@@ -28,7 +28,11 @@ from core.services.telegram_offer_channel_service import (
     build_offer_channel_message,
     build_offer_channel_reply_markup,
 )
-from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
+from core.services.telegram_offer_publication_service import (
+    TelegramOfferSendResult,
+    publish_offer_to_telegram_channel_once,
+    telegram_offer_send_result_from_gateway,
+)
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
     customer_management_name_for_user_id,
@@ -705,7 +709,7 @@ async def _expire_offer_side_effects(
         await _set_active_offer_count_safely(offer.user_id, active_count, reason=realtime_reason)
 
 
-async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
+async def send_offer_to_channel_with_result(offer: Offer, user: User) -> TelegramOfferSendResult | None:
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
     if current_server() != "foreign":
         return None
@@ -723,7 +727,7 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
             idempotency_key=f"offer-channel-send:{getattr(offer, 'id', '')}",
         )
         if result.ok:
-            return result.message_id
+            return telegram_offer_send_result_from_gateway(result)
         log_trading_event(
             logger,
             "offer_channel_send_failed",
@@ -735,6 +739,7 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
             status_code=result.status_code,
             error=result.error,
         )
+        return telegram_offer_send_result_from_gateway(result)
     except Exception as exc:
         log_trading_event(
             logger,
@@ -748,6 +753,12 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
         )
     
     return None
+
+
+async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
+    """Backward-compatible Telegram offer-channel send callback."""
+    result = await send_offer_to_channel_with_result(offer, user)
+    return result.message_id if result else None
 
 
 def _normalize_internal_offer_source(value: Optional[str]) -> Optional[str]:

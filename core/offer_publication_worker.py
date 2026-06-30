@@ -31,6 +31,9 @@ class OfferPublicationCycleReport:
     failed: int
     gated: int
     status: str
+    rate_limited: int = 0
+    cooldown_seconds: float = 0.0
+    response_counts: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +71,15 @@ def _bounded_setting_seconds(setting_name: str, *, default: float, minimum: floa
 def _channel_edit_spacing_seconds() -> float:
     return _bounded_setting_seconds(
         "offer_publication_worker_channel_edit_spacing_seconds",
+        default=0.35,
+        minimum=0.0,
+        maximum=5.0,
+    )
+
+
+def _channel_send_spacing_seconds() -> float:
+    return _bounded_setting_seconds(
+        "offer_publication_worker_channel_send_spacing_seconds",
         default=0.35,
         minimum=0.0,
         maximum=5.0,
@@ -145,7 +157,7 @@ def _is_terminal_offer(offer: Offer) -> bool:
 async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> OfferPublicationCycleReport:
     assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
 
-    from api.routers.offers import send_offer_to_channel
+    from api.routers.offers import send_offer_to_channel_with_result
 
     allow_active_publication = not await active_publication_is_gated()
     async with AsyncSessionLocal() as db:
@@ -154,16 +166,25 @@ async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> O
             server_mode="foreign",
             dry_run=False,
             limit=_worker_batch_limit(limit),
-            send_offer_to_channel=send_offer_to_channel,
+            send_offer_to_channel=send_offer_to_channel_with_result,
             allow_active_publication=allow_active_publication,
+            telegram_send_spacing_seconds=_channel_send_spacing_seconds(),
         )
 
+    rate_limited = int(report.get("telegram_rate_limited") or 0)
     return OfferPublicationCycleReport(
         processed=int(report.get("processed") or 0),
         repaired=int(report.get("repaired") or 0),
         failed=int(report.get("failed") or 0),
         gated=int(report.get("gated") or 0),
         status=str(report.get("status") or "unknown"),
+        rate_limited=rate_limited,
+        cooldown_seconds=(
+            _rate_limit_cooldown_seconds(_coerce_int(report.get("telegram_retry_after_seconds")))
+            if rate_limited
+            else 0.0
+        ),
+        response_counts=tuple(sorted(dict(report.get("telegram_response_counts") or {}).items())),
     )
 
 
@@ -280,7 +301,7 @@ async def offer_telegram_publication_loop() -> None:
             try:
                 report = await run_offer_telegram_publication_cycle()
                 channel_state_report = await run_offer_channel_state_cycle()
-                sleep_seconds = max(sleep_seconds, channel_state_report.cooldown_seconds)
+                sleep_seconds = max(sleep_seconds, report.cooldown_seconds, channel_state_report.cooldown_seconds)
                 if (
                     report.processed
                     or report.repaired
@@ -302,6 +323,9 @@ async def offer_telegram_publication_loop() -> None:
                             "failed": report.failed,
                             "gated": report.gated,
                             "status": report.status,
+                            "publication_rate_limited": report.rate_limited,
+                            "publication_cooldown_seconds": report.cooldown_seconds,
+                            "publication_response_counts": dict(report.response_counts),
                             "channel_state_processed": channel_state_report.processed,
                             "channel_state_applied": channel_state_report.applied,
                             "channel_state_failed": channel_state_report.failed,

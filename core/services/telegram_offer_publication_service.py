@@ -9,6 +9,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import telegram_gateway
 from core.config import settings
 from core.offer_identity import ensure_offer_public_id
 from core.server_routing import SERVER_FOREIGN, current_server
@@ -28,7 +29,22 @@ from models.offer_publication_state import (
 
 logger = logging.getLogger(__name__)
 
-SendOfferToChannel = Callable[[Any, Any], Awaitable[Optional[int]]]
+@dataclass(frozen=True, slots=True)
+class TelegramOfferSendResult:
+    message_id: Optional[int]
+    response_class: str = "unknown"
+    status_code: int | None = None
+    retry_after_seconds: int | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.message_id) and not self.error_code
+
+
+SendOfferToChannelResult = Optional[int] | TelegramOfferSendResult
+SendOfferToChannel = Callable[[Any, Any], Awaitable[SendOfferToChannelResult]]
 
 SENT_TELEGRAM_PUBLICATION_STATUSES = {
     OfferPublicationStatus.SENT,
@@ -41,8 +57,11 @@ class TelegramOfferPublicationResult:
     message_id: Optional[int]
     status: OfferPublicationStatus | None
     sent_new_message: bool = False
+    send_attempted: bool = False
     skipped_reason: str | None = None
     error_code: str | None = None
+    response_class: str | None = None
+    retry_after_seconds: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -56,6 +75,93 @@ def _coerce_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    numeric_value = _coerce_int(value)
+    if numeric_value is None or numeric_value <= 0:
+        return None
+    return numeric_value
+
+
+def _gateway_status_code(result: telegram_gateway.TelegramGatewayResult) -> int | None:
+    status_code = result.status_code
+    if status_code is None and isinstance(result.response_json, dict):
+        status_code = _positive_int(result.response_json.get("error_code"))
+    return status_code
+
+
+def _retry_after_from_gateway_result(result: telegram_gateway.TelegramGatewayResult) -> int | None:
+    raw_retry_after = None
+    if isinstance(result.response_json, dict):
+        parameters = result.response_json.get("parameters")
+        if isinstance(parameters, dict):
+            raw_retry_after = parameters.get("retry_after")
+    retry_after = _positive_int(raw_retry_after)
+    if retry_after is None:
+        return None
+    return min(120, max(1, retry_after))
+
+
+def _telegram_response_class(status_code: int | None, *, ok: bool, error: str | None = None) -> str:
+    if ok:
+        return "2xx"
+    if status_code == 429:
+        return "429"
+    if status_code == 400:
+        return "400"
+    if status_code is not None and 400 <= status_code <= 499:
+        return "4xx"
+    if status_code is not None and 500 <= status_code <= 599:
+        return "5xx"
+    if error:
+        return "transport"
+    return "unknown"
+
+
+def _telegram_error_code(response_class: str, *, error: str | None = None) -> str:
+    if error == "missing_bot_token":
+        return "telegram_missing_bot_token"
+    if response_class == "429":
+        return "telegram_rate_limited"
+    if response_class == "400":
+        return "telegram_bad_request"
+    if response_class == "4xx":
+        return "telegram_client_error"
+    if response_class == "5xx":
+        return "telegram_server_error"
+    if response_class == "transport":
+        return "telegram_transport_error"
+    return "telegram_send_empty_result"
+
+
+def telegram_offer_send_result_from_gateway(
+    result: telegram_gateway.TelegramGatewayResult,
+) -> TelegramOfferSendResult:
+    status_code = _gateway_status_code(result)
+    response_class = _telegram_response_class(status_code, ok=result.ok, error=result.error)
+    message_id = result.message_id if result.ok else None
+    return TelegramOfferSendResult(
+        message_id=message_id,
+        response_class=response_class,
+        status_code=status_code,
+        retry_after_seconds=_retry_after_from_gateway_result(result) if response_class == "429" else None,
+        error_code=None if message_id else _telegram_error_code(response_class, error=result.error),
+        error_message=result.response_text or result.error,
+    )
+
+
+def normalize_telegram_offer_send_result(value: SendOfferToChannelResult) -> TelegramOfferSendResult:
+    if isinstance(value, TelegramOfferSendResult):
+        return value
+    message_id = _coerce_int(value)
+    if message_id:
+        return TelegramOfferSendResult(message_id=message_id, response_class="2xx")
+    return TelegramOfferSendResult(
+        message_id=None,
+        response_class="unknown",
+        error_code="telegram_send_empty_result",
+    )
 
 
 def _offer_status_value(offer: Any) -> str:
@@ -238,7 +344,7 @@ async def publish_offer_to_telegram_channel_once(
     )
 
     try:
-        message_id = await send_offer_to_channel(offer, user)
+        raw_send_result = await send_offer_to_channel(offer, user)
     except Exception as exc:
         mark_telegram_publication_failure(
             state,
@@ -260,9 +366,12 @@ async def publish_offer_to_telegram_channel_once(
         return TelegramOfferPublicationResult(
             message_id=None,
             status=OfferPublicationStatus.FAILED,
+            send_attempted=True,
             error_code="telegram_send_exception",
         )
 
+    send_result = normalize_telegram_offer_send_result(raw_send_result)
+    message_id = send_result.message_id
     if message_id:
         mark_telegram_publication_success(
             state,
@@ -274,15 +383,22 @@ async def publish_offer_to_telegram_channel_once(
             message_id=int(message_id),
             status=OfferPublicationStatus.SENT,
             sent_new_message=True,
+            send_attempted=True,
+            response_class=send_result.response_class,
+            retry_after_seconds=send_result.retry_after_seconds,
         )
 
     mark_telegram_publication_failure(
         state,
         offer,
-        error_code="telegram_send_empty_result",
+        error_code=send_result.error_code or "telegram_send_empty_result",
+        error_message=send_result.error_message,
     )
     return TelegramOfferPublicationResult(
         message_id=None,
         status=OfferPublicationStatus.FAILED,
-        error_code="telegram_send_empty_result",
+        send_attempted=True,
+        error_code=send_result.error_code or "telegram_send_empty_result",
+        response_class=send_result.response_class,
+        retry_after_seconds=send_result.retry_after_seconds,
     )

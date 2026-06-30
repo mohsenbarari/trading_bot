@@ -113,6 +113,37 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added[0].error_code, "telegram_send_empty_result")
         self.assertIsNotNone(db.added[0].last_attempt_at)
 
+    async def test_publish_failure_preserves_classified_rate_limit_result(self):
+        offer = make_offer()
+        db = FakeDB()
+        send_mock = AsyncMock(
+            return_value=publication_service.TelegramOfferSendResult(
+                message_id=None,
+                response_class="429",
+                status_code=429,
+                retry_after_seconds=11,
+                error_code="telegram_rate_limited",
+                error_message="Too Many Requests",
+            )
+        )
+
+        with patch("core.services.telegram_offer_publication_service.current_server", return_value="foreign"):
+            result = await publication_service.publish_offer_to_telegram_channel_once(
+                db,
+                offer,
+                SimpleNamespace(id=1),
+                send_offer_to_channel=send_mock,
+            )
+
+        self.assertEqual(result.status, OfferPublicationStatus.FAILED)
+        self.assertTrue(result.send_attempted)
+        self.assertEqual(result.error_code, "telegram_rate_limited")
+        self.assertEqual(result.response_class, "429")
+        self.assertEqual(result.retry_after_seconds, 11)
+        self.assertEqual(db.added[0].status, OfferPublicationStatus.FAILED)
+        self.assertEqual(db.added[0].error_code, "telegram_rate_limited")
+        self.assertEqual(db.added[0].error_message, "Too Many Requests")
+
     async def test_existing_legacy_message_id_backfills_publication_state_without_send(self):
         offer = make_offer(channel_message_id=444)
         db = FakeDB()

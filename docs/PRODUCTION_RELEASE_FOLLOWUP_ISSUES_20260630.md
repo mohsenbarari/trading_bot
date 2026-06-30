@@ -517,3 +517,30 @@ Validation run:
 - `python3 -m unittest tests.test_telegram_gateway_policy tests.test_job_logging`
 - `python3 -m unittest tests.test_offer_expiry tests.test_market_transition_service tests.test_telegram_offer_channel_service tests.test_offer_publication_worker`
 - `git diff --check`
+
+### 2026-06-30 Claude follow-up: active publication/send-cycle pacing
+
+Review source:
+
+- `tmp/claude/telegram-publication-worker-hardening-review.md`
+
+Accepted finding:
+
+- The first hardening pass handled Telegram channel-state edit pacing and cooldown, but the active-offer publication/send repair cycle still did not expose classified `429` results to the worker.
+
+Completed for issue 17:
+
+- Added a classified `TelegramOfferSendResult` path for Telegram offer-channel sends while keeping the existing `send_offer_to_channel()` public callback backward-compatible as `Optional[int]`.
+- Added `send_offer_to_channel_with_result()` for the worker so active publication repair can see Telegram response class, status code, `retry_after`, and error code without breaking existing direct callers.
+- `publish_offer_to_telegram_channel_once()` now preserves classified send failures such as `telegram_rate_limited` instead of collapsing them into generic `telegram_send_empty_result`.
+- `reconcile_offer_publications()` now stops the current active-publication repair batch on `429`, returns `telegram_rate_limited`, `telegram_retry_after_seconds`, and response-class counts, and reports `processed` as the actual processed finding count when the batch is stopped early.
+- `core.offer_publication_worker` now maps active-publication `429` reports into the same bounded cooldown used for channel-state edits and logs `publication_rate_limited`, `publication_cooldown_seconds`, and `publication_response_counts`.
+- Added configurable active send spacing via `offer_publication_worker_channel_send_spacing_seconds` with the same conservative default as edit spacing.
+
+Validation run:
+
+- `python3 -m py_compile api/routers/offers.py core/services/telegram_offer_publication_service.py core/services/offer_publication_reconciliation_service.py core/offer_publication_worker.py core/config.py`
+- `python3 -m unittest tests.test_telegram_offer_publication_service tests.test_offer_publication_reconciliation_service tests.test_offer_publication_worker tests.test_offers_router_helpers`
+- `python3 -m unittest tests.test_telegram_offer_channel_service tests.test_offer_publication_worker tests.test_logging_foundation tests.test_offer_expiry tests.test_market_transition_service tests.test_telegram_gateway_policy tests.test_job_logging tests.test_telegram_offer_publication_service tests.test_offer_publication_reconciliation_service tests.test_offers_router_helpers`
+- `python3 -m unittest tests.test_bot_trade_create_confirm_success_wholesale tests.test_bot_trade_create_confirm_success_retail tests.test_bot_trade_create_text_offer_confirm_success tests.test_bot_trade_create_confirm_telegram_error tests.test_bot_trade_create_text_offer_failure_cancel tests.test_bot_trade_create_confirm_unexpected_error tests.test_bot_trade_create_text_offer_warning_confirm tests.test_bot_trade_create_text_offer_warning_flow_integration tests.test_offer_limit_cross_surface_smoke`
+- `git diff --check`

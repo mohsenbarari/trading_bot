@@ -116,6 +116,120 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         publish_mock.assert_awaited_once()
         db.commit.assert_awaited_once()
 
+    async def test_foreign_repair_stops_batch_on_telegram_rate_limit(self):
+        db = FakeDB()
+        candidates = [
+            service.PublicationReconciliationCandidate(
+                issue="failed_telegram_publication",
+                offer=make_offer(id=101, offer_public_id="ofr_101"),
+                state=make_state(id=1010),
+                surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+            ),
+            service.PublicationReconciliationCandidate(
+                issue="failed_telegram_publication",
+                offer=make_offer(id=102, offer_public_id="ofr_102"),
+                state=make_state(id=1020),
+                surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+            ),
+        ]
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=candidates),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    message_id=None,
+                    error_code="telegram_rate_limited",
+                    skipped_reason=None,
+                    send_attempted=True,
+                    response_class="429",
+                    retry_after_seconds=13,
+                )
+            ),
+        ) as publish_mock, patch(
+            "core.services.offer_publication_reconciliation_service.asyncio.sleep",
+            new=AsyncMock(),
+        ) as sleep_mock:
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(return_value=None),
+                telegram_send_spacing_seconds=0.01,
+            )
+
+        self.assertEqual(publish_mock.await_count, 1)
+        sleep_mock.assert_not_awaited()
+        self.assertEqual(report["status"], "partial")
+        self.assertEqual(report["processed"], 1)
+        self.assertEqual(report["failed"], 1)
+        self.assertEqual(report["telegram_rate_limited"], 1)
+        self.assertEqual(report["telegram_retry_after_seconds"], 13)
+        self.assertEqual(report["telegram_response_counts"], {"429": 1})
+        self.assertEqual(len(report["findings"]), 1)
+        db.commit.assert_awaited_once()
+
+    async def test_foreign_repair_spaces_between_successful_telegram_sends(self):
+        db = FakeDB()
+        candidates = [
+            service.PublicationReconciliationCandidate(
+                issue="failed_telegram_publication",
+                offer=make_offer(id=201, offer_public_id="ofr_201"),
+                state=make_state(id=2010),
+                surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+            ),
+            service.PublicationReconciliationCandidate(
+                issue="failed_telegram_publication",
+                offer=make_offer(id=202, offer_public_id="ofr_202"),
+                state=make_state(id=2020),
+                surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+            ),
+        ]
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=candidates),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(
+                side_effect=[
+                    SimpleNamespace(
+                        message_id=501,
+                        error_code=None,
+                        skipped_reason=None,
+                        send_attempted=True,
+                        response_class="2xx",
+                        retry_after_seconds=None,
+                    ),
+                    SimpleNamespace(
+                        message_id=502,
+                        error_code=None,
+                        skipped_reason=None,
+                        send_attempted=True,
+                        response_class="2xx",
+                        retry_after_seconds=None,
+                    ),
+                ]
+            ),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.asyncio.sleep",
+            new=AsyncMock(),
+        ) as sleep_mock:
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(return_value=501),
+                telegram_send_spacing_seconds=0.01,
+            )
+
+        sleep_mock.assert_awaited_once_with(0.01)
+        self.assertEqual(report["status"], "repaired")
+        self.assertEqual(report["repaired"], 2)
+        self.assertEqual(report["telegram_response_counts"], {"2xx": 2})
+
     async def test_repair_respects_active_publication_gate(self):
         db = FakeDB()
         offer = make_offer()

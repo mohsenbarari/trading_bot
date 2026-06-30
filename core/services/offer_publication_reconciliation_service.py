@@ -1,6 +1,7 @@
 """Reconciliation helpers for cross-surface offer publication state."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -372,6 +373,7 @@ async def reconcile_offer_publications(
     limit: int = 50,
     send_offer_to_channel: SendOfferToChannel | None = None,
     allow_active_publication: bool = True,
+    telegram_send_spacing_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Report or repair local publication drift for the current server role."""
     mode = (server_mode or settings.server_mode or "").strip().lower()
@@ -395,7 +397,11 @@ async def reconcile_offer_publications(
     repaired = 0
     failed = 0
     gated = 0
-    for candidate in candidates:
+    telegram_rate_limited = 0
+    telegram_retry_after_seconds: int | None = None
+    telegram_response_counts: dict[str, int] = {}
+    stop_repair_loop = False
+    for candidate_index, candidate in enumerate(candidates):
         if dry_run:
             findings.append(_candidate_payload(candidate, result="reported"))
             continue
@@ -419,7 +425,25 @@ async def reconcile_offer_publications(
             failed += 1
         elif result.get("result") == "gated":
             gated += 1
+        response_class = str(result.get("telegram_response_class") or "").strip()
+        if response_class:
+            telegram_response_counts[response_class] = telegram_response_counts.get(response_class, 0) + 1
+        if response_class == "429":
+            telegram_rate_limited += 1
+            raw_retry_after = _coerce_int(result.get("telegram_retry_after_seconds"))
+            if raw_retry_after is not None:
+                telegram_retry_after_seconds = max(telegram_retry_after_seconds or 0, raw_retry_after)
+            stop_repair_loop = True
         findings.append({**_candidate_payload(candidate, result=result.get("result", "unknown")), **result})
+        if stop_repair_loop:
+            break
+        if (
+            not dry_run
+            and result.get("telegram_send_attempted")
+            and candidate_index < len(candidates) - 1
+            and telegram_send_spacing_seconds > 0
+        ):
+            await asyncio.sleep(max(0.0, float(telegram_send_spacing_seconds)))
 
     if not dry_run and (repaired or failed):
         commit = getattr(db, "commit", None)
@@ -440,10 +464,13 @@ async def reconcile_offer_publications(
         "status": status,
         "server_mode": mode,
         "dry_run": dry_run,
-        "processed": len(candidates),
+        "processed": len(findings),
         "repaired": repaired,
         "failed": failed,
         "gated": gated,
+        "telegram_rate_limited": telegram_rate_limited,
+        "telegram_retry_after_seconds": telegram_retry_after_seconds,
+        "telegram_response_counts": telegram_response_counts,
         "findings": findings,
     }
 
@@ -519,8 +546,17 @@ async def _repair_foreign_telegram_candidate(
             "result": "repaired",
             "reason": result.skipped_reason or "telegram_publication_repaired",
             "message_id": result.message_id,
+            "telegram_send_attempted": bool(getattr(result, "send_attempted", False)),
+            "telegram_response_class": getattr(result, "response_class", None),
+            "telegram_retry_after_seconds": getattr(result, "retry_after_seconds", None),
         }
-    return {"result": "failed", "reason": result.error_code or result.skipped_reason or "telegram_publication_not_repaired"}
+    return {
+        "result": "failed",
+        "reason": result.error_code or result.skipped_reason or "telegram_publication_not_repaired",
+        "telegram_send_attempted": bool(getattr(result, "send_attempted", False)),
+        "telegram_response_class": getattr(result, "response_class", None),
+        "telegram_retry_after_seconds": getattr(result, "retry_after_seconds", None),
+    }
 
 
 async def _no_telegram_send_callback(_offer: Any, _user: Any) -> None:

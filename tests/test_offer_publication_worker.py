@@ -74,7 +74,7 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.offer_publication_worker.reconcile_offer_publications", new=AsyncMock(return_value=report)
         ) as reconcile, patch(
-            "api.routers.offers.send_offer_to_channel", new=AsyncMock(return_value=777)
+            "api.routers.offers.send_offer_to_channel_with_result", new=AsyncMock(return_value=777)
         ) as send_offer:
             result = await worker.run_offer_telegram_publication_cycle(limit=3)
 
@@ -89,6 +89,36 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kwargs["allow_active_publication"])
         self.assertEqual(result.processed, 2)
         self.assertEqual(result.repaired, 2)
+        self.assertIn("telegram_send_spacing_seconds", kwargs)
+        self.assertGreaterEqual(kwargs["telegram_send_spacing_seconds"], 0)
+
+    async def test_cycle_maps_publication_rate_limit_to_cooldown(self):
+        fake_db = object()
+        report = {
+            "status": "partial",
+            "processed": 1,
+            "repaired": 0,
+            "failed": 1,
+            "gated": 0,
+            "telegram_rate_limited": 1,
+            "telegram_retry_after_seconds": 6,
+            "telegram_response_counts": {"429": 1},
+        }
+
+        with patch("core.offer_publication_worker.assert_background_job_authority"), patch(
+            "core.offer_publication_worker.active_publication_is_gated", new=AsyncMock(return_value=False)
+        ), patch(
+            "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
+        ), patch(
+            "core.offer_publication_worker.reconcile_offer_publications", new=AsyncMock(return_value=report)
+        ), patch("api.routers.offers.send_offer_to_channel_with_result", new=AsyncMock()):
+            result = await worker.run_offer_telegram_publication_cycle(limit=3)
+
+        self.assertEqual(result.status, "partial")
+        self.assertEqual(result.failed, 1)
+        self.assertEqual(result.rate_limited, 1)
+        self.assertEqual(result.cooldown_seconds, 6)
+        self.assertEqual(dict(result.response_counts), {"429": 1})
 
     async def test_cycle_respects_active_publication_gate(self):
         fake_db = object()
@@ -100,7 +130,7 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
             "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
         ), patch(
             "core.offer_publication_worker.reconcile_offer_publications", new=AsyncMock(return_value=report)
-        ) as reconcile, patch("api.routers.offers.send_offer_to_channel", new=AsyncMock()):
+        ) as reconcile, patch("api.routers.offers.send_offer_to_channel_with_result", new=AsyncMock()):
             result = await worker.run_offer_telegram_publication_cycle(limit=1)
 
         _, kwargs = reconcile.await_args
