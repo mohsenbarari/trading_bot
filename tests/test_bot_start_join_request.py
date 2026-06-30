@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.start import handle_channel_join_request, handle_offer_tutorial_ack
+from bot.handlers.start import handle_channel_join_request, handle_customer_tutorial_ack, handle_offer_tutorial_ack
 from core.enums import UserAccountStatus, UserRole
 
 
@@ -94,7 +94,7 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         ) as logger_mock:
             await handle_channel_join_request(join_request)
         join_request.bot.approve_chat_join_request.assert_awaited_once_with(chat_id=100, user_id=7)
-        self.assertEqual(active_user.bot_onboarding_required_step, 1)
+        self.assertEqual(active_user.bot_onboarding_required_step, 2)
         self.assertIn("راهنمای سریع ثبت آفر", join_request.bot.send_message.await_args.kwargs["text"])
         self.assertIsNotNone(join_request.bot.send_message.await_args.kwargs.get("reply_markup"))
         logger_mock.assert_called_once()
@@ -108,12 +108,12 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         join_request.bot.decline_chat_join_request.assert_awaited_once_with(chat_id=100, user_id=7)
         logger_mock.assert_called_once()
 
-    async def test_offer_tutorial_ack_marks_step_completed(self):
+    async def test_offer_tutorial_ack_shows_customer_tutorial_step(self):
         user = SimpleNamespace(
             id=7,
             telegram_id=7,
             is_deleted=False,
-            bot_onboarding_required_step=1,
+            bot_onboarding_required_step=2,
             bot_onboarding_completed_step=0,
             bot_onboarding_completed_at=None,
         )
@@ -127,12 +127,41 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(session)):
             await handle_offer_tutorial_ack(callback, user=user)
 
-        self.assertEqual(user.bot_onboarding_required_step, 1)
+        self.assertEqual(user.bot_onboarding_required_step, 2)
         self.assertEqual(user.bot_onboarding_completed_step, 1)
+        self.assertIsNone(user.bot_onboarding_completed_at)
+        session.commit.assert_awaited_once()
+        callback.answer.assert_awaited_once_with("مرحله بعد")
+        callback.message.edit_text.assert_awaited_once()
+        self.assertIn("راهنمای سریع مشتریان", callback.message.edit_text.await_args.args[0])
+        self.assertIsNotNone(callback.message.edit_text.await_args.kwargs.get("reply_markup"))
+
+    async def test_customer_tutorial_ack_marks_onboarding_completed(self):
+        user = SimpleNamespace(
+            id=7,
+            telegram_id=7,
+            is_deleted=False,
+            bot_onboarding_required_step=2,
+            bot_onboarding_completed_step=1,
+            bot_onboarding_completed_at=None,
+        )
+        session = FakeSession(user)
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=7),
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(session)):
+            await handle_customer_tutorial_ack(callback, user=user)
+
+        self.assertEqual(user.bot_onboarding_required_step, 2)
+        self.assertEqual(user.bot_onboarding_completed_step, 2)
         self.assertIsNotNone(user.bot_onboarding_completed_at)
         session.commit.assert_awaited_once()
         callback.answer.assert_awaited_once_with("ثبت شد.")
         callback.message.edit_text.assert_awaited_once()
+        self.assertIn("اکنون می‌توانید", callback.message.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

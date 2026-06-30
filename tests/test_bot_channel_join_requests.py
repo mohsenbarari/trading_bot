@@ -90,7 +90,7 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
             user_id=7,
         )
         join_request.bot.decline_chat_join_request.assert_not_awaited()
-        self.assertEqual(user.bot_onboarding_required_step, 1)
+        self.assertEqual(user.bot_onboarding_required_step, 2)
         session.commit.assert_awaited_once()
         self.assertIn("راهنمای سریع ثبت آفر", join_request.bot.send_message.await_args.kwargs["text"])
         self.assertIsNotNone(join_request.bot.send_message.await_args.kwargs.get("reply_markup"))

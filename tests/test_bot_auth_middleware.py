@@ -211,7 +211,7 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             account_status=UserAccountStatus.ACTIVE,
             messenger_blocked_at=None,
             messenger_grace_expires_at=None,
-            bot_onboarding_required_step=1,
+            bot_onboarding_required_step=2,
             bot_onboarding_completed_step=0,
         )
         session = AsyncMock()
@@ -247,7 +247,7 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             account_status=UserAccountStatus.ACTIVE,
             messenger_blocked_at=None,
             messenger_grace_expires_at=None,
-            bot_onboarding_required_step=1,
+            bot_onboarding_required_step=2,
             bot_onboarding_completed_step=0,
         )
         session = AsyncMock()
@@ -266,6 +266,36 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 'allowed')
         handler.assert_awaited_once()
         callback.answer.assert_not_awaited()
+
+    async def test_middleware_allows_customer_tutorial_ack_after_offer_step(self):
+        pending_user = MagicMock(
+            has_bot_access=True,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+            bot_onboarding_required_step=2,
+            bot_onboarding_completed_step=1,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=_ExecuteResult(pending_user))
+        middleware = auth_middleware.AuthMiddleware(session_pool=MagicMock(return_value=_AsyncSessionContext(session)))
+        handler = AsyncMock(return_value='allowed')
+
+        original_callback = auth_middleware.CallbackQuery
+        try:
+            auth_middleware.CallbackQuery = FakeCallbackQuery
+            stale_callback = FakeCallbackQuery(21, data=auth_middleware.OFFER_TUTORIAL_ACK_CALLBACK)
+            result_stale = await middleware(handler, stale_callback, {})
+            current_callback = FakeCallbackQuery(21, data=auth_middleware.CUSTOMER_TUTORIAL_ACK_CALLBACK)
+            result_current = await middleware(handler, current_callback, {})
+        finally:
+            auth_middleware.CallbackQuery = original_callback
+
+        self.assertIsNone(result_stale)
+        stale_callback.answer.assert_awaited_once()
+        self.assertEqual(result_current, 'allowed')
+        handler.assert_awaited_once()
+        current_callback.answer.assert_not_awaited()
 
 
 if __name__ == '__main__':

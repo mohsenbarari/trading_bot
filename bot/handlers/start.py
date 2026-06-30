@@ -29,10 +29,13 @@ from core.services.customer_relation_service import (
 from models.invitation import Invitation
 from models.user import User
 from bot.onboarding import (
+    BOT_ONBOARDING_REQUIRED_STEP,
+    CUSTOMER_TUTORIAL_ACK_CALLBACK,
+    CUSTOMER_TUTORIAL_STEP,
     OFFER_TUTORIAL_ACK_CALLBACK,
     OFFER_TUTORIAL_STEP,
-    OFFER_TUTORIAL_TEXT,
-    build_offer_tutorial_keyboard,
+    build_onboarding_keyboard,
+    onboarding_text_for_step,
 )
 from bot.states import Registration
 from bot.keyboards import get_persistent_menu_keyboard
@@ -335,7 +338,7 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
     if not settings.channel_id or join_request.chat.id != settings.channel_id:
         return
 
-    offer_tutorial_required = False
+    pending_tutorial_step = None
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(
             User.telegram_id == join_request.from_user.id,
@@ -351,10 +354,10 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
 
         if not denial_reason and user:
             completed_step = int(getattr(user, "bot_onboarding_completed_step", 0) or 0)
-            if completed_step < OFFER_TUTORIAL_STEP:
+            if completed_step < BOT_ONBOARDING_REQUIRED_STEP:
                 required_step = int(getattr(user, "bot_onboarding_required_step", 0) or 0)
-                user.bot_onboarding_required_step = max(required_step, OFFER_TUTORIAL_STEP)
-                offer_tutorial_required = True
+                user.bot_onboarding_required_step = max(required_step, BOT_ONBOARDING_REQUIRED_STEP)
+                pending_tutorial_step = max(completed_step + 1, OFFER_TUTORIAL_STEP)
                 await session.commit()
 
     if denial_reason:
@@ -377,9 +380,9 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         user_id=join_request.from_user.id,
     )
     try:
-        if offer_tutorial_required:
-            tutorial_text = OFFER_TUTORIAL_TEXT
-            tutorial_markup = build_offer_tutorial_keyboard()
+        if pending_tutorial_step:
+            tutorial_text = onboarding_text_for_step(pending_tutorial_step)
+            tutorial_markup = build_onboarding_keyboard(pending_tutorial_step)
         else:
             tutorial_text = "✅ درخواست عضویت شما به صورت خودکار تایید شد. اکنون می‌توانید از کانال معاملات استفاده کنید."
             tutorial_markup = None
@@ -394,6 +397,15 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
 
 @router.callback_query(F.data == OFFER_TUTORIAL_ACK_CALLBACK)
 async def handle_offer_tutorial_ack(callback: types.CallbackQuery, user: Optional[User]):
+    await _handle_bot_onboarding_ack(callback, user, acknowledged_step=OFFER_TUTORIAL_STEP)
+
+
+@router.callback_query(F.data == CUSTOMER_TUTORIAL_ACK_CALLBACK)
+async def handle_customer_tutorial_ack(callback: types.CallbackQuery, user: Optional[User]):
+    await _handle_bot_onboarding_ack(callback, user, acknowledged_step=CUSTOMER_TUTORIAL_STEP)
+
+
+async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Optional[User], *, acknowledged_step: int):
     if not user:
         await callback.answer("ابتدا حساب تلگرام خود را به حساب کاربری متصل کنید.", show_alert=True)
         return
@@ -409,20 +421,34 @@ async def handle_offer_tutorial_ack(callback: types.CallbackQuery, user: Optiona
             return
 
         required_step = int(getattr(db_user, "bot_onboarding_required_step", 0) or 0)
-        db_user.bot_onboarding_required_step = max(required_step, OFFER_TUTORIAL_STEP)
+        db_user.bot_onboarding_required_step = max(required_step, BOT_ONBOARDING_REQUIRED_STEP)
         db_user.bot_onboarding_completed_step = max(
             int(getattr(db_user, "bot_onboarding_completed_step", 0) or 0),
-            OFFER_TUTORIAL_STEP,
+            acknowledged_step,
         )
-        db_user.bot_onboarding_completed_at = datetime.now(timezone.utc)
+        completed_step = int(getattr(db_user, "bot_onboarding_completed_step", 0) or 0)
+        if completed_step >= BOT_ONBOARDING_REQUIRED_STEP:
+            db_user.bot_onboarding_completed_at = datetime.now(timezone.utc)
         await session.commit()
+
+    if acknowledged_step < BOT_ONBOARDING_REQUIRED_STEP:
+        await callback.answer("مرحله بعد")
+        if callback.message:
+            try:
+                await callback.message.edit_text(
+                    onboarding_text_for_step(acknowledged_step + 1),
+                    reply_markup=build_onboarding_keyboard(acknowledged_step + 1),
+                )
+            except Exception:
+                logger.exception("Failed to update bot onboarding tutorial message")
+        return
 
     await callback.answer("ثبت شد.")
     if callback.message:
         try:
-            await callback.message.edit_text("✅ راهنمای ثبت آفر تایید شد. اکنون می‌توانید از امکانات بات استفاده کنید.")
+            await callback.message.edit_text("✅ راهنما تایید شد. اکنون می‌توانید از امکانات بات استفاده کنید.")
         except Exception:
-            logger.exception("Failed to update offer tutorial acknowledgement message")
+            logger.exception("Failed to update bot onboarding completion message")
 
 
 # --- تایید معامله ---

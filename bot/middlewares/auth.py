@@ -5,11 +5,14 @@ from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from bot.onboarding import (
+    BOT_ONBOARDING_BLOCK_MESSAGE,
+    CUSTOMER_TUTORIAL_ACK_CALLBACK,
     OFFER_TUTORIAL_ACK_CALLBACK,
-    OFFER_TUTORIAL_BLOCK_MESSAGE,
-    OFFER_TUTORIAL_TEXT,
-    build_offer_tutorial_keyboard,
-    user_requires_offer_tutorial,
+    build_onboarding_keyboard,
+    is_allowed_onboarding_callback,
+    onboarding_text_for_step,
+    pending_onboarding_step,
+    user_requires_bot_onboarding,
 )
 from core.services.user_account_status_service import is_user_global_web_locked
 from models.user import User
@@ -68,15 +71,16 @@ class AuthMiddleware(BaseMiddleware):
                         await inner_event.answer(restricted_message, show_alert=True)
                 return
 
-            if user and user_requires_offer_tutorial(user):
+            if user and user_requires_bot_onboarding(user):
                 if isinstance(inner_event, CallbackQuery):
-                    if getattr(inner_event, "data", None) == OFFER_TUTORIAL_ACK_CALLBACK:
+                    if is_allowed_onboarding_callback(user, getattr(inner_event, "data", None)):
                         return await handler(event, data)
-                    await inner_event.answer(OFFER_TUTORIAL_BLOCK_MESSAGE, show_alert=True)
+                    await inner_event.answer(BOT_ONBOARDING_BLOCK_MESSAGE, show_alert=True)
                 elif isinstance(inner_event, Message):
+                    pending_step = pending_onboarding_step(user)
                     await inner_event.answer(
-                        OFFER_TUTORIAL_TEXT,
-                        reply_markup=build_offer_tutorial_keyboard(),
+                        onboarding_text_for_step(pending_step or 1),
+                        reply_markup=build_onboarding_keyboard(pending_step or 1),
                     )
                 return
 
