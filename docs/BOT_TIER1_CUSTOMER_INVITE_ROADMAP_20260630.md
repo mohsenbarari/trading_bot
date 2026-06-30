@@ -154,9 +154,9 @@ Reason:
 
 `messageId` policy:
 
-- Returning or storing the provider `messageId` is not required for the bot success message.
+- Returning, storing, or exposing the provider `messageId` is not required in this feature.
 - `sms_sent=true` is sufficient for the bot contract because it means SMS.ir accepted the template send request according to the current helper checks.
-- `messageId` may be useful later for provider support, audit, or delivery-report reconciliation, but it should not be added to the bot-facing contract unless that operational need is explicitly opened.
+- Do not add `messageId` to the bot-facing contract, internal endpoint response, or persistence layer unless a future explicit requirement reopens provider-level delivery tracking.
 
 ### Sync/connectivity gate
 
