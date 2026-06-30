@@ -140,12 +140,17 @@ describe('main.ts', () => {
         getRegistrations: mainMocks.getRegistrationsMock,
       },
     })
+    Object.defineProperty(navigator, 'webdriver', {
+      configurable: true,
+      value: false,
+    })
 
     document.documentElement.setAttribute('data-app-boot-recovering', '1')
     vi.spyOn(window.sessionStorage.__proto__, 'removeItem').mockImplementation(() => undefined)
     document.body.style.backgroundColor = ''
     document.body.style.color = ''
     delete (window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__
+    delete (window as any).__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__
     setTelegram(false)
   })
 
@@ -222,6 +227,35 @@ describe('main.ts', () => {
 
     expect(getTimeoutByDelay(250)).toBeUndefined()
     expect(mainMocks.registerSW).not.toHaveBeenCalled()
+  })
+
+  it('skips PWA registration by default in Playwright browsers', async () => {
+    setReadyState('complete')
+    setTelegram(true)
+    Object.defineProperty(navigator, 'webdriver', {
+      configurable: true,
+      value: true,
+    })
+
+    await importFreshMain()
+
+    expect(getTimeoutByDelay(250)).toBeUndefined()
+    expect(mainMocks.registerSW).not.toHaveBeenCalled()
+  })
+
+  it('allows Playwright tests to opt into PWA registration explicitly', async () => {
+    setReadyState('complete')
+    setTelegram(true)
+    Object.defineProperty(navigator, 'webdriver', {
+      configurable: true,
+      value: true,
+    })
+    ;(window as any).__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__ = true
+
+    await importFreshMain()
+
+    getTimeoutByDelay(250)?.fn()
+    expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
   })
 
   it('covers offline-ready logging, setup failures, Telegram init warnings, and storage-cleanup failures', async () => {

@@ -96,8 +96,12 @@ try {
   // Ignore storage failures in stricter privacy contexts.
 }
 
+const shouldSkipPwaRegistration =
+  Boolean((window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__) ||
+  (navigator.webdriver === true && !Boolean((window as any).__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__))
+
 // Register early enough for Android installability/WebAPK evaluation, but keep
 // a small delay so first paint and route bootstrap win the critical path.
-if (!(window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__) {
+if (!shouldSkipPwaRegistration) {
   window.setTimeout(registerPwaWhenStable, PWA_REGISTRATION_DELAY_MS)
 }

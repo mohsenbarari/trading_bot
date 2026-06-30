@@ -17,7 +17,9 @@ export async function primeAuthSession(
 ) {
   const payloadId = createPrimeAuthPayloadId()
 
-  if (options.disablePwaRegistration !== false) {
+  if (options.disablePwaRegistration === false) {
+    await enablePwaRegistration(page)
+  } else {
     await disablePwaRegistration(page)
   }
 
@@ -46,10 +48,18 @@ export async function primeAuthSession(
 export async function disablePwaRegistration(page: Page) {
   await page.addInitScript(() => {
     ;(window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__ = true
+    delete (window as any).__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations()
         .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
         .catch(() => {})
     }
+  })
+}
+
+export async function enablePwaRegistration(page: Page) {
+  await page.addInitScript(() => {
+    ;(window as any).__PLAYWRIGHT_ENABLE_PWA_REGISTRATION__ = true
+    delete (window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__
   })
 }
