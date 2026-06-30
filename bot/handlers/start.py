@@ -9,11 +9,13 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from typing import Optional
 from datetime import datetime, timezone
+import asyncio
 import logging
+import re
 
 from core.db import AsyncSessionLocal
 from core.config import settings
-from core.services.bot_access_policy import evaluate_bot_access
+from core.services.bot_access_policy import BOT_ACCESS_REASON_SYNC_PENDING, evaluate_bot_access
 from core.services.telegram_link_token_service import (
     TelegramLinkTokenError,
     load_pending_telegram_link_token_user_for_update,
@@ -61,6 +63,56 @@ router = Router()
 LEGACY_RESPOND_PATH_DISABLED_MESSAGE = (
     "این مسیر قدیمی پاسخ به آفر دیگر فعال نیست. لطفاً از دکمه‌های خود آفر در کانال معاملات استفاده کنید."
 )
+TELEGRAM_LINK_TOKEN_SYNC_GRACE_SECONDS = 45.0
+TELEGRAM_LINK_TOKEN_SYNC_POLL_SECONDS = 1.0
+_TELEGRAM_LINK_TOKEN_RETRYABLE_REASONS = {"invalid", BOT_ACCESS_REASON_SYNC_PENDING}
+_TELEGRAM_LINK_TOKEN_SHAPE = re.compile(r"^[A-Za-z0-9_-]{32,59}$")
+
+
+def _looks_like_webapp_link_token(raw_token: str) -> bool:
+    return bool(_TELEGRAM_LINK_TOKEN_SHAPE.fullmatch((raw_token or "").strip()))
+
+
+async def _rollback_link_token_probe(session) -> None:
+    rollback = getattr(session, "rollback", None)
+    if not callable(rollback):
+        return
+    try:
+        await rollback()
+    except Exception as exc:
+        logger.debug("Telegram link token retry rollback failed: %s", exc)
+
+
+async def load_pending_telegram_link_token_user_with_sync_grace(session, raw_token: str):
+    """Wait briefly for Iran-issued link tokens to arrive on the foreign bot DB."""
+    should_wait_for_sync = _looks_like_webapp_link_token(raw_token)
+    deadline = asyncio.get_running_loop().time() + TELEGRAM_LINK_TOKEN_SYNC_GRACE_SECONDS
+    attempts = 0
+
+    while True:
+        attempts += 1
+        try:
+            result = await load_pending_telegram_link_token_user_for_update(session, raw_token)
+            if attempts > 1:
+                logger.info(
+                    "Telegram link token became available after sync grace.",
+                    extra={"attempts": attempts},
+                )
+            return result
+        except TelegramLinkTokenError as exc:
+            if exc.reason not in _TELEGRAM_LINK_TOKEN_RETRYABLE_REASONS or not should_wait_for_sync:
+                raise
+
+            now = asyncio.get_running_loop().time()
+            if now >= deadline:
+                logger.info(
+                    "Telegram link token sync grace exhausted.",
+                    extra={"attempts": attempts, "reason": exc.reason},
+                )
+                raise
+
+            await _rollback_link_token_probe(session)
+            await asyncio.sleep(min(TELEGRAM_LINK_TOKEN_SYNC_POLL_SECONDS, max(0.0, deadline - now)))
 
 
 def build_webapp_link_line() -> str | None:
@@ -109,7 +161,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         raw_link_token = token.replace("link_", "", 1).strip()
         async with AsyncSessionLocal() as session:
             try:
-                await load_pending_telegram_link_token_user_for_update(session, raw_link_token)
+                await load_pending_telegram_link_token_user_with_sync_grace(session, raw_link_token)
             except TelegramLinkTokenError:
                 anchor_msg = await message.answer(
                     "لینک اتصال آماده نیست یا منقضی شده است. از وب‌اپ دوباره وارد مسیر اتصال شوید.",

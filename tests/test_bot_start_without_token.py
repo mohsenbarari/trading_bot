@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from core.services.telegram_link_token_service import TelegramLinkTokenError
 from bot.handlers.start import handle_start_without_token
 from bot.handlers.start import handle_start_with_token
 
@@ -24,6 +25,61 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("شماره موبایل همین حساب", message.answer.await_args.args[0])
         state.update_data.assert_awaited_once()
         state.set_state.assert_awaited_once()
+        set_anchor.assert_called_once_with(10, 55)
+
+    async def test_handle_start_with_recent_link_token_waits_for_sync_race(self):
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=10),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=55)),
+        )
+        state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
+        raw_token = "A" * 43
+        loader = AsyncMock(
+            side_effect=[
+                TelegramLinkTokenError("invalid"),
+                (SimpleNamespace(), SimpleNamespace(), SimpleNamespace()),
+            ]
+        )
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.load_pending_telegram_link_token_user_for_update",
+            new=loader,
+        ), patch("bot.handlers.start.asyncio.sleep", new=AsyncMock()) as sleep_mock, patch(
+            "bot.handlers.start.set_anchor"
+        ) as set_anchor:
+            await handle_start_with_token(message, SimpleNamespace(args=f"link_{raw_token}"), state=state, user=None)
+
+        self.assertEqual(loader.await_count, 2)
+        sleep_mock.assert_awaited_once()
+        self.assertIn("شماره موبایل همین حساب", message.answer.await_args.args[0])
+        state.update_data.assert_awaited_once()
+        state.set_state.assert_awaited_once()
+        set_anchor.assert_called_once_with(10, 55)
+
+    async def test_handle_start_with_terminal_link_token_status_does_not_retry(self):
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=10),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=55)),
+        )
+        state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
+        raw_token = "B" * 43
+        loader = AsyncMock(side_effect=TelegramLinkTokenError("used"))
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.load_pending_telegram_link_token_user_for_update",
+            new=loader,
+        ), patch("bot.handlers.start.asyncio.sleep", new=AsyncMock()) as sleep_mock, patch(
+            "bot.handlers.start.set_anchor"
+        ) as set_anchor:
+            await handle_start_with_token(message, SimpleNamespace(args=f"link_{raw_token}"), state=state, user=None)
+
+        loader.assert_awaited_once()
+        sleep_mock.assert_not_awaited()
+        self.assertIn("لینک اتصال آماده نیست", message.answer.await_args.args[0])
+        state.update_data.assert_not_awaited()
+        state.set_state.assert_not_awaited()
         set_anchor.assert_called_once_with(10, 55)
 
     async def test_handle_start_without_token_shows_panel_for_registered_user(self):
