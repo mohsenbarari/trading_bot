@@ -44,7 +44,7 @@ class BlockStates(StatesGroup):
 from aiogram.filters.callback_data import CallbackData
 
 class BlockMenuCallback(CallbackData, prefix="block_menu"):
-    action: str  # list, search, back
+    action: str  # list, search, back, panel
 
 class BlockUserCallback(CallbackData, prefix="block_user"):
     user_id: int
@@ -69,8 +69,8 @@ def get_block_menu_keyboard(status: dict) -> InlineKeyboardMarkup:
         )])
     
     buttons.append([InlineKeyboardButton(
-        text="🔙 بازگشت",
-        callback_data=BlockMenuCallback(action="back").pack()
+        text="🔙 بازگشت به پنل کاربر",
+        callback_data=BlockMenuCallback(action="panel").pack()
     )])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -123,6 +123,36 @@ def get_search_results_keyboard(users: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def build_block_menu_text(status: dict) -> str:
+    status_text = (
+        f"🚫 **مدیریت کاربران مسدود**\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    if status.get("can_block"):
+        status_text += (
+            f"✅ قابلیت مسدود کردن: فعال\n"
+            f"📊 مسدود شده: {status['current_blocked']} از {status['max_blocked']}\n"
+            f"💡 باقی‌مانده: {status['remaining']}\n"
+        )
+    else:
+        reason_message = status.get("reason_message") or "قابلیت مسدود کردن برای شما غیرفعال است."
+        status_text += f"❌ {reason_message}\n"
+
+    return status_text
+
+
+async def send_block_menu_message(message: types.Message, user: User) -> types.Message:
+    async with AsyncSessionLocal() as session:
+        status = await get_block_status(session, user.id)
+
+    return await message.answer(
+        build_block_menu_text(status),
+        parse_mode="Markdown",
+        reply_markup=get_block_menu_keyboard(status),
+    )
+
+
 # ===== Handlers =====
 
 @router.callback_query(BlockMenuCallback.filter(F.action == "main"))
@@ -131,26 +161,12 @@ async def show_block_menu(callback: types.CallbackQuery, user: Optional[User]):
     if not user:
         await callback.answer()
         return
-    
+
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
-    
-    status_text = (
-        f"🚫 **مدیریت کاربران مسدود**\n"
-        f"━━━━━━━━━━━━━━━━━━━\n\n"
-    )
-    
-    if status.get("can_block"):
-        status_text += (
-            f"✅ قابلیت مسدود کردن: فعال\n"
-            f"📊 مسدود شده: {status['current_blocked']} از {status['max_blocked']}\n"
-            f"💡 باقی‌مانده: {status['remaining']}\n"
-        )
-    else:
-        status_text += "❌ قابلیت مسدود کردن برای شما غیرفعال است.\n"
-    
+
     await safe_edit_text(callback.message, 
-        status_text,
+        build_block_menu_text(status),
         parse_mode="Markdown",
         reply_markup=get_block_menu_keyboard(status)
     )
@@ -273,16 +289,8 @@ async def handle_block_user(callback: types.CallbackQuery, callback_data: BlockU
         async with AsyncSessionLocal() as session:
             status = await get_block_status(session, user.id)
         
-        status_text = (
-            f"🚫 **مدیریت کاربران مسدود**\n"
-            f"━━━━━━━━━━━━━━━━━━━\n\n"
-            f"✅ قابلیت مسدود کردن: فعال\n"
-            f"📊 مسدود شده: {status['current_blocked']} از {status['max_blocked']}\n"
-            f"💡 باقی‌مانده: {status['remaining']}\n"
-        )
-        
         await safe_edit_text(callback.message, 
-            status_text,
+            build_block_menu_text(status),
             parse_mode="Markdown",
             reply_markup=get_block_menu_keyboard(status)
         )
@@ -345,23 +353,20 @@ async def handle_back(callback: types.CallbackQuery, state: FSMContext, user: Op
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
     
-    status_text = (
-        f"🚫 **مدیریت کاربران مسدود**\n"
-        f"━━━━━━━━━━━━━━━━━━━\n\n"
-    )
-    
-    if status.get("can_block"):
-        status_text += (
-            f"✅ قابلیت مسدود کردن: فعال\n"
-            f"📊 مسدود شده: {status['current_blocked']} از {status['max_blocked']}\n"
-            f"💡 باقی‌مانده: {status['remaining']}\n"
-        )
-    else:
-        status_text += "❌ قابلیت مسدود کردن برای شما غیرفعال است.\n"
-    
     await safe_edit_text(callback.message, 
-        status_text,
+        build_block_menu_text(status),
         parse_mode="Markdown",
         reply_markup=get_block_menu_keyboard(status)
     )
+    await callback.answer()
+
+
+@router.callback_query(BlockMenuCallback.filter(F.action == "panel"))
+async def back_to_user_panel_from_block_menu(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+
+    await state.clear()
+    await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
     await callback.answer()

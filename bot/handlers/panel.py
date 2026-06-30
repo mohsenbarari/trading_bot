@@ -449,7 +449,9 @@ async def _render_user_panel_blocked_users(message: types.Message, user_id: int)
 async def show_user_panel_blocked_users(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:
         return
-    await _render_user_panel_blocked_users(message, user.id)
+    from bot.handlers.block_manage import send_block_menu_message
+
+    await send_block_menu_message(message, user)
 
 
 @router.callback_query(UserPanelBlockCallback.filter(F.action == "unblock"))

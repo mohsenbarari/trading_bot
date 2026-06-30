@@ -163,6 +163,11 @@ async def block_user(db: AsyncSession, blocker_id: int, blocked_id: int) -> Tupl
     # چک کاربر یکسان
     if blocker_id == blocked_id:
         return False, "❌ نمی‌توانید خودتان را مسدود کنید!"
+
+    if hasattr(db, "get"):
+        target_user = await db.get(User, blocked_id)
+        if target_user is None or getattr(target_user, "is_deleted", False):
+            return False, "کاربر یافت نشد."
     
     # چک بلاک قبلی
     existing = await db.scalar(

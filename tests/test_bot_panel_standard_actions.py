@@ -115,6 +115,16 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("هفت روز گذشته", message.answer.await_args.args[0])
         message.answer_document.assert_not_awaited()
 
+    async def test_blocked_users_button_opens_full_block_menu(self):
+        message = SimpleNamespace(answer=AsyncMock())
+        user = SimpleNamespace(id=9)
+
+        with patch("bot.handlers.block_manage.send_block_menu_message", new=AsyncMock()) as menu_mock:
+            await panel.show_user_panel_blocked_users(message, state=SimpleNamespace(), user=user)
+
+        menu_mock.assert_awaited_once_with(message, user)
+        message.answer.assert_not_awaited()
+
     def test_blocked_and_customer_keyboards(self):
         blocked_keyboard = panel.get_user_panel_blocked_keyboard([{"id": 4, "account_name": "ali"}])
         self.assertIn("رفع مسدودیت", blocked_keyboard.inline_keyboard[0][0].text)

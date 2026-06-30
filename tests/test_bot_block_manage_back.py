@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.block_manage import handle_back
+from bot.handlers.block_manage import back_to_user_panel_from_block_menu, handle_back
 
 
 class FakeState:
@@ -38,6 +38,20 @@ class BotBlockManageBackTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state.cleared, 1)
         self.assertIn("قابلیت مسدود کردن برای شما غیرفعال است", safe_edit.await_args.args[1])
+        callback.answer.assert_awaited_once()
+
+    async def test_back_to_user_panel_from_block_menu_edits_panel_text(self):
+        callback = SimpleNamespace(
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        state = SimpleNamespace(clear=AsyncMock())
+
+        await back_to_user_panel_from_block_menu(callback, state, user=SimpleNamespace(id=5))
+
+        state.clear.assert_awaited_once()
+        callback.message.edit_text.assert_awaited_once()
+        self.assertIn("پنل کاربر", callback.message.edit_text.await_args.args[0])
         callback.answer.assert_awaited_once()
 
 

@@ -116,6 +116,28 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         db.add.assert_not_called()
         db.commit.assert_not_awaited()
 
+    async def test_block_user_rejects_missing_or_deleted_target(self):
+        missing_db = SimpleNamespace(get=AsyncMock(return_value=None), scalar=AsyncMock(), add=Mock(), commit=AsyncMock())
+        success, message = await block_service.block_user(missing_db, 15, 16)
+        self.assertFalse(success)
+        self.assertEqual(message, "کاربر یافت نشد.")
+        missing_db.scalar.assert_not_awaited()
+        missing_db.add.assert_not_called()
+        missing_db.commit.assert_not_awaited()
+
+        deleted_db = SimpleNamespace(
+            get=AsyncMock(return_value=SimpleNamespace(is_deleted=True)),
+            scalar=AsyncMock(),
+            add=Mock(),
+            commit=AsyncMock(),
+        )
+        success, message = await block_service.block_user(deleted_db, 15, 17)
+        self.assertFalse(success)
+        self.assertEqual(message, "کاربر یافت نشد.")
+        deleted_db.scalar.assert_not_awaited()
+        deleted_db.add.assert_not_called()
+        deleted_db.commit.assert_not_awaited()
+
     async def test_block_user_rejects_existing_block(self):
         db = SimpleNamespace(scalar=AsyncMock(return_value=object()), add=Mock(), commit=AsyncMock())
 

@@ -7,6 +7,7 @@ class BotBlockManageKeyboardTests(unittest.TestCase):
     def test_block_manage_keyboards_render_expected_buttons(self):
         menu = get_block_menu_keyboard({"can_block": True, "remaining": 2})
         self.assertEqual(len(menu.inline_keyboard), 3)
+        self.assertEqual(menu.inline_keyboard[-1][0].callback_data, "block_menu:panel")
 
         blocked = get_blocked_list_keyboard([{"id": 1, "account_name": "u1"}, {"id": 2, "account_name": "u2"}])
         self.assertIn("u1", blocked.inline_keyboard[0][0].text)
