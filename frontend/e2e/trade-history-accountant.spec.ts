@@ -321,7 +321,7 @@ async def main():
     offer = Offer(
       user_id=counterparty_accountant.id,
       actor_user_id=counterparty_accountant.id,
-      home_server='foreign',
+      home_server='iran',
       offer_type=OfferType.SELL,
       commodity_id=commodity.id,
       quantity=3,
@@ -706,7 +706,7 @@ async def main():
     offer = Offer(
       user_id=target.id,
       actor_user_id=target.id,
-      home_server='foreign',
+      home_server='iran',
       offer_type=OfferType.SELL,
       commodity_id=commodity.id,
       quantity=2,

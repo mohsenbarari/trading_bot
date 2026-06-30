@@ -901,7 +901,7 @@ onMounted(fetchUser)
 /* Content */
 .dashboard-content {
   padding: 1.25rem;
-  padding-bottom: 2rem; /* Reduced since App.vue handles scroll margin */
+  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 3rem);
   width: 100%;
   max-width: var(--ds-page-max-width);
   margin: 0 auto;

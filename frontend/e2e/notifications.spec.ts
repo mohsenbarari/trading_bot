@@ -523,7 +523,7 @@ async def main():
     offer = Offer(
       user_id=accountant.id,
       actor_user_id=accountant.id,
-      home_server='foreign',
+      home_server='iran',
       offer_type=OfferType.SELL,
       commodity_id=commodity.id,
       quantity=2,
@@ -708,7 +708,7 @@ test.describe('Notification regressions', () => {
     await page.locator('button.notif-btn[aria-label="اعلان‌ها"]:visible').first().click()
 
     await expect(page).toHaveURL(/\/notifications$/)
-    await expect(page.getByRole('heading', { name: 'مرکز اعلان‌ها' })).toBeVisible()
+    await expect(page.locator('.notifications-topbar[aria-label="مرکز اعلانات"]')).toBeVisible()
   })
 
   test('websocket heartbeat pong does not emit JSON parse errors', async ({ page }) => {

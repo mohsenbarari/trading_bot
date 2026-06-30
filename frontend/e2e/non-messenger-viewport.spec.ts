@@ -24,8 +24,8 @@ const ROUTES = [
   { path: '/operations/accountants', label: 'accountants', expectedText: 'حسابداران' },
   { path: '/account', label: 'account', expectedText: 'حساب' },
   { path: '/account/security', label: 'security', expectedText: 'امنیت حساب' },
-  { path: '/account/notifications', label: 'notifications', expectedText: 'مرکز اعلان‌ها' },
-  { path: '/market', label: 'market', expectedText: 'بازار' },
+  { path: '/account/notifications', label: 'notifications', expectedText: 'هیچ اعلانی یافت نشد' },
+  { path: '/market', label: 'market', expectedText: 'هیچ لفظ فعالی یافت نشد' },
   { path: '/admin', label: 'admin', expectedText: 'پنل مدیریت' },
 ]
 

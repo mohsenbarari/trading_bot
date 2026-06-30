@@ -518,8 +518,6 @@ test.describe('Messenger room manager and public profile flows', () => {
     const suffix = Date.now()
     const initialTitle = `Playwright Group ${suffix}`
     const updatedTitle = `Playwright Group Updated ${suffix}`
-    const initialDescription = 'Playwright group manager creation flow'
-    const updatedDescription = 'Playwright group manager updated flow'
 
     await waitForBackendReady(request)
     await setAuthTokens(page, owner)
@@ -538,7 +536,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await groupManager.locator('.primary-chip').filter({ hasText: 'ادامه' }).click()
 
     await groupManager.locator('#group-title').fill(initialTitle)
-    await groupManager.locator('#group-description').fill(initialDescription)
+    await expect(groupManager.locator('#group-description')).toHaveCount(0)
     await groupManager.getByRole('button', { name: 'ساخت گروه' }).click()
 
     await expect
@@ -565,7 +563,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await groupManager.locator('.telegram-row').filter({ hasText: 'تنظیمات گروه' }).click({ force: true })
 
     await groupManager.locator('#group-edit-title').fill(updatedTitle)
-    await groupManager.locator('#group-edit-description').fill(updatedDescription)
+    await expect(groupManager.locator('#group-edit-description')).toHaveCount(0)
     await groupManager.getByRole('button', { name: 'ذخیره تغییرات' }).click()
 
     await expect
@@ -573,7 +571,7 @@ test.describe('Messenger room manager and public profile flows', () => {
       .toMatchObject({
         id: groupId,
         title: updatedTitle,
-        description: updatedDescription,
+        description: null,
         avatar_file_id: expect.any(String),
       })
   })
