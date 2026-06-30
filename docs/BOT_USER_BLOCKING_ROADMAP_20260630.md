@@ -33,10 +33,33 @@ Expose user-to-user blocking in the Telegram bot with the lowest practical risk 
    - missing/deleted target rejection in the shared block service;
    - existing block-management tests staying green.
 
+## Re-Review Follow-Up - Delegated Account Guard
+
+The post-implementation review found one defensive gap: the normal Telegram UI
+does not expose block management to customers or accountants, but an old inline
+message or crafted callback could still reach list/search/unblock handlers. New
+block creation was already rejected by `block_user()`, but management access
+should match the WebApp policy more strictly.
+
+Accepted hardening:
+
+- `bot.handlers.block_manage` must reject customers and accountants before
+  listing blocked users, starting search, processing search-state messages,
+  blocking, or unblocking.
+- `bot.handlers.panel` legacy unblock callbacks must reuse the same rejection
+  guard before calling the shared `unblock_user()` service.
+- The rejection is based on `get_block_status().reason_code` values
+  `customer_block_delegated` and `accountant_block_delegated`, so regular users
+  with full capacity or disabled new-block capability keep existing list/unblock
+  behavior unless product policy changes.
+- Regression tests must prove delegated accounts do not reach search/list or
+  unblock service calls.
+
 ## Validation
 
 - Run focused bot block and panel tests.
 - Run focused block service tests.
+- Run WebApp block-router tests and trade blocked-path tests after hardening.
 - Run `py_compile` for changed bot/service modules.
 - Run `git diff --check`.
 

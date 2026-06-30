@@ -14,6 +14,8 @@ from sqlalchemy import select
 from models.user import User
 from core.db import AsyncSessionLocal
 from core.services.block_service import (
+    BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED,
+    BLOCK_STATUS_REASON_CUSTOMER_DELEGATED,
     get_block_status,
     get_blocked_users,
     block_user,
@@ -142,6 +144,39 @@ def build_block_menu_text(status: dict) -> str:
     return status_text
 
 
+def _delegated_block_management_message(status: dict) -> str | None:
+    if status.get("reason_code") not in {
+        BLOCK_STATUS_REASON_CUSTOMER_DELEGATED,
+        BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED,
+    }:
+        return None
+    return status.get("reason_message") or "مدیریت مسدودسازی برای این حساب مجاز نیست."
+
+
+async def reject_delegated_block_management(callback: types.CallbackQuery, user: User) -> bool:
+    async with AsyncSessionLocal() as session:
+        status = await get_block_status(session, user.id)
+
+    message = _delegated_block_management_message(status)
+    if not message:
+        return False
+
+    await callback.answer(message, show_alert=True)
+    return True
+
+
+async def reject_delegated_block_management_message(message: types.Message, user: User) -> bool:
+    async with AsyncSessionLocal() as session:
+        status = await get_block_status(session, user.id)
+
+    rejection_message = _delegated_block_management_message(status)
+    if not rejection_message:
+        return False
+
+    await message.answer(f"❌ {rejection_message}")
+    return True
+
+
 async def send_block_menu_message(message: types.Message, user: User) -> types.Message:
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
@@ -179,6 +214,9 @@ async def show_blocked_list(callback: types.CallbackQuery, user: Optional[User])
     if not user:
         await callback.answer()
         return
+
+    if await reject_delegated_block_management(callback, user):
+        return
     
     async with AsyncSessionLocal() as session:
         blocked = await get_blocked_users(session, user.id)
@@ -206,6 +244,9 @@ async def start_search(callback: types.CallbackQuery, state: FSMContext, user: O
     """شروع جستجوی کاربر"""
     if not user:
         await callback.answer()
+        return
+
+    if await reject_delegated_block_management(callback, user):
         return
     
     await state.set_state(BlockStates.searching)
@@ -237,6 +278,10 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
     
     if len(query) < 2:
         await message.answer("❌ حداقل 2 کاراکتر وارد کنید.")
+        return
+
+    if await reject_delegated_block_management_message(message, user):
+        await state.clear()
         return
     
     async with AsyncSessionLocal() as session:
@@ -276,6 +321,9 @@ async def handle_block_user(callback: types.CallbackQuery, callback_data: BlockU
     if not user:
         await callback.answer()
         return
+
+    if await reject_delegated_block_management(callback, user):
+        return
     
     target_user_id = callback_data.user_id
     
@@ -301,6 +349,9 @@ async def handle_unblock_user(callback: types.CallbackQuery, callback_data: Bloc
     """رفع مسدودیت کاربر"""
     if not user:
         await callback.answer()
+        return
+
+    if await reject_delegated_block_management(callback, user):
         return
     
     target_user_id = callback_data.user_id

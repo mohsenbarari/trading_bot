@@ -464,7 +464,11 @@ async def unblock_user_from_user_panel(
         await callback.answer()
         return
 
+    from bot.handlers.block_manage import reject_delegated_block_management
     from core.services.block_service import get_blocked_users, unblock_user
+
+    if await reject_delegated_block_management(callback, user):
+        return
 
     async with AsyncSessionLocal() as session:
         success, result_message = await unblock_user(session, user.id, callback_data.user_id)

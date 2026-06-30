@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from core.enums import UserRole
+from core.services.block_service import BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED
 from bot.handlers import panel
 
 
@@ -124,6 +125,24 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
 
         menu_mock.assert_awaited_once_with(message, user)
         message.answer.assert_not_awaited()
+
+    async def test_legacy_block_unblock_callback_rejects_delegated_accounts(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        status = {
+            "can_block": False,
+            "reason_code": BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED,
+            "reason_message": "قابلیت بلاک کاربران فقط در اختیار سرگروه است.",
+        }
+        callback_data = panel.UserPanelBlockCallback(action="unblock", user_id=4)
+
+        with patch("bot.handlers.block_manage.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.block_manage.get_block_status", new=AsyncMock(return_value=status)
+        ), patch("core.services.block_service.unblock_user", new=AsyncMock()) as unblock_mock:
+            await panel.unblock_user_from_user_panel(callback, callback_data, user=SimpleNamespace(id=9))
+
+        callback.answer.assert_awaited_once_with(status["reason_message"], show_alert=True)
+        callback.message.edit_text.assert_not_awaited()
+        unblock_mock.assert_not_awaited()
 
     def test_blocked_and_customer_keyboards(self):
         blocked_keyboard = panel.get_user_panel_blocked_keyboard([{"id": 4, "account_name": "ali"}])
