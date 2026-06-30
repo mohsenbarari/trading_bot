@@ -119,12 +119,15 @@ Field policy recommendation:
 - The worker uses `telegram_gateway.send_message` with no parse mode.
 - Telegram `429 retry_after` should set `next_retry_at`.
 - Network/timeouts should be retryable.
+- Retryable failures without Telegram `retry_after` must use bounded exponential backoff with deterministic jitter, not a flat tight retry loop.
+- Retryable failures must have a finite max-attempt cap. After the cap is exhausted, the receipt becomes `terminal_failed` with reason `telegram_retry_exhausted` so the parent broadcast can finalize.
 - Permanent user-unreachable errors should become terminal/skipped without crashing.
 - Message too long or malformed payload should fail the broadcast safely and alert in logs.
 - Claim receipts atomically with a short lease; recover expired leases in the worker cycle.
 - The broadcast worker must be a separate job/loop with its own batch and rate budget so a large broadcast cannot starve trade Telegram delivery.
 - Use proactive global send pacing, not only reactive `429 retry_after` handling. Initial target: use conservative bounded concurrency and sleeps, then tune from staging evidence.
 - Add a parent broadcast finalizer that transitions `queued/running` to `completed`, `completed_with_errors`, or `failed` after receipt statuses reach terminal states.
+- Delivery is at-least-once at the Telegram side-effect boundary. The worker keeps claim/send/status persistence in one DB transaction so a crash rolls the receipt back to a retryable state, but if Telegram accepted the message before the crash, a later retry can duplicate the direct message. This is a known Telegram-side limitation; the receipt `dedupe_key` prevents local duplicate processing but cannot make Telegram `sendMessage` exactly-once.
 
 ## Bot UX Flow
 
@@ -290,6 +293,8 @@ For selected-user search, customers should be displayed with the customer manage
 - Re-load the current user, re-run `evaluate_bot_access`, and send to the current `telegram_id`; store `telegram_id_at_send`.
 - Classify Telegram gateway responses using patterns aligned with trade delivery.
 - Persist retry/terminal/sent status.
+- Use bounded exponential backoff plus deterministic jitter for retryable failures that do not provide Telegram `retry_after`.
+- Mark receipts `terminal_failed` with `telegram_retry_exhausted` after the configured max attempt cap.
 - Finalize parent broadcast status from receipt counts.
 - Add tests for success, retryable network failure, `429 retry_after`, user unreachable, missing bot token, live-telegram-id relink, post-enqueue role/status drift, concurrent workers, expired lease recovery, parent status finalization, and long/malformed message.
 
@@ -332,6 +337,8 @@ For selected-user search, customers should be displayed with the customer manage
 - Cancel clears FSM state.
 - Worker sends pending receipts and records Telegram message id.
 - Worker respects retry_after.
+- Worker uses bounded backoff for retryable 5xx/transport failures without retry_after.
+- Worker marks retry-exhausted receipts terminal so parent broadcasts do not stay running forever.
 - Worker uses current `telegram_id` after a relink and stores `telegram_id_at_send`.
 - Worker skips users that become deleted, inactive, accountant, Tier 2, or unlinked after enqueue.
 - Worker does not crash on permanent Telegram errors.

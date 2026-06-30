@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import hashlib
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -36,6 +37,8 @@ TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_BLOCKED_WRONG_SERVER = "blocked_wrong_s
 
 MIN_RETRY_DELAY_SECONDS = 1
 MAX_RETRY_DELAY_SECONDS = 300
+MAX_RETRY_JITTER_SECONDS = 5
+MAX_RETRY_ATTEMPTS = 8
 
 _RETRYABLE_ERROR_CLASSES = {
     "connecterror",
@@ -144,6 +147,52 @@ def _retry_after_from_result(result: telegram_gateway.TelegramGatewayResult) -> 
     if retry_after is None:
         return None
     return min(MAX_RETRY_DELAY_SECONDS, max(MIN_RETRY_DELAY_SECONDS, retry_after))
+
+
+def _stable_retry_jitter_seconds(
+    *,
+    receipt: TelegramAdminBroadcastReceipt | Any,
+    attempt_count: int,
+    max_jitter_seconds: int = MAX_RETRY_JITTER_SECONDS,
+) -> int:
+    if max_jitter_seconds <= 0:
+        return 0
+    seed = (
+        f"{getattr(receipt, 'id', '')}:"
+        f"{getattr(receipt, 'broadcast_id', '')}:"
+        f"{getattr(receipt, 'recipient_user_id', '')}:"
+        f"{attempt_count}"
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % (max_jitter_seconds + 1)
+
+
+def bounded_retry_delay_seconds(
+    classification: TelegramAdminBroadcastFailureClassification,
+    *,
+    receipt: TelegramAdminBroadcastReceipt | Any,
+    max_jitter_seconds: int = MAX_RETRY_JITTER_SECONDS,
+) -> int:
+    if classification.retry_after_seconds is not None:
+        base_delay = classification.retry_after_seconds
+    else:
+        attempt_count = max(1, int(getattr(receipt, "attempt_count", 0) or 0))
+        base_delay = min(MAX_RETRY_DELAY_SECONDS, 2 ** min(attempt_count, 8))
+
+    jitter = _stable_retry_jitter_seconds(
+        receipt=receipt,
+        attempt_count=max(1, int(getattr(receipt, "attempt_count", 0) or 0)),
+        max_jitter_seconds=max_jitter_seconds,
+    )
+    return min(MAX_RETRY_DELAY_SECONDS, max(MIN_RETRY_DELAY_SECONDS, base_delay + jitter))
+
+
+def retry_attempts_exhausted(
+    receipt: TelegramAdminBroadcastReceipt | Any,
+    *,
+    max_attempts: int = MAX_RETRY_ATTEMPTS,
+) -> bool:
+    return int(getattr(receipt, "attempt_count", 0) or 0) >= max(1, int(max_attempts))
 
 
 def classify_telegram_admin_broadcast_failure(
@@ -548,6 +597,33 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
         )
 
     classification = classify_telegram_admin_broadcast_failure(gateway_result)
+    if classification.status == TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED and retry_attempts_exhausted(receipt):
+        await _mark_receipt(
+            db,
+            receipt=receipt,
+            status=TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED,
+            current_time=current_time,
+            reason="telegram_retry_exhausted",
+            telegram_id_at_send=telegram_id,
+            error_class=classification.error_class,
+            error_message=classification.error_message,
+        )
+        await finalize_telegram_admin_broadcast_status(db, broadcast_id=int(receipt.broadcast_id), now=current_time)
+        return TelegramAdminBroadcastDeliveryResult(
+            status=TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_TERMINAL_FAILED,
+            current_server=normalized_server,
+            receipt=receipt,
+            broadcast_id=broadcast_id,
+            recipient_user_id=recipient_user_id,
+            reason="telegram_retry_exhausted",
+            alert_required=True,
+        )
+
+    retry_delay_seconds = (
+        bounded_retry_delay_seconds(classification, receipt=receipt)
+        if classification.status == TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED
+        else classification.retry_after_seconds
+    )
     await _mark_receipt(
         db,
         receipt=receipt,
@@ -555,7 +631,7 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
         current_time=current_time,
         reason=classification.reason,
         telegram_id_at_send=telegram_id,
-        retry_after_seconds=classification.retry_after_seconds,
+        retry_after_seconds=retry_delay_seconds,
         error_class=classification.error_class,
         error_message=classification.error_message,
     )
@@ -573,7 +649,7 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
         broadcast_id=broadcast_id,
         recipient_user_id=recipient_user_id,
         reason=classification.reason,
-        retry_after_seconds=classification.retry_after_seconds,
+        retry_after_seconds=retry_delay_seconds,
         alert_required=classification.alert_required,
     )
 

@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -8,8 +9,12 @@ from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
     TelegramAdminBroadcastReceipt,
     TelegramAdminBroadcastReceiptStatus,
+    TelegramAdminBroadcastStatus,
 )
 from models.user import User
+
+
+NOW = datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc)
 
 
 class FakeDeliveryDB:
@@ -31,10 +36,50 @@ class FakeDeliveryDB:
         self.flush_count += 1
 
 
+class FakeResult:
+    def __init__(self, rows=None, scalars=None):
+        self._rows = list(rows or [])
+        self._scalars = list(scalars or [])
+
+    def all(self):
+        return list(self._rows)
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: list(self._scalars))
+
+
+class FakeFinalizeDB(FakeDeliveryDB):
+    def __init__(self, *, broadcast, rows):
+        super().__init__(broadcast=broadcast)
+        self.rows = rows
+        self.execute_calls = []
+
+    async def execute(self, statement):
+        self.execute_calls.append(statement)
+        return FakeResult(rows=self.rows)
+
+
+class FakeLeaseRecoveryDB:
+    def __init__(self, receipts):
+        self.receipts = list(receipts)
+        self.execute_calls = []
+        self.flush_count = 0
+
+    async def execute(self, statement):
+        self.execute_calls.append(statement)
+        return FakeResult(scalars=self.receipts)
+
+    async def flush(self):
+        self.flush_count += 1
+
+
 def make_broadcast(**overrides):
     data = {
         "id": 51,
         "content": "پیام اطلاع‌رسانی",
+        "status": TelegramAdminBroadcastStatus.RUNNING,
+        "updated_at": None,
+        "completed_at": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -95,6 +140,31 @@ class TelegramAdminBroadcastDeliveryServiceTests(unittest.IsolatedAsyncioTestCas
         )
         self.assertEqual(missing_token.status, TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED)
         self.assertTrue(missing_token.alert_required)
+
+    def test_bounded_retry_delay_uses_retry_after_or_exponential_backoff(self):
+        rate_limited = service.TelegramAdminBroadcastFailureClassification(
+            status=TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED,
+            reason="telegram_rate_limited",
+            retry_after_seconds=90,
+        )
+        receipt = make_receipt(attempt_count=3)
+        self.assertEqual(
+            service.bounded_retry_delay_seconds(rate_limited, receipt=receipt, max_jitter_seconds=0),
+            90,
+        )
+
+        server_error = service.TelegramAdminBroadcastFailureClassification(
+            status=TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED,
+            reason="telegram_server_error",
+        )
+        self.assertEqual(
+            service.bounded_retry_delay_seconds(server_error, receipt=receipt, max_jitter_seconds=0),
+            8,
+        )
+        self.assertEqual(
+            service.bounded_retry_delay_seconds(server_error, receipt=make_receipt(attempt_count=20), max_jitter_seconds=0),
+            256,
+        )
 
     async def test_delivery_is_foreign_only_and_does_not_call_gateway_on_iran(self):
         receipt = make_receipt()
@@ -197,6 +267,135 @@ class TelegramAdminBroadcastDeliveryServiceTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(result.status, service.TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_SKIPPED)
         self.assertEqual(receipt.reason, "customer_tier2")
         gateway_send.assert_not_awaited()
+
+    async def test_retryable_failure_uses_backoff_and_retry_exhaustion_goes_terminal(self):
+        receipt = make_receipt(attempt_count=3)
+        db = FakeDeliveryDB(
+            broadcast=make_broadcast(content="متن ساده"),
+            user=SimpleNamespace(id=9, telegram_id=9010),
+        )
+
+        async def server_error_send(*_args, **_kwargs):
+            return telegram_gateway.TelegramGatewayResult(
+                ok=False,
+                method="sendMessage",
+                status_code=500,
+                response_text="server error",
+            )
+
+        with patch(
+            "core.services.telegram_admin_broadcast_delivery_service.evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+        ), patch(
+            "core.services.telegram_admin_broadcast_delivery_service.finalize_telegram_admin_broadcast_status",
+            new=AsyncMock(),
+        ):
+            result = await service.deliver_claimed_telegram_admin_broadcast_receipt(
+                db,
+                receipt,
+                current_server="foreign",
+                gateway_send=server_error_send,
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_RETRY_PENDING)
+        self.assertEqual(receipt.status, TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED)
+        self.assertEqual(receipt.reason, "telegram_server_error")
+        self.assertEqual(result.retry_after_seconds, 8 + service._stable_retry_jitter_seconds(receipt=receipt, attempt_count=3))
+        self.assertEqual(receipt.next_retry_at, NOW + timedelta(seconds=result.retry_after_seconds))
+        self.assertIsNone(receipt.worker_id)
+        self.assertIsNone(receipt.lease_until)
+
+        exhausted = make_receipt(attempt_count=service.MAX_RETRY_ATTEMPTS)
+        db = FakeDeliveryDB(
+            broadcast=make_broadcast(content="متن ساده"),
+            user=SimpleNamespace(id=9, telegram_id=9010),
+        )
+        with patch(
+            "core.services.telegram_admin_broadcast_delivery_service.evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+        ), patch(
+            "core.services.telegram_admin_broadcast_delivery_service.finalize_telegram_admin_broadcast_status",
+            new=AsyncMock(),
+        ):
+            result = await service.deliver_claimed_telegram_admin_broadcast_receipt(
+                db,
+                exhausted,
+                current_server="foreign",
+                gateway_send=server_error_send,
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_TERMINAL_FAILED)
+        self.assertEqual(exhausted.status, TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED)
+        self.assertEqual(exhausted.reason, "telegram_retry_exhausted")
+        self.assertIsNone(exhausted.next_retry_at)
+        self.assertEqual(exhausted.terminal_at, NOW)
+
+    async def test_finalize_broadcast_status_taxonomy(self):
+        cases = [
+            (
+                [(TelegramAdminBroadcastReceiptStatus.SENT, 2)],
+                TelegramAdminBroadcastStatus.COMPLETED,
+            ),
+            (
+                [(TelegramAdminBroadcastReceiptStatus.SENT, 1), (TelegramAdminBroadcastReceiptStatus.SKIPPED, 1)],
+                TelegramAdminBroadcastStatus.COMPLETED_WITH_ERRORS,
+            ),
+            (
+                [(TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED, 2)],
+                TelegramAdminBroadcastStatus.FAILED,
+            ),
+            (
+                [(TelegramAdminBroadcastReceiptStatus.SENT, 1), (TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED, 1)],
+                TelegramAdminBroadcastStatus.RUNNING,
+            ),
+        ]
+        for rows, expected_status in cases:
+            with self.subTest(expected_status=expected_status):
+                broadcast = make_broadcast(status=TelegramAdminBroadcastStatus.RUNNING)
+                db = FakeFinalizeDB(broadcast=broadcast, rows=rows)
+
+                result = await service.finalize_telegram_admin_broadcast_status(db, broadcast_id=51, now=NOW)
+
+                self.assertEqual(result, expected_status)
+                self.assertEqual(broadcast.status, expected_status)
+                if expected_status in {
+                    TelegramAdminBroadcastStatus.COMPLETED,
+                    TelegramAdminBroadcastStatus.COMPLETED_WITH_ERRORS,
+                    TelegramAdminBroadcastStatus.FAILED,
+                }:
+                    self.assertEqual(broadcast.completed_at, NOW)
+
+    async def test_expired_lease_recovery_releases_worker_state(self):
+        receipt = make_receipt(
+            status=TelegramAdminBroadcastReceiptStatus.SENDING,
+            worker_id="stale-worker",
+            lease_until=NOW - timedelta(seconds=10),
+            next_retry_at=None,
+        )
+        db = FakeLeaseRecoveryDB([receipt])
+
+        recovered = await service.recover_expired_telegram_admin_broadcast_leases(
+            db,
+            current_server="foreign",
+            now=NOW,
+        )
+
+        self.assertEqual(recovered, [receipt])
+        self.assertEqual(receipt.status, TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED)
+        self.assertEqual(receipt.reason, "lease_expired")
+        self.assertIsNone(receipt.worker_id)
+        self.assertIsNone(receipt.lease_until)
+        self.assertEqual(receipt.next_retry_at, NOW)
+        self.assertEqual(db.flush_count, 1)
+
+        iran_db = FakeLeaseRecoveryDB([make_receipt()])
+        self.assertEqual(
+            await service.recover_expired_telegram_admin_broadcast_leases(iran_db, current_server="iran", now=NOW),
+            [],
+        )
+        self.assertEqual(iran_db.flush_count, 0)
 
 
 if __name__ == "__main__":
