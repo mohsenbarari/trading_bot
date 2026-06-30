@@ -382,6 +382,75 @@ Required follow-up:
 - For confirmed terminal/deleted-message rows, design an idempotent cleanup or archived-state transition so the publication worker stops retrying impossible edits.
 - Keep active-offer publication repair strict; do not suppress active-offer Telegram publication failures without explicit operator visibility.
 
+Additional evidence from the 2026-06-30 `a1a1aa2f` production release:
+
+- Release log: `tmp/production-release-logs/production-release-20260630T193710Z.log`
+- Foreign runtime log: `tmp/production-release-logs/foreign-runtime-after-release.log`
+- The foreign bot started the admin broadcast worker successfully:
+
+```text
+core.telegram_admin_broadcast_worker - Telegram admin broadcast worker started
+```
+
+- The offer Telegram publication worker still emitted repeated `400 Bad Request` responses after restart. In this release log window, the saved foreign runtime log contains 30 `400 Bad Request` Telegram responses.
+- The publication worker stayed alive and completed cycles with `status=ok`. It eventually reached a final observed cycle with `channel_state_processed=1`, `channel_state_applied=1`, and `channel_state_failed=0`, but earlier cycles still showed repeated failed channel-state applications.
+
+### 17. Telegram publication worker can hit Telegram `429 Too Many Requests` after restart
+
+Observed behavior during the 2026-06-30 `a1a1aa2f` production release:
+
+- The foreign runtime log captured 115 Telegram `429 Too Many Requests` responses from `offer_telegram_publication` shortly after the bot restarted.
+- The worker logged the HTTP responses as INFO and continued running; production health and sync checks passed.
+- The observed cycles were still marked `job_result=success`, but the retry pressure was high enough to be operationally suspicious.
+
+Evidence path:
+
+- `tmp/production-release-logs/foreign-runtime-after-release.log`
+
+Impact:
+
+- This did not block the release.
+- Repeated rate limits can delay channel-state convergence after restart and can hide whether the worker is pacing Telegram edits conservatively enough.
+- The behavior is adjacent to issue 16 but distinct: `400 Bad Request` is likely stale/deleted-message state, while `429 Too Many Requests` indicates send/edit pacing pressure.
+
+Required follow-up:
+
+- Review `core.offer_publication_worker` pacing around Telegram edit/update calls, especially immediately after bot startup.
+- Add structured aggregation for Telegram publication response classes per cycle: `2xx`, `400`, `429`, other `4xx`, `5xx`, transport errors.
+- Honor Telegram `retry_after` when available and add bounded backoff or per-cycle cooldown so restart reconciliation does not repeatedly hit rate limits.
+- Keep active-offer publication failures visible; do not silently suppress active-offer Telegram failures.
+
+### 18. Generic PII redaction can over-redact UUID/run_id fields as national IDs
+
+Observed behavior during the 2026-06-30 `a1a1aa2f` production release:
+
+- Several structured bot logs showed `run_id` values partially redacted as `REDACTED_NATIONAL_ID`, for example:
+
+```text
+"run_id":"838ee21e-90ab-46e0-8ed2-ac[REDACTED_NATIONAL_ID]"
+```
+
+- The same foreign runtime log contains 12 occurrences of `REDACTED_NATIONAL_ID`.
+- Telegram Bot API token redaction worked correctly and appeared as `bot[REDACTED]`.
+
+Evidence path:
+
+- `tmp/production-release-logs/foreign-runtime-after-release.log`
+
+Impact:
+
+- This does not leak sensitive data.
+- It reduces operational usefulness of structured correlation IDs and makes release log analysis harder.
+
+Required follow-up:
+
+- Refine structured-log redaction so UUID-like fields such as `run_id`, `request_id`, and other known correlation IDs are not treated as national IDs.
+- Keep real national-id/mobile/Telegram-token redaction strict.
+- Add regression tests covering:
+  - Telegram Bot API URL token redaction;
+  - Persian/national-id redaction in free-text payloads;
+  - no redaction of UUID correlation IDs in structured fields.
+
 ## Closed-Market Remediation Order
 
 1. Add a pre-mutation release decision gate for `IRAN_CONNECTIVITY_MODE` and `IRAN_SHARED_DATA_MODE`.
@@ -396,6 +465,8 @@ Required follow-up:
 10. Design the database uniqueness backstop for duplicate customer invitations in a dedicated migration roadmap.
 11. Reduce pip warning noise if it can be done without hiding real packaging problems.
 12. Classify non-retryable Telegram `Bad Request` publication-state rows and stop impossible terminal/deleted-message retries safely.
+13. Add Telegram publication-worker rate-limit pacing and response aggregation for `429 Too Many Requests`.
+14. Refine log redaction so UUID correlation IDs are not partially redacted as national IDs.
 
 ## Validation Required After Remediation
 
@@ -409,3 +480,5 @@ Required follow-up:
 - Confirm the internal endpoint rejects non-Iran execution, source mismatch, invalid owner states, and invalid tier/account/idempotency payloads.
 - Confirm existing bot users cannot be forced into onboarding by crafted acknowledgement callbacks.
 - Confirm Telegram publication-state cleanup keeps active-offer failures visible while preventing repeated retries for confirmed terminal/deleted-message rows.
+- Confirm Telegram publication-worker restart reconciliation no longer causes repeated `429 Too Many Requests` bursts.
+- Confirm structured logs preserve UUID correlation IDs while still redacting real secrets and PII.
