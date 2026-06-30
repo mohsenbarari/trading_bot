@@ -42,10 +42,16 @@ class BotKeyboardsTests(unittest.TestCase):
         admin_panel = keyboards.get_admin_panel_keyboard()
         admin_texts = [button.text for row in admin_panel.keyboard for button in row]
         self.assertIn('👥 مدیریت کاربران', admin_texts)
+        self.assertNotIn('📣 ارسال پیام همگانی بات', admin_texts)
+
+        super_admin_panel = keyboards.get_admin_panel_keyboard(UserRole.SUPER_ADMIN)
+        super_admin_texts = [button.text for row in super_admin_panel.keyboard for button in row]
+        self.assertIn('📣 ارسال پیام همگانی بات', super_admin_texts)
 
         middle_admin_panel = keyboards.get_admin_panel_keyboard(UserRole.MIDDLE_MANAGER)
         middle_admin_texts = [button.text for row in middle_admin_panel.keyboard for button in row]
         self.assertEqual(middle_admin_texts, ['➕ ارسال لینک دعوت', '👥 مدیریت کاربران', '🔙 بازگشت'])
+        self.assertNotIn('📣 ارسال پیام همگانی بات', middle_admin_texts)
 
         users_management = keyboards.get_users_management_keyboard()
         management_texts = [button.text for row in users_management.keyboard for button in row]

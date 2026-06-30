@@ -132,6 +132,38 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["source_server"], "iran")
         self.assertEqual(metadata["source_sequence"], 113)
 
+    def test_telegram_admin_broadcast_receipt_metadata_uses_dedupe_key(self):
+        metadata = build_sync_metadata(
+            "telegram_admin_broadcast_receipts",
+            61,
+            "UPDATE",
+            {
+                "dedupe_key": "telegram-admin-broadcast:9:44",
+                "broadcast_id": 9,
+                "recipient_user_id": 44,
+            },
+            change_log_id=119,
+        )
+
+        self.assertEqual(metadata["aggregate_id"], "telegram-admin-broadcast:9:44")
+        self.assertEqual(
+            build_sync_public_identity(
+                "telegram_admin_broadcast_receipts",
+                61,
+                {
+                    "dedupe_key": "telegram-admin-broadcast:9:44",
+                    "broadcast_id": 9,
+                },
+            ),
+            {
+                "table": "telegram_admin_broadcast_receipts",
+                "kind": "dedupe_key",
+                "value": "telegram-admin-broadcast:9:44",
+                "record_id": 61,
+                "references": {"broadcast_id": "9"},
+            },
+        )
+
     def test_offer_request_metadata_uses_request_home_and_idempotency_not_offer_public_id(self):
         first = build_sync_metadata(
             "offer_requests",

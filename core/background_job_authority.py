@@ -19,6 +19,7 @@ JOB_CONNECTIVITY_MONITOR = "connectivity_monitor"
 JOB_SYNC_WORKER = "sync_worker"
 JOB_TRADE_WEBAPP_DELIVERY = "trade_webapp_delivery"
 JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
+JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
@@ -28,9 +29,10 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_SESSION_EXPIRY,
         JOB_USER_ACCOUNT_STATUS,
         JOB_CONNECTIVITY_MONITOR,
-        JOB_TRADE_WEBAPP_DELIVERY,
-        JOB_TRADE_TELEGRAM_DELIVERY,
-        JOB_OFFER_TELEGRAM_PUBLICATION,
+            JOB_TRADE_WEBAPP_DELIVERY,
+            JOB_TRADE_TELEGRAM_DELIVERY,
+            JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
+            JOB_OFFER_TELEGRAM_PUBLICATION,
     }
 )
 
@@ -200,6 +202,25 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         ),
         external_state=("Telegram Bot API",),
         side_effects=("Telegram private trade message",),
+    ),
+    JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
+        mutated_tables=("telegram_admin_broadcasts", "telegram_admin_broadcast_receipts"),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only Telegram admin broadcast worker; claims only local Telegram broadcast receipt rows "
+            "and sends direct bot messages through the Telegram gateway"
+        ),
+        outage_behavior=(
+            "retry transient Telegram/network failures; skip unreachable or no-longer-eligible recipients "
+            "without creating WebApp notifications or messenger rows"
+        ),
+        sync_outbox_behavior=(
+            "telegram_admin_broadcasts and telegram_admin_broadcast_receipts are synced non-messenger "
+            "operational data; worker_id and lease_until remain local execution fields"
+        ),
+        external_state=("Telegram Bot API",),
+        side_effects=("Telegram private admin broadcast message",),
     ),
     JOB_OFFER_TELEGRAM_PUBLICATION: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_TELEGRAM_PUBLICATION,

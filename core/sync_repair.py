@@ -44,6 +44,7 @@ REPLAY_SKIP_COLUMNS_BY_TABLE: dict[str, set[str]] = {
     "chats": {"avatar_file_id", "last_message_id", "pinned_message_id"},
     "chat_members": {"last_read_message_id"},
     "trade_delivery_receipts": {"worker_id", "lease_until"},
+    "telegram_admin_broadcast_receipts": {"worker_id", "lease_until"},
 }
 
 REPLAY_IDENTITY_FIELDS_BY_TABLE: dict[str, set[str]] = {
@@ -63,6 +64,8 @@ REPLAY_IDENTITY_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "telegram_link_tokens": {"id", "token_hash", "user_id"},
     "trades": {"id", "trade_number", "idempotency_key"},
     "trade_delivery_receipts": {"id", "dedupe_key", "trade_number"},
+    "telegram_admin_broadcasts": {"id"},
+    "telegram_admin_broadcast_receipts": {"id", "dedupe_key", "broadcast_id"},
     "trading_settings": {"id", "key"},
     "user_blocks": {"id", "blocker_id", "blocked_id"},
     "user_notification_preferences": {"id", "user_id"},

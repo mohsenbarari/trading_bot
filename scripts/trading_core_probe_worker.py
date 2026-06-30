@@ -87,6 +87,7 @@ from models.session import (
     UserSession,
 )
 from models.telegram_link_token import TelegramLinkToken
+from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdminBroadcastReceipt
 from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User, UserRole
@@ -296,6 +297,8 @@ class CleanupPlan:
     offer_public_ids: list[str]
     trade_ids: list[int]
     trade_delivery_receipt_ids: list[int]
+    telegram_admin_broadcast_ids: list[int]
+    telegram_admin_broadcast_receipt_ids: list[int]
     offer_request_ids: list[int]
     publication_state_ids: list[int]
     notification_ids: list[int]
@@ -1271,6 +1274,8 @@ def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
         "offer_requests": len(plan.offer_request_ids),
         "trades": len(plan.trade_ids),
         "trade_delivery_receipts": len(plan.trade_delivery_receipt_ids),
+        "telegram_admin_broadcasts": len(plan.telegram_admin_broadcast_ids),
+        "telegram_admin_broadcast_receipts": len(plan.telegram_admin_broadcast_receipt_ids),
         "notifications": len(plan.notification_ids),
     }
 
@@ -1293,6 +1298,8 @@ def cleanup_report_payload(
     deleted_offers: int = 0,
     deleted_trades: int = 0,
     deleted_trade_delivery_receipts: int = 0,
+    deleted_telegram_admin_broadcasts: int = 0,
+    deleted_telegram_admin_broadcast_receipts: int = 0,
     deleted_notifications: int = 0,
     deleted_offer_requests: int = 0,
     deleted_publication_states: int = 0,
@@ -1319,6 +1326,8 @@ def cleanup_report_payload(
         "deleted_offers": deleted_offers,
         "deleted_trades": deleted_trades,
         "deleted_trade_delivery_receipts": deleted_trade_delivery_receipts,
+        "deleted_telegram_admin_broadcasts": deleted_telegram_admin_broadcasts,
+        "deleted_telegram_admin_broadcast_receipts": deleted_telegram_admin_broadcast_receipts,
         "deleted_notifications": deleted_notifications,
         "deleted_offer_requests": deleted_offer_requests,
         "deleted_publication_states": deleted_publication_states,
@@ -1547,6 +1556,25 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                 (TradeDeliveryReceipt.recipient_user_id, user_ids),
             ],
         )
+        telegram_admin_broadcast_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(TelegramAdminBroadcast.id).where(
+                TelegramAdminBroadcast.content.like(contains_pattern, escape=LIKE_ESCAPE)
+            ),
+            TelegramAdminBroadcast.id,
+            [(TelegramAdminBroadcast.created_by_id, user_ids)],
+        )
+        telegram_admin_broadcast_receipt_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(TelegramAdminBroadcastReceipt.id).where(
+                TelegramAdminBroadcastReceipt.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
+            ),
+            TelegramAdminBroadcastReceipt.id,
+            [
+                (TelegramAdminBroadcastReceipt.broadcast_id, telegram_admin_broadcast_ids),
+                (TelegramAdminBroadcastReceipt.recipient_user_id, user_ids),
+            ],
+        )
         notification_ids = await collect_int_ids_by_statement_and_batched_filters(
             db,
             select(Notification.id).where(
@@ -1575,6 +1603,8 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
         offer_public_ids=offer_public_ids,
         trade_ids=trade_ids,
         trade_delivery_receipt_ids=trade_delivery_receipt_ids,
+        telegram_admin_broadcast_ids=telegram_admin_broadcast_ids,
+        telegram_admin_broadcast_receipt_ids=telegram_admin_broadcast_receipt_ids,
         offer_request_ids=offer_request_ids,
         publication_state_ids=publication_state_ids,
         notification_ids=notification_ids,
@@ -1616,6 +1646,8 @@ TARGETED_SYNC_TABLE_ID_FIELDS = {
     "trades": "trade_ids",
     "offer_requests": "offer_request_ids",
     "trade_delivery_receipts": "trade_delivery_receipt_ids",
+    "telegram_admin_broadcasts": "telegram_admin_broadcast_ids",
+    "telegram_admin_broadcast_receipts": "telegram_admin_broadcast_receipt_ids",
 }
 TARGETED_SYNC_TABLES = tuple(TARGETED_SYNC_TABLE_ID_FIELDS)
 
@@ -1802,6 +1834,8 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_notifications = 0
         deleted_chat_members = 0
         deleted_trade_delivery_receipts = 0
+        deleted_telegram_admin_broadcasts = 0
+        deleted_telegram_admin_broadcast_receipts = 0
         deleted_trades = 0
         deleted_offers = 0
         deleted_users = 0
@@ -1830,7 +1864,19 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_trade_delivery_receipts = await delete_in_batches(
             db, TradeDeliveryReceipt, TradeDeliveryReceipt.id, plan.trade_delivery_receipt_ids
         )
+        deleted_telegram_admin_broadcast_receipts = await delete_in_batches(
+            db,
+            TelegramAdminBroadcastReceipt,
+            TelegramAdminBroadcastReceipt.id,
+            plan.telegram_admin_broadcast_receipt_ids,
+        )
         deleted_notifications = await delete_in_batches(db, Notification, Notification.id, plan.notification_ids)
+        deleted_telegram_admin_broadcasts = await delete_in_batches(
+            db,
+            TelegramAdminBroadcast,
+            TelegramAdminBroadcast.id,
+            plan.telegram_admin_broadcast_ids,
+        )
         deleted_publication_states = await delete_in_batches(
             db, OfferPublicationState, OfferPublicationState.id, plan.publication_state_ids
         )
@@ -1861,6 +1907,8 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                        OR (table_name = 'offers' AND record_id = ANY(:offer_ids))
                        OR (table_name = 'trades' AND record_id = ANY(:trade_ids))
                        OR (table_name = 'trade_delivery_receipts' AND record_id = ANY(:trade_delivery_receipt_ids))
+                       OR (table_name = 'telegram_admin_broadcasts' AND record_id = ANY(:telegram_admin_broadcast_ids))
+                       OR (table_name = 'telegram_admin_broadcast_receipts' AND record_id = ANY(:telegram_admin_broadcast_receipt_ids))
                        OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
                        OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
                        OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
@@ -1877,6 +1925,8 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                 "offer_ids": plan.offer_ids or [-1],
                 "trade_ids": plan.trade_ids or [-1],
                 "trade_delivery_receipt_ids": plan.trade_delivery_receipt_ids or [-1],
+                "telegram_admin_broadcast_ids": plan.telegram_admin_broadcast_ids or [-1],
+                "telegram_admin_broadcast_receipt_ids": plan.telegram_admin_broadcast_receipt_ids or [-1],
                 "offer_request_ids": plan.offer_request_ids or [-1],
                 "publication_state_ids": plan.publication_state_ids or [-1],
                 "notification_ids": plan.notification_ids or [-1],
@@ -1903,6 +1953,8 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_offers=deleted_offers,
         deleted_trades=deleted_trades,
         deleted_trade_delivery_receipts=deleted_trade_delivery_receipts,
+        deleted_telegram_admin_broadcasts=deleted_telegram_admin_broadcasts,
+        deleted_telegram_admin_broadcast_receipts=deleted_telegram_admin_broadcast_receipts,
         deleted_notifications=deleted_notifications,
         deleted_offer_requests=deleted_offer_requests,
         deleted_publication_states=deleted_publication_states,

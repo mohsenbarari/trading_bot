@@ -648,6 +648,121 @@ def setup_trade_delivery_receipt_events():
     logger.info("✅ TradeDeliveryReceipt event listeners registered")
 
 
+def setup_telegram_admin_broadcast_events():
+    """Setup event listeners for Telegram admin broadcast models."""
+    from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdminBroadcastReceipt
+
+    def _enum_value(value):
+        return value.value if hasattr(value, "value") else value
+
+    def broadcast_payload(target) -> Dict[str, Any]:
+        return {
+            "id": target.id,
+            "content": target.content,
+            "created_by_id": target.created_by_id,
+            "audience_type": _enum_value(target.audience_type),
+            "target_groups": target.target_groups or [],
+            "recipient_count": target.recipient_count,
+            "status": _enum_value(target.status),
+            "queued_at": _isoformat_or_none(getattr(target, "queued_at", None)),
+            "completed_at": _isoformat_or_none(getattr(target, "completed_at", None)),
+            "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+            "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+        }
+
+    def receipt_payload(target) -> Dict[str, Any]:
+        return {
+            "id": target.id,
+            "broadcast_id": target.broadcast_id,
+            "recipient_user_id": target.recipient_user_id,
+            "telegram_id_at_enqueue": target.telegram_id_at_enqueue,
+            "telegram_id_at_send": target.telegram_id_at_send,
+            "dedupe_key": target.dedupe_key,
+            "status": _enum_value(target.status),
+            "reason": target.reason,
+            "telegram_message_id": target.telegram_message_id,
+            "attempt_count": target.attempt_count,
+            "next_retry_at": _isoformat_or_none(getattr(target, "next_retry_at", None)),
+            "last_error_class": target.last_error_class,
+            "last_error_message": target.last_error_message,
+            "worker_id": target.worker_id,
+            "lease_until": _isoformat_or_none(getattr(target, "lease_until", None)),
+            "sent_at": _isoformat_or_none(getattr(target, "sent_at", None)),
+            "terminal_at": _isoformat_or_none(getattr(target, "terminal_at", None)),
+            "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+            "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+        }
+
+    @event.listens_for(TelegramAdminBroadcast, 'after_insert')
+    def on_telegram_admin_broadcast_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_admin_broadcasts", target.id, "INSERT", broadcast_payload(target))
+        except Exception as e:
+            logger.error(f"Error in telegram_admin_broadcast after_insert event: {e}")
+
+    @event.listens_for(TelegramAdminBroadcast, 'after_update')
+    def on_telegram_admin_broadcast_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_admin_broadcasts", target.id, "UPDATE", broadcast_payload(target))
+        except Exception as e:
+            logger.error(f"Error in telegram_admin_broadcast after_update event: {e}")
+
+    @event.listens_for(TelegramAdminBroadcast, 'after_delete')
+    def on_telegram_admin_broadcast_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_admin_broadcasts", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in telegram_admin_broadcast after_delete event: {e}")
+
+    @event.listens_for(TelegramAdminBroadcastReceipt, 'after_insert')
+    def on_telegram_admin_broadcast_receipt_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "telegram_admin_broadcast_receipts",
+                target.id,
+                "INSERT",
+                receipt_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in telegram_admin_broadcast_receipt after_insert event: {e}")
+
+    @event.listens_for(TelegramAdminBroadcastReceipt, 'after_update')
+    def on_telegram_admin_broadcast_receipt_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "telegram_admin_broadcast_receipts",
+                target.id,
+                "UPDATE",
+                receipt_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in telegram_admin_broadcast_receipt after_update event: {e}")
+
+    @event.listens_for(TelegramAdminBroadcastReceipt, 'after_delete')
+    def on_telegram_admin_broadcast_receipt_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id, "dedupe_key": target.dedupe_key, "broadcast_id": target.broadcast_id}
+            log_change(connection, "telegram_admin_broadcast_receipts", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in telegram_admin_broadcast_receipt after_delete event: {e}")
+
+    logger.info("✅ TelegramAdminBroadcast event listeners registered")
+
+
 def setup_user_events():
     """Setup event listeners for User model"""
     from models.user import User
@@ -1455,6 +1570,7 @@ def setup_all_events():
     setup_offer_publication_state_events()
     setup_trade_events()
     setup_trade_delivery_receipt_events()
+    setup_telegram_admin_broadcast_events()
     setup_commodity_events()
     setup_commodity_alias_events()
     setup_trading_settings_events()

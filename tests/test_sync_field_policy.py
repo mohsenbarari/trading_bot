@@ -125,6 +125,30 @@ class SyncFieldPolicyTests(unittest.TestCase):
         for field in {"trade_id", "offer_id", "notification_id", "worker_id", "lease_until"}:
             self.assertNotIn(field, sanitized)
 
+    def test_telegram_admin_broadcast_local_worker_fields_are_dropped_from_sync_payload(self):
+        payload = {
+            "id": 51,
+            "broadcast_id": 5,
+            "recipient_user_id": 7,
+            "telegram_id_at_enqueue": 9001,
+            "telegram_id_at_send": 9002,
+            "dedupe_key": "telegram-admin-broadcast:5:7",
+            "status": "retryable_failed",
+            "reason": "telegram_rate_limited",
+            "last_error_message": "provider detail",
+            "worker_id": "foreign-local-worker",
+            "lease_until": "2026-06-30T12:00:00Z",
+        }
+
+        sanitized = sanitize_sync_payload("telegram_admin_broadcast_receipts", payload)
+
+        self.assertEqual(sanitized["dedupe_key"], "telegram-admin-broadcast:5:7")
+        self.assertEqual(sanitized["telegram_id_at_enqueue"], 9001)
+        self.assertEqual(sanitized["telegram_id_at_send"], 9002)
+        self.assertEqual(sanitized["last_error_message"], "provider detail")
+        self.assertNotIn("worker_id", sanitized)
+        self.assertNotIn("lease_until", sanitized)
+
     def test_required_sensitive_fields_have_explicit_classification(self):
         expectations = {
             ("users", "admin_password_hash"): SyncFieldClassification.NO_SYNC,
@@ -133,6 +157,12 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("trades", "offer_user_mobile"): SyncFieldClassification.SYNC,
             ("notifications", "message"): SyncFieldClassification.SYNC,
             ("notifications", "extra_payload"): SyncFieldClassification.SYNC,
+            ("telegram_admin_broadcasts", "content"): SyncFieldClassification.SYNC,
+            ("telegram_admin_broadcast_receipts", "telegram_id_at_enqueue"): SyncFieldClassification.SYNC,
+            ("telegram_admin_broadcast_receipts", "telegram_id_at_send"): SyncFieldClassification.SYNC,
+            ("telegram_admin_broadcast_receipts", "last_error_message"): SyncFieldClassification.SYNC,
+            ("telegram_admin_broadcast_receipts", "worker_id"): SyncFieldClassification.NO_SYNC,
+            ("telegram_admin_broadcast_receipts", "lease_until"): SyncFieldClassification.NO_SYNC,
             ("trade_delivery_receipts", "last_error"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "audit_payload"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "trade_id"): SyncFieldClassification.NO_SYNC,
@@ -159,6 +189,14 @@ class SyncFieldPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             get_sync_field_policy_entry("trade_delivery_receipts", "lease_until").action,
+            SyncFieldAction.DROP,
+        )
+        self.assertEqual(
+            get_sync_field_policy_entry("telegram_admin_broadcast_receipts", "worker_id").action,
+            SyncFieldAction.DROP,
+        )
+        self.assertEqual(
+            get_sync_field_policy_entry("telegram_admin_broadcast_receipts", "lease_until").action,
             SyncFieldAction.DROP,
         )
 

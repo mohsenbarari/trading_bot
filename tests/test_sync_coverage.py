@@ -10,6 +10,7 @@ from models.customer_relation import CustomerRelation
 from models.invitation import Invitation
 from models.notification import Notification
 from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
+from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdminBroadcastReceipt
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user_notification_preference import UserNotificationPreference
 
@@ -24,6 +25,8 @@ class SyncCoverageTests(unittest.TestCase):
         self.assertIs(sync.get_model_class("notifications"), Notification)
         self.assertIs(sync.get_model_class("user_notification_preferences"), UserNotificationPreference)
         self.assertIs(sync.get_model_class("trade_delivery_receipts"), TradeDeliveryReceipt)
+        self.assertIs(sync.get_model_class("telegram_admin_broadcasts"), TelegramAdminBroadcast)
+        self.assertIs(sync.get_model_class("telegram_admin_broadcast_receipts"), TelegramAdminBroadcastReceipt)
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["accountant_relations"])
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["customer_relations"])
         self.assertLess(sync.TABLE_ORDER["accountant_relations"], sync.TABLE_ORDER["offers"])
@@ -36,6 +39,7 @@ class SyncCoverageTests(unittest.TestCase):
         self.assertLess(sync.TABLE_ORDER["invitations"], sync.TABLE_ORDER["offers"])
         self.assertLess(sync.TABLE_ORDER["notifications"], sync.TABLE_ORDER["offers"])
         self.assertLess(sync.TABLE_ORDER["trades"], sync.TABLE_ORDER["trade_delivery_receipts"])
+        self.assertLess(sync.TABLE_ORDER["telegram_admin_broadcasts"], sync.TABLE_ORDER["telegram_admin_broadcast_receipts"])
 
     def test_every_sync_registry_table_has_receiver_coverage(self):
         missing_model = []

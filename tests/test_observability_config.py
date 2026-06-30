@@ -229,6 +229,8 @@ class ObservabilityConfigTests(unittest.TestCase):
             "offer_requests",
             "offer_publication_states",
             "trade_delivery_receipts",
+            "telegram_admin_broadcasts",
+            "telegram_admin_broadcast_receipts",
         ):
             self.assertIn(expected_table, recover_script)
         self.assertNotIn("chat_members", recover_script)

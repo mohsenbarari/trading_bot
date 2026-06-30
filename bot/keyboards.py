@@ -56,6 +56,8 @@ def get_admin_panel_keyboard(user_role: UserRole | None = None) -> ReplyKeyboard
     if user_role != UserRole.MIDDLE_MANAGER:
         keyboard_layout.insert(1, [KeyboardButton(text="📦 مدیریت کالاها")])
         keyboard_layout.insert(3, [KeyboardButton(text="⚙️ تنظیمات سیستم")])
+    if user_role == UserRole.SUPER_ADMIN:
+        keyboard_layout.append([KeyboardButton(text="📣 ارسال پیام همگانی بات")])
 
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)

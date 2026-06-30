@@ -42,6 +42,8 @@ PARITY_QUICK_TABLES = (
     "offer_requests",
     "trades",
     "trade_delivery_receipts",
+    "telegram_admin_broadcasts",
+    "telegram_admin_broadcast_receipts",
 )
 
 IDENTITY_FIELDS_BY_TABLE: dict[str, tuple[str, ...]] = {
@@ -56,6 +58,7 @@ IDENTITY_FIELDS_BY_TABLE: dict[str, tuple[str, ...]] = {
     "offer_requests": ("request_home_server", "idempotency_key"),
     "offers": ("offer_public_id",),
     "telegram_link_tokens": ("token_hash",),
+    "telegram_admin_broadcast_receipts": ("dedupe_key",),
     "trade_delivery_receipts": ("dedupe_key",),
     "trades": ("trade_number",),
     "trading_settings": ("key",),
@@ -70,6 +73,8 @@ VOLATILE_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "users": {"last_seen_at", "updated_at"},
     "offer_publication_states": {"last_attempt_at", "last_success_at", "next_retry_at", "updated_at"},
     "trade_delivery_receipts": {"next_retry_at", "updated_at"},
+    "telegram_admin_broadcasts": {"updated_at"},
+    "telegram_admin_broadcast_receipts": {"next_retry_at", "updated_at"},
 }
 
 LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
@@ -85,6 +90,7 @@ LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
         "state_metadata",
     },
     "trade_delivery_receipts": {"trade_id", "offer_id", "notification_id", "worker_id", "lease_until"},
+    "telegram_admin_broadcast_receipts": {"worker_id", "lease_until"},
 }
 
 SENSITIVE_IDENTITY_FIELDS = {

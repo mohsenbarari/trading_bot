@@ -395,6 +395,14 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
             sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("trades"),
             sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("trade_delivery_receipts"),
         )
+        self.assertLess(
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("telegram_admin_broadcasts"),
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("telegram_admin_broadcast_receipts"),
+        )
+        self.assertLess(
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("telegram_admin_broadcast_receipts"),
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("notifications"),
+        )
 
     async def test_fetch_next_unsynced_change_log_item_reads_committed_row(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)

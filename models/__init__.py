@@ -39,6 +39,15 @@ from .trade_delivery_receipt import (
     TradeDeliveryReceipt,
     TradeDeliveryReceiptStatus,
 )
+from .telegram_admin_broadcast import (
+    NON_TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES,
+    TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES,
+    TelegramAdminBroadcast,
+    TelegramAdminBroadcastAudienceType,
+    TelegramAdminBroadcastReceipt,
+    TelegramAdminBroadcastReceiptStatus,
+    TelegramAdminBroadcastStatus,
+)
 from .chat import Chat
 from .chat_member import ChatMember
 from .message import Message
@@ -97,6 +106,13 @@ __all__ = [
     "TradeDeliveryChannel",
     "TradeDeliveryReceipt",
     "TradeDeliveryReceiptStatus",
+    "NON_TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES",
+    "TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES",
+    "TelegramAdminBroadcast",
+    "TelegramAdminBroadcastAudienceType",
+    "TelegramAdminBroadcastReceipt",
+    "TelegramAdminBroadcastReceiptStatus",
+    "TelegramAdminBroadcastStatus",
     # Generic Chat
     "Chat",
     "ChatMember",

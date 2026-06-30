@@ -30,6 +30,8 @@ TABLES=(
     offer_publication_states
     trades
     trade_delivery_receipts
+    telegram_admin_broadcasts
+    telegram_admin_broadcast_receipts
 )
 
 load_shared_deploy_surface() {

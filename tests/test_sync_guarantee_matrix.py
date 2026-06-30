@@ -197,6 +197,40 @@ SYNC_TABLE_FIXTURES = {
         "used_telegram_id": None,
         "revoked_at": None,
     },
+    "telegram_admin_broadcasts": {
+        "id": 36,
+        "content": "پیام تست همگانی",
+        "created_by_id": 1,
+        "audience_type": "selected",
+        "target_groups": [],
+        "recipient_count": 1,
+        "status": "queued",
+        "queued_at": NOW,
+        "completed_at": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    },
+    "telegram_admin_broadcast_receipts": {
+        "id": 37,
+        "broadcast_id": 36,
+        "recipient_user_id": 4,
+        "telegram_id_at_enqueue": 1000004,
+        "telegram_id_at_send": None,
+        "dedupe_key": "telegram-admin-broadcast:36:4",
+        "status": "pending",
+        "reason": None,
+        "telegram_message_id": None,
+        "attempt_count": 0,
+        "next_retry_at": None,
+        "last_error_class": None,
+        "last_error_message": None,
+        "worker_id": "telegram-admin-broadcast-local",
+        "lease_until": NOW,
+        "sent_at": None,
+        "terminal_at": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    },
     "trade_delivery_receipts": {
         "id": 32,
         "event_type": "trade_completed",
@@ -296,6 +330,8 @@ RULE_FAMILY_BY_TABLE = {
     "offer_requests": "request_home_idempotency_version_guard",
     "offers": "offer_public_id_version_terminal_guard",
     "telegram_link_tokens": "token_hash_terminal_guard",
+    "telegram_admin_broadcasts": "idempotent_id_upsert",
+    "telegram_admin_broadcast_receipts": "dedupe_key_terminal_receipt_guard",
     "trade_delivery_receipts": "dedupe_key_terminal_receipt_guard",
     "trades": "trade_number_completed_trade_guard",
     "trading_settings": "special_key_update_handler",
@@ -311,6 +347,7 @@ EXPECTED_ORDER_PAIRS = (
     ("users", "telegram_link_tokens"),
     ("users", "invitations"),
     ("users", "notifications"),
+    ("users", "telegram_admin_broadcasts"),
     ("users", "user_notification_preferences"),
     ("notifications", "offers"),
     ("accountant_relations", "offers"),
@@ -322,6 +359,7 @@ EXPECTED_ORDER_PAIRS = (
     ("offers", "trades"),
     ("offer_requests", "trades"),
     ("trades", "trade_delivery_receipts"),
+    ("telegram_admin_broadcasts", "telegram_admin_broadcast_receipts"),
 )
 
 NATURAL_IDENTITY_ONLY_TABLES_WITHOUT_SEPARATE_BUSINESS_FIELDS = {"commodities"}
@@ -550,12 +588,19 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
                 compiled = str(stmt.compile(dialect=postgresql.dialect()))
                 self.assertIn("ON CONFLICT", compiled)
 
-                if table_name in {"offers", "trades", "offer_publication_states", "trade_delivery_receipts"}:
+                if table_name in {
+                    "offers",
+                    "trades",
+                    "offer_publication_states",
+                    "trade_delivery_receipts",
+                    "telegram_admin_broadcast_receipts",
+                }:
                     identity_token = {
                         "offers": "offer_public_id",
                         "trades": "trade_number",
                         "offer_publication_states": "dedupe_key",
                         "trade_delivery_receipts": "dedupe_key",
+                        "telegram_admin_broadcast_receipts": "dedupe_key",
                     }[table_name]
                     self.assertIn(identity_token, compiled)
 

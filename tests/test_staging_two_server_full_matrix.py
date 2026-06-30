@@ -408,6 +408,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             "offer_requests",
             "trades",
             "trade_delivery_receipts",
+            "telegram_admin_broadcasts",
+            "telegram_admin_broadcast_receipts",
             "notifications",
         ):
             self.assertIn(table, worker.TARGETED_SYNC_TABLES)

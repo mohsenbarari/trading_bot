@@ -46,6 +46,8 @@ SYNC_OUTBOUND_TABLE_PRIORITY = (
     "offer_requests",
     "offer_publication_states",
     "trade_delivery_receipts",
+    "telegram_admin_broadcasts",
+    "telegram_admin_broadcast_receipts",
     "notifications",
     "user_blocks",
 )

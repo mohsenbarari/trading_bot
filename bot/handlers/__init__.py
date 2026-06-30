@@ -3,6 +3,7 @@
 
 from . import (
     admin,
+    admin_broadcast,
     admin_commodities,
     admin_users,
     default,
@@ -17,6 +18,7 @@ from . import (
 
 __all__ = [
     "admin",
+    "admin_broadcast",
     "admin_commodities",
     "admin_users",
     "default",

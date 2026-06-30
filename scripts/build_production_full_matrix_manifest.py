@@ -181,6 +181,8 @@ SYNC_TABLES = [
     "trades",
     "notifications",
     "trade_delivery_receipts",
+    "telegram_admin_broadcasts",
+    "telegram_admin_broadcast_receipts",
     "offer_publication_states",
     "customer_relations",
     "accountant_relations",
