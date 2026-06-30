@@ -41,6 +41,9 @@ class User(Base):
     messenger_grace_expires_at = Column(DateTime, nullable=True, index=True)
     messenger_blocked_at = Column(DateTime, nullable=True)
     has_bot_access = Column(Boolean, default=True, nullable=False)
+    bot_onboarding_required_step = Column(Integer, default=0, nullable=False)
+    bot_onboarding_completed_step = Column(Integer, default=0, nullable=False)
+    bot_onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
     
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)

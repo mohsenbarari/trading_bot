@@ -8,6 +8,7 @@ from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from typing import Optional
+from datetime import datetime, timezone
 import logging
 
 from core.db import AsyncSessionLocal
@@ -27,6 +28,12 @@ from core.services.customer_relation_service import (
 )
 from models.invitation import Invitation
 from models.user import User
+from bot.onboarding import (
+    OFFER_TUTORIAL_ACK_CALLBACK,
+    OFFER_TUTORIAL_STEP,
+    OFFER_TUTORIAL_TEXT,
+    build_offer_tutorial_keyboard,
+)
 from bot.states import Registration
 from bot.keyboards import get_persistent_menu_keyboard
 from bot.handlers.link_account import (
@@ -328,6 +335,7 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
     if not settings.channel_id or join_request.chat.id != settings.channel_id:
         return
 
+    offer_tutorial_required = False
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(
             User.telegram_id == join_request.from_user.id,
@@ -340,6 +348,14 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
             decision = await evaluate_bot_access(session, user)
             if not decision.allowed:
                 denial_reason = decision.reason or BOT_ACCOUNT_INACTIVE_REASON
+
+        if not denial_reason and user:
+            completed_step = int(getattr(user, "bot_onboarding_completed_step", 0) or 0)
+            if completed_step < OFFER_TUTORIAL_STEP:
+                required_step = int(getattr(user, "bot_onboarding_required_step", 0) or 0)
+                user.bot_onboarding_required_step = max(required_step, OFFER_TUTORIAL_STEP)
+                offer_tutorial_required = True
+                await session.commit()
 
     if denial_reason:
         await join_request.bot.decline_chat_join_request(
@@ -361,12 +377,52 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         user_id=join_request.from_user.id,
     )
     try:
+        if offer_tutorial_required:
+            tutorial_text = OFFER_TUTORIAL_TEXT
+            tutorial_markup = build_offer_tutorial_keyboard()
+        else:
+            tutorial_text = "✅ درخواست عضویت شما به صورت خودکار تایید شد. اکنون می‌توانید از کانال معاملات استفاده کنید."
+            tutorial_markup = None
         await join_request.bot.send_message(
             chat_id=join_request.user_chat_id,
-            text="✅ درخواست عضویت شما به صورت خودکار تایید شد. اکنون می‌توانید از کانال معاملات استفاده کنید.",
+            text=tutorial_text,
+            reply_markup=tutorial_markup,
         )
     except Exception:
         logger.exception("Failed to notify approved channel join request user")
+
+
+@router.callback_query(F.data == OFFER_TUTORIAL_ACK_CALLBACK)
+async def handle_offer_tutorial_ack(callback: types.CallbackQuery, user: Optional[User]):
+    if not user:
+        await callback.answer("ابتدا حساب تلگرام خود را به حساب کاربری متصل کنید.", show_alert=True)
+        return
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(
+            User.telegram_id == callback.from_user.id,
+            User.is_deleted == False,
+        )
+        db_user = (await session.execute(stmt)).scalar_one_or_none()
+        if not db_user:
+            await callback.answer("حساب کاربری شما یافت نشد.", show_alert=True)
+            return
+
+        required_step = int(getattr(db_user, "bot_onboarding_required_step", 0) or 0)
+        db_user.bot_onboarding_required_step = max(required_step, OFFER_TUTORIAL_STEP)
+        db_user.bot_onboarding_completed_step = max(
+            int(getattr(db_user, "bot_onboarding_completed_step", 0) or 0),
+            OFFER_TUTORIAL_STEP,
+        )
+        db_user.bot_onboarding_completed_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    await callback.answer("ثبت شد.")
+    if callback.message:
+        try:
+            await callback.message.edit_text("✅ راهنمای ثبت آفر تایید شد. اکنون می‌توانید از امکانات بات استفاده کنید.")
+        except Exception:
+            logger.exception("Failed to update offer tutorial acknowledgement message")
 
 
 # --- تایید معامله ---

@@ -12,8 +12,9 @@ class FakeMessage:
 
 
 class FakeCallbackQuery:
-    def __init__(self, user_id=None):
+    def __init__(self, user_id=None, data=None):
         self.from_user = MagicMock(id=user_id) if user_id is not None else None
+        self.data = data
         self.answer = AsyncMock()
 
 
@@ -203,6 +204,68 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(callback.answer.await_args.kwargs['show_alert'])
         self.assertIn('غیرفعال', callback.answer.await_args.args[0])
         handler.assert_not_awaited()
+
+    async def test_middleware_blocks_bot_until_offer_tutorial_acknowledged(self):
+        pending_user = MagicMock(
+            has_bot_access=True,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+            bot_onboarding_required_step=1,
+            bot_onboarding_completed_step=0,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=_ExecuteResult(pending_user))
+        middleware = auth_middleware.AuthMiddleware(session_pool=MagicMock(return_value=_AsyncSessionContext(session)))
+        handler = AsyncMock(return_value='blocked')
+
+        original_message = auth_middleware.Message
+        original_callback = auth_middleware.CallbackQuery
+        try:
+            auth_middleware.Message = FakeMessage
+            auth_middleware.CallbackQuery = FakeCallbackQuery
+            message = FakeMessage(21)
+            callback = FakeCallbackQuery(21, data="trade_type:buy")
+
+            result_message = await middleware(handler, message, {})
+            result_callback = await middleware(handler, callback, {})
+        finally:
+            auth_middleware.Message = original_message
+            auth_middleware.CallbackQuery = original_callback
+
+        self.assertIsNone(result_message)
+        self.assertIsNone(result_callback)
+        self.assertIn("راهنمای سریع ثبت آفر", message.answer.await_args.args[0])
+        self.assertIsNotNone(message.answer.await_args.kwargs.get("reply_markup"))
+        callback.answer.assert_awaited_once()
+        self.assertTrue(callback.answer.await_args.kwargs["show_alert"])
+        handler.assert_not_awaited()
+
+    async def test_middleware_allows_offer_tutorial_ack_callback(self):
+        pending_user = MagicMock(
+            has_bot_access=True,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+            bot_onboarding_required_step=1,
+            bot_onboarding_completed_step=0,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=_ExecuteResult(pending_user))
+        middleware = auth_middleware.AuthMiddleware(session_pool=MagicMock(return_value=_AsyncSessionContext(session)))
+        handler = AsyncMock(return_value='allowed')
+
+        original_callback = auth_middleware.CallbackQuery
+        try:
+            auth_middleware.CallbackQuery = FakeCallbackQuery
+            callback = FakeCallbackQuery(21, data=auth_middleware.OFFER_TUTORIAL_ACK_CALLBACK)
+            result = await middleware(handler, callback, {})
+        finally:
+            auth_middleware.CallbackQuery = original_callback
+
+        self.assertEqual(result, 'allowed')
+        handler.assert_awaited_once()
+        callback.answer.assert_not_awaited()
 
 
 if __name__ == '__main__':

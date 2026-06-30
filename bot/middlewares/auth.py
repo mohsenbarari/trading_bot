@@ -4,6 +4,13 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from bot.onboarding import (
+    OFFER_TUTORIAL_ACK_CALLBACK,
+    OFFER_TUTORIAL_BLOCK_MESSAGE,
+    OFFER_TUTORIAL_TEXT,
+    build_offer_tutorial_keyboard,
+    user_requires_offer_tutorial,
+)
 from core.services.user_account_status_service import is_user_global_web_locked
 from models.user import User
 
@@ -59,6 +66,18 @@ class AuthMiddleware(BaseMiddleware):
                         await inner_event.answer(restricted_message)
                     elif isinstance(inner_event, CallbackQuery):
                         await inner_event.answer(restricted_message, show_alert=True)
+                return
+
+            if user and user_requires_offer_tutorial(user):
+                if isinstance(inner_event, CallbackQuery):
+                    if getattr(inner_event, "data", None) == OFFER_TUTORIAL_ACK_CALLBACK:
+                        return await handler(event, data)
+                    await inner_event.answer(OFFER_TUTORIAL_BLOCK_MESSAGE, show_alert=True)
+                elif isinstance(inner_event, Message):
+                    await inner_event.answer(
+                        OFFER_TUTORIAL_TEXT,
+                        reply_markup=build_offer_tutorial_keyboard(),
+                    )
                 return
 
             return await handler(event, data)

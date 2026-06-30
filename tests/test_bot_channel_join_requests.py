@@ -18,6 +18,7 @@ class FakeExecuteResult:
 class FakeSession:
     def __init__(self, user):
         self.user = user
+        self.commit = AsyncMock()
 
     async def execute(self, stmt):
         return FakeExecuteResult(self.user)
@@ -73,11 +74,14 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
             has_bot_access=False,
             is_deleted=False,
             account_status=UserAccountStatus.ACTIVE,
+            bot_onboarding_required_step=0,
+            bot_onboarding_completed_step=0,
         )
+        session = FakeSession(user)
 
         with patch(
             "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(FakeSession(user)),
+            return_value=FakeSessionContext(session),
         ), patch("bot.handlers.start.settings", SimpleNamespace(channel_id=-1003367566585)):
             await handle_channel_join_request(join_request)
 
@@ -86,7 +90,10 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
             user_id=7,
         )
         join_request.bot.decline_chat_join_request.assert_not_awaited()
-        self.assertIn("تایید شد", join_request.bot.send_message.await_args.kwargs["text"])
+        self.assertEqual(user.bot_onboarding_required_step, 1)
+        session.commit.assert_awaited_once()
+        self.assertIn("راهنمای سریع ثبت آفر", join_request.bot.send_message.await_args.kwargs["text"])
+        self.assertIsNotNone(join_request.bot.send_message.await_args.kwargs.get("reply_markup"))
 
     async def test_handle_channel_join_request_declines_unknown_user(self):
         join_request = make_join_request(user_id=9)
