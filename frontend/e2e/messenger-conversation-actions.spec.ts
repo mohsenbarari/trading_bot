@@ -6,8 +6,6 @@ import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
-test.use({ serviceWorkers: 'block' })
-
 function resolveAppContainerName() {
   const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',

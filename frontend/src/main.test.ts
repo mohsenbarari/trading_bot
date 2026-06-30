@@ -145,6 +145,7 @@ describe('main.ts', () => {
     vi.spyOn(window.sessionStorage.__proto__, 'removeItem').mockImplementation(() => undefined)
     document.body.style.backgroundColor = ''
     document.body.style.color = ''
+    delete (window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__
     setTelegram(false)
   })
 
@@ -210,6 +211,17 @@ describe('main.ts', () => {
 
     dispatchStoredListeners('load')
     expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips PWA registration when the Playwright disable flag is present', async () => {
+    setReadyState('complete')
+    setTelegram(true)
+    ;(window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__ = true
+
+    await importFreshMain()
+
+    expect(getTimeoutByDelay(250)).toBeUndefined()
+    expect(mainMocks.registerSW).not.toHaveBeenCalled()
   })
 
   it('covers offline-ready logging, setup failures, Telegram init warnings, and storage-cleanup failures', async () => {

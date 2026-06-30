@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { disablePwaRegistration } from './helpers/auth'
 
 function base64Url(payload: Record<string, unknown>) {
   return Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -12,12 +13,8 @@ function fakeJwt() {
 
 async function primeMockAuth(page: Page) {
   const accessToken = fakeJwt()
+  await disablePwaRegistration(page)
   await page.addInitScript((token) => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations()
-        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
-        .catch(() => {})
-    }
     localStorage.setItem('auth_token', token)
     localStorage.setItem('refresh_token', 'pw-refresh-token')
     localStorage.setItem('current_user_summary', JSON.stringify({
@@ -39,8 +36,6 @@ async function fulfillJson(route: Route, status: number, body: unknown) {
 }
 
 test.describe('Market mutation UX', () => {
-  test.use({ serviceWorkers: 'block' })
-
   test('recent expired offers toggle stays clickable above the market FAB on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await primeMockAuth(page)
@@ -150,7 +145,10 @@ test.describe('Market mutation UX', () => {
     await expect(recentOffersDropdown).toBeVisible({ timeout: 10000 })
     await expect(recentOffersDropdown).toHaveCSS('z-index', '1200')
     await expect(page.locator('.recent-offer-item')).toContainText('سکه', { timeout: 10000 })
-    const dropdownBox = await recentOffersDropdown.boundingBox()
+    const dropdownBox = await recentOffersDropdown.evaluate((node) => {
+      const rect = node.getBoundingClientRect()
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })
     expect(dropdownBox).not.toBeNull()
     expect(dropdownBox!.y).toBeGreaterThanOrEqual(0)
     expect(dropdownBox!.y + dropdownBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
@@ -296,8 +294,8 @@ test.describe('Market mutation UX', () => {
       request.url().includes('/api/offers/') && request.method() === 'POST',
     )
     await publishConfirm.click()
-    await expect(publishConfirm).toBeDisabled()
     await publishConfirm.evaluate((node: HTMLElement) => node.click())
+    await expect(publishConfirm).toBeDisabled()
     await publishRequest
 
     await expect(page.locator('.offer-preview-error')).toContainText('بازار در حال حاضر بسته است')

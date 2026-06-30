@@ -1,9 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { primeAuthSession } from './helpers/auth'
+import { disablePwaRegistration, primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
-
-test.use({ serviceWorkers: 'block' })
 
 interface AuthTokens {
   access_token: string
@@ -27,6 +25,7 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
 
 test.describe('Login/auth regressions', () => {
   test('unauthenticated protected routes redirect to the login page', async ({ page }) => {
+    await disablePwaRegistration(page)
     await page.goto('/profile')
 
     await expect(page).toHaveURL(/\/login$/)
@@ -35,6 +34,7 @@ test.describe('Login/auth regressions', () => {
   })
 
   test('developer quick login reaches the dashboard and stores tokens', async ({ page }) => {
+    await disablePwaRegistration(page)
     await page.goto('/login')
     await page.getByRole('button', { name: 'ورود سریع ۱ ساله' }).click()
 

@@ -2,11 +2,9 @@
 
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { primeAuthSession } from './helpers/auth'
+import { disablePwaRegistration, primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
-
-test.use({ serviceWorkers: 'block' })
 
 interface MandatoryChannelFixture {
   accountName: string
@@ -192,6 +190,15 @@ async function createInvitation(request: APIRequestContext): Promise<InvitationF
     '300',
     otpCode,
   ], { encoding: 'utf8' })
+  execFileSync('docker', [
+    'exec',
+    'trading_bot_redis',
+    'redis-cli',
+    'SETEX',
+    `reg_verified:${payload.token}`,
+    '600',
+    '1',
+  ], { encoding: 'utf8' })
 
   return {
     accountName,
@@ -227,6 +234,7 @@ test.describe('Mandatory channel smoke', () => {
   })
 
   test('freshly activated web user immediately sees the mandatory room in messenger', async ({ page, request }) => {
+    await disablePwaRegistration(page)
     const invitation = await createInvitation(request)
 
     await page.route('**/api/auth/register-otp-request**', async route => {
@@ -234,6 +242,13 @@ test.describe('Mandatory channel smoke', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ detail: 'کد تایید ارسال شد', expires_in: 120 }),
+      })
+    })
+    await page.route('**/api/auth/register-otp-verify**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'کد تایید شد' }),
       })
     })
 
@@ -251,9 +266,13 @@ test.describe('Mandatory channel smoke', () => {
     await otpResponse
     await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible({ timeout: 10000 })
 
+    const verifyResponse = page.waitForResponse((response) =>
+      response.url().includes('/api/auth/register-otp-verify') && response.status() === 200,
+    )
     await page.locator('.otp-input').fill(invitation.otpCode)
     await page.getByRole('button', { name: 'تایید کد' }).click()
-    await expect(page.getByText('آدرس دقیق پستی:')).toBeVisible()
+    await verifyResponse
+    await expect(page.locator('.address-input')).toBeVisible({ timeout: 10000 })
 
     await page.locator('.address-input').fill('تهران، خیابان تست، پلاک ۱۲، واحد ۳')
     await page.getByRole('button', { name: 'تکمیل ثبت‌نام' }).click()

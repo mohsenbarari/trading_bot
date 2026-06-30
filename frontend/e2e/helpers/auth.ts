@@ -16,16 +16,12 @@ export async function primeAuthSession(
 ) {
   const payloadId = createPrimeAuthPayloadId()
 
+  await disablePwaRegistration(page)
+
   await page.addInitScript(({ nextAccessToken, nextRefreshToken, nextCurrentUserSummary, nextPayloadId }) => {
     const marker = `|${nextPayloadId}|`
     if (window.name.includes(marker)) {
       return
-    }
-
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations()
-        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
-        .catch(() => {})
     }
 
     localStorage.setItem('auth_token', nextAccessToken)
@@ -41,5 +37,16 @@ export async function primeAuthSession(
     nextRefreshToken: refreshToken,
     nextCurrentUserSummary: options.currentUserSummary ?? null,
     nextPayloadId: payloadId,
+  })
+}
+
+export async function disablePwaRegistration(page: Page) {
+  await page.addInitScript(() => {
+    ;(window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__ = true
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch(() => {})
+    }
   })
 }

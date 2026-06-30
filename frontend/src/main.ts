@@ -98,4 +98,6 @@ try {
 
 // Register early enough for Android installability/WebAPK evaluation, but keep
 // a small delay so first paint and route bootstrap win the critical path.
-window.setTimeout(registerPwaWhenStable, PWA_REGISTRATION_DELAY_MS)
+if (!(window as any).__PLAYWRIGHT_DISABLE_PWA_REGISTRATION__) {
+  window.setTimeout(registerPwaWhenStable, PWA_REGISTRATION_DELAY_MS)
+}
