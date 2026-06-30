@@ -9,10 +9,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import redis.asyncio as redis
+from redis.asyncio import Redis
 
 from core.config import settings
 from core.log_redaction import mask_mobile
-from core.redis import get_redis_client
+from core.redis import get_redis_client, pool
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
 from core.trade_forwarding import _tls_verify_setting
 from core.utils import normalize_persian_numerals
@@ -118,9 +120,18 @@ def _health_queues_clean(payload: dict[str, Any]) -> bool:
     return int(queues.get("sync:outbound") or 0) == 0 and int(queues.get("sync:retry") or 0) == 0
 
 
-async def _foreign_local_sync_queues_clean() -> bool:
+def _get_customer_invite_queue_client() -> tuple[Redis, bool]:
     try:
-        redis_client = get_redis_client()
+        return get_redis_client(), False
+    except Exception:
+        return redis.Redis(connection_pool=pool), True
+
+
+async def _foreign_local_sync_queues_clean() -> bool:
+    redis_client: Redis | None = None
+    owns_client = False
+    try:
+        redis_client, owns_client = _get_customer_invite_queue_client()
         outbound = int(await redis_client.llen("sync:outbound") or 0)
         retry = int(await redis_client.llen("sync:retry") or 0)
         return outbound == 0 and retry == 0
@@ -134,6 +145,9 @@ async def _foreign_local_sync_queues_clean() -> bool:
             },
         )
         return False
+    finally:
+        if owns_client and redis_client is not None:
+            await redis_client.aclose()
 
 
 async def _fetch_iran_sync_health() -> tuple[dict[str, Any] | None, str | None]:

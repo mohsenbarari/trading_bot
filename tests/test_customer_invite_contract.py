@@ -79,6 +79,29 @@ class CustomerInviteContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ready)
         self.assertEqual(result.reason, "iran_sync_dirty")
 
+    async def test_sync_gate_uses_temporary_redis_client_when_singleton_is_uninitialized(self):
+        temporary_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]), aclose=AsyncMock())
+        iran_health = {
+            "redis_ok": True,
+            "redis_queues": {"sync:outbound": 0, "sync:retry": 0},
+            "unsynced_by_table": {
+                "users": 0,
+                "customer_relations": 0,
+                "accountant_relations": 0,
+                "invitations": 0,
+            },
+        }
+
+        with patch("core.customer_invite.current_server", return_value="foreign"), patch(
+            "core.customer_invite.get_redis_client", side_effect=RuntimeError("Redis client not initialized")
+        ), patch("core.customer_invite.redis.Redis", return_value=temporary_client), patch(
+            "core.customer_invite._fetch_iran_sync_health", new=AsyncMock(return_value=(iran_health, None))
+        ):
+            result = await check_customer_invite_sync_ready(wait_seconds=0)
+
+        self.assertTrue(result.ready)
+        temporary_client.aclose.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()
