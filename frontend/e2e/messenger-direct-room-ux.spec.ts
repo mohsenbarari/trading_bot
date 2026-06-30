@@ -201,8 +201,14 @@ async function waitForBackendReady(request: APIRequestContext) {
     .toBe(true)
 }
 
-async function loginWithSeededSession(page: Page, fixture: SessionFixture) {
-  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
+async function loginWithSeededSession(
+  page: Page,
+  fixture: SessionFixture,
+  options: { disablePwaRegistration?: boolean } = {},
+) {
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken, {
+    disablePwaRegistration: options.disablePwaRegistration,
+  })
 }
 
 function activeHeaderName(page: Page) {
@@ -744,8 +750,8 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     const senderCdp = await senderContext.newCDPSession(senderPage)
 
     try {
-      await loginWithSeededSession(senderPage, sender)
-      await loginWithSeededSession(receiverPage, receiver)
+      await loginWithSeededSession(senderPage, sender, { disablePwaRegistration: false })
+      await loginWithSeededSession(receiverPage, receiver, { disablePwaRegistration: false })
 
       await senderPage.goto('/chat')
       await openConversationFromList(senderPage, receiver.accountName)

@@ -2,6 +2,7 @@ import { type Page } from '@playwright/test'
 
 interface PrimeAuthSessionOptions {
   currentUserSummary?: Record<string, unknown>
+  disablePwaRegistration?: boolean
 }
 
 function createPrimeAuthPayloadId() {
@@ -16,7 +17,9 @@ export async function primeAuthSession(
 ) {
   const payloadId = createPrimeAuthPayloadId()
 
-  await disablePwaRegistration(page)
+  if (options.disablePwaRegistration !== false) {
+    await disablePwaRegistration(page)
+  }
 
   await page.addInitScript(({ nextAccessToken, nextRefreshToken, nextCurrentUserSummary, nextPayloadId }) => {
     const marker = `|${nextPayloadId}|`
