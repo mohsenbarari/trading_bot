@@ -404,6 +404,38 @@ class CustomerRelationRead(BaseModel):
         from_attributes = True
 
 
+class InternalCustomerInviteRequest(BaseModel):
+    owner_user_id: int = Field(..., gt=0)
+    account_name: str | None = None
+    management_name: str = Field(..., min_length=1, max_length=120)
+    mobile_number: str = Field(..., pattern=r"^09[0-9]{9}$")
+    customer_tier: CustomerTier = CustomerTier.TIER_1
+    idempotency_key: str = Field(..., min_length=16, max_length=128)
+    source_server: str
+
+    @field_validator("mobile_number", mode="before")
+    @classmethod
+    def normalize_internal_customer_mobile(cls, value):
+        return normalize_persian_numerals(value)
+
+    @field_validator("account_name", "management_name", "idempotency_key", "source_server", mode="before")
+    @classmethod
+    def strip_internal_customer_strings(cls, value):
+        if value is None:
+            return value
+        return str(value).strip()
+
+
+class InternalCustomerInviteResponse(BaseModel):
+    created: bool
+    already_pending: bool = False
+    relation_id: int | None = None
+    sms_sent: bool = False
+    idempotency_key: str
+    error_code: str | None = None
+    reason: str | None = None
+
+
 class CustomerTradeStatsCommodityRead(BaseModel):
     commodity_id: int
     commodity_name: str

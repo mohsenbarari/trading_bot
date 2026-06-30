@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -11,26 +11,42 @@ from api.deps import get_effective_owner_actor_context
 from core.audit_logger import audit_log
 from core.config import settings
 from core.db import get_db
+from core.customer_invite import (
+    build_customer_invite_account_name,
+    build_customer_invite_idempotency_key,
+    customer_invite_lock_key,
+    normalize_customer_invite_mobile,
+    normalize_customer_invite_tier,
+)
+from core.redis import get_redis_client
+from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
+from core.trade_forwarding import verify_internal_signature
 from core.utils import utc_now_naive
 from core.services.accountant_relation_service import EffectiveOwnerActor
+from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import (
     create_owner_customer_relation,
+    find_capacity_tracked_customer_relation_by_identity,
     is_user_customer,
     list_owner_customer_relations,
     load_customer_relation_invitation_map,
+    sweep_expired_pending_customer_relations,
     unlink_owner_customer_relation,
     update_owner_customer_relation,
 )
 from core.services.session_service import get_active_sessions, logout_session
 from core.sms import send_customer_invitation_sms
-from models.customer_relation import CustomerRelation, CustomerRelationStatus
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.trade import Trade, TradeStatus
 from models.session import UserSession
+from models.user import User
+from core.enums import UserAccountStatus
 
 
 router = APIRouter()
 CUSTOMER_STATS_PERIOD_DAYS = {1, 3, 7, 30, 90, 180}
 CUSTOMER_COMMISSION_PRICE_UNIT_TOMAN = 1000
+CUSTOMER_INVITE_LOCK_VALUE = "inflight"
 
 
 def build_customer_registration_link(invitation_token: str) -> str | None:
@@ -92,6 +108,44 @@ def audit_actor_context(context: EffectiveOwnerActor) -> dict:
         "actor_id": getattr(actor_user, "id", None),
         "actor_role": getattr(getattr(actor_user, "role", None), "value", getattr(actor_user, "role", None)),
     }
+
+
+def _internal_source_from_headers(raw_request: Request, payload_source: object) -> tuple[str, str]:
+    payload_source_server = normalize_server(str(payload_source or ""), default="")
+    header_source_server = normalize_server(raw_request.headers.get("x-source-server"), default="")
+    return payload_source_server, header_source_server
+
+
+async def _existing_relation_response_if_reusable(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    account_name: str,
+    mobile_number: str,
+    idempotency_key: str,
+) -> schemas.InternalCustomerInviteResponse | None:
+    existing_relation = await find_capacity_tracked_customer_relation_by_identity(
+        db,
+        account_name=account_name,
+        mobile_number=mobile_number,
+    )
+    if existing_relation is None:
+        return None
+
+    status_value = getattr(existing_relation.status, "value", existing_relation.status)
+    if existing_relation.owner_user_id == owner_user_id and status_value == CustomerRelationStatus.PENDING.value:
+        return schemas.InternalCustomerInviteResponse(
+            created=False,
+            already_pending=True,
+            relation_id=existing_relation.id,
+            sms_sent=False,
+            idempotency_key=idempotency_key,
+            reason="pending invitation already exists",
+        )
+
+    if existing_relation.owner_user_id == owner_user_id:
+        raise HTTPException(status_code=400, detail="این مشتری قبلاً برای شما ثبت شده است")
+    raise HTTPException(status_code=400, detail="این شماره موبایل قبلاً برای مشتری دیگری ثبت یا دعوت شده است")
 
 
 def _coerce_optional_int(value) -> int | None:
@@ -374,6 +428,165 @@ async def create_my_customer(
     )
 
     return serialize_customer_relation(relation, invitation=invitation)
+
+
+@router.post(
+    "/internal/owner-relations",
+    response_model=schemas.InternalCustomerInviteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_owner_customer_internal_from_bot(
+    payload: schemas.InternalCustomerInviteRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await raw_request.body()
+    payload_source_server, header_source_server = _internal_source_from_headers(raw_request, payload.source_server)
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        audit_log(
+            "customer.bot_invite_internal",
+            target_type="customer_relation",
+            result="denied",
+            reason="bad_signature",
+            extra={"source_server": payload_source_server or header_source_server},
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal customer invite signature")
+
+    if current_server() != SERVER_IRAN:
+        raise HTTPException(status_code=403, detail="Customer invite endpoint is Iran-authoritative")
+
+    if (
+        payload_source_server != SERVER_FOREIGN
+        or header_source_server != SERVER_FOREIGN
+        or payload_source_server != header_source_server
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal customer invite source")
+
+    try:
+        normalized_mobile = normalize_customer_invite_mobile(payload.mobile_number)
+        tier = normalize_customer_invite_tier(payload.customer_tier)
+        expected_account_name = build_customer_invite_account_name(normalized_mobile)
+        expected_idempotency_key = build_customer_invite_idempotency_key(
+            source_server=SERVER_FOREIGN,
+            owner_user_id=payload.owner_user_id,
+            mobile_number=normalized_mobile,
+            customer_tier=tier,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if payload.account_name and payload.account_name != expected_account_name:
+        raise HTTPException(status_code=400, detail="نام کاربری مشتری با شماره موبایل تطابق ندارد")
+    if payload.idempotency_key != expected_idempotency_key:
+        raise HTTPException(status_code=400, detail="کلید تکرار دعوت مشتری نامعتبر است")
+
+    owner_user = await db.get(User, payload.owner_user_id)
+    if not owner_user or getattr(owner_user, "is_deleted", False):
+        raise HTTPException(status_code=404, detail="سرگروه یافت نشد")
+    owner_status = getattr(owner_user, "account_status", UserAccountStatus.ACTIVE)
+    owner_status_value = getattr(owner_status, "value", owner_status)
+    if owner_status_value != UserAccountStatus.ACTIVE.value:
+        raise HTTPException(status_code=403, detail="حساب سرگروه فعال نیست")
+    if await is_user_customer(db, owner_user.id):
+        raise HTTPException(status_code=403, detail="مشتریان اجازه دعوت مشتری ندارند")
+    if await is_user_accountant(db, owner_user.id):
+        raise HTTPException(status_code=403, detail="حسابداران اجازه دعوت مشتری ندارند")
+
+    expired_relations = await sweep_expired_pending_customer_relations(db)
+    if expired_relations:
+        await db.commit()
+
+    reusable_response = await _existing_relation_response_if_reusable(
+        db,
+        owner_user_id=owner_user.id,
+        account_name=expected_account_name,
+        mobile_number=normalized_mobile,
+        idempotency_key=expected_idempotency_key,
+    )
+    if reusable_response is not None:
+        return reusable_response
+
+    lock_key = customer_invite_lock_key(expected_idempotency_key)
+    try:
+        redis_client = get_redis_client()
+        lock_acquired = bool(await redis_client.set(lock_key, CUSTOMER_INVITE_LOCK_VALUE, nx=True, ex=20))
+    except Exception as exc:
+        audit_log(
+            "customer.bot_invite_internal",
+            target_type="customer_relation",
+            result="failure",
+            reason="redis_lock_unavailable",
+            actor_id=owner_user.id,
+            actor_role=getattr(getattr(owner_user, "role", None), "value", getattr(owner_user, "role", None)),
+            extra={"error_type": type(exc).__name__},
+        )
+        raise HTTPException(status_code=503, detail="قفل ایمن دعوت مشتری در دسترس نیست") from exc
+
+    if not lock_acquired:
+        raise HTTPException(status_code=409, detail="دعوت همین مشتری در حال انجام است. چند لحظه بعد دوباره تلاش کنید")
+
+    try:
+        reusable_response = await _existing_relation_response_if_reusable(
+            db,
+            owner_user_id=owner_user.id,
+            account_name=expected_account_name,
+            mobile_number=normalized_mobile,
+            idempotency_key=expected_idempotency_key,
+        )
+        if reusable_response is not None:
+            return reusable_response
+
+        relation, invitation = await create_owner_customer_relation(
+            db,
+            owner_user=owner_user,
+            account_name=expected_account_name,
+            management_name=payload.management_name,
+            mobile_number=normalized_mobile,
+            customer_tier=CustomerTier.TIER_1,
+        )
+
+        registration_link = build_customer_registration_link(relation.invitation_token) or ""
+        sms_sent = bool(
+            send_customer_invitation_sms(
+                mobile=invitation.mobile_number,
+                management_name=relation.management_name,
+                web_link=registration_link,
+            )
+        )
+
+        audit_log(
+            "customer.link",
+            target_type="customer_relation",
+            target_id=relation.id,
+            actor_id=owner_user.id,
+            actor_role=getattr(getattr(owner_user, "role", None), "value", getattr(owner_user, "role", None)),
+            after_summary={
+                "owner_user_id": relation.owner_user_id,
+                "customer_user_id": relation.customer_user_id,
+                "customer_tier": relation.customer_tier,
+                "status": relation.status,
+                "source": "telegram_bot_foreign",
+                "sms_sent": sms_sent,
+            },
+        )
+
+        return schemas.InternalCustomerInviteResponse(
+            created=True,
+            already_pending=False,
+            relation_id=relation.id,
+            sms_sent=sms_sent,
+            idempotency_key=expected_idempotency_key,
+        )
+    finally:
+        try:
+            await redis_client.delete(lock_key)
+        except Exception:
+            pass
 
 
 @router.delete("/owner-relations/{relation_id}", response_model=schemas.CustomerRelationRead)

@@ -2,9 +2,10 @@
 """هندلرهای پنل کاربر و مدیریت"""
 
 import os
+import logging
 from datetime import datetime, time as dt_time, timedelta, timezone
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
@@ -36,9 +37,20 @@ from core.services.trade_history_export_service import (
     build_trade_history_export_rows,
     generate_trade_history_pdf_file,
 )
+from core.customer_invite import (
+    build_customer_invite_account_name,
+    build_customer_invite_idempotency_key,
+    check_customer_invite_sync_ready,
+    normalize_customer_invite_management_name,
+    normalize_customer_invite_mobile,
+)
+from core.customer_invite_forwarding import forward_customer_invite_to_iran
+from core.server_routing import SERVER_FOREIGN, current_server
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
+from bot.states import CustomerInvite
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 class UserPanelBlockCallback(CallbackData, prefix="user_panel_block"):
@@ -51,10 +63,16 @@ class UserPanelCustomerCallback(CallbackData, prefix="user_panel_customer"):
     relation_id: int = 0
 
 
+class UserPanelCustomerInviteCallback(CallbackData, prefix="user_customer_invite"):
+    action: str
+
+
 USER_PANEL_RECENT_TRADES_TEXT = "📄 معاملات اخیر"
 USER_PANEL_BLOCKED_USERS_TEXT = "🚫 کاربران مسدود شده"
 USER_PANEL_CUSTOMERS_TEXT = "👥 مشتریان"
 USER_PANEL_COLLEAGUES_TEXT = "👥 لیست همکاران"
+USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT = "مشتریان سطح2 فقط به وب اپ دسترسی دارند! بنابراین برای دعوت این مشتریان به وب اپ مراجعه فرمایید."
+CUSTOMER_INVITE_ALLOWED_ROLES = (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN)
 
 
 def _settings_admin_write_decision(operation: str):
@@ -142,14 +160,10 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
     # حذف پیام کاربر و لنگر قبلی
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
 
-    is_customer_user = False
-    if user.role == UserRole.STANDARD:
-        from core.services.customer_relation_service import is_user_customer
+    async with AsyncSessionLocal() as session:
+        can_use_customer_panel = await _can_use_customer_panel(session, user)
 
-        async with AsyncSessionLocal() as session:
-            is_customer_user = await is_user_customer(session, user.id)
-
-    if user.role == UserRole.STANDARD and not is_customer_user:
+    if can_use_customer_panel:
         anchor_msg = await message.answer(
             "👤 **پنل کاربر**\n\nگزینه مورد نظر را انتخاب کنید:",
             parse_mode="Markdown",
@@ -233,6 +247,20 @@ async def handle_simple_settings_button(message: types.Message, user: Optional[U
     if not user: return
     
     await message.answer("🚧 بخش تنظیمات کاربری در حال توسعه است.")
+
+
+async def _can_use_customer_panel(session, user: User) -> bool:
+    if user.role not in CUSTOMER_INVITE_ALLOWED_ROLES:
+        return False
+
+    from core.services.accountant_relation_service import is_user_accountant
+    from core.services.customer_relation_service import is_user_customer
+
+    if await is_user_customer(session, user.id):
+        return False
+    if await is_user_accountant(session, user.id):
+        return False
+    return True
 
 
 async def _can_view_colleagues_list(session, user: User) -> bool:
@@ -509,7 +537,10 @@ def get_user_panel_customers_keyboard(relations: list[CustomerRelation]) -> Inli
             )
         ])
     rows.append([
-        InlineKeyboardButton(text="➕ دعوت مشتری", callback_data=UserPanelCustomerCallback(action="invite").pack())
+        InlineKeyboardButton(text="➕ دعوت مشتری سطح1", callback_data=UserPanelCustomerCallback(action="invite_tier1").pack())
+    ])
+    rows.append([
+        InlineKeyboardButton(text="➕ دعوت مشتری سطح2", callback_data=UserPanelCustomerCallback(action="invite_tier2").pack())
     ])
     rows.append([
         InlineKeyboardButton(text="🔙 بازگشت به پنل کاربر", callback_data=UserPanelCustomerCallback(action="back").pack())
@@ -608,6 +639,10 @@ async def _edit_or_answer_customers_panel(target, owner_user_id: int, *, edit: b
 async def show_user_panel_customers(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:
         return
+    async with AsyncSessionLocal() as session:
+        if not await _can_use_customer_panel(session, user):
+            await message.answer("این بخش برای حساب شما فعال نیست.")
+            return
     await _edit_or_answer_customers_panel(message, user.id, edit=False)
 
 
@@ -616,6 +651,10 @@ async def show_user_panel_customers_callback(callback: types.CallbackQuery, user
     if not user:
         await callback.answer()
         return
+    async with AsyncSessionLocal() as session:
+        if not await _can_use_customer_panel(session, user):
+            await callback.answer("این بخش برای حساب شما فعال نیست.", show_alert=True)
+            return
     await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
     await callback.answer()
 
@@ -692,12 +731,199 @@ async def confirm_unlink_user_panel_customer(
     await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
 
 
-@router.callback_query(UserPanelCustomerCallback.filter(F.action == "invite"))
-async def user_panel_customer_invite_placeholder(callback: types.CallbackQuery, user: Optional[User]):
+async def _customer_invite_access_allowed(user: Optional[User]) -> tuple[bool, str | None]:
     if not user:
-        await callback.answer()
+        return False, "کاربر شناسایی نشد."
+    if is_user_global_web_locked(user):
+        return False, "دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است."
+    async with AsyncSessionLocal() as session:
+        if not await _can_use_customer_panel(session, user):
+            return False, "دعوت مشتری برای حساب شما فعال نیست."
+    return True, None
+
+
+def _customer_invite_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ انصراف", callback_data=UserPanelCustomerInviteCallback(action="cancel").pack())]
+        ]
+    )
+
+
+def _customer_invite_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ تایید و ارسال دعوت", callback_data=UserPanelCustomerInviteCallback(action="confirm").pack()),
+            ],
+            [
+                InlineKeyboardButton(text="❌ انصراف", callback_data=UserPanelCustomerInviteCallback(action="cancel").pack()),
+            ],
+        ]
+    )
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "invite_tier2"))
+async def user_panel_customer_invite_tier2_webapp_only(callback: types.CallbackQuery, user: Optional[User]):
+    await callback.answer(USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT, show_alert=True)
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "invite_tier1"))
+async def start_user_panel_customer_invite_tier1(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    allowed, reason = await _customer_invite_access_allowed(user)
+    if not allowed:
+        await callback.answer(reason or "عدم دسترسی", show_alert=True)
         return
-    await callback.answer("دعوت مشتری از بات در مرحله بعد اضافه می‌شود.", show_alert=True)
+
+    await callback.answer("در حال بررسی وضعیت اتصال دو سرور...")
+    sync_gate = await check_customer_invite_sync_ready()
+    if not sync_gate.ready:
+        await callback.message.answer(sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.")
+        return
+
+    await state.clear()
+    await state.update_data(customer_invite_owner_id=user.id)
+    await state.set_state(CustomerInvite.awaiting_management_name)
+    await callback.message.answer(
+        "نام مشتری سطح۱ را وارد کنید:",
+        reply_markup=_customer_invite_cancel_keyboard(),
+    )
+
+
+@router.message(CustomerInvite.awaiting_management_name)
+async def process_customer_invite_management_name(message: types.Message, state: FSMContext, user: Optional[User]):
+    allowed, reason = await _customer_invite_access_allowed(user)
+    if not allowed:
+        await state.clear()
+        await message.answer(reason or "عدم دسترسی")
+        return
+
+    try:
+        management_name = normalize_customer_invite_management_name(message.text)
+    except ValueError as exc:
+        await message.answer(str(exc), reply_markup=_customer_invite_cancel_keyboard())
+        return
+
+    await state.update_data(customer_invite_management_name=management_name)
+    await state.set_state(CustomerInvite.awaiting_mobile_number)
+    await message.answer(
+        "شماره موبایل مشتری را با فرمت 09123456789 وارد کنید:",
+        reply_markup=_customer_invite_cancel_keyboard(),
+    )
+
+
+@router.message(CustomerInvite.awaiting_mobile_number)
+async def process_customer_invite_mobile(message: types.Message, state: FSMContext, user: Optional[User]):
+    allowed, reason = await _customer_invite_access_allowed(user)
+    if not allowed:
+        await state.clear()
+        await message.answer(reason or "عدم دسترسی")
+        return
+
+    try:
+        normalized_mobile = normalize_customer_invite_mobile(message.text)
+    except ValueError as exc:
+        await message.answer(str(exc), reply_markup=_customer_invite_cancel_keyboard())
+        return
+
+    data = await state.get_data()
+    management_name = data.get("customer_invite_management_name")
+    if not management_name:
+        await state.clear()
+        await message.answer("اطلاعات دعوت ناقص است. دوباره از بخش مشتریان شروع کنید.")
+        return
+
+    await state.update_data(customer_invite_mobile_number=normalized_mobile)
+    await state.set_state(CustomerInvite.awaiting_confirmation)
+    await message.answer(
+        "لطفاً اطلاعات دعوت مشتری سطح۱ را تایید کنید:\n\n"
+        f"نام مشتری: {management_name}\n"
+        f"شماره موبایل: `{normalized_mobile}`",
+        parse_mode="Markdown",
+        reply_markup=_customer_invite_confirm_keyboard(),
+    )
+
+
+def _customer_invite_result_message(status_code: int, body: object) -> str:
+    if not isinstance(body, dict):
+        return "پاسخ سرور ایران برای دعوت مشتری نامعتبر بود."
+    if status_code < 400:
+        if body.get("already_pending"):
+            return "این مشتری قبلاً دعوت شده و دعوت فعال در انتظار ثبت‌نام دارد. دعوت جدیدی ساخته نشد."
+        if body.get("created") and body.get("sms_sent"):
+            return "دعوت مشتری ثبت شد و پیامک دعوت برای مشتری ارسال شد."
+        if body.get("created"):
+            return "دعوت مشتری ثبت شد اما ارسال پیامک با خطا مواجه شد. لطفاً وضعیت را در وب اپ بررسی کنید."
+        return "درخواست دعوت مشتری پردازش شد."
+    detail = body.get("detail") or body.get("reason") or "دعوت مشتری انجام نشد."
+    return str(detail)
+
+
+@router.callback_query(UserPanelCustomerInviteCallback.filter(F.action == "confirm"), StateFilter(CustomerInvite.awaiting_confirmation))
+async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    allowed, reason = await _customer_invite_access_allowed(user)
+    if not allowed:
+        await state.clear()
+        await callback.answer(reason or "عدم دسترسی", show_alert=True)
+        return
+
+    data = await state.get_data()
+    management_name = data.get("customer_invite_management_name")
+    mobile_number = data.get("customer_invite_mobile_number")
+    owner_id = data.get("customer_invite_owner_id")
+    if owner_id != user.id or not management_name or not mobile_number:
+        await state.clear()
+        await callback.answer("اطلاعات دعوت ناقص است.", show_alert=True)
+        return
+
+    await callback.answer("در حال ارسال دعوت به سرور ایران...")
+    sync_gate = await check_customer_invite_sync_ready()
+    if not sync_gate.ready:
+        await callback.message.answer(sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.")
+        return
+
+    try:
+        account_name = build_customer_invite_account_name(mobile_number)
+        idempotency_key = build_customer_invite_idempotency_key(
+            source_server=SERVER_FOREIGN,
+            owner_user_id=user.id,
+            mobile_number=mobile_number,
+        )
+        payload = {
+            "owner_user_id": user.id,
+            "account_name": account_name,
+            "management_name": management_name,
+            "mobile_number": mobile_number,
+            "customer_tier": "tier1",
+            "idempotency_key": idempotency_key,
+            "source_server": current_server(),
+        }
+        status_code, body = await forward_customer_invite_to_iran(payload)
+    except Exception as exc:
+        logger.warning(
+            "Customer invite bot flow failed before/while forwarding",
+            extra={
+                "event": "customer_invite.bot_flow.error",
+                "owner_user_id": user.id,
+                "error_type": type(exc).__name__,
+            },
+        )
+        await callback.message.answer("خطا در ارسال دعوت مشتری. کمی بعد دوباره تلاش کنید.")
+        return
+
+    await state.clear()
+    await callback.message.answer(_customer_invite_result_message(status_code, body))
+    try:
+        await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
+    except Exception:
+        pass
+
+
+@router.callback_query(UserPanelCustomerInviteCallback.filter(F.action == "cancel"), StateFilter(CustomerInvite))
+async def cancel_customer_invite_tier1(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    await state.clear()
+    await callback.answer("لغو شد")
+    await callback.message.answer("دعوت مشتری لغو شد.")
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "back"))

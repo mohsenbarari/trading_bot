@@ -9,6 +9,11 @@ class InvitationCreation(StatesGroup):
     awaiting_mobile_number = State()
     awaiting_role = State() 
 
+class CustomerInvite(StatesGroup):
+    awaiting_management_name = State()
+    awaiting_mobile_number = State()
+    awaiting_confirmation = State()
+
 class CommodityManagement(StatesGroup):
     # FSM افزودن کالا (بدون تغییر)
     awaiting_add_name = State()
@@ -49,4 +54,3 @@ class Trade(StatesGroup):
 class TradingSettingsEdit(StatesGroup):
     """FSM برای ویرایش تنظیمات سیستم"""
     awaiting_value = State()  # منتظر ورود مقدار جدید
-

@@ -165,9 +165,12 @@ Before starting or submitting the tier1 invite flow, foreign should require:
 - peer Iran URL configured
 - signed internal request path reachable
 - Redis health readable
-- `sync:outbound == 0`
-- `sync:retry == 0`
-- no unsynced rows in required tables:
+- local foreign `sync:outbound == 0`
+- local foreign `sync:retry == 0`
+- Iran `/api/sync/health` reachable with `X-Observability-Api-Key`
+- Iran `sync:outbound == 0`
+- Iran `sync:retry == 0`
+- no Iran unsynced rows in required Iran-authoritative tables:
   - `users`
   - `customer_relations`
   - `accountant_relations`
@@ -179,10 +182,11 @@ If only global parity is available and reports unrelated historical drift, the i
 Operational definition for this feature:
 
 - "Synced" is primarily state-based, not only time-based.
-- If any required table has unsynced rows, or either sync queue is non-empty, the bot should treat customer invitation as not fully synced.
+- If any required Iran-authored table has unsynced Iran rows, or either relevant sync queue is non-empty, the bot should treat customer invitation as not fully synced.
 - A short grace window is allowed for momentary backlog: retry the health check for about 5-10 seconds.
 - If the required table/queue backlog is still present after that grace window, the bot must reject the invite flow as temporarily unavailable due to sync state.
 - The existing global parity freshness window is 900 seconds, but this feature must not rely on that broad observability value as permission to invite customers. The invite gate must inspect the required tables and queues at request time.
+- Foreign-only `/api/sync/health` is not enough for this decision because `users`, `customer_relations`, `accountant_relations`, and `invitations` are Iran-authored and sync-apply on foreign suppresses outbound `change_log` rows. The gate must measure the Iran -> foreign direction by reading Iran's outbound health and foreign's local queue drain state.
 
 Outage behavior:
 
@@ -204,10 +208,23 @@ The internal Iran endpoint must accept an idempotency key derived from:
 - source server
 - owner user id
 - normalized mobile
-- normalized management name
 - customer tier
 
-The endpoint must still query existing pending/active relation state before creating. The idempotency key is for safe retries and logging, not a replacement for database validation.
+The endpoint must still query existing pending/active relation state before creating. For this release, duplicate/race protection is implemented as:
+
+- explicit pre-check after `sweep_expired_pending_customer_relations()`;
+- an Iran-side Redis atomic lock keyed by the idempotency key before the authoritative create path;
+- a second pre-check after acquiring the lock.
+
+Reason:
+
+- This avoids adding a schema migration while unrelated bot-onboarding migration files are currently dirty in the checkout.
+- Same owner/mobile/tier retries and double-taps serialize safely.
+- If the first request created the relation but the response was lost, the next request returns the existing pending relation instead of creating a second row.
+
+Future hardening:
+
+- Add a database-backed partial unique guard or a dedicated idempotency table after the migration chain is clean, especially if product policy must prevent cross-owner simultaneous pending relations for the same mobile at the database layer.
 
 ## Implementation Roadmap
 
@@ -277,7 +294,10 @@ Exit criteria:
 Implement a foreign-side read-only validation before forwarding:
 
 - Check current server is foreign for the Telegram path.
-- Check connectivity/sync gate.
+- Check connectivity/sync gate with two-sided direction awareness:
+  - Iran health via `/api/sync/health` and `OBSERVABILITY_API_KEY`;
+  - local foreign Redis queues;
+  - required Iran-authored table backlog from Iran, not foreign.
 - Load inviter user by Telegram-linked account.
 - Reject if inviter is customer.
 - Reject if inviter is accountant.
@@ -312,7 +332,7 @@ Endpoint requirements:
 - Reject if current server is not Iran.
 - Reject if source server is not foreign.
 - Load owner/group-leader user by `owner_user_id`.
-- Reuse existing owner/customer policy:
+- Do not reuse JWT/session-bound WebApp owner context dependencies directly. Re-implement the same owner policy from the signed payload:
   - owner must not be deleted/disabled
   - actor/owner must not be customer
   - accountant context cannot create customers
@@ -322,6 +342,7 @@ Endpoint requirements:
 - Send SMS through `send_customer_invitation_sms()`.
 - Return `sms_sent`.
 - If matching pending invitation already exists, return `already_pending=true` without creating a duplicate.
+- Call SMS sending based on the relation/invitation creation result, not on `registration_link` availability. The SMS helper currently ignores the web link value and returns provider acceptance as a boolean.
 
 Exit criteria:
 

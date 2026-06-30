@@ -279,6 +279,39 @@ async def list_owner_customer_relations(
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def find_capacity_tracked_customer_relation_by_identity(
+    db: AsyncSession,
+    *,
+    account_name: str,
+    mobile_number: str,
+) -> CustomerRelation | None:
+    normalized_account_name = normalize_account_name((account_name or "").strip())
+    normalized_mobile = _normalize_mobile_number(mobile_number)
+    if not normalized_account_name and not normalized_mobile:
+        return None
+
+    conditions = []
+    if normalized_account_name:
+        conditions.append(Invitation.account_name == normalized_account_name)
+    if normalized_mobile:
+        conditions.append(Invitation.mobile_number == normalized_mobile)
+    if not conditions:
+        return None
+
+    stmt = (
+        select(CustomerRelation)
+        .options(joinedload(CustomerRelation.customer_user))
+        .join(Invitation, Invitation.token == CustomerRelation.invitation_token)
+        .where(
+            CustomerRelation.deleted_at.is_(None),
+            CustomerRelation.status.in_(CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES),
+            or_(*conditions),
+        )
+        .order_by(CustomerRelation.created_at.asc(), CustomerRelation.id.asc())
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
 async def load_customer_relation_invitation_map(
     db: AsyncSession,
     invitation_tokens: list[str] | tuple[str, ...] | set[str],

@@ -35,7 +35,7 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
 
 def get_user_panel_keyboard(user_role: UserRole = None, *, standard_actions: bool = False) -> ReplyKeyboardMarkup:
     keyboard_layout = []
-    if user_role == UserRole.STANDARD and standard_actions:
+    if user_role in (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN) and standard_actions:
         keyboard_layout.append([KeyboardButton(text="📄 معاملات اخیر")])
         keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
         keyboard_layout.append([KeyboardButton(text="👥 مشتریان")])

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 import schemas
 from api.routers.customers import (
     build_customer_registration_link,
+    create_owner_customer_internal_from_bot,
     create_my_customer,
     get_active_customer_session,
     get_active_owner_customer_relation,
@@ -20,7 +21,10 @@ from api.routers.customers import (
     unlink_my_customer,
     update_my_customer,
 )
+from core.customer_invite import build_customer_invite_idempotency_key
+from core.server_routing import SERVER_FOREIGN
 from models.customer_relation import CustomerRelationStatus, CustomerTier
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeDB:
@@ -50,6 +54,32 @@ class ExecuteDB:
         if isinstance(value, FakeExecuteResult):
             return value
         return FakeExecuteResult(value)
+
+
+class InternalInviteDB:
+    def __init__(self, owner):
+        self.owner = owner
+        self.commits = 0
+
+    async def get(self, model, item_id):
+        return self.owner if item_id == self.owner.id else None
+
+    async def commit(self):
+        self.commits += 1
+
+
+class FakeRequest:
+    def __init__(self, headers=None, body=b"{}"):
+        self.headers = headers or {
+            "x-source-server": SERVER_FOREIGN,
+            "x-timestamp": "1",
+            "x-signature": "sig",
+            "x-api-key": "key",
+        }
+        self._body = body
+
+    async def body(self):
+        return self._body
 
 
 class LazyCustomerRelation(SimpleNamespace):
@@ -151,6 +181,124 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=CUST-token")
         self.assertEqual(listed[0]["mobile_number"], "09120000000")
+
+    async def test_internal_bot_customer_invite_rejects_bad_signature(self):
+        payload = schemas.InternalCustomerInviteRequest(
+            owner_user_id=7,
+            account_name="customer_09123456789",
+            management_name="مشتری",
+            mobile_number="09123456789",
+            customer_tier=CustomerTier.TIER_1,
+            idempotency_key="customer-invite:test-key",
+            source_server=SERVER_FOREIGN,
+        )
+        with patch("api.routers.customers.verify_internal_signature", return_value=False):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(SimpleNamespace(id=7)))
+
+        self.assertEqual(exc_info.exception.status_code, 401)
+
+    async def test_internal_bot_customer_invite_returns_existing_pending_without_sms(self):
+        owner = SimpleNamespace(
+            id=7,
+            is_deleted=False,
+            account_status=UserAccountStatus.ACTIVE,
+            role=UserRole.STANDARD,
+        )
+        idempotency_key = build_customer_invite_idempotency_key(
+            source_server=SERVER_FOREIGN,
+            owner_user_id=7,
+            mobile_number="09123456789",
+        )
+        payload = schemas.InternalCustomerInviteRequest(
+            owner_user_id=7,
+            account_name="customer_09123456789",
+            management_name="مشتری",
+            mobile_number="09123456789",
+            customer_tier=CustomerTier.TIER_1,
+            idempotency_key=idempotency_key,
+            source_server=SERVER_FOREIGN,
+        )
+        existing_relation = SimpleNamespace(
+            id=11,
+            owner_user_id=7,
+            status=CustomerRelationStatus.PENDING,
+        )
+
+        with patch("api.routers.customers.verify_internal_signature", return_value=True), patch(
+            "api.routers.customers.current_server", return_value="iran"
+        ), patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)), patch(
+            "api.routers.customers.is_user_accountant", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.customers.sweep_expired_pending_customer_relations", new=AsyncMock(return_value=[])
+        ), patch(
+            "api.routers.customers.find_capacity_tracked_customer_relation_by_identity",
+            new=AsyncMock(return_value=existing_relation),
+        ), patch("api.routers.customers.send_customer_invitation_sms") as sms_mock:
+            result = await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(owner))
+
+        self.assertFalse(result.created)
+        self.assertTrue(result.already_pending)
+        self.assertEqual(result.relation_id, 11)
+        sms_mock.assert_not_called()
+
+    async def test_internal_bot_customer_invite_creates_and_surfaces_sms_boolean(self):
+        owner = SimpleNamespace(
+            id=7,
+            is_deleted=False,
+            account_status=UserAccountStatus.ACTIVE,
+            role=UserRole.STANDARD,
+        )
+        idempotency_key = build_customer_invite_idempotency_key(
+            source_server=SERVER_FOREIGN,
+            owner_user_id=7,
+            mobile_number="09123456789",
+        )
+        payload = schemas.InternalCustomerInviteRequest(
+            owner_user_id=7,
+            account_name="customer_09123456789",
+            management_name="مشتری",
+            mobile_number="09123456789",
+            customer_tier=CustomerTier.TIER_1,
+            idempotency_key=idempotency_key,
+            source_server=SERVER_FOREIGN,
+        )
+        relation = SimpleNamespace(
+            id=12,
+            owner_user_id=7,
+            customer_user_id=None,
+            customer_tier=CustomerTier.TIER_1,
+            status=CustomerRelationStatus.PENDING,
+            invitation_token="CUST-token",
+            management_name="مشتری",
+        )
+        invitation = SimpleNamespace(mobile_number="09123456789")
+        redis_client = SimpleNamespace(set=AsyncMock(return_value=True), delete=AsyncMock())
+
+        with patch("api.routers.customers.verify_internal_signature", return_value=True), patch(
+            "api.routers.customers.current_server", return_value="iran"
+        ), patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)), patch(
+            "api.routers.customers.is_user_accountant", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.customers.sweep_expired_pending_customer_relations", new=AsyncMock(return_value=[])
+        ), patch(
+            "api.routers.customers.find_capacity_tracked_customer_relation_by_identity",
+            new=AsyncMock(side_effect=[None, None]),
+        ), patch(
+            "api.routers.customers.get_redis_client", return_value=redis_client
+        ), patch(
+            "api.routers.customers.create_owner_customer_relation",
+            new=AsyncMock(return_value=(relation, invitation)),
+        ) as create_mock, patch(
+            "api.routers.customers.send_customer_invitation_sms", return_value=True
+        ):
+            result = await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(owner))
+
+        self.assertTrue(result.created)
+        self.assertFalse(result.already_pending)
+        self.assertTrue(result.sms_sent)
+        create_mock.assert_awaited_once()
+        redis_client.delete.assert_awaited_once()
 
     async def test_unlink_owner_customer_returns_serialized_relation(self):
         relation = SimpleNamespace(

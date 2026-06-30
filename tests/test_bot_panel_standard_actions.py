@@ -34,6 +34,27 @@ class CapturingSession:
         return FakeExecuteResult()
 
 
+class FakeState:
+    def __init__(self, data=None):
+        self.data = dict(data or {})
+        self.state = None
+        self.cleared = False
+
+    async def clear(self):
+        self.data.clear()
+        self.state = None
+        self.cleared = True
+
+    async def update_data(self, **kwargs):
+        self.data.update(kwargs)
+
+    async def set_state(self, state):
+        self.state = state
+
+    async def get_data(self):
+        return dict(self.data)
+
+
 class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
     async def test_standard_user_panel_renders_action_menu_for_non_customer(self):
         message = SimpleNamespace(
@@ -51,6 +72,8 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.panel.delete_previous_anchor", new=AsyncMock()), patch(
             "core.services.customer_relation_service.is_user_customer", new=AsyncMock(return_value=False)
+        ), patch(
+            "core.services.accountant_relation_service.is_user_accountant", new=AsyncMock(return_value=False)
         ), patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
             "bot.handlers.panel.set_anchor"
         ) as set_anchor:
@@ -112,17 +135,75 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         )
         customers_keyboard = panel.get_user_panel_customers_keyboard([relation, tier_2_relation])
         button_texts = [button.text for row in customers_keyboard.inline_keyboard for button in row]
-        self.assertIn("➕ دعوت مشتری", button_texts)
+        self.assertIn("➕ دعوت مشتری سطح1", button_texts)
+        self.assertIn("➕ دعوت مشتری سطح2", button_texts)
         self.assertIn("👤 مشتری تست | سطح ۱ | فعال", button_texts)
         self.assertIn("👤 مشتری دوم | سطح ۲ | در انتظار ثبت‌نام", button_texts)
 
         detail_keyboard = panel.get_customer_detail_keyboard(relation)
         self.assertIn("اخراج مشتری", detail_keyboard.inline_keyboard[0][0].text)
 
-    async def test_customer_invite_placeholder_only_answers(self):
+    async def test_customer_invite_tier2_button_is_webapp_only(self):
         callback = SimpleNamespace(answer=AsyncMock())
-        await panel.user_panel_customer_invite_placeholder(callback, user=SimpleNamespace(id=1))
-        callback.answer.assert_awaited_once_with("دعوت مشتری از بات در مرحله بعد اضافه می‌شود.", show_alert=True)
+        await panel.user_panel_customer_invite_tier2_webapp_only(callback, user=SimpleNamespace(id=1))
+        callback.answer.assert_awaited_once_with(panel.USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT, show_alert=True)
+
+    async def test_customer_invite_tier1_starts_fsm_after_sync_gate(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock()))
+        state = FakeState()
+        user = SimpleNamespace(
+            id=1,
+            role=UserRole.STANDARD,
+            account_status=None,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
+
+        with patch("bot.handlers.panel._customer_invite_access_allowed", new=AsyncMock(return_value=(True, None))), patch(
+            "bot.handlers.panel.check_customer_invite_sync_ready",
+            new=AsyncMock(return_value=SimpleNamespace(ready=True, message=None)),
+        ):
+            await panel.start_user_panel_customer_invite_tier1(callback, state, user)
+
+        self.assertEqual(state.data["customer_invite_owner_id"], 1)
+        self.assertIsNotNone(state.state)
+        self.assertIn("نام مشتری", callback.message.answer.await_args.args[0])
+
+    async def test_customer_invite_confirm_forwards_signed_payload(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock()))
+        state = FakeState(
+            {
+                "customer_invite_owner_id": 1,
+                "customer_invite_management_name": "مشتری تست",
+                "customer_invite_mobile_number": "09123456789",
+            }
+        )
+        user = SimpleNamespace(
+            id=1,
+            role=UserRole.STANDARD,
+            account_status=None,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
+
+        with patch("bot.handlers.panel._customer_invite_access_allowed", new=AsyncMock(return_value=(True, None))), patch(
+            "bot.handlers.panel.check_customer_invite_sync_ready",
+            new=AsyncMock(return_value=SimpleNamespace(ready=True, message=None)),
+        ), patch(
+            "bot.handlers.panel.forward_customer_invite_to_iran",
+            new=AsyncMock(return_value=(201, {"created": True, "sms_sent": True})),
+        ) as forward_mock, patch(
+            "bot.handlers.panel._edit_or_answer_customers_panel",
+            new=AsyncMock(),
+        ):
+            await panel.confirm_customer_invite_tier1(callback, state, user)
+
+        payload = forward_mock.await_args.args[0]
+        self.assertEqual(payload["account_name"], "customer_09123456789")
+        self.assertEqual(payload["customer_tier"], "tier1")
+        self.assertTrue(payload["idempotency_key"].startswith("customer-invite:"))
+        self.assertTrue(state.cleared)
+        self.assertIn("پیامک", callback.message.answer.await_args_list[0].args[0])
 
     async def test_colleagues_list_shows_non_relation_users(self):
         message = SimpleNamespace(answer=AsyncMock())
