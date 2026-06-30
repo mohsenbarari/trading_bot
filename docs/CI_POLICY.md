@@ -48,6 +48,16 @@ Pre-release policy:
 - Deploy/release from the exact commit SHA that passed the pre-release gate.
 - If a maintainer manually dispatches the workflow for a release candidate, use that run as the authoritative pre-release signal for the chosen ref.
 
+## Coverage Report
+
+Workflow name:
+- `Coverage Report`
+
+Coverage policy:
+- The coverage workflow publishes backend/frontend coverage summaries and artifacts for review.
+- It fails only when a covered backend or frontend suite fails to run successfully.
+- Raw percentage thresholds are tracked in the report, but are not release gates; product behavior coverage is governed by `docs/AUTOMATED_TEST_CHECKLIST.md`.
+
 ## CI Bootstrap Notes
 
 The browser-matrix workflows intentionally bootstrap the real backend test surface instead of mocking it:
