@@ -21,6 +21,8 @@ This feature is intentionally independent from the existing WebApp/admin-message
 - Tier 1 customers that are linked to the bot are valid recipients.
 - Text is plain text. Plain URLs are allowed as ordinary text.
 - Markdown/HTML formatting is out of scope for this stage to avoid Telegram parse failures.
+- Telegram Bot API does not provide server-side idempotent `sendMessage`; this feature can prevent local duplicate processing, but it cannot provide absolute exactly-once delivery across unknown Telegram/network outcomes.
+- New broadcast tables are synced non-messenger operational data in this stage. They are not foreign-local, because project policy requires non-messenger operational data to stay visible to both servers. Iran must still never process or send Telegram broadcast receipts.
 - The bot UX must support:
   - send to everyone;
   - send to predefined groups;
@@ -62,6 +64,7 @@ Add dedicated tables rather than overloading `admin_broadcast_messages`, because
   - `broadcast_id`
   - `recipient_user_id`
   - `telegram_id_at_enqueue`
+  - `telegram_id_at_send`
   - `dedupe_key`
   - `status`: `pending`, `sending`, `sent`, `skipped`, `retryable_failed`, `terminal_failed`
   - `reason`
@@ -78,18 +81,19 @@ Unique constraints:
 
 - `(broadcast_id, recipient_user_id)` on receipts.
 - `dedupe_key` on receipts.
-- An idempotency key generated as `telegram-admin-broadcast:{broadcast_id}:{recipient_user_id}:{attempt_count}` for each Telegram send attempt.
+- `dedupe_key` must be stable per receipt: `telegram-admin-broadcast:{broadcast_id}:{recipient_user_id}`.
+- A separate per-attempt correlation key may be logged as `telegram-admin-broadcast:{broadcast_id}:{recipient_user_id}:attempt:{attempt_count}`, but it is audit/log metadata only and must not be described as a duplicate-send guard.
 
 Recommended indexes:
 
-- queue index on `(status, next_retry_at, id)`;
-- lease recovery index on `(status, lease_until)`;
+- partial queue index on `(next_retry_at, id)` where `status IN ('pending', 'sending', 'retryable_failed')`;
+- partial lease recovery index on `(lease_until, id)` where `status = 'sending' AND lease_until IS NOT NULL`;
 - broadcast status/history index on `(created_at, id)`;
 - recipient lookup index on `(recipient_user_id, created_at)`.
 
 ### Cross-Server And Sync Contract
 
-This feature is bot-only, but the tables are non-messenger operational data. To stay aligned with the project-level sync policy, the default implementation should sync the new tables unless a later product decision explicitly marks them foreign-local.
+This feature is bot-only, but the tables are non-messenger operational data. To stay aligned with the project-level sync policy, implement the new tables as synced operational data.
 
 Required sync work if the dedicated tables are added:
 
@@ -101,9 +105,10 @@ Required sync work if the dedicated tables are added:
 
 Field policy recommendation:
 
-- sync stable business/audit fields: `content`, `created_by_id`, `audience_type`, `target_groups`, `recipient_count`, `status`, `broadcast_id`, `recipient_user_id`, `telegram_id_at_enqueue`, `dedupe_key`, `reason`, `telegram_message_id`, `attempt_count`, `next_retry_at`, `last_error_class`, `last_error_message`, timestamps;
+- sync stable business/audit fields: `content`, `created_by_id`, `audience_type`, `target_groups`, `recipient_count`, `status`, `broadcast_id`, `recipient_user_id`, `telegram_id_at_enqueue`, `telegram_id_at_send`, `dedupe_key`, `reason`, `telegram_message_id`, `attempt_count`, `next_retry_at`, `last_error_class`, `last_error_message`, timestamps;
 - treat worker execution fields as local-only: `worker_id`, `lease_until`;
 - never let the Iran server process or send Telegram broadcast receipts even if it receives synced rows.
+- Add tests proving synced rows on Iran do not create Telegram calls and local-only worker fields do not appear as business parity drift.
 
 ### Runtime
 
@@ -117,6 +122,9 @@ Field policy recommendation:
 - Permanent user-unreachable errors should become terminal/skipped without crashing.
 - Message too long or malformed payload should fail the broadcast safely and alert in logs.
 - Claim receipts atomically with a short lease; recover expired leases in the worker cycle.
+- The broadcast worker must be a separate job/loop with its own batch and rate budget so a large broadcast cannot starve trade Telegram delivery.
+- Use proactive global send pacing, not only reactive `429 retry_after` handling. Initial target: use conservative bounded concurrency and sleeps, then tune from staging evidence.
+- Add a parent broadcast finalizer that transitions `queued/running` to `completed`, `completed_with_errors`, or `failed` after receipt statuses reach terminal states.
 
 ## Bot UX Flow
 
@@ -155,6 +163,15 @@ Group choices should be explicit and multi-select:
 
 The resolver must still apply linked-Telegram and bot-access checks.
 
+Group taxonomy is locked as:
+
+- `ordinary`: bot-eligible users with `role == STANDARD`, excluding active customers of any tier and excluding accountants.
+- `managers`: bot-eligible users with `role IN (MIDDLE_MANAGER, SUPER_ADMIN)`.
+- `tier1_customers`: bot-eligible users with an active Tier 1 customer relation.
+- `WATCH` users are not bot-eligible and must never be recipients.
+- `POLICE` users are bot-eligible but are not included in the three predefined groups in this stage; they can receive broadcasts through `all users` or explicit selected-user targeting.
+- When multiple groups are selected, union recipients and dedupe by `user_id` before queue creation.
+
 ### Selected Users
 
 1. Ask for search text: account name, full name, username, or mobile.
@@ -188,7 +205,9 @@ For selected-user search, customers should be displayed with the customer manage
 1. Rate limiting and flood control.
    - Use worker-level throttling and `retry_after`.
 2. Exactly-once behavior.
-   - Receipt uniqueness and idempotency keys prevent accidental duplicate sends from retries.
+   - Telegram cannot guarantee server-side exactly-once `sendMessage`.
+   - Receipt uniqueness, stable `dedupe_key`, terminal-status guards, and atomic lease claim prevent local duplicate processing.
+   - Retryable unknown outcomes can still produce a rare duplicate if Telegram accepted a message but the network response was lost; this must be logged and treated as a known external-side-effect limitation.
 3. Long-running sends.
    - Do not block bot polling or callback responses.
 4. Telegram delivery uncertainty.
@@ -197,7 +216,8 @@ For selected-user search, customers should be displayed with the customer manage
    - Because this stage is bot-only, do not create WebApp notifications or messenger rows.
 6. User eligibility drift.
    - Resolve recipient list at enqueue time and store `telegram_id_at_enqueue`.
-   - Worker should re-check current basic eligibility before sending to avoid messaging deleted/inactive users.
+   - Worker must load the current `User`, require an active current `telegram_id`, re-run `evaluate_bot_access`, and send to the current `telegram_id`.
+   - Store `telegram_id_at_send` for audit; `telegram_id_at_enqueue` is only an enqueue-time snapshot.
 7. Audit and abuse prevention.
    - Store actor, recipient count, target mode, and final status.
    - Log without leaking message content in high-cardinality/structured logs.
@@ -205,25 +225,39 @@ For selected-user search, customers should be displayed with the customer manage
    - Plain text only; no Markdown/HTML parse mode.
    - Enforce Telegram text length limits before queueing.
 9. Sync/parity drift.
-   - New broadcast tables must either be explicitly registered as synced non-messenger operational data or explicitly documented as foreign-local. The default is synced.
+   - New broadcast tables are synced non-messenger operational data.
    - Worker lease fields must be local-only to avoid false parity mismatches.
 10. Callback forgery and role drift.
    - Every callback handler must re-check `SUPER_ADMIN`; showing the button only to superadmin is not enough.
    - Re-check recipient eligibility before send so deleted/inactive users do not receive queued messages after enqueue.
+11. Large audience pressure.
+   - Cap selected-user multi-select size.
+   - Paginate search results.
+   - Insert receipt rows in chunks for all/group broadcasts and set `recipient_count` from successfully inserted deduped rows.
+12. Notification preferences.
+   - User WebApp notification preferences do not apply to this Telegram management broadcast stage; document and test that no WebApp notification preference is read or mutated.
 
 ## Implementation Stages
+
+### Stage 0 - Design Lock
+
+- Keep the table placement decision locked as synced non-messenger operational data, not foreign-local.
+- Keep group taxonomy locked as ordinary/managers/Tier1 customers with WATCH excluded and POLICE reachable only through all/selected.
+- Lock the duplicate-control contract: stable receipt `dedupe_key`, terminal guards, atomic lease claim, and no absolute Telegram exactly-once promise.
+- Lock the live-send contract: send to the current `telegram_id` after a fresh `evaluate_bot_access` check.
+- Lock a conservative worker rate target and selected-user cap before coding Stage 4/5.
 
 ### Stage 1 - Contract And Schema
 
 - Add models and Alembic migration for broadcasts and receipts.
 - Add enums/constants for audience type and receipt status.
-- Add queue, lease, dedupe, and recipient lookup indexes.
+- Add partial queue, partial lease-recovery, dedupe, and recipient lookup indexes.
 - Add unit tests for schema constraints and model import/sync registry requirements.
 
 ### Stage 1B - Sync/Authority Registration
 
 - Add background job authority for the foreign-only broadcast worker.
-- Register new tables in sync registry/events/router/parity if they are implemented as synced operational data.
+- Register new tables in sync registry/events/router/parity as synced operational data.
 - Add sync field policy for local-only worker fields.
 - Add tests proving Iran cannot claim/send Telegram broadcast receipts.
 
@@ -234,29 +268,39 @@ For selected-user search, customers should be displayed with the customer manage
   - group bot users;
   - selected searched users.
 - Reuse `evaluate_bot_access`.
-- Add tests for standard users, managers, Tier 1 customers, Tier 2 customers, accountants, inactive users, deleted users, unlinked users, and duplicate candidates.
+- Implement the locked group taxonomy exactly.
+- Union and dedupe multi-group recipients by `user_id`.
+- Add tests for standard users, POLICE users, WATCH users, managers, Tier 1 customers, Tier 2 customers, accountants, inactive users, deleted users, unlinked users, duplicate candidates, and sender-exclusion behavior.
 
 ### Stage 3 - Queue Creation Service
 
 - Implement a service that validates content, creates broadcast row, creates deduped receipt rows, and returns a queued summary.
 - Add idempotency/unique constraint tests.
 - Make sure no Telegram API call happens in this stage.
+- Reject empty and over-4096-character text before any row is created.
+- Batch receipt inserts for large all/group audiences.
+- Handle empty eligible recipient sets safely with a clear admin-facing result and no crash.
 
 ### Stage 4 - Telegram Delivery Worker
 
 - Implement foreign-only worker loop.
 - Send pending receipts with bounded concurrency and rate limits.
+- Keep this worker separate from trade Telegram delivery and give it its own batch/rate settings.
+- Claim receipts atomically with lease and short-circuit terminal rows before sending.
+- Re-load the current user, re-run `evaluate_bot_access`, and send to the current `telegram_id`; store `telegram_id_at_send`.
 - Classify Telegram gateway responses using patterns aligned with trade delivery.
 - Persist retry/terminal/sent status.
-- Add tests for success, retryable network failure, `429 retry_after`, user unreachable, missing bot token, and long/malformed message.
+- Finalize parent broadcast status from receipt counts.
+- Add tests for success, retryable network failure, `429 retry_after`, user unreachable, missing bot token, live-telegram-id relink, post-enqueue role/status drift, concurrent workers, expired lease recovery, parent status finalization, and long/malformed message.
 
 ### Stage 5 - Bot FSM And Admin UI
 
 - Add bot states for broadcast audience selection, search, selected recipients, content, preview, and confirmation.
 - Add admin keyboard button for `SUPER_ADMIN`.
 - Store selected users in FSM state, not in callback payloads.
+- Cap selected-user size and paginate search results.
 - Add cancel/back behavior in every state.
-- Add tests for all-users flow, group flow, selected-users flow, denial for non-superadmin, and confirmation protection.
+- Add tests for all-users flow, group flow, selected-users flow, denial for non-superadmin, forged callbacks for every action, cancel-state cleanup, and confirmation protection.
 
 ### Stage 6 - Observability And Status
 
@@ -288,12 +332,24 @@ For selected-user search, customers should be displayed with the customer manage
 - Cancel clears FSM state.
 - Worker sends pending receipts and records Telegram message id.
 - Worker respects retry_after.
+- Worker uses current `telegram_id` after a relink and stores `telegram_id_at_send`.
+- Worker skips users that become deleted, inactive, accountant, Tier 2, or unlinked after enqueue.
 - Worker does not crash on permanent Telegram errors.
 - Worker does not run on Iran.
+- Concurrent workers do not send the same non-terminal receipt twice under local lease/claim rules.
+- Expired `sending` lease recovery works and terminal rows are short-circuited.
+- Parent broadcast status finalizes to completed or completed_with_errors.
+- Empty eligible recipient set does not crash and creates a clear admin-facing result.
+- Group ordinary users excludes POLICE, WATCH, managers, accountants, Tier 1 customers, and Tier 2 customers.
+- POLICE users can receive all-user or selected broadcasts but are not in predefined groups.
+- WATCH users never receive bot broadcasts.
+- Multi-group audience union dedupes a Tier 1/standard overlap and any repeated candidates.
 - No WebApp notification, admin-message room, or messenger row is created in this stage.
 - Synced receipt rows do not cause Iran-side Telegram side effects.
 - Worker lease fields do not appear as business parity drift.
 - Forged non-superadmin callbacks are rejected server-side.
+- WebApp notification preferences are not read or mutated.
+- Plain URL and markdown-like characters are delivered as plain text with `parse_mode=None`.
 
 ## Open Items Before Coding
 
