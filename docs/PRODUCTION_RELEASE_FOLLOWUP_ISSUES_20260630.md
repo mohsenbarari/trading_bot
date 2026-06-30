@@ -451,6 +451,35 @@ Required follow-up:
   - Persian/national-id redaction in free-text payloads;
   - no redaction of UUID correlation IDs in structured fields.
 
+### 19. Iran connectivity monitor logs recurring `404 Not Found` for the foreign root URL
+
+Observed behavior during the 2026-06-30 `bcefb3ac` production release:
+
+- Iran runtime logs repeatedly showed the connectivity monitor/httpx probe calling the foreign root URL:
+
+```text
+HTTP Request: GET https://coin.362514.ir "HTTP/1.1 404 Not Found"
+```
+
+- At the same time, both Iran and foreign `/api/sync/health` checks reported:
+  - `status=ok`
+  - `redis_ok=true`
+  - `unsynced_change_log_count=0`
+  - `sync:outbound=0`
+  - `sync:retry=0`
+  - `publication_reconciliation.status=ok`
+
+Impact:
+
+- This did not block the release and does not indicate a sync failure by itself.
+- It makes production logs noisier and can confuse operational review because the root URL is not the same as the actual sync/health receiver path.
+
+Required follow-up:
+
+- Audit the connectivity-monitor URL selection for production Iran.
+- Prefer an explicit health/sync endpoint for reachability checks, or classify the foreign root `404` as an expected non-error only if it is intentionally used as a coarse reachability probe.
+- Keep foreign WebApp/API public-surface blocking intact; do not make the foreign root or WebApp API public just to silence this log.
+
 ## Closed-Market Remediation Order
 
 1. Add a pre-mutation release decision gate for `IRAN_CONNECTIVITY_MODE` and `IRAN_SHARED_DATA_MODE`.
@@ -467,6 +496,7 @@ Required follow-up:
 12. Classify non-retryable Telegram `Bad Request` publication-state rows and stop impossible terminal/deleted-message retries safely.
 13. Add Telegram publication-worker rate-limit pacing and response aggregation for `429 Too Many Requests`.
 14. Refine log redaction so UUID correlation IDs are not partially redacted as national IDs.
+15. Replace or explicitly classify the Iran connectivity-monitor foreign root probe that logs recurring `404 Not Found`.
 
 ## Validation Required After Remediation
 
@@ -482,6 +512,7 @@ Required follow-up:
 - Confirm Telegram publication-state cleanup keeps active-offer failures visible while preventing repeated retries for confirmed terminal/deleted-message rows.
 - Confirm Telegram publication-worker restart reconciliation no longer causes repeated `429 Too Many Requests` bursts.
 - Confirm structured logs preserve UUID correlation IDs while still redacting real secrets and PII.
+- Confirm Iran connectivity-monitor reachability logs are either successful against an explicit endpoint or clearly classified as expected non-error probes.
 
 ## Remediation Progress
 
@@ -489,7 +520,7 @@ Required follow-up:
 
 Status:
 
-- Code remediation prepared on `main`; production deploy is still required before live services load it.
+- Code remediation was deployed to production in the `bcefb3ac` release.
 
 Completed for issues 16 and 17:
 
@@ -544,3 +575,32 @@ Validation run:
 - `python3 -m unittest tests.test_telegram_offer_channel_service tests.test_offer_publication_worker tests.test_logging_foundation tests.test_offer_expiry tests.test_market_transition_service tests.test_telegram_gateway_policy tests.test_job_logging tests.test_telegram_offer_publication_service tests.test_offer_publication_reconciliation_service tests.test_offers_router_helpers`
 - `python3 -m unittest tests.test_bot_trade_create_confirm_success_wholesale tests.test_bot_trade_create_confirm_success_retail tests.test_bot_trade_create_text_offer_confirm_success tests.test_bot_trade_create_confirm_telegram_error tests.test_bot_trade_create_text_offer_failure_cancel tests.test_bot_trade_create_confirm_unexpected_error tests.test_bot_trade_create_text_offer_warning_confirm tests.test_bot_trade_create_text_offer_warning_flow_integration tests.test_offer_limit_cross_surface_smoke`
 - `git diff --check`
+
+Production release evidence:
+
+- Release log: `tmp/production-release-logs/production-release-20260630T203445Z.log`
+- Foreign runtime log: `tmp/production-release-logs/foreign-runtime-after-release-current.log`
+- Iran runtime log: `tmp/production-release-logs/iran-runtime-after-release-current.log`
+- `make production-release` completed with exit code `0`.
+- Foreign Docker services were up after release: `app`, `bot`, `sync_worker`, `db`, and `redis`.
+- Iran Docker services were up after release: `app`, `sync_worker`, `db`, and `redis`.
+- `make sync-health` and `make sync-health-iran` both returned `status=ok`, `unsynced_change_log_count=0`, empty sync queues, and `publication_reconciliation.status=ok`.
+- The first foreign offer-publication cycle after restart observed one Telegram `429` and applied a `37.0` second cooldown:
+
+```text
+channel_state_rate_limited=1
+channel_state_cooldown_seconds=37.0
+channel_state_response_counts={"2xx":8,"429":1,"transport":2}
+```
+
+- The next observed cycles converged without a persistent blocker; the third observed cycle reached:
+
+```text
+channel_state_processed=2
+channel_state_applied=2
+channel_state_failed=0
+channel_state_response_counts={"2xx":2}
+```
+
+- A later recent-log snapshot showed no continuing Telegram `400 Bad Request` or `429 Too Many Requests` lines; only expected `foreign_surface.blocked` warnings remained on the foreign public surface.
+- The old stale runtime parity status remains an operator-observability follow-up under issue 6; it did not block the release because live sync queues and publication reconciliation were clean on both servers.
