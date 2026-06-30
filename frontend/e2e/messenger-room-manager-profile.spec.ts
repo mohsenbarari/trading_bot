@@ -321,6 +321,12 @@ async function openChannelSettingsPanel(managerRoot: Locator) {
   await expect(titleInput).toBeVisible({ timeout: 30000 })
 }
 
+async function clickManagerBack(managerRoot: Locator) {
+  const backButton = managerRoot.getByRole('button', { name: 'بازگشت' }).first()
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click({ force: true })
+}
+
 async function clickOpenInMessengerButton(managerRoot: Locator) {
   let lastError: unknown = null
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -610,7 +616,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await channelManager.locator('.primary-chip').filter({ hasText: 'افزودن' }).click()
     await expect(channelManager.locator('.chat-user-row').filter({ hasText: candidate.accountName }).first()).toBeVisible({ timeout: 30000 })
 
-    await channelManager.locator('.manager-header .header-icon-btn').first().click()
+    await clickManagerBack(channelManager)
     await waitForBackendReady(request)
     await clickOpenInMessengerButton(channelManager)
 
@@ -733,11 +739,11 @@ test.describe('Messenger room manager and public profile flows', () => {
     await groupManager.locator('.header-icon-btn').first().click()
     await groupManager.locator('.telegram-row.nav.danger').click()
 
-    await expect.poll(() => page.url(), { timeout: 30000 }).not.toContain(`user_id=-${group.id}`)
     const detailResponse = await request.get(`${BACKEND_BASE_URL}/api/chat/groups/${group.id}`, {
       headers: authHeaders(owner.accessToken),
     })
     expect(detailResponse.status()).toBe(403)
+    await expect(page.locator('.chat-header .header-name')).not.toContainText(title, { timeout: 30000 })
   })
 
   test('channel manager supports member-row profiles, admin mutations, member removal, and creator delete', async ({ page, request }) => {
@@ -811,7 +817,7 @@ test.describe('Messenger room manager and public profile flows', () => {
       .poll(async () => (await fetchChannelMembers(request, owner.accessToken, channel.id)).find((member) => member.user_id === candidateOne.userId)?.role, { timeout: 30000 })
       .toBe('admin')
 
-    await channelManager.locator('.manager-header .header-icon-btn').first().click()
+    await clickManagerBack(channelManager)
     await channelManager.locator('.telegram-row').filter({ hasText: 'اعضای کانال' }).click()
 
     const removableRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateTwo.accountName }).first()
@@ -821,13 +827,13 @@ test.describe('Messenger room manager and public profile flows', () => {
       .poll(async () => (await fetchChannelMembers(request, owner.accessToken, channel.id)).some((member) => member.user_id === candidateTwo.userId), { timeout: 30000 })
       .toBe(false)
 
-    await channelManager.locator('.manager-header .header-icon-btn').first().click()
+    await clickManagerBack(channelManager)
     await channelManager.locator('.telegram-row.nav.danger').click()
 
-    await expect.poll(() => page.url(), { timeout: 30000 }).not.toContain(`user_id=-${channel.id}`)
     await expect
       .poll(async () => await fetchChannelById(request, owner.accessToken, channel.id), { timeout: 30000 })
       .toBeNull()
+    await expect(page.locator('.chat-header .header-name')).not.toContainText(title, { timeout: 30000 })
   })
 
   test('public profiles can replace an existing avatar without removing it first', async ({ page, request }) => {
@@ -895,7 +901,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(page.locator('.public-profile-view .profile-avatar-image')).toBeVisible({ timeout: 30000 })
     await expect(page.getByRole('button', { name: 'تغییر آواتار' })).toBeVisible({ timeout: 30000 })
 
-    await page.locator('.public-profile-view .back-button').click()
+    await page.locator('.public-profile-view').getByRole('button', { name: 'بازگشت' }).first().click()
     await expect(page).toHaveURL(/\/chat/)
     await expect(page.locator('.chat-header')).toBeVisible({ timeout: 30000 })
 

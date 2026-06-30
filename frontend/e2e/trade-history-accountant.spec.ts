@@ -1083,7 +1083,7 @@ test.describe('Trade history accountant context', () => {
     await page.goto(`/users/${fixture.targetUserId}?account_name=${encodeURIComponent(fixture.targetAccountName)}`)
     await expect(page.locator('.public-profile-view')).toContainText(fixture.targetAccountName)
 
-    const blockButton = page.locator('.visitor-action-btn').filter({ hasText: 'بلاک کاربر' }).first()
+    const blockButton = page.getByRole('button', { name: /بلاک کاربر/ }).first()
     await expect(blockButton).toBeVisible()
 
     const dialogMessages: string[] = []
@@ -1099,7 +1099,7 @@ test.describe('Trade history accountant context', () => {
     expect(dialogMessages[0]).toContain(`بلاک کاربر ${fixture.targetAccountName}`)
     expect(dialogMessages[1]).toContain('مسدود شد')
 
-    await expect(page.locator('.visitor-action-btn').filter({ hasText: 'رفع بلاک' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /رفع بلاک/ }).first()).toBeVisible()
 
     await page.goto('/market')
     const offerCard = page.locator('.offer-card-wrap', { hasText: fixture.offerNote }).first()

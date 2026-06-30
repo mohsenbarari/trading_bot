@@ -169,6 +169,24 @@ async function installApiMocks(page: Page) {
   })
 }
 
+async function gotoRouteWithNavigationRetry(page: Page, path: string) {
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(path, { waitUntil: 'domcontentloaded' })
+      return
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/interrupted by another navigation|NS_BINDING_ABORTED|NS_ERROR_FAILURE/i.test(message)) {
+        throw error
+      }
+      await page.waitForTimeout(250)
+    }
+  }
+  throw lastError
+}
+
 async function expectNoHorizontalOverflow(page: Page, label: string) {
   const metrics = await page.evaluate(() => {
     const doc = document.documentElement
@@ -254,7 +272,7 @@ async function expectLastControlClearOfBottomChrome(page: Page, label: string) {
           && rect.bottom >= window.innerHeight - 2
           && rect.top < window.innerHeight
           && rect.height > 8
-        const isKnownBottomChrome = element.matches('.bottom-nav-bar, .market-action-bar')
+        const isKnownBottomChrome = element.matches('.bottom-nav-bar, .market-action-bar, .fab-container')
         return isBottomFixed || isKnownBottomChrome
       })
       .map((element) => {
@@ -335,7 +353,7 @@ test.describe('Non-messenger responsive viewport matrix', () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
 
       for (const route of ROUTES) {
-        await page.goto(route.path, { waitUntil: 'domcontentloaded' })
+        await gotoRouteWithNavigationRetry(page, route.path)
         await expect(page.getByText(route.expectedText).first()).toBeVisible({ timeout: 10_000 })
         await expectNoHorizontalOverflow(page, `${viewport.label}:${route.label}`)
         if (viewport.width <= 430) {

@@ -908,6 +908,6 @@ test.describe('Notification regressions', () => {
     await expect(page).toHaveURL(new RegExp(`highlight_accountant_user_id=${fixture.accountantUserId}`))
     await expect(page.getByText('نمایش پروفایل مالک اصلی')).toBeVisible()
     await expect(page.locator('.accountant-resolution-banner')).toContainText(fixture.relationDisplayName)
-    await expect(page.locator('.profile-hero-copy h3')).toHaveText(fixture.ownerAccountName)
+    await expect(page.locator('.public-profile-view').getByRole('heading', { name: fixture.ownerAccountName }).first()).toBeVisible()
   })
 })
