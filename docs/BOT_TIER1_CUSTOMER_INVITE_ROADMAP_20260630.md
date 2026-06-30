@@ -124,8 +124,10 @@ Impact:
 - Payload forwarded to Iran must include owner/group-leader identity, customer name, mobile number, generated account name, and tier1.
 - Foreign performs preliminary validation from synced data. Iran performs final validation and is authoritative.
 - If preliminary or final validation fails, the bot must show a clear Persian message.
-- After SMS is sent, the bot sends a success message to the inviter. No invitation link should be displayed in the bot.
+- After SMS provider acceptance is confirmed, the bot sends a success message to the inviter. No invitation link should be displayed in the bot.
+- SMS provider acceptance means the template request returned a successful provider response and usable acceptance result. It does not guarantee final delivery to the customer's handset.
 - If a duplicate pending invitation already exists for the same owner/mobile/account-name, the bot should not create another row; it should return a success-like "already registered" message.
+- If the success response is delayed by a short or medium cross-server interruption, the bot should send the success message after connectivity returns and the successful result is known. For a long interruption, no delayed success message is required.
 
 ## Engineering Decisions
 
@@ -149,6 +151,12 @@ Reason:
 - This avoids false success messages.
 - It avoids duplicate pending relations.
 - It keeps retry/resend as a future explicit operator/user feature instead of a hidden loop.
+
+`messageId` policy:
+
+- Returning or storing the provider `messageId` is not required for the bot success message.
+- `sms_sent=true` is sufficient for the bot contract because it means SMS.ir accepted the template send request according to the current helper checks.
+- `messageId` may be useful later for provider support, audit, or delivery-report reconciliation, but it should not be added to the bot-facing contract unless that operational need is explicitly opened.
 
 ### Sync/connectivity gate
 
