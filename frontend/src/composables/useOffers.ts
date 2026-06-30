@@ -8,6 +8,7 @@ const isLoading = ref(false);
 const error = ref('');
 let pollingInterval: any = null;
 let isFetching = false;
+let queuedRefreshAfterCurrentFetch = false;
 let refreshOffersFromServer: null | (() => Promise<void>) = null;
 
 
@@ -66,7 +67,10 @@ on('offer:completed', handleOfferExpired);
 export function useOffers() {
 
     async function fetchOffers(silent = false) {
-        if (isFetching && silent) return; // Prevent overlapping polls
+        if (isFetching) {
+            if (silent) queuedRefreshAfterCurrentFetch = true;
+            return;
+        }
 
         const token = localStorage.getItem('auth_token');
         if (!token) return;
@@ -75,7 +79,10 @@ export function useOffers() {
         isFetching = true;
 
         try {
-            const response = await apiFetch('/api/offers/');
+            const response = await apiFetch('/api/offers/', {
+                cache: 'no-store',
+                retryNetwork: false,
+            });
             if (!response.ok) {
                 throw await createHttpErrorFromResponse(response, {
                     surface: 'market',
@@ -110,6 +117,10 @@ export function useOffers() {
         } finally {
             if (!silent) isLoading.value = false;
             isFetching = false;
+            if (queuedRefreshAfterCurrentFetch) {
+                queuedRefreshAfterCurrentFetch = false;
+                void fetchOffers(true);
+            }
         }
     }
 

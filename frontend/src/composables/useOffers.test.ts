@@ -76,7 +76,10 @@ describe('useOffers', () => {
 
     await offersApi.fetchOffers()
 
-    expect(useOffersMocks.apiFetch).toHaveBeenCalledWith('/api/offers/')
+    expect(useOffersMocks.apiFetch).toHaveBeenCalledWith('/api/offers/', {
+      cache: 'no-store',
+      retryNetwork: false,
+    })
     expect(offersApi.offers.value.map((offer: { id: number }) => offer.id)).toEqual([1, 3])
     expect(offersApi.error.value).toBe('')
     expect(offersApi.isLoading.value).toBe(false)
@@ -132,12 +135,13 @@ describe('useOffers', () => {
     expect(globalThis.clearInterval).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the current offers on transient fetch errors and avoids silent overlap when already fetching', async () => {
+  it('keeps the current offers on transient fetch errors and queues silent overlap after the current fetch', async () => {
     let resolveFirstFetch!: (value: Response) => void
     useOffersMocks.apiFetch
       .mockImplementationOnce(() => new Promise<Response>((resolve) => {
         resolveFirstFetch = resolve
       }))
+      .mockRejectedValueOnce(new Error('network unstable'))
       .mockRejectedValueOnce(new Error('network unstable'))
 
     const { useOffers } = await importFreshUseOffers()
@@ -147,15 +151,22 @@ describe('useOffers', () => {
     const firstFetch = offersApi.fetchOffers(true)
     await offersApi.fetchOffers(true)
     expect(useOffersMocks.apiFetch).toHaveBeenCalledTimes(1)
+    expect(useOffersMocks.apiFetch).toHaveBeenCalledWith('/api/offers/', {
+      cache: 'no-store',
+      retryNetwork: false,
+    })
 
     resolveFirstFetch(new Response(JSON.stringify([{ id: 11, price: 350 }]), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
     await firstFetch
+    await flushPromises()
+    expect(useOffersMocks.apiFetch).toHaveBeenCalledTimes(2)
     expect(offersApi.offers.value).toEqual([{ id: 11, price: 350 }])
 
     await offersApi.fetchOffers()
+    expect(useOffersMocks.apiFetch).toHaveBeenCalledTimes(3)
     expect(offersApi.offers.value).toEqual([{ id: 11, price: 350 }])
     expect(offersApi.error.value).toBe('دریافت لیست لفظ‌ها ممکن نشد.')
   })
