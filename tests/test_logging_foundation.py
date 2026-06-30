@@ -65,6 +65,19 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertEqual(redact(f"token={token}"), f"token={REDACTED}")
         self.assertEqual(redact(f"raw {token}"), f"raw {REDACTED_JWT}")
 
+    def test_redact_masks_telegram_bot_api_tokens_inside_httpx_messages(self):
+        message = (
+            'HTTP Request: POST '
+            'https://api.telegram.org/bot1234567890:abcdefghijklmnopqrstuvwxyz/editMessageText '
+            '"HTTP/1.1 400 Bad Request"'
+        )
+
+        redacted = redact(message)
+
+        self.assertIn(f"https://api.telegram.org/bot{REDACTED}/editMessageText", redacted)
+        self.assertNotIn("1234567890", redacted)
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", redacted)
+
     def test_redact_preserves_integrity_hash_fields(self):
         hash_value = "21f13ee3385597725cf7e7b578ac042f54b012c5dc735d235a60206dd67e24ca"
 

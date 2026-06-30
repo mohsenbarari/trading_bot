@@ -110,6 +110,9 @@ _KEY_VALUE_FILENAME_RE = re.compile(
     r"(\s*[:=]\s*)"
     r"([^\s,;]+)"
 )
+_TELEGRAM_BOT_URL_RE = re.compile(
+    r"(?i)(https://api\.telegram\.org/bot)[A-Za-z0-9:_-]+(?=/)"
+)
 _OTP_RE = re.compile(r"(?i)\b(otp|code)(\s*[:=]\s*)\d{4,8}\b")
 _MOBILE_RE = re.compile(r"(?<!\d)(09\d{2})\d{4}(\d{3})(?!\d)")
 _IRAN_MOBILE_VARIANT_RE = re.compile(
@@ -157,6 +160,7 @@ def mask_mobile(value: str) -> str:
 
 def redact_string(value: str) -> str:
     sanitized = _BEARER_RE.sub(f"Bearer {REDACTED}", value)
+    sanitized = _TELEGRAM_BOT_URL_RE.sub(rf"\1{REDACTED}", sanitized)
     sanitized = _JWT_RE.sub(REDACTED_JWT, sanitized)
     sanitized = _SIGNED_URL_QUERY_RE.sub(rf"\1{REDACTED_SIGNED_URL_VALUE}", sanitized)
     sanitized = _OTP_RE.sub(rf"\1\2{REDACTED}", sanitized)
