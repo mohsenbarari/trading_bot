@@ -1885,11 +1885,11 @@ if ! ss -ltn | awk 'NR > 1 {print \$4}' | grep -Eq '(^|:)443$'; then
   exit 21
 fi
 nginx_dump=\$(nginx -T 2>/dev/null || true)
-printf '%s\n' \"\$nginx_dump\" | grep -Eq 'listen[[:space:]]+443([^0-9]|$)' || {
+grep -Eq 'listen[[:space:]]+443([^0-9]|$)' <<< \"\$nginx_dump\" || {
   echo 'Iran active Nginx config has no listen 443 server block.' >&2
   exit 22
 }
-printf '%s\n' \"\$nginx_dump\" | grep -q 'ssl_certificate ' || {
+grep -q 'ssl_certificate ' <<< \"\$nginx_dump\" || {
   echo 'Iran active Nginx config has no ssl_certificate directive.' >&2
   exit 23
 }"
