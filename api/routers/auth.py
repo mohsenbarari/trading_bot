@@ -15,7 +15,7 @@ from jose import JWTError, jwt
 from core.db import get_db
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelationStatus
-from models.customer_relation import CustomerRelationStatus, CustomerTier
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
 from core.enums import NotificationCategory, NotificationLevel
 from core.security import (
@@ -28,7 +28,6 @@ from core.security import (
 from core.config import settings
 import json
 from bot.utils.redis_helpers import get_redis
-from core.notifications import send_telegram_message
 from core.sms import send_otp_sms, send_sms
 from core.connectivity import is_internet_connected
 from api.deps import get_current_user, oauth2_scheme
@@ -58,6 +57,7 @@ from core.services.telegram_link_token_service import (
 from models.session import Platform, UserSession
 import uuid
 from core.utils import create_user_notification, normalize_persian_numerals, utc_now, utc_now_naive
+from core.notifications import send_telegram_message
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.request_logging import client_ip_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
@@ -224,6 +224,27 @@ async def _publish_project_user_joined_notifications(db: AsyncSession, new_user:
         logger.warning("Project user joined notification recipient lookup failed: %s", exc)
         return
 
+    customer_exists = (
+        select(CustomerRelation.id)
+        .where(
+            CustomerRelation.customer_user_id == User.id,
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    telegram_recipient_stmt = select(User.telegram_id).where(
+        User.is_deleted == False,
+        User.id != new_user.id,
+        User.telegram_id.is_not(None),
+        ~customer_exists,
+    )
+    try:
+        telegram_recipient_ids = list((await db.execute(telegram_recipient_stmt)).scalars().all())
+    except Exception as exc:
+        telegram_recipient_ids = []
+        logger.warning("Project user joined Telegram recipient lookup failed: %s", exc)
+
     message = _project_user_joined_message(new_user)
     route = _project_user_profile_route(new_user)
     for recipient_id in recipient_ids:
@@ -249,6 +270,20 @@ async def _publish_project_user_joined_notifications(db: AsyncSession, new_user:
                     "error": str(exc),
                 },
             )
+
+    for telegram_id in telegram_recipient_ids:
+        try:
+            await send_telegram_message(int(telegram_id), message)
+        except Exception as exc:
+            logger.warning(
+                "Project user joined Telegram notification failed",
+                extra={
+                    "telegram_id": telegram_id,
+                    "new_user_id": new_user.id,
+                    "error": str(exc),
+                },
+            )
+
 
 def _raise_inactive_account_error() -> None:
     raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
