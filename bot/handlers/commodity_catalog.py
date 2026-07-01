@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from math import ceil
 from typing import Sequence
 
@@ -20,10 +21,15 @@ from models.user import User
 
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 COMMODITY_CATALOG_TEXT = "📦 لیست کالاها"
 COMMODITY_CATALOG_PAGE_SIZE = 10
-_MAX_ALIAS_TEXT_LENGTH = 900
+_MAX_ALIAS_TEXT_LENGTH = 220
+_MAX_COMMODITY_NAME_LENGTH = 120
+_MAX_CATALOG_TEXT_LENGTH = 3900
+_CATALOG_TRUNCATED_NOTICE = "… ادامه این صفحه به دلیل محدودیت تلگرام کوتاه شد."
+_CATALOG_SEND_ERROR_TEXT = "نمایش لیست کالاها با خطا مواجه شد. کمی بعد دوباره تلاش کنید."
 
 
 def _normalize_text(value: object) -> str:
@@ -36,6 +42,16 @@ def _stable_text_key(value: object) -> str:
 
 def _commodity_display_name(commodity: object) -> str:
     return _normalize_text(getattr(commodity, "name", None)) or "نامشخص"
+
+
+def _truncate_text(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 1].rstrip(" ،") + "…"
+
+
+def _bounded_commodity_display_name(commodity: object) -> str:
+    return _truncate_text(_commodity_display_name(commodity), _MAX_COMMODITY_NAME_LENGTH)
 
 
 def _commodity_sort_key(commodity: object) -> tuple[str, int]:
@@ -62,9 +78,7 @@ def _alias_display_names(commodity: object) -> list[str]:
 
 def _bounded_alias_text(alias_names: Sequence[str]) -> str:
     text = "، ".join(alias_names)
-    if len(text) <= _MAX_ALIAS_TEXT_LENGTH:
-        return text
-    return text[: _MAX_ALIAS_TEXT_LENGTH - 1].rstrip(" ،") + "…"
+    return _truncate_text(text, _MAX_ALIAS_TEXT_LENGTH)
 
 
 def _normalize_page(page: object, total_pages: int) -> int:
@@ -80,6 +94,27 @@ def _normalize_page(page: object, total_pages: int) -> int:
 def _catalog_page_items(commodities: Sequence[object], page: int, page_size: int) -> list[object]:
     offset = (page - 1) * page_size
     return list(commodities[offset : offset + page_size])
+
+
+def _candidate_catalog_text(lines: Sequence[str]) -> str:
+    return "\n".join(lines).rstrip()
+
+
+def _try_append_catalog_block(lines: list[str], block: Sequence[str]) -> bool:
+    candidate = _candidate_catalog_text([*lines, *block])
+    if len(candidate) > _MAX_CATALOG_TEXT_LENGTH:
+        return False
+    lines.extend(block)
+    return True
+
+
+def _append_catalog_truncation_notice(lines: list[str]) -> None:
+    if _try_append_catalog_block(lines, [_CATALOG_TRUNCATED_NOTICE]):
+        return
+    while lines and len(_candidate_catalog_text([*lines, _CATALOG_TRUNCATED_NOTICE])) > _MAX_CATALOG_TEXT_LENGTH:
+        lines.pop()
+    if len(_candidate_catalog_text([*lines, _CATALOG_TRUNCATED_NOTICE])) <= _MAX_CATALOG_TEXT_LENGTH:
+        lines.append(_CATALOG_TRUNCATED_NOTICE)
 
 
 def build_commodity_catalog_text(
@@ -108,14 +143,17 @@ def build_commodity_catalog_text(
         _catalog_page_items(sorted_commodities, normalized_page, page_size),
         start=start_index,
     ):
-        lines.append(f"{index}. {_commodity_display_name(commodity)}")
+        commodity_lines = [f"{index}. {_bounded_commodity_display_name(commodity)}"]
         alias_names = _alias_display_names(commodity)
         if alias_names:
-            lines.append(f"   نام‌های قابل استفاده: {_bounded_alias_text(alias_names)}")
+            commodity_lines.append(f"   نام‌های قابل استفاده: {_bounded_alias_text(alias_names)}")
         else:
-            lines.append("   نام مستعار ثبت نشده است.")
-        lines.append("")
-    return "\n".join(lines).rstrip()
+            commodity_lines.append("   نام مستعار ثبت نشده است.")
+        commodity_lines.append("")
+        if not _try_append_catalog_block(lines, commodity_lines):
+            _append_catalog_truncation_notice(lines)
+            break
+    return _candidate_catalog_text(lines)
 
 
 def build_commodity_catalog_keyboard(
@@ -182,7 +220,15 @@ async def show_commodity_catalog(message: types.Message, user: User | None):
 
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     text, keyboard = await _render_catalog(1)
-    anchor_msg = await message.answer(text, reply_markup=keyboard)
+    try:
+        anchor_msg = await message.answer(text, reply_markup=keyboard)
+    except TelegramBadRequest:
+        logger.warning("Failed to send commodity catalog message", exc_info=True)
+        try:
+            anchor_msg = await message.answer(_CATALOG_SEND_ERROR_TEXT)
+        except TelegramBadRequest:
+            logger.warning("Failed to send commodity catalog fallback message", exc_info=True)
+            return
     set_anchor(message.chat.id, anchor_msg.message_id)
 
 
