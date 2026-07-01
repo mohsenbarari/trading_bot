@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -177,6 +177,66 @@ class TelegramNotificationOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.RETRYABLE_FAILED)
         self.assertEqual(outbox.reason, "telegram_rate_limited")
         self.assertIsNotNone(outbox.next_retry_at)
+
+    async def test_rate_limit_retry_after_can_exceed_generic_backoff_cap(self):
+        db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
+        outbox = _outbox(attempt_count=service.MAX_RETRY_ATTEMPTS)
+        gateway_send = AsyncMock(
+            return_value=telegram_gateway.TelegramGatewayResult(
+                ok=False,
+                method="sendMessage",
+                status_code=429,
+                response_json={"parameters": {"retry_after": 1200}},
+                response_text="Too Many Requests",
+            )
+        )
+
+        with patch.object(service, "evaluate_bot_access", new=AsyncMock(return_value=BotAccessDecision(True))), patch.object(
+            service, "get_active_customer_relation_for_user", new=AsyncMock(return_value=None)
+        ):
+            result = await service.deliver_claimed_telegram_notification_outbox(
+                db,
+                outbox,
+                current_server="foreign",
+                gateway_send=gateway_send,
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.TELEGRAM_NOTIFICATION_DELIVERY_STATUS_RETRY_PENDING)
+        self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.RETRYABLE_FAILED)
+        self.assertEqual(outbox.reason, "telegram_rate_limited")
+        self.assertGreaterEqual(result.retry_after_seconds, 1200)
+        self.assertLessEqual(result.retry_after_seconds, 1205)
+        self.assertEqual(outbox.next_retry_at, NOW + timedelta(seconds=result.retry_after_seconds))
+        self.assertIsNone(outbox.terminal_at)
+
+    async def test_retry_exhaustion_still_terminalizes_non_rate_limit_failures(self):
+        db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
+        outbox = _outbox(attempt_count=service.MAX_RETRY_ATTEMPTS)
+        gateway_send = AsyncMock(
+            return_value=telegram_gateway.TelegramGatewayResult(
+                ok=False,
+                method="sendMessage",
+                status_code=500,
+                response_text="server error",
+            )
+        )
+
+        with patch.object(service, "evaluate_bot_access", new=AsyncMock(return_value=BotAccessDecision(True))), patch.object(
+            service, "get_active_customer_relation_for_user", new=AsyncMock(return_value=None)
+        ):
+            result = await service.deliver_claimed_telegram_notification_outbox(
+                db,
+                outbox,
+                current_server="foreign",
+                gateway_send=gateway_send,
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.TELEGRAM_NOTIFICATION_DELIVERY_STATUS_TERMINAL_FAILED)
+        self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.TERMINAL_FAILED)
+        self.assertEqual(outbox.reason, "telegram_retry_exhausted")
+        self.assertEqual(outbox.terminal_at, NOW)
 
 
 if __name__ == "__main__":

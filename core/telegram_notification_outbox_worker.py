@@ -30,6 +30,7 @@ class TelegramNotificationOutboxCycleReport:
     processed_count: int
     recovered_lease_count: int
     status_counts: dict[str, int]
+    alert_count: int
 
 
 def _worker_batch_limit(limit: int | None = None) -> int:
@@ -80,6 +81,7 @@ async def run_telegram_notification_outbox_delivery_cycle(
     assert_background_job_authority(JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY)
     status_counts: dict[str, int] = {}
     processed_count = 0
+    alert_count = 0
     recovered_lease_count = await _recover_leases()
     send_interval = _worker_send_interval_seconds()
 
@@ -94,6 +96,18 @@ async def run_telegram_notification_outbox_delivery_cycle(
         _increment_status(status_counts, result.status)
         if result.status == TELEGRAM_NOTIFICATION_DELIVERY_STATUS_NO_ROW:
             break
+        if result.alert_required:
+            alert_count += 1
+            logger.warning(
+                "Telegram notification outbox delivery requires attention",
+                extra={
+                    "event": "telegram_notification_outbox.delivery_alert",
+                    "status": result.status,
+                    "reason": result.reason,
+                    "outbox_id": getattr(result.outbox, "id", None),
+                    "recipient_user_id": result.recipient_user_id,
+                },
+            )
         processed_count += 1
         await asyncio.sleep(send_interval)
 
@@ -101,6 +115,7 @@ async def run_telegram_notification_outbox_delivery_cycle(
         processed_count=processed_count,
         recovered_lease_count=recovered_lease_count,
         status_counts=status_counts,
+        alert_count=alert_count,
     )
 
 
@@ -132,6 +147,7 @@ async def telegram_notification_outbox_delivery_loop() -> None:
                             "processed_count": report.processed_count,
                             "recovered_lease_count": report.recovered_lease_count,
                             "status_counts": report.status_counts,
+                            "alert_count": report.alert_count,
                             "duration_ms": duration_ms_since(start_time),
                         },
                     )

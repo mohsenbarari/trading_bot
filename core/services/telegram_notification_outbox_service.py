@@ -36,6 +36,7 @@ TELEGRAM_NOTIFICATION_DELIVERY_STATUS_BLOCKED_WRONG_SERVER = "blocked_wrong_serv
 
 MIN_RETRY_DELAY_SECONDS = 1
 MAX_RETRY_DELAY_SECONDS = 300
+MAX_RATE_LIMIT_RETRY_AFTER_SECONDS = 24 * 60 * 60
 MAX_RETRY_JITTER_SECONDS = 5
 MAX_RETRY_ATTEMPTS = 8
 TEXT_MAX_LENGTH = 4096
@@ -150,7 +151,7 @@ def _retry_after_from_result(result: telegram_gateway.TelegramGatewayResult) -> 
     retry_after = _coerce_int(raw_retry_after)
     if retry_after is None:
         return None
-    return min(MAX_RETRY_DELAY_SECONDS, max(MIN_RETRY_DELAY_SECONDS, retry_after))
+    return min(MAX_RATE_LIMIT_RETRY_AFTER_SECONDS, max(MIN_RETRY_DELAY_SECONDS, retry_after))
 
 
 def _stable_retry_jitter_seconds(
@@ -179,15 +180,17 @@ def bounded_retry_delay_seconds(
 ) -> int:
     if classification.retry_after_seconds is not None:
         base_delay = classification.retry_after_seconds
+        max_delay = MAX_RATE_LIMIT_RETRY_AFTER_SECONDS
     else:
         attempt_count = max(1, int(getattr(outbox, "attempt_count", 0) or 0))
         base_delay = min(MAX_RETRY_DELAY_SECONDS, 2 ** min(attempt_count, 8))
+        max_delay = MAX_RETRY_DELAY_SECONDS
     jitter = _stable_retry_jitter_seconds(
         outbox=outbox,
         attempt_count=max(1, int(getattr(outbox, "attempt_count", 0) or 0)),
         max_jitter_seconds=max_jitter_seconds,
     )
-    return min(MAX_RETRY_DELAY_SECONDS, max(MIN_RETRY_DELAY_SECONDS, base_delay + jitter))
+    return min(max_delay, max(MIN_RETRY_DELAY_SECONDS, base_delay + jitter))
 
 
 def retry_attempts_exhausted(
@@ -196,6 +199,17 @@ def retry_attempts_exhausted(
     max_attempts: int = MAX_RETRY_ATTEMPTS,
 ) -> bool:
     return int(getattr(outbox, "attempt_count", 0) or 0) >= max(1, int(max_attempts))
+
+
+def retry_attempts_should_terminalize(
+    classification: TelegramNotificationFailureClassification,
+    outbox: TelegramNotificationOutbox | Any,
+    *,
+    max_attempts: int = MAX_RETRY_ATTEMPTS,
+) -> bool:
+    if classification.reason == "telegram_rate_limited":
+        return False
+    return retry_attempts_exhausted(outbox, max_attempts=max_attempts)
 
 
 def validate_telegram_notification_text(text: str) -> str:
@@ -369,7 +383,7 @@ async def _mark_outbox(
     outbox.updated_at = current_time
     if status == TelegramNotificationOutboxStatus.RETRYABLE_FAILED:
         delay = max(MIN_RETRY_DELAY_SECONDS, int(retry_after_seconds or MIN_RETRY_DELAY_SECONDS))
-        outbox.next_retry_at = current_time + timedelta(seconds=min(MAX_RETRY_DELAY_SECONDS, delay))
+        outbox.next_retry_at = current_time + timedelta(seconds=delay)
         outbox.terminal_at = None
     else:
         outbox.next_retry_at = None
@@ -606,7 +620,10 @@ async def deliver_claimed_telegram_notification_outbox(
         )
 
     classification = classify_telegram_notification_failure(gateway_result)
-    if classification.status == TelegramNotificationOutboxStatus.RETRYABLE_FAILED and retry_attempts_exhausted(outbox):
+    if classification.status == TelegramNotificationOutboxStatus.RETRYABLE_FAILED and retry_attempts_should_terminalize(
+        classification,
+        outbox,
+    ):
         await _mark_outbox(
             db,
             outbox=outbox,
