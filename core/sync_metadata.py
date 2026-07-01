@@ -107,6 +107,10 @@ def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -
         recipient_user_id = _string_or_none(data.get("recipient_user_id"))
         if broadcast_id and recipient_user_id:
             return f"{broadcast_id}:{recipient_user_id}"
+    if table_name == "telegram_notification_outbox":
+        dedupe_key = _string_or_none(data.get("dedupe_key"))
+        if dedupe_key:
+            return dedupe_key
     if table_name == "user_blocks":
         blocker_id = coerce_positive_int(data.get("blocker_id"))
         blocked_id = coerce_positive_int(data.get("blocked_id"))
@@ -201,6 +205,28 @@ def build_sync_public_identity(table_name: str, record_id: Any, data: Any) -> di
                 identity["references"] = {"broadcast_id": broadcast_id}
             return identity
 
+    if table_name == "telegram_notification_outbox":
+        dedupe_key = _string_or_none(payload_data.get("dedupe_key"))
+        if dedupe_key:
+            identity = {
+                "table": table_name,
+                "kind": "dedupe_key",
+                "value": dedupe_key,
+                "record_id": record_id,
+            }
+            references = {
+                key: value
+                for key, value in {
+                    "source_type": _string_or_none(payload_data.get("source_type")),
+                    "source_id": _string_or_none(payload_data.get("source_id")),
+                    "recipient_user_id": _string_or_none(payload_data.get("recipient_user_id")),
+                }.items()
+                if value
+            }
+            if references:
+                identity["references"] = references
+            return identity
+
     if table_name == "offer_requests":
         request_home_server = _string_or_none(payload_data.get("request_home_server"))
         idempotency_key = _string_or_none(payload_data.get("idempotency_key"))
@@ -232,6 +258,7 @@ def build_sync_public_identity(table_name: str, record_id: Any, data: Any) -> di
         "notifications": "dedupe_key",
         "telegram_link_tokens": "token_hash",
         "telegram_admin_broadcast_receipts": "dedupe_key",
+        "telegram_notification_outbox": "dedupe_key",
         "user_notification_preferences": "user_id",
     }
     simple_key = simple_identity_keys.get(table_name)

@@ -231,6 +231,31 @@ SYNC_TABLE_FIXTURES = {
         "created_at": NOW,
         "updated_at": NOW,
     },
+    "telegram_notification_outbox": {
+        "id": 38,
+        "dedupe_key": "telegram-notification:project_user_joined:1:4",
+        "source_type": "project_user_joined",
+        "source_id": "1",
+        "recipient_user_id": 4,
+        "telegram_id_at_enqueue": 1000004,
+        "telegram_id_at_send": None,
+        "text": "همکار جدید به لیست اضافه شد.",
+        "parse_mode": None,
+        "status": "pending",
+        "reason": None,
+        "telegram_message_id": None,
+        "attempt_count": 0,
+        "next_retry_at": None,
+        "last_error_class": None,
+        "last_error_message": None,
+        "worker_id": "telegram-notification-local",
+        "lease_until": NOW,
+        "sent_at": None,
+        "terminal_at": None,
+        "extra_payload": {"exclude_customers": True},
+        "created_at": NOW,
+        "updated_at": NOW,
+    },
     "trade_delivery_receipts": {
         "id": 32,
         "event_type": "trade_completed",
@@ -332,6 +357,7 @@ RULE_FAMILY_BY_TABLE = {
     "telegram_link_tokens": "token_hash_terminal_guard",
     "telegram_admin_broadcasts": "idempotent_id_upsert",
     "telegram_admin_broadcast_receipts": "dedupe_key_terminal_receipt_guard",
+    "telegram_notification_outbox": "dedupe_key_terminal_receipt_guard",
     "trade_delivery_receipts": "dedupe_key_terminal_receipt_guard",
     "trades": "trade_number_completed_trade_guard",
     "trading_settings": "special_key_update_handler",
@@ -348,6 +374,7 @@ EXPECTED_ORDER_PAIRS = (
     ("users", "invitations"),
     ("users", "notifications"),
     ("users", "telegram_admin_broadcasts"),
+    ("users", "telegram_notification_outbox"),
     ("users", "user_notification_preferences"),
     ("notifications", "offers"),
     ("accountant_relations", "offers"),
@@ -594,6 +621,7 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
                     "offer_publication_states",
                     "trade_delivery_receipts",
                     "telegram_admin_broadcast_receipts",
+                    "telegram_notification_outbox",
                 }:
                     identity_token = {
                         "offers": "offer_public_id",
@@ -601,6 +629,7 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
                         "offer_publication_states": "dedupe_key",
                         "trade_delivery_receipts": "dedupe_key",
                         "telegram_admin_broadcast_receipts": "dedupe_key",
+                        "telegram_notification_outbox": "dedupe_key",
                     }[table_name]
                     self.assertIn(identity_token, compiled)
 

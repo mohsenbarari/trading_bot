@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     offer_publication_worker_channel_send_spacing_seconds: float = 0.35
     offer_publication_worker_rate_limit_cooldown_seconds: float = 10.0
     offer_publication_worker_max_rate_limit_cooldown_seconds: float = 120.0
+    telegram_notification_outbox_worker_interval_seconds: float = 1.0
+    telegram_notification_outbox_worker_batch_limit: int = 50
+    telegram_notification_outbox_worker_lease_seconds: int = 30
+    telegram_notification_outbox_worker_recover_limit: int = 100
+    telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
 
     database_url: str
     sync_database_url: str

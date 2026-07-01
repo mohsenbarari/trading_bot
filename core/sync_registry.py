@@ -309,6 +309,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "Telegram-only management broadcast delivery audit and repair",
         notes="Workers must execute only on foreign; synced rows on Iran are visibility/audit data only.",
     ),
+    "telegram_notification_outbox": _entry(
+        "telegram_notification_outbox",
+        SyncPolicy.SYNC,
+        ("webapp_notification_producer", "telegram_notification_outbox_worker"),
+        "foreign Telegram delivery owner",
+        "dedupe key plus terminal-state precedence; local lease fields are not cross-server execution authority",
+        "Generic Telegram private-message notification delivery audit and repair",
+        notes=(
+            "Iran may enqueue rows for Telegram delivery without calling Telegram directly. "
+            "Workers must execute only on foreign; synced rows on Iran are visibility/audit data only."
+        ),
+    ),
     "trading_settings": _entry(
         "trading_settings",
         SyncPolicy.SYNC,

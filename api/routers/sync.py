@@ -385,6 +385,7 @@ TABLE_ORDER = {
     "trade_delivery_receipts": 21,
     "telegram_admin_broadcasts": 22,
     "telegram_admin_broadcast_receipts": 23,
+    "telegram_notification_outbox": 24,
 }
 
 async def verify_signature(request: Request):
@@ -505,6 +506,10 @@ from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
     TelegramAdminBroadcastReceipt,
 )
+from models.telegram_notification_outbox import (
+    TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
+    TelegramNotificationOutbox,
+)
 from models.sync_apply_watermark import SyncApplyWatermark
 from models.commodity import Commodity, CommodityAlias
 from models.chat import Chat
@@ -534,6 +539,7 @@ NATURAL_KEYS = {
     "offer_publication_states": "dedupe_key",
     "trade_delivery_receipts": "dedupe_key",
     "telegram_admin_broadcast_receipts": "dedupe_key",
+    "telegram_notification_outbox": "dedupe_key",
 }
 
 SAFE_NATURAL_VALUE_LOG_KEYS = {
@@ -544,6 +550,7 @@ SAFE_NATURAL_VALUE_LOG_KEYS = {
     ("offer_publication_states", "dedupe_key"),
     ("trade_delivery_receipts", "dedupe_key"),
     ("telegram_admin_broadcast_receipts", "dedupe_key"),
+    ("telegram_notification_outbox", "dedupe_key"),
 }
 
 NATURAL_IDENTITY_DELETE_TABLES = {
@@ -559,6 +566,7 @@ NATURAL_IDENTITY_DELETE_TABLES = {
     "offers",
     "telegram_link_tokens",
     "telegram_admin_broadcast_receipts",
+    "telegram_notification_outbox",
     "trade_delivery_receipts",
     "trades",
     "user_blocks",
@@ -592,6 +600,7 @@ SEQUENCE_MAP = {
         "telegram_admin_broadcast_receipts_id_seq",
         "telegram_admin_broadcast_receipts",
     ),
+    "telegram_notification_outbox": ("telegram_notification_outbox_id_seq", "telegram_notification_outbox"),
     "telegram_link_tokens": ("telegram_link_tokens_id_seq", "telegram_link_tokens"),
     "invitations": ("invitations_id_seq", "invitations"),
     "user_notification_preferences": ("user_notification_preferences_id_seq", "user_notification_preferences"),
@@ -656,6 +665,7 @@ def get_model_class(table_name: str):
         "trade_delivery_receipts": TradeDeliveryReceipt,
         "telegram_admin_broadcasts": TelegramAdminBroadcast,
         "telegram_admin_broadcast_receipts": TelegramAdminBroadcastReceipt,
+        "telegram_notification_outbox": TelegramNotificationOutbox,
         "commodities": Commodity,
         "commodity_aliases": CommodityAlias,
         "market_schedule_overrides": MarketScheduleOverride,
@@ -1069,6 +1079,21 @@ def _build_upsert_stmt(model, table, data):
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
         return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict, where=where_clause)
+    elif table == "telegram_notification_outbox" and data.get("dedupe_key"):
+        immutable_fields = {
+            "id",
+            "dedupe_key",
+            "source_type",
+            "source_id",
+            "recipient_user_id",
+            "worker_id",
+            "lease_until",
+        }
+        set_dict = {key: value for key, value in data.items() if key not in immutable_fields}
+        where_clause = _telegram_notification_outbox_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict, where=where_clause)
     elif table == "user_notification_preferences" and data.get("user_id") is not None:
         set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "user_id"}}
         if "updated_at" in data:
@@ -1475,6 +1500,7 @@ def _sync_table_has_natural_delete_identity(table: str, data: dict) -> bool:
         "offer_publication_states",
         "trade_delivery_receipts",
         "telegram_admin_broadcast_receipts",
+        "telegram_notification_outbox",
         "offer_requests",
         "user_blocks",
     }:
@@ -1495,6 +1521,8 @@ def _sync_table_has_public_identity(table: str, data: dict) -> bool:
     if table == "trade_delivery_receipts":
         return bool(_nonempty_text(data.get("dedupe_key")))
     if table == "telegram_admin_broadcast_receipts":
+        return bool(_nonempty_text(data.get("dedupe_key")))
+    if table == "telegram_notification_outbox":
         return bool(_nonempty_text(data.get("dedupe_key")))
     if table == "offer_requests":
         return bool(_nonempty_text(data.get("request_home_server")) and _nonempty_text(data.get("idempotency_key")))
@@ -1838,6 +1866,25 @@ def _telegram_admin_broadcast_receipt_upsert_where_clause(model, stmt, data: dic
         return None
 
     terminal_statuses = list(TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES)
+    current_terminal = current_status.in_(terminal_statuses)
+    incoming_terminal = incoming_status.in_(terminal_statuses)
+    same_terminal_state = current_terminal & incoming_terminal & (current_status == incoming_status)
+
+    return (~current_terminal) | same_terminal_state
+
+
+def _telegram_notification_outbox_upsert_where_clause(model, stmt, data: dict):
+    if not _enum_value(data.get("status")):
+        return None
+    current_status = getattr(model, "status", None)
+    if current_status is None:
+        return None
+    try:
+        incoming_status = stmt.excluded["status"]
+    except (AttributeError, KeyError):
+        return None
+
+    terminal_statuses = list(TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES)
     current_terminal = current_status.in_(terminal_statuses)
     incoming_terminal = incoming_status.in_(terminal_statuses)
     same_terminal_state = current_terminal & incoming_terminal & (current_status == incoming_status)

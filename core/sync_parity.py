@@ -44,6 +44,7 @@ PARITY_QUICK_TABLES = (
     "trade_delivery_receipts",
     "telegram_admin_broadcasts",
     "telegram_admin_broadcast_receipts",
+    "telegram_notification_outbox",
 )
 
 IDENTITY_FIELDS_BY_TABLE: dict[str, tuple[str, ...]] = {
@@ -59,6 +60,7 @@ IDENTITY_FIELDS_BY_TABLE: dict[str, tuple[str, ...]] = {
     "offers": ("offer_public_id",),
     "telegram_link_tokens": ("token_hash",),
     "telegram_admin_broadcast_receipts": ("dedupe_key",),
+    "telegram_notification_outbox": ("dedupe_key",),
     "trade_delivery_receipts": ("dedupe_key",),
     "trades": ("trade_number",),
     "trading_settings": ("key",),
@@ -75,6 +77,7 @@ VOLATILE_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "trade_delivery_receipts": {"next_retry_at", "updated_at"},
     "telegram_admin_broadcasts": {"updated_at"},
     "telegram_admin_broadcast_receipts": {"next_retry_at", "updated_at"},
+    "telegram_notification_outbox": {"next_retry_at", "updated_at"},
 }
 
 LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
@@ -91,6 +94,7 @@ LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
     },
     "trade_delivery_receipts": {"trade_id", "offer_id", "notification_id", "worker_id", "lease_until"},
     "telegram_admin_broadcast_receipts": {"worker_id", "lease_until"},
+    "telegram_notification_outbox": {"worker_id", "lease_until"},
 }
 
 SENSITIVE_IDENTITY_FIELDS = {

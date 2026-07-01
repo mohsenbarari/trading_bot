@@ -48,6 +48,12 @@ from .telegram_admin_broadcast import (
     TelegramAdminBroadcastReceiptStatus,
     TelegramAdminBroadcastStatus,
 )
+from .telegram_notification_outbox import (
+    NON_TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
+    TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
+    TelegramNotificationOutbox,
+    TelegramNotificationOutboxStatus,
+)
 from .chat import Chat
 from .chat_member import ChatMember
 from .message import Message
@@ -113,6 +119,10 @@ __all__ = [
     "TelegramAdminBroadcastReceipt",
     "TelegramAdminBroadcastReceiptStatus",
     "TelegramAdminBroadcastStatus",
+    "NON_TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES",
+    "TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES",
+    "TelegramNotificationOutbox",
+    "TelegramNotificationOutboxStatus",
     # Generic Chat
     "Chat",
     "ChatMember",

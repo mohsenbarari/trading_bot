@@ -14,7 +14,7 @@ import time
 from jose import JWTError, jwt
 from core.db import get_db
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
-from models.accountant_relation import AccountantRelationStatus
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
 from core.enums import NotificationCategory, NotificationLevel
@@ -53,6 +53,11 @@ from core.services.telegram_link_token_service import (
     build_telegram_deep_link,
     build_telegram_start_parameter,
     create_telegram_link_token,
+)
+from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+    TelegramNotificationRecipient,
+    enqueue_telegram_notifications,
 )
 from models.session import Platform, UserSession
 import uuid
@@ -233,16 +238,26 @@ async def _publish_project_user_joined_notifications(db: AsyncSession, new_user:
         )
         .exists()
     )
-    telegram_recipient_stmt = select(User.telegram_id).where(
+    accountant_exists = (
+        select(AccountantRelation.id)
+        .where(
+            AccountantRelation.accountant_user_id == User.id,
+            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+            AccountantRelation.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    telegram_recipient_stmt = select(User.id, User.telegram_id).where(
         User.is_deleted == False,
         User.id != new_user.id,
         User.telegram_id.is_not(None),
         ~customer_exists,
+        ~accountant_exists,
     )
     try:
-        telegram_recipient_ids = list((await db.execute(telegram_recipient_stmt)).scalars().all())
+        telegram_recipient_rows = list((await db.execute(telegram_recipient_stmt)).all())
     except Exception as exc:
-        telegram_recipient_ids = []
+        telegram_recipient_rows = []
         logger.warning("Project user joined Telegram recipient lookup failed: %s", exc)
 
     message = _project_user_joined_message(new_user)
@@ -271,14 +286,33 @@ async def _publish_project_user_joined_notifications(db: AsyncSession, new_user:
                 },
             )
 
-    for telegram_id in telegram_recipient_ids:
+    telegram_recipients = [
+        TelegramNotificationRecipient(user_id=int(user_id), telegram_id=int(telegram_id))
+        for user_id, telegram_id in telegram_recipient_rows
+        if telegram_id is not None
+    ]
+    if telegram_recipients:
         try:
-            await send_telegram_message(int(telegram_id), message)
+            await enqueue_telegram_notifications(
+                db,
+                recipients=telegram_recipients,
+                text=message,
+                source_type=TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+                source_id=new_user.id,
+                parse_mode=None,
+                extra_payload={
+                    "title": "پیام مدیریت",
+                    "route": route,
+                    "exclude_customers": True,
+                },
+            )
+            await db.commit()
         except Exception as exc:
+            await db.rollback()
             logger.warning(
-                "Project user joined Telegram notification failed",
+                "Project user joined Telegram notification enqueue failed",
                 extra={
-                    "telegram_id": telegram_id,
+                    "recipient_count": len(telegram_recipients),
                     "new_user_id": new_user.id,
                     "error": str(exc),
                 },

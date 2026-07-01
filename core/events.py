@@ -763,6 +763,71 @@ def setup_telegram_admin_broadcast_events():
     logger.info("✅ TelegramAdminBroadcast event listeners registered")
 
 
+def setup_telegram_notification_outbox_events():
+    """Setup event listeners for generic Telegram notification outbox rows."""
+    from models.telegram_notification_outbox import TelegramNotificationOutbox
+
+    def _enum_value(value):
+        return value.value if hasattr(value, "value") else value
+
+    def outbox_payload(target) -> Dict[str, Any]:
+        return {
+            "id": target.id,
+            "dedupe_key": target.dedupe_key,
+            "source_type": target.source_type,
+            "source_id": target.source_id,
+            "recipient_user_id": target.recipient_user_id,
+            "telegram_id_at_enqueue": target.telegram_id_at_enqueue,
+            "telegram_id_at_send": target.telegram_id_at_send,
+            "text": target.text,
+            "parse_mode": target.parse_mode,
+            "status": _enum_value(target.status),
+            "reason": target.reason,
+            "telegram_message_id": target.telegram_message_id,
+            "attempt_count": target.attempt_count,
+            "next_retry_at": _isoformat_or_none(getattr(target, "next_retry_at", None)),
+            "last_error_class": target.last_error_class,
+            "last_error_message": target.last_error_message,
+            "worker_id": target.worker_id,
+            "lease_until": _isoformat_or_none(getattr(target, "lease_until", None)),
+            "sent_at": _isoformat_or_none(getattr(target, "sent_at", None)),
+            "terminal_at": _isoformat_or_none(getattr(target, "terminal_at", None)),
+            "extra_payload": target.extra_payload,
+            "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+            "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+        }
+
+    @event.listens_for(TelegramNotificationOutbox, 'after_insert')
+    def on_telegram_notification_outbox_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_notification_outbox", target.id, "INSERT", outbox_payload(target))
+        except Exception as e:
+            logger.error(f"Error in telegram_notification_outbox after_insert event: {e}")
+
+    @event.listens_for(TelegramNotificationOutbox, 'after_update')
+    def on_telegram_notification_outbox_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_notification_outbox", target.id, "UPDATE", outbox_payload(target))
+        except Exception as e:
+            logger.error(f"Error in telegram_notification_outbox after_update event: {e}")
+
+    @event.listens_for(TelegramNotificationOutbox, 'after_delete')
+    def on_telegram_notification_outbox_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id, "dedupe_key": target.dedupe_key}
+            log_change(connection, "telegram_notification_outbox", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in telegram_notification_outbox after_delete event: {e}")
+
+    logger.info("✅ TelegramNotificationOutbox event listeners registered")
+
+
 def setup_user_events():
     """Setup event listeners for User model"""
     from models.user import User
@@ -1571,6 +1636,7 @@ def setup_all_events():
     setup_trade_events()
     setup_trade_delivery_receipt_events()
     setup_telegram_admin_broadcast_events()
+    setup_telegram_notification_outbox_events()
     setup_commodity_events()
     setup_commodity_alias_events()
     setup_trading_settings_events()

@@ -29,6 +29,7 @@ from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
 from core.offer_publication_worker import offer_telegram_publication_loop
 from core.telegram_admin_broadcast_worker import telegram_admin_broadcast_delivery_loop
+from core.telegram_notification_outbox_worker import telegram_notification_outbox_delivery_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop
 
 # Configure logging
@@ -116,18 +117,26 @@ async def main():
     offer_publication_task = asyncio.create_task(offer_telegram_publication_loop())
     telegram_delivery_task = asyncio.create_task(telegram_trade_delivery_loop())
     telegram_admin_broadcast_task = asyncio.create_task(telegram_admin_broadcast_delivery_loop())
+    telegram_notification_outbox_task = asyncio.create_task(telegram_notification_outbox_delivery_loop())
     try:
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Bot error: {e}")
     finally:
-        for task in (suggestion_sync_task, offer_publication_task, telegram_delivery_task, telegram_admin_broadcast_task):
+        for task in (
+            suggestion_sync_task,
+            offer_publication_task,
+            telegram_delivery_task,
+            telegram_admin_broadcast_task,
+            telegram_notification_outbox_task,
+        ):
             task.cancel()
         await asyncio.gather(
             suggestion_sync_task,
             offer_publication_task,
             telegram_delivery_task,
             telegram_admin_broadcast_task,
+            telegram_notification_outbox_task,
             return_exceptions=True,
         )
         await bot.session.close()

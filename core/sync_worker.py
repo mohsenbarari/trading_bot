@@ -36,6 +36,7 @@ SYNC_OUTBOUND_TABLE_PRIORITY = (
     "accountant_relations",
     "customer_relations",
     "telegram_link_tokens",
+    "telegram_notification_outbox",
     "commodities",
     "commodity_aliases",
     "trading_settings",

@@ -20,6 +20,7 @@ JOB_SYNC_WORKER = "sync_worker"
 JOB_TRADE_WEBAPP_DELIVERY = "trade_webapp_delivery"
 JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
 JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
+JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
@@ -32,6 +33,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
             JOB_TRADE_WEBAPP_DELIVERY,
             JOB_TRADE_TELEGRAM_DELIVERY,
             JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
+            JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
             JOB_OFFER_TELEGRAM_PUBLICATION,
     }
 )
@@ -221,6 +223,25 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         ),
         external_state=("Telegram Bot API",),
         side_effects=("Telegram private admin broadcast message",),
+    ),
+    JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
+        mutated_tables=("telegram_notification_outbox",),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only generic Telegram notification outbox worker; claims local synced outbox rows "
+            "and sends private bot messages through the Telegram gateway"
+        ),
+        outage_behavior=(
+            "Iran may enqueue durable notification rows; foreign sends them after sync when available. "
+            "Transient Telegram/network failures remain retryable; unreachable or no-longer-eligible users are skipped."
+        ),
+        sync_outbox_behavior=(
+            "telegram_notification_outbox is synced non-messenger operational data; worker_id and lease_until "
+            "remain local execution fields"
+        ),
+        external_state=("Telegram Bot API",),
+        side_effects=("Telegram private generic notification message",),
     ),
     JOB_OFFER_TELEGRAM_PUBLICATION: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_TELEGRAM_PUBLICATION,
