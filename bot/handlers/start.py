@@ -2,7 +2,6 @@
 """هندلرهای شروع و ثبت‌نام"""
 
 from aiogram import Router, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
@@ -50,6 +49,11 @@ from bot.handlers.link_account import (
     prompt_contact_for_account_link,
 )
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
+from bot.utils.public_profile import (
+    build_bot_public_profile_keyboard,
+    build_bot_public_profile_text,
+    load_bot_public_profile,
+)
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -187,40 +191,21 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             await message.delete()
         except Exception:
             pass
-        
+
         try:
             target_user_id = int(token.replace("profile_", ""))
             async with AsyncSessionLocal() as session:
-                stmt = select(User).where(User.id == target_user_id)
-                target_user = (await session.execute(stmt)).scalar_one_or_none()
-                await attach_customer_management_names(session, [target_user])
-                
-                if target_user and not target_user.is_deleted:
-                    profile_text = (
-                        f"👤 پروفایل عمومی\n\n"
-                        f"🔸 نام کاربری: {user_display_name(target_user)}\n"
-                        f"📞 شماره تماس: {target_user.mobile_number}\n"
-                        f"📍 آدرس: {target_user.address or 'ثبت نشده'}"
-                    )
-                    await delete_previous_anchor(message.bot, message.chat.id, delay=0)
-                    
-                    # دکمه تاریخچه معاملات (فقط برای کاربران لاگین شده)
-                    if user:
-                        from bot.callbacks import TradeHistoryCallback
-                        profile_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=TradeHistoryCallback(target_user_id=target_user_id).pack())]
-                        ])
-                    else:
-                        profile_keyboard = None
-                    
-                    anchor_msg = await message.answer(
-                        profile_text,
-                        reply_markup=profile_keyboard
-                    )
-                    if user:
-                        set_anchor(message.chat.id, anchor_msg.message_id)
-                else:
-                    await message.answer("❌ کاربر یافت نشد.")
+                profile = await load_bot_public_profile(session, viewer=user, target_user_id=target_user_id)
+                if profile is None:
+                    await message.answer("❌ پروفایل در دسترس نیست.")
+                    return
+
+                await delete_previous_anchor(message.bot, message.chat.id, delay=0)
+                anchor_msg = await message.answer(
+                    build_bot_public_profile_text(profile),
+                    reply_markup=build_bot_public_profile_keyboard(profile),
+                )
+                set_anchor(message.chat.id, anchor_msg.message_id)
         except (ValueError, Exception):
             await message.answer("❌ لینک نامعتبر است.")
         return

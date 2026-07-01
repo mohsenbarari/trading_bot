@@ -44,13 +44,8 @@ class BotStartProfileTokenSuccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("https://app.example", build_webapp_link_line())
             self.assertIn("register?token=tok", build_accountant_register_link_line("tok"))
 
-        target_user = SimpleNamespace(
-            id=9,
-            is_deleted=False,
-            account_name="target",
-            mobile_number="09120000000",
-            address="تهران",
-        )
+        target_user = SimpleNamespace(id=9)
+        profile = SimpleNamespace(target_user=target_user, display_name="target", accountants=())
         message = SimpleNamespace(
             bot=SimpleNamespace(),
             chat=SimpleNamespace(id=30),
@@ -59,38 +54,32 @@ class BotStartProfileTokenSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         user = SimpleNamespace(id=5)
 
-        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(target_user))), patch(
+        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))), patch(
+            "bot.handlers.start.load_bot_public_profile", new=AsyncMock(return_value=profile)
+        ), patch("bot.handlers.start.build_bot_public_profile_text", return_value="👤 پروفایل"), patch(
+            "bot.handlers.start.build_bot_public_profile_keyboard", return_value="KB"
+        ), patch(
             "bot.handlers.start.delete_previous_anchor", new=AsyncMock()
         ), patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_start_with_token(message, SimpleNamespace(args="profile_9"), state=SimpleNamespace(), user=user)
 
-        self.assertIsNotNone(message.answer.await_args.kwargs["reply_markup"])
+        self.assertEqual(message.answer.await_args.args[0], "👤 پروفایل")
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "KB")
         set_anchor.assert_called_once_with(30, 91)
 
-    async def test_handle_start_with_profile_token_shows_public_profile(self):
-        target_user = SimpleNamespace(
-            id=9,
-            is_deleted=False,
-            account_name="target",
-            mobile_number="09120000000",
-            address="تهران",
-        )
+    async def test_handle_start_with_profile_token_requires_logged_in_viewer(self):
         message = SimpleNamespace(
             bot=SimpleNamespace(),
             chat=SimpleNamespace(id=30),
             delete=AsyncMock(),
-            answer=AsyncMock(return_value=SimpleNamespace(message_id=90)),
+            answer=AsyncMock(),
         )
 
-        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(target_user))), patch(
-            "bot.handlers.start.delete_previous_anchor", new=AsyncMock()
-        ) as delete_anchor, patch("bot.handlers.start.set_anchor") as set_anchor:
+        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))):
             await handle_start_with_token(message, SimpleNamespace(args="profile_9"), state=SimpleNamespace(), user=None)
 
         message.delete.assert_awaited_once()
-        delete_anchor.assert_awaited_once()
-        self.assertIn("پروفایل عمومی", message.answer.await_args.args[0])
-        set_anchor.assert_not_called()
+        self.assertIn("پروفایل در دسترس نیست", message.answer.await_args.args[0])
 
 
 if __name__ == "__main__":

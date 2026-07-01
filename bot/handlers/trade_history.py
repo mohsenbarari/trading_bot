@@ -25,10 +25,15 @@ from core.services.trade_history_export_service import (
 )
 from core.utils import to_jalali_str
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
+from bot.utils.public_profile import (
+    build_bot_public_profile_keyboard,
+    build_bot_public_profile_text,
+    load_bot_public_profile,
+)
 
 from bot.callbacks import (
     TradeHistoryCallback, HistoryPageCallback, 
-    ExportHistoryCallback, ProfileCallback
+    ExportHistoryCallback, ProfileCallback, ProfileTradePdfCallback
 )
 
 router = Router()
@@ -76,6 +81,23 @@ def get_trade_history_keyboard(target_user_id: int) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="🔙 بازگشت", callback_data=ProfileCallback(target_user_id=target_user_id).pack())]
     ])
+
+
+async def _ensure_history_profile_access(
+    *,
+    user: User,
+    target_user_id: int,
+    callback: types.CallbackQuery | None = None,
+) -> bool:
+    if target_user_id in {0, user.id}:
+        return True
+    async with AsyncSessionLocal() as session:
+        profile = await load_bot_public_profile(session, viewer=user, target_user_id=target_user_id)
+    if profile is not None:
+        return True
+    if callback is not None:
+        await callback.answer("پروفایل در دسترس نیست.", show_alert=True)
+    return False
 
 
 async def get_trade_history(current_user_id: int, target_user_id: int, months: int = 3):
@@ -230,6 +252,8 @@ async def show_trade_history(callback: types.CallbackQuery, callback_data: Trade
         return
 
     target_user_id = callback_data.target_user_id
+    if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
+        return
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
     if target_user is None and not trades and target_user_id not in {user.id, 0}:
         await callback.answer("کاربر یافت نشد!", show_alert=True)
@@ -248,6 +272,8 @@ async def filter_trade_history(callback: types.CallbackQuery, callback_data: His
         return
 
     target_user_id = callback_data.target_user_id
+    if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
+        return
     target_user, trades = await get_trade_history(user.id, target_user_id, months=callback_data.months)
     if target_user is None and not trades and target_user_id not in {user.id, 0}:
         await callback.answer("کاربر یافت نشد!", show_alert=True)
@@ -309,6 +335,8 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
     data = await state.get_data()
     months = data.get("history_months", 3)
     target_user_id = callback_data.target_user_id
+    if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
+        return
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
@@ -346,6 +374,8 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
     data = await state.get_data()
     months = data.get("history_months", 3)
     target_user_id = callback_data.target_user_id
+    if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
+        return
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
@@ -370,6 +400,41 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
         
     except Exception as e:
         msg = await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
+
+
+@router.callback_query(ProfileTradePdfCallback.filter())
+async def export_profile_trade_pdf(
+    callback: types.CallbackQuery,
+    callback_data: ProfileTradePdfCallback,
+    state: FSMContext,
+    user: Optional[User],
+    bot: Bot,
+):
+    if not user:
+        return
+
+    await callback.answer("⏳ در حال ایجاد فایل PDF...")
+
+    target_user_id = callback_data.target_user_id
+    if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
+        return
+
+    target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
+    if not trades:
+        await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
+        return
+
+    try:
+        filename = await generate_pdf(trades, target_user, user, months=3)
+        display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
+        await bot.send_document(
+            chat_id=callback.message.chat.id,
+            document=FSInputFile(filename, filename=_history_download_filename(display_name, "pdf")),
+            caption=f"📊 تاریخچه معاملات {display_name}\n📅 ۳ ماه اخیر",
+        )
+        os.remove(filename)
+    except Exception as e:
+        await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
 
 
 # --- بازگشت به پروفایل ---
@@ -408,24 +473,16 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
         return
 
     async with AsyncSessionLocal() as session:
-        stmt = select(User).where(User.id == target_user_id)
-        target_user = (await session.execute(stmt)).scalar_one_or_none()
-        await attach_customer_management_names(session, [target_user])
-    
-    if target_user:
-        profile_text = (
-            f"👤 پروفایل عمومی\n\n"
-            f"🔸 نام کاربری: {user_display_name(target_user)}\n"
-            f"📞 شماره تماس: {target_user.mobile_number}\n"
-            f"📍 آدرس: {target_user.address or 'ثبت نشده'}"
-        )
-        
+        profile = await load_bot_public_profile(session, viewer=user, target_user_id=target_user_id)
+
+    if profile:
         await callback.message.edit_text(
-            profile_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=TradeHistoryCallback(target_user_id=target_user_id).pack())]
-            ])
+            build_bot_public_profile_text(profile),
+            reply_markup=build_bot_public_profile_keyboard(profile),
         )
+    else:
+        await callback.answer("پروفایل در دسترس نیست.", show_alert=True)
+        return
     
     await callback.answer()
 
@@ -438,6 +495,8 @@ async def show_mutual_trade_history(callback: types.CallbackQuery, callback_data
     
     target_user_id = callback_data.target_user_id
     await state.update_data(history_months=3)
+    if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
+        return
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
     

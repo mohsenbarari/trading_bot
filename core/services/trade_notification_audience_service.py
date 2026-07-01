@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape as html_escape
 from typing import Mapping, Sequence
 from urllib.parse import urlencode
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import settings
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.bot_access_policy import evaluate_bot_access
@@ -312,6 +314,26 @@ def _should_hide_counterparty_for_recipient(
     return normalized_counterparty_user_id != owner_user_id
 
 
+def _bot_profile_deep_link(profile_user_id: int | None) -> str | None:
+    normalized_profile_user_id = _coerce_user_id(profile_user_id)
+    bot_username = str(getattr(settings, "bot_username", None) or "").strip().lstrip("@")
+    if normalized_profile_user_id is None or not bot_username:
+        return None
+    return f"https://t.me/{bot_username}?start=profile_{normalized_profile_user_id}"
+
+
+def _format_telegram_counterparty_name(
+    counterparty_name: str,
+    *,
+    counterparty_profile_user_id: int | None = None,
+) -> str:
+    escaped_name = html_escape(str(counterparty_name), quote=False)
+    profile_url = _bot_profile_deep_link(counterparty_profile_user_id)
+    if profile_url is None:
+        return escaped_name
+    return f'<a href="{html_escape(profile_url, quote=True)}">{escaped_name}</a>'
+
+
 def _build_trade_notification_message(
     *,
     trade_emoji: str,
@@ -360,6 +382,7 @@ def _build_trade_telegram_message(
     trade_number: int,
     trade_datetime: str,
     counterparty_name: str | None,
+    counterparty_profile_user_id: int | None = None,
     hide_counterparty: bool = False,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
@@ -372,7 +395,13 @@ def _build_trade_telegram_message(
         f"🏷️ کالا: {commodity_name}",
     ]
     if counterparty_name and not hide_counterparty:
-        lines.append(f"👤 طرف معامله: {counterparty_name}")
+        lines.append(
+            "👤 طرف معامله: "
+            + _format_telegram_counterparty_name(
+                counterparty_name,
+                counterparty_profile_user_id=counterparty_profile_user_id,
+            )
+        )
     lines.append(f"🔢 شماره معامله: {trade_number}")
     lines.append(f"🕐 زمان معامله: {trade_datetime}")
     if trade_path_summary:
@@ -396,6 +425,8 @@ def _build_trade_message_bundle(
     trade_datetime: str,
     offer_user_name: str,
     responder_user_name: str,
+    offer_user_profile_user_id: int | None = None,
+    responder_user_profile_user_id: int | None = None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
@@ -409,6 +440,7 @@ def _build_trade_message_bundle(
         trade_number=trade_number,
         trade_datetime=trade_datetime,
         counterparty_name=offer_user_name,
+        counterparty_profile_user_id=offer_user_profile_user_id,
         trade_path_summary=trade_path_summary,
         offer_notes=offer_notes,
     )
@@ -421,6 +453,7 @@ def _build_trade_message_bundle(
         trade_number=trade_number,
         trade_datetime=trade_datetime,
         counterparty_name=responder_user_name,
+        counterparty_profile_user_id=responder_user_profile_user_id,
         trade_path_summary=trade_path_summary,
         offer_notes=offer_notes,
     )
@@ -586,6 +619,10 @@ async def build_trade_completion_notification_audience(
         trade_datetime=trade_datetime,
         offer_user_name=str(offer_user_payload.get("offer_user_name") or _user_display_name(offer_user)),
         responder_user_name=str(responder_user_payload.get("responder_user_name") or _user_display_name(responder_user)),
+        offer_user_profile_user_id=_coerce_user_id(offer_user_payload.get("offer_user_profile_user_id")),
+        responder_user_profile_user_id=_coerce_user_id(
+            responder_user_payload.get("responder_user_profile_user_id")
+        ),
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_payload.get("trade_path_summary"),
         offer_notes=_offer_notes(trade),
@@ -602,6 +639,7 @@ async def build_trade_completion_notification_audience(
             "counterparty_payload": offer_user_payload,
             "counterparty_name": str(offer_user_payload.get("offer_user_name") or _user_display_name(offer_user)),
             "counterparty_user_id": offer_user_id,
+            "counterparty_profile_user_id": _coerce_user_id(offer_user_payload.get("offer_user_profile_user_id")),
             "telegram_message": responder_telegram_message,
         },
         {
@@ -614,6 +652,9 @@ async def build_trade_completion_notification_audience(
             "counterparty_payload": responder_user_payload,
             "counterparty_name": str(responder_user_payload.get("responder_user_name") or _user_display_name(responder_user)),
             "counterparty_user_id": responder_user_id,
+            "counterparty_profile_user_id": _coerce_user_id(
+                responder_user_payload.get("responder_user_profile_user_id")
+            ),
             "telegram_message": offer_owner_telegram_message,
         },
     )
@@ -676,6 +717,7 @@ async def build_trade_completion_notification_audience(
                         trade_number=int(trade_number or 0),
                         trade_datetime=trade_datetime,
                         counterparty_name=str(side_spec["counterparty_name"]),
+                        counterparty_profile_user_id=_coerce_user_id(side_spec.get("counterparty_profile_user_id")),
                         hide_counterparty=hide_counterparty,
                         trade_path_summary=trade_path_payload.get("trade_path_summary"),
                         offer_notes=_offer_notes(trade),

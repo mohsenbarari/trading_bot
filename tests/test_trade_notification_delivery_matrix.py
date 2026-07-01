@@ -54,6 +54,24 @@ def channel(recipient, channel_name: str):
 
 
 class TradeNotificationDeliveryMatrixTests(unittest.IsolatedAsyncioTestCase):
+    def test_telegram_counterparty_name_links_to_bot_profile_when_available(self):
+        with patch.object(audience_service.settings, "bot_username", "@trade_test_bot"):
+            linked = audience_service._format_telegram_counterparty_name(
+                "Ali & Co",
+                counterparty_profile_user_id=42,
+            )
+        self.assertEqual(
+            linked,
+            '<a href="https://t.me/trade_test_bot?start=profile_42">Ali &amp; Co</a>',
+        )
+
+        with patch.object(audience_service.settings, "bot_username", ""):
+            plain = audience_service._format_telegram_counterparty_name(
+                "Ali & Co",
+                counterparty_profile_user_id=42,
+            )
+        self.assertEqual(plain, "Ali &amp; Co")
+
     def build_actor_context(self, actor_pair, index: int):
         base = 10_000 + index * 100
         source_user = make_user(base + 1, f"{actor_pair.pair_id}_source_user")
@@ -189,6 +207,10 @@ class TradeNotificationDeliveryMatrixTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.trade_notification_audience_service.evaluate_bot_access",
             new=AsyncMock(side_effect=fake_bot_access),
+        ), patch.object(
+            audience_service.settings,
+            "bot_username",
+            "",
         ):
             return await audience_service.build_trade_completion_notification_audience(object(), trade)
 

@@ -120,6 +120,13 @@ class ExportHistoryCallback(CallbackData, prefix="export"):
     format: str
     target_user_id: int
 
+class ProfileTradePdfCallback(CallbackData, prefix="profile_pdf"):
+    """
+    Format: profile_pdf:{target_user_id}
+    Example: profile_pdf:12345
+    """
+    target_user_id: int
+
 class ProfileCallback(CallbackData, prefix="back_to_profile"):
     """
     Format: back_to_profile:{target_user_id}

@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_history import export_pdf
+from bot.handlers.trade_history import export_pdf, export_profile_trade_pdf
 
 
 class FakeState:
@@ -41,7 +41,9 @@ class BotTradeHistoryExportPdfTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_export_pdf_warns_when_no_trades_exist(self):
         callback = make_callback()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), []))):
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), []))
+        ):
             await export_pdf(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2), bot=SimpleNamespace())
 
         callback.message.answer.assert_awaited_once()
@@ -53,7 +55,9 @@ class BotTradeHistoryExportPdfTests(unittest.IsolatedAsyncioTestCase):
         target_user = SimpleNamespace(account_name="target")
         trades = [SimpleNamespace(id=1)]
 
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))
+        ), patch(
             "bot.handlers.trade_history.generate_pdf", new=AsyncMock(return_value="/tmp/out.pdf")
         ), patch("bot.handlers.trade_history.FSInputFile", return_value="FILE"), patch(
             "bot.handlers.trade_history.os.remove"
@@ -64,12 +68,41 @@ class BotTradeHistoryExportPdfTests(unittest.IsolatedAsyncioTestCase):
         remove_mock.assert_called_once_with("/tmp/out.pdf")
 
         callback = make_callback()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))
+        ), patch(
             "bot.handlers.trade_history.generate_pdf", new=AsyncMock(side_effect=RuntimeError("boom"))
         ):
             await export_pdf(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2), bot=bot)
 
         self.assertIn("خطا در ایجاد فایل", callback.message.answer.await_args.args[0])
+
+    async def test_export_profile_trade_pdf_always_uses_three_month_window(self):
+        callback = make_callback()
+        bot = SimpleNamespace(send_document=AsyncMock())
+        target_user = SimpleNamespace(account_name="target")
+        trades = [SimpleNamespace(id=1)]
+
+        get_history = AsyncMock(return_value=(target_user, trades))
+        generate = AsyncMock(return_value="/tmp/profile.pdf")
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=get_history
+        ), patch("bot.handlers.trade_history.generate_pdf", new=generate), patch(
+            "bot.handlers.trade_history.FSInputFile", return_value="FILE"
+        ), patch("bot.handlers.trade_history.os.remove") as remove_mock:
+            await export_profile_trade_pdf(
+                callback,
+                SimpleNamespace(target_user_id=5),
+                FakeState({"history_months": 12}),
+                user=SimpleNamespace(id=2),
+                bot=bot,
+            )
+
+        get_history.assert_awaited_once_with(2, 5, months=3)
+        generate.assert_awaited_once_with(trades, target_user, SimpleNamespace(id=2), months=3)
+        bot.send_document.assert_awaited_once()
+        self.assertIn("۳ ماه اخیر", bot.send_document.await_args.kwargs["caption"])
+        remove_mock.assert_called_once_with("/tmp/profile.pdf")
 
 
 if __name__ == "__main__":

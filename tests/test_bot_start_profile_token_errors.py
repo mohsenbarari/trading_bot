@@ -43,7 +43,7 @@ class BotStartProfileTokenErrorTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))):
             await handle_start_with_token(message, SimpleNamespace(args="profile_11"), state=SimpleNamespace(), user=None)
-        self.assertIn("کاربر یافت نشد", message.answer.await_args.args[0])
+        self.assertIn("پروفایل در دسترس نیست", message.answer.await_args.args[0])
 
         message = SimpleNamespace(
             bot=SimpleNamespace(),

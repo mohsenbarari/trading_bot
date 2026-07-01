@@ -45,13 +45,18 @@ class BotTradeHistoryBackToProfileTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_not_awaited()
 
     async def test_back_to_profile_rebuilds_profile_text_and_answers(self):
-        target_user = SimpleNamespace(account_name="target", mobile_number="0912", address="تهران")
+        target_user = SimpleNamespace(id=5, account_name="target", mobile_number="0912", address="تهران")
+        profile = SimpleNamespace(target_user=target_user, display_name="target", accountants=())
         callback = make_callback()
 
-        with patch("bot.handlers.trade_history.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(target_user))):
+        with patch("bot.handlers.trade_history.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))), patch(
+            "bot.handlers.trade_history.load_bot_public_profile", new=AsyncMock(return_value=profile)
+        ), patch("bot.handlers.trade_history.build_bot_public_profile_text", return_value="👤 پروفایل"), patch(
+            "bot.handlers.trade_history.build_bot_public_profile_keyboard", return_value="KB"
+        ):
             await back_to_profile(callback, SimpleNamespace(target_user_id=5), state=SimpleNamespace(), user=SimpleNamespace(id=2))
 
-        self.assertIn("پروفایل عمومی", callback.message.edit_text.await_args.args[0])
+        callback.message.edit_text.assert_awaited_once_with("👤 پروفایل", reply_markup="KB")
         callback.answer.assert_awaited_once()
 
     async def test_back_to_profile_handles_self_target_and_missing_target(self):
@@ -69,7 +74,9 @@ class BotTradeHistoryBackToProfileTests(unittest.IsolatedAsyncioTestCase):
         )
 
         callback = make_callback()
-        with patch("bot.handlers.trade_history.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))):
+        with patch("bot.handlers.trade_history.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))), patch(
+            "bot.handlers.trade_history.load_bot_public_profile", new=AsyncMock(return_value=None)
+        ):
             await back_to_profile(callback, SimpleNamespace(target_user_id=5), state=SimpleNamespace(), user=SimpleNamespace(id=2))
         callback.message.edit_text.assert_not_awaited()
         callback.answer.assert_awaited_once()
