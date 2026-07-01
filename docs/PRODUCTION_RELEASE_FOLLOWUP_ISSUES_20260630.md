@@ -604,3 +604,43 @@ channel_state_response_counts={"2xx":2}
 
 - A later recent-log snapshot showed no continuing Telegram `400 Bad Request` or `429 Too Many Requests` lines; only expected `foreign_surface.blocked` warnings remained on the foreign public surface.
 - The old stale runtime parity status remains an operator-observability follow-up under issue 6; it did not block the release because live sync queues and publication reconciliation were clean on both servers.
+
+### 2026-07-01 production release observation: Telegram publication restart noise persists but is bounded
+
+Release:
+
+- `8f9d2c21` - `Harden Telegram notification outbox retries`
+
+Observed during post-release monitoring:
+
+- `make production-release` completed with exit code `0`.
+- `make production-online-health` passed after the release.
+- Foreign services were up: `app`, `bot`, `sync_worker`, `db`, and `redis`.
+- Iran services were up: `app`, `sync_worker`, `db`, and `redis`.
+- Production data hygiene passed on both servers with `finding_count=0`.
+- Recent filtered logs on both servers showed no `ERROR`, `CRITICAL`, `Traceback`, or unhandled exception entries.
+- The foreign bot registered `TelegramNotificationOutbox` listeners and started the notification outbox worker successfully.
+- Sync health samples on foreign reported clean queues and `publication_reconciliation_status=ok`.
+
+Suspicious but non-blocking Telegram publication evidence:
+
+- The foreign bot still emitted repeated Telegram `400 Bad Request` responses for `editMessageText` and `editMessageReplyMarkup` shortly after restart.
+- The first observed cycle also hit one Telegram `429 Too Many Requests`.
+- The worker handled the cycle without crashing and reported `job_result=success`.
+- The cycle-level aggregation showed bounded behavior rather than an unhandled failure:
+
+```text
+channel_state_processed=11
+channel_state_applied=9
+channel_state_failed=2
+channel_state_rate_limited=1
+channel_state_retryable_failed=2
+channel_state_cooldown_seconds=40.0
+channel_state_response_counts={"2xx":9,"429":1,"transport":1}
+```
+
+Required follow-up:
+
+- Keep issue 16 open: classify old/deleted/stale publication rows so impossible terminal edits do not create repeated restart noise.
+- Keep issue 17 open: continue observing Telegram restart pacing and confirm `429` bursts stay bounded after future releases.
+- Do not treat this release observation as a production blocker because service health, sync queues, publication reconciliation, and data hygiene were clean.
