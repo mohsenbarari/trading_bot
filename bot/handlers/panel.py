@@ -111,6 +111,7 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
     from bot.handlers.admin import start_invitation_creation
     from bot.handlers.admin_broadcast import ADMIN_BROADCAST_BUTTON_TEXT, start_telegram_admin_broadcast
     from bot.handlers.admin_commodities import handle_manage_commodities
+    from bot.handlers.commodity_catalog import COMMODITY_CATALOG_TEXT, show_commodity_catalog
     from bot.handlers.admin_users import (
         handle_back_to_admin,
         handle_users_list_command,
@@ -131,6 +132,7 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
         USER_PANEL_RECENT_TRADES_TEXT: lambda: show_recent_trades_pdf(message, state, user),
         USER_PANEL_BLOCKED_USERS_TEXT: lambda: show_user_panel_blocked_users(message, state, user),
         USER_PANEL_CUSTOMERS_TEXT: lambda: show_user_panel_customers(message, state, user),
+        COMMODITY_CATALOG_TEXT: lambda: show_commodity_catalog(message, user),
         "➕ ارسال لینک دعوت": lambda: start_invitation_creation(message, state, user),
         ADMIN_BROADCAST_BUTTON_TEXT: lambda: start_telegram_admin_broadcast(message, state, user),
         "📦 مدیریت کالاها": lambda: handle_manage_commodities(message, user, state),

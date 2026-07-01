@@ -16,6 +16,7 @@ from bot.handlers import (
     admin_broadcast,
     admin_commodities,
     admin_users,
+    commodity_catalog,
     block_manage,
     link_account, # 👈 Added
     default
@@ -100,6 +101,7 @@ async def main():
     dp.include_router(trade_execute.router)
     dp.include_router(trade_manage.router)
     dp.include_router(trade_history.router)
+    dp.include_router(commodity_catalog.router)
     dp.include_router(admin.router)
     dp.include_router(admin_broadcast.router)
     dp.include_router(admin_commodities.router)

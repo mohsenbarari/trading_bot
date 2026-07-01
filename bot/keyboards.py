@@ -31,6 +31,7 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     if not row_2_buttons:
         row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
     keyboard_layout.append(row_2_buttons)
+    keyboard_layout.append([KeyboardButton(text="📦 لیست کالاها")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
 def get_user_panel_keyboard(user_role: UserRole = None, *, standard_actions: bool = False) -> ReplyKeyboardMarkup:

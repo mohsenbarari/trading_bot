@@ -127,6 +127,13 @@ class ProfileTradePdfCallback(CallbackData, prefix="profile_pdf"):
     """
     target_user_id: int
 
+class CommodityCatalogPageCallback(CallbackData, prefix="commodity_catalog"):
+    """
+    Format: commodity_catalog:{page}
+    Example: commodity_catalog:2
+    """
+    page: int
+
 class ProfileCallback(CallbackData, prefix="back_to_profile"):
     """
     Format: back_to_profile:{target_user_id}
