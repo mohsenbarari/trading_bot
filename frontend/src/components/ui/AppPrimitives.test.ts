@@ -513,15 +513,29 @@ describe('ui primitives', () => {
     dialogTrigger.focus()
 
     const dialog = mount(AppResponsiveDialog, {
-      props: { open: true, title: 'جزئیات' },
-      slots: { default: '<input aria-label="نام" /><button>ذخیره</button>' },
+      props: {
+        open: true,
+        title: 'جزئیات',
+        backdropClass: 'legacy-backdrop',
+        panelClass: 'legacy-panel',
+        bodyClass: 'legacy-body',
+        actionsClass: 'legacy-actions',
+      },
+      slots: {
+        default: '<input aria-label="نام" />',
+        actions: '<button>ذخیره</button>',
+      },
       attachTo: document.body,
     })
     await nextTick()
     const dialogElement = document.body.querySelector('.ui-responsive-dialog') as HTMLElement | null
     const dialogInput = document.body.querySelector('.ui-responsive-dialog input') as HTMLInputElement | null
     const dialogButtons = Array.from(document.body.querySelectorAll('.ui-responsive-dialog button')) as HTMLButtonElement[]
+    expect(document.body.querySelector('.ui-responsive-dialog-backdrop')?.classList.contains('legacy-backdrop')).toBe(true)
     expect(dialogElement).toBeTruthy()
+    expect(dialogElement?.classList.contains('legacy-panel')).toBe(true)
+    expect(document.body.querySelector('.ui-responsive-dialog__body')?.classList.contains('legacy-body')).toBe(true)
+    expect(document.body.querySelector('.ui-responsive-dialog__actions')?.classList.contains('legacy-actions')).toBe(true)
     expect(dialogInput).toBeTruthy()
     expect(dialogButtons).toHaveLength(2)
     expect(document.activeElement).toBe(dialog.findComponent(AppButton).element)

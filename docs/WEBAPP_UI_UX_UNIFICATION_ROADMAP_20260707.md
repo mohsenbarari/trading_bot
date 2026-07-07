@@ -455,6 +455,11 @@ Exit criteria:
 - Customer/accountant visibility rules remain unchanged.
 - Existing profile and workspace tests pass.
 
+Implementation notes:
+
+- The Stage 7 behavior contract and rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE7_PROFILE_ACCOUNT_CONTRACT_20260707.md`.
+- The first Stage 7 slice prepares `AppResponsiveDialog` with optional compatibility class props (`backdropClass`, `panelClass`, `bodyClass`, `actionsClass`) so profile modals can migrate to the shared primitive while preserving legacy selectors such as `.modal-overlay`, `.modal-content`, and `.date-modal-content`.
+
 ## Stage 8 - Navigation and PWA Interaction Decision
 
 Goal: resolve the remaining product-level UX questions with evidence.
