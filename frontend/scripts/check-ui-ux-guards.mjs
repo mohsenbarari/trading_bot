@@ -44,6 +44,62 @@ const modalOverlayAllowlist = new Set([
   'src/components/PublicProfile.vue',
 ])
 
+const allChecks = ['tokens', 'trade-colors', 'modal-overlays']
+
+function parseCheckModes(args) {
+  if (!args.length) {
+    return new Set(allChecks)
+  }
+
+  const selected = new Set()
+  for (const arg of args) {
+    if (arg === '--help' || arg === '-h') {
+      console.log([
+        'Usage: node scripts/check-ui-ux-guards.mjs [options]',
+        '',
+        'Options:',
+        '  --tokens-only          Run only undefined design-token guard',
+        '  --trade-colors-only    Run only hardcoded trade-side color guard',
+        '  --modal-overlays-only  Run only bespoke modal overlay guard',
+        '  --check=a,b            Run a comma-separated subset of: tokens, trade-colors, modal-overlays',
+      ].join('\n'))
+      process.exit(0)
+    }
+    if (arg === '--tokens-only') {
+      selected.add('tokens')
+      continue
+    }
+    if (arg === '--trade-colors-only') {
+      selected.add('trade-colors')
+      continue
+    }
+    if (arg === '--modal-overlays-only') {
+      selected.add('modal-overlays')
+      continue
+    }
+    if (arg.startsWith('--check=')) {
+      for (const check of arg.slice('--check='.length).split(',')) {
+        if (allChecks.includes(check)) {
+          selected.add(check)
+          continue
+        }
+        console.error(`Unknown UI guard check: ${check}`)
+        process.exit(2)
+      }
+      continue
+    }
+    console.error(`Unknown UI guard option: ${arg}`)
+    process.exit(2)
+  }
+
+  if (!selected.size) {
+    console.error('No UI guard checks selected.')
+    process.exit(2)
+  }
+
+  return selected
+}
+
 function toRepoPath(filePath) {
   return path.relative(frontendRoot, filePath).split(path.sep).join('/')
 }
@@ -186,13 +242,20 @@ function printFlatFindings(title, findings) {
   }
 }
 
-const undefinedTokens = checkUndefinedTokens()
-const hardcodedTradeColors = checkHardcodedTradeColors()
-const modalOverlayFindings = checkModalOverlays()
+const selectedChecks = parseCheckModes(process.argv.slice(2))
+const undefinedTokens = selectedChecks.has('tokens') ? checkUndefinedTokens() : []
+const hardcodedTradeColors = selectedChecks.has('trade-colors') ? checkHardcodedTradeColors() : []
+const modalOverlayFindings = selectedChecks.has('modal-overlays') ? checkModalOverlays() : []
 
-printTokenFindings(undefinedTokens)
-printFlatFindings('hardcoded trade-side color guard', hardcodedTradeColors)
-printFlatFindings('new bespoke modal-overlay guard', modalOverlayFindings)
+if (selectedChecks.has('tokens')) {
+  printTokenFindings(undefinedTokens)
+}
+if (selectedChecks.has('trade-colors')) {
+  printFlatFindings('hardcoded trade-side color guard', hardcodedTradeColors)
+}
+if (selectedChecks.has('modal-overlays')) {
+  printFlatFindings('new bespoke modal-overlay guard', modalOverlayFindings)
+}
 
 const hasFailures = undefinedTokens.length > 0
   || hardcodedTradeColors.length > 0

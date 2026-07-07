@@ -43,6 +43,7 @@
     --ds-primary-500: #f59e0b;
     --ds-primary-600: #d97706;
     --ds-primary-700: #b45309;
+    --ds-primary-800: #92400e;
 
     /* Success / Buy (Green) */
     --ds-success-50:  #ecfdf5;
@@ -55,6 +56,7 @@
     --ds-danger-50:  #fef2f2;
     --ds-danger-100: #fee2e2;
     --ds-danger-200: #fecaca;
+    --ds-danger-300: #fca5a5;
     --ds-danger-500: #ef4444;
     --ds-danger-600: #dc2626;
     --ds-danger-700: #b91c1c;
@@ -64,28 +66,39 @@
     --ds-warning-100: #fef3c7;
     --ds-warning-500: #f59e0b;
     --ds-warning-600: #d97706;
+    --ds-warning-700: #b45309;
 
     /* Info (Sky) */
     --ds-info-50:  #f0f9ff;
     --ds-info-500: #0ea5e9;
+    --ds-info-700: #0369a1;
 
     /* Text */
     --ds-text-primary:   #1f2937;
     --ds-text-secondary: #4b5563;
     --ds-text-muted:     #6b7280;
+    --ds-text-tertiary:  #64748b;
     --ds-text-placeholder: #9ca3af;
+    --ds-text-disabled:  #9ca3af;
     --ds-text-faint:     #d1d5db;
+    --ds-text-strong: var(--ds-text-primary);
 
     /* Backgrounds */
     --ds-bg-page:    #f9fafb;
     --ds-bg-card:    #ffffff;
     --ds-bg-inset:   #f9fafb;
+    --ds-bg-surface: var(--ds-bg-card);
+    --ds-bg-subtle:  #f8fafc;
+    --ds-bg-soft:    var(--ds-bg-inset);
     --ds-bg-hover:   #f3f4f6;
+    --ds-bg-disabled: var(--ds-bg-hover);
 
     /* Borders */
     --ds-border-light:  #f3f4f6;
     --ds-border-medium: #e5e7eb;
     --ds-border-strong: #d1d5db;
+    --ds-border: var(--ds-border-medium);
+    --ds-border-subtle: var(--ds-border-light);
     --ds-border-accent: rgba(245, 158, 11, 0.12);
 
     /* Border Radius */
@@ -114,6 +127,7 @@
     --ds-font-lg:   1rem;
     --ds-font-xl:   1.1rem;
     --ds-font-2xl:  1.2rem;
+    --ds-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
     --ds-font-eyebrow: var(--ds-font-xs);
     --ds-font-badge: var(--ds-font-xs);
     --ds-font-meta: var(--ds-font-xs);
@@ -136,6 +150,17 @@
     --ds-z-toast: 120;
     --ds-transition-fast: 0.18s;
     --ds-transition-normal: 0.24s;
+
+    /* Compatibility aliases for pre-roadmap UI surfaces. Keep these mapped to canonical tokens. */
+    --ds-accent: var(--ds-primary-700);
+    --ds-color-danger-700: var(--ds-danger-700);
+    --ds-color-info-700: var(--ds-info-700);
+    --ds-primary: var(--ds-primary-500);
+    --ds-primary-soft: var(--ds-primary-50);
+    --ds-primary-strong: var(--ds-primary-700);
+    --ds-surface: var(--ds-bg-card);
+    --ds-surface-soft: var(--ds-bg-inset);
+    --ds-surface-subtle: var(--ds-bg-subtle);
 
     /* Gradient shortcuts */
     --ds-gradient-primary: linear-gradient(135deg, var(--ds-primary-500), var(--ds-primary-600), var(--ds-primary-700));
