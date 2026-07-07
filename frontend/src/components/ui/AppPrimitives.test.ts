@@ -19,6 +19,8 @@ import {
   AppMetricCard,
   AppNumberStepper,
   AppOfferCard,
+  AppOfferQuantityBadge,
+  AppOfferSideBadge,
   AppPage,
   AppPageHeader,
   AppResponsiveDialog,
@@ -111,6 +113,15 @@ describe('ui primitives', () => {
     expect(tradeButton.attributes('data-state')).toBe('pending')
     expect(tradeButton.classes()).toEqual(expect.arrayContaining(['trade-btn', 'pending', 'busy']))
     expect(tradeButton.attributes('disabled')).toBeDefined()
+
+    const sideBadge = mount(AppOfferSideBadge, { props: { side: 'sell' } })
+    expect(sideBadge.classes()).toEqual(expect.arrayContaining(['role-badge', 'sell']))
+    expect(sideBadge.text()).toBe('فروش')
+
+    const quantityBadge = mount(AppOfferQuantityBadge, { slots: { default: '12 عدد' } })
+    expect(quantityBadge.classes()).toContain('quantity-badge')
+    expect(quantityBadge.attributes('data-test')).toBe('offer-quantity')
+    expect(quantityBadge.text()).toBe('12 عدد')
   })
 
   it('supports keyboard-friendly tabs and emits model updates', async () => {

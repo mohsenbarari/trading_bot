@@ -6,7 +6,7 @@ import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
-import { AppOfferCard, AppTradeActionButton } from './ui';
+import { AppOfferCard, AppOfferQuantityBadge, AppOfferSideBadge, AppTradeActionButton } from './ui';
 
 interface TradeLotSuggestionState {
   title: string;
@@ -511,9 +511,7 @@ async function cancelOwnOffer(offerId: number) {
 
           <!-- Header: role badge + time -->
           <div class="offer-header">
-            <span class="role-badge" :class="offer.offer_type">
-              {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
-            </span>
+            <AppOfferSideBadge :side="offer.offer_type" />
             <span class="offer-time">{{ timeAgo(offer.created_at) }}</span>
           </div>
 
@@ -521,7 +519,7 @@ async function cancelOwnOffer(offerId: number) {
           <div class="offer-body">
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
-              <span class="quantity-badge">{{ getOfferQuantityLabel(offer) }}</span>
+              <AppOfferQuantityBadge>{{ getOfferQuantityLabel(offer) }}</AppOfferQuantityBadge>
               <span class="price" data-test="offer-price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
             </div>
             <div v-if="offer.customer_badge_visible" class="customer-context-row" data-test="customer-context-row">

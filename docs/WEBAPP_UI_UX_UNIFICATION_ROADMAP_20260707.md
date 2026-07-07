@@ -370,7 +370,7 @@ Exit criteria:
 Implementation notes:
 
 - The pre-refactor behavior contract and rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE5_MARKET_BEHAVIOR_CONTRACT_20260707.md`.
-- The first low-risk Stage 5 slice introduces `AppOfferCard` and `AppTradeActionButton` while preserving the existing root classes, Stage 4.5 `data-test` / `data-state` contract, slot content, trade handlers, and request/idempotency flow.
+- The first low-risk Stage 5 slices introduce `AppOfferCard`, `AppTradeActionButton`, `AppOfferSideBadge`, and `AppOfferQuantityBadge` while preserving the existing root classes, Stage 4.5 `data-test` / `data-state` contract, slot content, trade handlers, and request/idempotency flow.
 - Higher-risk visual changes to Market empty/loading/error states, bottom action model, or broader offer-card internals must wait for staging/runtime review because browser E2E runtime cannot run inside the current sandbox.
 
 ## Stage 6 - Admin Surface Refactor

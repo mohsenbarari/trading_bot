@@ -109,8 +109,11 @@ The current sandbox cannot run browser E2E runtime because Vite cannot bind `127
 
 - `AppOfferCard` now owns the offer-card wrapper state classes and `data-test="offer-card"` while preserving the existing inner slot content.
 - `AppTradeActionButton` now owns the root trade action button class, side/pending/busy classes, `data-test="trade-action-button"`, and `data-state`.
+- `AppOfferSideBadge` now owns the root `role-badge` buy/sell badge and label.
+- `AppOfferQuantityBadge` now owns the root `quantity-badge` quantity display and exposes `data-test="offer-quantity"`.
 - `OffersList.vue` keeps the existing trade handlers, cancel handler, idempotency key management, lot suggestion state, price display, customer-context display, and history stamp rendering.
 - `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/OffersList.test.ts src/views/MarketView.test.ts src/components/TradeLotSuggestionAlert.test.ts`: passed, 61 tests.
+- `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/OffersList.test.ts src/views/MarketView.test.ts`: passed, 56 tests after the badge primitive slice.
 - `npm run guard:ui`: passed.
 - `npm run build`: passed.
 - `npx playwright test e2e/market-offers.spec.ts e2e/lot-suggestion.spec.ts e2e/market-mutation-ux.spec.ts e2e/market-schedule.spec.ts --project=chromium --list`: passed, 13 tests discovered.
