@@ -19,6 +19,9 @@ import {
   AppMetricCard,
   AppNumberStepper,
   AppOfferCard,
+  AppOfferCustomerContext,
+  AppOfferHistoryStamp,
+  AppOfferPrice,
   AppOfferQuantityBadge,
   AppOfferSideBadge,
   AppPage,
@@ -122,6 +125,28 @@ describe('ui primitives', () => {
     expect(quantityBadge.classes()).toContain('quantity-badge')
     expect(quantityBadge.attributes('data-test')).toBe('offer-quantity')
     expect(quantityBadge.text()).toBe('12 عدد')
+
+    const historyStamp = mount(AppOfferHistoryStamp, {
+      props: { label: 'معامله‌شده 20 عدد', traded: true },
+    })
+    expect(historyStamp.attributes('data-test')).toBe('history-stamp')
+    expect(historyStamp.classes()).toEqual(expect.arrayContaining(['history-ribbon', 'traded-ribbon']))
+    expect(historyStamp.text()).toBe('معامله‌شده 20 عدد')
+
+    const offerPrice = mount(AppOfferPrice, { props: { value: 50000 } })
+    expect(offerPrice.attributes('data-test')).toBe('offer-price')
+    expect(offerPrice.classes()).toContain('price')
+    expect(offerPrice.text()).toBe('50,000')
+
+    const emptyPrice = mount(AppOfferPrice, { props: { value: 0 } })
+    expect(emptyPrice.text()).toBe('---')
+
+    const customerContext = mount(AppOfferCustomerContext, {
+      props: { managementName: 'مشتری تست', tierLabel: 'سطح 1' },
+    })
+    expect(customerContext.attributes('data-test')).toBe('customer-context-row')
+    expect(customerContext.text()).toContain('مشتری تست')
+    expect(customerContext.text()).toContain('سطح 1')
   })
 
   it('supports keyboard-friendly tabs and emits model updates', async () => {

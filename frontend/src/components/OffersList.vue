@@ -4,9 +4,16 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
-import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
-import { AppOfferCard, AppOfferQuantityBadge, AppOfferSideBadge, AppTradeActionButton } from './ui';
+import {
+  AppOfferCard,
+  AppOfferCustomerContext,
+  AppOfferHistoryStamp,
+  AppOfferPrice,
+  AppOfferQuantityBadge,
+  AppOfferSideBadge,
+  AppTradeActionButton,
+} from './ui';
 
 interface TradeLotSuggestionState {
   title: string;
@@ -500,14 +507,11 @@ async function cancelOwnOffer(offerId: number) {
         :timer-style="cardTimerStyle(offer)"
       >
         <div class="offer-card-inner" :class="[offer.offer_type]">
-          <span
+          <AppOfferHistoryStamp
             v-if="getHistoryStampLabel(offer)"
-            class="history-ribbon"
-            :class="isTradedHistoryOffer(offer) ? 'traded-ribbon' : 'expired-ribbon'"
-            data-test="history-stamp"
-          >
-            {{ getHistoryStampLabel(offer) }}
-          </span>
+            :label="getHistoryStampLabel(offer)"
+            :traded="isTradedHistoryOffer(offer)"
+          />
 
           <!-- Header: role badge + time -->
           <div class="offer-header">
@@ -520,18 +524,13 @@ async function cancelOwnOffer(offerId: number) {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <AppOfferQuantityBadge>{{ getOfferQuantityLabel(offer) }}</AppOfferQuantityBadge>
-              <span class="price" data-test="offer-price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
+              <AppOfferPrice :value="getDisplayedOfferPrice(offer)" />
             </div>
-            <div v-if="offer.customer_badge_visible" class="customer-context-row" data-test="customer-context-row">
-              <CustomerNameWithBadge
-                v-if="offer.customer_management_name"
-                :name="offer.customer_management_name"
-                compact
-                data-test="customer-context-name-badge"
-              />
-              <span v-else class="customer-context-badge" data-test="customer-context-badge">مشتری</span>
-              <span v-if="offer.customer_tier" class="customer-context-tier" data-test="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
-            </div>
+            <AppOfferCustomerContext
+              v-if="offer.customer_badge_visible"
+              :management-name="offer.customer_management_name"
+              :tier-label="offer.customer_tier ? getCustomerTierLabel(offer.customer_tier) : null"
+            />
             <p v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
             </p>
