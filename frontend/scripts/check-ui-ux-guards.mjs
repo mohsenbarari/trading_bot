@@ -132,6 +132,17 @@ function read(filePath) {
   return fs.readFileSync(filePath, 'utf8')
 }
 
+function extractStyleSource(filePath, source) {
+  if (path.extname(filePath) !== '.vue') return source
+
+  const blocks = []
+  const stylePattern = /<style\b[^>]*>([\s\S]*?)<\/style>/gi
+  for (const match of source.matchAll(stylePattern)) {
+    blocks.push(match[1])
+  }
+  return blocks.join('\n')
+}
+
 function collectDefinedTokens() {
   const css = read(tokenSource)
   const defined = new Set()
@@ -173,13 +184,14 @@ function checkHardcodedTradeColors() {
   for (const repoPath of tradeColorFiles) {
     const filePath = path.join(frontendRoot, repoPath)
     if (!fs.existsSync(filePath)) continue
-    const source = read(filePath)
+    const originalSource = read(filePath)
+    const source = extractStyleSource(filePath, originalSource)
     for (const pattern of tradeColorPatterns) {
       pattern.lastIndex = 0
       for (const match of source.matchAll(pattern)) {
         findings.push({
           value: match[0],
-          location: `${repoPath}:${lineForIndex(source, match.index ?? 0)}`,
+          location: `${repoPath}:style:${lineForIndex(source, match.index ?? 0)}`,
         })
       }
     }

@@ -51,6 +51,7 @@
     --ds-success-500: #10b981;
     --ds-success-600: #059669;
     --ds-success-700: #047857;
+    --ds-success-800: #065f46;
 
     /* Danger / Sell (Red) */
     --ds-danger-50:  #fef2f2;
@@ -60,6 +61,7 @@
     --ds-danger-500: #ef4444;
     --ds-danger-600: #dc2626;
     --ds-danger-700: #b91c1c;
+    --ds-danger-800: #991b1b;
 
     /* Warning (Amber alias) */
     --ds-warning-50:  #fffbeb;
@@ -71,7 +73,19 @@
     /* Info (Sky) */
     --ds-info-50:  #f0f9ff;
     --ds-info-500: #0ea5e9;
+    --ds-info-600: #0284c7;
     --ds-info-700: #0369a1;
+
+    /* Telegram brand */
+    --ds-telegram-400: #38bdf8;
+    --ds-telegram-500: #169bd7;
+    --ds-telegram-600: #087eb8;
+    --ds-telegram-700: #0284c7;
+    --ds-telegram-border: rgba(14, 116, 144, 0.26);
+    --ds-telegram-focus: rgba(56, 189, 248, 0.34);
+    --ds-telegram-shadow: rgba(14, 165, 233, 0.28);
+    --ds-telegram-shadow-strong: rgba(14, 165, 233, 0.36);
+    --ds-telegram-gradient: linear-gradient(135deg, var(--ds-telegram-400), var(--ds-telegram-500) 48%, var(--ds-telegram-600));
 
     /* Text */
     --ds-text-primary:   #1f2937;
@@ -150,6 +164,22 @@
     --ds-z-toast: 120;
     --ds-transition-fast: 0.18s;
     --ds-transition-normal: 0.24s;
+
+    /* App shell */
+    --ds-app-background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%);
+
+    /* Trade/status semantics */
+    --ds-trade-buy-bg: rgba(22, 163, 74, 0.12);
+    --ds-trade-buy-text: #15803d;
+    --ds-trade-buy-shadow: rgba(16, 185, 129, 0.18);
+    --ds-trade-sell-bg: rgba(220, 38, 38, 0.1);
+    --ds-trade-sell-text: var(--ds-danger-700);
+    --ds-trade-sell-shadow: rgba(239, 68, 68, 0.18);
+    --ds-market-open-bg: rgba(15, 118, 110, 0.09);
+    --ds-market-open-text: #0f766e;
+    --ds-market-open-border: rgba(15, 118, 110, 0.18);
+    --ds-market-closed-bg: rgba(185, 28, 28, 0.08);
+    --ds-market-closed-border: rgba(185, 28, 28, 0.16);
 
     /* Compatibility aliases for pre-roadmap UI surfaces. Keep these mapped to canonical tokens. */
     --ds-accent: var(--ds-primary-700);

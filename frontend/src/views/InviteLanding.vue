@@ -162,13 +162,13 @@ function goToWebRegister() {
 }
 
 .telegram-btn {
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  background: linear-gradient(135deg, var(--ds-info-500), var(--ds-telegram-700));
   color: white;
-  box-shadow: 0 14px 30px rgba(14, 165, 233, 0.22);
+  box-shadow: 0 14px 30px var(--ds-telegram-shadow);
 }
 
 .telegram-btn:focus-visible {
-  outline: 3px solid rgba(14, 165, 233, 0.26);
+  outline: 3px solid var(--ds-telegram-focus);
   outline-offset: 2px;
 }
 </style>

@@ -4,7 +4,11 @@ import { useRouter } from 'vue-router'
 import { X } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { getNotificationIconComponent } from '../utils/notificationUi'
-import type { ToastNotification } from '../types/notifications'
+import {
+  getNotificationDisplayKind,
+  type ToastNotification,
+} from '../types/notifications'
+import AppToast from './ui/AppToast.vue'
 
 const store = useNotificationStore()
 const router = useRouter()
@@ -53,6 +57,22 @@ const getToastStyle = (id: number) => {
   }
 }
 
+type ToastTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
+
+const getToastTone = (toast: ToastNotification): ToastTone => {
+  if (toast.level === 'success') return 'success'
+  if (toast.level === 'warning') return 'warning'
+  if (toast.level === 'error') return 'danger'
+  if (toast.level === 'info' && toast.kind !== 'chat') return 'info'
+
+  const displayKind = getNotificationDisplayKind(toast)
+  if (displayKind === 'success') return 'success'
+  if (displayKind === 'warning') return 'warning'
+  if (displayKind === 'error') return 'danger'
+  if (displayKind === 'info' || displayKind === 'chat') return 'info'
+  return 'neutral'
+}
+
 const handleToastClick = (toast: ToastNotification) => {
   // If user was swiping, don't trigger click navigation
   const state = dragState.value[toast.id]
@@ -75,6 +95,7 @@ const handleToastClick = (toast: ToastNotification) => {
         v-for="toast in store.activeToasts" 
         :key="toast.id"
         class="toast-card-floating pointer-events-auto"
+        :class="`toast-card-floating--${getToastTone(toast)}`"
         :style="getToastStyle(toast.id)"
         @touchstart="onTouchStart($event, toast.id)"
         @touchmove="onTouchMove($event, toast.id)"
@@ -84,10 +105,12 @@ const handleToastClick = (toast: ToastNotification) => {
         <div class="notif-icon-circle">
           <component :is="getNotificationIconComponent(toast)" :size="20" />
         </div>
-        <div class="notif-content">
-          <h4 class="notif-title">{{ toast.title }}</h4>
-          <p class="notif-body-text">{{ toast.body }}</p>
-        </div>
+        <AppToast
+          class="toast-card-floating__surface"
+          :title="toast.title"
+          :message="toast.body"
+          :tone="getToastTone(toast)"
+        />
         <button @click.stop="store.removeToast(toast.id)" class="close-btn-minimal">
           <X :size="16" :stroke-width="2.5" />
         </button>
@@ -98,57 +121,33 @@ const handleToastClick = (toast: ToastNotification) => {
 
 <style scoped>
 .toast-card-floating {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  padding: 0.875rem 1rem;
+  position: relative;
   max-width: 400px;
   width: 100%;
   display: flex;
-  align-items: center;
-  gap: 0.875rem;
-  box-shadow: 
-    0 10px 25px -5px rgba(0, 0, 0, 0.1),
-    0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  align-items: stretch;
+  gap: 0.75rem;
   cursor: pointer;
   user-select: none;
   touch-action: pan-y;
   will-change: transform, opacity;
 }
 
-.notif-icon-circle {
-  width: 40px;
-  height: 40px;
-  background: white;
-  color: #f59e0b;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-}
-
-.notif-content {
-  flex: 1;
+.toast-card-floating__surface {
   min-width: 0;
+  flex: 1;
 }
 
-.notif-title {
-  font-size: 0.875rem;
-  font-weight: 800;
-  color: #111827;
-  margin: 0;
-  line-height: 1.2;
+.toast-card-floating :deep(.ui-toast) {
+  width: 100%;
+  max-width: none;
+  min-height: 64px;
+  padding-inline: 3.6rem 2.75rem;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-.notif-body-text {
-  font-size: 0.75rem;
-  color: #4b5563;
-  margin: 0.2rem 0 0 0;
-  line-height: 1.4;
+.toast-card-floating :deep(.ui-toast span) {
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -156,17 +155,53 @@ const handleToastClick = (toast: ToastNotification) => {
   -webkit-box-orient: vertical;
 }
 
+.notif-icon-circle {
+  width: 40px;
+  height: 40px;
+  position: absolute;
+  margin: 0.78rem 0.85rem 0 0;
+  background: var(--ds-bg-card);
+  color: var(--ds-primary-500);
+  border-radius: var(--ds-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: var(--ds-shadow-sm);
+  z-index: 1;
+}
+
+.toast-card-floating--success .notif-icon-circle {
+  color: var(--ds-success-700);
+}
+
+.toast-card-floating--warning .notif-icon-circle {
+  color: var(--ds-warning-700);
+}
+
+.toast-card-floating--danger .notif-icon-circle {
+  color: var(--ds-danger-700);
+}
+
+.toast-card-floating--info .notif-icon-circle {
+  color: var(--ds-info-700);
+}
+
 .close-btn-minimal {
   background: none;
   border: none;
-  color: #9ca3af;
+  color: var(--ds-text-placeholder);
   padding: 0.25rem;
+  position: absolute;
+  left: 0.85rem;
+  top: 0.85rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0.5;
   transition: opacity 0.2s;
+  z-index: 1;
 }
 .close-btn-minimal:hover {
   opacity: 1;

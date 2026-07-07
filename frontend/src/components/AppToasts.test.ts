@@ -58,6 +58,27 @@ describe('AppToasts.vue', () => {
     expect(removeToastSpy).toHaveBeenCalledWith(7)
   })
 
+  it('renders live toasts through the AppToast tone classes', () => {
+    const store = useNotificationStore()
+    store.activeToasts = [
+      { id: 5, title: 'خطا', body: 'پیام خطا', kind: 'app', level: 'error' },
+      { id: 6, title: 'چت', body: 'پیام چت', kind: 'chat' },
+    ]
+
+    const wrapper = mount(AppToasts, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    const primitiveToasts = wrapper.findAll('.ui-toast')
+    expect(primitiveToasts).toHaveLength(2)
+    expect(primitiveToasts[0]!.classes()).toContain('ui-toast--danger')
+    expect(primitiveToasts[1]!.classes()).toContain('ui-toast--info')
+  })
+
   it('ignores click navigation while the user is swiping and dismisses after a large swipe', async () => {
     const store = useNotificationStore()
     store.activeToasts = [

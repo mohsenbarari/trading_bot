@@ -1218,15 +1218,15 @@ onUnmounted(() => {
 }
 
 .market-runtime-notice--open {
-  background: rgba(15, 118, 110, 0.09);
-  color: #0f766e;
-  border-color: rgba(15, 118, 110, 0.18);
+  background: var(--ds-market-open-bg);
+  color: var(--ds-market-open-text);
+  border-color: var(--ds-market-open-border);
 }
 
 .market-runtime-notice--closed {
-  background: rgba(185, 28, 28, 0.08);
-  color: #b91c1c;
-  border-color: rgba(185, 28, 28, 0.16);
+  background: var(--ds-market-closed-bg);
+  color: var(--ds-danger-700);
+  border-color: var(--ds-market-closed-border);
 }
 
 .admin-market-message {

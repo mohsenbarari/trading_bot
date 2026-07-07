@@ -34,7 +34,7 @@ watch(isFirstRouteReady, (ready) => {
 
 
 <template>
-  <div class="h-full flex flex-col font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white overflow-hidden" style="background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%)">
+  <div class="app-shell h-full flex flex-col font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white overflow-hidden">
     
     <!-- Global Connecting State -->
     <div v-if="isAppConnecting" class="fixed top-0 left-0 w-full bg-amber-500 text-white text-sm py-1.5 flex items-center justify-center z-[200] gap-2 font-medium shadow-md">
@@ -67,6 +67,10 @@ watch(isFirstRouteReady, (ready) => {
 </template>
 
 <style>
+.app-shell {
+  background: var(--ds-app-background);
+}
+
 /* Global Transitions */
 .fade-enter-active,
 .fade-leave-active {

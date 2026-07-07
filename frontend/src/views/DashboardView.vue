@@ -1077,8 +1077,8 @@ onMounted(fetchUser)
   font-weight: 700;
   margin: 0 0 0.25rem 0;
 }
-.alert-blocked .alert-body h3 { color: #991b1b; }
-.alert-restricted .alert-body h3 { color: #92400e; }
+.alert-blocked .alert-body h3 { color: var(--ds-danger-800); }
+.alert-restricted .alert-body h3 { color: var(--ds-primary-800); }
 
 .alert-body p {
   font-size: 0.78rem;
@@ -1540,7 +1540,7 @@ onMounted(fetchUser)
 }
 
 .telegram-connect-section {
-  border: 1px solid rgba(14, 165, 233, 0.18);
+  border: 1px solid var(--ds-telegram-border);
 }
 
 .today-trades-counterparty {
@@ -1559,13 +1559,13 @@ onMounted(fetchUser)
 }
 
 .today-trade-type--buy {
-  background: rgba(22, 163, 74, 0.12);
-  color: #15803d;
+  background: var(--ds-trade-buy-bg);
+  color: var(--ds-trade-buy-text);
 }
 
 .today-trade-type--sell {
-  background: rgba(220, 38, 38, 0.1);
-  color: #b91c1c;
+  background: var(--ds-trade-sell-bg);
+  color: var(--ds-trade-sell-text);
 }
 
 .today-trade-type--unknown {
@@ -1596,14 +1596,14 @@ onMounted(fetchUser)
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
 }
 .hero-btn--open {
-  border-color: rgba(15, 118, 110, 0.18);
+  border-color: var(--ds-market-open-border);
   background: linear-gradient(135deg, rgba(240, 253, 250, 0.98), rgba(255, 255, 255, 0.96));
   box-shadow:
     inset 0 0 0 1px rgba(22, 163, 74, 0.1),
     inset 0 -24px 42px rgba(22, 163, 74, 0.16);
 }
 .hero-btn--closed {
-  border-color: rgba(220, 38, 38, 0.16);
+  border-color: var(--ds-market-closed-border);
   background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.96));
   box-shadow:
     inset 0 0 0 1px rgba(220, 38, 38, 0.1),
@@ -1673,8 +1673,8 @@ onMounted(fetchUser)
   white-space: nowrap;
 }
 .hero-status-pill--open {
-  background: rgba(22, 163, 74, 0.1);
-  color: #15803d;
+  background: var(--ds-trade-buy-bg);
+  color: var(--ds-trade-buy-text);
 }
 .hero-status-pill--closed {
   background: rgba(148, 163, 184, 0.12);

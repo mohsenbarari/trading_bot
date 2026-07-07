@@ -44,10 +44,10 @@ const emit = defineEmits<{
 
 <style scoped>
 .telegram-connect-panel {
-  --telegram-blue: #169bd7;
-  --telegram-blue-dark: #087eb8;
-  --telegram-blue-light: #38bdf8;
-  --telegram-blue-border: rgba(14, 116, 144, 0.26);
+  --telegram-blue: var(--ds-telegram-500);
+  --telegram-blue-dark: var(--ds-telegram-600);
+  --telegram-blue-light: var(--ds-telegram-400);
+  --telegram-blue-border: var(--ds-telegram-border);
 
   width: 100%;
   display: grid;
@@ -64,13 +64,13 @@ const emit = defineEmits<{
   background:
     radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.26), transparent 29%),
     linear-gradient(135deg, var(--telegram-blue-light), var(--telegram-blue) 48%, var(--telegram-blue-dark));
-  box-shadow: 0 14px 32px rgba(14, 165, 233, 0.28);
+  box-shadow: 0 14px 32px var(--ds-telegram-shadow);
   transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
 .telegram-connect-panel:hover:not(:disabled) {
-  box-shadow: 0 18px 40px rgba(14, 165, 233, 0.36);
+  box-shadow: 0 18px 40px var(--ds-telegram-shadow-strong);
   filter: saturate(1.08);
 }
 
@@ -79,7 +79,7 @@ const emit = defineEmits<{
 }
 
 .telegram-connect-panel:focus-visible {
-  outline: 3px solid rgba(56, 189, 248, 0.34);
+  outline: 3px solid var(--ds-telegram-focus);
   outline-offset: 3px;
 }
 
@@ -88,8 +88,8 @@ const emit = defineEmits<{
 }
 
 .telegram-connect-panel.is-connected {
-  --telegram-blue: #16a34a;
-  --telegram-blue-dark: #15803d;
+  --telegram-blue: var(--ds-success-600);
+  --telegram-blue-dark: var(--ds-trade-buy-text);
   --telegram-blue-light: #34d399;
   --telegram-blue-border: rgba(22, 101, 52, 0.22);
   box-shadow: 0 12px 28px rgba(22, 163, 74, 0.2);

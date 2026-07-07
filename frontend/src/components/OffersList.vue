@@ -778,7 +778,7 @@ async function cancelOwnOffer(offerId: number) {
 
 .expired-ribbon {
   background: rgba(239, 68, 68, 0.06);
-  color: #b91c1c;
+  color: var(--ds-danger-700);
   border: 2px solid rgba(185, 28, 28, 0.72);
 }
 
@@ -824,11 +824,11 @@ async function cancelOwnOffer(offerId: number) {
 
 /* Subtle outer shadow for depth */
 .offer-card-inner.buy {
-  box-shadow: 0 1px 4px 0 rgba(16, 185, 129, 0.18), 0 1px 2px 0 rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px 0 var(--ds-trade-buy-shadow), 0 1px 2px 0 rgba(0,0,0,0.04);
 }
 
 .offer-card-inner.sell {
-  box-shadow: 0 1px 4px 0 rgba(239, 68, 68, 0.18), 0 1px 2px 0 rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px 0 var(--ds-trade-sell-shadow), 0 1px 2px 0 rgba(0,0,0,0.04);
 }
 
 /* ── Header ── */
@@ -849,7 +849,7 @@ async function cancelOwnOffer(offerId: number) {
 
 .role-badge.buy {
   background: var(--ds-success-100);
-  color: #16a34a;
+  color: var(--ds-trade-buy-text);
 }
 
 .role-badge.sell {

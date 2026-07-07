@@ -435,10 +435,10 @@ input:focus, select:focus {
 
 .result-box.error {
   margin-top: 1.25rem; padding: 0.75rem; border-radius: 0.75rem;
-  background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;
+  background: var(--ds-danger-50); color: var(--ds-danger-800); border: 1px solid var(--ds-danger-200);
   font-size: 0.8rem; word-break: break-all;
 }
-.result-box :deep(strong) { color: #dc2626; }
+.result-box :deep(strong) { color: var(--ds-danger-600); }
 
 .success-box {
   margin-top: 1.25rem; padding: 1rem; border-radius: 1rem;
@@ -467,8 +467,8 @@ input:focus, select:focus {
 }
 .copy-container .copy-btn:disabled { background: #d1d5db; }
 .copy-container .copy-btn.web {
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
-  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+  background: linear-gradient(135deg, var(--ds-info-500), var(--ds-telegram-700));
+  box-shadow: 0 4px 12px var(--ds-telegram-shadow);
 }
 .link-label {
   font-size: 0.78rem; font-weight: 700; color: #374151;
@@ -525,9 +525,9 @@ input:focus, select:focus {
   margin-bottom: 0.75rem;
   padding: 0.625rem 0.75rem;
   border-radius: 0.75rem;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
+  background: var(--ds-danger-50);
+  border: 1px solid var(--ds-danger-200);
+  color: var(--ds-danger-800);
   font-size: 0.78rem;
 }
 .pending-state {
@@ -580,13 +580,13 @@ input:focus, select:focus {
   padding: 0.5rem 0.75rem;
 }
 .pending-copy-btn {
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  background: linear-gradient(135deg, var(--ds-info-500), var(--ds-telegram-700));
   color: white;
 }
 .delete-pending-btn {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-700);
+  border: 1px solid var(--ds-danger-200);
 }
 
 @media (max-width: 540px) {
