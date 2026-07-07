@@ -776,13 +776,27 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="override-actions">
-            <button data-testid="override-save" class="settings-button settings-button--primary" @click="saveOverride" :disabled="overrideSaving">
+            <AppButton
+              type="button"
+              data-testid="override-save"
+              class="settings-button settings-button--primary"
+              @click="saveOverride"
+              :disabled="overrideSaving"
+            >
               <Loader2 v-if="overrideSaving" class="animate-spin" :size="16" />
               <span>{{ editingOverrideId ? 'ذخیره ویرایش استثنا' : 'ثبت استثنا' }}</span>
-            </button>
-            <button v-if="editingOverrideId" data-testid="override-cancel" class="settings-button settings-button--secondary" @click="resetOverrideForm" :disabled="overrideSaving">
+            </AppButton>
+            <AppButton
+              v-if="editingOverrideId"
+              type="button"
+              data-testid="override-cancel"
+              class="settings-button settings-button--secondary"
+              variant="secondary"
+              @click="resetOverrideForm"
+              :disabled="overrideSaving"
+            >
               <span>لغو ویرایش</span>
-            </button>
+            </AppButton>
           </div>
 
           <div v-if="overridesLoading" class="inline-loading">
@@ -805,10 +819,10 @@ onBeforeUnmount(() => {
                 <div v-if="item.note" class="override-note">{{ item.note }}</div>
               </div>
               <div class="override-card__actions">
-                <button :data-testid="`override-edit-${item.id}`" class="mini-footer-control" @click="startEditingOverride(item)">ویرایش</button>
-                <button :data-testid="`override-delete-${item.id}`" class="mini-footer-control danger" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
+                <AppButton type="button" :data-testid="`override-edit-${item.id}`" class="mini-footer-control" variant="secondary" @click="startEditingOverride(item)">ویرایش</AppButton>
+                <AppButton type="button" :data-testid="`override-delete-${item.id}`" class="mini-footer-control danger" variant="danger" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
                   {{ overrideDeletingId === item.id ? 'در حال حذف...' : 'حذف' }}
-                </button>
+                </AppButton>
               </div>
             </div>
           </div>

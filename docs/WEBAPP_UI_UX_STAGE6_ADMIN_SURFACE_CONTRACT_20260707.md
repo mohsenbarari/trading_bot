@@ -189,3 +189,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Trading Settings Calendar Override Button Slice Evidence
+
+- `TradingSettings.vue` calendar override save, cancel, edit, and delete controls now use `AppButton`.
+- Existing selectors remain in place: `data-testid="override-save"`, `data-testid="override-cancel"`, `data-testid="override-edit-*"`, `data-testid="override-delete-*"`, `.settings-button.settings-button--primary`, `.settings-button.settings-button--secondary`, `.mini-footer-control`, and `.mini-footer-control.danger`.
+- Override create/edit/delete handlers, confirmation, disabled/loading state, payload shape, JalaliDatePicker flow, schedule settings, footer save/reset, and market-state refresh behavior are unchanged.
+- `npm run test:unit:run -- src/components/TradingSettings.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 32 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

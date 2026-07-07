@@ -254,22 +254,29 @@ describe('TradingSettings.vue', () => {
     await wrapper.get('[data-testid="override-open-time"]').setValue('12:00')
     await wrapper.get('[data-testid="override-close-time"]').setValue('15:30')
     await wrapper.get('[data-testid="override-note"]').setValue('جلسه خاص')
-    await wrapper.get('[data-testid="override-save"]').trigger('click')
+    const overrideSaveButton = wrapper.get('[data-testid="override-save"]')
+    expect(overrideSaveButton.classes()).toContain('ui-button')
+    await overrideSaveButton.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('استثنای تقویمی با موفقیت ثبت شد')
     expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(3)
     expect(wrapper.text()).toContain('جلسه خاص')
 
-    await wrapper.get('[data-testid="override-edit-1"]').trigger('click')
+    const overrideEditButton = wrapper.get('[data-testid="override-edit-1"]')
+    expect(overrideEditButton.classes()).toContain('ui-button')
+    await overrideEditButton.trigger('click')
     await wrapper.get('[data-testid="override-note"]').setValue('تعطیلی اصلاح‌شده')
+    expect(wrapper.get('[data-testid="override-cancel"]').classes()).toContain('ui-button')
     await wrapper.get('[data-testid="override-save"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('استثنای تقویمی با موفقیت ویرایش شد')
     expect(wrapper.text()).toContain('تعطیلی اصلاح‌شده')
 
-    await wrapper.get('[data-testid="override-delete-2"]').trigger('click')
+    const overrideDeleteButton = wrapper.get('[data-testid="override-delete-2"]')
+    expect(overrideDeleteButton.classes()).toContain('ui-button')
+    await overrideDeleteButton.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('استثنای تقویمی حذف شد')
