@@ -285,7 +285,20 @@ describe('ui primitives', () => {
       props: { title: 'ذخیره شد', message: 'تغییرات با موفقیت ذخیره شد.', tone: 'success' },
     })
     expect(toast.attributes('role')).toBe('status')
+    expect(toast.attributes('aria-live')).toBe('polite')
     expect(toast.classes()).toContain('ui-toast--success')
+
+    const alertToast = mount(AppToast, {
+      props: { title: 'خطا', role: 'alert', tone: 'danger' },
+      slots: {
+        icon: '<span class="toast-icon">!</span>',
+        default: '<p>پیام با slot</p>',
+      },
+    })
+    expect(alertToast.attributes('role')).toBe('alert')
+    expect(alertToast.attributes('aria-live')).toBe('assertive')
+    expect(alertToast.find('.ui-toast__icon .toast-icon').exists()).toBe(true)
+    expect(alertToast.text()).toContain('پیام با slot')
 
     const sheetTrigger = document.createElement('button')
     sheetTrigger.textContent = 'open-sheet'

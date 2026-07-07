@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import AppActionCard from '../ui/AppActionCard.vue'
+
+type WorkspaceTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
+
 withDefaults(defineProps<{
   title: string
   description?: string
   badge?: string
   disabled?: boolean
   active?: boolean
-  tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
+  tone?: WorkspaceTone
 }>(), {
   disabled: false,
   active: false,
@@ -18,23 +22,21 @@ defineEmits<{
 </script>
 
 <template>
-  <button
-    type="button"
+  <AppActionCard
     class="ds-action-tile"
     :class="[`ds-action-tile--${tone}`, { 'is-active': active }]"
+    :title="title"
+    :description="description"
+    :badge="badge"
     :disabled="disabled"
-    @click="$emit('select')"
+    :active="active"
+    :tone="tone"
+    @select="$emit('select')"
   >
-    <span v-if="$slots.icon" class="ds-action-tile-icon" aria-hidden="true">
-      <slot name="icon" />
-    </span>
-    <span class="ds-action-tile-copy">
-      <span class="ds-action-tile-title-row">
-        <strong>{{ title }}</strong>
-        <span v-if="badge" class="ds-action-tile-badge">{{ badge }}</span>
+    <template v-if="$slots.icon" #icon>
+      <span class="ds-action-tile-icon">
+        <slot name="icon" />
       </span>
-      <span v-if="description" class="ds-action-tile-description">{{ description }}</span>
-    </span>
-    <span class="ds-action-tile-arrow" aria-hidden="true">‹</span>
-  </button>
+    </template>
+  </AppActionCard>
 </template>

@@ -54,8 +54,11 @@ describe('workspace primitives', () => {
       },
     })
     expect(section.classes()).toContain('ds-workspace-section--warning')
+    expect(section.classes()).toContain('ui-section-card')
+    expect(section.classes()).toContain('ui-section-card--warning')
     expect(section.text()).toContain('محدودیت‌ها')
     expect(section.find('.section-content').exists()).toBe(true)
+    expect(section.find('.ui-section-card__actions .ds-workspace-section-actions').exists()).toBe(true)
 
     const notice = mount(WorkspaceNotice, {
       props: {
@@ -66,6 +69,8 @@ describe('workspace primitives', () => {
     })
     expect(notice.attributes('role')).toBe('status')
     expect(notice.classes()).toContain('ds-workspace-notice--success')
+    expect(notice.classes()).toContain('ui-toast')
+    expect(notice.classes()).toContain('ui-toast--success')
 
     const stat = mount(WorkspaceStatTile, {
       props: {
@@ -76,6 +81,8 @@ describe('workspace primitives', () => {
       },
     })
     expect(stat.classes()).toContain('ds-stat-tile--primary')
+    expect(stat.classes()).toContain('ui-metric-card')
+    expect(stat.classes()).toContain('ui-metric-card--primary')
     expect(stat.text()).toContain('۱۲')
 
     const danger = mount(WorkspaceDangerZone, {
@@ -87,6 +94,7 @@ describe('workspace primitives', () => {
         default: '<button class="danger-action">قطع رابطه</button>',
       },
     })
+    expect(danger.classes()).toContain('ui-danger-zone')
     expect(danger.find('.danger-action').exists()).toBe(true)
     expect(danger.text()).toContain('اقدامات حساس')
   })
@@ -106,6 +114,8 @@ describe('workspace primitives', () => {
     })
 
     expect(wrapper.classes()).toContain('ds-action-tile--primary')
+    expect(wrapper.classes()).toContain('ui-action-card')
+    expect(wrapper.classes()).toContain('ui-action-card--primary')
     expect(wrapper.classes()).toContain('is-active')
     expect(wrapper.text()).toContain('مدیریت مشتریان')
     expect(wrapper.text()).toContain('فعال')

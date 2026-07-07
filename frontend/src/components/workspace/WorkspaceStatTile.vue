@@ -1,18 +1,25 @@
 <script setup lang="ts">
+import AppMetricCard from '../ui/AppMetricCard.vue'
+
+type WorkspaceTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
+
 withDefaults(defineProps<{
   label: string
   value: string | number
   hint?: string
-  tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
+  tone?: WorkspaceTone
 }>(), {
   tone: 'neutral',
 })
 </script>
 
 <template>
-  <article class="ds-stat-tile" :class="`ds-stat-tile--${tone}`">
-    <span class="ds-stat-label">{{ label }}</span>
-    <strong class="ds-stat-value">{{ value }}</strong>
-    <span v-if="hint" class="ds-stat-hint">{{ hint }}</span>
-  </article>
+  <AppMetricCard
+    class="ds-stat-tile"
+    :class="`ds-stat-tile--${tone}`"
+    :label="label"
+    :value="value"
+    :hint="hint"
+    :tone="tone"
+  />
 </template>

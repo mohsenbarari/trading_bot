@@ -231,6 +231,8 @@ Exit criteria:
 
 Goal: reduce maintenance and visual drift between the `ds-*` and `ui-*` primitive families.
 
+Stage evidence: `docs/WEBAPP_UI_UX_STAGE3_PRIMITIVE_CONSOLIDATION_20260707.md`
+
 Tasks:
 
 1. Decide the canonical primitive direction:

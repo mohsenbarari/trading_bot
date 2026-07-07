@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppToast from '../ui/AppToast.vue'
+
 const props = withDefaults(defineProps<{
   title?: string
   message?: string
@@ -11,14 +13,21 @@ const props = withDefaults(defineProps<{
 </script>
 
 <template>
-  <div class="ds-workspace-notice" :class="`ds-workspace-notice--${tone}`" :role="props.role">
-    <div v-if="$slots.icon" class="ds-workspace-notice-icon" aria-hidden="true">
-      <slot name="icon" />
-    </div>
+  <AppToast
+    class="ds-workspace-notice"
+    :class="`ds-workspace-notice--${tone}`"
+    :title="title"
+    :message="message"
+    :tone="tone"
+    :role="props.role"
+  >
+    <template v-if="$slots.icon" #icon>
+      <span class="ds-workspace-notice-icon">
+        <slot name="icon" />
+      </span>
+    </template>
     <div class="ds-workspace-notice-copy">
-      <strong v-if="title">{{ title }}</strong>
-      <p v-if="message">{{ message }}</p>
       <slot />
     </div>
-  </div>
+  </AppToast>
 </template>
