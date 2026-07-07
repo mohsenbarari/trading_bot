@@ -4,6 +4,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
+import { AppButton } from './ui'
 
 type AdminMarketMessage = {
   id: number
@@ -235,9 +236,10 @@ onMounted(loadDashboard)
 <template>
   <div class="admin-messages-view">
     <div class="message-mode-switcher" role="tablist" aria-label="نوع پیام مدیریت">
-      <button
+      <AppButton
         type="button"
         class="message-mode-button message-mode-button--market"
+        variant="secondary"
         data-test="message-mode-market"
         id="admin-message-tab-market"
         :class="{ 'message-mode-button--active': activePanel === 'market' }"
@@ -250,10 +252,11 @@ onMounted(loadDashboard)
       >
         <Pin :size="16" />
         <span>ارسال پیام در بازار</span>
-      </button>
-      <button
+      </AppButton>
+      <AppButton
         type="button"
         class="message-mode-button message-mode-button--chat"
+        variant="secondary"
         data-test="message-mode-chat"
         id="admin-message-tab-chat"
         :class="{ 'message-mode-button--active': activePanel === 'chat' }"
@@ -266,7 +269,7 @@ onMounted(loadDashboard)
       >
         <Megaphone :size="16" />
         <span>ارسال پیام در چت</span>
-      </button>
+      </AppButton>
     </div>
 
     <div class="message-workspace" :aria-busy="isLoading">
@@ -285,16 +288,17 @@ onMounted(loadDashboard)
               <span class="date-chip">{{ formatDate(activeMarketMessage.published_at) }}</span>
             </div>
             <div class="market-pin-card-actions">
-              <button
+              <AppButton
                 type="button"
                 class="secondary-action secondary-action--danger"
+                variant="danger"
                 data-test="clear-market-pin"
                 :disabled="isClearingMarketPin"
                 @click="clearMarketPin"
               >
                 <PinOff :size="16" />
                 <span>{{ isClearingMarketPin ? 'در حال برداشتن...' : 'برداشتن از بازار' }}</span>
-              </button>
+              </AppButton>
             </div>
           </div>
 
@@ -400,10 +404,10 @@ onMounted(loadDashboard)
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
           <div class="composer-actions composer-actions--market">
-            <button class="primary-action" :disabled="!marketContent.trim() || isPublishingMarket" @click="publishMarketMessage">
+            <AppButton type="button" class="primary-action" :disabled="!marketContent.trim() || isPublishingMarket" @click="publishMarketMessage">
               <Pin :size="16" />
               <span>{{ isPublishingMarket ? 'در حال ثبت...' : 'انتشار در بازار' }}</span>
-            </button>
+            </AppButton>
           </div>
         </section>
       </section>
@@ -470,10 +474,10 @@ onMounted(loadDashboard)
 
           <div class="composer-actions">
             <span></span>
-            <button class="primary-action" :disabled="!broadcastContent.trim() || broadcastTargets.length === 0 || isPublishingBroadcast" @click="publishBroadcastMessage">
+            <AppButton type="button" class="primary-action" :disabled="!broadcastContent.trim() || broadcastTargets.length === 0 || isPublishingBroadcast" @click="publishBroadcastMessage">
               <Megaphone :size="16" />
               <span>{{ isPublishingBroadcast ? 'در حال ارسال...' : 'ارسال در چت' }}</span>
-            </button>
+            </AppButton>
           </div>
         </section>
 

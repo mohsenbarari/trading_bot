@@ -150,6 +150,8 @@ describe('AdminMessagesView.vue', () => {
 
     expect(wrapper.find('[data-test="message-mode-market"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="message-mode-chat"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="message-mode-market"]').classes()).toContain('ui-button')
+    expect(wrapper.get('[data-test="message-mode-chat"]').classes()).toContain('ui-button')
     expect(wrapper.get('[data-test="message-mode-market"]').attributes('role')).toBe('tab')
     expect(wrapper.get('[data-test="message-mode-market"]').attributes('tabindex')).toBe('0')
     expect(wrapper.get('[data-test="message-mode-chat"]').attributes('tabindex')).toBe('-1')
@@ -230,7 +232,9 @@ describe('AdminMessagesView.vue', () => {
     await wrapper.get('[data-test="market-history-edit-11"]').trigger('click')
     await flushPromises()
 
-    await wrapper.findAll('.primary-action')[0]!.trigger('click')
+    const marketPrimaryAction = wrapper.findAll('.primary-action')[0]!
+    expect(marketPrimaryAction.classes()).toContain('ui-button')
+    await marketPrimaryAction.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('پیام بازار برای ۵ نفر اعلان شد')
@@ -247,7 +251,9 @@ describe('AdminMessagesView.vue', () => {
     const textareas = wrapper.findAll('textarea')
     expect((textareas[0]!.element as HTMLTextAreaElement).value).toBe('پیام قبلی همگانی')
 
-    await wrapper.findAll('.primary-action')[0]!.trigger('click')
+    const broadcastPrimaryAction = wrapper.findAll('.primary-action')[0]!
+    expect(broadcastPrimaryAction.classes()).toContain('ui-button')
+    await broadcastPrimaryAction.trigger('click')
     await flushPromises()
 
     const marketCall = adminMessagesMocks.apiFetchMock.mock.calls.find(([path]) => path === '/api/admin-messages/market')
@@ -268,6 +274,7 @@ describe('AdminMessagesView.vue', () => {
     await wrapper.get('[data-test="message-mode-market"]').trigger('click')
     await flushPromises()
 
+    expect(wrapper.get('[data-test="clear-market-pin"]').classes()).toContain('ui-button')
     await wrapper.get('[data-test="clear-market-pin"]').trigger('click')
     await flushPromises()
 
