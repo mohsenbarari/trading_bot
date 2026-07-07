@@ -39,10 +39,19 @@ Messenger may only be touched if a global primitive, app shell, navigation eleme
 - Do not change trading behavior, access policy, customer visibility policy, notification delivery semantics, or cross-server sync behavior while doing visual work.
 - Market and OffersList changes are high-risk because they affect offer creation and trade request workflows. They must be implemented only after the shared primitives and tests are ready.
 - Runtime visual validation is required before claiming this roadmap is complete. A static code audit alone is not enough.
+- Do not weaken, delete, or loosen E2E assertions just to make a visual refactor pass. Stabilize selectors and fix code instead.
+- Every implementation stage must define its gate before code changes. The default gate is:
+  - frontend build;
+  - relevant unit/component tests;
+  - relevant Playwright E2E tests;
+  - stage-specific screenshots where visual behavior changes.
+- No staging or production deploy is part of this roadmap unless explicitly requested for a completed implementation stage.
+- Shared shell changes must include Messenger smoke checks when they touch `App.vue`, `AppToasts.vue`, `BottomNav.vue`, shared primitives, or global tokens.
 
 ## Sources
 
 - Claude audit: `tmp/claude/webapp-ui-ux-unification-audit.md`
+- Claude roadmap review: `tmp/claude/webapp-ui-ux-roadmap-review.md`
 - Router: `frontend/src/router/index.ts`
 - Current design tokens: `frontend/src/assets/main.css`
 - Shared primitives:
@@ -107,11 +116,22 @@ Tasks:
    - `/register`
    - `/i/:code` with a controlled test invite if possible
 5. Record known static-only limitations and any route that cannot be rendered without test data.
+6. Build the screenshot harness on top of the existing non-Messenger viewport coverage where possible, especially `frontend/e2e/non-messenger-viewport.spec.ts`.
+7. Make screenshots deterministic before using them as regression evidence:
+   - disable CSS animations and transitions;
+   - freeze time and timezone-sensitive values where possible;
+   - mask or stub live offer countdown timers;
+   - mask or stub relative-time text;
+   - control Dashboard greeting/time-dependent text;
+   - document acceptable image-diff thresholds.
+8. Add automated accessibility checks where practical for refactored routes, especially modals and keyboard-focused admin/market controls.
 
 Exit criteria:
 
 - Token drift is reproducible by a command or test.
+- Undefined-token detection is a hard failing guard, not only documentation.
 - Baseline visual evidence exists before UI changes.
+- Baseline screenshot evidence is deterministic enough to be useful.
 - No source UI change is made in this stage except test/guard infrastructure and documentation.
 
 ## Stage 1 - Token Repair and Design Token Canonicalization
@@ -150,6 +170,15 @@ Tasks:
    - any other Telegram connect entry point.
 6. Tokenize the app background decision instead of hardcoding a gradient in `App.vue`.
 7. Preserve PWA/mobile safe-area behavior.
+8. If Stage 2 touches Market or OffersList, it must be CSS-value-only:
+   - no DOM restructure;
+   - no class-name removal;
+   - no selector rename;
+   - no `trade-btn`, `offer-card-wrap`, `price`, or preview/recent-offer hook change.
+9. Preserve Messenger behavior when touching global shell surfaces:
+   - chat toasts still render correctly through `AppToasts`;
+   - `/chat` bottom navigation or FAB behavior does not regress;
+   - chat unread and mention badges still render.
 
 Exit criteria:
 
@@ -158,6 +187,7 @@ Exit criteria:
 - Telegram connect visuals are consistent.
 - App shell background is token-driven.
 - Existing notification and trade behavior remains unchanged.
+- Messenger smoke checks pass for shared toast/nav/background behavior.
 
 ## Stage 3 - Primitive Family Consolidation
 
@@ -209,12 +239,51 @@ Exit criteria:
 - Mobile and desktop screenshots are reviewed.
 - Dashboard tests are updated.
 
+## Stage 4.5 - Market Test Hook Hardening
+
+Goal: stabilize the trading E2E selector contract before any DOM-level Market or OffersList refactor.
+
+Reason:
+
+The current Market/OffersList E2E suite is coupled to bespoke CSS classes such as `.offer-card-wrap`, `.trade-btn`, `.price`, `.send-btn`, `.text-offer-input`, `.offer-preview-*`, `.recent-offer*`, and `.trade-suggestion-lot-btn`. Only preserving `data-test="history-stamp"` is not enough. A visual refactor that replaces offer cards or buttons with shared primitives can break tests without proving a behavior regression.
+
+Tasks:
+
+1. Add stable test ids to the current implementation before changing DOM structure:
+   - offer card wrapper;
+   - price text;
+   - trade action button;
+   - pending trade state;
+   - text offer input;
+   - send button;
+   - offer preview card;
+   - offer preview confirm/error/close controls;
+   - recent-offer toggle/dropdown/item;
+   - lot suggestion button;
+   - customer-context row and badge areas;
+   - existing `history-stamp`.
+2. Migrate these E2E tests from CSS-class selectors to the stabilized test ids:
+   - `frontend/e2e/market-offers.spec.ts`
+   - `frontend/e2e/lot-suggestion.spec.ts`
+   - `frontend/e2e/market-mutation-ux.spec.ts`
+   - `frontend/e2e/trade-history-accountant.spec.ts`
+3. Keep all existing assertions semantically equivalent or stronger.
+4. Do not weaken, delete, skip, or loosen test assertions during this migration.
+5. Run the market/trade E2E subset before and after selector migration.
+
+Exit criteria:
+
+- Market/trade E2E tests no longer depend on the bespoke CSS classes that will be refactored in Stage 5.
+- Existing trade, lot, preview, recent-offer, and history assertions remain covered.
+- No visual redesign is included in this stage except adding invisible/stable test hooks.
+
 ## Stage 5 - Market and OffersList Refactor
 
 Goal: unify the highest-risk trading surface after primitives and tests are ready.
 
 Tasks:
 
+0. Do not start DOM-level Market/OffersList refactor until Stage 4.5 is complete.
 1. Document current Market and OffersList behavior before changes:
    - offer creation;
    - whole offer request;
@@ -226,7 +295,7 @@ Tasks:
 2. Introduce `AppOfferCard` only after the behavior contract is documented.
 3. Migrate offer cards, quantity badges, trade buttons, expired/traded states, loading, empty, and error states to shared primitives.
 4. Preserve the two-tap confirmation behavior.
-5. Preserve `data-test` hooks required by existing E2E tests, including history/trade stamps.
+5. Preserve the full stabilized testid contract from Stage 4.5, including `history-stamp`.
 6. Re-evaluate the Market navigation model:
    - bottom bar vs floating action button;
    - mobile safe area;
@@ -238,6 +307,14 @@ Exit criteria:
 - Market and OffersList look consistent with the rest of the WebApp.
 - All offer/trade E2E tests pass.
 - No regression in trade creation/request flows.
+- Mandatory market and role/visibility gates pass unchanged:
+  - `frontend/e2e/market-offers.spec.ts`
+  - `frontend/e2e/lot-suggestion.spec.ts`
+  - `frontend/e2e/market-mutation-ux.spec.ts`
+  - `frontend/e2e/trade-history-accountant.spec.ts`
+  - `frontend/e2e/customer-owner-flow.spec.ts`
+  - `frontend/e2e/accountant-owner-flow.spec.ts`
+  - `frontend/e2e/customer-chat-privacy.spec.ts`
 - Mobile and desktop screenshots are reviewed.
 
 ## Stage 6 - Admin Surface Refactor
@@ -258,6 +335,10 @@ Tasks:
    - channels;
    - admin messages;
    - system/trading settings.
+7. Run mandatory admin and role/visibility gates:
+   - `frontend/e2e/admin-smoke.spec.ts`
+   - `frontend/e2e/customer-owner-flow.spec.ts`
+   - `frontend/e2e/accountant-owner-flow.spec.ts`
 
 Exit criteria:
 
@@ -276,6 +357,11 @@ Tasks:
 3. Preserve customer/accountant visibility and display-name policies.
 4. Keep `OperationsView.vue` and `AccountHubView.vue` as reference patterns unless the Stage 3 layout decision changes them.
 5. Align customer/accountant workspaces with the consolidated primitive family.
+6. Run mandatory profile and role/visibility gates:
+   - `frontend/e2e/customer-owner-flow.spec.ts`
+   - `frontend/e2e/accountant-owner-flow.spec.ts`
+   - `frontend/e2e/customer-chat-privacy.spec.ts`
+   - `frontend/e2e/trade-history-accountant.spec.ts`
 
 Exit criteria:
 
@@ -299,11 +385,13 @@ Tasks after decisions:
 1. Implement the selected navigation pattern consistently.
 2. Add keyboard and screen-reader coverage for the selected navigation behavior.
 3. Verify PWA install, share receive, safe-area, and mobile viewport behavior.
+4. If `BottomNav.vue` or shared navigation behavior changes, verify `/chat` still keeps its expected FAB/bottom-nav and unread/mention badge behavior.
 
 Exit criteria:
 
 - Navigation is predictable across WebApp routes.
 - No important action is hidden, overlapped, or hard to reach on mobile.
+- Messenger navigation smoke checks pass when shared navigation is touched.
 
 ## Stage 9 - Dead Code and Legacy Cleanup
 
