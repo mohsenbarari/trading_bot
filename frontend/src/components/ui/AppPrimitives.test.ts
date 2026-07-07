@@ -248,6 +248,9 @@ describe('ui primitives', () => {
     await arrayCheckbox.get('input').setValue(false)
     expect((arrayCheckbox.vm as unknown as { selected: string[] }).selected).toEqual(['users'])
 
+    const controlledCheckbox = mount(AppCheckbox, { props: { checked: true } })
+    expect((controlledCheckbox.get('input').element as HTMLInputElement).checked).toBe(true)
+
     const select = mount(AppSelect, {
       props: {
         modelValue: 'tier1',

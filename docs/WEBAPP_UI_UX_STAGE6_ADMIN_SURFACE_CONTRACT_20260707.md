@@ -325,3 +325,20 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Create Channel Select-All Checkbox Slice Evidence
+
+- `AppCheckbox` now also supports controlled `checked` usage for flows that keep custom change handlers.
+- The controlled `checked` prop is intentionally typed so absent usage does not boolean-cast to `false`; boolean and array `v-model` consumers continue to derive checked state from `modelValue`.
+- `CreateChannelView.vue` select-all-active-users checkbox now uses `AppCheckbox`.
+- Existing `.select-all-toggle` layout, active class behavior, and `handleToggleSelectAll()` remain in place.
+- The existing `handleToggleSelectAll()` branch still clears manual `selectedUserIds` when all active users are selected.
+- Hidden avatar file input and avatar preview button remain native in this slice. The file input is intentionally kept as the real file control because `avatarInput` is clicked through a direct ref, and the avatar preview button has bespoke circular/media overlay structure that should not inherit generic button label/spinner markup without a separate avatar-action primitive.
+- A broad admin-suite rerun caught and fixed the initial boolean-prop casting risk before commit.
+- `npm run test:unit:run -- src/components/CreateChannelView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 17 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run test:unit:run -- src/components/TradingSettings.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 28 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

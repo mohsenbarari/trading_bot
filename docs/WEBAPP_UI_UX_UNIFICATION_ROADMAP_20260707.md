@@ -426,7 +426,8 @@ Implementation notes:
 - The trading-settings numeric-input slice extends `AppInput` with explicit `v-model.number` support, migrates the numeric settings fields to `AppInput`, and preserves numeric API payloads, min/max attributes, `.settings-input`, and `is-default` behavior.
 - The admin-messages broadcast-target checkbox slice introduces `AppCheckbox` with boolean and array `v-model` support, then migrates the hidden target-group checkboxes without changing the target-card layout or submitted `target_groups` payload behavior.
 - The trading-settings schedule-checkbox slice migrates `market-schedule-enabled` and weekly closed-day checkboxes to `AppCheckbox` while preserving selectors, `.weekday-checkbox`, and sorted schedule-save payload behavior.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then channel file/select-all controls.
+- The create-channel select-all slice extends `AppCheckbox` with controlled `checked` support and migrates the active-users select-all checkbox while keeping `handleToggleSelectAll()` selection-clearing behavior intact. The hidden avatar file input and bespoke circular avatar action remain native pending a dedicated file/avatar-action primitive.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then any dedicated file/avatar-action primitive work if it can be done without changing file-picker behavior.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

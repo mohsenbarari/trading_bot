@@ -631,8 +631,11 @@ describe('CreateChannelView.vue', () => {
     vm.toggleUser(3)
     expect(vm.selectedUserIds.has(3)).toBe(false)
 
-    vm.activeChannel = { ...channel, is_mandatory: true }
     vm.page = 'add-members'
+    await flushPromises()
+    expect(wrapper.get('.select-all-toggle input').classes()).toContain('ui-checkbox')
+
+    vm.activeChannel = { ...channel, is_mandatory: true }
     await vm.loadCandidates('x')
     expect(vm.candidates).toEqual([])
     expect(vm.activeTotal).toBe(0)

@@ -6,6 +6,7 @@ import HelpPopover from './HelpPopover.vue'
 import {
   AppActionCard,
   AppButton,
+  AppCheckbox,
   AppEmptyState,
   AppFormField,
   AppIconButton,
@@ -1273,7 +1274,7 @@ onBeforeUnmount(() => {
         </div>
 
         <label class="select-all-toggle" :class="{ active: selectAllActiveUsers }">
-          <input type="checkbox" :checked="selectAllActiveUsers" @change="handleToggleSelectAll" />
+          <AppCheckbox :checked="selectAllActiveUsers" @change="handleToggleSelectAll" />
           <span>انتخاب همه کاربران فعال ({{ activeTotal.toLocaleString('fa-IR') }})</span>
         </label>
 

@@ -8,6 +8,7 @@ const props = withDefaults(defineProps<{
   value?: CheckboxValue
   trueValue?: CheckboxValue
   falseValue?: CheckboxValue
+  checked?: unknown
   disabled?: boolean
   invalid?: boolean
 }>(), {
@@ -24,6 +25,9 @@ const emit = defineEmits<{
 }>()
 
 const isChecked = computed(() => {
+  if (typeof props.checked === 'boolean') {
+    return props.checked
+  }
   if (Array.isArray(props.modelValue)) {
     return props.modelValue.includes(props.value)
   }
