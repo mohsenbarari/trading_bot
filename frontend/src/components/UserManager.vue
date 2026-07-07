@@ -302,15 +302,15 @@ onMounted(fetchUsers);
 }
 
 .relation-badge--owner {
-  border: 1px solid rgba(37, 99, 235, 0.22);
-  background: rgba(37, 99, 235, 0.09);
-  color: #1d4ed8;
+  border: 1px solid var(--ds-border-medium);
+  background: var(--ds-info-50);
+  color: var(--ds-info-700);
 }
 
 .relation-badge--accountant {
-  border: 1px solid rgba(124, 58, 237, 0.2);
-  background: rgba(124, 58, 237, 0.09);
-  color: #6d28d9;
+  border: 1px solid var(--ds-primary-200);
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-800);
 }
 
 .user-subtext {
@@ -335,9 +335,9 @@ onMounted(fetchUsers);
   color: var(--ds-text-muted);
 }
 
-.role-badge.مدیر { background: #fef3c7; color: #92400e; }
-.role-badge.پلیس { background: #ede9fe; color: #5b21b6; }
-.role-badge.عادی { background: #d1fae5; color: #065f46; }
+.role-badge.مدیر { background: var(--ds-primary-100); color: var(--ds-primary-800); }
+.role-badge.پلیس { background: var(--ds-info-50); color: var(--ds-info-700); }
+.role-badge.عادی { background: var(--ds-success-100); color: var(--ds-success-800); }
 .role-badge.تماشا { background: var(--ds-bg-inset); color: var(--ds-text-muted); }
 
 .chevron-icon {

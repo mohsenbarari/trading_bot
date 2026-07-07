@@ -429,7 +429,8 @@ Implementation notes:
 - The create-channel select-all slice extends `AppCheckbox` with controlled `checked` support and migrates the active-users select-all checkbox while keeping `handleToggleSelectAll()` selection-clearing behavior intact. The hidden avatar file input and bespoke circular avatar action remain native pending a dedicated file/avatar-action primitive.
 - The create-channel state primitive slice migrates member/candidate loading and empty states to `AppLoadingState` / `AppEmptyState` while preserving compact `.state-box` spacing and leaving transient status banners native.
 - The pending-invitation row token polish moves row/state colors to design tokens while preserving DOM, copy/delete workflows, and the custom row shape that does not currently fit `AppListItem` safely.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, then any dedicated file/avatar-action primitive work if it can be done without changing file-picker behavior.
+- The user-list token polish moves relation/role badge colors to design tokens while preserving customer/accountant display names, relation visibility, search, and profile navigation behavior.
+- Later Stage 6 slices should continue only with any dedicated file/avatar-action primitive work if it can be done without changing file-picker behavior.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

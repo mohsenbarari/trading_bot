@@ -369,3 +369,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## User List Token Polish Evidence
+
+- `UserManager.vue` user-list relation badges and role badges now use existing design tokens instead of local hardcoded color values.
+- User card DOM, customer/accountant display-name policy, relation tag visibility, search behavior, loading/empty/error states, and profile navigation are unchanged.
+- The user-manager test still verifies customer management names, accountant/customer tags, owner relation tags, mobile numbers, search encoding, empty state, and error state behavior.
+- `npm run test:unit:run -- src/components/UserManager.test.ts`: passed, 5 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
