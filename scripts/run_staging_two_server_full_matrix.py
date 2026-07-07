@@ -38,7 +38,7 @@ from scripts import build_staging_two_server_full_matrix_manifest as manifest_bu
 
 
 SCHEMA_VERSION = "staging_two_server_full_matrix_runner_v1"
-EXPECTED_BRANCH = "candidate/sync-parity-hardening"
+DEFAULT_EXPECTED_BRANCH = "candidate/sync-parity-hardening"
 DEFAULT_IRAN_BASE_URL = "https://staging.gold-trade.ir"
 DEFAULT_FOREIGN_BASE_URL = "https://staging.362514.ir"
 DEFAULT_ARTIFACT_ROOT = REPO_ROOT / "tmp" / "staging-two-server-full-matrix"
@@ -1166,12 +1166,13 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
     current_commit = run_git_value(["rev-parse", "HEAD"])
     expected_release = expected_release_sha(args)
     git_status = run_git_value(["status", "--short", "--branch"]) or ""
+    expected_branch = args.expected_branch
     checks.append(
         CheckResult(
             "git_branch",
-            "passed" if current_branch == EXPECTED_BRANCH else "failed",
-            "branch matches expected candidate" if current_branch == EXPECTED_BRANCH else "wrong branch",
-            payload={"current_branch": current_branch, "expected_branch": EXPECTED_BRANCH, "commit": current_commit},
+            "passed" if current_branch == expected_branch else "failed",
+            "branch matches expected candidate" if current_branch == expected_branch else "wrong branch",
+            payload={"current_branch": current_branch, "expected_branch": expected_branch, "commit": current_commit},
         )
     )
     checks.append(
@@ -2506,6 +2507,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--basic-auth-user", default=None)
     parser.add_argument("--basic-auth-password", default=None)
     parser.add_argument("--observability-api-key", default=os.getenv("STAGING_OBSERVABILITY_API_KEY"))
+    parser.add_argument("--expected-branch", default=os.getenv("STAGING_EXPECTED_BRANCH", DEFAULT_EXPECTED_BRANCH))
     parser.add_argument("--expected-release-sha", default=os.getenv("STAGING_EXPECTED_RELEASE_SHA"))
     parser.add_argument("--iran-ssh-host", default=os.getenv("STAGING_IRAN_SSH_HOST", DEFAULT_IRAN_SSH_HOST))
     parser.add_argument("--iran-workdir", default=os.getenv("STAGING_IRAN_WORKDIR", DEFAULT_IRAN_WORKDIR))

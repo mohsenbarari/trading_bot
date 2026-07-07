@@ -82,6 +82,11 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             self.assertNotIn("abcdefghijklmnopqrstuvwxyz", text)
             self.assertFalse(runner.detect_forbidden_secret_like_values(Path(tmpdir))["detected"])
 
+    def test_expected_branch_can_be_overridden_for_candidate_release_gates(self):
+        args = runner.parse_args(["--expected-branch", "candidate/webapp-ui-ux-unification"])
+
+        self.assertEqual(args.expected_branch, "candidate/webapp-ui-ux-unification")
+
     def test_cleanup_zero_gate_fails_on_remaining_rows(self):
         result = runner.CommandResult(
             name="final_cleanup_zero_check_iran",

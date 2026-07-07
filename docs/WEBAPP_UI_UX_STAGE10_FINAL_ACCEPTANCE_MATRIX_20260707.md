@@ -113,6 +113,26 @@ scripts/run_staging_role_trading_e2e_gate.sh
 
 This gate is intentionally wrapped by `scripts/run_staging_role_trading_e2e_gate.sh` instead of running the specs directly. Deploy staging with `STAGING_ENABLE_BOT=1` first so the app, foreign app, bot, and sync worker profiles are all recreated from the same image before the gate runs. Keep `STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=0` for this single-domain staging WebApp surface so `/api/config` remains available to the WebApp. The wrapped runner fail-closes unless the target is an explicit staging app container, the Redis container is explicit staging Redis, the backend URL points at staging, and the staging mutation confirmation environment is present. It also runs scoped pre/post cleanup for the Playwright fixture prefixes. Do not run the role/trading specs directly on a host that also has production containers.
 
+For the already-provisioned real two-server staging topology, use the existing
+two-server runner instead of the single-host compose gate:
+
+```bash
+set -a
+source .env.staging
+set +a
+STAGING_EXPECTED_BRANCH=candidate/webapp-ui-ux-unification \
+STAGING_EXPECTED_RELEASE_SHA="$(git rev-parse --short=12 HEAD)" \
+STAGING_OBSERVABILITY_API_KEY="$OBSERVABILITY_API_KEY" \
+python3 scripts/run_staging_two_server_full_matrix.py \
+  --mode preflight \
+  --run-id S2FM-UIUX-PREFLIGHT-$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+Mutating execution remains guarded by
+`STAGING_TWO_SERVER_FULL_MATRIX_CONFIRM=execute-staging-two-server-full-matrix`
+and should only run after preflight passes on the deployed two-server staging
+release SHA.
+
 ## Local Browser Blockers
 
 Actual browser execution is blocked in the current local sandbox:
