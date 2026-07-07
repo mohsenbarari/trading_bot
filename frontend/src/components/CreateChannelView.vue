@@ -1145,7 +1145,7 @@ onBeforeUnmount(() => {
 
       <template v-else-if="page === 'members'">
         <div class="search-shell slim">
-          <input v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای کانال..." />
+          <AppInput v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای کانال..." />
         </div>
 
         <div v-if="isLoadingMembers" class="state-box">
@@ -1187,7 +1187,7 @@ onBeforeUnmount(() => {
 
       <template v-else-if="page === 'admins' && !isMembershipManagementLocked">
         <div class="search-shell slim">
-          <input v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." />
+          <AppInput v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." />
         </div>
 
         <section class="section-shell">
@@ -1263,7 +1263,7 @@ onBeforeUnmount(() => {
 
       <template v-else-if="page === 'add-members' && !isMembershipManagementLocked && activeChannel">
         <div class="search-shell">
-          <input v-model="candidateQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." :disabled="selectAllActiveUsers" />
+          <AppInput v-model="candidateQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." :disabled="selectAllActiveUsers" />
         </div>
 
         <label class="select-all-toggle" :class="{ active: selectAllActiveUsers }">

@@ -141,3 +141,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Channel Manager Search Input Slice Evidence
+
+- `CreateChannelView.vue` member, admin, and add-member search fields now use `AppInput`.
+- Existing `.search-input` selectors remain in place for styling and tests.
+- Search `v-model` bindings, disabled behavior for select-all member invites, candidate/member/admin filtering, channel membership mutations, profile routing, and channel create/update/delete flows are unchanged.
+- `npm run test:unit:run -- src/components/CreateChannelView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 33 tests. The existing jsdom navigation warning remains non-fatal.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 66 tests. The existing jsdom navigation warning remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

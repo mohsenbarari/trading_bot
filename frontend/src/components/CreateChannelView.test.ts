@@ -150,6 +150,8 @@ describe('CreateChannelView.vue', () => {
     await membersEntry!.trigger('click')
     await flushPromises()
 
+    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+
     const memberRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(memberRow).toBeTruthy()
     const profileButton = memberRow!.findAll('.channel-member-action').find((button) => button.text().includes('پروفایل'))
@@ -308,6 +310,7 @@ describe('CreateChannelView.vue', () => {
     expect(uploadAvatarImageMock).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('refresh-conversations')).toHaveLength(1)
     expect(wrapper.text()).toContain('افزودن عضو')
+    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
 
     const candidateRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(candidateRow).toBeTruthy()
@@ -463,6 +466,8 @@ describe('CreateChannelView.vue', () => {
     expect(adminsEntry).toBeTruthy()
     await adminsEntry!.trigger('click')
     await flushPromises()
+
+    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
 
     const promoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('ارتقا به ادمین'))
     expect(promoteButton).toBeTruthy()

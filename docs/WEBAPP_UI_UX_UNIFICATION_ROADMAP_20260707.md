@@ -412,7 +412,8 @@ Implementation notes:
 - `CommodityManager.vue` was already mostly primitive-backed; the Stage 6 commodity slice migrates the remaining raw back/edit/delete icon controls to `AppIconButton` while preserving all commodity and alias workflows.
 - The first `UserManager.vue` slice migrates only search, empty, and error states to shared primitives while preserving user list rendering, customer/accountant relation badges, display-name policy, API fetch behavior, search trimming/encoding, and profile navigation.
 - The pending invitation state slice migrates loading, empty, and error states to shared primitives while preserving pending row structure, readonly links, copy/delete workflows, refresh API behavior, and generated invite behavior.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation row structure polish, channels, admin messages, then system/trading settings.
+- The first channel-manager slice migrates member/admin/add-member search fields to `AppInput` while preserving `.search-input`, search bindings, select-all disabled behavior, filtering, membership mutations, profile routing, and channel create/update/delete flows.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation row structure polish, channel action buttons/states, admin messages, then system/trading settings.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 
