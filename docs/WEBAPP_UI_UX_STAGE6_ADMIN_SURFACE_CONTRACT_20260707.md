@@ -103,6 +103,21 @@ If an Admin regression appears:
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
 
+## User Manager Search State Slice Evidence
+
+- `UserManager.vue` search toggle and search-submit controls now use `AppButton`.
+- The user search field now uses `AppInput`.
+- The fetch-failure state now uses `AppErrorState`; the no-results state now uses `AppEmptyState`.
+- Existing selectors remain in place for tests and styling: `.search-toggle-btn`, `.user-search-input`, `.search-submit-btn`, `.ds-message.danger`, and `.no-results`.
+- User list rendering, customer/accountant relation badges, display-name policy, `/api/users/` and `/api/users/?search=...` fetch behavior, search trimming/encoding, and `navigate('user_profile', user)` are unchanged.
+- This slice intentionally does not change user-list grouping, customer/accountant visibility, profile navigation, user deletion, role management, or any backend route.
+- `npm run test:unit:run -- src/components/UserManager.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 30 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 57 tests.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
+
 ## Create Invitation Form Slice Evidence
 
 - `CreateInvitationView.vue` invite form fields now use `AppFormField`, `AppInput`, and `AppSelect`.

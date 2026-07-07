@@ -94,6 +94,10 @@ describe('UserManager.vue', () => {
     const wrapper = await mountView()
 
     await wrapper.get('.search-toggle-btn').trigger('click')
+    expect(wrapper.get('.search-toggle-btn').classes()).toContain('ui-button')
+    expect(wrapper.get('.user-search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.search-submit-btn').classes()).toContain('ui-button')
+
     await wrapper.get('input').setValue(' ali search ')
     await wrapper.get('input').trigger('keyup.enter')
     await flushPromises()
@@ -131,6 +135,7 @@ describe('UserManager.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.find('.no-results').exists()).toBe(true)
+    expect(wrapper.get('.no-results').classes()).toContain('ui-empty-state')
     expect(wrapper.text()).toContain('کاربری یافت نشد.')
   })
 
@@ -139,6 +144,9 @@ describe('UserManager.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(wrapper.find('.ds-message.danger').text()).toContain('خطا در دریافت لیست کاربران')
+    const errorState = wrapper.get('.ds-message.danger')
+    expect(errorState.classes()).toContain('ui-empty-state')
+    expect(errorState.attributes('role')).toBe('alert')
+    expect(errorState.text()).toContain('خطا در دریافت لیست کاربران')
   })
 })

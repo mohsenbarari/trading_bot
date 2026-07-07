@@ -4,6 +4,10 @@ import { apiFetch } from '../utils/auth';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import { Search, X, ChevronLeft } from 'lucide-vue-next';
+import AppButton from './ui/AppButton.vue';
+import AppEmptyState from './ui/AppEmptyState.vue';
+import AppErrorState from './ui/AppErrorState.vue';
+import AppInput from './ui/AppInput.vue';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -75,23 +79,23 @@ onMounted(fetchUsers);
     
     <div class="ds-card">
       <div class="user-search-toolbar">
-        <button class="search-toggle-btn" :class="{ active: showSearch }" @click="toggleSearch">
+        <AppButton type="button" class="search-toggle-btn" :class="{ active: showSearch }" variant="secondary" @click="toggleSearch">
           <Search v-if="!showSearch" :size="20" />
           <X v-else :size="20" />
           <span class="btn-text">{{ showSearch ? 'بستن جستجو' : 'جستجوی کاربر' }}</span>
-        </button>
+        </AppButton>
       </div>
 
       <transition name="slide">
         <div v-if="showSearch" class="search-box">
           <div class="search-input-wrapper">
-            <input 
+            <AppInput
               v-model="searchQuery" 
               @keyup.enter="fetchUsers" 
               placeholder="نام، نام کاربری یا موبایل..." 
               class="user-search-input"
             />
-            <button @click="fetchUsers" class="user-search-submit search-submit-btn">جستجو</button>
+            <AppButton type="button" @click="fetchUsers" class="user-search-submit search-submit-btn">جستجو</AppButton>
           </div>
         </div>
       </transition>
@@ -100,13 +104,14 @@ onMounted(fetchUsers);
          <LoadingSkeleton :count="6" :height="70" />
       </div>
       
-      <div v-else-if="errorMessage" class="ds-message danger">{{ errorMessage }}</div>
+      <AppErrorState v-else-if="errorMessage" class="ds-message danger" title="خطا در دریافت کاربران" :message="errorMessage" />
       
       <div v-else class="users-list">
-        <div v-if="users.length === 0" class="no-results">
-          <div class="no-results-icon">🤷</div>
-          <p>کاربری یافت نشد.</p>
-        </div>
+        <AppEmptyState v-if="users.length === 0" class="no-results" title="کاربری یافت نشد.">
+          <template #icon>
+            <Search :size="24" />
+          </template>
+        </AppEmptyState>
         
         <div v-for="user in users" :key="user.id" class="user-item" @click="selectUser(user)">
           <div class="user-main-info">
