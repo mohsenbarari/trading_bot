@@ -522,6 +522,13 @@ Exit criteria:
 - Dead code is removed only after active surfaces are stable.
 - Build and tests pass.
 
+Implementation notes:
+
+- The Stage 9 cleanup contract and rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE9_DEAD_CODE_CLEANUP_20260707.md`.
+- The confirmed dead static/legacy components `HomePage.vue`, `PlaceholderView.vue`, `UserSettings.vue`, `MainMenu.vue`, `HomeAnimation.vue`, and their isolated tests were removed because they are not mounted by the active router and are only self-referenced.
+- `TradingView.vue` and `TradingView.test.ts` were removed as legacy/test-only code. The active Market route remains `MarketView.vue`; shared sort behavior remains covered by `useTradingSort.test.ts`.
+- No Market runtime components (`MarketView.vue`, `OffersList.vue`, `OfferPreviewModal.vue`, `useOffers`) were changed in this stage.
+
 ## Stage 10 - Final Visual Acceptance Matrix
 
 Goal: prove that the WebApp UI/UX is actually unified after implementation.
