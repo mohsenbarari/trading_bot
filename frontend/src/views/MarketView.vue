@@ -148,6 +148,7 @@ const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const republishedFromOfferId = ref<number | null>(null)
 const pendingOfferIdempotencyKey = ref<string | null>(null)
+let offerPreviewConfirmLocked = false
 const recentOffers = ref<RecentOfferSummary[]>([])
 const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
@@ -679,19 +680,21 @@ function editPendingOfferPreview() {
 
 async function confirmOfferPreview() {
   if (!pendingOfferPreview.value) return
-  if (isSubmitting.value) return
-  if (!isMarketOpen.value) {
-    previewError.value = MARKET_CLOSED_DETAIL
-    return
-  }
-  if (isTier2Customer.value) {
-    previewError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
-    return
-  }
+  if (offerPreviewConfirmLocked || isSubmitting.value) return
+  offerPreviewConfirmLocked = true
   isSubmitting.value = true
   previewError.value = ''
 
   try {
+    if (!isMarketOpen.value) {
+      previewError.value = MARKET_CLOSED_DETAIL
+      return
+    }
+    if (isTier2Customer.value) {
+      previewError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
+      return
+    }
+
     const response = await apiFetch('/api/offers/', {
       method: 'POST',
       body: JSON.stringify({
@@ -734,6 +737,7 @@ async function confirmOfferPreview() {
     })
   } finally {
     isSubmitting.value = false
+    offerPreviewConfirmLocked = false
   }
 }
 

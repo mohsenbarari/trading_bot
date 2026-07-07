@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { AppStatusBadge } from './ui'
 
 type ParsedOfferPreview = {
@@ -48,6 +48,17 @@ const confirmButtonText = computed(() => {
   if (props.submitting) return 'در حال ارسال...'
   return props.warning ? 'با وجود هشدار منتشر کن' : 'تایید و ارسال'
 })
+const confirmClickLocked = ref(false)
+
+watch(() => props.submitting, (submitting) => {
+  if (!submitting) confirmClickLocked.value = false
+})
+
+function handleConfirmClick() {
+  if (props.submitting || confirmClickLocked.value) return
+  confirmClickLocked.value = true
+  emit('confirm')
+}
 </script>
 
 <template>
@@ -97,7 +108,7 @@ const confirmButtonText = computed(() => {
         <button type="button" class="offer-preview-edit" :disabled="submitting" @click="emit('edit')">
           ویرایش
         </button>
-        <button type="button" class="offer-preview-confirm" data-test="offer-preview-confirm" :disabled="submitting" @click="emit('confirm')">
+        <button type="button" class="offer-preview-confirm" data-test="offer-preview-confirm" :disabled="submitting || confirmClickLocked" @click="handleConfirmClick">
           {{ confirmButtonText }}
         </button>
       </div>

@@ -22,6 +22,7 @@ defineEmits<{
     <Search :size="18" aria-hidden="true" />
     <input
       type="search"
+      :aria-label="label"
       :value="modelValue"
       :placeholder="placeholder"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
