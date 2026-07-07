@@ -155,6 +155,9 @@ describe('TradingSettings.vue', () => {
     expect(wrapper.text()).toContain('برنامه بازار')
 
     const headers = wrapper.findAll('.settings-section__header')
+    expect(headers).toHaveLength(6)
+    expect(headers[0]!.classes()).toContain('ui-button')
+    expect(headers[5]!.classes()).toContain('ui-button')
     await headers[0]!.trigger('click')
     await headers[3]!.trigger('click')
     await headers[4]!.trigger('click')

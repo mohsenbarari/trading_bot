@@ -412,10 +412,11 @@ onBeforeUnmount(() => {
 
       <!-- دعوت‌نامه -->
       <div class="settings-section" :class="{ open: openSections.invitation }">
-        <button
+        <AppButton
           id="trading-settings-invitation-header"
           class="settings-section__header"
           type="button"
+          variant="ghost"
           :aria-expanded="openSections.invitation"
           aria-controls="trading-settings-invitation-panel"
           @click="toggleSection('invitation')"
@@ -425,7 +426,7 @@ onBeforeUnmount(() => {
             <h2 class="section-title">دعوت‌نامه</h2>
           </div>
           <ChevronLeft class="settings-section__chevron" :size="18" />
-        </button>
+        </AppButton>
         <div
           id="trading-settings-invitation-panel"
           v-show="openSections.invitation"
@@ -449,10 +450,11 @@ onBeforeUnmount(() => {
 
       <!-- لفظ -->
       <div class="settings-section" :class="{ open: openSections.offer }">
-        <button
+        <AppButton
           id="trading-settings-offer-header"
           class="settings-section__header"
           type="button"
+          variant="ghost"
           :aria-expanded="openSections.offer"
           aria-controls="trading-settings-offer-panel"
           @click="toggleSection('offer')"
@@ -462,7 +464,7 @@ onBeforeUnmount(() => {
             <h2 class="section-title">لفظ معاملاتی</h2>
           </div>
           <ChevronLeft class="settings-section__chevron" :size="18" />
-        </button>
+        </AppButton>
         <div
           id="trading-settings-offer-panel"
           v-show="openSections.offer"
@@ -522,10 +524,11 @@ onBeforeUnmount(() => {
 
       <!-- محدودیت منقضی کردن -->
       <div class="settings-section" :class="{ open: openSections.expire }">
-        <button
+        <AppButton
           id="trading-settings-expire-header"
           class="settings-section__header"
           type="button"
+          variant="ghost"
           :aria-expanded="openSections.expire"
           aria-controls="trading-settings-expire-panel"
           @click="toggleSection('expire')"
@@ -535,7 +538,7 @@ onBeforeUnmount(() => {
             <h2 class="section-title">محدودیت منقضی کردن</h2>
           </div>
           <ChevronLeft class="settings-section__chevron" :size="18" />
-        </button>
+        </AppButton>
         <div
           id="trading-settings-expire-panel"
           v-show="openSections.expire"
@@ -571,10 +574,11 @@ onBeforeUnmount(() => {
 
       <!-- امنیت -->
       <div class="settings-section" :class="{ open: openSections.security }">
-        <button
+        <AppButton
           id="trading-settings-security-header"
           class="settings-section__header"
           type="button"
+          variant="ghost"
           :aria-expanded="openSections.security"
           aria-controls="trading-settings-security-panel"
           @click="toggleSection('security')"
@@ -584,7 +588,7 @@ onBeforeUnmount(() => {
             <h2 class="section-title">امنیت و نشست‌ها</h2>
           </div>
           <ChevronLeft class="settings-section__chevron" :size="18" />
-        </button>
+        </AppButton>
         <div
           id="trading-settings-security-panel"
           v-show="openSections.security"
@@ -634,10 +638,11 @@ onBeforeUnmount(() => {
 
       <!-- برنامه بازار -->
       <div class="settings-section" :class="{ open: openSections.marketSchedule }">
-        <button
+        <AppButton
           id="trading-settings-market-schedule-header"
           class="settings-section__header"
           type="button"
+          variant="ghost"
           :aria-expanded="openSections.marketSchedule"
           aria-controls="trading-settings-market-schedule-panel"
           @click="toggleSection('marketSchedule')"
@@ -647,7 +652,7 @@ onBeforeUnmount(() => {
             <h2 class="section-title">برنامه بازار</h2>
           </div>
           <ChevronLeft class="settings-section__chevron" :size="18" />
-        </button>
+        </AppButton>
         <div
           id="trading-settings-market-schedule-panel"
           v-show="openSections.marketSchedule"
@@ -720,10 +725,11 @@ onBeforeUnmount(() => {
 
       <!-- استثناهای تقویمی -->
       <div class="settings-section" :class="{ open: openSections.marketCalendar }">
-        <button
+        <AppButton
           id="trading-settings-market-calendar-header"
           class="settings-section__header"
           type="button"
+          variant="ghost"
           :aria-expanded="openSections.marketCalendar"
           aria-controls="trading-settings-market-calendar-panel"
           @click="toggleSection('marketCalendar')"
@@ -733,7 +739,7 @@ onBeforeUnmount(() => {
             <h2 class="section-title">استثناهای تقویمی بازار</h2>
           </div>
           <ChevronLeft class="settings-section__chevron" :size="18" />
-        </button>
+        </AppButton>
         <div
           id="trading-settings-market-calendar-panel"
           v-show="openSections.marketCalendar"
@@ -889,6 +895,37 @@ onBeforeUnmount(() => {
 
 .section-icon {
   color: var(--ds-primary-500);
+}
+
+.settings-section__header {
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--ds-radius-lg);
+  text-align: right;
+  box-shadow: none;
+}
+
+.settings-section__header :deep(.ui-button__label) {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settings-section__header-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.settings-section__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.18s ease;
+}
+
+.settings-section.open .settings-section__chevron {
+  transform: rotate(-90deg);
 }
 
 .section-title {

@@ -254,3 +254,16 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Trading Settings Accordion Header Slice Evidence
+
+- `TradingSettings.vue` settings-section accordion headers now use `AppButton`.
+- Existing IDs, selectors, and accessibility attributes remain in place: `trading-settings-*-header`, `.settings-section__header`, `aria-expanded`, `aria-controls`, and region `aria-labelledby` links.
+- Scoped header styles keep the full-width right-aligned header layout and make the shared button label carry the existing icon/title/chevron row.
+- Section open/close state, visible section count, form inputs, schedule controls, market-state card, market override rows, footer save/reset controls, and API payload behavior are unchanged.
+- `npm run test:unit:run -- src/components/TradingSettings.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 32 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
