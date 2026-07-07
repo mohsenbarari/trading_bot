@@ -48,6 +48,44 @@ Messenger may only be touched if a global primitive, app shell, navigation eleme
 - No staging or production deploy is part of this roadmap unless explicitly requested for a completed implementation stage.
 - Shared shell changes must include Messenger smoke checks when they touch `App.vue`, `AppToasts.vue`, `BottomNav.vue`, shared primitives, or global tokens.
 
+## Market Protected Surface Rule
+
+The Market surface is a protected surface for this roadmap. The project must treat `MarketView.vue`, `OffersList.vue`, offer preview flows, lot suggestion flows, offer status rendering, and all trade-request controls as behavior-critical.
+
+Protected files and flows:
+
+- `frontend/src/views/MarketView.vue`
+- `frontend/src/components/OffersList.vue`
+- offer creation UI
+- whole-offer request UI
+- lot-offer request UI
+- two-tap trade confirmation
+- pending trade state
+- expired/traded/active visual states
+- customer/accountant/owner visibility in market cards
+- market navigation controls that can overlap trade actions
+
+Rules:
+
+1. No DOM-level Market or OffersList refactor may start before Stage 4.5 is complete.
+2. No visual/structural Market refactor may start without explicit product approval for that specific stage.
+3. Before any Market refactor, capture baseline behavior and screenshots for:
+   - active offer;
+   - expired offer;
+   - fully traded offer;
+   - partially traded lot offer;
+   - whole offer request;
+   - lot offer request;
+   - two-tap confirmation;
+   - owner view;
+   - requester view;
+   - customer/accountant visibility cases.
+4. Stage 2 is allowed to touch Market/OffersList only as CSS-value-only token replacement. It must not change DOM shape, class names, selectors, action handlers, request flow, or mounted component boundaries.
+5. Any Market change must preserve the complete stabilized testid contract from Stage 4.5.
+6. Any Market change must pass the mandatory market and role/visibility E2E gates before it can be considered complete.
+7. If a market regression is detected, the stage must stop immediately and the market-related diff must be reverted before continuing.
+8. A Market stage is not complete until manual/runtime review confirms no negative impact on trading speed, clarity, tap targets, confirmation flow, or offer state visibility.
+
 ## Sources
 
 - Claude audit: `tmp/claude/webapp-ui-ux-unification-audit.md`
@@ -283,7 +321,7 @@ Goal: unify the highest-risk trading surface after primitives and tests are read
 
 Tasks:
 
-0. Do not start DOM-level Market/OffersList refactor until Stage 4.5 is complete.
+0. Do not start DOM-level Market/OffersList refactor until Stage 4.5 is complete and the Market Protected Surface Rule has been explicitly satisfied.
 1. Document current Market and OffersList behavior before changes:
    - offer creation;
    - whole offer request;
@@ -301,9 +339,11 @@ Tasks:
    - mobile safe area;
    - keyboard accessibility;
    - overlap with the market action bar.
+7. Prepare a minimal rollback plan for the Market-specific diff before implementation starts.
 
 Exit criteria:
 
+- The Market Protected Surface Rule is satisfied.
 - Market and OffersList look consistent with the rest of the WebApp.
 - All offer/trade E2E tests pass.
 - No regression in trade creation/request flows.
