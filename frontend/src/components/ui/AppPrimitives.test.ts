@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   AppActionCard,
   AppBottomSheet,
@@ -224,6 +224,26 @@ describe('ui primitives', () => {
     const textarea = mount(AppTextarea, { props: { modelValue: 'توضیح' } })
     await textarea.get('textarea').setValue('شرح وظیفه')
     expect(textarea.emitted('update:modelValue')?.[0]).toEqual(['شرح وظیفه'])
+    const focusSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'focus').mockImplementation(() => undefined)
+    const originalScrollIntoView = HTMLTextAreaElement.prototype.scrollIntoView
+    const scrollSpy = vi.fn()
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollSpy,
+    })
+    ;(textarea.vm as unknown as { focus: () => void; scrollIntoView: () => void }).focus()
+    ;(textarea.vm as unknown as { focus: () => void; scrollIntoView: () => void }).scrollIntoView()
+    expect(focusSpy).toHaveBeenCalled()
+    expect(scrollSpy).toHaveBeenCalled()
+    focusSpy.mockRestore()
+    if (originalScrollIntoView) {
+      Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: originalScrollIntoView,
+      })
+    } else {
+      delete (HTMLTextAreaElement.prototype as Partial<HTMLTextAreaElement>).scrollIntoView
+    }
   })
 
   it('renders shared empty, loading, error, and danger states', () => {

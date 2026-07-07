@@ -196,6 +196,7 @@ describe('AdminMessagesView.vue', () => {
     await flushPromises()
 
     const marketTextarea = wrapper.get('[data-test="market-composer-input"]')
+    expect(marketTextarea.classes()).toContain('ui-textarea')
     expect((marketTextarea.element as HTMLTextAreaElement).value).toBe('پیام قبلی بازار')
     expect(adminMessagesMocks.scrollIntoViewMock).toHaveBeenCalled()
   })

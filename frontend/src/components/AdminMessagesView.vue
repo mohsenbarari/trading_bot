@@ -53,7 +53,10 @@ const isPublishingMarket = ref(false)
 const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
-const marketComposerInputRef = ref<HTMLTextAreaElement | null>(null)
+const marketComposerInputRef = ref<{
+  focus: (options?: FocusOptions) => void
+  scrollIntoView: (arg?: boolean | ScrollIntoViewOptions) => void
+} | null>(null)
 const panelOptions = [
   { key: 'market' as const, label: 'ارسال پیام در بازار' },
   { key: 'chat' as const, label: 'ارسال پیام در چت' },
@@ -398,14 +401,14 @@ onMounted(loadDashboard)
               <h4>نوشتن پیام بازار</h4>
             </div>
           </div>
-          <textarea
+          <AppTextarea
             ref="marketComposerInputRef"
             v-model="marketContent"
             class="message-textarea"
             data-test="market-composer-input"
             rows="7"
             placeholder="متن پیام بازار..."
-          ></textarea>
+          />
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
           <div class="composer-actions composer-actions--market">

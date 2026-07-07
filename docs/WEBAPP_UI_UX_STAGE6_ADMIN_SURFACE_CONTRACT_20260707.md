@@ -240,3 +240,17 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Admin Messages Market Composer Textarea Slice Evidence
+
+- `AppTextarea` now exposes `focus()` and `scrollIntoView()` methods that delegate to its root `<textarea>`.
+- `AdminMessagesView.vue` market composer textarea now uses `AppTextarea`.
+- Existing selectors and attributes remain in place: `.message-textarea`, `data-test="market-composer-input"`, `rows="7"`, and the placeholder text.
+- The edit-history path still writes the selected market message into the composer, collapses the history list, scrolls the composer into view, and focuses it.
+- Market publish payloads, chat broadcast payloads, selected target groups, history reuse, clear-pin behavior, and the previous broadcast textarea primitive behavior are unchanged.
+- `npm run test:unit:run -- src/components/AdminMessagesView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 29 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

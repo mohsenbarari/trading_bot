@@ -420,7 +420,8 @@ Implementation notes:
 - The invitation readonly-link slice migrates generated Telegram/Web link and pending Web link inputs to `AppInput` while preserving root input selectors, readonly values, local link conversion, click-to-copy handlers, clipboard fallbacks, pending refresh/delete behavior, and generated invite API payloads.
 - The admin-messages secondary-control slice migrates market pin expand, market history toggle/edit controls, the broadcast composer textarea, and broadcast history reuse to shared primitives while preserving accordion/edit/focus behavior, publish payloads, clear-pin behavior, target selection, and history reuse. The market composer textarea remains native until `AppTextarea` can safely expose its root for scroll/focus.
 - The admin-panel accordion toggle slice migrates the section toggles to `AppButton` while preserving IDs, `.admin-accordion-toggle`, `aria-expanded`, `aria-controls`, region labeling, action counts, role-gated action sets, and navigation emits.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, the market composer textarea/root-ref follow-up, then remaining trading-settings fields/states.
+- The admin-messages market composer textarea follow-up extends `AppTextarea` with root `focus()`/`scrollIntoView()` methods and migrates the market composer textarea while preserving the edit-history scroll/focus behavior and publish payloads.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then remaining trading-settings fields/states.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 
