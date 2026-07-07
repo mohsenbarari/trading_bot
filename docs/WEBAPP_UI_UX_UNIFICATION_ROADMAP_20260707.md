@@ -409,7 +409,8 @@ Implementation notes:
 - The first Stage 6 slice migrates only the `AdminView.vue` subview shell to `AppSectionCard` and `AppIconButton`. It intentionally leaves child admin workflows, forms, tables, modals, API calls, route guards, and permission decisions unchanged.
 - The second Stage 6 slice migrates the `CreateInvitationView.vue` invite form fields/actions to shared form/button primitives while keeping role gates, validation, API payloads, generated links, pending invitations, and delete/copy behavior unchanged.
 - The next invitation slice migrates copy/refresh/delete buttons to `AppButton` while preserving every existing button class and clipboard/delete workflow.
-- Later Stage 6 slices should continue one child surface at a time: pending-invitation list structure polish, commodities, user list, channels, admin messages, then system/trading settings.
+- `CommodityManager.vue` was already mostly primitive-backed; the Stage 6 commodity slice migrates the remaining raw back/edit/delete icon controls to `AppIconButton` while preserving all commodity and alias workflows.
+- Later Stage 6 slices should continue one child surface at a time: pending-invitation list structure polish, user list, channels, admin messages, then system/trading settings.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

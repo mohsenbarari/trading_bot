@@ -91,6 +91,18 @@ If an Admin regression appears:
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
 
+## Commodity Manager Icon Button Slice Evidence
+
+- `CommodityManager.vue` already used the shared form/list/card primitives for its primary flows.
+- The remaining raw alias-management icon controls now use `AppIconButton` while preserving `.commodity-back-control`, `.commodity-icon-control.edit`, and `.commodity-icon-control.delete`.
+- Commodity list loading, alias management, locked Imam restrictions, add/edit/delete commodity flows, add/edit/delete alias flows, and validation/error behavior remain unchanged.
+- `npm run test:unit:run -- src/components/CommodityManager.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 34 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 52 tests.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
+
 ## Create Invitation Form Slice Evidence
 
 - `CreateInvitationView.vue` invite form fields now use `AppFormField`, `AppInput`, and `AppSelect`.

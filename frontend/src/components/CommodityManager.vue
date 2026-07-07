@@ -13,6 +13,7 @@ import AppButton from './ui/AppButton.vue'
 import AppDangerZone from './ui/AppDangerZone.vue'
 import AppEmptyState from './ui/AppEmptyState.vue'
 import AppFormField from './ui/AppFormField.vue'
+import AppIconButton from './ui/AppIconButton.vue'
 import AppInput from './ui/AppInput.vue'
 import AppListItem from './ui/AppListItem.vue'
 import AppLoadingState from './ui/AppLoadingState.vue'
@@ -435,9 +436,9 @@ onMounted(fetchCommodities)
         <template #actions>
           <div class="aliases-header-actions">
             <AppStatusBadge tone="info">{{ aliasCountLabel(selectedCommodityAliasCount) }}</AppStatusBadge>
-            <button @click="fetchCommodities" class="commodity-back-control" type="button" aria-label="بازگشت به فهرست کالاها">
+            <AppIconButton @click="fetchCommodities" class="commodity-back-control" label="بازگشت به فهرست کالاها">
               <ArrowRight :size="16" />
-            </button>
+            </AppIconButton>
           </div>
         </template>
 
@@ -470,12 +471,12 @@ onMounted(fetchCommodities)
               </template>
               <template #trailing>
                 <div class="alias-actions">
-                  <button @click="onEditAliasStart(alias)" class="commodity-icon-control edit" type="button" aria-label="ویرایش نام مستعار">
+                  <AppIconButton @click="onEditAliasStart(alias)" class="commodity-icon-control edit" label="ویرایش نام مستعار" size="sm">
                     <PencilLine :size="15" />
-                  </button>
-                  <button @click="onDeleteAliasStart(alias)" class="commodity-icon-control delete" type="button" aria-label="حذف نام مستعار">
+                  </AppIconButton>
+                  <AppIconButton @click="onDeleteAliasStart(alias)" class="commodity-icon-control delete" label="حذف نام مستعار" variant="danger" size="sm">
                     <Trash2 :size="15" />
-                  </button>
+                  </AppIconButton>
                 </div>
               </template>
             </AppListItem>

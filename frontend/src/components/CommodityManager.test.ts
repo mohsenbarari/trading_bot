@@ -143,6 +143,7 @@ describe('CommodityManager.vue', () => {
 
     expect(wrapper.text()).toContain('امامی')
     expect(wrapper.text()).toContain('سکه جدید')
+    expect(wrapper.get('.commodity-back-control').classes()).toContain('ui-icon-button')
 
     await wrapper.find('.commodity-back-control').trigger('click')
     await flushPromises()
@@ -219,6 +220,8 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.text()).toContain('بهار')
     expect(wrapper.text()).toContain('طرح قدیم')
 
+    expect(wrapper.find('.commodity-icon-control.edit').classes()).toContain('ui-icon-button')
+    expect(wrapper.find('.commodity-icon-control.delete').classes()).toContain('ui-icon-button')
     await wrapper.find('.commodity-icon-control.edit').trigger('click')
     await flushPromises()
     await wrapper.find('input').setValue('بهار آزادی')
