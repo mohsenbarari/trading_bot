@@ -3,6 +3,9 @@ import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
 const frontendBuildOutDir = process.env.FRONTEND_BUILD_OUT_DIR?.trim() || '../mini_app_dist'
+const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET?.trim()
+  || process.env.E2E_BACKEND_BASE_URL?.trim()
+  || 'http://127.0.0.1:8000'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -97,7 +100,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: devProxyTarget,
         changeOrigin: true,
         ws: true,
       },

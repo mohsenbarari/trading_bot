@@ -107,16 +107,10 @@ npx playwright test e2e/non-messenger-viewport.spec.ts e2e/market-mutation-ux.sp
 Recommended role/trading follow-up checks:
 
 ```bash
-cd frontend
-npx playwright test \
-  e2e/market-offers.spec.ts \
-  e2e/market-schedule.spec.ts \
-  e2e/lot-suggestion.spec.ts \
-  e2e/trade-history-accountant.spec.ts \
-  e2e/customer-owner-flow.spec.ts \
-  e2e/accountant-owner-flow.spec.ts \
-  --project=chromium
+scripts/run_staging_role_trading_e2e_gate.sh
 ```
+
+This gate is intentionally wrapped by `scripts/run_staging_role_trading_e2e_gate.sh` instead of running the specs directly. The wrapped runner fail-closes unless the target is an explicit staging app container, the Redis container is explicit staging Redis, the backend URL points at staging, and the staging mutation confirmation environment is present. It also runs scoped pre/post cleanup for the Playwright fixture prefixes. Do not run the role/trading specs directly on a host that also has production containers.
 
 ## Local Browser Blockers
 

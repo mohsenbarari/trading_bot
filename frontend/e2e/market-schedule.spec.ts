@@ -1,11 +1,11 @@
 /// <reference types="node" />
 
-import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
 
+import { getE2EBackendBaseUrl, runPythonInApp as runPythonInConfiguredApp } from './helpers/mutationRuntime'
 import { primeAuthSession } from './helpers/auth'
 
-const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+const BACKEND_BASE_URL = getE2EBackendBaseUrl()
 
 interface SeededMarketSession {
   userId: number
@@ -32,22 +32,7 @@ interface MarketRuntimeResponse {
 }
 
 function runPythonInApp<T>(script: string): T {
-  const stdout = execFileSync('docker', ['exec', '-i', 'trading_bot_app', 'python', '-'], {
-    input: script,
-    encoding: 'utf8',
-  })
-
-  const lastLine = stdout
-    .split(/\r?\n/)
-    .map((line: string) => line.trim())
-    .filter(Boolean)
-    .at(-1)
-
-  if (!lastLine) {
-    throw new Error('No JSON output returned from trading_bot_app market schedule helper')
-  }
-
-  return JSON.parse(lastLine) as T
+  return runPythonInConfiguredApp<T>(script, 'market schedule helper')
 }
 
 function seedIsolatedMarketSession(label: string, role: 'standard' | 'super_admin' = 'standard'): SeededMarketSession {

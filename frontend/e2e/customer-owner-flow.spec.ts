@@ -1,11 +1,11 @@
 /// <reference types="node" />
 
-import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
+import { getE2EBackendBaseUrl, runPythonInApp as runPythonInConfiguredApp, runRedisCli } from './helpers/mutationRuntime'
 import { primeAuthSession } from './helpers/auth'
 
-const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+const BACKEND_BASE_URL = getE2EBackendBaseUrl()
 
 interface SessionUser {
   userId: number
@@ -69,47 +69,8 @@ interface MutualHistoryFixture {
   tradeQuantity: number
 }
 
-function resolveAppContainerName() {
-  const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
-    encoding: 'utf8',
-  })
-
-  const names = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  const exactAppName = names.find((name) => name === 'trading_bot_app')
-  if (exactAppName) {
-    return exactAppName
-  }
-
-  const appName = names.find((name) => name.includes('trading_bot') && /(^|_)app($|_)/.test(name))
-  if (!appName) {
-    throw new Error('Could not find a running trading bot app container')
-  }
-  return appName
-}
-
-const APP_CONTAINER_NAME = resolveAppContainerName()
-
 function runPythonInApp<T>(script: string): T {
-  const stdout = execFileSync('docker', ['exec', '-i', APP_CONTAINER_NAME, 'python', '-'], {
-    input: script,
-    encoding: 'utf8',
-  })
-
-  const lastLine = stdout
-    .split(/\r?\n/)
-    .map((line: string) => line.trim())
-    .filter(Boolean)
-    .at(-1)
-
-  if (!lastLine) {
-    throw new Error('No JSON output returned from trading_bot_app customer flow helper')
-  }
-
-  return JSON.parse(lastLine) as T
+  return runPythonInConfiguredApp<T>(script, 'customer flow helper')
 }
 
 function seedSessionUser(label: string, roleTag: 'standard' | 'super_admin' = 'standard'): SessionUser {
@@ -544,15 +505,12 @@ function toRelativeRegistrationPath(registrationLink: string): string {
 }
 
 function seedRegistrationVerified(token: string) {
-  execFileSync('docker', [
-    'exec',
-    'trading_bot_redis',
-    'redis-cli',
+  runRedisCli([
     'SETEX',
     `reg_verified:${token}`,
     '600',
     '1',
-  ], { encoding: 'utf8' })
+  ], 'customer registration Redis verification helper')
 }
 
 async function waitForBackendReady(request: APIRequestContext) {
