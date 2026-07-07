@@ -114,10 +114,14 @@ The current sandbox cannot run browser E2E runtime because Vite cannot bind `127
 - `AppOfferHistoryStamp` now owns the root `history-ribbon` rendering and preserves `data-test="history-stamp"`.
 - `AppOfferPrice` now owns the root `price` display and preserves `data-test="offer-price"`.
 - `AppOfferCustomerContext` now owns the customer context row, management-name badge path, fallback badge, tier label, and preserves `data-test="customer-context-row"`.
-- `OffersList.vue` keeps the existing trade handlers, cancel handler, idempotency key management, lot suggestion state, price selection, customer-context visibility decision, and history stamp label/state decisions.
+- `AppOfferLoadingSkeletonList` now owns the loading skeleton markup and the old `offers-list` / `skeleton-card` root classes with moved scoped CSS.
+- `AppOfferEmptyState` now owns the empty-offer markup, search icon, copy, and old `empty-state` / `empty-icon` classes with moved scoped CSS.
+- `AppOfferTradeErrorToast` now owns the transient trade-error toast markup and preserves the existing visual utility classes.
+- `OffersList.vue` keeps the existing trade handlers, cancel handler, idempotency key management, lot suggestion state, price selection, customer-context visibility decision, history stamp label/state decisions, loading condition, empty condition, and trade-error lifecycle.
 - `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/OffersList.test.ts src/views/MarketView.test.ts src/components/TradeLotSuggestionAlert.test.ts`: passed, 61 tests.
 - `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/OffersList.test.ts src/views/MarketView.test.ts`: passed, 56 tests after the badge primitive slice.
 - `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/OffersList.test.ts src/views/MarketView.test.ts`: passed, 56 tests after the offer-detail primitive slice.
+- `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/OffersList.test.ts src/views/MarketView.test.ts`: passed, 56 tests after the loading/empty/error primitive slice.
 - `npm run guard:ui`: passed.
 - `npm run build`: passed.
 - `npx playwright test e2e/market-offers.spec.ts e2e/lot-suggestion.spec.ts e2e/market-mutation-ux.spec.ts e2e/market-schedule.spec.ts --project=chromium --list`: passed, 13 tests discovered.

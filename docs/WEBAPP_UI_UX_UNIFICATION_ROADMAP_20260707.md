@@ -370,8 +370,8 @@ Exit criteria:
 Implementation notes:
 
 - The pre-refactor behavior contract and rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE5_MARKET_BEHAVIOR_CONTRACT_20260707.md`.
-- The first low-risk Stage 5 slices introduce `AppOfferCard`, `AppTradeActionButton`, `AppOfferSideBadge`, `AppOfferQuantityBadge`, `AppOfferHistoryStamp`, `AppOfferPrice`, and `AppOfferCustomerContext` while preserving the existing root classes, Stage 4.5 `data-test` / `data-state` contract, slot content, trade handlers, and request/idempotency flow.
-- `OffersList.vue` still owns behavior decisions for price source, customer-context visibility, history label/state, lot buttons, two-tap confirmation, trade execution, cancel, and idempotency. The new Stage 5 components only own presentational root markup/classes.
+- The first low-risk Stage 5 slices introduce `AppOfferCard`, `AppTradeActionButton`, `AppOfferSideBadge`, `AppOfferQuantityBadge`, `AppOfferHistoryStamp`, `AppOfferPrice`, `AppOfferCustomerContext`, `AppOfferLoadingSkeletonList`, `AppOfferEmptyState`, and `AppOfferTradeErrorToast` while preserving the existing root classes, Stage 4.5 `data-test` / `data-state` contract, slot content, trade handlers, and request/idempotency flow.
+- `OffersList.vue` still owns behavior decisions for price source, customer-context visibility, history label/state, loading/empty/error conditions, lot buttons, two-tap confirmation, trade execution, cancel, and idempotency. The new Stage 5 components only own presentational root markup/classes and their local scoped styles where required.
 - Higher-risk visual changes to Market empty/loading/error states, bottom action model, or broader offer-card internals must wait for staging/runtime review because browser E2E runtime cannot run inside the current sandbox.
 
 ## Stage 6 - Admin Surface Refactor

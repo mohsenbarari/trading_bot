@@ -1,17 +1,20 @@
 <script setup lang="ts">
 
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { Search, Loader2 } from 'lucide-vue-next';
+import { Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
 import {
   AppOfferCard,
   AppOfferCustomerContext,
+  AppOfferEmptyState,
   AppOfferHistoryStamp,
+  AppOfferLoadingSkeletonList,
   AppOfferPrice,
   AppOfferQuantityBadge,
   AppOfferSideBadge,
+  AppOfferTradeErrorToast,
   AppTradeActionButton,
 } from './ui';
 
@@ -479,21 +482,12 @@ async function cancelOwnOffer(offerId: number) {
   />
     <!-- Trade Error Toast -->
     <transition name="fade">
-        <div v-if="tradeError" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-red-500 to-red-600 text-white px-5 py-2.5 rounded-2xl text-sm font-bold shadow-lg shadow-red-500/25">
-            {{ tradeError }}
-        </div>
+      <AppOfferTradeErrorToast v-if="tradeError" :message="tradeError" />
     </transition>
 
-    <div v-if="loading" class="offers-list">
-       <div v-for="i in (limit || 5)" :key="i" class="skeleton-card"></div>
-    </div>
+    <AppOfferLoadingSkeletonList v-if="loading" :count="limit || 5" />
 
-    <div v-else-if="filteredOffers.length === 0" class="empty-state">
-       <div class="empty-icon">
-          <Search :size="28" />
-       </div>
-       <p>هیچ لفظ فعالی یافت نشد.</p>
-    </div>
+    <AppOfferEmptyState v-else-if="filteredOffers.length === 0" />
 
     <div v-else class="offers-list">
       <AppOfferCard
@@ -600,38 +594,6 @@ async function cancelOwnOffer(offerId: number) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-/* ── Loading skeleton ── */
-.skeleton-card {
-  height: 78px;
-  background: rgba(255,255,255,0.5);
-  border-radius: var(--ds-radius-md);
-  border: 1px solid var(--ds-border-accent);
-  animation: pulse-skeleton 1.5s ease-in-out infinite;
-}
-@keyframes pulse-skeleton {
-  0%, 100% { opacity: 0.6; }
-  50%      { opacity: 1; }
-}
-
-/* ── Empty state ── */
-.empty-state {
-  text-align: center;
-  padding: 24px 16px;
-  color: var(--ds-text-placeholder);
-  font-size: 0.76rem;
-}
-.empty-icon {
-  width: 42px;
-  height: 42px;
-  background: var(--ds-primary-50);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 8px;
-  color: var(--ds-primary-500);
 }
 
 /* ── Card wrapper (timer border ring) ── */

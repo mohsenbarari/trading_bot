@@ -20,10 +20,13 @@ import {
   AppNumberStepper,
   AppOfferCard,
   AppOfferCustomerContext,
+  AppOfferEmptyState,
   AppOfferHistoryStamp,
+  AppOfferLoadingSkeletonList,
   AppOfferPrice,
   AppOfferQuantityBadge,
   AppOfferSideBadge,
+  AppOfferTradeErrorToast,
   AppPage,
   AppPageHeader,
   AppResponsiveDialog,
@@ -147,6 +150,20 @@ describe('ui primitives', () => {
     expect(customerContext.attributes('data-test')).toBe('customer-context-row')
     expect(customerContext.text()).toContain('مشتری تست')
     expect(customerContext.text()).toContain('سطح 1')
+
+    const loadingSkeleton = mount(AppOfferLoadingSkeletonList, { props: { count: 3 } })
+    expect(loadingSkeleton.attributes('data-test')).toBe('offers-loading-skeleton')
+    expect(loadingSkeleton.classes()).toContain('offers-list')
+    expect(loadingSkeleton.findAll('.skeleton-card')).toHaveLength(3)
+
+    const offerEmpty = mount(AppOfferEmptyState)
+    expect(offerEmpty.attributes('data-test')).toBe('offers-empty-state')
+    expect(offerEmpty.classes()).toContain('empty-state')
+    expect(offerEmpty.text()).toContain('هیچ لفظ فعالی یافت نشد.')
+
+    const tradeErrorToast = mount(AppOfferTradeErrorToast, { props: { message: 'خطا در انجام معامله' } })
+    expect(tradeErrorToast.attributes('data-test')).toBe('offer-trade-error-toast')
+    expect(tradeErrorToast.text()).toBe('خطا در انجام معامله')
   })
 
   it('supports keyboard-friendly tabs and emits model updates', async () => {
