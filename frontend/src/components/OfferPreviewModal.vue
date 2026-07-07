@@ -50,8 +50,8 @@ const confirmButtonText = computed(() => {
 })
 const confirmClickLocked = ref(false)
 
-watch(() => props.submitting, (submitting) => {
-  if (!submitting) confirmClickLocked.value = false
+watch(() => [props.submitting, props.error, props.warning], ([submitting, error, warning]) => {
+  if (!submitting || error || warning) confirmClickLocked.value = false
 })
 
 function handleConfirmClick() {

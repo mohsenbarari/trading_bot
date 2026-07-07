@@ -1209,11 +1209,28 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
     expect(wrapper.find('.offer-preview-error').text()).toBe('بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.')
+    expect(wrapper.find('.offer-preview-confirm').attributes('disabled')).toBeUndefined()
     expect(
       marketViewMocks.apiFetchMock.mock.calls.find(
         ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
       ),
     ).toBeUndefined()
+
+    emitWs('market:opened', {
+      is_open: true,
+      active_web_notice_visible: true,
+      offers_since_last_open: 0,
+    })
+    await nextTick()
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCalls = marketViewMocks.apiFetchMock.mock.calls.filter(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(postCalls).toHaveLength(1)
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
 
     wrapper.unmount()
   })

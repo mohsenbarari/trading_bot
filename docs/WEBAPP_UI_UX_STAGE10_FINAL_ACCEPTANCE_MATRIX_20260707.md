@@ -143,4 +143,18 @@ The roadmap can be considered visually accepted only when all of the following a
 
 ## Current Status
 
-Local automated gates are green. Runtime screenshot and browser E2E execution remain pending because the local sandbox cannot start the Playwright webServer.
+Local automated gates are green. Runtime browser validation also passed on staging through a temporary Docker Compose Playwright runner using `mcr.microsoft.com/playwright:v1.59.1-noble` against `https://staging.362514.ir`.
+
+Final staging Chromium evidence:
+
+- Visual baseline: `26/26` passed.
+- Viewport and market mutation: `10/10` passed.
+- Total Stage 10 staging browser matrix: `36/36` passed.
+
+Artifacts:
+
+- `tmp/stage10-staging-playwright/summary.md`
+- `tmp/stage10-staging-playwright/runner-visual-baseline-20260707T1554Z/`
+- `tmp/stage10-staging-playwright/runner-viewport-market-20260707T1559Z/`
+
+The local Codex sandbox still cannot launch Chromium directly, but the approved containerized runner completed the real staging gate. The broader role/trading e2e follow-up suite remains a required pre-production gate on a Docker-capable approved host.
