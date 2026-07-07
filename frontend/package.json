@@ -18,6 +18,8 @@
     "test:e2e:webkit": "playwright test --project=webkit --workers=1",
     "test:e2e:matrix": "playwright test --project=chromium --project=firefox --project=webkit --workers=1",
     "test:e2e:all": "playwright test",
+    "test:e2e:ui-baseline": "UI_UX_BASELINE=1 playwright test e2e/non-messenger-visual-baseline.spec.ts --project=chromium",
+    "guard:ui": "node scripts/check-ui-ux-guards.mjs",
     "benchmark:messenger:prepare": "python3 ../scripts/prepare_messenger_benchmark_versions.py",
     "benchmark:messenger": "node ../scripts/run_messenger_benchmark.mjs",
     "benchmark:messenger:report": "python3 ../scripts/build_messenger_benchmark_report.py",
