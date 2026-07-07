@@ -79,6 +79,18 @@ If an Admin regression appears:
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
 
+## Create Invitation Action Button Slice Evidence
+
+- `CreateInvitationView.vue` link-copy, pending-refresh, pending-copy, and pending-delete actions now use `AppButton`.
+- Existing button classes remain in place: `.copy-btn`, `.copy-btn.web`, `.pending-refresh-btn`, `.pending-copy-btn`, and `.delete-pending-btn`.
+- Clipboard success/failure fallbacks, refresh loading, delete confirmation, and pending invitation removal behavior remain unchanged.
+- `npm run test:unit:run -- src/components/CreateInvitationView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 40 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 43 tests.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
+
 ## Create Invitation Form Slice Evidence
 
 - `CreateInvitationView.vue` invite form fields now use `AppFormField`, `AppInput`, and `AppSelect`.

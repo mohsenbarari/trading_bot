@@ -335,16 +335,16 @@ function normalizeMobile(mobile: string): string {
       <div class="link-label">🔵 لینک تلگرام:</div>
       <div class="copy-container">
         <input type="text" :value="inviteLink" @click="copyToClipboard" readonly />
-        <button type="button" @click="copyToClipboard" class="copy-btn">
+        <AppButton type="button" @click="copyToClipboard" class="copy-btn">
           {{ copyMessage ? copyMessage : 'کپی' }}
-        </button>
+        </AppButton>
       </div>
       <div v-if="webLink" class="link-label" style="margin-top: 0.75rem;">🌐 لینک وب:</div>
       <div v-if="webLink" class="copy-container">
         <input type="text" :value="webLink" @click="copyWebLink" readonly />
-        <button type="button" @click="copyWebLink" class="copy-btn web">
+        <AppButton type="button" @click="copyWebLink" class="copy-btn web">
           {{ webCopyMessage ? webCopyMessage : 'کپی' }}
-        </button>
+        </AppButton>
       </div>
     </div>
 
@@ -354,9 +354,9 @@ function normalizeMobile(mobile: string): string {
           <h3 id="pending-invitations-title">دعوت‌نامه‌های pending</h3>
           <p>{{ pendingInvitations.length }} دعوت‌نامه فعال</p>
         </div>
-        <button type="button" class="pending-refresh-btn" :disabled="pendingLoading" @click="loadPendingInvitations">
+        <AppButton type="button" class="pending-refresh-btn" variant="secondary" :loading="pendingLoading" @click="loadPendingInvitations">
           {{ pendingLoading ? 'در حال دریافت...' : 'به‌روزرسانی' }}
-        </button>
+        </AppButton>
       </div>
 
       <div v-if="pendingError" class="pending-error">{{ pendingError }}</div>
@@ -373,19 +373,20 @@ function normalizeMobile(mobile: string): string {
             </div>
             <div class="pending-link-row">
               <input type="text" :value="toLocalDisplayLink(pending.web_link)" readonly @click="copyPendingWebLink(pending)" />
-              <button type="button" class="pending-copy-btn" @click="copyPendingWebLink(pending)">
+              <AppButton type="button" class="pending-copy-btn" @click="copyPendingWebLink(pending)">
                 {{ pendingCopyState[pending.id] || 'کپی لینک' }}
-              </button>
+              </AppButton>
             </div>
           </div>
-          <button
+          <AppButton
             type="button"
             class="delete-pending-btn"
-            :disabled="pendingDeleteId === pending.id"
+            variant="danger"
+            :loading="pendingDeleteId === pending.id"
             @click="deletePendingInvitation(pending)"
           >
             {{ pendingDeleteId === pending.id ? 'در حال حذف...' : 'حذف' }}
-          </button>
+          </AppButton>
         </div>
       </div>
     </section>

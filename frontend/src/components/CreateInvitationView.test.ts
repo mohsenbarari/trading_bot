@@ -183,6 +183,7 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('.copy-btn').trigger('click')
     await flushPromises()
 
+    expect(wrapper.get('.copy-btn').classes()).toContain('ui-button')
     expect(writeText).toHaveBeenCalledWith('https://t.me/mbmtrading1_bot?start=invite-token')
     expect(wrapper.get('.copy-btn').text()).toBe('کپی شد!')
 
@@ -306,6 +307,9 @@ describe('CreateInvitationView.vue', () => {
     expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending')
     expect(wrapper.text()).toContain('pending-user')
     expect(wrapper.text()).toContain('09120000000')
+    expect(wrapper.get('.pending-refresh-btn').classes()).toContain('ui-button')
+    expect(wrapper.get('.pending-copy-btn').classes()).toContain('ui-button')
+    expect(wrapper.get('.delete-pending-btn').classes()).toContain('ui-button')
     const pendingInput = wrapper.get('.pending-link-row input[readonly]').element as HTMLInputElement
     expect(pendingInput.value).toBe(`${window.location.origin}/register?token=INV-PENDING`)
   })
