@@ -303,8 +303,8 @@ async function openFreshMarketContext(browser: Browser, fixture: SeededMarketSes
 }
 
 async function openOfferPreview(page: Page, text: string) {
-  const offerInput = page.locator('.text-offer-input')
-  const sendButton = page.locator('.send-btn')
+  const offerInput = page.locator('[data-test="market-text-offer-input"]')
+  const sendButton = page.locator('[data-test="market-send-button"]')
   await expect(offerInput).toBeEnabled({ timeout: 15000 })
   await offerInput.fill(text)
   await expect(offerInput).toHaveValue(text)
@@ -314,14 +314,14 @@ async function openOfferPreview(page: Page, text: string) {
   )
   await sendButton.click()
   await parseRequest
-  await expect(page.locator('.offer-preview-card')).toBeVisible()
+  await expect(page.locator('[data-test="offer-preview-card"]')).toBeVisible()
 }
 
 async function confirmOfferPreview(page: Page) {
-  const card = page.locator('.offer-preview-card')
-  const confirmButton = card.locator('.offer-preview-confirm')
-  const warning = card.locator('.offer-preview-warning')
-  const error = card.locator('.offer-preview-error')
+  const card = page.locator('[data-test="offer-preview-card"]')
+  const confirmButton = card.locator('[data-test="offer-preview-confirm"]')
+  const warning = card.locator('[data-test="offer-preview-warning"]')
+  const error = card.locator('[data-test="offer-preview-error"]')
   const waitForPreviewOutcome = async () => Promise.race([
     card.waitFor({ state: 'detached', timeout: 30000 }).then(() => 'closed' as const),
     warning.waitFor({ state: 'visible', timeout: 30000 }).then(() => 'warning' as const),
@@ -385,8 +385,8 @@ test.describe('Market schedule browser regressions', () => {
     )
     const { freshContext: initialContext, freshPage: initialPage } = await openFreshMarketContext(browser, actor, initialMarketState)
 
-    const input = initialPage.locator('.text-offer-input')
-    const sendButton = initialPage.locator('.send-btn')
+    const input = initialPage.locator('[data-test="market-text-offer-input"]')
+    const sendButton = initialPage.locator('[data-test="market-send-button"]')
     await expect(input).toBeEnabled()
     await expect(sendButton).toBeDisabled()
     await expect(initialPage.locator('.market-runtime-notice')).toHaveCount(0)
@@ -407,8 +407,8 @@ test.describe('Market schedule browser regressions', () => {
     const { freshContext: closedContext, freshPage: closedPage } = await openFreshMarketContext(browser, actor, closedMarketState)
 
     await expect(closedPage.locator('.market-runtime-notice')).toHaveText('پایان فعالیت بازار')
-    await expect(closedPage.locator('.text-offer-input')).toBeDisabled()
-    await expect(closedPage.locator('.send-btn')).toBeDisabled()
+    await expect(closedPage.locator('[data-test="market-text-offer-input"]')).toBeDisabled()
+    await expect(closedPage.locator('[data-test="market-send-button"]')).toBeDisabled()
 
     configureMarketRuntime({
       mode: 'open',
@@ -423,8 +423,8 @@ test.describe('Market schedule browser regressions', () => {
     const { freshContext: reopenedContext, freshPage: reopenedPage } = await openFreshMarketContext(browser, actor, reopenedMarketState)
 
     await expect(reopenedPage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
-    const reopenedInput = reopenedPage.locator('.text-offer-input')
-    const reopenedSendButton = reopenedPage.locator('.send-btn')
+    const reopenedInput = reopenedPage.locator('[data-test="market-text-offer-input"]')
+    const reopenedSendButton = reopenedPage.locator('[data-test="market-send-button"]')
     await expect(reopenedInput).toBeEnabled()
     await reopenedInput.fill(`فروش ${actor.commodityName} 11 عدد 122100`)
     await expect(reopenedSendButton).toBeEnabled()
@@ -469,7 +469,7 @@ test.describe('Market schedule browser regressions', () => {
     })
     await refreshMarketScheduleSettingsInApp(request, actor.accessToken, true)
     await confirmOfferPreview(activePage)
-    await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(activePage.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
     const afterFirstOfferState = await waitForAuthoritativeMarketState(
       (state) => state.is_open && state.active_web_notice_visible && state.offers_since_last_open === 1,
       'start notice still visible after first accepted offer',
@@ -486,7 +486,7 @@ test.describe('Market schedule browser regressions', () => {
     })
     await refreshMarketScheduleSettingsInApp(request, actor.accessToken, true)
     await confirmOfferPreview(activePage)
-    await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(activePage.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
     const afterSecondOfferState = await waitForAuthoritativeMarketState(
       (state) => state.is_open && !state.active_web_notice_visible && state.offers_since_last_open >= 2,
       'start notice hidden after second accepted offer',

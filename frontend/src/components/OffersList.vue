@@ -500,6 +500,7 @@ async function cancelOwnOffer(offerId: number) {
           'is-traded': isTradedHistoryOffer(offer),
         }"
         :style="cardTimerStyle(offer)"
+        data-test="offer-card"
       >
         <div class="offer-card-inner" :class="[offer.offer_type]">
           <span
@@ -524,16 +525,17 @@ async function cancelOwnOffer(offerId: number) {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <span class="quantity-badge">{{ getOfferQuantityLabel(offer) }}</span>
-              <span class="price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
+              <span class="price" data-test="offer-price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
             </div>
-            <div v-if="offer.customer_badge_visible" class="customer-context-row">
+            <div v-if="offer.customer_badge_visible" class="customer-context-row" data-test="customer-context-row">
               <CustomerNameWithBadge
                 v-if="offer.customer_management_name"
                 :name="offer.customer_management_name"
                 compact
+                data-test="customer-context-name-badge"
               />
-              <span v-else class="customer-context-badge">مشتری</span>
-              <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
+              <span v-else class="customer-context-badge" data-test="customer-context-badge">مشتری</span>
+              <span v-if="offer.customer_tier" class="customer-context-tier" data-test="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
             <p v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
@@ -549,6 +551,8 @@ async function cancelOwnOffer(offerId: number) {
                 @click="handleLotClick(offer.id, amount)"
                 :disabled="tradingOfferId === offer.id"
                 class="trade-btn"
+                data-test="trade-action-button"
+                :data-state="isPending(offer.id, amount) ? 'pending' : 'idle'"
                 :class="[
                   isPending(offer.id, amount)
                     ? 'pending'

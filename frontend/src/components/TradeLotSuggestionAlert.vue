@@ -161,6 +161,8 @@ onBeforeUnmount(() => {
                 :key="amount"
                 type="button"
                 class="trade-suggestion-lot-btn"
+                data-test="trade-suggestion-lot-button"
+                :data-state="pendingAmount === amount ? 'pending' : 'idle'"
                 :class="[
                   offerTypeClass,
                   pendingAmount === amount ? 'pending' : '',

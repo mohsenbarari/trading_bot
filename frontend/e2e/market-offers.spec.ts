@@ -713,10 +713,10 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
 }
 
 async function executeTradeFromCard(page: Page, offerCard: Locator, quantityLabel: string) {
-  const tradeButton = offerCard.locator('.trade-btn').filter({ hasText: quantityLabel }).first()
+  const tradeButton = offerCard.locator('[data-test="trade-action-button"]').filter({ hasText: quantityLabel }).first()
   await expect(tradeButton).toBeVisible({ timeout: 30000 })
   await tradeButton.evaluate((node: HTMLElement) => node.click())
-  await expect(tradeButton).toHaveClass(/pending/)
+  await expect(tradeButton).toHaveAttribute('data-state', 'pending')
   const tradeRequest = page.waitForRequest((request) =>
     request.url().includes('/api/trades/') && request.method() === 'POST',
   )
@@ -757,16 +757,16 @@ async function fetchMyOffers(request: APIRequestContext, accessToken: string): P
 }
 
 async function openOfferPreview(page: Page, text: string) {
-  const offerInput = page.locator('.text-offer-input').first()
+  const offerInput = page.locator('[data-test="market-text-offer-input"]').first()
   await offerInput.fill(text)
-  const sendButton = page.locator('.send-btn')
+  const sendButton = page.locator('[data-test="market-send-button"]')
   await expect(sendButton).toBeEnabled({ timeout: 30000 })
   await sendButton.click()
-  await expect(page.locator('.offer-preview-card')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="offer-preview-card"]')).toBeVisible({ timeout: 30000 })
 }
 
 async function confirmOfferPreview(page: Page) {
-  await page.locator('.offer-preview-confirm').click()
+  await page.locator('[data-test="offer-preview-confirm"]').click()
 }
 
 function uniquePrice(seed: number) {
@@ -788,7 +788,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
-    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(page.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
 
     const offers = await fetchMyOffers(request, actor.accessToken)
     expect(
@@ -812,7 +812,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
-    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(page.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
 
     const offers = await fetchMyOffers(request, actor.accessToken)
     expect(
@@ -831,27 +831,27 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, fixture.owner)
     await page.goto('/market')
 
-    const ownerCard = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
+    const ownerCard = page.locator('[data-test="offer-card"]', { hasText: fixture.commodityName }).first()
     await expect(ownerCard).toBeVisible()
-    await expect(ownerCard.locator('.price')).toHaveText('50,000')
-    await expect(ownerCard.locator('.customer-context-row')).toContainText(fixture.sourceManagementName)
-    await expect(ownerCard.locator('.customer-context-row')).toContainText('سطح 1')
+    await expect(ownerCard.locator('[data-test="offer-price"]')).toHaveText('50,000')
+    await expect(ownerCard.locator('[data-test="customer-context-row"]')).toContainText(fixture.sourceManagementName)
+    await expect(ownerCard.locator('[data-test="customer-context-row"]')).toContainText('سطح 1')
 
     await setSeededSession(page, fixture.tier2Customer)
     await page.goto('/market')
 
-    const tier2Card = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
+    const tier2Card = page.locator('[data-test="offer-card"]', { hasText: fixture.commodityName }).first()
     await expect(tier2Card).toBeVisible()
-    await expect(tier2Card.locator('.price')).toHaveText('49,700')
-    await expect(tier2Card.locator('.customer-context-row')).toHaveCount(0)
+    await expect(tier2Card.locator('[data-test="offer-price"]')).toHaveText('49,700')
+    await expect(tier2Card.locator('[data-test="customer-context-row"]')).toHaveCount(0)
 
     await setSeededSession(page, fixture.outsider)
     await page.goto('/market')
 
-    const outsiderCard = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
+    const outsiderCard = page.locator('[data-test="offer-card"]', { hasText: fixture.commodityName }).first()
     await expect(outsiderCard).toBeVisible()
-    await expect(outsiderCard.locator('.price')).toHaveText('50,000')
-    await expect(outsiderCard.locator('.customer-context-row')).toHaveCount(0)
+    await expect(outsiderCard.locator('[data-test="offer-price"]')).toHaveText('50,000')
+    await expect(outsiderCard.locator('[data-test="customer-context-row"]')).toHaveCount(0)
   })
 
   test('tier1 customer can publish a sell offer while owner and tier2 viewers see raw versus projected prices', async ({ page }) => {
@@ -865,7 +865,7 @@ test.describe('Market offer creation regressions', () => {
     await openOfferPreview(page, `فروش ${fixture.commodityName} 7 عدد ${sellPrice}: ${uniqueNote}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
-    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(page.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
 
     await expect
       .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
@@ -879,19 +879,19 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, fixture.owner)
     await page.goto('/market')
 
-    const ownerCard = page.locator('.offer-card-wrap', { hasText: uniqueNote }).first()
+    const ownerCard = page.locator('[data-test="offer-card"]', { hasText: uniqueNote }).first()
     await expect(ownerCard).toBeVisible()
-    await expect(ownerCard.locator('.price')).toHaveText('50,000')
-    await expect(ownerCard.locator('.customer-context-row')).toContainText(fixture.sourceManagementName)
-    await expect(ownerCard.locator('.customer-context-row')).toContainText('سطح 1')
+    await expect(ownerCard.locator('[data-test="offer-price"]')).toHaveText('50,000')
+    await expect(ownerCard.locator('[data-test="customer-context-row"]')).toContainText(fixture.sourceManagementName)
+    await expect(ownerCard.locator('[data-test="customer-context-row"]')).toContainText('سطح 1')
 
     await setSeededSession(page, fixture.tier2Customer)
     await page.goto('/market')
 
-    const tier2Card = page.locator('.offer-card-wrap', { hasText: uniqueNote }).first()
+    const tier2Card = page.locator('[data-test="offer-card"]', { hasText: uniqueNote }).first()
     await expect(tier2Card).toBeVisible()
-    await expect(tier2Card.locator('.price')).toHaveText('50,300')
-    await expect(tier2Card.locator('.customer-context-row')).toHaveCount(0)
+    await expect(tier2Card.locator('[data-test="offer-price"]')).toHaveText('50,300')
+    await expect(tier2Card.locator('[data-test="customer-context-row"]')).toHaveCount(0)
   })
 
   test('tier2 customer executes own-owner and outsider offers through the browser with direct and mediated trade legs', async ({ page, request }) => {
@@ -900,9 +900,9 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, fixture.tier2Customer)
     await page.goto('/market')
 
-    const ownerCard = page.locator('.offer-card-wrap', { hasText: fixture.ownerOfferNote }).first()
+    const ownerCard = page.locator('[data-test="offer-card"]', { hasText: fixture.ownerOfferNote }).first()
     await expect(ownerCard).toBeVisible()
-    await expect(ownerCard.locator('.price')).toHaveText('49,700')
+    await expect(ownerCard.locator('[data-test="offer-price"]')).toHaveText('49,700')
 
     await executeTradeFromCard(page, ownerCard, '4 عدد')
     await expect
@@ -920,9 +920,9 @@ test.describe('Market offer creation regressions', () => {
         },
       ])
 
-    const outsiderCard = page.locator('.offer-card-wrap', { hasText: fixture.outsiderOfferNote }).first()
+    const outsiderCard = page.locator('[data-test="offer-card"]', { hasText: fixture.outsiderOfferNote }).first()
     await expect(outsiderCard).toBeVisible()
-    await expect(outsiderCard.locator('.price')).toHaveText('100,500')
+    await expect(outsiderCard.locator('[data-test="offer-price"]')).toHaveText('100,500')
 
     await executeTradeFromCard(page, outsiderCard, '4 عدد')
 
@@ -985,10 +985,10 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('heading', { name: 'هشدار قیمت فروش' })).toBeVisible()
     await expect(page.getByText('پایین‌ترین قیمت فروش فعال')).toBeVisible()
     await expect(page.getByText('در نرخ منصفانه لحاظ نخواهد شد.')).toBeVisible()
-    await expect(page.locator('.offer-preview-confirm')).toHaveText('با وجود هشدار منتشر کن')
+    await expect(page.locator('[data-test="offer-preview-confirm"]')).toHaveText('با وجود هشدار منتشر کن')
 
     await confirmOfferPreview(page)
-    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(page.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
 
     await expect
       .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
@@ -1018,10 +1018,10 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('heading', { name: 'هشدار قیمت خرید' })).toBeVisible()
     await expect(page.getByText('بالاترین قیمت خرید فعال')).toBeVisible()
     await expect(page.getByText('در نرخ منصفانه لحاظ نخواهد شد.')).toBeVisible()
-    await expect(page.locator('.offer-preview-confirm')).toHaveText('با وجود هشدار منتشر کن')
+    await expect(page.locator('[data-test="offer-preview-confirm"]')).toHaveText('با وجود هشدار منتشر کن')
 
     await confirmOfferPreview(page)
-    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
+    await expect(page.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
 
     await expect
       .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })

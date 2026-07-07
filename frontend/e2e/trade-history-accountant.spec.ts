@@ -1102,12 +1102,12 @@ test.describe('Trade history accountant context', () => {
     await expect(page.getByRole('button', { name: /رفع بلاک/ }).first()).toBeVisible()
 
     await page.goto('/market')
-    const offerCard = page.locator('.offer-card-wrap', { hasText: fixture.offerNote }).first()
+    const offerCard = page.locator('[data-test="offer-card"]', { hasText: fixture.offerNote }).first()
     await expect(offerCard).toBeVisible()
 
-    const executeButton = offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()
+    const executeButton = offerCard.locator('[data-test="trade-action-button"]').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()
     await executeButton.click()
-    const pendingButton = offerCard.locator('.trade-btn.pending').first()
+    const pendingButton = offerCard.locator('[data-test="trade-action-button"][data-state="pending"]').first()
     await expect(pendingButton).toBeVisible({ timeout: 10000 })
     const [tradeResponse] = await Promise.all([
       page.waitForResponse((response) => {
@@ -1118,7 +1118,7 @@ test.describe('Trade history accountant context', () => {
       pendingButton.click({ force: true }),
     ])
     expect(tradeResponse.status()).toBe(400)
-    await expect(offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()).toBeVisible()
+    await expect(offerCard.locator('[data-test="trade-action-button"]').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()).toBeVisible()
 
     const payload = await tradeResponse.json()
     expect(payload?.detail).toBe('امکان انجام این معامله وجود ندارد.')

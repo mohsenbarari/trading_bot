@@ -243,7 +243,7 @@ test.describe('Lot suggestion regressions', () => {
     await loginWithSeededSession(page, fixture.viewer)
     await page.goto('/market', { waitUntil: 'domcontentloaded' })
 
-    const publicOfferCard = page.locator('.offer-card-wrap').filter({
+    const publicOfferCard = page.locator('[data-test="offer-card"]').filter({
       has: page.locator('p').filter({ hasText: `توضیحات: ${fixture.publicOfferNote}` }),
     }).first()
     await expect(publicOfferCard).toBeVisible()
@@ -274,7 +274,7 @@ test.describe('Lot suggestion regressions', () => {
     await expect(lot10Button).toBeVisible({ timeout: 30000 })
     await lot10Button.evaluate((node: HTMLElement) => node.click())
 
-    const confirm10Button = publicOfferCard.locator('.trade-btn.pending').first()
+    const confirm10Button = publicOfferCard.locator('[data-test="trade-action-button"][data-state="pending"]').first()
     await expect(confirm10Button).toBeVisible({ timeout: 30000 })
     await confirm10Button.evaluate((node: HTMLElement) => node.click())
 
@@ -290,7 +290,7 @@ test.describe('Lot suggestion regressions', () => {
 
     await expect(dialog.getByRole('button', { name: '16 عدد' })).toBeVisible({ timeout: 30000 })
     await dialog.getByRole('button', { name: '16 عدد' }).evaluate((node: HTMLElement) => node.click())
-    await expect(dialog.locator('.trade-suggestion-lot-btn.pending')).toBeVisible({ timeout: 30000 })
+    await expect(dialog.locator('[data-test="trade-suggestion-lot-button"][data-state="pending"]')).toBeVisible({ timeout: 30000 })
 
     updateOfferState(fixture.publicOfferId, 8, [8], 'active')
     await expect(dialog).toContainText('8 عدد')

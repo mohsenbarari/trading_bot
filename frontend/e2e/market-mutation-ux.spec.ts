@@ -127,12 +127,12 @@ test.describe('Market mutation UX', () => {
 
     await page.goto('/market', { waitUntil: 'domcontentloaded' })
 
-    await expect(page.locator('.recent-offers-toggle')).toBeVisible()
-    await expect(page.locator('.text-offer-input')).toBeVisible()
-    await expect(page.locator('.send-btn')).toBeVisible()
-    const toggleBox = await page.locator('.recent-offers-toggle').boundingBox()
-    const inputBox = await page.locator('.text-offer-input').boundingBox()
-    const sendBox = await page.locator('.send-btn').boundingBox()
+    await expect(page.locator('[data-test="recent-offers-toggle"]')).toBeVisible()
+    await expect(page.locator('[data-test="market-text-offer-input"]')).toBeVisible()
+    await expect(page.locator('[data-test="market-send-button"]')).toBeVisible()
+    const toggleBox = await page.locator('[data-test="recent-offers-toggle"]').boundingBox()
+    const inputBox = await page.locator('[data-test="market-text-offer-input"]').boundingBox()
+    const sendBox = await page.locator('[data-test="market-send-button"]').boundingBox()
     expect(toggleBox).not.toBeNull()
     expect(inputBox).not.toBeNull()
     expect(sendBox).not.toBeNull()
@@ -140,11 +140,11 @@ test.describe('Market mutation UX', () => {
     expect(toggleBox!.x - inputBox!.x).toBeLessThanOrEqual(4)
     expect(toggleBox!.x + toggleBox!.width).toBeLessThanOrEqual(inputBox!.x + inputBox!.width)
     expect(Math.abs((sendBox!.x + sendBox!.width) - (inputBox!.x + inputBox!.width))).toBeLessThanOrEqual(4)
-    await page.locator('.recent-offers-toggle').click()
-    const recentOffersDropdown = page.locator('.recent-offers-dropdown')
+    await page.locator('[data-test="recent-offers-toggle"]').click()
+    const recentOffersDropdown = page.locator('[data-test="recent-offers-dropdown"]')
     await expect(recentOffersDropdown).toBeVisible({ timeout: 10000 })
     await expect(recentOffersDropdown).toHaveCSS('z-index', '1200')
-    await expect(page.locator('.recent-offer-item')).toContainText('سکه', { timeout: 10000 })
+    await expect(page.locator('[data-test="recent-offer-item"]')).toContainText('سکه', { timeout: 10000 })
     const dropdownBox = await recentOffersDropdown.evaluate((node) => {
       const rect = node.getBoundingClientRect()
       return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -275,8 +275,8 @@ test.describe('Market mutation UX', () => {
 
     await page.goto('/market', { waitUntil: 'domcontentloaded' })
 
-    const offerInput = page.locator('.text-offer-input')
-    const sendButton = page.locator('.send-btn')
+    const offerInput = page.locator('[data-test="market-text-offer-input"]')
+    const sendButton = page.locator('[data-test="market-send-button"]')
     await expect(offerInput).toBeVisible()
     await offerInput.fill('خرید سکه 4 عدد 50000')
     await expect(offerInput).toHaveValue('خرید سکه 4 عدد 50000')
@@ -286,9 +286,9 @@ test.describe('Market mutation UX', () => {
     )
     await sendButton.click()
     await parseRequest
-    await expect(page.locator('.offer-preview-card')).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('[data-test="offer-preview-card"]')).toBeVisible({ timeout: 10000 })
 
-    const publishConfirm = page.locator('.offer-preview-confirm')
+    const publishConfirm = page.locator('[data-test="offer-preview-confirm"]')
     await expect(publishConfirm).toBeEnabled()
     const publishRequest = page.waitForRequest((request) =>
       request.url().includes('/api/offers/') && request.method() === 'POST',
@@ -298,21 +298,21 @@ test.describe('Market mutation UX', () => {
     await expect(publishConfirm).toBeDisabled()
     await publishRequest
 
-    await expect(page.locator('.offer-preview-error')).toContainText('بازار در حال حاضر بسته است')
+    await expect(page.locator('[data-test="offer-preview-error"]')).toContainText('بازار در حال حاضر بسته است')
     expect(offerPublishCount).toBe(1)
     expect(offerBodies[0]?.idempotency_key).toEqual(expect.any(String))
-    await page.locator('.offer-preview-close').evaluate((node: HTMLElement) => node.click())
-    await expect(page.locator('.offer-preview-card')).toBeHidden()
+    await page.locator('[data-test="offer-preview-close"]').evaluate((node: HTMLElement) => node.click())
+    await expect(page.locator('[data-test="offer-preview-card"]')).toBeHidden()
 
-    const offerCard = page.locator('.offer-card-wrap').filter({ hasText: 'pw execute conflict' }).first()
+    const offerCard = page.locator('[data-test="offer-card"]').filter({ hasText: 'pw execute conflict' }).first()
     await expect(offerCard).toBeVisible()
-    const tradeButton = offerCard.getByRole('button', { name: '4 عدد' }).first()
+    const tradeButton = offerCard.locator('[data-test="trade-action-button"]').filter({ hasText: '4 عدد' }).first()
     await expect(tradeButton).toBeEnabled()
     const tradeRequest = page.waitForRequest((request) =>
       request.url().includes('/api/trades/') && request.method() === 'POST',
     )
     await tradeButton.click()
-    await expect(tradeButton).toHaveClass(/pending/)
+    await expect(tradeButton).toHaveAttribute('data-state', 'pending')
     await tradeButton.evaluate((node: HTMLElement) => node.click())
     await tradeRequest
 

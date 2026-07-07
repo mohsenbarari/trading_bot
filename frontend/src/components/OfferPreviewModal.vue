@@ -52,13 +52,13 @@ const confirmButtonText = computed(() => {
 
 <template>
   <div class="offer-preview-overlay" @click.self="emit('cancel')">
-    <div class="offer-preview-card" role="dialog" aria-modal="true" aria-labelledby="offer-preview-title">
+    <div class="offer-preview-card" data-test="offer-preview-card" role="dialog" aria-modal="true" aria-labelledby="offer-preview-title">
       <div class="offer-preview-header">
         <div>
           <p class="offer-preview-kicker">{{ warning ? 'هشدار قبل از انتشار' : 'قبل از انتشار' }}</p>
           <h2 id="offer-preview-title">{{ warning ? warning.title : 'پیش‌نمایش لفظ' }}</h2>
         </div>
-        <button type="button" class="offer-preview-close" @click="emit('cancel')" aria-label="بستن پیش‌نمایش">×</button>
+        <button type="button" class="offer-preview-close" data-test="offer-preview-close" @click="emit('cancel')" aria-label="بستن پیش‌نمایش">×</button>
       </div>
 
       <div class="offer-preview-body">
@@ -77,7 +77,7 @@ const confirmButtonText = computed(() => {
           </div>
         </div>
 
-        <div v-if="warning" class="offer-preview-warning">
+        <div v-if="warning" class="offer-preview-warning" data-test="offer-preview-warning">
           <div class="offer-preview-warning-title">{{ warning.detail }}</div>
           <div class="offer-preview-warning-meta">
             <span>{{ warning.reference_label }}: <strong>{{ referencePrice }}</strong></span>
@@ -87,7 +87,7 @@ const confirmButtonText = computed(() => {
           <p class="offer-preview-warning-hint">در صورت تایید دوباره، لفظ منتشر می‌شود اما در نرخ منصفانه لحاظ نخواهد شد.</p>
         </div>
 
-        <div v-if="error" class="offer-preview-error">{{ error }}</div>
+        <div v-if="error" class="offer-preview-error" data-test="offer-preview-error">{{ error }}</div>
       </div>
 
       <div class="offer-preview-actions">
@@ -97,7 +97,7 @@ const confirmButtonText = computed(() => {
         <button type="button" class="offer-preview-edit" :disabled="submitting" @click="emit('edit')">
           ویرایش
         </button>
-        <button type="button" class="offer-preview-confirm" :disabled="submitting" @click="emit('confirm')">
+        <button type="button" class="offer-preview-confirm" data-test="offer-preview-confirm" :disabled="submitting" @click="emit('confirm')">
           {{ confirmButtonText }}
         </button>
       </div>

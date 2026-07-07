@@ -1007,6 +1007,7 @@ onUnmounted(() => {
           <AppIconButton
             ref="recentOffersToggleRef"
             class="recent-offers-toggle"
+            data-test="recent-offers-toggle"
             :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
             :disabled="isSubmitting"
             label="نمایش لفظ‌های اخیر"
@@ -1022,6 +1023,7 @@ onUnmounted(() => {
             v-model="offerText"
             :placeholder="marketInputPlaceholder"
             class="text-offer-input"
+            data-test="market-text-offer-input"
             rows="1"
             :disabled="!isMarketOpen || isSubmitting"
             aria-label="متن لفظ بازار"
@@ -1032,6 +1034,7 @@ onUnmounted(() => {
             @click="parseAndSubmitTextOffer"
             :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
             class="send-btn"
+            data-test="market-send-button"
             variant="neutral"
             label="ارسال لفظ برای پیش‌نمایش"
           >
@@ -1050,6 +1053,7 @@ onUnmounted(() => {
           id="recent-offers-dropdown"
           ref="recentOffersDropdownRef"
           class="recent-offers-dropdown"
+          data-test="recent-offers-dropdown"
           :class="recentOffersOpenDirection === 'above' ? 'recent-offers-dropdown--above' : 'recent-offers-dropdown--below'"
           :style="recentOffersDropdownStyle"
         >
@@ -1077,6 +1081,7 @@ onUnmounted(() => {
             :key="offer.id"
             type="button"
             class="recent-offer-item"
+            data-test="recent-offer-item"
             @click="openRecentOfferPreview(offer)"
           >
             <div class="recent-offer-item-main">

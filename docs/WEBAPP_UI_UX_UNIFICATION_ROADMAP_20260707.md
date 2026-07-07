@@ -319,6 +319,12 @@ Exit criteria:
 - Existing trade, lot, preview, recent-offer, and history assertions remain covered.
 - No visual redesign is included in this stage except adding invisible/stable test hooks.
 
+Implementation notes:
+
+- The Stage 4.5 selector contract is documented in `docs/WEBAPP_UI_UX_STAGE4_5_MARKET_TEST_HOOKS_20260707.md`.
+- Stage 4.5 also includes `frontend/e2e/market-schedule.spec.ts` because it depends on the same market text input and offer preview contract.
+- Stage 5 must preserve the full Stage 4.5 `data-test` / `data-state` contract, including `history-stamp`, unless the roadmap and every affected test are updated in the same change.
+
 ## Stage 5 - Market and OffersList Refactor
 
 Goal: unify the highest-risk trading surface after primitives and tests are ready.
