@@ -18,6 +18,7 @@ import {
   AppMasterDetail,
   AppMetricCard,
   AppNumberStepper,
+  AppOfferCard,
   AppPage,
   AppPageHeader,
   AppResponsiveDialog,
@@ -30,6 +31,7 @@ import {
   AppConfirmDialog,
   AppToast,
   AppToolbar,
+  AppTradeActionButton,
   AppWorkspace,
 } from './index'
 
@@ -86,6 +88,29 @@ describe('ui primitives', () => {
     })
     expect(section.find('.ui-section-card__actions').exists()).toBe(true)
     expect(section.text()).toContain('محتوا')
+
+    const offerCard = mount(AppOfferCard, {
+      props: {
+        hasTimer: true,
+        timerCritical: true,
+        traded: true,
+        timerStyle: { '--t-pct': '42' },
+      },
+      slots: { default: '<div class="offer-card-inner">لفظ بازار</div>' },
+    })
+    expect(offerCard.attributes('data-test')).toBe('offer-card')
+    expect(offerCard.classes()).toEqual(expect.arrayContaining(['offer-card-wrap', 'has-timer', 'timer-critical', 'is-traded']))
+    expect(offerCard.attributes('style')).toContain('--t-pct: 42')
+    expect(offerCard.text()).toContain('لفظ بازار')
+
+    const tradeButton = mount(AppTradeActionButton, {
+      props: { side: 'buy', pending: true, busy: true },
+      slots: { default: 'تایید 5 عدد؟' },
+    })
+    expect(tradeButton.attributes('data-test')).toBe('trade-action-button')
+    expect(tradeButton.attributes('data-state')).toBe('pending')
+    expect(tradeButton.classes()).toEqual(expect.arrayContaining(['trade-btn', 'pending', 'busy']))
+    expect(tradeButton.attributes('disabled')).toBeDefined()
   })
 
   it('supports keyboard-friendly tabs and emits model updates', async () => {

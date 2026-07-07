@@ -367,6 +367,12 @@ Exit criteria:
   - `frontend/e2e/customer-chat-privacy.spec.ts`
 - Mobile and desktop screenshots are reviewed.
 
+Implementation notes:
+
+- The pre-refactor behavior contract and rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE5_MARKET_BEHAVIOR_CONTRACT_20260707.md`.
+- The first low-risk Stage 5 slice introduces `AppOfferCard` and `AppTradeActionButton` while preserving the existing root classes, Stage 4.5 `data-test` / `data-state` contract, slot content, trade handlers, and request/idempotency flow.
+- Higher-risk visual changes to Market empty/loading/error states, bottom action model, or broader offer-card internals must wait for staging/runtime review because browser E2E runtime cannot run inside the current sandbox.
+
 ## Stage 6 - Admin Surface Refactor
 
 Goal: bring Admin subsections into the same design system without weakening management workflows.

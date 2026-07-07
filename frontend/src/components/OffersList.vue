@@ -6,6 +6,7 @@ import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
+import { AppOfferCard, AppTradeActionButton } from './ui';
 
 interface TradeLotSuggestionState {
   title: string;
@@ -488,19 +489,15 @@ async function cancelOwnOffer(offerId: number) {
     </div>
 
     <div v-else class="offers-list">
-      <div 
+      <AppOfferCard
         v-for="offer in filteredOffers" 
         :key="offer.id"
-        class="offer-card-wrap"
-        :class="{
-          'timer-critical': !isReadOnlyOffer(offer) && isCritical(offer),
-          'has-timer': !isReadOnlyOffer(offer) && hasTimer(offer),
-          'is-history': isReadOnlyOffer(offer),
-          'is-expired': isExpiredOffer(offer),
-          'is-traded': isTradedHistoryOffer(offer),
-        }"
-        :style="cardTimerStyle(offer)"
-        data-test="offer-card"
+        :timer-critical="!isReadOnlyOffer(offer) && isCritical(offer)"
+        :has-timer="!isReadOnlyOffer(offer) && hasTimer(offer)"
+        :history="isReadOnlyOffer(offer)"
+        :expired="isExpiredOffer(offer)"
+        :traded="isTradedHistoryOffer(offer)"
+        :timer-style="cardTimerStyle(offer)"
       >
         <div class="offer-card-inner" :class="[offer.offer_type]">
           <span
@@ -545,25 +542,19 @@ async function cancelOwnOffer(offerId: number) {
           <!-- Footer: lot buttons or own offer -->
           <div v-if="!isReadOnlyOffer(offer)" class="offer-footer">
             <div v-if="!isOwnOffer(offer) && (offer.remaining_quantity ?? offer.quantity) > 0" class="trade-buttons">
-              <button
+              <AppTradeActionButton
                 v-for="amount in getLotButtons(offer)"
                 :key="amount"
-                @click="handleLotClick(offer.id, amount)"
+                :side="offer.offer_type"
+                :pending="isPending(offer.id, amount)"
+                :busy="tradingOfferId === offer.id"
                 :disabled="tradingOfferId === offer.id"
-                class="trade-btn"
-                data-test="trade-action-button"
-                :data-state="isPending(offer.id, amount) ? 'pending' : 'idle'"
-                :class="[
-                  isPending(offer.id, amount)
-                    ? 'pending'
-                    : offer.offer_type,
-                  tradingOfferId === offer.id ? 'busy' : ''
-                ]"
+                @click="handleLotClick(offer.id, amount)"
               >
                 <Loader2 v-if="tradingOfferId === offer.id && tradingAmount === amount" class="inline animate-spin mr-1" :size="14" />
                 <span v-if="isPending(offer.id, amount)">تایید {{ amount }} عدد؟</span>
                 <span v-else>{{ amount }} عدد</span>
-              </button>
+              </AppTradeActionButton>
             </div>
             <div v-else-if="isOwnOffer(offer)" class="own-offer-actions">
               <button 
@@ -578,7 +569,7 @@ async function cancelOwnOffer(offerId: number) {
           </div>
 
         </div><!-- /offer-card-inner -->
-      </div>
+      </AppOfferCard>
       <div v-if="canLoadExpired && (hasMoreExpired || expiredLoading)" class="expired-load-more-row">
         <button
           type="button"
