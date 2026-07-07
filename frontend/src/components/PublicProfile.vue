@@ -30,6 +30,7 @@ import {
   AppMetricCard,
   AppResponsiveDialog,
   AppSectionCard,
+  AppSelect,
   AppStatusBadge,
   AppTextarea,
 } from './ui';
@@ -354,6 +355,23 @@ const historyCommoditySelectOptions = computed(() => {
 
   return Array.from(options.values());
 });
+const historyCommodityAppSelectOptions = computed(() => [
+  { value: '', label: 'همه کالاها' },
+  ...historyCommoditySelectOptions.value.map((option) => ({
+    value: option.name,
+    label: option.name,
+  })),
+]);
+const historyCounterpartySelectValue = computed(() => (
+  historyCounterpartyUserId.value ? String(historyCounterpartyUserId.value) : ''
+));
+const historyCounterpartyAppSelectOptions = computed(() => [
+  { value: '', label: 'همه همکاران' },
+  ...historyCounterpartyOptions.value.map((projectUser) => ({
+    value: String(projectUser.id),
+    label: formatProjectUserLabel(projectUser),
+  })),
+]);
 const historyFilterSummary = computed(() => {
   const parts: string[] = [];
   if (historyFromDate.value || historyToDate.value) {
@@ -755,8 +773,7 @@ async function loadHistoryCounterpartyOptions() {
   }
 }
 
-function handleHistoryCounterpartyChange(event: Event) {
-  const value = (event.target as HTMLSelectElement | null)?.value || '';
+function setHistoryCounterpartyValue(value: string) {
   const parsed = Number(value);
   historyCounterpartyUserId.value = Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
@@ -1802,29 +1819,21 @@ function handleHistoryPresetChipChange(value: string) {
                   />
                 </AppFormField>
                 <AppFormField label="کالا" class="history-filter-field history-filter-field-wide">
-                  <select
+                  <AppSelect
                     v-model="historyCommodityQuery"
                     :disabled="historyCommodityOptionsLoading"
+                    :options="historyCommodityAppSelectOptions"
                     @focus="loadHistoryCommodityOptions"
-                  >
-                    <option value="">همه کالاها</option>
-                    <option v-for="option in historyCommoditySelectOptions" :key="`${option.id}:${option.name}`" :value="option.name">
-                      {{ option.name }}
-                    </option>
-                  </select>
+                  />
                 </AppFormField>
                 <AppFormField v-if="isOwnProfile && !shouldHideCustomerTradeRelationshipDetails" label="طرف دیگر معامله" class="history-filter-field history-filter-field-wide">
-                  <select
-                    :value="historyCounterpartyUserId ?? ''"
+                  <AppSelect
+                    :model-value="historyCounterpartySelectValue"
                     :disabled="historyCounterpartyOptionsLoading"
+                    :options="historyCounterpartyAppSelectOptions"
                     @focus="loadHistoryCounterpartyOptions"
-                    @change="handleHistoryCounterpartyChange"
-                  >
-                    <option value="">همه همکاران</option>
-                    <option v-for="projectUser in historyCounterpartyOptions" :key="projectUser.id" :value="projectUser.id">
-                      {{ formatProjectUserLabel(projectUser) }}
-                    </option>
-                  </select>
+                    @update:modelValue="setHistoryCounterpartyValue"
+                  />
                   <span v-if="historyCounterpartyOptionsLoading" class="history-filter-hint">در حال دریافت لیست همکاران...</span>
                   <span v-else-if="historyCounterpartyError" class="history-filter-hint error">{{ historyCounterpartyError }}</span>
                 </AppFormField>

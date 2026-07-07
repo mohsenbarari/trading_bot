@@ -121,3 +121,10 @@ If profile/public-profile behavior regresses:
 - Preserved `AppFormField` wiring, `addressDraft` v-model, `rows`, placeholder, `.address-edit-textarea`, submit/cancel buttons, validation error rendering, and `/api/auth/me/address` payload behavior.
 - The owner-address test verifies the textarea keeps the shared `.ui-textarea` class and still submits the same normalized address payload.
 - `npm run test:unit:run -- src/components/PublicProfile.test.ts src/views/PublicProfileView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 61 tests.
+
+## PublicProfile History Select Primitive Slice Evidence
+
+- `PublicProfile.vue` trade-history commodity and counterparty filters now use `AppSelect`.
+- Preserved lazy option loading on focus, commodity query state, counterparty id parsing, filter summary rendering, own-profile counterparty visibility rules, and existing history fetch/export query behavior.
+- The history tests verify the rendered selects keep the shared `.ui-select` class and still drive commodity and counterparty filter calls.
+- `npm run test:unit:run -- src/components/PublicProfile.test.ts src/views/PublicProfileView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 61 tests.

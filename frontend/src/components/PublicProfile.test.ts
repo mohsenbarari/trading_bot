@@ -190,6 +190,7 @@ describe('PublicProfile.vue', () => {
     await setHistoryDate(wrapper, 1, '2026-05-20')
     const commoditySelect = wrapper.find('.history-filter-field-wide select')
     expect(commoditySelect.exists()).toBe(true)
+    expect(commoditySelect.classes()).toContain('ui-select')
     await commoditySelect.trigger('focus')
     await flushPromises()
     await commoditySelect.setValue('سکه')
@@ -2151,6 +2152,7 @@ describe('PublicProfile.vue', () => {
 
     const selects = wrapper.findAll('.history-filter-field-wide select')
     expect(selects).toHaveLength(2)
+    expect(selects[1]!.classes()).toContain('ui-select')
     await selects[1]!.trigger('focus')
     await flushPromises()
     await selects[1]!.setValue('90')

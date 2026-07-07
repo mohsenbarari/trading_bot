@@ -217,6 +217,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-07 14:45 UTC | Codex | **WebApp UI/UX Stage 7 PublicProfile History Select Slice**: Migrated `PublicProfile.vue` trade-history commodity and counterparty filters to `AppSelect` while preserving lazy option loading on focus, commodity query state, counterparty id parsing, filter summaries, visibility rules, and history fetch/export behavior. |
 | 2026-07-07 14:41 UTC | Codex | **WebApp UI/UX Stage 7 PublicProfile Address Textarea Slice**: Migrated the owner address edit textarea in `PublicProfile.vue` to `AppTextarea` while preserving `AppFormField` wiring, `.address-edit-textarea`, validation/error rendering, save/cancel controls, and `/api/auth/me/address` payload behavior. |
 | 2026-07-07 14:38 UTC | Codex | **WebApp UI/UX Stage 7 PublicProfile Admin Modal Slice**: Migrated the `PublicProfile.vue` admin user-manager modal to `AppResponsiveDialog` while preserving admin lookup, embedded `UserProfile`, `.admin-user-modal-overlay`, `.admin-user-modal`, backdrop close, and nested-modal Escape protection. |
 | 2026-07-07 14:35 UTC | Codex | **WebApp UI/UX Stage 7 UserProfile Date Modal Slice**: Added default-preserving `AppResponsiveDialog` close controls (`showClose`, `closeOnBackdrop`, `closeOnEscape`), wired `useOverlayA11y` to honor optional Escape suppression, and migrated UserProfile block/limit date-picker modals while preserving nested z-index, date/time picker selectors, and existing in-modal close/advance behavior. |
