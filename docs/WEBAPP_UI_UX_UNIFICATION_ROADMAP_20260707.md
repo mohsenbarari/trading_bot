@@ -425,7 +425,8 @@ Implementation notes:
 - The trading-settings string-control slice migrates time/text/select controls to `AppInput`/`AppSelect` while preserving `data-testid` selectors, `.settings-input`, schedule save payloads, override create/edit/delete payloads, custom-hours visibility, and market-state behavior. Numeric `v-model.number` fields and checkbox controls remain native until the primitive layer has explicit coercion/checked-state support.
 - The trading-settings numeric-input slice extends `AppInput` with explicit `v-model.number` support, migrates the numeric settings fields to `AppInput`, and preserves numeric API payloads, min/max attributes, `.settings-input`, and `is-default` behavior.
 - The admin-messages broadcast-target checkbox slice introduces `AppCheckbox` with boolean and array `v-model` support, then migrates the hidden target-group checkboxes without changing the target-card layout or submitted `target_groups` payload behavior.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then remaining trading-settings checkbox state work and channel file/select-all controls.
+- The trading-settings schedule-checkbox slice migrates `market-schedule-enabled` and weekly closed-day checkboxes to `AppCheckbox` while preserving selectors, `.weekday-checkbox`, and sorted schedule-save payload behavior.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then channel file/select-all controls.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

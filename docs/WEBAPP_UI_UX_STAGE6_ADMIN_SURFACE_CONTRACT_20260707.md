@@ -311,3 +311,17 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Trading Settings Schedule Checkbox Slice Evidence
+
+- `TradingSettings.vue` schedule checkboxes now use shared `AppCheckbox`.
+- Migrated controls: `market-schedule-enabled` and weekly closed-day `weekday-*` checkboxes.
+- Existing selectors and layout classes remain in place: `data-testid="market-schedule-enabled"`, `data-testid="weekday-*"` and `.weekday-checkbox`.
+- The previous manual weekday toggle helper was removed; `AppCheckbox` array `v-model` now updates `scheduleForm.market_closed_weekdays`, and the existing save path still sorts `market_closed_weekdays` before submitting.
+- The schedule save test confirms `market_schedule_enabled`, open/close times, and sorted `market_closed_weekdays` payload behavior remain unchanged.
+- `npm run test:unit:run -- src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 16 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

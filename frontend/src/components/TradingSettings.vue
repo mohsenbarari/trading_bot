@@ -4,7 +4,7 @@ import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
 import JalaliDatePicker from './JalaliDatePicker.vue'
-import { AppButton, AppInput, AppSelect } from './ui'
+import { AppButton, AppCheckbox, AppInput, AppSelect } from './ui'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -230,14 +230,6 @@ const loadOverrides = async () => {
   } finally {
     overridesLoading.value = false
   }
-}
-
-const toggleClosedWeekday = (weekday: number) => {
-  if (scheduleForm.value.market_closed_weekdays.includes(weekday)) {
-    scheduleForm.value.market_closed_weekdays = scheduleForm.value.market_closed_weekdays.filter((value) => value !== weekday)
-    return
-  }
-  scheduleForm.value.market_closed_weekdays = [...scheduleForm.value.market_closed_weekdays, weekday].sort((a, b) => a - b)
 }
 
 const resetOverrideForm = () => {
@@ -680,11 +672,9 @@ onBeforeUnmount(() => {
           </div>
 
           <label class="schedule-toggle" data-testid="market-schedule-enabled-row">
-            <input
+            <AppCheckbox
               data-testid="market-schedule-enabled"
-              type="checkbox"
-              :checked="scheduleForm.market_schedule_enabled"
-              @change="scheduleForm.market_schedule_enabled = ($event.target as HTMLInputElement).checked"
+              v-model="scheduleForm.market_schedule_enabled"
             />
             <span>زمان‌بندی خودکار بازار فعال باشد</span>
           </label>
@@ -709,12 +699,11 @@ onBeforeUnmount(() => {
                 class="weekday-chip"
                 :class="{ active: scheduleForm.market_closed_weekdays.includes(option.value) }"
               >
-                <input
+                <AppCheckbox
                   :data-testid="`weekday-${option.value}`"
-                  type="checkbox"
                   class="weekday-checkbox"
-                  :checked="scheduleForm.market_closed_weekdays.includes(option.value)"
-                  @change="toggleClosedWeekday(option.value)"
+                  v-model="scheduleForm.market_closed_weekdays"
+                  :value="option.value"
                 />
                 <span>{{ option.label }}</span>
               </label>
