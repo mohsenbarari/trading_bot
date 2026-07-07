@@ -23,7 +23,7 @@ import { formatIranDateTime } from '../utils/iranTime';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
-import { AppResponsiveDialog } from './ui';
+import { AppResponsiveDialog, AppSelect } from './ui';
 
 const props = defineProps<{
   user: any;
@@ -268,6 +268,22 @@ const blockDurations = [
   { label: 'نامحدود', minutes: 0 },
   { label: 'انتخاب زمان دلخواه', minutes: -1 } // -1 برای حالت کاستوم
 ];
+const maxSessionOptions = [
+  { value: '1', label: '۱' },
+  { value: '2', label: '۲' },
+  { value: '3', label: '۳' },
+];
+const maxSessionsSelectValue = computed(() => String(editMaxSessions.value ?? 1));
+const limitDurationOptions = computed(() => blockDurations.map((duration) => ({
+  value: String(duration.minutes),
+  label: duration.label,
+})));
+const limitDurationSelectValue = computed(() => String(limitDurationMinutes.value));
+
+function setLimitDurationValue(value: string) {
+  const parsed = Number(value);
+  limitDurationMinutes.value = Number.isFinite(parsed) ? parsed : 0;
+}
 
 
 
@@ -594,6 +610,12 @@ async function saveMaxSessions() {
   }
 }
 
+function handleMaxSessionsSelect(value: string) {
+  const parsed = Number(value);
+  editMaxSessions.value = Number.isFinite(parsed) ? parsed : 1;
+  void saveMaxSessions();
+}
+
 async function saveMaxAccountants() {
   const normalizedValue = Number.isFinite(editMaxAccountants.value)
     ? Math.max(0, Math.trunc(editMaxAccountants.value))
@@ -822,11 +844,14 @@ async function deleteUser() {
         <div class="detail-item">
           <span class="label">حداکثر نشست همزمان</span>
           <div class="inline-edit" @click="handleAdminSessionClick">
-            <select v-model.number="editMaxSessions" class="form-select-sm" @change="saveMaxSessions" :disabled="user.role === 'مدیر ارشد' || user.role === 'مدیر میانی'" :style="{ pointerEvents: (user.role === 'مدیر ارشد' || user.role === 'مدیر میانی') ? 'none' : 'auto' }">
-              <option :value="1">۱</option>
-              <option :value="2">۲</option>
-              <option :value="3">۳</option>
-            </select>
+            <AppSelect
+              :model-value="maxSessionsSelectValue"
+              class="form-select-sm"
+              :options="maxSessionOptions"
+              :disabled="user.role === 'مدیر ارشد' || user.role === 'مدیر میانی'"
+              :style="{ pointerEvents: (user.role === 'مدیر ارشد' || user.role === 'مدیر میانی') ? 'none' : 'auto' }"
+              @update:modelValue="handleMaxSessionsSelect"
+            />
           </div>
         </div>
         <div class="detail-item owner-limit-row">
@@ -901,9 +926,7 @@ async function deleteUser() {
       <div v-if="isEditingRole && canEditRole" class="edit-section">
         <div class="form-group">
             <label>انتخاب نقش جدید:</label>
-            <select v-model="selectedRole" class="form-select">
-                <option v-for="role in roles" :key="role.value" :value="role.value">{{ role.label }}</option>
-            </select>
+            <AppSelect v-model="selectedRole" class="form-select" :options="roles" />
         </div>
         <div class="action-buttons">
             <button @click="saveRole" :disabled="isLoading" class="save-btn">ذخیره</button>
@@ -1036,11 +1059,12 @@ async function deleteUser() {
 
       <div class="form-group">
         <label>مدت زمان محدودیت:</label>
-        <select v-model="limitDurationMinutes" class="form-select">
-          <option v-for="duration in blockDurations" :key="duration.minutes" :value="duration.minutes">
-            {{ duration.label }}
-          </option>
-        </select>
+        <AppSelect
+          :model-value="limitDurationSelectValue"
+          class="form-select"
+          :options="limitDurationOptions"
+          @update:modelValue="setLimitDurationValue"
+        />
       </div>
 
       <div v-if="limitDurationMinutes === -1" class="custom-date-section">

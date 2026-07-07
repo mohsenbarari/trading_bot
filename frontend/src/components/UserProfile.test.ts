@@ -281,6 +281,7 @@ describe('UserProfile.vue', () => {
     expect(wrapper.text()).toContain('پایان مهلت فعال‌سازی')
 
     await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
+    expect(wrapper.get('.form-select').classes()).toContain('ui-select')
     await wrapper.get('.form-select').setValue('پلیس')
     await wrapper.get('.edit-section .save-btn').trigger('click')
     await flushPromises()
@@ -473,6 +474,7 @@ describe('UserProfile.vue', () => {
       },
     })
 
+    expect(wrapper.get('.form-select-sm').classes()).toContain('ui-select')
     await wrapper.get('.form-select-sm').setValue('3')
     await flushPromises()
 
@@ -816,6 +818,7 @@ describe('UserProfile.vue', () => {
     await limitInputs[0]!.setValue('7')
     await limitInputs[1]!.setValue('8')
     await limitInputs[2]!.setValue('9')
+    expect(wrapper.get('.modal-content .form-select').classes()).toContain('ui-select')
     await wrapper.get('.modal-content .form-select').setValue('-1')
 
     await wrapper.get('.modal-content .custom-date-trigger').trigger('click')

@@ -128,3 +128,10 @@ If profile/public-profile behavior regresses:
 - Preserved lazy option loading on focus, commodity query state, counterparty id parsing, filter summary rendering, own-profile counterparty visibility rules, and existing history fetch/export query behavior.
 - The history tests verify the rendered selects keep the shared `.ui-select` class and still drive commodity and counterparty filter calls.
 - `npm run test:unit:run -- src/components/PublicProfile.test.ts src/views/PublicProfileView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 61 tests.
+
+## UserProfile Select Primitive Slice Evidence
+
+- `UserProfile.vue` max-session, role-edit, and limitation-duration selects now use `AppSelect`.
+- Preserved legacy `.form-select-sm` / `.form-select` selectors, max-session numeric autosave/fallback behavior, role-save payload behavior, and limitation duration/custom-date behavior.
+- The UserProfile tests verify the migrated selects keep the shared `.ui-select` class and still drive role, session, and limitation flows.
+- `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.
