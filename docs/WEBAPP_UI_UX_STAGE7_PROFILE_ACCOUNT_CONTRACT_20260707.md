@@ -106,3 +106,11 @@ If profile/public-profile behavior regresses:
 - The date modals set `showClose=false`, `closeOnBackdrop=false`, and `closeOnEscape=false` to preserve the previous behavior where only the existing in-modal buttons close or advance the picker.
 - The date modals use `date-modal-overlay` to preserve the higher nested-modal z-index.
 - `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.
+
+## PublicProfile Admin User Modal Dialog Slice Evidence
+
+- `PublicProfile.vue` admin user manager modal now uses `AppResponsiveDialog`.
+- Legacy selectors remain available through `backdropClass="admin-user-modal-overlay"`, `panelClass="admin-user-modal"`, and `bodyClass="admin-user-modal-body"`.
+- Preserved admin user lookup, embedded `UserProfile`, customer/admin display data, and `handleAdminUserManagerNavigate` close behavior.
+- The modal keeps backdrop-click close behavior and disables Escape close so nested `UserProfile` modals cannot accidentally close parent and child together.
+- `npm run test:unit:run -- src/components/PublicProfile.test.ts src/views/PublicProfileView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 61 tests.

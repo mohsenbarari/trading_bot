@@ -1235,6 +1235,8 @@ describe('PublicProfile.vue', () => {
       }),
     }))
     expect(wrapper.find('.user-profile-stub').exists()).toBe(true)
+    expect(wrapper.get('.admin-user-modal').classes()).toContain('ui-responsive-dialog')
+    expect(wrapper.get('.admin-user-modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
     expect(wrapper.text()).toContain('managed61')
     expect(wrapper.text()).toContain('مشتری ویژه')
     expect(wrapper.emitted('navigate')).toBeUndefined()

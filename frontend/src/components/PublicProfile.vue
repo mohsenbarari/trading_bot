@@ -28,6 +28,7 @@ import {
   AppInput,
   AppListItem,
   AppMetricCard,
+  AppResponsiveDialog,
   AppSectionCard,
   AppStatusBadge,
 } from './ui';
@@ -1954,21 +1955,24 @@ function handleHistoryPresetChipChange(value: string) {
       </section>
     </div>
 
-    <Teleport to="body">
-      <div v-if="showAdminUserManager" class="admin-user-modal-overlay" @click.self="closeAdminUserManager">
-        <div class="admin-user-modal">
-          <button type="button" class="admin-user-modal-close" @click="closeAdminUserManager" aria-label="بستن">×</button>
-          <UserProfile
-            v-if="adminUserData"
-            :user="adminUserData"
-            :isAdminView="true"
-            :apiBaseUrl="props.apiBaseUrl"
-            :jwtToken="props.jwtToken"
-            @navigate="handleAdminUserManagerNavigate"
-          />
-        </div>
-      </div>
-    </Teleport>
+    <AppResponsiveDialog
+      :open="showAdminUserManager"
+      title="مدیریت کاربر"
+      backdrop-class="admin-user-modal-overlay"
+      panel-class="admin-user-modal"
+      body-class="admin-user-modal-body"
+      :close-on-escape="false"
+      @close="closeAdminUserManager"
+    >
+      <UserProfile
+        v-if="adminUserData"
+        :user="adminUserData"
+        :isAdminView="true"
+        :apiBaseUrl="props.apiBaseUrl"
+        :jwtToken="props.jwtToken"
+        @navigate="handleAdminUserManagerNavigate"
+      />
+    </AppResponsiveDialog>
   </div>
 </template>
 
@@ -2321,28 +2325,17 @@ function handleHistoryPresetChipChange(value: string) {
   position: relative;
   width: min(100%, 640px);
   max-height: min(92vh, 860px);
-  overflow-y: auto;
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
   border-radius: 22px;
   background: var(--ds-bg-card, #fff);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
 }
 
-.admin-user-modal-close {
-  position: sticky;
-  top: 10px;
-  right: calc(100% - 48px);
-  z-index: 2;
-  width: 38px;
-  height: 38px;
-  margin: 10px 10px -48px auto;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--ds-text-primary, #111827);
-  font-size: 1.45rem;
-  line-height: 1;
-  cursor: pointer;
+.admin-user-modal-body {
+  padding: 0 !important;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .hidden-avatar-input {
