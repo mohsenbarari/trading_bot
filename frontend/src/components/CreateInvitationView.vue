@@ -544,9 +544,9 @@ input:focus, select:focus {
 }
 .pending-state {
   padding: 0.875rem;
-  border-radius: 0.875rem;
-  background: #f9fafb;
-  color: #6b7280;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-muted);
   font-size: 0.8rem;
   text-align: center;
 }
@@ -560,12 +560,12 @@ input:focus, select:focus {
   gap: 0.75rem;
   align-items: start;
   padding: 0.875rem;
-  border: 1px solid rgba(245, 158, 11, 0.14);
-  border-radius: 0.875rem;
-  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid var(--ds-border-accent);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-card);
 }
 .pending-title {
-  color: #111827;
+  color: var(--ds-text-primary);
   font-size: 0.9rem;
   font-weight: 800;
 }
@@ -574,7 +574,7 @@ input:focus, select:focus {
   flex-wrap: wrap;
   gap: 0.375rem 0.625rem;
   margin-top: 0.35rem;
-  color: #6b7280;
+  color: var(--ds-text-muted);
   font-size: 0.74rem;
 }
 .pending-link-row {

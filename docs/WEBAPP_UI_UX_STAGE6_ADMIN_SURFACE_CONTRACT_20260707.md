@@ -357,3 +357,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Pending Invitation Row Token Polish Evidence
+
+- `CreateInvitationView.vue` pending invitation row/state colors now use existing design tokens instead of local hardcoded color values.
+- DOM structure, pending row classes, readonly web-link input, copy/delete buttons, clipboard fallback behavior, pending refresh, and delete API behavior are unchanged.
+- `AppListItem` was intentionally not used for this row because the pending row includes a readonly registration link plus copy/delete controls that do not fit the current `AppListItem` title/description/trailing contract without distorting the layout.
+- `npm run test:unit:run -- src/components/CreateInvitationView.test.ts`: passed, 16 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
