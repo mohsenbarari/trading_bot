@@ -155,6 +155,6 @@ Artifacts:
 
 - `tmp/stage10-staging-playwright/summary.md`
 - `tmp/stage10-staging-playwright/runner-visual-baseline-20260707T1554Z/`
-- `tmp/stage10-staging-playwright/runner-viewport-market-20260707T1559Z/`
+- `tmp/stage10-staging-playwright/runner-viewport-market-20260707T1654Z/`
 
 The local Codex sandbox still cannot launch Chromium directly, but the approved containerized runner completed the real staging gate. The broader role/trading e2e follow-up suite remains a required pre-production gate on a Docker-capable approved host.
