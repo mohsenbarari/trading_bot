@@ -267,3 +267,18 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Trading Settings String Control Slice Evidence
+
+- `TradingSettings.vue` string/time controls now use shared primitives where no numeric modifier is involved.
+- Migrated controls: `market-open-time`, `market-close-time`, `override-type`, `override-open-time`, `override-close-time`, and `override-note`.
+- Existing selectors, values, placeholders, and classes remain in place: `data-testid` attributes and `.settings-input`.
+- `AppSelect` is used for `override-type`; `AppInput` is used for the time/text controls.
+- Numeric `v-model.number` fields and checkbox controls remain native in this slice to avoid changing coercion or checked-state behavior.
+- Schedule save payloads, override create/edit/delete payloads, custom-hours visibility, JalaliDatePicker flow, footer save/reset controls, and market-state behavior are unchanged.
+- `npm run test:unit:run -- src/components/TradingSettings.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 32 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

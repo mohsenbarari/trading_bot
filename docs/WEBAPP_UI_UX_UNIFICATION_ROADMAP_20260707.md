@@ -422,7 +422,8 @@ Implementation notes:
 - The admin-panel accordion toggle slice migrates the section toggles to `AppButton` while preserving IDs, `.admin-accordion-toggle`, `aria-expanded`, `aria-controls`, region labeling, action counts, role-gated action sets, and navigation emits.
 - The admin-messages market composer textarea follow-up extends `AppTextarea` with root `focus()`/`scrollIntoView()` methods and migrates the market composer textarea while preserving the edit-history scroll/focus behavior and publish payloads.
 - The trading-settings accordion header slice migrates all settings-section header toggles to `AppButton` while preserving IDs, `.settings-section__header`, `aria-expanded`, `aria-controls`, region labeling, section open/close behavior, form fields, schedule controls, and save/reset/override payload behavior.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then remaining trading-settings fields/states.
+- The trading-settings string-control slice migrates time/text/select controls to `AppInput`/`AppSelect` while preserving `data-testid` selectors, `.settings-input`, schedule save payloads, override create/edit/delete payloads, custom-hours visibility, and market-state behavior. Numeric `v-model.number` fields and checkbox controls remain native until the primitive layer has explicit coercion/checked-state support.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, then remaining trading-settings numeric/checkbox state work.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

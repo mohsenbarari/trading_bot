@@ -4,7 +4,7 @@ import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
 import JalaliDatePicker from './JalaliDatePicker.vue'
-import { AppButton } from './ui'
+import { AppButton, AppInput, AppSelect } from './ui'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -692,11 +692,11 @@ onBeforeUnmount(() => {
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">ساعت شروع روزانه</label>
-              <input data-testid="market-open-time" type="time" v-model="scheduleForm.market_open_time_local" class="settings-input" />
+              <AppInput data-testid="market-open-time" type="time" v-model="scheduleForm.market_open_time_local" class="settings-input" />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">ساعت پایان روزانه</label>
-              <input data-testid="market-close-time" type="time" v-model="scheduleForm.market_close_time_local" class="settings-input" />
+              <AppInput data-testid="market-close-time" type="time" v-model="scheduleForm.market_close_time_local" class="settings-input" />
             </div>
           </div>
 
@@ -759,26 +759,24 @@ onBeforeUnmount(() => {
             </div>
             <div class="ds-form-group">
               <label class="ds-label">نوع استثنا</label>
-              <select data-testid="override-type" v-model="overrideForm.override_type" class="settings-input">
-                <option v-for="option in overrideTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
+              <AppSelect data-testid="override-type" v-model="overrideForm.override_type" class="settings-input" :options="overrideTypeOptions" />
             </div>
           </div>
 
           <div v-if="isCustomHoursOverride" class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">ساعت شروع استثنا</label>
-              <input data-testid="override-open-time" type="time" v-model="overrideForm.open_time_local" class="settings-input" />
+              <AppInput data-testid="override-open-time" type="time" v-model="overrideForm.open_time_local" class="settings-input" />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">ساعت پایان استثنا</label>
-              <input data-testid="override-close-time" type="time" v-model="overrideForm.close_time_local" class="settings-input" />
+              <AppInput data-testid="override-close-time" type="time" v-model="overrideForm.close_time_local" class="settings-input" />
             </div>
           </div>
 
           <div class="ds-form-group">
             <label class="ds-label">یادداشت</label>
-            <input data-testid="override-note" type="text" v-model="overrideForm.note" class="settings-input" placeholder="مثلاً تعطیلی مناسبت یا نیمه‌وقت" />
+            <AppInput data-testid="override-note" type="text" v-model="overrideForm.note" class="settings-input" placeholder="مثلاً تعطیلی مناسبت یا نیمه‌وقت" />
           </div>
 
           <div class="override-actions">
