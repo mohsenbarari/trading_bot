@@ -6,6 +6,7 @@ import {
   AppBottomSheet,
   AppButton,
   AppDangerZone,
+  AppCheckbox,
   AppChip,
   AppDisclosure,
   AppEmptyState,
@@ -221,6 +222,31 @@ describe('ui primitives', () => {
     expect((numericInput.vm as unknown as { amount: number | string }).amount).toBe(42)
     await numericInput.get('input').setValue('')
     expect((numericInput.vm as unknown as { amount: number | string }).amount).toBe('')
+
+    const booleanCheckbox = mount(defineComponent({
+      components: { AppCheckbox },
+      setup() {
+        const enabled = ref(false)
+        return { enabled }
+      },
+      template: '<AppCheckbox v-model="enabled" />',
+    }))
+    expect(booleanCheckbox.get('input').classes()).toContain('ui-checkbox')
+    await booleanCheckbox.get('input').setValue(true)
+    expect((booleanCheckbox.vm as unknown as { enabled: boolean }).enabled).toBe(true)
+
+    const arrayCheckbox = mount(defineComponent({
+      components: { AppCheckbox },
+      setup() {
+        const selected = ref<string[]>(['users'])
+        return { selected }
+      },
+      template: '<AppCheckbox v-model="selected" value="customers" />',
+    }))
+    await arrayCheckbox.get('input').setValue(true)
+    expect((arrayCheckbox.vm as unknown as { selected: string[] }).selected).toEqual(['users', 'customers'])
+    await arrayCheckbox.get('input').setValue(false)
+    expect((arrayCheckbox.vm as unknown as { selected: string[] }).selected).toEqual(['users'])
 
     const select = mount(AppSelect, {
       props: {

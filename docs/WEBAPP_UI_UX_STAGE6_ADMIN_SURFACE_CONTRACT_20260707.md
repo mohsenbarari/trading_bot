@@ -297,3 +297,17 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Admin Messages Broadcast Target Checkbox Slice Evidence
+
+- Added a shared `AppCheckbox` primitive whose root element remains the real `<input type="checkbox">`.
+- `AppCheckbox` supports boolean `v-model` and array `v-model` with a `value` prop, matching the existing native checkbox behavior needed by target-group selection.
+- `AdminMessagesView.vue` broadcast target checkboxes now use `AppCheckbox`.
+- Existing hidden-input styling and selectors remain in place through `.target-option-input`; the primitive adds `ui-checkbox` without adding CSS that would alter the current target-card layout.
+- The broadcast publish test now verifies that target-group checkbox selection still updates the submitted `target_groups` payload.
+- `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/components/AdminMessagesView.test.ts`: passed, 13 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

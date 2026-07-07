@@ -258,6 +258,10 @@ describe('AdminMessagesView.vue', () => {
     const textareas = wrapper.findAll('textarea')
     expect(textareas[0]!.classes()).toContain('ui-textarea')
     expect((textareas[0]!.element as HTMLTextAreaElement).value).toBe('پیام قبلی همگانی')
+    const targetInputs = wrapper.findAll('.target-option-input')
+    expect(targetInputs[0]!.classes()).toContain('ui-checkbox')
+    await targetInputs[0]!.setValue(true)
+    await targetInputs[1]!.setValue(true)
 
     const broadcastPrimaryAction = wrapper.findAll('.primary-action')[0]!
     expect(broadcastPrimaryAction.classes()).toContain('ui-button')
@@ -269,7 +273,7 @@ describe('AdminMessagesView.vue', () => {
     expect(JSON.parse(String(marketCall?.[1]?.body))).toEqual({ content: 'پیام قبلی بازار' })
     expect(JSON.parse(String(broadcastCall?.[1]?.body))).toEqual({
       content: 'پیام قبلی همگانی',
-      target_groups: ['users', 'customers'],
+      target_groups: ['users', 'customers', 'managers'],
     })
     expect(wrapper.text()).toContain('پیام برای ۶ نفر ارسال شد')
   })

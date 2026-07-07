@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
-import { AppButton, AppIconButton, AppTextarea } from './ui'
+import { AppButton, AppCheckbox, AppIconButton, AppTextarea } from './ui'
 
 type AdminMarketMessage = {
   id: number
@@ -471,7 +471,7 @@ onMounted(loadDashboard)
             </div>
             <div class="target-grid">
               <label v-for="option in targetOptions" :key="option.key" class="target-option" :class="{ 'target-option--active': broadcastTargets.includes(option.key) }">
-                <input v-model="broadcastTargets" type="checkbox" class="target-option-input" :value="option.key" />
+                <AppCheckbox v-model="broadcastTargets" class="target-option-input" :value="option.key" />
                 <span>{{ option.label }}</span>
               </label>
             </div>
