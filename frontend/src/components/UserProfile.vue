@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Ban,
   Bell,
-  CalendarDays,
   Check,
   ChevronLeft,
   Clock,
@@ -1087,88 +1086,88 @@ async function deleteUser() {
   </div>
 
     <!-- Moved Block Date Modal -->
-    <Teleport to="body">
-        <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2010;">
-            <div class="modal-content date-modal-content">
-                <h3>
-                  <CalendarDays v-if="pickerStep === 1" :size="18" aria-hidden="true" />
-                  <Clock v-else :size="18" aria-hidden="true" />
-                  {{ pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت' }}
-                </h3>
-
-                <div class="date-picker-wrapper">
-                    <!-- Step 1: Date -->
-                    <JalaliDatePicker
-                        v-if="pickerStep === 1"
-                      v-model="tempDatePart"
-                      inline
-                      value-type="jalali"
-                      :clearable="false"
-                      :auto-close="false"
-                      @change="updateDatePart"
-                    />
-                    <!-- Step 2: Time - Using native HTML5 input for reliability -->
-                    <div v-if="pickerStep === 2" class="native-time-picker">
-                        <label>ساعت مورد نظر:</label>
-                        <input
-                            type="time"
-                            v-model="tempTimePart"
-                            class="time-input"
-                        />
-                    </div>
-                </div>
-                <!-- Footer moved outside wrapper to ensure visibility -->
-                <div class="integrated-footer">
-                        <button @click="showBlockDateModal = false" class="integrated-cancel-btn">انصراف</button>
-
-                        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
-                        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
-                </div>
-            </div>
+    <AppResponsiveDialog
+      :open="showBlockDateModal"
+      :title="pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت'"
+      backdrop-class="modal-overlay date-modal-overlay"
+      panel-class="modal-content date-modal-content"
+      body-class="date-modal-body"
+      :show-close="false"
+      :close-on-backdrop="false"
+      :close-on-escape="false"
+      @close="showBlockDateModal = false"
+    >
+      <div class="date-picker-wrapper">
+        <!-- Step 1: Date -->
+        <JalaliDatePicker
+          v-if="pickerStep === 1"
+          v-model="tempDatePart"
+          inline
+          value-type="jalali"
+          :clearable="false"
+          :auto-close="false"
+          @change="updateDatePart"
+        />
+        <!-- Step 2: Time - Using native HTML5 input for reliability -->
+        <div v-if="pickerStep === 2" class="native-time-picker">
+          <label>ساعت مورد نظر:</label>
+          <input
+            type="time"
+            v-model="tempTimePart"
+            class="time-input"
+          />
         </div>
-    </Teleport>
+      </div>
+      <!-- Footer moved outside wrapper to ensure visibility -->
+      <div class="integrated-footer">
+        <button @click="showBlockDateModal = false" class="integrated-cancel-btn">انصراف</button>
+
+        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
+        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
+      </div>
+    </AppResponsiveDialog>
 
     <!-- Moved Limit Date Modal -->
-    <Teleport to="body">
-        <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2010;">
-            <div class="modal-content date-modal-content">
-                <h3>
-                  <CalendarDays v-if="pickerStep === 1" :size="18" aria-hidden="true" />
-                  <Clock v-else :size="18" aria-hidden="true" />
-                  {{ pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت' }}
-                </h3>
-
-                <div class="date-picker-wrapper">
-                    <!-- Step 1: Date -->
-                    <JalaliDatePicker
-                        v-if="pickerStep === 1"
-                      v-model="tempDatePart"
-                      inline
-                      value-type="jalali"
-                      :clearable="false"
-                      :auto-close="false"
-                      @change="updateDatePart"
-                    />
-                    <!-- Step 2: Time - Using native HTML5 input for reliability -->
-                    <div v-if="pickerStep === 2" class="native-time-picker">
-                        <label>ساعت مورد نظر:</label>
-                        <input
-                            type="time"
-                            v-model="tempTimePart"
-                            class="time-input"
-                        />
-                    </div>
-                </div>
-                <!-- Footer moved outside wrapper to ensure visibility -->
-                <div class="integrated-footer">
-                        <button @click="showLimitDateModal = false" class="integrated-cancel-btn">انصراف</button>
-
-                        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
-                        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
-                </div>
-            </div>
+    <AppResponsiveDialog
+      :open="showLimitDateModal"
+      :title="pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت'"
+      backdrop-class="modal-overlay date-modal-overlay"
+      panel-class="modal-content date-modal-content"
+      body-class="date-modal-body"
+      :show-close="false"
+      :close-on-backdrop="false"
+      :close-on-escape="false"
+      @close="showLimitDateModal = false"
+    >
+      <div class="date-picker-wrapper">
+        <!-- Step 1: Date -->
+        <JalaliDatePicker
+          v-if="pickerStep === 1"
+          v-model="tempDatePart"
+          inline
+          value-type="jalali"
+          :clearable="false"
+          :auto-close="false"
+          @change="updateDatePart"
+        />
+        <!-- Step 2: Time - Using native HTML5 input for reliability -->
+        <div v-if="pickerStep === 2" class="native-time-picker">
+          <label>ساعت مورد نظر:</label>
+          <input
+            type="time"
+            v-model="tempTimePart"
+            class="time-input"
+          />
         </div>
-    </Teleport>
+      </div>
+      <!-- Footer moved outside wrapper to ensure visibility -->
+      <div class="integrated-footer">
+        <button @click="showLimitDateModal = false" class="integrated-cancel-btn">انصراف</button>
+
+        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
+        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
+      </div>
+    </AppResponsiveDialog>
 </template>
 
 <style>
@@ -1313,21 +1312,38 @@ async function deleteUser() {
     align-items: center;
 }
 
+.date-modal-overlay {
+    z-index: 2010;
+}
+
+.date-modal-body {
+    width: 100%;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
 /* Hide redundant input field (white box with date) in inline mode */
 .date-picker-wrapper .vpd-input-group {
     display: none !important;
 }
 
-.date-modal-content h3 {
-    margin-bottom: 15px;
-    color: white; /* Make title visible on overlay or add bg */
+.date-modal-content .ui-responsive-dialog__header {
     background: #fff;
     width: 100%;
     text-align: center;
     padding: 10px;
-    border-radius: 8px;
-    color: #333;
     max-width: 320px;
+    border: 0;
+    border-radius: 8px 8px 0 0;
+    justify-content: center;
+}
+
+.date-modal-content .ui-responsive-dialog__header h2 {
+    font-size: 1rem;
+    color: #333;
 }
 
 /* Stronger layout fix for width */

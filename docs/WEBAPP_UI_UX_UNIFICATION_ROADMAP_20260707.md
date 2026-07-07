@@ -461,6 +461,7 @@ Implementation notes:
 - The first Stage 7 slice prepares `AppResponsiveDialog` with optional compatibility class props (`backdropClass`, `panelClass`, `bodyClass`, `actionsClass`) so profile modals can migrate to the shared primitive while preserving legacy selectors such as `.modal-overlay`, `.modal-content`, and `.date-modal-content`.
 - The UserProfile block-modal slice migrates the block-duration modal to `AppResponsiveDialog` while preserving legacy modal selectors and block/custom-date behavior.
 - The UserProfile limitation-modal slice migrates the admin limitation modal to `AppResponsiveDialog` while preserving numeric limit fields, duration/custom-date behavior, save/cancel flows, and existing limitation payload tests.
+- The UserProfile date-modal slice adds default-preserving dialog close controls (`showClose`, `closeOnBackdrop`, `closeOnEscape`) and migrates both block-date and limit-date pickers to `AppResponsiveDialog` with those close controls disabled to preserve the previous nested-modal behavior.
 
 ## Stage 8 - Navigation and PWA Interaction Decision
 

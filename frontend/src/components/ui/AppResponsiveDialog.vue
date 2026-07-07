@@ -10,6 +10,9 @@ const props = withDefaults(defineProps<{
   title: string
   description?: string
   closeLabel?: string
+  showClose?: boolean
+  closeOnBackdrop?: boolean
+  closeOnEscape?: boolean
   backdropClass?: ClassValue
   panelClass?: ClassValue
   bodyClass?: ClassValue
@@ -17,6 +20,9 @@ const props = withDefaults(defineProps<{
 }>(), {
   description: '',
   closeLabel: 'بستن',
+  showClose: true,
+  closeOnBackdrop: true,
+  closeOnEscape: true,
   backdropClass: '',
   panelClass: '',
   bodyClass: '',
@@ -34,7 +40,14 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
   description: computed(() => props.description || undefined),
   containerRef,
   close: () => emit('close'),
+  closeOnEscape: toRef(props, 'closeOnEscape'),
 })
+
+function handleBackdropClick() {
+  if (props.closeOnBackdrop) {
+    emit('close')
+  }
+}
 </script>
 
 <template>
@@ -43,7 +56,7 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
       v-if="open"
       class="ui-responsive-dialog-backdrop"
       :class="backdropClass"
-      @click.self="$emit('close')"
+      @click.self="handleBackdropClick"
     >
       <section
         ref="containerRef"
@@ -60,7 +73,7 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
             <h2 :id="titleId">{{ title }}</h2>
             <p v-if="description" :id="descriptionId">{{ description }}</p>
           </div>
-          <AppButton variant="ghost" size="sm" @click="$emit('close')">{{ closeLabel }}</AppButton>
+          <AppButton v-if="showClose" variant="ghost" size="sm" @click="$emit('close')">{{ closeLabel }}</AppButton>
         </header>
         <div class="ui-responsive-dialog__body" :class="bodyClass">
           <slot />

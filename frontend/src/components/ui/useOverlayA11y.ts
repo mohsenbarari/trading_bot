@@ -14,6 +14,7 @@ type OverlayA11yOptions = {
   description: Ref<string | undefined>
   containerRef: Ref<HTMLElement | null>
   close: () => void
+  closeOnEscape?: Ref<boolean>
 }
 
 export function useOverlayA11y(options: OverlayA11yOptions) {
@@ -46,7 +47,9 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
 
     if (event.key === 'Escape') {
       event.preventDefault()
-      options.close()
+      if (options.closeOnEscape?.value ?? true) {
+        options.close()
+      }
       return
     }
 

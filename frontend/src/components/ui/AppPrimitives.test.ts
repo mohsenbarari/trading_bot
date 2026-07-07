@@ -548,5 +548,30 @@ describe('ui primitives', () => {
     await nextTick()
     expect(document.activeElement).toBe(dialogTrigger)
     dialogTrigger.remove()
+
+    const guardedDialog = mount(AppResponsiveDialog, {
+      props: {
+        open: true,
+        title: 'انتخاب تاریخ',
+        showClose: false,
+        closeOnBackdrop: false,
+        closeOnEscape: false,
+      },
+      slots: {
+        default: '<button>ادامه</button>',
+      },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.body.querySelectorAll('.ui-responsive-dialog button')).toHaveLength(1)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(guardedDialog.emitted('close')).toBeUndefined()
+    const guardedBackdrop = document.body.querySelector('.ui-responsive-dialog-backdrop') as HTMLElement | null
+    expect(guardedBackdrop).toBeTruthy()
+    guardedBackdrop!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    expect(guardedDialog.emitted('close')).toBeUndefined()
+    guardedDialog.unmount()
+    await nextTick()
   })
 })

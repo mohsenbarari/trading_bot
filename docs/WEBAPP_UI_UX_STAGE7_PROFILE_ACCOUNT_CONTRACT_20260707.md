@@ -96,3 +96,13 @@ If profile/public-profile behavior regresses:
 - Block-date and limit-date picker modals remain native in this slice.
 - The UserProfile admin-limitation test verifies the migrated limitation modal has both shared dialog classes and legacy `.modal-content` / `.modal-overlay` classes.
 - `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.
+
+## UserProfile Date Modal Dialog Slice Evidence
+
+- `AppResponsiveDialog` now supports optional `showClose`, `closeOnBackdrop`, and `closeOnEscape` props. Defaults preserve the previous dialog behavior.
+- `useOverlayA11y` accepts optional `closeOnEscape` so nested dialogs can avoid closing parent and child together.
+- `UserProfile.vue` block-date and limit-date picker modals now use `AppResponsiveDialog`.
+- The date modals keep legacy `.modal-overlay`, `.modal-content`, `.date-modal-content`, `.integrated-cancel-btn`, `.integrated-save-btn`, `.time-input`, and custom date-picker selectors.
+- The date modals set `showClose=false`, `closeOnBackdrop=false`, and `closeOnEscape=false` to preserve the previous behavior where only the existing in-modal buttons close or advance the picker.
+- The date modals use `date-modal-overlay` to preserve the higher nested-modal z-index.
+- `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.

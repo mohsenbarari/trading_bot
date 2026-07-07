@@ -789,6 +789,9 @@ describe('UserProfile.vue', () => {
 
     await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
     await wrapper.get('.custom-date-trigger').trigger('click')
+    expect(wrapper.get('.date-modal-content').classes()).toContain('ui-responsive-dialog')
+    expect(wrapper.get('.date-modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
+    expect(wrapper.find('.date-modal-content .ui-responsive-dialog__header button').exists()).toBe(false)
     await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
 
     await wrapper.get('.custom-date-trigger').trigger('click')
@@ -816,6 +819,9 @@ describe('UserProfile.vue', () => {
     await wrapper.get('.modal-content .form-select').setValue('-1')
 
     await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
+    expect(wrapper.get('.date-modal-content').classes()).toContain('ui-responsive-dialog')
+    expect(wrapper.get('.date-modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
+    expect(wrapper.find('.date-modal-content .ui-responsive-dialog__header button').exists()).toBe(false)
     await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
     await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
     await setOpenJalaliDate(wrapper, '1409/02/03')
