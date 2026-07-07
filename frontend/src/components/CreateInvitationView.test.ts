@@ -134,6 +134,8 @@ describe('CreateInvitationView.vue', () => {
     })
     const textInputs = wrapper.findAll('.success-box input[readonly]')
     expect(wrapper.text()).toContain('✅ لینک دعوت با موفقیت ایجاد شد:')
+    expect(textInputs[0]!.classes()).toContain('ui-input')
+    expect(textInputs[1]!.classes()).toContain('ui-input')
     expect((textInputs[0]!.element as HTMLInputElement).value).toBe('https://t.me/mbmtrading1_bot?start=invite-token')
     expect((textInputs[1]!.element as HTMLInputElement).value).toBe(`${window.location.origin}/invite/abc?foo=1`)
   })
@@ -310,7 +312,9 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.get('.pending-refresh-btn').classes()).toContain('ui-button')
     expect(wrapper.get('.pending-copy-btn').classes()).toContain('ui-button')
     expect(wrapper.get('.delete-pending-btn').classes()).toContain('ui-button')
-    const pendingInput = wrapper.get('.pending-link-row input[readonly]').element as HTMLInputElement
+    const pendingInputWrapper = wrapper.get('.pending-link-row input[readonly]')
+    expect(pendingInputWrapper.classes()).toContain('ui-input')
+    const pendingInput = pendingInputWrapper.element as HTMLInputElement
     expect(pendingInput.value).toBe(`${window.location.origin}/register?token=INV-PENDING`)
   })
 

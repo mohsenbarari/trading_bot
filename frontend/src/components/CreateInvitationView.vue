@@ -334,14 +334,14 @@ function normalizeMobile(mobile: string): string {
       <div class="result-message">✅ لینک دعوت با موفقیت ایجاد شد:</div>
       <div class="link-label">🔵 لینک تلگرام:</div>
       <div class="copy-container">
-        <input type="text" :value="inviteLink" @click="copyToClipboard" readonly />
+        <AppInput type="text" :model-value="inviteLink" @click="copyToClipboard" readonly />
         <AppButton type="button" @click="copyToClipboard" class="copy-btn">
           {{ copyMessage ? copyMessage : 'کپی' }}
         </AppButton>
       </div>
       <div v-if="webLink" class="link-label" style="margin-top: 0.75rem;">🌐 لینک وب:</div>
       <div v-if="webLink" class="copy-container">
-        <input type="text" :value="webLink" @click="copyWebLink" readonly />
+        <AppInput type="text" :model-value="webLink" @click="copyWebLink" readonly />
         <AppButton type="button" @click="copyWebLink" class="copy-btn web">
           {{ webCopyMessage ? webCopyMessage : 'کپی' }}
         </AppButton>
@@ -385,7 +385,7 @@ function normalizeMobile(mobile: string): string {
               <span>انقضا: {{ formatDateTime(pending.expires_at) }}</span>
             </div>
             <div class="pending-link-row">
-              <input type="text" :value="toLocalDisplayLink(pending.web_link)" readonly @click="copyPendingWebLink(pending)" />
+              <AppInput type="text" :model-value="toLocalDisplayLink(pending.web_link)" readonly @click="copyPendingWebLink(pending)" />
               <AppButton type="button" class="pending-copy-btn" @click="copyPendingWebLink(pending)">
                 {{ pendingCopyState[pending.id] || 'کپی لینک' }}
               </AppButton>

@@ -417,7 +417,8 @@ Implementation notes:
 - The first admin-messages slice migrates mode tabs, clear-market-pin, market publish, and chat publish actions to `AppButton` while preserving tab ARIA/keyboard behavior, selectors, API calls, disabled/loading behavior, and history reuse behavior.
 - The first trading-settings slice migrates only footer save/reset controls to `AppButton` while preserving selectors, confirmation behavior, disabled state, payload creation, schedule fields, calendar override flows, and market-state refresh behavior.
 - The trading-settings calendar override button slice migrates override save/cancel/edit/delete controls to `AppButton` while preserving selectors, handler/API/payload/JalaliDatePicker behavior, schedule fields, footer save/reset, and market-state refresh behavior.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation row structure polish, channel states, remaining admin-message textareas/secondary actions, then remaining trading-settings fields/states.
+- The invitation readonly-link slice migrates generated Telegram/Web link and pending Web link inputs to `AppInput` while preserving root input selectors, readonly values, local link conversion, click-to-copy handlers, clipboard fallbacks, pending refresh/delete behavior, and generated invite API payloads.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, remaining pending-invitation row layout polish, channel states, remaining admin-message textareas/secondary actions, then remaining trading-settings fields/states.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

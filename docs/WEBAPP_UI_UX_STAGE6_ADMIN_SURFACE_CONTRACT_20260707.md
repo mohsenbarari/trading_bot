@@ -201,3 +201,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Create Invitation Readonly Link Input Slice Evidence
+
+- `CreateInvitationView.vue` generated Telegram link, generated Web link, and pending invitation Web link inputs now use `AppInput`.
+- Existing DOM selectors remain usable because `AppInput` renders a root `<input>`: `.success-box input[readonly]`, `.pending-link-row input[readonly]`, `.copy-container input[type="text"]`, and `.pending-link-row input[type="text"]`.
+- Link values, local link conversion, readonly behavior, click-to-copy handlers, clipboard fallback behavior, pending invitation refresh/delete behavior, and generated invite API payloads are unchanged.
+- `npm run test:unit:run -- src/components/CreateInvitationView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 41 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
