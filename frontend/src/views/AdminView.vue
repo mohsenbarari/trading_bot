@@ -12,9 +12,11 @@ import AdminMessagesView from '../components/AdminMessagesView.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
+import AppIconButton from '../components/ui/AppIconButton.vue'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
 import AppPage from '../components/ui/AppPage.vue'
 import AppPageHeader from '../components/ui/AppPageHeader.vue'
+import AppSectionCard from '../components/ui/AppSectionCard.vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 
 const router = useRouter()
@@ -298,17 +300,21 @@ onUnmounted(() => clearBackStack())
 
       <template v-else>
         <section class="admin-subview-shell">
-          <header class="admin-subview-header">
-            <button @click="handleNavigate('admin_panel')" class="admin-subview-return" type="button">
-              <ChevronLeft :size="20" />
-            </button>
-            <div class="admin-subview-copy">
-              <h1>{{ currentSectionMeta.title }}</h1>
-              <p>{{ currentSectionMeta.description }}</p>
-            </div>
-          </header>
+          <AppSectionCard
+            class="admin-subview-card"
+            :title="currentSectionMeta.title"
+            :description="currentSectionMeta.description"
+          >
+            <template #actions>
+              <AppIconButton
+                class="admin-subview-return"
+                label="بازگشت به پنل مدیریت"
+                @click="handleNavigate('admin_panel')"
+              >
+                <ChevronLeft :size="20" />
+              </AppIconButton>
+            </template>
 
-          <div class="admin-subview-card">
             <transition name="fade" mode="out-in">
               <CreateInvitationView
                 v-if="currentSection === 'create_invitation'"
@@ -361,7 +367,7 @@ onUnmounted(() => clearBackStack())
                 :jwtToken="jwtToken"
               />
             </transition>
-          </div>
+          </AppSectionCard>
         </section>
       </template>
     </div>
@@ -381,43 +387,7 @@ onUnmounted(() => clearBackStack())
   gap: 0.9rem;
 }
 
-.admin-subview-header {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.9rem;
-  align-items: start;
-  padding: 1rem 1.05rem;
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-sm);
-}
-
-.admin-subview-copy {
-  min-width: 0;
-}
-
-.admin-subview-copy h1 {
-  margin: 0 0 0.3rem;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-lg);
-  font-weight: 850;
-  line-height: 1.45;
-}
-
-.admin-subview-copy p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-}
-
 .admin-subview-card {
-  padding: 1rem;
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-sm);
   min-width: 0;
 }
 
@@ -452,8 +422,9 @@ onUnmounted(() => clearBackStack())
 }
 
 @media (max-width: 767px) {
-  .admin-subview-card {
-    padding: 0.85rem;
+  .admin-subview-card :deep(.ui-section-card__header),
+  .admin-subview-card :deep(.ui-section-card__body) {
+    padding-inline: 0.85rem;
   }
 }
 </style>

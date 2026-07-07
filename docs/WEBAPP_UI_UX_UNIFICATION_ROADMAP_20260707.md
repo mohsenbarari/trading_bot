@@ -403,6 +403,12 @@ Exit criteria:
 - Management actions keep their existing permissions and behavior.
 - Keyboard/focus behavior is consistent.
 
+Implementation notes:
+
+- The Admin behavior contract and first safe-slice rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE6_ADMIN_SURFACE_CONTRACT_20260707.md`.
+- The first Stage 6 slice migrates only the `AdminView.vue` subview shell to `AppSectionCard` and `AppIconButton`. It intentionally leaves child admin workflows, forms, tables, modals, API calls, route guards, and permission decisions unchanged.
+- Later Stage 6 slices should target one child surface at a time: user list, invitations, commodities, channels, admin messages, then system/trading settings.
+
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 
 Goal: standardize medium-risk screens after global primitives are stable.
