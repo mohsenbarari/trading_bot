@@ -1149,10 +1149,7 @@ onBeforeUnmount(() => {
           <AppInput v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای کانال..." />
         </div>
 
-        <div v-if="isLoadingMembers" class="state-box">
-          <Loader2 :size="18" class="spin" />
-          <span>در حال دریافت اعضای کانال...</span>
-        </div>
+        <AppLoadingState v-if="isLoadingMembers" class="state-box" label="در حال دریافت اعضای کانال..." />
         <div v-else class="channel-list">
           <ChatUserListRow
             v-for="member in filteredMembers"
@@ -1232,7 +1229,7 @@ onBeforeUnmount(() => {
 
         <section class="section-shell">
           <div class="section-heading">اعضای قابل ارتقا</div>
-          <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
+          <AppEmptyState v-if="promotableMembers.length === 0" class="state-box muted" title="عضوی برای ارتقا باقی نمانده است." />
           <div v-else class="channel-list compact">
             <ChatUserListRow
               v-for="member in promotableMembers"
@@ -1285,11 +1282,8 @@ onBeforeUnmount(() => {
           </AppButton>
         </div>
 
-        <div v-if="isLoadingCandidates" class="state-box">
-          <Loader2 :size="18" class="spin" />
-          <span>در حال دریافت کاربران فعال...</span>
-        </div>
-        <div v-else-if="!selectAllActiveUsers && candidates.length === 0" class="state-box muted">کاربری برای دعوت باقی نمانده است.</div>
+        <AppLoadingState v-if="isLoadingCandidates" class="state-box" label="در حال دریافت کاربران فعال..." />
+        <AppEmptyState v-else-if="!selectAllActiveUsers && candidates.length === 0" class="state-box muted" title="کاربری برای دعوت باقی نمانده است." />
         <div v-else-if="!selectAllActiveUsers" class="channel-list">
           <ChatUserListRow
             v-for="candidate in candidates"
@@ -1477,6 +1471,22 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.84);
   border: 1px solid rgba(148, 163, 184, 0.12);
   color: #475569;
+}
+
+.state-box.ui-loading-state,
+.state-box.ui-empty-state {
+  min-height: 58px;
+  padding: 12px 14px;
+}
+
+.state-box.ui-loading-state {
+  flex-direction: row;
+}
+
+.state-box.ui-empty-state :deep(h2) {
+  margin: 0;
+  font: inherit;
+  font-weight: 800;
 }
 
 .state-box.muted {

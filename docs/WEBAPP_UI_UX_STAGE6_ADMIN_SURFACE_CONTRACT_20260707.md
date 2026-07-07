@@ -342,3 +342,18 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Create Channel State Primitive Slice Evidence
+
+- `CreateChannelView.vue` channel loading and empty states now use `AppLoadingState` and `AppEmptyState`.
+- Migrated states: member loading, promotable-member empty, candidate loading, and candidate empty.
+- Existing `.state-box` / `.muted` hooks remain in place with scoped overrides so the compact channel-manager state height and spacing are preserved.
+- The channel add-members DOM test now verifies the empty state renders through `ui-empty-state`.
+- Error/success/warning/info status banners remain native in this slice because they are transient inline banners with existing semantic copy and color states; no API or mutation behavior changed.
+- `npm run test:unit:run -- src/components/CreateChannelView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 17 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run test:unit:run -- src/components/CreateChannelView.test.ts`: passed, 8 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

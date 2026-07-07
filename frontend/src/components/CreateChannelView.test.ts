@@ -634,6 +634,7 @@ describe('CreateChannelView.vue', () => {
     vm.page = 'add-members'
     await flushPromises()
     expect(wrapper.get('.select-all-toggle input').classes()).toContain('ui-checkbox')
+    expect(wrapper.get('.state-box.ui-empty-state').text()).toContain('کاربری برای دعوت باقی نمانده است.')
 
     vm.activeChannel = { ...channel, is_mandatory: true }
     await vm.loadCandidates('x')
