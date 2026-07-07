@@ -415,7 +415,8 @@ Implementation notes:
 - The first channel-manager slice migrates member/admin/add-member search fields to `AppInput` while preserving `.search-input`, search bindings, select-all disabled behavior, filtering, membership mutations, profile routing, and channel create/update/delete flows.
 - The channel-manager action button slice migrates member/profile/remove/admin/promote/add-selected controls to `AppButton` while preserving action selectors, click/stop behavior, disabled conditions, selection count behavior, membership mutation APIs, profile routing, and channel create/update/delete flows.
 - The first admin-messages slice migrates mode tabs, clear-market-pin, market publish, and chat publish actions to `AppButton` while preserving tab ARIA/keyboard behavior, selectors, API calls, disabled/loading behavior, and history reuse behavior.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation row structure polish, channel states, remaining admin-message textareas/secondary actions, then system/trading settings.
+- The first trading-settings slice migrates only footer save/reset controls to `AppButton` while preserving selectors, confirmation behavior, disabled state, payload creation, schedule fields, calendar override flows, and market-state refresh behavior.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation row structure polish, channel states, remaining admin-message textareas/secondary actions, then the remaining low-risk trading-settings fields/states.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

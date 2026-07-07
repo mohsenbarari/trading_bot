@@ -4,6 +4,7 @@ import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
 import JalaliDatePicker from './JalaliDatePicker.vue'
+import { AppButton } from './ui'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -816,15 +817,15 @@ onBeforeUnmount(() => {
 
       <!-- دکمه‌ها -->
       <div class="footer-actions">
-        <button class="settings-button settings-button--primary footer-control" @click="saveSettings" :disabled="saving">
+        <AppButton type="button" class="settings-button settings-button--primary footer-control" @click="saveSettings" :disabled="saving">
           <Loader2 v-if="saving" class="animate-spin" :size="18" />
           <Save v-else :size="18" />
           <span>ذخیره تنظیمات</span>
-        </button>
-        <button class="settings-button settings-button--danger footer-control" @click="resetSettings" :disabled="saving">
+        </AppButton>
+        <AppButton type="button" class="settings-button settings-button--danger footer-control" variant="danger" @click="resetSettings" :disabled="saving">
           <RotateCcw :size="18" />
           <span>بازنشانی به پیش‌فرض</span>
-        </button>
+        </AppButton>
       </div>
     </div>
   </div>

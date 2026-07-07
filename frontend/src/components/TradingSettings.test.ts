@@ -204,7 +204,9 @@ describe('TradingSettings.vue', () => {
     await wrapper.get('[data-testid="market-open-time"]').setValue('09:30')
     await wrapper.get('[data-testid="market-close-time"]').setValue('16:45')
     await wrapper.get('[data-testid="weekday-3"]').setValue(true)
-    await wrapper.find('.settings-button.settings-button--primary.footer-control').trigger('click')
+    const saveFooterButton = wrapper.get('.settings-button.settings-button--primary.footer-control')
+    expect(saveFooterButton.classes()).toContain('ui-button')
+    await saveFooterButton.trigger('click')
     await flushPromises()
 
     expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith(
@@ -307,7 +309,9 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    await wrapper.find('.settings-button.settings-button--danger.footer-control').trigger('click')
+    const resetFooterButton = wrapper.get('.settings-button.settings-button--danger.footer-control')
+    expect(resetFooterButton.classes()).toContain('ui-button')
+    await resetFooterButton.trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledOnce()
