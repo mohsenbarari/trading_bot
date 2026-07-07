@@ -13,6 +13,7 @@ import { computed, ref } from 'vue'
 import type { Component } from 'vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 import AppActionCard from './ui/AppActionCard.vue'
+import AppButton from './ui/AppButton.vue'
 import AppPageHeader from './ui/AppPageHeader.vue'
 import AppSectionCard from './ui/AppSectionCard.vue'
 import AppStatusBadge from './ui/AppStatusBadge.vue'
@@ -217,10 +218,12 @@ function toggleSection(section: AdminSectionKey) {
       :class="{ open: openSections[group.key] }"
     >
       <template #actions>
-        <button
+        <AppButton
           :id="`admin-${group.key}-header`"
           class="admin-accordion-toggle"
           type="button"
+          variant="ghost"
+          size="sm"
           :aria-expanded="openSections[group.key]"
           :aria-controls="`admin-${group.key}-panel`"
           @click="toggleSection(group.key)"
@@ -228,7 +231,7 @@ function toggleSection(section: AdminSectionKey) {
           <component :is="group.icon" :size="18" class="section-icon" />
           <AppStatusBadge tone="primary">{{ group.actions.length }} ابزار</AppStatusBadge>
           <component :is="openSections[group.key] ? ChevronDown : ChevronLeft" :size="18" class="admin-section-card-icon" />
-        </button>
+        </AppButton>
       </template>
       <div
         :id="`admin-${group.key}-panel`"
@@ -314,9 +317,12 @@ function toggleSection(section: AdminSectionKey) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-height: auto;
   border: 0;
   padding: 0;
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
   color: var(--ds-text-primary);
   cursor: pointer;
   font-family: inherit;

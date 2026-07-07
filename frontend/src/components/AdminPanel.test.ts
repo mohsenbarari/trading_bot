@@ -45,6 +45,7 @@ describe('AdminPanel.vue', () => {
 
     expect(wrapper.findAll('.admin-panel-action')).toHaveLength(6)
     expect(wrapper.findAll('.admin-accordion')).toHaveLength(3)
+    expect(wrapper.find('#admin-system-header').classes()).toContain('ui-button')
     expect(wrapper.find('#admin-system-header').attributes('aria-expanded')).toBe('true')
     expect(wrapper.find('#admin-system-panel').attributes('role')).toBe('region')
     expect(wrapper.text()).toContain('مدیریت کالاها')

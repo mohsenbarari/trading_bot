@@ -227,3 +227,16 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Admin Panel Accordion Toggle Slice Evidence
+
+- `AdminPanel.vue` section accordion toggles now use `AppButton`.
+- Existing IDs, selectors, and accessibility attributes remain in place: `#admin-*-header`, `.admin-accordion-toggle`, `aria-expanded`, `aria-controls`, and the region `aria-labelledby` links.
+- Scoped `.admin-accordion-toggle` overrides keep the compact header-control sizing instead of adopting the full button height.
+- Section open/close behavior, visible action counts, middle-manager action restrictions, super-admin action set, action navigation emits, and all permission decisions are unchanged.
+- `npm run test:unit:run -- src/components/AdminPanel.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 28 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
