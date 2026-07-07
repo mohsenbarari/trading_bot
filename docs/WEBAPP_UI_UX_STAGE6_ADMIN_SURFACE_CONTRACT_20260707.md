@@ -282,3 +282,18 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Trading Settings Numeric Input Slice Evidence
+
+- `AppInput` now explicitly supports `v-model.number` through the standard `modelModifiers` prop while leaving non-number consumers as string emitters.
+- `TradingSettings.vue` numeric settings inputs now use `AppInput`.
+- Migrated fields: `invitation_expiry_days`, `offer_expiry_minutes`, `offer_min_quantity`, `offer_max_quantity`, `max_active_offers`, `offer_expire_rate_per_minute`, `offer_expire_daily_limit_after_threshold`, `anti_abuse_daily_base`, `anti_abuse_weekly_base`, and `anti_abuse_monthly_base`.
+- Existing `type="number"`, `v-model.number`, placeholders, min/max attributes, `.settings-input`, and `is-default` behavior remain in place.
+- The settings save test confirms the API payload still contains numeric values, not numeric strings.
+- Checkbox controls remain native in this slice to avoid changing checked-state behavior.
+- `npm run test:unit:run -- src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts src/views/AdminView.test.ts`: passed, 32 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

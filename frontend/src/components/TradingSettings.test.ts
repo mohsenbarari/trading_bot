@@ -173,6 +173,9 @@ describe('TradingSettings.vue', () => {
 
     const inputs = wrapper.findAll('.settings-input')
     expect(inputs[0]!.attributes('placeholder')).toBe('3')
+    expect(inputs[0]!.classes()).toContain('ui-input')
+    expect(inputs[4]!.classes()).toContain('ui-input')
+    expect(inputs[9]!.classes()).toContain('ui-input')
     expect(inputs[0]!.classes()).not.toContain('is-default')
 
     await inputs[0]!.setValue('2')

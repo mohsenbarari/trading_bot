@@ -436,7 +436,7 @@ onBeforeUnmount(() => {
         >
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.invitation_expiry_days"
               :placeholder="settings.invitation_expiry_days?.toString()"
@@ -474,7 +474,7 @@ onBeforeUnmount(() => {
         >
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.offer_expiry_minutes"
               :placeholder="settings.offer_expiry_minutes?.toString()"
@@ -486,7 +486,7 @@ onBeforeUnmount(() => {
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">حداقل تعداد کالا</label>
-              <input
+              <AppInput
                 type="number"
                 v-model.number="form.offer_min_quantity"
                 :placeholder="settings.offer_min_quantity?.toString()"
@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="ds-form-group">
               <label class="ds-label">حداکثر تعداد کالا</label>
-              <input
+              <AppInput
                 type="number"
                 v-model.number="form.offer_max_quantity"
                 :placeholder="settings.offer_max_quantity?.toString()"
@@ -509,7 +509,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">حداکثر لفظ‌های فعال همزمان</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.max_active_offers"
               :placeholder="settings.max_active_offers?.toString()"
@@ -548,7 +548,7 @@ onBeforeUnmount(() => {
         >
           <div class="ds-form-group">
             <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.offer_expire_rate_per_minute"
               :placeholder="settings.offer_expire_rate_per_minute?.toString()"
@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه منقضی شدن روزانه</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.offer_expire_daily_limit_after_threshold"
               :placeholder="settings.offer_expire_daily_limit_after_threshold?.toString()"
@@ -602,7 +602,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه روزانه</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.anti_abuse_daily_base"
               :placeholder="settings.anti_abuse_daily_base?.toString()"
@@ -613,7 +613,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه هفتگی</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.anti_abuse_weekly_base"
               :placeholder="settings.anti_abuse_weekly_base?.toString()"
@@ -624,7 +624,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه ماهانه</label>
-            <input
+            <AppInput
               type="number"
               v-model.number="form.anti_abuse_monthly_base"
               :placeholder="settings.anti_abuse_monthly_base?.toString()"

@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { defineComponent, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AppActionCard,
@@ -208,6 +208,19 @@ describe('ui primitives', () => {
     const appInput = mount(AppInput, { props: { modelValue: 'علی' } })
     await appInput.get('input').setValue('محمد')
     expect(appInput.emitted('update:modelValue')?.[0]).toEqual(['محمد'])
+
+    const numericInput = mount(defineComponent({
+      components: { AppInput },
+      setup() {
+        const amount = ref<number | string>(0)
+        return { amount }
+      },
+      template: '<AppInput v-model.number="amount" type="number" />',
+    }))
+    await numericInput.get('input').setValue('42')
+    expect((numericInput.vm as unknown as { amount: number | string }).amount).toBe(42)
+    await numericInput.get('input').setValue('')
+    expect((numericInput.vm as unknown as { amount: number | string }).amount).toBe('')
 
     const select = mount(AppSelect, {
       props: {
