@@ -1015,50 +1015,50 @@ async function deleteUser() {
     </AppResponsiveDialog>
 
     <!-- مودال اعمال محدودیت -->
-    <Teleport to="body">
-        <div v-if="showLimitationsModal" class="modal-overlay">
-            <div class="modal-content">
-                <h3><AlertTriangle :size="18" aria-hidden="true" /> اعمال محدودیت</h3>
+    <AppResponsiveDialog
+      :open="showLimitationsModal"
+      title="اعمال محدودیت"
+      backdrop-class="modal-overlay"
+      panel-class="modal-content"
+      @close="showLimitationsModal = false"
+    >
+      <div class="form-group">
+        <label>مجموع تعداد معاملات:</label>
+        <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" />
+      </div>
+      <div class="form-group">
+        <label>مجموع تعداد کالای معامله شده:</label>
+        <input type="number" v-model.number="limitMaxCommodities" class="form-input" min="0" placeholder="نامحدود (خالی)" />
+      </div>
+      <div class="form-group">
+        <label>مجموع ارسال لفظ در کانال:</label>
+        <input type="number" v-model.number="limitMaxRequests" class="form-input" min="0" placeholder="نامحدود (خالی)" />
+      </div>
 
-                <div class="form-group">
-                    <label>مجموع تعداد معاملات:</label>
-                    <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" />
-                </div>
-                <div class="form-group">
-                    <label>مجموع تعداد کالای معامله شده:</label>
-                    <input type="number" v-model.number="limitMaxCommodities" class="form-input" min="0" placeholder="نامحدود (خالی)" />
-                </div>
-                <div class="form-group">
-                    <label>مجموع ارسال لفظ در کانال:</label>
-                    <input type="number" v-model.number="limitMaxRequests" class="form-input" min="0" placeholder="نامحدود (خالی)" />
-                </div>
+      <div class="form-group">
+        <label>مدت زمان محدودیت:</label>
+        <select v-model="limitDurationMinutes" class="form-select">
+          <option v-for="duration in blockDurations" :key="duration.minutes" :value="duration.minutes">
+            {{ duration.label }}
+          </option>
+        </select>
+      </div>
 
-                <div class="form-group">
-                    <label>مدت زمان محدودیت:</label>
-                    <select v-model="limitDurationMinutes" class="form-select">
-                        <option v-for="duration in blockDurations" :key="duration.minutes" :value="duration.minutes">
-                            {{ duration.label }}
-                        </option>
-                    </select>
-                </div>
-
-                <div v-if="limitDurationMinutes === -1" class="custom-date-section">
-                    <label>تاریخ پایان:</label>
-                    <div
-                        class="custom-date-trigger"
-                        @click="initDatePicker(customLimitDate); showLimitDateModal = true"
-                    >
-                        {{ customLimitDate || 'انتخاب تاریخ...' }}
-                    </div>
-                </div>
-
-                <div class="action-buttons">
-                    <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
-                    <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
-                </div>
-            </div>
+      <div v-if="limitDurationMinutes === -1" class="custom-date-section">
+        <label>تاریخ پایان:</label>
+        <div
+          class="custom-date-trigger"
+          @click="initDatePicker(customLimitDate); showLimitDateModal = true"
+        >
+          {{ customLimitDate || 'انتخاب تاریخ...' }}
         </div>
-    </Teleport>
+      </div>
+
+      <div class="action-buttons">
+        <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
+        <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
+      </div>
+    </AppResponsiveDialog>
 
     <template v-if="!isAdminView">
       <div class="profile-user-actions profile-menu-card card-with-help">

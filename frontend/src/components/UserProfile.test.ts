@@ -375,6 +375,8 @@ describe('UserProfile.vue', () => {
 
     await wrapper.get('.settings-btn').trigger('click')
     await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
+    expect(wrapper.get('.modal-content').classes()).toContain('ui-responsive-dialog')
+    expect(wrapper.get('.modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
 
     const limitInputs = wrapper.findAll('.modal-content .form-input')
     expect(limitInputs[0]).toBeTruthy()

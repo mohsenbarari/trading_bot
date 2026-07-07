@@ -217,6 +217,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-07 14:28 UTC | Codex | **WebApp UI/UX Stage 7 UserProfile Limitation Modal Slice**: Migrated the `UserProfile.vue` admin limitation modal to `AppResponsiveDialog` while preserving `.modal-overlay`, `.modal-content`, numeric limit fields, duration/custom-date flow, save/cancel controls, and existing limitation payload behavior. |
 | 2026-07-07 14:24 UTC | Codex | **WebApp UI/UX Stage 7 UserProfile Block Modal Slice**: Migrated the `UserProfile.vue` block-duration modal to `AppResponsiveDialog` while preserving `.modal-overlay`, `.modal-content`, duration buttons, custom date trigger, block submit/cancel flows, and block/custom-date API behavior. |
 | 2026-07-07 13:55 UTC | Codex | **WebApp UI/UX Stage 7 Responsive Dialog Compatibility Prep**: Added `WEBAPP_UI_UX_STAGE7_PROFILE_ACCOUNT_CONTRACT_20260707.md`, documented profile/account behavior guards, and extended `AppResponsiveDialog` with optional `backdropClass`, `panelClass`, `bodyClass`, and `actionsClass` props so profile modals can migrate while preserving legacy selectors. |
 | 2026-07-07 13:48 UTC | Codex | **WebApp UI/UX Stage 6 User List Token Polish**: Updated `UserManager.vue` relation/role badge colors to existing design tokens while preserving user-card DOM, customer/accountant display-name policy, relation tag visibility, search behavior, loading/empty/error states, and profile navigation. |

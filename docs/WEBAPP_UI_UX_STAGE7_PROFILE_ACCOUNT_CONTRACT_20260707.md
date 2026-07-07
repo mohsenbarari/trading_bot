@@ -87,3 +87,12 @@ If profile/public-profile behavior regresses:
 - Limitation and date-picker modals remain native in this slice.
 - The UserProfile UI-controls test verifies the migrated modal has both shared dialog classes and legacy `.modal-content` / `.modal-overlay` classes.
 - `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.
+
+## UserProfile Limitation Modal Dialog Slice Evidence
+
+- `UserProfile.vue` limitation modal now uses `AppResponsiveDialog`.
+- Legacy selectors remain available through `backdropClass="modal-overlay"` and `panelClass="modal-content"`.
+- Preserved the three numeric limitation fields, duration select, custom limit-date trigger, save/cancel buttons, `saveLimitations`, `showLimitDateModal`, and existing limitation payload behavior.
+- Block-date and limit-date picker modals remain native in this slice.
+- The UserProfile admin-limitation test verifies the migrated limitation modal has both shared dialog classes and legacy `.modal-content` / `.modal-overlay` classes.
+- `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.
