@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
-import { AppButton } from './ui'
+import { AppButton, AppIconButton, AppTextarea } from './ui'
 
 type AdminMarketMessage = {
   id: number
@@ -308,14 +308,16 @@ onMounted(loadDashboard)
           </div>
 
           <div class="market-pin-footer">
-            <button
+            <AppButton
               type="button"
               class="ghost-link"
+              variant="ghost"
+              size="sm"
               data-test="market-pin-expand"
               @click="isMarketPinExpanded = !isMarketPinExpanded"
             >
               {{ isMarketPinExpanded ? 'بستن' : 'مشاهده همه پیام' }}
-            </button>
+            </AppButton>
             <span>{{ Number(activeMarketMessage.notified_recipients_count || 0).toLocaleString('fa-IR') }} گیرنده اعلان</span>
           </div>
         </article>
@@ -347,15 +349,16 @@ onMounted(loadDashboard)
           <div class="history-header history-header--market">
             <div class="history-title-row">
               <h4>۵ پیام آخر بازار</h4>
-              <button
+              <AppIconButton
                 type="button"
                 class="history-toggle-button"
                 data-test="market-history-toggle"
+                :label="isMarketHistoryOpen ? 'بستن تاریخچه بازار' : 'نمایش تاریخچه بازار'"
                 :aria-expanded="isMarketHistoryOpen"
                 @click="isMarketHistoryOpen = !isMarketHistoryOpen"
               >
                 <ChevronDown :size="22" class="history-toggle-icon" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
-              </button>
+              </AppIconButton>
             </div>
           </div>
 
@@ -363,15 +366,17 @@ onMounted(loadDashboard)
             <article v-for="message in marketRecentHistory" :key="message.id" class="history-item history-item--compact">
               <div class="history-item-top">
                 <span class="date-chip">{{ formatDate(message.published_at) }}</span>
-                <button
+                <AppIconButton
                   type="button"
                   class="icon-edit-button"
+                  variant="primary"
+                  size="sm"
                   :data-test="`market-history-edit-${message.id}`"
-                  :aria-label="`ویرایش ${message.content}`"
+                  :label="`ویرایش ${message.content}`"
                   @click="editMarketMessage(message)"
                 >
                   <PencilLine :size="16" />
-                </button>
+                </AppIconButton>
               </div>
               <p>{{ message.content }}</p>
             </article>
@@ -451,7 +456,7 @@ onMounted(loadDashboard)
             </div>
             <span class="composer-counter">{{ broadcastContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
           </div>
-          <textarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..."></textarea>
+          <AppTextarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..." />
 
           <div class="audience-panel">
             <div class="audience-header">
@@ -504,7 +509,7 @@ onMounted(loadDashboard)
             <p>{{ message.content }}</p>
             <div class="target-summary">{{ message.target_groups.map(targetLabel).join('، ') }}</div>
             <div class="history-footer">
-              <button type="button" class="ghost-link" @click="reuseBroadcastMessage(message)">استفاده مجدد</button>
+              <AppButton type="button" class="ghost-link" variant="ghost" size="sm" @click="reuseBroadcastMessage(message)">استفاده مجدد</AppButton>
             </div>
           </article>
 
@@ -1039,6 +1044,9 @@ onMounted(loadDashboard)
 
 .ghost-link {
   padding: 0;
+  min-height: auto;
+  border-radius: 0;
+  box-shadow: none;
   background: transparent;
   color: #0f766e;
 }

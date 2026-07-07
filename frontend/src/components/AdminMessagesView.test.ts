@@ -166,6 +166,7 @@ describe('AdminMessagesView.vue', () => {
     expect(wrapper.get('[data-test="market-panel"]').attributes('role')).toBe('tabpanel')
     expect(wrapper.get('[data-test="market-panel"]').attributes('aria-labelledby')).toBe('admin-message-tab-market')
     expect(wrapper.text()).toContain('مشاهده همه پیام')
+    expect(wrapper.get('[data-test="market-pin-expand"]').classes()).toContain('ui-button')
     expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(false)
     expect(wrapper.find('.history-header--market .history-badge').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('به‌صورت پیش‌فرض بسته است تا تمرکز روی پیام فعال و composer بماند.')
@@ -181,13 +182,17 @@ describe('AdminMessagesView.vue', () => {
     expect(wrapper.get('[data-test="market-composer-help-note"]').text()).toContain('فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد')
     expect(wrapper.get('[data-test="market-composer-help-note"]').text()).not.toContain('اگر روی آیکن مداد')
 
-    await wrapper.get('[data-test="market-history-toggle"]').trigger('click')
+    const marketHistoryToggle = wrapper.get('[data-test="market-history-toggle"]')
+    expect(marketHistoryToggle.classes()).toContain('ui-icon-button')
+    await marketHistoryToggle.trigger('click')
     await flushPromises()
 
     expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('پیام قبلی بازار')
 
-    await wrapper.get('[data-test="market-history-edit-11"]').trigger('click')
+    const marketHistoryEdit = wrapper.get('[data-test="market-history-edit-11"]')
+    expect(marketHistoryEdit.classes()).toContain('ui-icon-button')
+    await marketHistoryEdit.trigger('click')
     await flushPromises()
 
     const marketTextarea = wrapper.get('[data-test="market-composer-input"]')
@@ -245,10 +250,12 @@ describe('AdminMessagesView.vue', () => {
     expect(wrapper.text()).toContain('پیام قبلی همگانی')
 
     const reuseButtons = wrapper.findAll('button').filter((button) => button.text().includes('استفاده مجدد'))
+    expect(reuseButtons[0]!.classes()).toContain('ui-button')
     await reuseButtons[0]!.trigger('click')
     await flushPromises()
 
     const textareas = wrapper.findAll('textarea')
+    expect(textareas[0]!.classes()).toContain('ui-textarea')
     expect((textareas[0]!.element as HTMLTextAreaElement).value).toBe('پیام قبلی همگانی')
 
     const broadcastPrimaryAction = wrapper.findAll('.primary-action')[0]!

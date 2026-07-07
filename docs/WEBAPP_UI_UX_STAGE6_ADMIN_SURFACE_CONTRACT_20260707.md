@@ -213,3 +213,17 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Admin Messages Secondary Control Slice Evidence
+
+- `AdminMessagesView.vue` market pin expand, market history toggle, market history edit, broadcast composer textarea, and broadcast history reuse controls now use shared primitives.
+- `AppButton` is used for the ghost-link text actions; scoped `.ghost-link` overrides keep the legacy compact text-link sizing.
+- `AppIconButton` is used for the market history toggle and edit icon controls while preserving `data-test="market-history-toggle"`, `data-test="market-history-edit-*"`, `aria-expanded`, dynamic labels, and click handlers.
+- `AppTextarea` is used only for the broadcast composer textarea. The market composer textarea remains native in this slice because it is directly referenced for scroll/focus after editing a market history item.
+- Market pin expansion, market history accordion, edit-to-composer focus behavior, market publish payloads, chat broadcast payloads, selected target groups, history reuse, and clear-pin behavior are unchanged.
+- `npm run test:unit:run -- src/components/AdminMessagesView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 29 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/AdminMessagesView.test.ts src/components/TradingSettings.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 77 tests. The existing jsdom navigation warning from `CreateChannelView.test.ts` remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.
