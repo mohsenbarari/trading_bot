@@ -156,6 +156,7 @@ describe('CreateChannelView.vue', () => {
     expect(memberRow).toBeTruthy()
     const profileButton = memberRow!.findAll('.channel-member-action').find((button) => button.text().includes('پروفایل'))
     expect(profileButton).toBeTruthy()
+    expect(profileButton!.classes()).toContain('ui-button')
     await profileButton!.trigger('click')
     await flushPromises()
 
@@ -318,6 +319,7 @@ describe('CreateChannelView.vue', () => {
 
     const addMembersButton = wrapper.findAll('button').find((button) => button.text().trim() === 'افزودن')
     expect(addMembersButton).toBeTruthy()
+    expect(addMembersButton!.classes()).toContain('ui-button')
     await addMembersButton!.trigger('click')
     await flushPromises()
     await flushPromises()
@@ -471,6 +473,7 @@ describe('CreateChannelView.vue', () => {
 
     const promoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('ارتقا به ادمین'))
     expect(promoteButton).toBeTruthy()
+    expect(promoteButton!.classes()).toContain('ui-button')
     await promoteButton!.trigger('click')
     await flushPromises()
     await flushPromises()
@@ -480,6 +483,7 @@ describe('CreateChannelView.vue', () => {
 
     const demoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('حذف ادمین'))
     expect(demoteButton).toBeTruthy()
+    expect(demoteButton!.classes()).toContain('ui-button')
     await demoteButton!.trigger('click')
     await flushPromises()
     await flushPromises()

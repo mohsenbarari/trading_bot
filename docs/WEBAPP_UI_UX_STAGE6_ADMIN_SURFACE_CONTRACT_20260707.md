@@ -153,3 +153,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Channel Manager Action Button Slice Evidence
+
+- `CreateChannelView.vue` member profile/remove, admin demote, promotable-member promote, and add-selected-members controls now use `AppButton`.
+- Existing action selectors remain in place: `.channel-member-action`, `.channel-member-action--danger`, `.channel-member-action--primary`, and `.primary-chip`.
+- Click handlers, `.stop` behavior, disabled conditions, selection count behavior, membership mutation APIs, profile routing, and channel create/update/delete flows are unchanged.
+- `npm run test:unit:run -- src/components/CreateChannelView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 33 tests. The existing jsdom navigation warning remains non-fatal.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/CreateChannelView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 66 tests. The existing jsdom navigation warning remains non-fatal.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

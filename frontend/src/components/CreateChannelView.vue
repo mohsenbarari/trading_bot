@@ -1164,22 +1164,24 @@ onBeforeUnmount(() => {
               <span dir="ltr">{{ member.mobile_number }}</span>
             </template>
             <template #actions>
-              <button
+              <AppButton
                 type="button"
                 class="channel-member-action"
+                variant="secondary"
                 @click.stop="openMemberProfile(member)"
               >
                 پروفایل
-              </button>
-              <button
+              </AppButton>
+              <AppButton
                 v-if="!isMembershipManagementLocked && canRemoveMember(member)"
                 type="button"
                 class="channel-member-action channel-member-action--danger"
+                variant="danger"
                 :disabled="mutatingUserId === member.user_id"
                 @click.stop="removeMember(member)"
               >
                 حذف
-              </button>
+              </AppButton>
             </template>
           </ChatUserListRow>
         </div>
@@ -1204,22 +1206,24 @@ onBeforeUnmount(() => {
                 <span dir="ltr">{{ member.mobile_number }}</span>
               </template>
               <template #actions>
-                <button
+                <AppButton
                   type="button"
                   class="channel-member-action"
+                  variant="secondary"
                   @click.stop="openMemberProfile(member)"
                 >
                   پروفایل
-                </button>
-                <button
+                </AppButton>
+                <AppButton
                   v-if="canDemoteMember(member)"
                   type="button"
                   class="channel-member-action"
+                  variant="secondary"
                   :disabled="mutatingUserId === member.user_id"
                   @click.stop="demoteMember(member)"
                 >
                   حذف ادمین
-                </button>
+                </AppButton>
               </template>
             </ChatUserListRow>
           </div>
@@ -1240,21 +1244,23 @@ onBeforeUnmount(() => {
                 <span dir="ltr">{{ member.mobile_number }}</span>
               </template>
               <template #actions>
-                <button
+                <AppButton
                   type="button"
                   class="channel-member-action"
+                  variant="secondary"
                   @click.stop="openMemberProfile(member)"
                 >
                   پروفایل
-                </button>
-                <button
+                </AppButton>
+                <AppButton
                   type="button"
                   class="channel-member-action channel-member-action--primary"
+                  variant="primary"
                   :disabled="mutatingUserId === member.user_id"
                   @click.stop="promoteMember(member)"
                 >
                   ارتقا به ادمین
-                </button>
+                </AppButton>
               </template>
             </ChatUserListRow>
           </div>
@@ -1273,9 +1279,9 @@ onBeforeUnmount(() => {
 
         <div class="selection-banner">
           <span>{{ selectedCount.toLocaleString('fa-IR') }} عضو انتخاب شده</span>
-          <button type="button" class="primary-chip" :disabled="selectedCount === 0 || isSubmittingMembers" @click="submitMembers">
+          <AppButton type="button" class="primary-chip" :disabled="selectedCount === 0 || isSubmittingMembers" @click="submitMembers">
             افزودن
-          </button>
+          </AppButton>
         </div>
 
         <div v-if="isLoadingCandidates" class="state-box">
