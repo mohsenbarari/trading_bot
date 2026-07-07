@@ -107,10 +107,11 @@ npx playwright test e2e/non-messenger-viewport.spec.ts e2e/market-mutation-ux.sp
 Recommended role/trading follow-up checks:
 
 ```bash
+STAGING_ENABLE_BOT=1 STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=0 scripts/deploy_staging.sh deploy
 scripts/run_staging_role_trading_e2e_gate.sh
 ```
 
-This gate is intentionally wrapped by `scripts/run_staging_role_trading_e2e_gate.sh` instead of running the specs directly. The wrapped runner fail-closes unless the target is an explicit staging app container, the Redis container is explicit staging Redis, the backend URL points at staging, and the staging mutation confirmation environment is present. It also runs scoped pre/post cleanup for the Playwright fixture prefixes. Do not run the role/trading specs directly on a host that also has production containers.
+This gate is intentionally wrapped by `scripts/run_staging_role_trading_e2e_gate.sh` instead of running the specs directly. Deploy staging with `STAGING_ENABLE_BOT=1` first so the app, foreign app, bot, and sync worker profiles are all recreated from the same image before the gate runs. Keep `STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=0` for this single-domain staging WebApp surface so `/api/config` remains available to the WebApp. The wrapped runner fail-closes unless the target is an explicit staging app container, the Redis container is explicit staging Redis, the backend URL points at staging, and the staging mutation confirmation environment is present. It also runs scoped pre/post cleanup for the Playwright fixture prefixes. Do not run the role/trading specs directly on a host that also has production containers.
 
 ## Local Browser Blockers
 
