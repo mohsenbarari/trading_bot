@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue';
 import { apiFetch } from '../utils/auth';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
+import { AppButton, AppFormField, AppInput, AppSelect } from './ui';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -307,25 +308,22 @@ function normalizeMobile(mobile: string): string {
 <template>
   <div class="card">
     <form @submit.prevent="createInvite" autocomplete="off">
-      <div class="form-group">
-        <label for="account_name">نام کاربری (Account Name)</label>
-        <input v-model="invite.account_name" id="account_name" type="text" placeholder="مثلاً alireza" required />
-      </div>
-      <div class="form-group">
-        <label for="mobile_number">شماره موبایل (ایران)</label>
-        <input v-model="invite.mobile_number" id="mobile_number" type="tel" placeholder="09123456789" required />
-      </div>
-      <div class="form-group">
-        <label for="role">نقش</label>
-        <select v-model="invite.role" id="role">
-          <option v-for="role in availableRoles" :key="role.value" :value="role.value">{{ role.label }}</option>
-        </select>
-      </div>
+      <AppFormField class="form-group" id="account_name" label="نام کاربری (Account Name)">
+        <AppInput v-model="invite.account_name" id="account_name" type="text" placeholder="مثلاً alireza" required />
+      </AppFormField>
+      <AppFormField class="form-group" id="mobile_number" label="شماره موبایل (ایران)">
+        <AppInput v-model="invite.mobile_number" id="mobile_number" type="tel" placeholder="09123456789" required />
+      </AppFormField>
+      <AppFormField class="form-group" id="role" label="نقش">
+        <AppSelect v-model="invite.role" id="role" :options="availableRoles" />
+      </AppFormField>
       <div class="form-actions">
-        <button type="submit" :disabled="isLoading">
+        <AppButton type="submit" :loading="isLoading">
           {{ isLoading ? 'در حال ساخت...' : 'ارسال لینک دعوت' }}
-        </button>
-        <button type="button" class="secondary" @click="resetForm" :disabled="isLoading">بازنشانی</button>
+        </AppButton>
+        <AppButton type="button" class="secondary" variant="secondary" :disabled="isLoading" @click="resetForm">
+          بازنشانی
+        </AppButton>
       </div>
     </form>
 

@@ -78,3 +78,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Create Invitation Form Slice Evidence
+
+- `CreateInvitationView.vue` invite form fields now use `AppFormField`, `AppInput`, and `AppSelect`.
+- The primary submit and reset actions now use `AppButton` while preserving `button[type="submit"]`, `button.secondary`, loading/disabled behavior, and the existing reset handler.
+- Mobile normalization, invite API payloads, role allow-list behavior, generated Telegram/Web links, copy fallbacks, pending invitation list, and delete behavior remain unchanged.
+- `npm run test:unit:run -- src/components/CreateInvitationView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 40 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 43 tests.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

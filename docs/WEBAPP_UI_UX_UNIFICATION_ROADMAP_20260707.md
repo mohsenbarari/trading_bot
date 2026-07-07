@@ -407,7 +407,8 @@ Implementation notes:
 
 - The Admin behavior contract and first safe-slice rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE6_ADMIN_SURFACE_CONTRACT_20260707.md`.
 - The first Stage 6 slice migrates only the `AdminView.vue` subview shell to `AppSectionCard` and `AppIconButton`. It intentionally leaves child admin workflows, forms, tables, modals, API calls, route guards, and permission decisions unchanged.
-- Later Stage 6 slices should target one child surface at a time: user list, invitations, commodities, channels, admin messages, then system/trading settings.
+- The second Stage 6 slice migrates the `CreateInvitationView.vue` invite form fields/actions to shared form/button primitives while keeping role gates, validation, API payloads, generated links, pending invitations, and delete/copy behavior unchanged.
+- Later Stage 6 slices should continue one child surface at a time: pending-invitation list polish, commodities, user list, channels, admin messages, then system/trading settings.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 

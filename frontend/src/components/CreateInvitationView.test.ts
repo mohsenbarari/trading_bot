@@ -115,6 +115,12 @@ describe('CreateInvitationView.vue', () => {
     const wrapper = await mountView()
     await fillInviteForm(wrapper, '۰۹۱۲۳۴۵۶۷۸۹')
 
+    expect(wrapper.findAll('.form-group.ui-form-field')).toHaveLength(3)
+    expect(wrapper.get('#account_name').classes()).toContain('ui-input')
+    expect(wrapper.get('#role').classes()).toEqual(expect.arrayContaining(['ui-input', 'ui-select']))
+    expect(wrapper.get('button[type="submit"]').classes()).toContain('ui-button')
+    expect(wrapper.get('button.secondary').classes()).toContain('ui-button--secondary')
+
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
