@@ -217,6 +217,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-07 14:52 UTC | Codex | **WebApp UI/UX Stage 7 Completion Scan**: Documented that remaining profile/account native controls are intentional browser/custom controls: avatar file picker, avatar/back/profile action buttons, UserProfile autosave number inputs, and native time inputs. The Stage 7 modal/textarea/select migration surface is complete pending future dedicated contracts for those controls. |
 | 2026-07-07 14:49 UTC | Codex | **WebApp UI/UX Stage 7 UserProfile Select Slice**: Migrated UserProfile max-session, role-edit, and limitation-duration selects to `AppSelect` while preserving legacy selectors, max-session numeric autosave/fallback behavior, role-save payloads, and limitation custom-date behavior. |
 | 2026-07-07 14:45 UTC | Codex | **WebApp UI/UX Stage 7 PublicProfile History Select Slice**: Migrated `PublicProfile.vue` trade-history commodity and counterparty filters to `AppSelect` while preserving lazy option loading on focus, commodity query state, counterparty id parsing, filter summaries, visibility rules, and history fetch/export behavior. |
 | 2026-07-07 14:41 UTC | Codex | **WebApp UI/UX Stage 7 PublicProfile Address Textarea Slice**: Migrated the owner address edit textarea in `PublicProfile.vue` to `AppTextarea` while preserving `AppFormField` wiring, `.address-edit-textarea`, validation/error rendering, save/cancel controls, and `/api/auth/me/address` payload behavior. |

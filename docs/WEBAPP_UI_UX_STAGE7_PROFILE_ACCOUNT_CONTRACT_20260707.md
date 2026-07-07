@@ -135,3 +135,12 @@ If profile/public-profile behavior regresses:
 - Preserved legacy `.form-select-sm` / `.form-select` selectors, max-session numeric autosave/fallback behavior, role-save payload behavior, and limitation duration/custom-date behavior.
 - The UserProfile tests verify the migrated selects keep the shared `.ui-select` class and still drive role, session, and limitation flows.
 - `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.
+
+## Stage 7 Completion Scan
+
+- Remaining `PublicProfile.vue` hidden avatar file input is intentionally native because it depends on browser file-picker semantics and an existing ref.
+- Remaining `PublicProfile.vue` avatar/back/retry/action buttons are intentionally native/custom because they have bespoke circular avatar, profile-navigation, or inline action layouts that are already covered by existing tests.
+- Remaining `UserProfile.vue` number inputs are intentionally native in Stage 7 because they auto-save on `change`, enforce numeric browser behavior, and should only migrate after a dedicated number-input autosave contract exists.
+- Remaining `UserProfile.vue` time inputs are intentionally native because the date-picker flow uses browser `type="time"` reliability.
+- Remaining `UserProfile.vue` profile-control and modal action buttons are intentionally native/custom because their color semantics, compact grid layout, and existing selectors are part of the admin action surface contract.
+- `rg "Teleport to=\"body\"|<textarea|<select"` across Stage 7 profile/account/operations/workspace surfaces shows no raw profile modal, textarea, or select left after the completed slices.

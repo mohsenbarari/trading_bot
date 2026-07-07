@@ -466,6 +466,7 @@ Implementation notes:
 - The PublicProfile address slice migrates the owner address textarea to `AppTextarea` while preserving form-field accessibility, address validation, save/cancel controls, and the `/api/auth/me/address` payload contract.
 - The PublicProfile history-filter slice migrates commodity and counterparty selects to `AppSelect` while preserving lazy option loading, query state, filter summaries, and history fetch/export behavior.
 - The UserProfile select slice migrates max-session, role-edit, and limitation-duration selects to `AppSelect` while preserving numeric autosave/fallback behavior, role payloads, and limitation custom-date behavior.
+- Stage 7 completion scan leaves only intentionally native/custom controls: avatar file picker, avatar/back/profile action buttons, UserProfile autosave number inputs, and native `type="time"` fields. These require dedicated future contracts before any migration.
 
 ## Stage 8 - Navigation and PWA Interaction Decision
 
