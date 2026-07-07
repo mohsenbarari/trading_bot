@@ -345,7 +345,21 @@ describe('CreateInvitationView.vue', () => {
     expect(window.confirm).toHaveBeenCalledWith('دعوت‌نامه pending-user حذف شود؟')
     expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending/12', { method: 'DELETE' })
     expect(wrapper.text()).not.toContain('pending-user')
+    expect(wrapper.get('.pending-state.empty').classes()).toContain('ui-empty-state')
     expect(wrapper.text()).toContain('دعوت‌نامه pending وجود ندارد.')
+  })
+
+  it('renders pending invitation load failures with the shared error state', async () => {
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({ detail: 'pending down' }, false, 500),
+    )
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+
+    const pendingError = wrapper.get('.pending-error')
+    expect(pendingError.classes()).toContain('ui-empty-state')
+    expect(pendingError.attributes('role')).toBe('alert')
+    expect(pendingError.text()).toContain('pending down')
   })
 
   it('shows a fallback copy error for the Telegram link when execCommand returns false', async () => {

@@ -129,3 +129,15 @@ If an Admin regression appears:
 - `npm run build`: passed.
 - `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
 - `git diff --check`: passed.
+
+## Create Invitation Pending State Slice Evidence
+
+- `CreateInvitationView.vue` pending-invitation loading, empty, and error states now use `AppLoadingState`, `AppEmptyState`, and `AppErrorState`.
+- Existing pending-state selectors remain in place: `.pending-error`, `.pending-state`, and `.pending-state.empty`.
+- Pending invitation row structure, readonly Web registration link, copy behavior, delete confirmation, delete API call, refresh API call, and generated invite behavior are unchanged.
+- `npm run test:unit:run -- src/components/CreateInvitationView.test.ts src/views/AdminView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 41 tests.
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CreateInvitationView.test.ts src/components/CommodityManager.test.ts src/components/UserManager.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 58 tests.
+- `npm run guard:ui`: passed.
+- `npm run build`: passed.
+- `npx playwright test e2e/admin-smoke.spec.ts --project=chromium --list`: passed, 4 tests discovered.
+- `git diff --check`: passed.

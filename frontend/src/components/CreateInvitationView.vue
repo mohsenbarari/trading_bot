@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue';
 import { apiFetch } from '../utils/auth';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
-import { AppButton, AppFormField, AppInput, AppSelect } from './ui';
+import { AppButton, AppEmptyState, AppErrorState, AppFormField, AppInput, AppLoadingState, AppSelect } from './ui';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -359,9 +359,22 @@ function normalizeMobile(mobile: string): string {
         </AppButton>
       </div>
 
-      <div v-if="pendingError" class="pending-error">{{ pendingError }}</div>
-      <div v-if="pendingLoading && !pendingInvitations.length" class="pending-state">در حال دریافت دعوت‌نامه‌ها...</div>
-      <div v-else-if="!pendingInvitations.length" class="pending-state empty">دعوت‌نامه pending وجود ندارد.</div>
+      <AppErrorState
+        v-if="pendingError"
+        class="pending-error"
+        title="خطا در دریافت دعوت‌نامه‌ها"
+        :message="pendingError"
+      />
+      <AppLoadingState
+        v-if="pendingLoading && !pendingInvitations.length"
+        class="pending-state"
+        label="در حال دریافت دعوت‌نامه‌ها..."
+      />
+      <AppEmptyState
+        v-else-if="!pendingInvitations.length"
+        class="pending-state empty"
+        title="دعوت‌نامه pending وجود ندارد."
+      />
       <div v-else class="pending-list">
         <div v-for="pending in pendingInvitations" :key="pending.id" class="pending-row">
           <div class="pending-main">

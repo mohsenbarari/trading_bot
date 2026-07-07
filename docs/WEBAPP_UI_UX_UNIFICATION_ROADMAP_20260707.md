@@ -411,7 +411,8 @@ Implementation notes:
 - The next invitation slice migrates copy/refresh/delete buttons to `AppButton` while preserving every existing button class and clipboard/delete workflow.
 - `CommodityManager.vue` was already mostly primitive-backed; the Stage 6 commodity slice migrates the remaining raw back/edit/delete icon controls to `AppIconButton` while preserving all commodity and alias workflows.
 - The first `UserManager.vue` slice migrates only search, empty, and error states to shared primitives while preserving user list rendering, customer/accountant relation badges, display-name policy, API fetch behavior, search trimming/encoding, and profile navigation.
-- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation list structure polish, channels, admin messages, then system/trading settings.
+- The pending invitation state slice migrates loading, empty, and error states to shared primitives while preserving pending row structure, readonly links, copy/delete workflows, refresh API behavior, and generated invite behavior.
+- Later Stage 6 slices should continue one child surface at a time: user-list structure polish, pending-invitation row structure polish, channels, admin messages, then system/trading settings.
 
 ## Stage 7 - Profile, Public Profile, Account, and Operations Cleanup
 
