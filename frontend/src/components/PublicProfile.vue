@@ -31,6 +31,7 @@ import {
   AppResponsiveDialog,
   AppSectionCard,
   AppStatusBadge,
+  AppTextarea,
 } from './ui';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
@@ -1532,13 +1533,13 @@ function handleHistoryPresetChipChange(value: string) {
                 <form v-else-if="isOwnProfile" class="address-edit-form" @submit.prevent="saveOwnAddress">
                   <AppFormField label="آدرس" :error="addressError || undefined">
                     <template #default="{ id, describedby, invalid }">
-                      <textarea
+                      <AppTextarea
                         :id="id"
                         v-model="addressDraft"
                         rows="3"
-                        class="ui-input ui-textarea address-edit-textarea"
+                        class="address-edit-textarea"
                         :aria-describedby="describedby"
-                        :aria-invalid="invalid || undefined"
+                        :invalid="invalid"
                         placeholder="آدرس کامل خود را وارد کنید"
                       />
                     </template>

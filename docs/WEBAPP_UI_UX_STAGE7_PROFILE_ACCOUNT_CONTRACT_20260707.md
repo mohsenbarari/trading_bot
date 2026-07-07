@@ -114,3 +114,10 @@ If profile/public-profile behavior regresses:
 - Preserved admin user lookup, embedded `UserProfile`, customer/admin display data, and `handleAdminUserManagerNavigate` close behavior.
 - The modal keeps backdrop-click close behavior and disables Escape close so nested `UserProfile` modals cannot accidentally close parent and child together.
 - `npm run test:unit:run -- src/components/PublicProfile.test.ts src/views/PublicProfileView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 61 tests.
+
+## PublicProfile Address Textarea Primitive Slice Evidence
+
+- `PublicProfile.vue` owner address edit textarea now uses `AppTextarea`.
+- Preserved `AppFormField` wiring, `addressDraft` v-model, `rows`, placeholder, `.address-edit-textarea`, submit/cancel buttons, validation error rendering, and `/api/auth/me/address` payload behavior.
+- The owner-address test verifies the textarea keeps the shared `.ui-textarea` class and still submits the same normalized address payload.
+- `npm run test:unit:run -- src/components/PublicProfile.test.ts src/views/PublicProfileView.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 61 tests.

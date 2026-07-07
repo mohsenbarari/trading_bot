@@ -1602,6 +1602,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     await wrapper.get('.address-edit-trigger').trigger('click')
+    expect(wrapper.get('.address-edit-textarea').classes()).toContain('ui-textarea')
     await wrapper.get('.address-edit-textarea').setValue('بازار تهران، پلاک ۱۲')
     fetchMock.mockResolvedValueOnce(makeResponse({ address: 'بازار تهران، پلاک ۱۲' }))
     await wrapper.get('.address-edit-form').trigger('submit')

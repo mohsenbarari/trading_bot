@@ -463,6 +463,7 @@ Implementation notes:
 - The UserProfile limitation-modal slice migrates the admin limitation modal to `AppResponsiveDialog` while preserving numeric limit fields, duration/custom-date behavior, save/cancel flows, and existing limitation payload tests.
 - The UserProfile date-modal slice adds default-preserving dialog close controls (`showClose`, `closeOnBackdrop`, `closeOnEscape`) and migrates both block-date and limit-date pickers to `AppResponsiveDialog` with those close controls disabled to preserve the previous nested-modal behavior.
 - The PublicProfile admin-user modal slice migrates the embedded admin `UserProfile` modal to `AppResponsiveDialog` while preserving admin lookup, embedded profile behavior, backdrop close, and nested-modal Escape protection.
+- The PublicProfile address slice migrates the owner address textarea to `AppTextarea` while preserving form-field accessibility, address validation, save/cancel controls, and the `/api/auth/me/address` payload contract.
 
 ## Stage 8 - Navigation and PWA Interaction Decision
 
