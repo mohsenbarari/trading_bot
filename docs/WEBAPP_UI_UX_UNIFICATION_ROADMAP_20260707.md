@@ -263,6 +263,8 @@ Exit criteria:
 
 Goal: make the first screen consistent with the canonical UI system without changing dashboard data behavior.
 
+Stage evidence: `docs/WEBAPP_UI_UX_STAGE4_DASHBOARD_REFACTOR_20260707.md`
+
 Tasks:
 
 1. Replace bespoke dashboard cards with shared card/section primitives.

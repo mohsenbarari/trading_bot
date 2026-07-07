@@ -9,7 +9,21 @@ import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate }
 import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
-import { AppButton, AppEmptyState, AppIconButton, AppInput, AppListItem, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
+import {
+  AppButton,
+  AppCard,
+  AppChip,
+  AppDisclosure,
+  AppEmptyState,
+  AppErrorState,
+  AppIconButton,
+  AppInput,
+  AppListItem,
+  AppLoadingState,
+  AppSectionCard,
+  AppStatusBadge,
+  AppToast,
+} from '../components/ui'
 
 interface DashboardTrade {
   id: number
@@ -551,7 +565,7 @@ onMounted(fetchUser)
 
     <div v-else-if="user" class="dashboard-content">
 
-      <header class="dashboard-header-card" :class="`dashboard-header-card--${dashboardHeaderTone}`">
+      <AppCard class="dashboard-header-card" :tone="dashboardHeaderTone">
         <div class="dashboard-header-main">
           <div class="dashboard-header-actions">
             <AppIconButton type="button" class="notif-btn" label="اعلان‌ها" size="sm" @click="router.push('/notifications')">
@@ -602,29 +616,39 @@ onMounted(fetchUser)
             </AppStatusBadge>
           </div>
         </div>
-      </header>
+      </AppCard>
 
       <!-- ═══ Blocked Warning ═══ -->
-      <div v-if="isInactiveAccount" class="alert-card alert-blocked">
-        <div class="alert-icon blocked-icon">
-          <Ban :size="28" />
-        </div>
-        <div class="alert-body">
-          <h3>{{ isGloballyLockedAccount ? 'حساب کاربری قفل شده است' : 'حساب کاربری غیرفعال شده است' }}</h3>
-          <p>{{ inactiveAccountMessage }}</p>
-        </div>
-      </div>
+      <AppToast
+        v-if="isInactiveAccount"
+        class="dashboard-alert-card alert-blocked"
+        tone="danger"
+        role="alert"
+        :title="isGloballyLockedAccount ? 'حساب کاربری قفل شده است' : 'حساب کاربری غیرفعال شده است'"
+        :message="inactiveAccountMessage"
+      >
+        <template #icon>
+          <span class="alert-icon blocked-icon">
+            <Ban :size="28" />
+          </span>
+        </template>
+      </AppToast>
 
       <!-- ═══ Restricted Warning ═══ -->
-      <div v-else-if="isRestricted" class="alert-card alert-restricted">
-        <div class="alert-icon restricted-icon">
-          <AlertTriangle :size="24" />
-        </div>
-        <div class="alert-body">
-          <h3>معاملات محدود شده</h3>
-          <p>دسترسی معاملاتی شما تا <strong>{{ restrictedUntil }}</strong> محدود شده است.</p>
-        </div>
-      </div>
+      <AppToast
+        v-else-if="isRestricted"
+        class="dashboard-alert-card alert-restricted"
+        tone="warning"
+        role="alert"
+        title="معاملات محدود شده"
+      >
+        <template #icon>
+          <span class="alert-icon restricted-icon">
+            <AlertTriangle :size="24" />
+          </span>
+        </template>
+        <p>دسترسی معاملاتی شما تا <strong>{{ restrictedUntil }}</strong> محدود شده است.</p>
+      </AppToast>
 
       <!-- ═══ Main Content ═══ -->
       <main class="main-section">
@@ -645,9 +669,9 @@ onMounted(fetchUser)
             <div class="hero-text">
               <span class="hero-title-row">
                 <span class="hero-title">ورود به بازار</span>
-                <span class="hero-status-pill" :class="isMarketOpen ? 'hero-status-pill--open' : 'hero-status-pill--closed'">
+                <AppStatusBadge :tone="isMarketOpen ? 'success' : 'neutral'" class="hero-status-pill">
                   {{ marketEntryStatusLabel }}
-                </span>
+                </AppStatusBadge>
               </span>
               <span class="hero-subtitle">{{ marketEntrySubtitle }}</span>
             </div>
@@ -662,23 +686,35 @@ onMounted(fetchUser)
           aria-label="تاریخچه معاملات امروز"
         >
           <template #actions>
-            <button
+            <AppButton
               type="button"
+              variant="secondary"
+              size="sm"
               class="today-trades-refresh"
               :disabled="todayTradesLoading"
               @click="loadTodayTrades"
             >
               بروزرسانی
-            </button>
+            </AppButton>
           </template>
 
-          <div v-if="todayTradesLoading" class="today-trades-state">در حال دریافت معاملات...</div>
-          <div v-else-if="todayTradesError" class="today-trades-state today-trades-state--error">
-            {{ todayTradesError }}
-          </div>
-          <div v-else-if="todayTrades.length === 0" class="today-trades-state">
-            امروز معامله‌ای ثبت نشده است.
-          </div>
+          <AppLoadingState
+            v-if="todayTradesLoading"
+            class="dashboard-state-card"
+            label="در حال دریافت معاملات"
+          />
+          <AppErrorState
+            v-else-if="todayTradesError"
+            class="dashboard-state-card"
+            title="دریافت معاملات امروز ناموفق بود"
+            :message="todayTradesError"
+          />
+          <AppEmptyState
+            v-else-if="todayTrades.length === 0"
+            class="dashboard-state-card"
+            title="امروز معامله‌ای ثبت نشده است"
+            message="بعد از انجام معامله، خلاصه روز جاری همین‌جا نمایش داده می‌شود."
+          />
           <div v-else class="today-trades-scroll">
             <div class="today-trades-table" role="table" aria-label="معاملات امروز">
               <div class="today-trades-row today-trades-row--head" role="row">
@@ -716,37 +752,30 @@ onMounted(fetchUser)
           />
         </AppSectionCard>
 
-        <section
+        <AppDisclosure
           v-if="showProjectUsersSection"
           class="dashboard-accordion-card dashboard-project-users-card"
-          :class="{ 'is-open': projectUsersExpanded }"
-          aria-labelledby="dashboard-project-users-title"
+          :open="projectUsersExpanded"
+          title="لیست همکاران"
+          description="اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید."
+          title-id="dashboard-project-users-title"
+          panel-id="dashboard-project-users-panel"
+          toggle-class="dashboard-accordion-toggle dashboard-accordion-toggle--project-users"
+          panel-class="dashboard-accordion-panel"
+          @toggle="toggleProjectUsersDirectory"
         >
-          <button
-            type="button"
-            class="dashboard-accordion-toggle dashboard-accordion-toggle--project-users"
-            :aria-expanded="projectUsersExpanded"
-            aria-controls="dashboard-project-users-panel"
-            @click="toggleProjectUsersDirectory"
-          >
+          <template #leading>
             <span class="dashboard-accordion-icon dashboard-accordion-icon--users" aria-hidden="true">
               <UsersRound :size="20" />
             </span>
-            <span class="dashboard-accordion-copy">
-              <strong id="dashboard-project-users-title">لیست همکاران</strong>
-              <span>اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید.</span>
-            </span>
+          </template>
+          <template #meta>
             <span class="dashboard-accordion-meta">
               <AppStatusBadge tone="info">{{ projectUsersSummaryLabel }}</AppStatusBadge>
               <ChevronDown class="dashboard-accordion-chevron" :size="18" />
             </span>
-          </button>
+          </template>
 
-          <div
-            v-if="projectUsersExpanded"
-            id="dashboard-project-users-panel"
-            class="dashboard-accordion-panel"
-          >
             <form class="dashboard-project-users-search" @submit.prevent="submitProjectUsersSearch">
               <AppInput
                 v-model="projectUsersQuery"
@@ -757,12 +786,17 @@ onMounted(fetchUser)
               <AppButton type="submit" size="sm" :loading="projectUsersLoading">جستجو</AppButton>
             </form>
 
-            <div v-if="projectUsersLoading" class="dashboard-directory-state">
-              در حال دریافت لیست همکاران...
-            </div>
-            <div v-else-if="projectUsersError" class="dashboard-directory-state dashboard-directory-state--error">
-              {{ projectUsersError }}
-            </div>
+            <AppLoadingState
+              v-if="projectUsersLoading"
+              class="dashboard-state-card"
+              label="در حال دریافت لیست همکاران"
+            />
+            <AppErrorState
+              v-else-if="projectUsersError"
+              class="dashboard-state-card"
+              title="دریافت لیست همکاران ناموفق بود"
+              :message="projectUsersError"
+            />
             <AppEmptyState
               v-else-if="projectUsersLoaded && projectUsers.length === 0"
               title="همکاری برای نمایش پیدا نشد"
@@ -779,12 +813,13 @@ onMounted(fetchUser)
               >
                 <template #trailing>
                   <span class="dashboard-project-user-trailing">
-                    <span
+                    <AppChip
                       v-if="isProjectUserNew(projectUser)"
                       class="dashboard-project-user-new-badge"
+                      tone="success"
                     >
                       جدید
-                    </span>
+                    </AppChip>
                     <span v-else class="dashboard-project-user-new-badge dashboard-project-user-new-badge--hidden" aria-hidden="true"></span>
                     <span v-if="projectUser.mobile_number" class="dashboard-project-user-mobile" dir="ltr">
                       {{ projectUser.mobile_number }}
@@ -808,56 +843,54 @@ onMounted(fetchUser)
                 </AppButton>
               </div>
             </div>
-          </div>
-        </section>
+        </AppDisclosure>
 
-        <section
+        <AppDisclosure
           v-if="showAllowedCommoditiesSection"
           class="dashboard-accordion-card dashboard-commodities-card"
-          :class="{ 'is-open': allowedCommoditiesExpanded }"
-          aria-labelledby="dashboard-commodities-title"
+          :open="allowedCommoditiesExpanded"
+          title="کالاهای مجاز برای معامله"
+          description="کالاهای فعال بازار و نام‌های مستعار ثبت‌شده را ببینید."
+          title-id="dashboard-commodities-title"
+          panel-id="dashboard-commodities-panel"
+          toggle-class="dashboard-accordion-toggle dashboard-accordion-toggle--commodities"
+          panel-class="dashboard-accordion-panel"
+          @toggle="toggleAllowedCommodities"
         >
-          <button
-            type="button"
-            class="dashboard-accordion-toggle dashboard-accordion-toggle--commodities"
-            :aria-expanded="allowedCommoditiesExpanded"
-            aria-controls="dashboard-commodities-panel"
-            @click="toggleAllowedCommodities"
-          >
+          <template #leading>
             <span class="dashboard-accordion-icon dashboard-accordion-icon--commodities" aria-hidden="true">
               <PackageCheck :size="20" />
             </span>
-            <span class="dashboard-accordion-copy">
-              <strong id="dashboard-commodities-title">کالاهای مجاز برای معامله</strong>
-              <span>کالاهای فعال بازار و نام‌های مستعار ثبت‌شده را ببینید.</span>
-            </span>
+          </template>
+          <template #meta>
             <span class="dashboard-accordion-meta">
               <AppStatusBadge tone="info">{{ allowedCommoditySummaryLabel }}</AppStatusBadge>
               <ChevronDown class="dashboard-accordion-chevron" :size="18" />
             </span>
-          </button>
+          </template>
 
-          <div
-            v-if="allowedCommoditiesExpanded"
-            id="dashboard-commodities-panel"
-            class="dashboard-accordion-panel"
-          >
-            <div v-if="allowedCommoditiesLoading" class="dashboard-commodities-state">
-              در حال دریافت فهرست کالاها...
-            </div>
-            <div v-else-if="allowedCommoditiesError" class="dashboard-commodities-state dashboard-commodities-state--error">
-              {{ allowedCommoditiesError }}
-            </div>
+            <AppLoadingState
+              v-if="allowedCommoditiesLoading"
+              class="dashboard-state-card"
+              label="در حال دریافت فهرست کالاها"
+            />
+            <AppErrorState
+              v-else-if="allowedCommoditiesError"
+              class="dashboard-state-card"
+              title="دریافت فهرست کالاها ناموفق بود"
+              :message="allowedCommoditiesError"
+            />
             <AppEmptyState
               v-else-if="allowedCommodities.length === 0"
               title="هنوز کالایی برای معامله ثبت نشده است"
               message="پس از تعریف کالاها در مدیریت سیستم، فهرست کامل همین‌جا نمایش داده می‌شود."
             />
             <div v-else class="dashboard-commodities-grid">
-              <article
+              <AppCard
                 v-for="commodity in allowedCommodities"
                 :key="commodity.id"
                 class="dashboard-commodity-card"
+                :padded="false"
               >
                 <div class="dashboard-commodity-head">
                   <strong class="dashboard-commodity-title">{{ commodity.name }}</strong>
@@ -867,26 +900,21 @@ onMounted(fetchUser)
                 </div>
                 <p class="dashboard-commodity-caption">نام‌های قابل استفاده برای جستجو و ثبت سریع این کالا</p>
                 <div v-if="getCommodityAliasLabels(commodity).length > 0" class="dashboard-commodity-aliases">
-                  <span
+                  <AppChip
                     v-for="alias in getCommodityAliasLabels(commodity)"
                     :key="`${commodity.id}-${alias}`"
                     class="dashboard-commodity-alias-chip"
+                    tone="primary"
                   >
                     {{ alias }}
-                  </span>
+                  </AppChip>
                 </div>
                 <p v-else class="dashboard-commodity-empty">برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است.</p>
-              </article>
+              </AppCard>
             </div>
-          </div>
-        </section>
+        </AppDisclosure>
 
       </main>
-
-      <!-- Footer -->
-      <footer class="dashboard-footer">
-        <span>نسخه ۲.۵.۰</span>
-      </footer>
 
     </div>
   </div>
@@ -919,21 +947,7 @@ onMounted(fetchUser)
   flex-direction: column;
   gap: 0.9rem;
   margin-bottom: 1rem;
-  background: var(--ds-bg-card);
   padding: 0.9rem;
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-border-subtle);
-  box-shadow: var(--ds-shadow-xs);
-}
-
-.dashboard-header-card--danger {
-  border-color: rgba(220, 38, 38, 0.16);
-  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.96));
-}
-
-.dashboard-header-card--warning {
-  border-color: rgba(217, 119, 6, 0.18);
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 255, 255, 0.96));
 }
 
 .dashboard-header-main {
@@ -969,7 +983,6 @@ onMounted(fetchUser)
 .notif-btn:focus-visible,
 .logout-btn:focus-visible,
 .hero-btn:focus-visible,
-.dashboard-accordion-toggle:focus-visible,
 .today-trades-refresh:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
@@ -1030,28 +1043,23 @@ onMounted(fetchUser)
   border: 2px solid var(--ds-bg-card);
 }
 
-/* ═══ Alert Cards ═══ */
-.alert-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
-  padding: 1rem 1.25rem;
-  border-radius: var(--ds-radius-lg);
+.dashboard-alert-card {
+  max-width: none;
+  width: 100%;
   margin-bottom: 1rem;
   animation: slideDown 0.4s ease-out;
 }
+
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.alert-blocked {
-  background: linear-gradient(135deg, var(--ds-danger-50), var(--ds-danger-100));
-  border: 1px solid var(--ds-danger-200);
-}
-.alert-restricted {
-  background: linear-gradient(135deg, var(--ds-warning-50), var(--ds-warning-100));
-  border: 1px solid var(--ds-primary-200);
+.dashboard-alert-card p {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+  line-height: 1.85;
 }
 
 .alert-icon {
@@ -1071,22 +1079,6 @@ onMounted(fetchUser)
   background: var(--ds-primary-100);
   color: var(--ds-primary-600);
 }
-
-.alert-body h3 {
-  font-size: var(--ds-font-md);
-  font-weight: 700;
-  margin: 0 0 0.25rem 0;
-}
-.alert-blocked .alert-body h3 { color: var(--ds-danger-800); }
-.alert-restricted .alert-body h3 { color: var(--ds-primary-800); }
-
-.alert-body p {
-  font-size: 0.78rem;
-  margin: 0;
-  line-height: 1.6;
-}
-.alert-blocked .alert-body p { color: var(--ds-danger-700); }
-.alert-restricted .alert-body p { color: #a16207; }
 
 /* ═══ Main Section ═══ */
 .main-section {
@@ -1131,27 +1123,11 @@ onMounted(fetchUser)
 }
 
 .dashboard-accordion-card {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: var(--ds-radius-lg);
-  background: rgba(255, 255, 255, 0.94);
   box-shadow: var(--ds-shadow-xs);
-  overflow: hidden;
 }
 
-.dashboard-accordion-toggle {
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.9rem 1rem;
-  border: 0;
+.dashboard-accordion-card :deep(.dashboard-accordion-toggle) {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
-  color: inherit;
-  font: inherit;
-  text-align: right;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .dashboard-accordion-icon {
@@ -1174,28 +1150,6 @@ onMounted(fetchUser)
   background: rgba(245, 158, 11, 0.12);
 }
 
-.dashboard-accordion-copy {
-  min-width: 0;
-  display: grid;
-  gap: 0.2rem;
-}
-
-.dashboard-accordion-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 850;
-  line-height: 1.55;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dashboard-accordion-copy span {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.75;
-}
-
 .dashboard-accordion-meta {
   display: inline-flex;
   align-items: center;
@@ -1214,12 +1168,10 @@ onMounted(fetchUser)
   transform: rotate(180deg);
 }
 
-.dashboard-accordion-panel {
+.dashboard-accordion-card :deep(.dashboard-accordion-panel) {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  padding: 0 1rem 1rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .dashboard-project-users-search {
@@ -1242,25 +1194,9 @@ onMounted(fetchUser)
   font-size: var(--ds-font-sm);
 }
 
-.dashboard-directory-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 5.5rem;
-  border: 1px dashed var(--ds-border-subtle);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-soft);
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-  text-align: center;
-  padding: 1rem;
-}
-
-.dashboard-directory-state--error {
-  color: var(--ds-danger-700);
-  border-color: rgba(220, 38, 38, 0.18);
-  background: rgba(254, 242, 242, 0.92);
+.dashboard-state-card {
+  min-height: 6rem;
+  box-shadow: none;
 }
 
 .dashboard-project-users-list {
@@ -1292,17 +1228,8 @@ onMounted(fetchUser)
 }
 
 .dashboard-project-user-new-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   min-height: 1.35rem;
   padding: 0.12rem 0.48rem;
-  border: 1px solid rgba(22, 163, 74, 0.22);
-  border-radius: var(--ds-radius-full);
-  background: rgba(220, 252, 231, 0.92);
-  color: var(--ds-success-700);
-  font-size: var(--ds-font-xs);
-  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -1333,27 +1260,6 @@ onMounted(fetchUser)
   min-width: 150px;
 }
 
-.dashboard-commodities-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 5.5rem;
-  border: 1px dashed var(--ds-border-subtle);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-soft);
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-  text-align: center;
-  padding: 1rem;
-}
-
-.dashboard-commodities-state--error {
-  color: var(--ds-danger-700);
-  border-color: rgba(220, 38, 38, 0.18);
-  background: rgba(254, 242, 242, 0.92);
-}
-
 .dashboard-commodities-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1366,9 +1272,6 @@ onMounted(fetchUser)
   gap: 0.75rem;
   min-width: 0;
   padding: 0.95rem;
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-border-subtle);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
 }
 
 .dashboard-commodity-head {
@@ -1406,20 +1309,6 @@ onMounted(fetchUser)
   gap: 0.5rem;
 }
 
-.dashboard-commodity-alias-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2rem;
-  max-width: 100%;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.12);
-  color: var(--ds-primary-700);
-  font-size: var(--ds-font-xs);
-  font-weight: 700;
-  line-height: 1.4;
-}
-
 @media (min-width: 381px) and (max-width: 680px) {
   .dashboard-header-summary {
     flex-direction: column;
@@ -1432,7 +1321,7 @@ onMounted(fetchUser)
 }
 
 @media (max-width: 430px) {
-  .dashboard-accordion-toggle {
+  .dashboard-accordion-card :deep(.dashboard-accordion-toggle) {
     grid-template-columns: auto minmax(0, 1fr);
     align-items: flex-start;
   }
@@ -1457,11 +1346,6 @@ onMounted(fetchUser)
 /* ═══ Today Trades ═══ */
 .today-trades-card {
   width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-  overflow: hidden;
 }
 
 .today-trades-card :deep(.ui-section-card__body) {
@@ -1472,31 +1356,6 @@ onMounted(fetchUser)
 
 .today-trades-refresh {
   flex-shrink: 0;
-  border: 1px solid rgba(245, 158, 11, 0.22);
-  border-radius: 12px;
-  background: rgba(245, 158, 11, 0.1);
-  color: #b45309;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 800;
-  padding: 0.45rem 0.75rem;
-  cursor: pointer;
-}
-
-.today-trades-refresh:disabled {
-  opacity: 0.58;
-  cursor: default;
-}
-
-.today-trades-state {
-  padding: 1.15rem;
-  color: var(--ds-text-secondary);
-  font-size: 0.86rem;
-  line-height: 1.7;
-}
-
-.today-trades-state--error {
-  color: var(--ds-danger-600);
 }
 
 .today-trades-scroll {
@@ -1660,25 +1519,9 @@ onMounted(fetchUser)
   line-height: 1.25;
 }
 .hero-status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   min-height: 1.55rem;
-  padding: 0.18rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  color: var(--ds-text-primary);
   font-size: 0.72rem;
-  font-weight: 800;
   white-space: nowrap;
-}
-.hero-status-pill--open {
-  background: var(--ds-trade-buy-bg);
-  color: var(--ds-trade-buy-text);
-}
-.hero-status-pill--closed {
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--ds-text-secondary);
 }
 .hero-subtitle {
   font-size: var(--ds-font-sm);
@@ -1702,12 +1545,4 @@ onMounted(fetchUser)
   flex-shrink: 0;
 }
 
-/* ═══ Footer ═══ */
-.dashboard-footer {
-  text-align: center;
-  padding: 1.5rem 0 1rem;
-  font-size: var(--ds-font-xs);
-  color: var(--ds-text-faint);
-  font-weight: 500;
-}
 </style>

@@ -6,6 +6,8 @@ import {
   AppBottomSheet,
   AppButton,
   AppDangerZone,
+  AppChip,
+  AppDisclosure,
   AppEmptyState,
   AppErrorState,
   AppFilterChips,
@@ -32,7 +34,7 @@ import {
 } from './index'
 
 describe('ui primitives', () => {
-  it('renders buttons, action cards, metrics, badges, and sections with stable contracts', async () => {
+  it('renders buttons, action cards, metrics, badges, chips, and sections with stable contracts', async () => {
     const button = mount(AppButton, {
       props: { variant: 'secondary' },
       slots: {
@@ -70,6 +72,13 @@ describe('ui primitives', () => {
       slots: { default: 'در انتظار' },
     })
     expect(badge.classes()).toContain('ui-status-badge--warning')
+
+    const chip = mount(AppChip, {
+      props: { tone: 'primary' },
+      slots: { default: 'امامی' },
+    })
+    expect(chip.classes()).toContain('ui-chip--primary')
+    expect(chip.text()).toBe('امامی')
 
     const section = mount(AppSectionCard, {
       props: { title: 'تنظیمات', description: 'بخش‌های قابل ویرایش' },
@@ -249,6 +258,40 @@ describe('ui primitives', () => {
       },
     })
     expect(toolbar.find('.ui-toolbar__actions').exists()).toBe(true)
+  })
+
+  it('renders disclosures with accessible toggle and controlled panels', async () => {
+    const disclosure = mount(AppDisclosure, {
+      props: {
+        title: 'لیست همکاران',
+        description: 'اعضای قابل مشاهده پروژه',
+        open: false,
+        titleId: 'project-users-title',
+        panelId: 'project-users-panel',
+        toggleClass: 'custom-toggle',
+        panelClass: 'custom-panel',
+      },
+      slots: {
+        leading: '<span>icon</span>',
+        meta: '<span>meta</span>',
+        default: '<p>محتوا</p>',
+      },
+    })
+
+    const toggle = disclosure.get('.ui-disclosure__toggle')
+    expect(toggle.classes()).toContain('custom-toggle')
+    expect(disclosure.attributes('aria-labelledby')).toBe('project-users-title')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.attributes('aria-controls')).toBe('project-users-panel')
+    expect(disclosure.find('#project-users-panel').exists()).toBe(false)
+
+    await toggle.trigger('click')
+    expect(disclosure.emitted('toggle')).toHaveLength(1)
+
+    await disclosure.setProps({ open: true })
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(disclosure.get('#project-users-panel').classes()).toContain('custom-panel')
+    expect(disclosure.get('#project-users-panel').text()).toContain('محتوا')
   })
 
   it('supports search fields, filter chips, and number steppers', async () => {
