@@ -78,3 +78,12 @@ If profile/public-profile behavior regresses:
 - `npm run build`: passed.
 - `git diff --check`: passed.
 - `npx playwright test e2e/customer-owner-flow.spec.ts e2e/accountant-owner-flow.spec.ts e2e/customer-chat-privacy.spec.ts e2e/trade-history-accountant.spec.ts --project=chromium --list`: blocked in the current sandbox because these specs access Docker during import (`spawnSync docker EPERM`). Escalated execution was not permitted by the environment policy.
+
+## UserProfile Block Modal Dialog Slice Evidence
+
+- `UserProfile.vue` block-duration modal now uses `AppResponsiveDialog`.
+- Legacy selectors remain available through `backdropClass="modal-overlay"` and `panelClass="modal-content"`.
+- Preserved block duration buttons, custom date trigger, custom block submit, cancel/back buttons, and all `blockUser`, `blockUserCustom`, `showBlockDateModal`, and `sendBlockRequest` behavior.
+- Limitation and date-picker modals remain native in this slice.
+- The UserProfile UI-controls test verifies the migrated modal has both shared dialog classes and legacy `.modal-content` / `.modal-overlay` classes.
+- `npm run test:unit:run -- src/components/UserProfile.test.ts src/components/ui/AppPrimitives.test.ts`: passed, 25 tests.

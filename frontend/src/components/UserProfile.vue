@@ -24,6 +24,7 @@ import { formatIranDateTime } from '../utils/iranTime';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
+import { AppResponsiveDialog } from './ui';
 
 const props = defineProps<{
   user: any;
@@ -979,41 +980,39 @@ async function deleteUser() {
     </div>
 
     <!-- مودال انتخاب مدت زمان مسدودیت -->
-    <Teleport to="body">
-        <div v-if="showBlockModal" class="modal-overlay">
-            <div class="modal-content">
-                <h3>⏳ مدت زمان مسدودیت</h3>
-
-                <div v-if="!showCustomDateInput">
-                    <div class="duration-list">
-                        <button v-for="duration in blockDurations" :key="duration.minutes"
-                                @click="blockUser(duration.minutes)" class="duration-btn">
-                            {{ duration.label }}
-                        </button>
-                    </div>
-                </div>
-
-                <div v-else class="custom-date-section">
-                    <label>تاریخ و زمان پایان مسدودیت:</label>
-                    <div
-                        class="custom-date-trigger"
-                        @click="initDatePicker(customDate); showBlockDateModal = true"
-                    >
-                        {{ customDate || 'انتخاب تاریخ...' }}
-                    </div>
-
-
-
-                    <div class="action-buttons">
-                         <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
-                         <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
-                    </div>
-                </div>
-
-                <button v-if="!showCustomDateInput" @click="showBlockModal = false" class="cancel-btn full-width">انصراف</button>
-            </div>
+    <AppResponsiveDialog
+      :open="showBlockModal"
+      title="مدت زمان مسدودیت"
+      backdrop-class="modal-overlay"
+      panel-class="modal-content"
+      @close="showBlockModal = false"
+    >
+      <div v-if="!showCustomDateInput">
+        <div class="duration-list">
+          <button v-for="duration in blockDurations" :key="duration.minutes"
+                  @click="blockUser(duration.minutes)" class="duration-btn">
+            {{ duration.label }}
+          </button>
         </div>
-    </Teleport>
+      </div>
+
+      <div v-else class="custom-date-section">
+        <label>تاریخ و زمان پایان مسدودیت:</label>
+        <div
+          class="custom-date-trigger"
+          @click="initDatePicker(customDate); showBlockDateModal = true"
+        >
+          {{ customDate || 'انتخاب تاریخ...' }}
+        </div>
+
+        <div class="action-buttons">
+          <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
+          <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
+        </div>
+      </div>
+
+      <button v-if="!showCustomDateInput" @click="showBlockModal = false" class="cancel-btn full-width">انصراف</button>
+    </AppResponsiveDialog>
 
     <!-- مودال اعمال محدودیت -->
     <Teleport to="body">

@@ -777,6 +777,8 @@ describe('UserProfile.vue', () => {
 
     await wrapper.get('.settings-btn').trigger('click')
     await wrapper.get('.block-btn').trigger('click')
+    expect(wrapper.get('.modal-content').classes()).toContain('ui-responsive-dialog')
+    expect(wrapper.get('.modal-overlay').classes()).toContain('ui-responsive-dialog-backdrop')
     await wrapper.get('.modal-content .cancel-btn.full-width').trigger('click')
 
     await wrapper.get('.block-btn').trigger('click')
