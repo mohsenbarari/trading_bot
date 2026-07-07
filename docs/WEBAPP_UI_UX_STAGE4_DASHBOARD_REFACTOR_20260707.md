@@ -80,7 +80,7 @@ All passed.
 
 Executed after documentation:
 
-- `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/views/DashboardView.test.ts src/components/AppToasts.test.ts src/components/account/TelegramConnectPanel.test.ts src/components/AppAuthenticatedShell.test.ts src/composables/useNotificationRuntime.test.ts`
+- `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts src/views/DashboardView.test.ts src/components/AppToasts.test.ts src/components/AppAuthenticatedShell.test.ts src/composables/useNotificationRuntime.test.ts`
 - `npm run build`
 - `npx playwright test e2e/non-messenger-visual-baseline.spec.ts --project=chromium --list`
 
