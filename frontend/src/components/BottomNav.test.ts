@@ -421,14 +421,19 @@ describe('BottomNav.vue', () => {
 
     const storedPosition = JSON.parse(localStorage.getItem('fab_position') || '{}')
     expect(storedPosition.x).toBe(window.innerWidth - 44)
-    expect(storedPosition.y).toBe(window.innerHeight - 44)
+    expect(storedPosition.y).toBe(window.innerHeight - 44 - 112)
     expect(wrapper.get('.fab-container').attributes('style')).toContain(`left: ${window.innerWidth - 44}px;`)
-    expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${window.innerHeight - 44}px;`)
+    expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${window.innerHeight - 44 - 112}px;`)
     expect(wrapper.get('.fab-container').classes()).toContain('fab-container--market')
+    expect(fabButton.attributes('type')).toBe('button')
+    expect(fabButton.attributes('aria-label')).toBe('باز کردن ناوبری')
+    expect(fabButton.attributes('aria-expanded')).toBe('false')
 
     await vi.advanceTimersByTimeAsync(60)
     await fabButton.trigger('click')
     expect(wrapper.find('.fab-nav').exists()).toBe(true)
+    expect(fabButton.attributes('aria-label')).toBe('بستن ناوبری')
+    expect(fabButton.attributes('aria-expanded')).toBe('true')
 
     wrapper.unmount()
     vi.useRealTimers()

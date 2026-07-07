@@ -492,6 +492,14 @@ Exit criteria:
 - No important action is hidden, overlapped, or hard to reach on mobile.
 - Messenger navigation smoke checks pass when shared navigation is touched.
 
+Implementation notes:
+
+- The Stage 8 navigation/PWA contract and rollback plan are documented in `docs/WEBAPP_UI_UX_STAGE8_NAVIGATION_PWA_CONTRACT_20260707.md`.
+- Stage 8 keeps the current route model: normal authenticated routes use the shared bottom navigation, while Market and Messenger keep the compact FAB menu. Market is not moved to full bottom navigation because `MarketView.vue` already owns the fixed offer composer at the bottom and remains a protected trading surface.
+- The first Stage 8 slice hardens the existing FAB rather than redesigning it: persisted/dragged FAB coordinates are clamped above the Market composer clearance, route changes re-clamp saved coordinates, and the FAB button receives explicit `type`, `aria-label`, `aria-expanded`, and `aria-controls` attributes.
+- The PWA install overlay now uses the shared bottom-nav/safe-area variables instead of a raw fixed `100px` bottom offset.
+- Desktop width policy remains unchanged in this stage; broader desktop layout decisions are deferred to final visual acceptance unless explicit product approval changes them.
+
 ## Stage 9 - Dead Code and Legacy Cleanup
 
 Goal: reduce future confusion after active surfaces are stabilized.

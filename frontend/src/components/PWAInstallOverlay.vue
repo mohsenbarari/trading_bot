@@ -113,7 +113,7 @@ const handleInstall = async () => {
 <style scoped>
 .pwa-install-overlay {
   position: fixed;
-  bottom: 100px;
+  bottom: calc(var(--ds-bottom-nav-height, 76px) + var(--ds-safe-area-bottom, env(safe-area-inset-bottom, 0px)) + 1.5rem);
   left: 0;
   right: 0;
   display: flex;

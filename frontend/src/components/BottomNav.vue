@@ -20,6 +20,7 @@ const FAB_MENU_ITEM_HEIGHT = 43
 const FAB_MENU_VERTICAL_PADDING = 16
 const FAB_MENU_ITEM_GAP = 3
 const VIEWPORT_MARGIN = 8
+const MARKET_FAB_BOTTOM_CLEARANCE = 112
 
 // Draggable FAB state
 const fabPosition = ref<DragPoint | null>(null)
@@ -43,7 +44,8 @@ function clampFabPoint(point: DragPoint) {
   const viewportWidth = viewportSize.value.width || window.innerWidth
   const viewportHeight = viewportSize.value.height || window.innerHeight
   const maxX = Math.max(0, viewportWidth - FAB_SIZE)
-  const maxY = Math.max(0, viewportHeight - FAB_SIZE)
+  const bottomClearance = isMarketPage.value ? MARKET_FAB_BOTTOM_CLEARANCE : 0
+  const maxY = Math.max(0, viewportHeight - FAB_SIZE - bottomClearance)
 
   return {
     x: Math.max(0, Math.min(point.x, maxX)),
@@ -153,6 +155,9 @@ const isMessengerPage = computed(() => route.name === 'messenger')
 // Close when navigating
 watch(() => route.name, () => {
   isExpanded.value = false
+  if (fabPosition.value) {
+    fabPosition.value = clampFabPoint(fabPosition.value)
+  }
 })
 
 onMounted(async () => {
@@ -297,11 +302,13 @@ function toggleNav() {
   if (isDragging.value) return;
   isExpanded.value = !isExpanded.value
 }
+
+const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری' : 'باز کردن ناوبری'))
 </script>
 
 <template>
   <!-- ═══ Normal Bottom Nav (non-market, non-messenger pages) ═══ -->
-  <nav v-if="!isMarketPage && !isMessengerPage" class="bottom-nav-wrapper">
+  <nav v-if="!isMarketPage && !isMessengerPage" class="bottom-nav-wrapper" aria-label="ناوبری اصلی">
     <div class="bottom-nav-bar">
       <template v-for="item in navItems" :key="item.name">
         <div v-if="item.disabled" class="nav-item disabled">
@@ -342,7 +349,15 @@ function toggleNav() {
 
     <!-- Expanded nav -->
     <transition name="slide-up">
-      <div v-if="isExpanded" class="fab-nav" :class="fabMenuClasses" :style="fabMenuStyle">
+      <div
+        v-if="isExpanded"
+        id="app-bottom-navigation-fab-menu"
+        class="fab-nav"
+        :class="fabMenuClasses"
+        :style="fabMenuStyle"
+        role="navigation"
+        aria-label="ناوبری اصلی"
+      >
         <template v-for="item in navItems" :key="item.name">
           <div v-if="item.disabled" class="fab-item disabled">
             <component :is="item.icon" :size="20" />
@@ -374,11 +389,15 @@ function toggleNav() {
 
     <!-- Toggle button -->
     <button 
+      type="button"
       class="fab-btn" 
       @click="toggleNav" 
       @mousedown="onDragStart"
       @touchstart="onDragStart"
       :class="{ 'fab-open': isExpanded }"
+      :aria-label="fabButtonLabel"
+      :aria-expanded="isExpanded"
+      aria-controls="app-bottom-navigation-fab-menu"
     >
       <transition name="spin" mode="out-in">
         <X v-if="isExpanded" :size="20" key="close" />
