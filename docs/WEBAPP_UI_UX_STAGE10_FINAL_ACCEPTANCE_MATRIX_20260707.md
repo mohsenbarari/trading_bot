@@ -1,0 +1,146 @@
+# WebApp UI/UX Stage 10 Final Acceptance Matrix - 2026-07-07
+
+## Scope
+
+Stage 10 is the final acceptance gate for the non-Messenger WebApp UI/UX unification roadmap.
+
+This document is not production-release approval. It records the acceptance matrix, the local evidence already collected, and the runtime screenshot checks that must still be executed in staging or another environment where Playwright can start the WebApp server.
+
+## Covered Surfaces
+
+The final matrix covers these active non-Messenger surfaces:
+
+- Dashboard: `/`
+- Market: `/market`
+- Operations hub: `/operations`
+- Customer workspace: `/operations/customers`
+- Accountant workspace: `/operations/accountants`
+- Account hub: `/account`
+- Profile: `/profile`
+- Notifications: `/notifications`
+- Admin users: `/admin/users`
+- Admin commodities: `/admin/commodities`
+- Login: `/login`
+- Register: `/register`
+- Invite landing: `/i/uiux-baseline`
+- Share receive: `/share-receive`
+
+Messenger internals are not part of the visual unification scope, but shared navigation changes must keep Messenger FAB/unread behavior intact.
+
+## Required Viewports
+
+- Mobile narrow: `390x844`
+- Desktop: `1440x900`
+- Responsive smoke matrix from `frontend/e2e/non-messenger-viewport.spec.ts`:
+  - `360x740`
+  - `375x812`
+  - `390x844`
+  - `414x896`
+  - `430x932`
+  - `768x1024`
+  - `1024x768`
+  - `1440x900`
+
+## Required State Coverage
+
+- Persian RTL text.
+- Mixed Persian/Latin content.
+- Empty states.
+- Loading states.
+- Error states.
+- Disabled controls.
+- Success/warning/danger/neutral notification states.
+- Market open/closed navigation chrome.
+- Market active/expired/traded offer states.
+- Customer/accountant/admin visibility surfaces.
+- PWA install prompt position.
+- Share receive loading/error/send result states.
+- Keyboard focus and accessible names for visible interactive controls where the baseline harness enables `UI_UX_A11Y=1`.
+
+## Local Evidence Collected
+
+2026-07-07 local gates:
+
+- Passed full frontend unit suite: `npm run test:unit:run`
+  - `127` test files passed.
+  - `1101` tests passed.
+- Passed Stage 9 active-market gate: `npm run test:unit:run -- src/views/MarketView.test.ts src/components/OffersList.test.ts src/composables/useTradingSort.test.ts`
+  - `49` tests passed.
+- Passed Stage 9 shell gate: `npm run test:unit:run -- src/components/BottomNav.test.ts src/views/DashboardView.test.ts src/views/OperationsView.test.ts src/views/AccountHubView.test.ts`
+  - `29` tests passed.
+- Passed Stage 8 navigation/PWA gates:
+  - `npm run test:unit:run -- src/components/BottomNav.test.ts src/components/PWAInstallOverlay.test.ts src/components/AppAuthenticatedShell.test.ts`
+  - `npm run test:unit:run -- src/views/MarketView.test.ts src/components/BottomNav.test.ts`
+  - `npm run test:unit:run -- src/views/ShareReceiveView.test.ts src/components/PWAInstallOverlay.test.ts src/components/BottomNav.test.ts`
+- Passed: `npm run guard:ui`.
+- Passed: `npm run build`.
+- Passed: `git diff --check`.
+- Passed visual-baseline discovery: `npx playwright test e2e/non-messenger-visual-baseline.spec.ts --project=chromium --list`
+  - `26` screenshot tests discovered across mobile and desktop.
+- Passed Stage 8 market/viewport discovery: `npx playwright test e2e/market-mutation-ux.spec.ts e2e/non-messenger-viewport.spec.ts --project=chromium --list`
+  - `10` Chromium tests discovered.
+
+Known non-fatal unit stderr is expected from tests that deliberately exercise failure branches, including cache-clear failure, upload retry/failure paths, unavailable browser APIs in jsdom, and invalid-date fallback tests.
+
+## Runtime Screenshot Gate
+
+The roadmap is not visually complete until screenshots are captured and reviewed.
+
+Run in staging or another environment where Playwright can bind the WebApp server:
+
+```bash
+cd frontend
+UI_UX_BASELINE=1 UI_UX_A11Y=1 npm run test:e2e:ui-baseline
+```
+
+Expected screenshot count from discovery:
+
+- `26` Chromium screenshot checks.
+
+Run viewport and protected-market smoke checks:
+
+```bash
+cd frontend
+npx playwright test e2e/non-messenger-viewport.spec.ts e2e/market-mutation-ux.spec.ts --project=chromium
+```
+
+Recommended role/trading follow-up checks:
+
+```bash
+cd frontend
+npx playwright test \
+  e2e/market-offers.spec.ts \
+  e2e/market-schedule.spec.ts \
+  e2e/lot-suggestion.spec.ts \
+  e2e/trade-history-accountant.spec.ts \
+  e2e/customer-owner-flow.spec.ts \
+  e2e/accountant-owner-flow.spec.ts \
+  --project=chromium
+```
+
+## Local Browser Blockers
+
+Actual browser execution is blocked in the current local sandbox:
+
+- `npm run dev -- --host 127.0.0.1 --strictPort --port 5173` fails with `listen EPERM: operation not permitted 127.0.0.1:5173`.
+- The environment rejected the required unsandboxed Playwright execution request.
+- Some role/trading E2E specs also import Docker-backed helpers at module load time and fail discovery in the sandbox with `spawnSync docker EPERM`.
+
+These are environment limitations, not application test failures. Runtime browser evidence must be gathered on staging or another approved host.
+
+## Acceptance Rules
+
+The roadmap can be considered visually accepted only when all of the following are true:
+
+1. Full frontend unit suite remains green.
+2. `npm run guard:ui` remains green.
+3. `npm run build` remains green.
+4. The 26-route screenshot baseline either passes or produces intentional, reviewed diffs.
+5. Mobile viewport checks show no horizontal overflow and no bottom-chrome overlap.
+6. Market offer creation, request, recent-offer, expired/traded history, and role visibility checks pass.
+7. Customer/accountant visibility checks pass.
+8. Any remaining inconsistency is documented as intentional or deferred with a specific follow-up.
+
+## Current Status
+
+Local automated gates are green. Runtime screenshot and browser E2E execution remain pending because the local sandbox cannot start the Playwright webServer.

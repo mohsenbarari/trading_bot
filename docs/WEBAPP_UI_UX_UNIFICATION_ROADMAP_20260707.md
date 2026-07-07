@@ -553,6 +553,13 @@ Exit criteria:
 - Visual review shows consistent typography, spacing, card shape, button behavior, status badges, toast behavior, modal behavior, and page layout.
 - Any remaining inconsistency is explicitly documented as intentional.
 
+Implementation notes:
+
+- The Stage 10 final acceptance matrix is documented in `docs/WEBAPP_UI_UX_STAGE10_FINAL_ACCEPTANCE_MATRIX_20260707.md`.
+- Local automated gates are green, including the full frontend Vitest suite (`127` files / `1101` tests), `npm run guard:ui`, `npm run build`, and `git diff --check`.
+- Playwright screenshot and browser E2E execution remain a staging/runtime gate because the local sandbox cannot bind the Vite webServer (`listen EPERM` on `127.0.0.1:5173`) and Docker-backed E2E helper discovery is blocked by `spawnSync docker EPERM`.
+- This roadmap should not be called visually complete until the Stage 10 screenshot matrix is executed and reviewed in staging or another approved runtime environment.
+
 ## Does This Roadmap Fully Solve the UI/UX Inconsistency?
 
 Yes, if all stages are implemented and validated, this roadmap should resolve the current structural UI/UX inconsistency in the non-Messenger WebApp.
