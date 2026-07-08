@@ -53,19 +53,19 @@ evidence after the automated matrix.
 Check current status on Iran:
 
 ```bash
-ssh root@87.107.3.22 'cd /srv/trading-bot/current && docker-compose exec -T app python scripts/production_test_isolation.py status'
+ssh -p 37067 root@87.107.3.22 'cd /srv/trading-bot/current && docker-compose exec -T app python scripts/production_test_isolation.py status'
 ```
 
 Enable production full-matrix isolation:
 
 ```bash
-ssh root@87.107.3.22 'cd /srv/trading-bot/current && docker-compose exec -T app python scripts/production_test_isolation.py enable --allow-account-name mohsen --allow-account-prefix PFM_ --allow-account-prefix PRODTEST_ --allow-account-prefix FMX_ --reason production_full_matrix_YYYYMMDD --yes-production'
+ssh -p 37067 root@87.107.3.22 'cd /srv/trading-bot/current && docker-compose exec -T app python scripts/production_test_isolation.py enable --allow-account-name mohsen --allow-account-prefix PFM_ --allow-account-prefix PRODTEST_ --allow-account-prefix FMX_ --reason production_full_matrix_YYYYMMDD --yes-production'
 ```
 
 Disable isolation after cleanup and verification:
 
 ```bash
-ssh root@87.107.3.22 'cd /srv/trading-bot/current && docker-compose exec -T app python scripts/production_test_isolation.py disable'
+ssh -p 37067 root@87.107.3.22 'cd /srv/trading-bot/current && docker-compose exec -T app python scripts/production_test_isolation.py disable'
 ```
 
 Expected isolation behavior:
@@ -96,7 +96,7 @@ docker compose exec -T app python scripts/trading_core_probe_worker.py cleanup -
 Iran dry-run:
 
 ```bash
-ssh root@87.107.3.22 "cd /srv/trading-bot/current && docker-compose exec -T app python scripts/trading_core_probe_worker.py cleanup --prefix '$PREFIX' --dry-run --artifact '/tmp/${PREFIX}iran-core-cleanup-dry-run.json'"
+ssh -p 37067 root@87.107.3.22 "cd /srv/trading-bot/current && docker-compose exec -T app python scripts/trading_core_probe_worker.py cleanup --prefix '$PREFIX' --dry-run --artifact '/tmp/${PREFIX}iran-core-cleanup-dry-run.json'"
 ```
 
 The dry-run must be captured before and after the matrix. Before the matrix,
@@ -119,7 +119,7 @@ docker compose exec -T -e PRODUCTION_TEST_CLEANUP_CONFIRM=hard-delete-test-data 
 Iran hard delete:
 
 ```bash
-ssh root@87.107.3.22 "cd /srv/trading-bot/current && docker-compose exec -T -e PRODUCTION_TEST_CLEANUP_CONFIRM=hard-delete-test-data app python scripts/trading_core_probe_worker.py cleanup --prefix '$PREFIX' --allow-production-hard-delete --artifact '/tmp/${PREFIX}iran-core-cleanup-hard-delete.json'"
+ssh -p 37067 root@87.107.3.22 "cd /srv/trading-bot/current && docker-compose exec -T -e PRODUCTION_TEST_CLEANUP_CONFIRM=hard-delete-test-data app python scripts/trading_core_probe_worker.py cleanup --prefix '$PREFIX' --allow-production-hard-delete --artifact '/tmp/${PREFIX}iran-core-cleanup-hard-delete.json'"
 ```
 
 After hard delete, run dry-run again on both servers. The expected result is

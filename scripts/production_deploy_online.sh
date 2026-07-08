@@ -329,7 +329,7 @@ ensure_manifest_file() {
     local foreign_timezone="UTC"
     local iran_host=""
     local iran_ssh_user="root"
-    local iran_ssh_port="22"
+    local iran_ssh_port="37067"
     local iran_ssh_auth_method="key"
     local iran_ssh_private_key_path="$HOME/.ssh/id_ed25519"
     local iran_ssh_password=""

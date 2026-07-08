@@ -122,6 +122,7 @@ source .env.staging
 set +a
 STAGING_EXPECTED_BRANCH=candidate/webapp-ui-ux-unification \
 STAGING_EXPECTED_RELEASE_SHA="$(git rev-parse --short=12 HEAD)" \
+STAGING_IRAN_SSH_PORT=37067 \
 STAGING_OBSERVABILITY_API_KEY="$OBSERVABILITY_API_KEY" \
 python3 scripts/run_staging_two_server_full_matrix.py \
   --mode preflight \

@@ -101,6 +101,7 @@ Required environment for the load runner remains the same as L7:
 ```text
 LOAD_RUNNER_HOST=root@45.129.39.182
 LOAD_RUNNER_JUMP_HOST=root@87.107.3.22
+LOAD_RUNNER_JUMP_SSH_PORT=37067
 ```
 
 Acceptance for L7.1:
@@ -150,6 +151,7 @@ Suggested diagnostic run:
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
 LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
 
@@ -188,6 +190,7 @@ Suggested diagnostic run:
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
 LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--workers 8,12,16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
 
@@ -240,6 +243,7 @@ Suggested diagnostic run:
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
 LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--workers 16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
 

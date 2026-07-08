@@ -38,6 +38,7 @@ PREFLIGHT_CONFIRM_VALUE = "run-production-preflight"
 CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
 CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 IRAN_HOST = "root@87.107.3.22"
+IRAN_SSH_PORT = "37067"
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 CAMPAIGN_LEDGER_SCHEMA_VERSION = "production_full_matrix_campaign_ledger_v1"
 RESUME_SKIPPABLE_PREFLIGHT_COMMAND_NAMES = {
@@ -273,7 +274,7 @@ def command_payload(command: CommandSpec) -> dict[str, Any]:
 def iran_command(name: str, remote_command: str, *, timeout_seconds: int = 30) -> CommandSpec:
     return CommandSpec(
         name=name,
-        args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {remote_command}"],
+        args=["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {remote_command}"],
         timeout_seconds=timeout_seconds,
     )
 
@@ -311,7 +312,7 @@ def container_python_command(
         remote_parts.extend(["app", *timeout_args])
         return CommandSpec(
             name=name,
-            args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
+            args=["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
             timeout_seconds=outer_timeout_seconds,
             mutates_production=mutates_production,
         )
@@ -337,7 +338,7 @@ def container_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec
         remote_parts = ["docker-compose", "exec", "-T", "app", "mkdir", "-p", path]
         return CommandSpec(
             name=name,
-            args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
+            args=["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
             timeout_seconds=30,
         )
     raise RunnerError(f"unsupported server for container mkdir command: {server}")
@@ -354,7 +355,7 @@ def copy_container_to_host_command(name: str, *, server: str, path: str) -> Comm
         remote_parts = ["docker", "cp", f"trading_bot_app:{path}", path]
         return CommandSpec(
             name=name,
-            args=["ssh", IRAN_HOST, shell_join(remote_parts)],
+            args=["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, shell_join(remote_parts)],
             timeout_seconds=60,
         )
     raise RunnerError(f"unsupported server for container-to-host copy: {server}")
@@ -371,7 +372,7 @@ def copy_host_to_container_command(name: str, *, server: str, path: str) -> Comm
         remote_parts = ["docker", "cp", path, f"trading_bot_app:{path}"]
         return CommandSpec(
             name=name,
-            args=["ssh", IRAN_HOST, shell_join(remote_parts)],
+            args=["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, shell_join(remote_parts)],
             timeout_seconds=60,
         )
     raise RunnerError(f"unsupported server for host-to-container copy: {server}")
@@ -387,14 +388,14 @@ def copy_between_servers_command(name: str, *, source_server: str, target_server
     if source_server == "foreign" and target_server == "iran":
         return CommandSpec(
             name=name,
-            args=["scp", path, f"{IRAN_HOST}:{path}"],
+            args=["scp", "-P", IRAN_SSH_PORT, path, f"{IRAN_HOST}:{path}"],
             timeout_seconds=120,
             mutates_production=False,
         )
     if source_server == "iran" and target_server == "foreign":
         return CommandSpec(
             name=name,
-            args=["scp", f"{IRAN_HOST}:{path}", path],
+            args=["scp", "-P", IRAN_SSH_PORT, f"{IRAN_HOST}:{path}", path],
             timeout_seconds=120,
             mutates_production=False,
         )

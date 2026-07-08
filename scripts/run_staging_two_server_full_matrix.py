@@ -47,6 +47,7 @@ CHATGPT_LOG_ROOT = REPO_ROOT / "tmp" / "chatgpt" / "full_matrix_logs"
 EXECUTION_CONFIRM_ENV = "STAGING_TWO_SERVER_FULL_MATRIX_CONFIRM"
 EXECUTION_CONFIRM_VALUE = "execute-staging-two-server-full-matrix"
 DEFAULT_IRAN_SSH_HOST = "root@87.107.3.22"
+DEFAULT_IRAN_SSH_PORT = "37067"
 DEFAULT_IRAN_APP_CONTAINER = "trading_bot_staging_iran_app_1"
 DEFAULT_FOREIGN_APP_CONTAINER = "trading_bot_staging-foreign_app-1"
 DEFAULT_IRAN_WORKDIR = "/srv/trading-bot/staging-iran"
@@ -760,8 +761,12 @@ def local_load_runner_command(
     ]
 
 
+def iran_ssh_command(args: argparse.Namespace, remote_command: str) -> list[str]:
+    return ["ssh", "-p", str(getattr(args, "iran_ssh_port", DEFAULT_IRAN_SSH_PORT)), args.iran_ssh_host, remote_command]
+
+
 def remote_shell_command(args: argparse.Namespace, inner: str) -> list[str]:
-    return ["ssh", args.iran_ssh_host, f"cd {shlex.quote(args.iran_workdir)} && {inner}"]
+    return iran_ssh_command(args, f"cd {shlex.quote(args.iran_workdir)} && {inner}")
 
 
 def remote_load_runner_command(args: argparse.Namespace, service: str, remote_artifact_dir: str, worker_args: list[str]) -> list[str]:
@@ -791,11 +796,11 @@ def remote_load_runner_command(args: argparse.Namespace, service: str, remote_ar
 
 
 def scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) -> list[str]:
-    return ["scp", f"{args.iran_ssh_host}:{remote_path}", str(local_path)]
+    return ["scp", "-P", str(args.iran_ssh_port), f"{args.iran_ssh_host}:{remote_path}", str(local_path)]
 
 
 def scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) -> list[str]:
-    return ["scp", str(local_path), f"{args.iran_ssh_host}:{remote_path}"]
+    return ["scp", "-P", str(args.iran_ssh_port), str(local_path), f"{args.iran_ssh_host}:{remote_path}"]
 
 
 def run_local_worker(
@@ -846,11 +851,10 @@ def check_container_runtime_identity(
     if server == "foreign":
         command = ["docker", "exec", args.foreign_app_container, "python", "-c", runtime_identity_python()]
     elif server == "iran":
-        command = [
-            "ssh",
-            args.iran_ssh_host,
+        command = iran_ssh_command(
+            args,
             f"docker exec {args.iran_app_container} python -c {json.dumps(runtime_identity_python())}",
-        ]
+        )
     else:
         return CheckResult(name, "failed", f"unsupported runtime identity server: {server}")
     returncode, payload, stdout, stderr = run_json_command(command)
@@ -906,11 +910,10 @@ def storage_identity_command(server: str, args: argparse.Namespace) -> list[str]
     if server == "foreign":
         return ["docker", "exec", args.foreign_app_container, "python", "-c", wrapper]
     if server == "iran":
-        return [
-            "ssh",
-            args.iran_ssh_host,
+        return iran_ssh_command(
+            args,
             f"docker exec {shlex.quote(args.iran_app_container)} python -c {shlex.quote(wrapper)}",
-        ]
+        )
     raise ValueError(f"unsupported storage identity server: {server}")
 
 
@@ -2510,6 +2513,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-branch", default=os.getenv("STAGING_EXPECTED_BRANCH", DEFAULT_EXPECTED_BRANCH))
     parser.add_argument("--expected-release-sha", default=os.getenv("STAGING_EXPECTED_RELEASE_SHA"))
     parser.add_argument("--iran-ssh-host", default=os.getenv("STAGING_IRAN_SSH_HOST", DEFAULT_IRAN_SSH_HOST))
+    parser.add_argument("--iran-ssh-port", default=os.getenv("STAGING_IRAN_SSH_PORT", DEFAULT_IRAN_SSH_PORT))
     parser.add_argument("--iran-workdir", default=os.getenv("STAGING_IRAN_WORKDIR", DEFAULT_IRAN_WORKDIR))
     parser.add_argument("--iran-app-container", default=os.getenv("STAGING_IRAN_APP_CONTAINER", DEFAULT_IRAN_APP_CONTAINER))
     parser.add_argument("--foreign-app-container", default=os.getenv("STAGING_FOREIGN_APP_CONTAINER", DEFAULT_FOREIGN_APP_CONTAINER))
