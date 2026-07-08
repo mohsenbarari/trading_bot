@@ -63,6 +63,18 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
             await show_trade_history(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2))
         callback.answer.assert_awaited_once_with("کاربر یافت نشد!", show_alert=True)
 
+    async def test_show_trade_history_denies_profile_access_before_fetching_history(self):
+        callback = make_callback()
+        get_history = AsyncMock()
+
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=False)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=get_history
+        ):
+            await show_trade_history(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2))
+
+        get_history.assert_not_awaited()
+        callback.message.edit_text.assert_not_awaited()
+
     async def test_show_trade_history_updates_state_and_edits_message(self):
         callback = make_callback()
         state = FakeState()

@@ -29,11 +29,11 @@ class BotTradeHistoryExportExcelTests(unittest.IsolatedAsyncioTestCase):
         callback = make_callback()
         bot = SimpleNamespace(send_document=AsyncMock())
         trades = [SimpleNamespace(id=1)]
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, trades))), patch(
-            "bot.handlers.trade_history.generate_excel", new=AsyncMock(return_value="/tmp/out.xlsx")
-        ), patch("bot.handlers.trade_history.FSInputFile", return_value="FILE") as file_mock, patch(
-            "bot.handlers.trade_history.os.remove"
-        ):
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, trades))
+        ), patch("bot.handlers.trade_history.generate_excel", new=AsyncMock(return_value="/tmp/out.xlsx")), patch(
+            "bot.handlers.trade_history.FSInputFile", return_value="FILE"
+        ) as file_mock, patch("bot.handlers.trade_history.os.remove"):
             await export_excel(callback, SimpleNamespace(target_user_id=2), FakeState(), user=SimpleNamespace(id=2), bot=bot)
         generated_name = file_mock.call_args.kwargs["filename"]
         self.assertTrue(generated_name.startswith("trade_history_پروفایل_من_"))
@@ -41,7 +41,10 @@ class BotTradeHistoryExportExcelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_export_excel_warns_when_no_trades_exist(self):
         callback = make_callback()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), []))):
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history",
+            new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [])),
+        ):
             await export_excel(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2), bot=SimpleNamespace())
 
         callback.message.answer.assert_awaited_once()
@@ -53,20 +56,20 @@ class BotTradeHistoryExportExcelTests(unittest.IsolatedAsyncioTestCase):
         target_user = SimpleNamespace(account_name="target")
         trades = [SimpleNamespace(id=1)]
 
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))), patch(
-            "bot.handlers.trade_history.generate_excel", new=AsyncMock(return_value="/tmp/out.xlsx")
-        ), patch("bot.handlers.trade_history.FSInputFile", return_value="FILE"), patch(
-            "bot.handlers.trade_history.os.remove"
-        ) as remove_mock:
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))
+        ), patch("bot.handlers.trade_history.generate_excel", new=AsyncMock(return_value="/tmp/out.xlsx")), patch(
+            "bot.handlers.trade_history.FSInputFile", return_value="FILE"
+        ), patch("bot.handlers.trade_history.os.remove") as remove_mock:
             await export_excel(callback, SimpleNamespace(target_user_id=5), FakeState({"history_months": 6}), user=SimpleNamespace(id=2), bot=bot)
 
         bot.send_document.assert_awaited_once()
         remove_mock.assert_called_once_with("/tmp/out.xlsx")
 
         callback = make_callback()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))), patch(
-            "bot.handlers.trade_history.generate_excel", new=AsyncMock(side_effect=RuntimeError("boom"))
-        ):
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))
+        ), patch("bot.handlers.trade_history.generate_excel", new=AsyncMock(side_effect=RuntimeError("boom"))):
             await export_excel(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2), bot=bot)
 
         self.assertIn("خطا در ایجاد فایل", callback.message.answer.await_args.args[0])

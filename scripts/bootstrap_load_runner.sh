@@ -27,7 +27,7 @@ Options:
   --host USER@HOST             Load-runner SSH target. Same as LOAD_RUNNER_HOST.
   --port PORT                  SSH port. Default: 22
   --jump-host USER@HOST        SSH jump host used to reach the load-runner.
-  --jump-port PORT             SSH jump host port. Default: 22
+  --jump-port PORT             SSH jump host port. Default: 37067
   --remote-dir PATH            Remote workspace. Default: /srv/trading-bot-loadtest
   --k6-version VERSION         Fallback k6 archive version. Default: 0.49.0
   --target-health-url URL      Health URL checked from the load-runner.

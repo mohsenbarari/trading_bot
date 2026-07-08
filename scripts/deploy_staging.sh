@@ -49,9 +49,12 @@ STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
 STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
+STAGING_PUBLIC_FOREIGN_SYNC_URL="${STAGING_PUBLIC_FOREIGN_SYNC_URL:-https://staging.362514.ir/foreign-sync}"
 default_staging_internal_foreign_server_url() {
     if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
         printf 'http://foreign_app:8000\n'
+    else
+        printf '%s\n' "$STAGING_PUBLIC_FOREIGN_SYNC_URL"
     fi
 }
 STAGING_INTERNAL_FOREIGN_SERVER_URL="${STAGING_INTERNAL_FOREIGN_SERVER_URL:-$(default_staging_internal_foreign_server_url)}"
@@ -134,6 +137,12 @@ set_env_value() {
     rm -f "$tmp"
 }
 
+require_staging_peer_url() {
+    if [[ -z "$STAGING_INTERNAL_FOREIGN_SERVER_URL" ]]; then
+        die "staging peer URL is empty; set STAGING_INTERNAL_FOREIGN_SERVER_URL or STAGING_PUBLIC_FOREIGN_SYNC_URL"
+    fi
+}
+
 ensure_env() {
     if [[ -f "$ENV_FILE" ]]; then
         return
@@ -197,8 +206,10 @@ EOF
 
 ensure_runtime_env_values() {
     ensure_env
+    require_staging_peer_url
     set_env_value FRONTEND_URL "$STAGING_FRONTEND_URL"
     set_env_value IRAN_SERVER_URL "$STAGING_INTERNAL_IRAN_SERVER_URL"
+    set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
     set_env_value FOREIGN_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
     set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
     set_env_value EXTRA_CORS_ORIGINS "$STAGING_FRONTEND_URL"
