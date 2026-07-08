@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import Any
 ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
 DEFAULT_ARTIFACT_ROOT = Path("/tmp/trading-bot-production-full-matrix")
 IRAN_HOST = "root@87.107.3.22"
-IRAN_SSH_PORT = "37067"
+IRAN_SSH_PORT = os.getenv("IRAN_SSH_PORT", "37067")
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 PRODUCTION_CLEANUP_CONFIRM = "hard-delete-test-data"
 SCENARIO_CATALOG_PATH = Path("docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md")

@@ -57,7 +57,9 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": True})
 
         callback = make_callback()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, []))):
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, []))
+        ):
             await show_trade_history(callback, SimpleNamespace(target_user_id=5), FakeState(), user=SimpleNamespace(id=2))
         callback.answer.assert_awaited_once_with("کاربر یافت نشد!", show_alert=True)
 
@@ -67,7 +69,9 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
         target_user = SimpleNamespace(account_name="target")
         trades = [SimpleNamespace(id=1)]
 
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(target_user, trades))
+        ), patch(
             "bot.handlers.trade_history.format_trade_history", return_value="TEXT"
         ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
             await show_trade_history(callback, SimpleNamespace(target_user_id=5), state, user=SimpleNamespace(id=2))
@@ -78,7 +82,9 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
 
         callback = make_callback()
         state = FakeState()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [1]))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [1]))
+        ), patch(
             "bot.handlers.trade_history.format_trade_history", return_value="SELF"
         ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
             await show_trade_history(callback, SimpleNamespace(target_user_id=0), state, user=SimpleNamespace(id=2))
@@ -102,14 +108,18 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
 
         callback = make_callback()
         state = FakeState()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, []))):
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, []))
+        ):
             await show_mutual_trade_history(callback, SimpleNamespace(target_user_id=5), state, user=SimpleNamespace(id=2))
         self.assertEqual(state.updated, [{"history_months": 3}])
         callback.answer.assert_awaited_once_with("کاربر یافت نشد", show_alert=True)
 
         callback = make_callback()
         state = FakeState()
-        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [1]))), patch(
+        with patch("bot.handlers.trade_history._ensure_history_profile_access", new=AsyncMock(return_value=True)), patch(
+            "bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [1]))
+        ), patch(
             "bot.handlers.trade_history.format_trade_history", return_value="SELF"
         ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
             await show_mutual_trade_history(callback, SimpleNamespace(target_user_id=2), state, user=SimpleNamespace(id=2))

@@ -193,7 +193,8 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(channel(customer_recipient, "telegram").required)
         self.assertIn("طرف معامله: owner", customer_recipient.webapp_message)
         self.assertIn("<b>", channel(customer_recipient, "telegram").message)
-        self.assertIn("طرف معامله: owner", channel(customer_recipient, "telegram").message)
+        self.assertIn("طرف معامله:", channel(customer_recipient, "telegram").message)
+        self.assertIn('start=profile_10">owner</a>', channel(customer_recipient, "telegram").message)
 
     async def test_customer_counterparty_uses_management_name_in_messages(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)
@@ -218,7 +219,8 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
 
         responder_recipient = built.result.recipients[0]
         self.assertIn("طرف معامله: مشتری بازار تهران", responder_recipient.webapp_message)
-        self.assertIn("طرف معامله: مشتری بازار تهران", channel(responder_recipient, "telegram").message)
+        self.assertIn("طرف معامله:", channel(responder_recipient, "telegram").message)
+        self.assertIn('start=profile_30">مشتری بازار تهران</a>', channel(responder_recipient, "telegram").message)
         self.assertNotIn("customer_0937", responder_recipient.webapp_message)
         self.assertNotIn("customer_0937", channel(responder_recipient, "telegram").message)
 

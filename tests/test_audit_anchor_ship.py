@@ -52,6 +52,17 @@ class AuditAnchorShipTests(unittest.TestCase):
         self.assertIn("install -d", command[2])
         self.assertIn("/srv/audit/anchor.jsonl", command[2])
 
+    def test_build_remote_append_command_accepts_optional_port(self):
+        command = ship_audit_anchor._build_remote_append_command(
+            "root@example:/srv/audit/anchor.jsonl",
+            '{"k":"v"}',
+            port="37067",
+        )
+
+        self.assertEqual(command[:3], ["ssh", "-p", "37067"])
+        self.assertEqual(command[3], "root@example")
+        self.assertIn("install -d", command[4])
+
     def test_append_remote_uses_ssh_subprocess_with_latest_line(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = self._write_anchor_file(tmpdir)

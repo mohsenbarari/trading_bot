@@ -9,6 +9,7 @@ SERVICE_PATH="$SYSTEMD_DIR/$SERVICE_NAME.service"
 TIMER_PATH="$SYSTEMD_DIR/$SERVICE_NAME.timer"
 ANCHOR_INPUT_PATH="${ANCHOR_INPUT_PATH:-/var/lib/trading-bot-observability/audit-anchor.jsonl}"
 ANCHOR_REMOTE_TARGET="${ANCHOR_REMOTE_TARGET:-}"
+ANCHOR_REMOTE_SSH_PORT="${ANCHOR_REMOTE_SSH_PORT:-}"
 ANCHOR_RELAY_OUTPUT_PATH="${ANCHOR_RELAY_OUTPUT_PATH:-}"
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
@@ -32,7 +33,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$ROOT_DIR
-ExecStart=/bin/bash -lc 'cd "$ROOT_DIR" && exec "$PYTHON_BIN" scripts/ship_audit_anchor.py --input "$ANCHOR_INPUT_PATH" ${ANCHOR_REMOTE_TARGET:+--remote "$ANCHOR_REMOTE_TARGET"} ${ANCHOR_RELAY_OUTPUT_PATH:+--output "$ANCHOR_RELAY_OUTPUT_PATH"}'
+ExecStart=/bin/bash -lc 'cd "$ROOT_DIR" && exec "$PYTHON_BIN" scripts/ship_audit_anchor.py --input "$ANCHOR_INPUT_PATH" ${ANCHOR_REMOTE_TARGET:+--remote "$ANCHOR_REMOTE_TARGET"} ${ANCHOR_REMOTE_SSH_PORT:+--remote-port "$ANCHOR_REMOTE_SSH_PORT"} ${ANCHOR_RELAY_OUTPUT_PATH:+--output "$ANCHOR_RELAY_OUTPUT_PATH"}'
 EOF
 
   cat >"$TIMER_PATH" <<EOF
@@ -55,4 +56,4 @@ EOF
 fi
 
 echo "systemd is not available. Add this cron entry instead:"
-echo "*/10 * * * * cd $ROOT_DIR && $PYTHON_BIN scripts/ship_audit_anchor.py --input \"$ANCHOR_INPUT_PATH\" ${ANCHOR_REMOTE_TARGET:+--remote \"$ANCHOR_REMOTE_TARGET\"} ${ANCHOR_RELAY_OUTPUT_PATH:+--output \"$ANCHOR_RELAY_OUTPUT_PATH\"}"
+echo "*/10 * * * * cd $ROOT_DIR && $PYTHON_BIN scripts/ship_audit_anchor.py --input \"$ANCHOR_INPUT_PATH\" ${ANCHOR_REMOTE_TARGET:+--remote \"$ANCHOR_REMOTE_TARGET\"} ${ANCHOR_REMOTE_SSH_PORT:+--remote-port \"$ANCHOR_REMOTE_SSH_PORT\"} ${ANCHOR_RELAY_OUTPUT_PATH:+--output \"$ANCHOR_RELAY_OUTPUT_PATH\"}"

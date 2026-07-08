@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ship the latest compact audit anchor line to a restricted sink.")
     parser.add_argument("--input", required=True, help="Local audit anchor JSONL path.")
     parser.add_argument("--remote", default="", help="Remote append-only target in the form user@host:/path/file.jsonl.")
+    parser.add_argument(
+        "--remote-port",
+        default=os.getenv("ANCHOR_REMOTE_SSH_PORT", ""),
+        help="Optional SSH port for --remote. Defaults to ssh_config/system SSH behavior when omitted.",
+    )
     parser.add_argument("--output", default="", help="Optional local append-only output path.")
     return parser.parse_args()
 
@@ -64,18 +70,23 @@ def _parse_remote_target(remote: str) -> tuple[str, str]:
     return host, path
 
 
-def _build_remote_append_command(remote: str, line: str) -> list[str]:
+def _build_remote_append_command(remote: str, line: str, *, port: str = "") -> list[str]:
     host, path = _parse_remote_target(remote)
     remote_dir = str(Path(path).parent)
     remote_cmd = (
         f"install -d {json.dumps(remote_dir)} "
         f"&& cat >> {json.dumps(path)}"
     )
-    return ["ssh", host, remote_cmd]
+    command = ["ssh"]
+    normalized_port = str(port or "").strip()
+    if normalized_port:
+        command.extend(["-p", normalized_port])
+    command.extend([host, remote_cmd])
+    return command
 
 
-def _append_remote(remote: str, line: str) -> str:
-    command = _build_remote_append_command(remote, line)
+def _append_remote(remote: str, line: str, *, port: str = "") -> str:
+    command = _build_remote_append_command(remote, line, port=port)
     subprocess.run(command, input=line + "\n", text=True, check=True)
     return remote
 
@@ -90,7 +101,7 @@ def main() -> int:
     if args.output.strip():
         shipped_to.append(_append_local(Path(args.output), latest_line))
     if args.remote.strip():
-        shipped_to.append(_append_remote(args.remote, latest_line))
+        shipped_to.append(_append_remote(args.remote, latest_line, port=args.remote_port))
 
     print(
         json.dumps(

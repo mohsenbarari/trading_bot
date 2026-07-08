@@ -796,11 +796,23 @@ def remote_load_runner_command(args: argparse.Namespace, service: str, remote_ar
 
 
 def scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) -> list[str]:
-    return ["scp", "-P", str(args.iran_ssh_port), f"{args.iran_ssh_host}:{remote_path}", str(local_path)]
+    return [
+        "scp",
+        "-P",
+        str(getattr(args, "iran_ssh_port", DEFAULT_IRAN_SSH_PORT)),
+        f"{args.iran_ssh_host}:{remote_path}",
+        str(local_path),
+    ]
 
 
 def scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) -> list[str]:
-    return ["scp", "-P", str(args.iran_ssh_port), str(local_path), f"{args.iran_ssh_host}:{remote_path}"]
+    return [
+        "scp",
+        "-P",
+        str(getattr(args, "iran_ssh_port", DEFAULT_IRAN_SSH_PORT)),
+        str(local_path),
+        f"{args.iran_ssh_host}:{remote_path}",
+    ]
 
 
 def run_local_worker(
@@ -1139,6 +1151,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_summary_md(summary: dict[str, Any]) -> str:
+    execution = summary.get("execution") if isinstance(summary.get("execution"), dict) else {}
+    driver_suite = execution.get("driver_suite") if isinstance(execution.get("driver_suite"), dict) else {}
     lines = [
         "# Full Matrix Summary",
         "",
@@ -1147,11 +1161,16 @@ def build_summary_md(summary: dict[str, Any]) -> str:
         f"- Run id: `{summary.get('run_id')}`",
         f"- Branch: `{summary.get('branch')}`",
         f"- Commit: `{summary.get('commit')}`",
-        f"- Scenario total: `{summary.get('scenario_total')}`",
-        "",
-        "## Branch-Change Areas",
-        "",
+        f"- Manifest scenario space: `{summary.get('scenario_total')}`",
     ]
+    if driver_suite:
+        lines.append(f"- Driver scenarios executed: `{driver_suite.get('scenario_total')}`")
+        lines.append(f"- Driver result counts: `{driver_suite.get('result_counts')}`")
+    if execution.get("manifest_total") is not None:
+        lines.append(f"- Execution manifest total: `{execution.get('manifest_total')}`")
+    if execution.get("note"):
+        lines.append(f"- Execution scope note: {execution.get('note')}")
+    lines.extend(["", "## Branch-Change Areas", ""])
     for area, count in sorted((summary.get("branch_change_area_counts") or {}).items()):
         lines.append(f"- `{area}`: `{count}`")
     if summary.get("validation_errors"):

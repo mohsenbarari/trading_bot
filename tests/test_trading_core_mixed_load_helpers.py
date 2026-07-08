@@ -1021,6 +1021,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             recovery_request_ids=[],
             recovery_admin_target_ids=[],
             telegram_link_token_ids=[],
+            telegram_admin_broadcast_ids=[],
+            telegram_admin_broadcast_receipt_ids=[],
             push_subscription_ids=[],
             offer_ids=[10],
             offer_public_ids=["ofr_10"],

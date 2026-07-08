@@ -68,6 +68,7 @@ class DeployConfigTests(unittest.TestCase):
 
         self.assertEqual(resolved["IRAN_HOST"], "87.107.3.22")
         self.assertEqual(resolved["IRAN_SSH_USER"], "root")
+        self.assertEqual(resolved["IRAN_SSH_PORT"], "37067")
         self.assertEqual(resolved["IRAN_PROJECT_DIR"], "/srv/trading-bot/current")
         self.assertEqual(resolved["IRAN_SSH_TARGET"], "root@87.107.3.22")
 

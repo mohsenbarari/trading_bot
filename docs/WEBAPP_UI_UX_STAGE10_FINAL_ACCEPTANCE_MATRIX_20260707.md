@@ -134,6 +134,14 @@ Mutating execution remains guarded by
 and should only run after preflight passes on the deployed two-server staging
 release SHA.
 
+When reviewing two-server artifacts, treat `parity_status=non_business_difference`
+as acceptable only when `business_drift_count=0`, `critical_drift_count=0`,
+queues/backlog are zero, and the local-only differences are explicitly listed
+as non-business staging residue. The `S2FM-CURRENT-BRANCH-EXECUTE2-20260708`
+artifact had two Iran-local offer rows in this category before and after the
+driver run; that class should not be confused with pending sync or market data
+drift.
+
 ## Local Browser Blockers
 
 Actual browser execution is blocked in the current local sandbox:
