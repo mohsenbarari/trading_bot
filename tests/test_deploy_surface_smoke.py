@@ -136,6 +136,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT"', staging_script)
         self.assertIn('STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL"', staging_script)
         self.assertIn('require_staging_peer_url', staging_script)
+        self.assertIn('staging_release_sha', staging_script)
+        self.assertIn('STAGING_RELEASE_SHA="$(staging_release_sha)"', staging_script)
         self.assertIn('set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
         self.assertIn('set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
         self.assertIn('realpath -m "$STAGING_FRONTEND_DIST_DIR"', staging_script)

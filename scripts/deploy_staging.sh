@@ -266,6 +266,14 @@ release_sha() {
     printf '%s%s\n' "$sha" "$dirty"
 }
 
+staging_release_sha() {
+    if [[ -n "${STAGING_RELEASE_SHA:-}" ]]; then
+        printf '%s\n' "$STAGING_RELEASE_SHA"
+        return
+    fi
+    release_sha
+}
+
 build_frontend() {
     require_cmd npm
     assert_staging_frontend_dist_isolated
@@ -290,7 +298,7 @@ compose() {
     STAGING_APP_PORT="$STAGING_APP_PORT" \
     STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT" \
     STAGING_FRONTEND_DOCKER_DIST_DIR="$(staging_frontend_dist_relpath)" \
-    STAGING_RELEASE_SHA="$(release_sha)" \
+    STAGING_RELEASE_SHA="$(staging_release_sha)" \
     STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL" \
     STAGING_FOREIGN_FRONTEND_URL="$STAGING_FOREIGN_FRONTEND_URL" \
     STAGING_FOREIGN_FOREIGN_SERVER_URL="$STAGING_FOREIGN_FOREIGN_SERVER_URL" \
