@@ -7,6 +7,7 @@ import logging
 from typing import Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
@@ -267,10 +268,27 @@ async def get_or_create_telegram_publication_state(
         OfferPublicationSurface.TELEGRAM_CHANNEL,
         status=OfferPublicationStatus.PENDING,
     )
-    db.add(state)
-    flush = getattr(db, "flush", None)
-    if flush is not None:
-        await flush()
+    stmt = (
+        pg_insert(OfferPublicationState)
+        .values(
+            offer_id=getattr(state, "offer_id", None),
+            offer_public_id=getattr(state, "offer_public_id", None),
+            offer_home_server=getattr(state, "offer_home_server", None),
+            surface=getattr(state, "surface", None),
+            publication_owner_server=getattr(state, "publication_owner_server", None),
+            status=getattr(state, "status", None),
+            dedupe_key=getattr(state, "dedupe_key", None),
+            offer_version_id=getattr(state, "offer_version_id", None),
+            last_known_offer_status=getattr(state, "last_known_offer_status", None),
+            created_at=getattr(state, "created_at", None),
+        )
+        .on_conflict_do_nothing(index_elements=["dedupe_key"])
+    )
+    await db.execute(stmt)
+
+    state = await load_telegram_publication_state_for_update(db, offer)
+    if state is None:
+        raise RuntimeError("telegram_publication_state_insert_not_visible")
     return state
 
 

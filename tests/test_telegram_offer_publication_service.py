@@ -2,8 +2,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.dialects import postgresql
+
 from core.services import telegram_offer_publication_service as publication_service
 from models.offer import OfferStatus
+from models.offer_publication_state import OfferPublicationState
 from models.offer_publication_state import OfferPublicationStatus, OfferPublicationSurface
 
 
@@ -19,8 +22,18 @@ class FakeDB:
     def __init__(self, state=None):
         self.state = state
         self.added = []
-        self.execute = AsyncMock(return_value=FakeExecuteResult(state))
+        self.execute_calls = []
         self.flush = AsyncMock()
+
+    async def execute(self, stmt):
+        self.execute_calls.append(stmt)
+        if getattr(stmt, "is_insert", False):
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            state = OfferPublicationState(**compiled.params)
+            self.added.append(state)
+            self.state = state
+            return FakeExecuteResult(None)
+        return FakeExecuteResult(self.state)
 
     def add(self, item):
         self.added.append(item)
@@ -41,6 +54,17 @@ def make_offer(**overrides):
 
 
 class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_or_create_uses_atomic_insert_on_dedupe_key(self):
+        offer = make_offer()
+        db = FakeDB()
+
+        state = await publication_service.get_or_create_telegram_publication_state(db, offer)
+
+        self.assertEqual(state.dedupe_key, "offer-publication:telegram_channel:ofr_pub_8")
+        self.assertEqual(len(db.execute_calls), 3)
+        compiled_insert = str(db.execute_calls[1].compile(dialect=postgresql.dialect()))
+        self.assertIn("ON CONFLICT (dedupe_key) DO NOTHING", compiled_insert)
+
     async def test_duplicate_publish_attempt_reuses_sent_publication_state(self):
         offer = make_offer()
         state = publication_service.build_offer_publication_state(
