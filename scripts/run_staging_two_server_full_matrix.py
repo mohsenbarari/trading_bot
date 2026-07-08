@@ -1473,8 +1473,9 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
         return payload
     peer_urls = {
         "iran": args.iran_base_url.rstrip("/") + f"/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
-        "foreign": args.foreign_base_url.rstrip("/") + f"/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
+        "foreign": args.foreign_base_url.rstrip("/") + f"/foreign-sync/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
     }
+    expected_server_modes = {"iran": "iran", "foreign": "foreign"}
     failures = []
     for peer, url in peer_urls.items():
         status_code, snapshot, raw = fetch_observability_json(
@@ -1487,8 +1488,17 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
             "status_code": status_code,
             "snapshot": snapshot or {},
             "body": "" if snapshot is not None else sanitize_text(raw[:1000]),
+            "expected_server_mode": expected_server_modes[peer],
         }
         if status_code != 200 or not isinstance(snapshot, dict):
+            failures.append(peer)
+            continue
+        observed_server_mode = str(snapshot.get("server_mode") or "").strip().lower()
+        if observed_server_mode != expected_server_modes[peer]:
+            payload["snapshots"][peer]["server_mode_mismatch"] = {
+                "expected": expected_server_modes[peer],
+                "observed": observed_server_mode,
+            }
             failures.append(peer)
     iran_snapshot = (payload["snapshots"].get("iran") or {}).get("snapshot") or {}
     foreign_snapshot = (payload["snapshots"].get("foreign") or {}).get("snapshot") or {}
@@ -1518,9 +1528,13 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
         )
         payload["comparison"] = comparison
         payload["status"] = "passed" if comparison.get("status") in {"ok", "non_business_difference"} else "failed"
-        for peer, base_url in (("iran", args.iran_base_url), ("foreign", args.foreign_base_url)):
+        record_urls = {
+            "iran": args.iran_base_url.rstrip("/") + "/api/sync/parity/status",
+            "foreign": args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/parity/status",
+        }
+        for peer, record_url in record_urls.items():
             record_status, record_payload, record_raw = fetch_observability_json(
-                base_url.rstrip("/") + "/api/sync/parity/status",
+                record_url,
                 args.observability_api_key,
                 basic_auth=auth,
                 method="POST",

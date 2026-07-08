@@ -138,9 +138,13 @@ set_env_value() {
 }
 
 require_staging_peer_url() {
-    if [[ -z "$STAGING_INTERNAL_FOREIGN_SERVER_URL" ]]; then
+    if [[ ! "$STAGING_INTERNAL_FOREIGN_SERVER_URL" =~ [^[:space:]] ]]; then
         die "staging peer URL is empty; set STAGING_INTERNAL_FOREIGN_SERVER_URL or STAGING_PUBLIC_FOREIGN_SYNC_URL"
     fi
+    case "$STAGING_INTERNAL_FOREIGN_SERVER_URL" in
+        http://*|https://*) ;;
+        *) die "staging peer URL must start with http:// or https://" ;;
+    esac
 }
 
 ensure_env() {
@@ -504,6 +508,7 @@ case "${1:-deploy}" in
         ;;
     up)
         shift
+        ensure_runtime_env_values
         compose up -d --build "$@"
         ;;
     deploy)

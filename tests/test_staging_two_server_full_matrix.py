@@ -221,6 +221,101 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertEqual(payload["status"], "failed")
         self.assertIn("parity_status.fresh=false", "; ".join(payload["gate_failures"]["iran"]))
 
+    def test_capture_parity_uses_foreign_sync_paths_and_validates_roles(self):
+        calls = []
+
+        def fake_fetch(url, _key, *, method="GET", **_kwargs):
+            calls.append((method, url))
+            if method == "POST":
+                return (200, {"stored": True}, "{}")
+            server_mode = "foreign" if "/foreign-sync/" in url else "iran"
+            return (
+                200,
+                {
+                    "status": "ok",
+                    "server_mode": server_mode,
+                    "release_sha": "abc123",
+                    "mode": "quick",
+                    "snapshot_at": "2026-07-08T16:03:48Z",
+                    "table_count": 0,
+                    "tables": {},
+                },
+                "{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            side_effect=fake_fetch,
+        ):
+            args = SimpleNamespace(
+                artifact_dir=Path(tmpdir),
+                observability_api_key="key",
+                iran_base_url="https://staging.gold-trade.ir",
+                foreign_base_url="https://staging.362514.ir",
+                basic_auth_user=None,
+                basic_auth_password=None,
+                expected_release_sha="abc123",
+                parity_mode="quick",
+                parity_max_rows_per_table=5000,
+            )
+            payload = runner.capture_parity(args, label="before")
+
+        self.assertEqual(payload["status"], "passed")
+        self.assertEqual(payload["snapshots"]["iran"]["snapshot"]["server_mode"], "iran")
+        self.assertEqual(payload["snapshots"]["foreign"]["snapshot"]["server_mode"], "foreign")
+        get_urls = [url for method, url in calls if method == "GET"]
+        post_urls = [url for method, url in calls if method == "POST"]
+        self.assertIn("https://staging.gold-trade.ir/api/sync/parity/snapshot?mode=quick&max_rows_per_table=5000", get_urls)
+        self.assertIn(
+            "https://staging.362514.ir/foreign-sync/api/sync/parity/snapshot?mode=quick&max_rows_per_table=5000",
+            get_urls,
+        )
+        self.assertIn("https://staging.gold-trade.ir/api/sync/parity/status", post_urls)
+        self.assertIn("https://staging.362514.ir/foreign-sync/api/sync/parity/status", post_urls)
+
+    def test_capture_parity_fails_when_foreign_snapshot_returns_iran_mode(self):
+        def fake_fetch(url, _key, *, method="GET", **_kwargs):
+            if method == "POST":
+                return (200, {"stored": True}, "{}")
+            return (
+                200,
+                {
+                    "status": "ok",
+                    "server_mode": "iran",
+                    "release_sha": "abc123",
+                    "mode": "quick",
+                    "snapshot_at": "2026-07-08T16:03:48Z",
+                    "table_count": 0,
+                    "tables": {},
+                },
+                "{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            side_effect=fake_fetch,
+        ):
+            args = SimpleNamespace(
+                artifact_dir=Path(tmpdir),
+                observability_api_key="key",
+                iran_base_url="https://staging.gold-trade.ir",
+                foreign_base_url="https://staging.362514.ir",
+                basic_auth_user=None,
+                basic_auth_password=None,
+                expected_release_sha="abc123",
+                parity_mode="quick",
+                parity_max_rows_per_table=5000,
+            )
+            payload = runner.capture_parity(args, label="before")
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["failed_peers"], ["foreign"])
+        self.assertEqual(
+            payload["snapshots"]["foreign"]["server_mode_mismatch"],
+            {"expected": "foreign", "observed": "iran"},
+        )
+        self.assertNotIn("comparison", payload)
+
     def test_execute_records_parity_before_final_sync_health(self):
         call_order = []
 
