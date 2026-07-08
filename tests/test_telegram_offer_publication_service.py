@@ -2,11 +2,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from core.services import telegram_offer_publication_service as publication_service
 from models.offer import OfferStatus
-from models.offer_publication_state import OfferPublicationState
 from models.offer_publication_state import OfferPublicationStatus, OfferPublicationSurface
 
 
@@ -18,22 +17,37 @@ class FakeExecuteResult:
         return self._value
 
 
+class AsyncNullContext:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class FakeDB:
-    def __init__(self, state=None):
+    def __init__(self, state=None, flush_error=None, race_state=None):
         self.state = state
+        self.race_state = race_state
         self.added = []
         self.execute_calls = []
-        self.flush = AsyncMock()
+        self.flush = AsyncMock(side_effect=self._flush)
+        self.flush_error = flush_error
 
     async def execute(self, stmt):
         self.execute_calls.append(stmt)
-        if getattr(stmt, "is_insert", False):
-            compiled = stmt.compile(dialect=postgresql.dialect())
-            state = OfferPublicationState(**compiled.params)
-            self.added.append(state)
-            self.state = state
-            return FakeExecuteResult(None)
         return FakeExecuteResult(self.state)
+
+    def begin_nested(self):
+        return AsyncNullContext()
+
+    async def _flush(self):
+        if self.flush_error is not None:
+            error = self.flush_error
+            self.flush_error = None
+            if self.race_state is not None:
+                self.state = self.race_state
+            raise error
 
     def add(self, item):
         self.added.append(item)
@@ -54,16 +68,24 @@ def make_offer(**overrides):
 
 
 class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_get_or_create_uses_atomic_insert_on_dedupe_key(self):
+    async def test_get_or_create_recovers_from_duplicate_insert_race(self):
         offer = make_offer()
-        db = FakeDB()
+        existing = publication_service.build_offer_publication_state(
+            offer,
+            OfferPublicationSurface.TELEGRAM_CHANNEL,
+            status=OfferPublicationStatus.SENT,
+        )
+        existing.telegram_message_id = 555
+        db = FakeDB(
+            flush_error=IntegrityError("insert", {}, Exception("duplicate key")),
+            race_state=existing,
+        )
 
         state = await publication_service.get_or_create_telegram_publication_state(db, offer)
 
-        self.assertEqual(state.dedupe_key, "offer-publication:telegram_channel:ofr_pub_8")
-        self.assertEqual(len(db.execute_calls), 3)
-        compiled_insert = str(db.execute_calls[1].compile(dialect=postgresql.dialect()))
-        self.assertIn("ON CONFLICT (dedupe_key) DO NOTHING", compiled_insert)
+        self.assertIs(state, existing)
+        self.assertEqual(state.telegram_message_id, 555)
+        self.assertEqual(len(db.execute_calls), 2)
 
     async def test_duplicate_publish_attempt_reuses_sent_publication_state(self):
         offer = make_offer()
