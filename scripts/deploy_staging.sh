@@ -66,6 +66,7 @@ STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"
 STAGING_BASIC_AUTH_FILE="${STAGING_BASIC_AUTH_FILE:-/etc/nginx/.htpasswd-trading-bot-staging}"
+STAGING_NGINX_DEDUPLICATE="${STAGING_NGINX_DEDUPLICATE:-1}"
 STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"
 case "$STAGING_FRONTEND_DIST_DIR" in
     /*) ;;
@@ -361,13 +362,88 @@ render_nginx_template() {
     ' "$NGINX_TEMPLATE"
 }
 
+nginx_worker_group() {
+    local worker_user
+    worker_user="$(nginx -T 2>/dev/null | awk '$1 == "user" { gsub(";", "", $2); print $2; exit }' || true)"
+    if [[ -n "$worker_user" ]] && getent group "$worker_user" >/dev/null 2>&1; then
+        printf '%s\n' "$worker_user"
+        return
+    fi
+    if getent group www-data >/dev/null 2>&1; then
+        printf 'www-data\n'
+    fi
+}
+
+install_basic_auth_file() {
+    local basic_user="$1"
+    local basic_password="$2"
+    local basic_hash worker_group
+
+    basic_hash="$(openssl passwd -apr1 "$basic_password")"
+    printf '%s:%s\n' "$basic_user" "$basic_hash" >"$STAGING_BASIC_AUTH_FILE"
+
+    worker_group="$(nginx_worker_group)"
+    if [[ -n "$worker_group" ]]; then
+        chown "root:$worker_group" "$STAGING_BASIC_AUTH_FILE"
+        chmod 0640 "$STAGING_BASIC_AUTH_FILE"
+    else
+        chown root:root "$STAGING_BASIC_AUTH_FILE"
+        chmod 0644 "$STAGING_BASIC_AUTH_FILE"
+    fi
+
+    [[ -s "$STAGING_BASIC_AUTH_FILE" ]] || die "staging Basic Auth file is empty: $STAGING_BASIC_AUTH_FILE"
+    [[ -r "$STAGING_BASIC_AUTH_FILE" ]] || die "staging Basic Auth file is not readable by the deploying user: $STAGING_BASIC_AUTH_FILE"
+}
+
+deduplicate_staging_nginx_sites() {
+    if [[ "$STAGING_NGINX_DEDUPLICATE" != "1" ]]; then
+        return
+    fi
+
+    local enabled_dir="/etc/nginx/sites-enabled"
+    local available="$1"
+    local enabled="$2"
+    local backup_dir="/etc/nginx/sites-disabled/trading-bot-staging-duplicates-$(date -u +%Y%m%dT%H%M%SZ)"
+    local available_real enabled_real site site_real removed_any
+
+    [[ -d "$enabled_dir" ]] || return
+    available_real="$(readlink -f "$available" 2>/dev/null || printf '%s\n' "$available")"
+    enabled_real="$(readlink -f "$enabled" 2>/dev/null || printf '%s\n' "$enabled")"
+    removed_any=0
+
+    for site in "$enabled_dir"/*; do
+        [[ -e "$site" ]] || continue
+        site_real="$(readlink -f "$site" 2>/dev/null || printf '%s\n' "$site")"
+        if [[ "$site" == "$enabled" || "$site_real" == "$available_real" || "$site_real" == "$enabled_real" ]]; then
+            continue
+        fi
+        if ! grep -q "server_name $STAGING_DOMAIN" "$site" 2>/dev/null; then
+            continue
+        fi
+
+        mkdir -p "$backup_dir"
+        if [[ -L "$site" ]]; then
+            rm -f "$site"
+            log "disabled duplicate staging Nginx symlink $site for $STAGING_DOMAIN"
+        else
+            mv "$site" "$backup_dir/$(basename "$site")"
+            log "moved duplicate staging Nginx file $site to $backup_dir"
+        fi
+        removed_any=1
+    done
+
+    if [[ "$removed_any" == "1" ]]; then
+        log "deduplicated Nginx staging server blocks for $STAGING_DOMAIN"
+    fi
+}
+
 install_nginx() {
     require_staging_ssl_if_forced
     ensure_basic_auth_env
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
     local available="/etc/nginx/sites-available/$STAGING_NGINX_SITE"
     local enabled="/etc/nginx/sites-enabled/$STAGING_NGINX_SITE"
-    local tmp basic_user basic_password basic_hash dev_key
+    local tmp basic_user basic_password dev_key
     basic_user="$(env_value STAGING_BASIC_AUTH_USER)"
     basic_password="$(env_value STAGING_BASIC_AUTH_PASSWORD)"
     dev_key="$(env_value DEV_API_KEY)"
@@ -375,10 +451,7 @@ install_nginx() {
     [[ -n "$basic_password" ]] || die "STAGING_BASIC_AUTH_PASSWORD is empty"
     [[ -n "$dev_key" ]] || die "DEV_API_KEY is empty"
 
-    basic_hash="$(openssl passwd -apr1 "$basic_password")"
-    printf '%s:%s\n' "$basic_user" "$basic_hash" >"$STAGING_BASIC_AUTH_FILE"
-    chown root:www-data "$STAGING_BASIC_AUTH_FILE" 2>/dev/null || chown root:root "$STAGING_BASIC_AUTH_FILE"
-    chmod 0640 "$STAGING_BASIC_AUTH_FILE" 2>/dev/null || chmod 0644 "$STAGING_BASIC_AUTH_FILE"
+    install_basic_auth_file "$basic_user" "$basic_password"
 
     tmp="$(mktemp)"
     render_nginx_template | sed \
@@ -394,6 +467,7 @@ install_nginx() {
     install -m 0644 "$tmp" "$available"
     rm -f "$tmp"
     ln -sfn "$available" "$enabled"
+    deduplicate_staging_nginx_sites "$available" "$enabled"
     nginx -t
     nginx -s reload
     log "installed nginx site $STAGING_NGINX_SITE for $STAGING_DOMAIN"
