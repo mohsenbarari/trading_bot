@@ -73,6 +73,12 @@ case "$STAGING_FRONTEND_DIST_DIR" in
     *) STAGING_FRONTEND_DIST_DIR="$PROJECT_DIR/$STAGING_FRONTEND_DIST_DIR" ;;
 esac
 STAGING_FRONTEND_DIST_DIR="$(realpath -m "$STAGING_FRONTEND_DIST_DIR")"
+STAGING_OBJECT_STORAGE_ENDPOINT="${STAGING_OBJECT_STORAGE_ENDPOINT:-${ARVAN_OBJECT_STORAGE_ENDPOINT:-https://s3.ir-thr-at1.arvanstorage.ir}}"
+STAGING_OBJECT_STORAGE_BUCKET="${STAGING_OBJECT_STORAGE_BUCKET:-${ARVAN_OBJECT_STORAGE_BUCKET:-}}"
+STAGING_OBJECT_STORAGE_PREFIX="${STAGING_OBJECT_STORAGE_PREFIX:-${ARVAN_OBJECT_STORAGE_PREFIX:-staging/deploy-bridge}}"
+STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV="${STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV:-ARVAN_OBJECT_STORAGE_ACCESS_KEY}"
+STAGING_OBJECT_STORAGE_SECRET_KEY_ENV="${STAGING_OBJECT_STORAGE_SECRET_KEY_ENV:-ARVAN_OBJECT_STORAGE_SECRET_KEY}"
+STAGING_OBJECT_STORAGE_ARTIFACT_DIR="${STAGING_OBJECT_STORAGE_ARTIFACT_DIR:-$PROJECT_DIR/tmp/staging-object-storage}"
 
 compose_cmd=(docker compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
@@ -136,6 +142,75 @@ set_env_value() {
     ' "$ENV_FILE" >"$tmp"
     install -m 0600 "$tmp" "$ENV_FILE"
     rm -f "$tmp"
+}
+
+export_env_value_if_present() {
+    local key="$1"
+    local value
+    if [[ -n "${!key-}" ]]; then
+        return
+    fi
+    value="$(env_value "$key" 2>/dev/null || true)"
+    if [[ -n "$value" ]]; then
+        export "$key=$value"
+    fi
+}
+
+refresh_staging_object_storage_config() {
+    ensure_env
+    export_env_value_if_present ARVAN_OBJECT_STORAGE_ENDPOINT
+    export_env_value_if_present ARVAN_OBJECT_STORAGE_BUCKET
+    export_env_value_if_present ARVAN_OBJECT_STORAGE_PREFIX
+    export_env_value_if_present STAGING_OBJECT_STORAGE_ENDPOINT
+    export_env_value_if_present STAGING_OBJECT_STORAGE_BUCKET
+    export_env_value_if_present STAGING_OBJECT_STORAGE_PREFIX
+    export_env_value_if_present STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV
+    export_env_value_if_present STAGING_OBJECT_STORAGE_SECRET_KEY_ENV
+
+    STAGING_OBJECT_STORAGE_ENDPOINT="${STAGING_OBJECT_STORAGE_ENDPOINT:-${ARVAN_OBJECT_STORAGE_ENDPOINT:-https://s3.ir-thr-at1.arvanstorage.ir}}"
+    STAGING_OBJECT_STORAGE_BUCKET="${STAGING_OBJECT_STORAGE_BUCKET:-${ARVAN_OBJECT_STORAGE_BUCKET:-}}"
+    STAGING_OBJECT_STORAGE_PREFIX="${STAGING_OBJECT_STORAGE_PREFIX:-${ARVAN_OBJECT_STORAGE_PREFIX:-staging/deploy-bridge}}"
+    STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV="${STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV:-ARVAN_OBJECT_STORAGE_ACCESS_KEY}"
+    STAGING_OBJECT_STORAGE_SECRET_KEY_ENV="${STAGING_OBJECT_STORAGE_SECRET_KEY_ENV:-ARVAN_OBJECT_STORAGE_SECRET_KEY}"
+
+    export_env_value_if_present "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV"
+    export_env_value_if_present "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV"
+}
+
+require_staging_object_storage_config() {
+    refresh_staging_object_storage_config
+    [[ -n "$STAGING_OBJECT_STORAGE_ENDPOINT" ]] || die "STAGING_OBJECT_STORAGE_ENDPOINT is empty"
+    [[ -n "$STAGING_OBJECT_STORAGE_BUCKET" ]] || die "STAGING_OBJECT_STORAGE_BUCKET or ARVAN_OBJECT_STORAGE_BUCKET is required"
+    case "$STAGING_OBJECT_STORAGE_PREFIX" in
+        staging/*|staging-probe/*) ;;
+        *) die "STAGING_OBJECT_STORAGE_PREFIX must start with staging/ or staging-probe/" ;;
+    esac
+}
+
+configure_staging_object_storage_env() {
+    ensure_env
+    refresh_staging_object_storage_config
+    [[ -n "$STAGING_OBJECT_STORAGE_BUCKET" ]] || die "set STAGING_OBJECT_STORAGE_BUCKET or ARVAN_OBJECT_STORAGE_BUCKET before object-storage-configure"
+    case "$STAGING_OBJECT_STORAGE_PREFIX" in
+        staging/*|staging-probe/*) ;;
+        *) die "STAGING_OBJECT_STORAGE_PREFIX must start with staging/ or staging-probe/" ;;
+    esac
+
+    set_env_value ARVAN_OBJECT_STORAGE_ENDPOINT "$STAGING_OBJECT_STORAGE_ENDPOINT"
+    set_env_value ARVAN_OBJECT_STORAGE_BUCKET "$STAGING_OBJECT_STORAGE_BUCKET"
+    set_env_value ARVAN_OBJECT_STORAGE_PREFIX "$STAGING_OBJECT_STORAGE_PREFIX"
+    if [[ "${STAGING_OBJECT_STORAGE_PERSIST_SECRETS:-0}" == "1" ]]; then
+        local access_value="${!STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV-}"
+        local secret_value="${!STAGING_OBJECT_STORAGE_SECRET_KEY_ENV-}"
+        [[ -n "$access_value" ]] || die "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV must be set when STAGING_OBJECT_STORAGE_PERSIST_SECRETS=1"
+        [[ -n "$secret_value" ]] || die "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV must be set when STAGING_OBJECT_STORAGE_PERSIST_SECRETS=1"
+        set_env_value "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV" "$access_value"
+        set_env_value "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV" "$secret_value"
+        log "stored staging object storage credentials in ignored $ENV_FILE"
+    else
+        log "stored staging object storage endpoint/bucket/prefix in $ENV_FILE; credentials were not persisted"
+    fi
+    chmod 0600 "$ENV_FILE"
 }
 
 require_staging_peer_url() {
@@ -295,6 +370,67 @@ build_frontend() {
         VITE_STAGING_DEV_LOGIN="$dev_login_enabled" \
         npm run build
     )
+}
+
+create_staging_object_storage_archive() {
+    require_cmd tar
+    assert_staging_frontend_dist_isolated
+    mkdir -p "$STAGING_OBJECT_STORAGE_ARTIFACT_DIR"
+    local sha archive
+    sha="$(staging_release_sha)"
+    archive="$STAGING_OBJECT_STORAGE_ARTIFACT_DIR/trading-bot-staging-$sha.tar.gz"
+    log "packaging staging deploy artifact at $archive" >&2
+    tar -C "$PROJECT_DIR" -czf "$archive" \
+        --exclude='./.git' \
+        --exclude='./.env' \
+        --exclude='./.env.*' \
+        --exclude='./frontend' \
+        --exclude='./node_modules' \
+        --exclude='./tmp' \
+        --exclude='./uploads' \
+        --exclude='./map_data' \
+        --exclude='./mini_app_dist' \
+        --exclude='./__pycache__' \
+        --exclude='*.pyc' \
+        .
+    printf '%s\n' "$archive"
+}
+
+stage_object_storage_artifact() {
+    local execute="${1:-0}"
+    require_cmd python3
+    require_staging_object_storage_config
+    ensure_runtime_env_values
+    build_frontend
+    local archive manifest_args execute_args
+    archive="$(create_staging_object_storage_archive)"
+    manifest_args=(
+        --artifact "$archive"
+        --endpoint "$STAGING_OBJECT_STORAGE_ENDPOINT"
+        --bucket "$STAGING_OBJECT_STORAGE_BUCKET"
+        --prefix "$STAGING_OBJECT_STORAGE_PREFIX"
+        --release-sha "$(staging_release_sha)"
+        --access-key-env "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV"
+        --secret-key-env "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV"
+        --manifest-out "${archive%.tar.gz}.manifest.json"
+    )
+    execute_args=()
+    if [[ "$execute" == "1" ]]; then
+        execute_args=(--execute)
+    fi
+    python3 "$PROJECT_DIR/scripts/staging_object_storage_artifact.py" "${manifest_args[@]}" "${execute_args[@]}"
+}
+
+staging_object_storage_probe() {
+    require_cmd python3
+    require_staging_object_storage_config
+    python3 "$PROJECT_DIR/scripts/arvan_object_storage_probe.py" \
+        --endpoint "$STAGING_OBJECT_STORAGE_ENDPOINT" \
+        --bucket "$STAGING_OBJECT_STORAGE_BUCKET" \
+        --prefix "$STAGING_OBJECT_STORAGE_PREFIX/probe" \
+        --access-key-env "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV" \
+        --secret-key-env "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV" \
+        --execute
 }
 
 compose() {
@@ -580,6 +716,18 @@ case "${1:-deploy}" in
     nginx)
         install_nginx
         ;;
+    object-storage-configure)
+        configure_staging_object_storage_env
+        ;;
+    object-storage-probe)
+        staging_object_storage_probe
+        ;;
+    object-storage-package)
+        stage_object_storage_artifact 0
+        ;;
+    object-storage-upload)
+        stage_object_storage_artifact 1
+        ;;
     up)
         shift
         ensure_runtime_env_values
@@ -610,6 +758,14 @@ Commands:
   ensure-env      Create .env.staging if missing
   build-frontend  Build frontend into mini_app_dist_staging
   nginx           Install/reload the staging Nginx server block
+  object-storage-configure
+                  Store staging Object Storage endpoint/bucket/prefix in .env.staging
+  object-storage-probe
+                  Run staging-only Object Storage PUT/GET/LIST/DELETE probe
+  object-storage-package
+                  Build staging frontend, package deploy artifact, and write local manifest
+  object-storage-upload
+                  Build/package and upload staging deploy artifact to Object Storage
   up              Compose up -d --build
   deploy          check + ensure-env + build frontend + nginx + compose up + health
   ps              Show staging compose services

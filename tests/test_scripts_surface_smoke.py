@@ -10,6 +10,7 @@ PYTHON_BIN = sys.executable
 
 PYTHON_SCRIPTS = (
     'scripts/backfill_direct_chats.py',
+    'scripts/arvan_object_storage_probe.py',
     'scripts/create_superadmin.py',
     'scripts/dev_admin.py',
     'scripts/free_deleted_user.py',
@@ -25,6 +26,7 @@ PYTHON_SCRIPTS = (
     'scripts/reset_sessions.py',
     'scripts/restore_default_commodities.py',
     'scripts/seed_shared_sync_tables.py',
+    'scripts/staging_object_storage_artifact.py',
     'scripts/test_invite.py',
     'scripts/test_session_realtime.py',
     'scripts/test_ws_e2e.py',

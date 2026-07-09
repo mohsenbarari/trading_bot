@@ -132,6 +132,13 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('STAGING_FOREIGN_IRAN_SERVER_URL="${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}"', staging_script)
         self.assertIn('STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FOREIGN_IRAN_SERVER_URL}"', staging_script)
         self.assertIn('STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-0}"', staging_script)
+        self.assertIn('STAGING_OBJECT_STORAGE_PREFIX="${STAGING_OBJECT_STORAGE_PREFIX:-${ARVAN_OBJECT_STORAGE_PREFIX:-staging/deploy-bridge}}"', staging_script)
+        self.assertIn('configure_staging_object_storage_env', staging_script)
+        self.assertIn('stage_object_storage_artifact', staging_script)
+        self.assertIn('scripts/staging_object_storage_artifact.py', staging_script)
+        self.assertIn('scripts/arvan_object_storage_probe.py', staging_script)
+        self.assertIn('--exclude=\'./.env.*\'', staging_script)
+        self.assertIn('--exclude=\'./tmp\'', staging_script)
         self.assertIn('STAGING_FOREIGN_APP_PORT="${STAGING_FOREIGN_APP_PORT:-8121}"', staging_script)
         self.assertIn('STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT"', staging_script)
         self.assertIn('STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL"', staging_script)
@@ -171,6 +178,18 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('TRUSTED_PROXY_CIDRS=$STAGING_TRUSTED_PROXY_CIDRS', staging_script)
         self.assertIn('set_env_value TRUSTED_PROXY_CIDRS "$STAGING_TRUSTED_PROXY_CIDRS"', staging_script)
         self.assertIn('TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12', staging_example)
+
+    def test_staging_object_storage_bridge_is_documented_as_staging_only(self):
+        staging_readme = (REPO_ROOT / 'deploy/staging/README.md').read_text(encoding='utf-8')
+        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+        production_doc = (REPO_ROOT / 'docs/PRODUCTION_DEPLOYMENT_ONLINE.md').read_text(encoding='utf-8')
+
+        self.assertIn('Object Storage deploy bridge', staging_readme)
+        self.assertIn('deployment\nartifacts only', staging_readme)
+        self.assertIn('does not replace cross-server sync', staging_readme)
+        self.assertIn('ARVAN_OBJECT_STORAGE_ENDPOINT=https://s3.ir-thr-at1.arvanstorage.ir', staging_example)
+        self.assertIn('ARVAN_OBJECT_STORAGE_PREFIX=staging/deploy-bridge', staging_example)
+        self.assertIn('S3 support has been removed from the production deploy flow', production_doc)
 
     def test_staging_deploy_rejects_shared_production_frontend_dist(self):
         result = run_checked(

@@ -57,6 +57,43 @@ scripts/deploy_staging.sh health
 scripts/deploy_staging.sh logs
 ```
 
+## Object Storage deploy bridge
+
+The Arvan Object Storage bridge is a foreign-staging experiment for deployment
+artifacts only. It does not replace cross-server sync and must not be wired into
+production without a separate approved design.
+
+Configure non-secret values in `.env.staging`:
+
+```bash
+ARVAN_OBJECT_STORAGE_ENDPOINT=https://s3.ir-thr-at1.arvanstorage.ir
+ARVAN_OBJECT_STORAGE_BUCKET=<private-staging-bucket>
+ARVAN_OBJECT_STORAGE_PREFIX=staging/deploy-bridge
+```
+
+Store credentials in ignored `.env.staging` only for staging, or export them in
+the shell before running the commands:
+
+```bash
+export ARVAN_OBJECT_STORAGE_ACCESS_KEY=...
+export ARVAN_OBJECT_STORAGE_SECRET_KEY=...
+```
+
+Useful commands:
+
+```bash
+scripts/deploy_staging.sh object-storage-configure
+scripts/deploy_staging.sh object-storage-probe
+scripts/deploy_staging.sh object-storage-package
+scripts/deploy_staging.sh object-storage-upload
+```
+
+`object-storage-package` builds the staging frontend, creates a tarball under
+`tmp/staging-object-storage/`, and writes a local manifest. `object-storage-upload`
+uploads the tarball and manifest to the configured staging prefix. The artifact
+excludes `.env*`, `uploads`, `map_data`, `tmp`, production `mini_app_dist`, and
+other local-only state.
+
 The bot is disabled by default. Start it only with a dedicated staging bot token:
 
 ```bash
