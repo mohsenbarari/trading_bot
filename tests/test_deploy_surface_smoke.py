@@ -149,6 +149,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('object-release-apply-latest', staging_script)
         self.assertIn('STAGING_OBJECT_RELEASE_CHANNEL="${STAGING_OBJECT_RELEASE_CHANNEL:-iran-staging}"', staging_script)
         self.assertIn('--publish-channel "$STAGING_OBJECT_RELEASE_CHANNEL"', staging_script)
+        self.assertIn('compose build app >&2', staging_script)
         self.assertIn('--exclude=\'./.env.*\'', staging_script)
         self.assertIn('--exclude=\'./tmp\'', staging_script)
         self.assertIn("'.github'", staging_script)

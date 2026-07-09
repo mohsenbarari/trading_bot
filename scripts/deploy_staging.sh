@@ -622,7 +622,7 @@ create_staging_object_release_image_bundle() {
     archive="$release_dir/trading-bot-staging-$(release_sha)-docker-images.tar"
     image_tag="${STAGING_IMAGE_TAG:-latest}"
     log "building staging app image and packaging docker image bundle at $archive" >&2
-    compose build app
+    compose build app >&2
     docker pull postgres:15-alpine >/dev/null
     docker pull redis:7-alpine >/dev/null
     docker save "trading_bot_staging_app:$image_tag" postgres:15-alpine redis:7-alpine -o "$archive"
