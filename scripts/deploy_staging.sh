@@ -598,7 +598,7 @@ create_staging_object_release_pip_archive() {
     if [[ "$STAGING_OBJECT_RELEASE_INCLUDE_PIP" != "1" ]]; then
         return 0
     fi
-    if [[ ! -d "$pip_dir" ]] || ! find "$pip_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' -o -name '.requirements_hash' \) | grep -q .; then
+    if [[ ! -d "$pip_dir" ]] || [[ -z "$(find "$pip_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' -o -name '.requirements_hash' \) -print -quit)" ]]; then
         log "skipping pip wheelhouse artifact because pip_packages is empty" >&2
         return 0
     fi
