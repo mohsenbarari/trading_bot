@@ -424,6 +424,11 @@ staging_release_sha() {
 }
 
 build_frontend() {
+    if [[ "${STAGING_SKIP_FRONTEND_BUILD:-0}" == "1" ]]; then
+        [[ -f "$STAGING_FRONTEND_DIST_DIR/index.html" ]] || die "STAGING_SKIP_FRONTEND_BUILD=1 but staging frontend dist is missing"
+        log "skipping frontend build; using existing $STAGING_FRONTEND_DIST_DIR"
+        return
+    fi
     require_cmd npm
     assert_staging_frontend_dist_isolated
     local dev_login_enabled="${STAGING_ENABLE_DEV_LOGIN:-}"
