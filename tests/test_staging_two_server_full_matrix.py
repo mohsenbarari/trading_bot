@@ -282,6 +282,10 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         )
         self.assertIn("https://staging.gold-trade.ir/api/sync/parity/status", post_urls)
         self.assertIn("https://staging.362514.ir/foreign-sync/api/sync/parity/status", post_urls)
+        self.assertNotIn(
+            "https://staging.362514.ir/api/sync/parity/snapshot?mode=quick&max_rows_per_table=5000",
+            get_urls,
+        )
 
     def test_capture_parity_fails_when_foreign_snapshot_returns_iran_mode(self):
         def fake_fetch(url, _key, *, method="GET", **_kwargs):
