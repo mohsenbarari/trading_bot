@@ -90,7 +90,7 @@ STAGING_OBJECT_RELEASE_APPLY_EXECUTE="${STAGING_OBJECT_RELEASE_APPLY_EXECUTE:-0}
 STAGING_OBJECT_RELEASE_DEPLOY_AFTER_APPLY="${STAGING_OBJECT_RELEASE_DEPLOY_AFTER_APPLY:-0}"
 STAGING_OBJECT_RELEASE_CHANNEL="${STAGING_OBJECT_RELEASE_CHANNEL:-iran-staging}"
 
-compose_cmd=(docker compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+compose_cmd=()
 
 STAGING_OBJECT_RELEASE_PROJECT_EXCLUDES=(
     '.git'
@@ -143,6 +143,21 @@ die() {
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+init_compose_cmd() {
+    if [[ "${#compose_cmd[@]}" -gt 0 ]]; then
+        return
+    fi
+    if docker compose version >/dev/null 2>&1; then
+        compose_cmd=(docker compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+        return
+    fi
+    if command -v docker-compose >/dev/null 2>&1; then
+        compose_cmd=(docker-compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+        return
+    fi
+    die "docker compose or docker-compose is required"
 }
 
 staging_frontend_dist_relpath() {
@@ -834,6 +849,7 @@ stage_object_storage_release_apply_latest() {
 }
 
 compose() {
+    init_compose_cmd
     ensure_env
     assert_staging_frontend_dist_isolated
     STAGING_APP_PORT="$STAGING_APP_PORT" \
