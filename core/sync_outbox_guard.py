@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import itertools
+import json
 import logging
 import re
+import time
 from typing import Any
 
 from sqlalchemy import event, inspect
@@ -20,9 +22,11 @@ SYNC_OUTBOX_PENDING_KEY = "_sync_outbox_pending"
 SYNC_OUTBOX_TOKEN_KEY = "_sync_outbox_flush_token"
 SYNC_OUTBOX_CURRENT_TOKEN_KEY = "_sync_outbox_current_token"
 SYNC_OUTBOX_RECORDED_KEY = "_sync_outbox_recorded"
+SYNC_OUTBOX_WAKEUP_NEEDED_KEY = "_sync_outbox_wakeup_needed"
 
 _REGISTERED = False
 _TOKEN_COUNTER = itertools.count(1)
+_SYNC_WAKEUP_REDIS = None
 _RAW_WRITE_RE = re.compile(
     r"^\s*(?:--[^\n]*\n\s*|/\*.*?\*/\s*)*"
     r"(?:insert\s+into|update|delete\s+from)\s+"
@@ -161,6 +165,38 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
             + ", ".join(missing)
         )
 
+    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = True
+
+
+def publish_sync_outbox_wakeup_after_commit(session: Session) -> None:
+    """Wake the sync worker after durable change_log rows are committed.
+
+    The Redis payload is intentionally only a signal. sync_worker ignores the
+    queued payload for fresh outbound work and reads the committed change_log
+    row from the database, so no peer-deliverable data is published pre-commit.
+    """
+    if not session.info.pop(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, False):
+        return
+
+    try:
+        client = _get_sync_wakeup_redis()
+        client.rpush(
+            "sync:outbound",
+            json.dumps(
+                {
+                    "type": "sync_outbox_wakeup",
+                    "timestamp": time.time(),
+                },
+                sort_keys=True,
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Could not wake sync worker after commit: %s", exc)
+
+
+def clear_sync_outbox_wakeup_after_rollback(session: Session) -> None:
+    session.info.pop(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, None)
+
 
 def guard_sync_bulk_or_raw_execute(orm_execute_state: Any) -> None:
     execution_options = getattr(orm_execute_state, "execution_options", {}) or {}
@@ -192,6 +228,8 @@ def register_sync_outbox_guards() -> None:
 
     event.listen(Session, "before_flush", collect_pending_sync_writes)
     event.listen(Session, "after_flush", verify_pending_sync_outbox)
+    event.listen(Session, "after_commit", publish_sync_outbox_wakeup_after_commit)
+    event.listen(Session, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
     event.listen(Session, "do_orm_execute", guard_sync_bulk_or_raw_execute)
     _REGISTERED = True
     logger.info("✅ Sync outbox guard registered")
@@ -208,6 +246,32 @@ def _append_pending(
         return
     pending.append(PendingSyncWrite(str(table_name), operation, obj))
     seen.add(id(obj))
+
+
+def _get_sync_wakeup_redis():
+    global _SYNC_WAKEUP_REDIS
+    if _SYNC_WAKEUP_REDIS is not None:
+        return _SYNC_WAKEUP_REDIS
+
+    import redis
+    from core.config import settings
+
+    try:
+        socket_timeout = max(0.05, float(getattr(settings, "sync_signal_redis_timeout_seconds", 0.25)))
+    except (TypeError, ValueError):
+        socket_timeout = 0.25
+
+    _SYNC_WAKEUP_REDIS = redis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=0,
+        decode_responses=True,
+        socket_connect_timeout=socket_timeout,
+        socket_timeout=socket_timeout,
+        socket_keepalive=True,
+        retry_on_timeout=True,
+    )
+    return _SYNC_WAKEUP_REDIS
 
 
 def object_table_name(obj: Any) -> str | None:

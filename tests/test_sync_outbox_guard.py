@@ -1,15 +1,19 @@
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import delete, text, update
 
 from core.sync_outbox_guard import (
     SYNC_OUTBOX_PENDING_KEY,
+    SYNC_OUTBOX_WAKEUP_NEEDED_KEY,
     SyncOutboxBypassError,
     SyncOutboxError,
+    clear_sync_outbox_wakeup_after_rollback,
     collect_pending_sync_writes,
     guard_sync_bulk_or_raw_execute,
     mark_sync_outbox_recorded,
+    publish_sync_outbox_wakeup_after_commit,
     statement_write_target_table,
     sync_table_requires_outbox,
     verify_pending_sync_outbox,
@@ -73,6 +77,17 @@ class FakeTradingSetting:
         self.key = key
 
 
+class FakeRedis:
+    def __init__(self, *, rpush_error=None):
+        self.rpush_error = rpush_error
+        self.rpush_calls = []
+
+    def rpush(self, queue_name, payload):
+        self.rpush_calls.append((queue_name, payload))
+        if self.rpush_error:
+            raise self.rpush_error
+
+
 class SyncOutboxGuardTests(unittest.TestCase):
     def test_synced_write_requires_recorded_change_log_marker(self):
         offer = FakeOffer(7)
@@ -96,6 +111,44 @@ class SyncOutboxGuardTests(unittest.TestCase):
         verify_pending_sync_outbox(session, flush_context)
 
         self.assertNotIn(SYNC_OUTBOX_PENDING_KEY, session.info)
+        self.assertTrue(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY])
+
+    def test_after_commit_wakes_sync_worker_only_after_verified_outbox(self):
+        offer = FakeOffer(81)
+        connection = FakeConnection()
+        session = FakeSession(new=[offer], connection=connection)
+        flush_context = object()
+        fake_redis = FakeRedis()
+
+        collect_pending_sync_writes(session, flush_context, None)
+        mark_sync_outbox_recorded(connection, "offers", "INSERT", 81, {"id": 81})
+        verify_pending_sync_outbox(session, flush_context)
+
+        with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis):
+            publish_sync_outbox_wakeup_after_commit(session)
+
+        self.assertEqual(len(fake_redis.rpush_calls), 1)
+        self.assertEqual(fake_redis.rpush_calls[0][0], "sync:outbound")
+        self.assertNotIn(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, session.info)
+
+    def test_after_rollback_clears_pending_sync_worker_wakeup(self):
+        session = FakeSession(info={SYNC_OUTBOX_WAKEUP_NEEDED_KEY: True})
+
+        clear_sync_outbox_wakeup_after_rollback(session)
+
+        self.assertNotIn(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, session.info)
+
+    def test_after_commit_wakeup_failure_does_not_fail_transaction_close(self):
+        session = FakeSession(info={SYNC_OUTBOX_WAKEUP_NEEDED_KEY: True})
+        fake_redis = FakeRedis(rpush_error=RuntimeError("redis down"))
+
+        with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis), patch(
+            "core.sync_outbox_guard.logger"
+        ) as logger:
+            publish_sync_outbox_wakeup_after_commit(session)
+
+        logger.warning.assert_called_once()
+        self.assertNotIn(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, session.info)
 
     def test_non_synced_and_sync_apply_writes_do_not_require_outbox(self):
         message = FakeMessage(3)
