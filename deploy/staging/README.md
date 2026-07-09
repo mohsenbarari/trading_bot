@@ -86,6 +86,10 @@ scripts/deploy_staging.sh object-storage-configure
 scripts/deploy_staging.sh object-storage-probe
 scripts/deploy_staging.sh object-storage-package
 scripts/deploy_staging.sh object-storage-upload
+scripts/deploy_staging.sh object-release-package
+scripts/deploy_staging.sh object-release-upload
+scripts/deploy_staging.sh object-release-fetch <release-sha>
+scripts/deploy_staging.sh object-release-apply <release-sha>
 ```
 
 `object-storage-package` builds the staging frontend, creates a tarball under
@@ -93,6 +97,37 @@ scripts/deploy_staging.sh object-storage-upload
 uploads the tarball and manifest to the configured staging prefix. The artifact
 excludes `.env*`, `uploads`, `map_data`, `tmp`, production `mini_app_dist`, and
 other local-only state.
+
+`object-release-package` is the deploy-bridge path that mirrors the older direct
+server transfer more closely. It creates separate release artifacts for the
+project payload, staging frontend dist, optional `pip_packages/`, optional Docker
+image bundle, optional encrypted runtime env, and a manifest that records the
+exact exclude/protected-path contract. The project payload excludes repository
+metadata, local env files, frontend sources/build outputs, test/docs/log output,
+runtime data, and `pip_packages/`; the wheelhouse is transferred only through its
+own artifact when enabled. `object-release-upload` uploads those artifacts plus
+the manifest. On the receiving staging host, run
+`object-release-fetch <release-sha>` to download and verify the manifest and
+artifacts. `object-release-apply <release-sha>` is a dry-run by default; set
+`STAGING_OBJECT_RELEASE_APPLY_EXECUTE=1` only on the receiving staging host to
+apply the release with local `rsync --delete` while preserving protected paths
+such as `.env*`, `tmp`, `uploads`, `map_data`, `postgres_data`, and `redis_data`.
+
+Docker image transfer is opt-in because it can be large:
+
+```bash
+STAGING_OBJECT_RELEASE_INCLUDE_IMAGES=1 scripts/deploy_staging.sh object-release-upload
+```
+
+Runtime env transfer must be encrypted and is also opt-in:
+
+```bash
+export STAGING_OBJECT_RELEASE_ENV_KEY=...
+STAGING_OBJECT_RELEASE_INCLUDE_ENV=encrypted scripts/deploy_staging.sh object-release-upload
+```
+
+Do not route runtime sync through this bridge; the Object Storage bridge is only
+for deploy artifacts.
 
 The bot is disabled by default. Start it only with a dedicated staging bot token:
 

@@ -27,6 +27,7 @@ PYTHON_SCRIPTS = (
     'scripts/restore_default_commodities.py',
     'scripts/seed_shared_sync_tables.py',
     'scripts/staging_object_storage_artifact.py',
+    'scripts/staging_object_storage_release.py',
     'scripts/test_invite.py',
     'scripts/test_session_realtime.py',
     'scripts/test_ws_e2e.py',
