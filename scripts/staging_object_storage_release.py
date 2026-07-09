@@ -36,6 +36,7 @@ from scripts.arvan_object_storage_probe import (
 
 
 SCHEMA = "trading_bot_staging_object_storage_release_v1"
+CHANNEL_SCHEMA = "trading_bot_staging_object_storage_release_channel_v1"
 DEFAULT_PREFIX = "staging/deploy-bridge"
 ALLOWED_ARTIFACTS = {
     "project_payload",
@@ -101,6 +102,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Artifact to include. Allowed names: " + ", ".join(sorted(ALLOWED_ARTIFACTS)),
     )
     upload.add_argument("--manifest-out", required=True, type=Path)
+    upload.add_argument("--publish-channel", action="append", default=[])
     upload.add_argument("--project-exclude", action="append", default=[])
     upload.add_argument("--receiver-protect", action="append", default=[])
     upload.add_argument("--transfer-note", action="append", default=[])
@@ -109,6 +111,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_common_args(fetch)
     fetch.add_argument("--download-dir", required=True, type=Path)
     fetch.add_argument("--manifest-key")
+
+    fetch_latest = subparsers.add_parser("fetch-latest", help="Fetch the latest release for a channel.")
+    add_common_args(fetch_latest)
+    fetch_latest.add_argument("--download-dir", required=True, type=Path)
+    fetch_latest.add_argument("--channel", required=True)
 
     return parser.parse_args(argv)
 
@@ -195,6 +202,36 @@ def build_manifest(args: argparse.Namespace, config: dict[str, str], artifact_pa
     }
 
 
+def channel_key_for(config: dict[str, str], channel: str) -> str:
+    return f"{config['prefix']}/channels/{safe_slug(channel)}/latest.json"
+
+
+def build_channel_pointer(manifest: dict[str, Any], config: dict[str, str], channel: str) -> dict[str, Any]:
+    return {
+        "schema": CHANNEL_SCHEMA,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "channel": channel,
+        "release_sha": manifest["release_sha"],
+        "manifest_key": manifest["manifest"]["key"],
+        "manifest_sha256": hashlib.sha256(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "artifacts": {
+            name: {
+                "key": item["key"],
+                "sha256": item["sha256"],
+                "size_bytes": item["size_bytes"],
+            }
+            for name, item in manifest["artifacts"].items()
+        },
+        "object_storage": {
+            "endpoint": config["endpoint"],
+            "bucket": config["bucket"],
+            "prefix": config["prefix"],
+        },
+    }
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -228,6 +265,10 @@ def upload_release(args: argparse.Namespace) -> int:
         "dry_run": not args.execute,
         "config": redacted_config(config, args),
         "manifest": manifest["manifest"],
+        "channels": {
+            channel: {"key": channel_key_for(config, channel)}
+            for channel in args.publish_channel
+        },
         "artifacts": {
             name: {
                 "key": item["key"],
@@ -277,6 +318,26 @@ def upload_release(args: argparse.Namespace) -> int:
             Metadata={"schema": "staging-release-manifest-v1"},
         )
         manifest_head = client.head_object(Bucket=config["bucket"], Key=manifest["manifest"]["key"])
+        channel_upload: dict[str, Any] = {}
+        for channel in args.publish_channel:
+            pointer = build_channel_pointer(manifest, config, channel)
+            pointer_body = json.dumps(pointer, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+            pointer_key = channel_key_for(config, channel)
+            pointer_put = client.put_object(
+                Bucket=config["bucket"],
+                Key=pointer_key,
+                Body=pointer_body,
+                ContentType="application/json",
+                Metadata={"schema": "staging-release-channel-v1"},
+            )
+            pointer_head = client.head_object(Bucket=config["bucket"], Key=pointer_key)
+            channel_upload[channel] = {
+                "key": pointer_key,
+                "put_status": pointer_put.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+                "head_status": pointer_head.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+                "content_length": pointer_head.get("ContentLength"),
+                "release_sha": manifest["release_sha"],
+            }
     except ClientError as exc:
         error = exc.response.get("Error", {})
         print(
@@ -308,6 +369,7 @@ def upload_release(args: argparse.Namespace) -> int:
                     "head_status": manifest_head.get("ResponseMetadata", {}).get("HTTPStatusCode"),
                     "content_length": manifest_head.get("ContentLength"),
                 },
+                "channel_upload": channel_upload,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -337,6 +399,48 @@ def validate_manifest(payload: dict[str, Any]) -> None:
                 raise ValueError(f"Artifact {name} is missing {key}")
 
 
+def validate_channel_pointer(payload: dict[str, Any], channel: str) -> None:
+    if payload.get("schema") != CHANNEL_SCHEMA:
+        raise ValueError(f"Unsupported channel pointer schema: {payload.get('schema')}")
+    if payload.get("channel") != channel:
+        raise ValueError(f"Channel pointer mismatch: expected {channel}, got {payload.get('channel')}")
+    if not payload.get("release_sha"):
+        raise ValueError("Channel pointer is missing release_sha")
+    if not payload.get("manifest_key"):
+        raise ValueError("Channel pointer is missing manifest_key")
+
+
+def download_release(
+    client: Any,
+    config: dict[str, str],
+    *,
+    manifest_key: str,
+    release_dir: Path,
+) -> dict[str, Any]:
+    release_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = release_dir / "manifest.json"
+    client.download_file(config["bucket"], manifest_key, str(manifest_path))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_manifest(manifest)
+
+    downloads: dict[str, Any] = {}
+    for name, item in manifest["artifacts"].items():
+        local_path = release_dir / item["filename"]
+        client.download_file(config["bucket"], item["key"], str(local_path))
+        actual_sha = file_sha256(local_path)
+        if actual_sha != item["sha256"]:
+            raise ValueError(f"SHA256 mismatch for {name}: expected {item['sha256']}, got {actual_sha}")
+        if local_path.stat().st_size != int(item["size_bytes"]):
+            raise ValueError(f"Size mismatch for {name}: expected {item['size_bytes']}, got {local_path.stat().st_size}")
+        downloads[name] = {
+            "path": str(local_path),
+            "key": item["key"],
+            "sha256": actual_sha,
+            "size_bytes": local_path.stat().st_size,
+        }
+    return {"manifest": manifest, "manifest_path": str(manifest_path), "downloads": downloads}
+
+
 def fetch_release(args: argparse.Namespace) -> int:
     try:
         config = validate_config(args, require_credentials=args.execute)
@@ -359,27 +463,7 @@ def fetch_release(args: argparse.Namespace) -> int:
 
     client = s3_client(config, args.timeout)
     try:
-        release_dir.mkdir(parents=True, exist_ok=True)
-        manifest_path = release_dir / "manifest.json"
-        client.download_file(config["bucket"], key, str(manifest_path))
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        validate_manifest(manifest)
-
-        downloads: dict[str, Any] = {}
-        for name, item in manifest["artifacts"].items():
-            local_path = release_dir / item["filename"]
-            client.download_file(config["bucket"], item["key"], str(local_path))
-            actual_sha = file_sha256(local_path)
-            if actual_sha != item["sha256"]:
-                raise ValueError(f"SHA256 mismatch for {name}: expected {item['sha256']}, got {actual_sha}")
-            if local_path.stat().st_size != int(item["size_bytes"]):
-                raise ValueError(f"Size mismatch for {name}: expected {item['size_bytes']}, got {local_path.stat().st_size}")
-            downloads[name] = {
-                "path": str(local_path),
-                "key": item["key"],
-                "sha256": actual_sha,
-                "size_bytes": local_path.stat().st_size,
-            }
+        result = download_release(client, config, manifest_key=key, release_dir=release_dir)
     except ClientError as exc:
         error = exc.response.get("Error", {})
         print(
@@ -400,7 +484,85 @@ def fetch_release(args: argparse.Namespace) -> int:
         )
         return 1
 
-    print(json.dumps({**summary, "dry_run": False, "downloads": downloads}, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({**summary, "dry_run": False, "downloads": result["downloads"]}, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def fetch_latest_release(args: argparse.Namespace) -> int:
+    try:
+        config = validate_config(args, require_credentials=args.execute)
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, sort_keys=True))
+        return 2
+
+    channel = args.channel
+    channel_slug = safe_slug(channel)
+    pointer_key = channel_key_for(config, channel)
+    pointer_dir = args.download_dir / "channels" / channel_slug
+    pointer_path = pointer_dir / "latest.json"
+    summary: dict[str, Any] = {
+        "ok": True,
+        "dry_run": not args.execute,
+        "config": redacted_config(config, args),
+        "channel": {"name": channel, "key": pointer_key, "path": str(pointer_path)},
+    }
+    if not args.execute:
+        print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+        return 0
+
+    client = s3_client(config, args.timeout)
+    try:
+        pointer_dir.mkdir(parents=True, exist_ok=True)
+        client.download_file(config["bucket"], pointer_key, str(pointer_path))
+        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+        validate_channel_pointer(pointer, channel)
+        release_slug = safe_slug(str(pointer["release_sha"]))
+        release_dir = args.download_dir / release_slug
+        result = download_release(client, config, manifest_key=str(pointer["manifest_key"]), release_dir=release_dir)
+        expected_manifest_sha = pointer.get("manifest_sha256")
+        if expected_manifest_sha:
+            actual_manifest_sha = file_sha256(Path(str(result["manifest_path"])))
+            if actual_manifest_sha != expected_manifest_sha:
+                raise ValueError(
+                    f"Manifest SHA256 mismatch: expected {expected_manifest_sha}, got {actual_manifest_sha}"
+                )
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        print(
+            json.dumps(
+                {**summary, "ok": False, "dry_run": False, "error_code": error.get("Code"), "error_message": error.get("Message")},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 1
+    except Exception as exc:
+        print(
+            json.dumps(
+                {**summary, "ok": False, "dry_run": False, "error_type": type(exc).__name__, "error_message": str(exc)},
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 1
+
+    print(
+        json.dumps(
+            {
+                **summary,
+                "dry_run": False,
+                "channel": {**summary["channel"], "release_sha": pointer["release_sha"]},
+                "manifest": {
+                    "key": pointer["manifest_key"],
+                    "download_dir": str(release_dir),
+                    "path": result["manifest_path"],
+                },
+                "downloads": result["downloads"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -410,6 +572,8 @@ def main(argv: list[str] | None = None) -> int:
         return upload_release(args)
     if args.command == "fetch":
         return fetch_release(args)
+    if args.command == "fetch-latest":
+        return fetch_latest_release(args)
     print(json.dumps({"ok": False, "error": f"Unknown command: {args.command}"}, ensure_ascii=False, sort_keys=True))
     return 2
 

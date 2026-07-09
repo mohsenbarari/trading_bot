@@ -89,7 +89,9 @@ scripts/deploy_staging.sh object-storage-upload
 scripts/deploy_staging.sh object-release-package
 scripts/deploy_staging.sh object-release-upload
 scripts/deploy_staging.sh object-release-fetch <release-sha>
+scripts/deploy_staging.sh object-release-fetch-latest
 scripts/deploy_staging.sh object-release-apply <release-sha>
+scripts/deploy_staging.sh object-release-apply-latest
 ```
 
 `object-storage-package` builds the staging frontend, creates a tarball under
@@ -106,12 +108,16 @@ exact exclude/protected-path contract. The project payload excludes repository
 metadata, local env files, frontend sources/build outputs, test/docs/log output,
 runtime data, and `pip_packages/`; the wheelhouse is transferred only through its
 own artifact when enabled. `object-release-upload` uploads those artifacts plus
-the manifest. On the receiving staging host, run
-`object-release-fetch <release-sha>` to download and verify the manifest and
-artifacts. `object-release-apply <release-sha>` is a dry-run by default; set
-`STAGING_OBJECT_RELEASE_APPLY_EXECUTE=1` only on the receiving staging host to
-apply the release with local `rsync --delete` while preserving protected paths
+the manifest, then publishes the configured channel pointer at
+`staging/deploy-bridge/channels/iran-staging/latest.json` by default. On the
+receiving staging host, run `object-release-fetch-latest` to resolve that pointer
+and download/verify the manifest and artifacts. `object-release-apply-latest` is
+a dry-run by default; set `STAGING_OBJECT_RELEASE_APPLY_EXECUTE=1` only on the
+receiving staging host to apply the release with local `rsync --delete` while
+preserving protected paths
 such as `.env*`, `tmp`, `uploads`, `map_data`, `postgres_data`, and `redis_data`.
+Set `STAGING_OBJECT_RELEASE_DEPLOY_AFTER_APPLY=1` on the receiver only when the
+apply should restart staging Docker services after the files are updated.
 
 Docker image transfer is opt-in because it can be large:
 

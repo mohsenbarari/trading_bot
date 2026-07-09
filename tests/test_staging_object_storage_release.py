@@ -34,6 +34,8 @@ class StagingObjectStorageReleaseTests(unittest.TestCase):
             "abc123",
             "--manifest-out",
             str(manifest_out),
+            "--publish-channel",
+            "iran-staging",
             "--project-exclude",
             ".env",
             "--project-exclude",
@@ -66,6 +68,12 @@ class StagingObjectStorageReleaseTests(unittest.TestCase):
         self.assertEqual(manifest["transfer_contract"]["receiver_protected_paths"], [".env", "uploads"])
         self.assertIn("docker_images", manifest["artifacts"])
 
+        pointer = release.build_channel_pointer(manifest, config, "iran-staging")
+        self.assertEqual(pointer["schema"], release.CHANNEL_SCHEMA)
+        self.assertEqual(pointer["channel"], "iran-staging")
+        self.assertEqual(pointer["release_sha"], "abc123")
+        self.assertEqual(pointer["manifest_key"], "staging/deploy-bridge/releases/abc123/manifest.json")
+
     def test_upload_dry_run_writes_manifest_and_masks_credentials(self):
         tmpdir, artifacts = self.make_artifacts()
         self.addCleanup(tmpdir.cleanup)
@@ -90,6 +98,7 @@ class StagingObjectStorageReleaseTests(unittest.TestCase):
         self.assertTrue(manifest_out.exists())
         manifest = json.loads(manifest_out.read_text(encoding="utf-8"))
         self.assertIn("project_payload", manifest["artifacts"])
+        self.assertEqual(payload["channels"]["iran-staging"]["key"], "staging/deploy-bridge/channels/iran-staging/latest.json")
 
     def test_non_staging_prefix_is_rejected(self):
         tmpdir, artifacts = self.make_artifacts()
@@ -134,6 +143,30 @@ class StagingObjectStorageReleaseTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["dry_run"])
         self.assertEqual(payload["manifest"]["key"], "staging/deploy-bridge/releases/abc123/manifest.json")
+
+    def test_fetch_latest_dry_run_reports_channel_pointer_key(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = release.main(
+                [
+                    "fetch-latest",
+                    "--bucket",
+                    "staging-bucket",
+                    "--prefix",
+                    "staging/deploy-bridge",
+                    "--channel",
+                    "iran-staging",
+                    "--download-dir",
+                    "/tmp/staging-downloads",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["channel"]["key"], "staging/deploy-bridge/channels/iran-staging/latest.json")
+        self.assertEqual(payload["channel"]["path"], "/tmp/staging-downloads/channels/iran-staging/latest.json")
 
 
 if __name__ == "__main__":

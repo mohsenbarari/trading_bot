@@ -88,6 +88,7 @@ STAGING_OBJECT_RELEASE_ENV_KEY_ENV="${STAGING_OBJECT_RELEASE_ENV_KEY_ENV:-STAGIN
 STAGING_OBJECT_RELEASE_APPLY_DIR="${STAGING_OBJECT_RELEASE_APPLY_DIR:-$PROJECT_DIR}"
 STAGING_OBJECT_RELEASE_APPLY_EXECUTE="${STAGING_OBJECT_RELEASE_APPLY_EXECUTE:-0}"
 STAGING_OBJECT_RELEASE_DEPLOY_AFTER_APPLY="${STAGING_OBJECT_RELEASE_DEPLOY_AFTER_APPLY:-0}"
+STAGING_OBJECT_RELEASE_CHANNEL="${STAGING_OBJECT_RELEASE_CHANNEL:-iran-staging}"
 
 compose_cmd=(docker compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
@@ -527,6 +528,39 @@ object_release_contract_args() {
     printf '%s\n' "--transfer-note=Runtime sync is intentionally not routed through Object Storage."
 }
 
+object_release_channel_slug() {
+    python3 - "$1" <<'PY'
+import re
+import sys
+
+slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(sys.argv[1] or "").strip())
+print(slug.strip(".-") or "unknown")
+PY
+}
+
+object_release_latest_pointer_path() {
+    local channel="${1:-$STAGING_OBJECT_RELEASE_CHANNEL}"
+    printf '%s/channels/%s/latest.json\n' "$STAGING_OBJECT_RELEASE_DOWNLOAD_DIR" "$(object_release_channel_slug "$channel")"
+}
+
+object_release_latest_release_sha() {
+    local channel="${1:-$STAGING_OBJECT_RELEASE_CHANNEL}"
+    local pointer
+    pointer="$(object_release_latest_pointer_path "$channel")"
+    [[ -f "$pointer" ]] || die "latest release pointer is missing; run object-release-fetch-latest first: $pointer"
+    python3 - "$pointer" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+release_sha = payload.get("release_sha")
+if not release_sha:
+    raise SystemExit("latest release pointer is missing release_sha")
+print(release_sha)
+PY
+}
+
 staging_object_release_dir() {
     printf '%s/%s\n' "$STAGING_OBJECT_RELEASE_DIR" "$(release_sha)"
 }
@@ -639,6 +673,7 @@ stage_object_storage_release() {
         --access-key-env "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV"
         --secret-key-env "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV"
         --manifest-out "$manifest_path"
+        --publish-channel "$STAGING_OBJECT_RELEASE_CHANNEL"
         --artifact "project_payload=$project_archive"
         --artifact "frontend_dist=$frontend_archive"
     )
@@ -670,6 +705,22 @@ stage_object_storage_release_fetch() {
         --bucket "$STAGING_OBJECT_STORAGE_BUCKET" \
         --prefix "$STAGING_OBJECT_STORAGE_PREFIX" \
         --release-sha "$release" \
+        --access-key-env "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV" \
+        --secret-key-env "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV" \
+        --download-dir "$STAGING_OBJECT_RELEASE_DOWNLOAD_DIR" \
+        --execute
+}
+
+stage_object_storage_release_fetch_latest() {
+    local channel="${1:-$STAGING_OBJECT_RELEASE_CHANNEL}"
+    require_cmd python3
+    require_staging_object_storage_config
+    python3 "$PROJECT_DIR/scripts/staging_object_storage_release.py" \
+        fetch-latest \
+        --endpoint "$STAGING_OBJECT_STORAGE_ENDPOINT" \
+        --bucket "$STAGING_OBJECT_STORAGE_BUCKET" \
+        --prefix "$STAGING_OBJECT_STORAGE_PREFIX" \
+        --channel "$channel" \
         --access-key-env "$STAGING_OBJECT_STORAGE_ACCESS_KEY_ENV" \
         --secret-key-env "$STAGING_OBJECT_STORAGE_SECRET_KEY_ENV" \
         --download-dir "$STAGING_OBJECT_RELEASE_DOWNLOAD_DIR" \
@@ -772,6 +823,14 @@ stage_object_storage_release_apply() {
         compose ps
     fi
     log "object release $release applied to $apply_dir"
+}
+
+stage_object_storage_release_apply_latest() {
+    local channel="${1:-$STAGING_OBJECT_RELEASE_CHANNEL}"
+    local release
+    stage_object_storage_release_fetch_latest "$channel"
+    release="$(object_release_latest_release_sha "$channel")"
+    stage_object_storage_release_apply "$release"
 }
 
 compose() {
@@ -1078,8 +1137,14 @@ case "${1:-deploy}" in
     object-release-fetch)
         stage_object_storage_release_fetch "${2:-$(release_sha)}"
         ;;
+    object-release-fetch-latest)
+        stage_object_storage_release_fetch_latest "${2:-$STAGING_OBJECT_RELEASE_CHANNEL}"
+        ;;
     object-release-apply)
         stage_object_storage_release_apply "${2:-$(release_sha)}"
+        ;;
+    object-release-apply-latest)
+        stage_object_storage_release_apply_latest "${2:-$STAGING_OBJECT_RELEASE_CHANNEL}"
         ;;
     up)
         shift
@@ -1125,8 +1190,12 @@ Commands:
                   Build/upload project, frontend, optional pip/image/env artifacts and manifest
   object-release-fetch [release]
                   Download and verify a release manifest/artifacts from Object Storage
+  object-release-fetch-latest [channel]
+                  Resolve the channel latest pointer, then download and verify that release
   object-release-apply [release]
                   Dry-run apply a fetched release; set STAGING_OBJECT_RELEASE_APPLY_EXECUTE=1 to apply
+  object-release-apply-latest [channel]
+                  Fetch latest for a channel, then dry-run/apply that release
   up              Compose up -d --build
   deploy          check + ensure-env + build frontend + nginx + compose up + health
   ps              Show staging compose services
