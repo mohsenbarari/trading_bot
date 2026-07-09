@@ -27,6 +27,13 @@ This lets WebApp requests against bot-owned offers forward to the foreign
 authority and lets foreign-owned offers expire through the foreign expiry loop,
 without exposing the foreign WebApp/API surface publicly.
 
+For the real two-server staging topology, run the foreign host with
+`STAGING_ENABLE_BOT=1 STAGING_FOREIGN_ONLY=1`. In this mode the deploy starts
+only the foreign API, bot, and foreign sync worker plus shared db/redis/migration
+services. It intentionally does not start the Iran-mode `app` service on the
+foreign host, so the foreign staging database cannot be polluted by local
+Iran-mode runtime rows or source-sequence watermarks.
+
 The public staging site is protected with Basic Auth. Credentials are generated
 in `.env.staging` as `STAGING_BASIC_AUTH_USER` and
 `STAGING_BASIC_AUTH_PASSWORD`. The Nginx staging site also injects the staging

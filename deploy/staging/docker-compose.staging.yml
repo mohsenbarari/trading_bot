@@ -79,8 +79,6 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
-      app:
-        condition: service_healthy
       redis:
         condition: service_started
     healthcheck:

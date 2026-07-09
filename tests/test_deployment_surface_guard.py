@@ -316,6 +316,7 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("uvicorn main:app", str(foreign_app.get("command", "")))
         self.assertIn("ports:", foreign_app_block)
         self.assertIn('"127.0.0.1:${STAGING_FOREIGN_APP_PORT:-8121}:8000"', foreign_app_block)
+        self.assertNotIn("\n      app:\n", foreign_app_block)
         self.assertIn("foreign_app:", staging_bot_block)
         self.assertIn("condition: service_healthy", staging_bot_block)
 

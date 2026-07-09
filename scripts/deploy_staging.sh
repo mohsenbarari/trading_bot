@@ -48,6 +48,7 @@ STAGING_FOREIGN_APP_PORT="${STAGING_FOREIGN_APP_PORT:-8121}"
 STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
+STAGING_FOREIGN_ONLY="${STAGING_FOREIGN_ONLY:-0}"
 STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
 STAGING_PUBLIC_FOREIGN_SYNC_URL="${STAGING_PUBLIC_FOREIGN_SYNC_URL:-https://staging.362514.ir/foreign-sync}"
 default_staging_internal_foreign_server_url() {
@@ -61,7 +62,7 @@ STAGING_INTERNAL_FOREIGN_SERVER_URL="${STAGING_INTERNAL_FOREIGN_SERVER_URL:-$(de
 STAGING_FOREIGN_IRAN_SERVER_URL="${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}"
 STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FOREIGN_IRAN_SERVER_URL}"
 STAGING_FOREIGN_FOREIGN_SERVER_URL="${STAGING_FOREIGN_FOREIGN_SERVER_URL:-$STAGING_INTERNAL_FOREIGN_SERVER_URL}"
-STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-0}"
+STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-$STAGING_ENABLE_BOT}"
 STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"
@@ -1087,6 +1088,9 @@ wait_for_service_health() {
 }
 
 wait_for_app_health() {
+    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        return
+    fi
     wait_for_service_health app "staging app"
 }
 
@@ -1124,13 +1128,17 @@ deploy() {
     ensure_env
     ensure_runtime_env_values
     build_frontend
-    if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
-        compose --profile staging-bot --profile staging-sync up -d --build
+    if [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker
+    elif [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
+        compose --profile staging-bot up -d --build
     else
         compose up -d --build
     fi
     wait_for_app_health
-    start_sync_worker
+    if [[ "$STAGING_FOREIGN_ONLY" != "1" ]]; then
+        start_sync_worker
+    fi
     wait_for_foreign_app_health_if_enabled
     install_nginx
     compose ps
