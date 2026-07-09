@@ -172,6 +172,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('staging_release_sha', staging_script)
         self.assertIn('STAGING_RELEASE_SHA="$(staging_release_sha)"', staging_script)
         self.assertIn('set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
+        self.assertIn('start_sync_worker', staging_script)
         self.assertIn('set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
         self.assertIn('ensure_runtime_env_values\n        compose up -d --build "$@"', staging_script)
         self.assertIn('realpath -m "$STAGING_FRONTEND_DIST_DIR"', staging_script)

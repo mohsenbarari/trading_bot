@@ -1090,6 +1090,10 @@ wait_for_app_health() {
     wait_for_service_health app "staging app"
 }
 
+start_sync_worker() {
+    compose up -d --build sync_worker
+}
+
 wait_for_foreign_app_health_if_enabled() {
     if [[ "$STAGING_ENABLE_BOT" != "1" ]]; then
         return
@@ -1122,6 +1126,7 @@ deploy() {
         compose up -d --build
     fi
     wait_for_app_health
+    start_sync_worker
     wait_for_foreign_app_health_if_enabled
     install_nginx
     compose ps
