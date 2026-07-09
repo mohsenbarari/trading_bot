@@ -28,6 +28,16 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         for area in manifest_builder.BRANCH_CHANGE_REQUIREMENTS:
             self.assertGreater(counts.get(area, 0), 0, area)
 
+    def test_expected_branch_can_be_overridden_for_staging_continuation(self):
+        args = runner.parse_args(["--expected-branch", "staging/object-storage-artifact-bridge"])
+
+        self.assertEqual(args.expected_branch, "staging/object-storage-artifact-bridge")
+
+    def test_expected_branch_default_remains_candidate_guard(self):
+        args = runner.parse_args([])
+
+        self.assertEqual(args.expected_branch, "candidate/sync-parity-hardening")
+
     def test_plan_writes_equivalent_agent_log_directories(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

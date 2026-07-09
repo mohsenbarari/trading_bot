@@ -38,7 +38,10 @@ from scripts import build_staging_two_server_full_matrix_manifest as manifest_bu
 
 
 SCHEMA_VERSION = "staging_two_server_full_matrix_runner_v1"
-DEFAULT_EXPECTED_BRANCH = "candidate/sync-parity-hardening"
+DEFAULT_EXPECTED_BRANCH = os.getenv(
+    "STAGING_TWO_SERVER_FULL_MATRIX_EXPECTED_BRANCH",
+    "candidate/sync-parity-hardening",
+)
 DEFAULT_IRAN_BASE_URL = "https://staging.gold-trade.ir"
 DEFAULT_FOREIGN_BASE_URL = "https://staging.362514.ir"
 DEFAULT_ARTIFACT_ROOT = REPO_ROOT / "tmp" / "staging-two-server-full-matrix"
@@ -1186,6 +1189,7 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
     checks: list[CheckResult] = []
     current_branch = run_git_value(["branch", "--show-current"])
     current_commit = run_git_value(["rev-parse", "HEAD"])
+    expected_branch = getattr(args, "expected_branch", None) or DEFAULT_EXPECTED_BRANCH
     expected_release = expected_release_sha(args)
     git_status = run_git_value(["status", "--short", "--branch"]) or ""
     expected_branch = args.expected_branch
@@ -2543,8 +2547,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--basic-auth-user", default=None)
     parser.add_argument("--basic-auth-password", default=None)
     parser.add_argument("--observability-api-key", default=os.getenv("STAGING_OBSERVABILITY_API_KEY"))
-    parser.add_argument("--expected-branch", default=os.getenv("STAGING_EXPECTED_BRANCH", DEFAULT_EXPECTED_BRANCH))
     parser.add_argument("--expected-release-sha", default=os.getenv("STAGING_EXPECTED_RELEASE_SHA"))
+    parser.add_argument("--expected-branch", default=os.getenv("STAGING_TWO_SERVER_FULL_MATRIX_EXPECTED_BRANCH", DEFAULT_EXPECTED_BRANCH))
     parser.add_argument("--iran-ssh-host", default=os.getenv("STAGING_IRAN_SSH_HOST", DEFAULT_IRAN_SSH_HOST))
     parser.add_argument("--iran-ssh-port", default=os.getenv("STAGING_IRAN_SSH_PORT", DEFAULT_IRAN_SSH_PORT))
     parser.add_argument("--iran-workdir", default=os.getenv("STAGING_IRAN_WORKDIR", DEFAULT_IRAN_WORKDIR))
