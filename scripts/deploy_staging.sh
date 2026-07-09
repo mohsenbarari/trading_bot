@@ -402,6 +402,10 @@ ensure_basic_auth_env() {
 }
 
 release_sha() {
+    if [[ -n "${STAGING_RELEASE_SHA_OVERRIDE:-}" ]]; then
+        printf '%s\n' "$STAGING_RELEASE_SHA_OVERRIDE"
+        return
+    fi
     local sha dirty
     sha="$(git -C "$PROJECT_DIR" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
     dirty=""
