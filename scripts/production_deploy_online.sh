@@ -1245,6 +1245,8 @@ replace_hosts_block_local() {
     filter_hosts_file_for_managed_domains "$hosts_file" "$tmp"
     printf '\n%s\n' "$block" >> "$tmp"
     cp "$tmp" "$hosts_file"
+    chown root:root "$hosts_file"
+    chmod 0644 "$hosts_file"
     rm -f "$tmp"
 }
 
@@ -1275,6 +1277,8 @@ cat >> \"\$tmp\" <<'EOF_HOSTS'
 $block
 EOF_HOSTS
 cp \"\$tmp\" \"\$hosts_file\"
+chown root:root \"\$hosts_file\"
+chmod 0644 \"\$hosts_file\"
 rm -f \"\$tmp\""
 }
 

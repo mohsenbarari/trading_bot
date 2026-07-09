@@ -339,6 +339,14 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN=staging.gold-trade.ir', staging_example)
         self.assertIn('STAGING_IRAN_PUBLIC_IP=62.220.124.174', staging_example)
 
+    def test_production_hosts_sync_restores_standard_permissions(self):
+        release_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+
+        self.assertIn('chown root:root "$hosts_file"', release_script)
+        self.assertIn('chmod 0644 "$hosts_file"', release_script)
+        self.assertIn('chown root:root \\"\\$hosts_file\\"', release_script)
+        self.assertIn('chmod 0644 \\"\\$hosts_file\\"', release_script)
+
     def test_dockerfiles_pass_docker_build_check(self):
         if shutil.which('docker') is None:
             self.skipTest('docker is not installed')
