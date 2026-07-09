@@ -1099,7 +1099,7 @@ check() {
     require_cmd git
     require_cmd sed
     require_cmd nginx
-    docker compose version >/dev/null
+    init_compose_cmd
     [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
     log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR foreign_iran_url=$STAGING_FOREIGN_IRAN_SERVER_URL foreign_public_guard=$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD"
