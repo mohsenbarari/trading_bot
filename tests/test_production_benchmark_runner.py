@@ -17,7 +17,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -50,7 +50,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -75,7 +75,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -110,7 +110,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -135,7 +135,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -160,7 +160,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -185,7 +185,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -210,7 +210,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -235,7 +235,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -260,7 +260,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -285,7 +285,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -310,7 +310,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
@@ -335,7 +335,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
             "IRAN_HOST": "192.0.2.10",
             "IRAN_PROJECT_DIR": "/srv/app",
-            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_PORT": "37067",
             "IRAN_SSH_USER": "root",
         }
         tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")

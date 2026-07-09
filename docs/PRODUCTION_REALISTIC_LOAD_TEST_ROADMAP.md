@@ -16,7 +16,7 @@ same time.
 | Stage | Status | Evidence |
 | --- | --- | --- |
 | `L0` | Complete on 2026-06-12 | Contract, safety inventory, persona endpoint map, restricted endpoint list, synthetic mutation inventory, and Stage L1 credential requirements are recorded in this document. No production load was generated. |
-| `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@87.107.3.22`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
+| `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@62.220.124.174`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
 | `L2` | Complete on 2026-06-12 | Default `make production-load-fixtures` prepare-and-cleanup passed against Iran/load-runner with artifact `tmp/production-benchmark/20260612T193743Z/load-fixtures/`: 161 synthetic users, 80 direct pairs, 12 groups, 3 channels, 60 offers, 20 trades, auth-pool upload, clean pre/post sync-health, and successful Iran/foreign/load-runner cleanup. |
 | `L3` | Complete on 2026-06-12 | Added the mixed k6 harness, production runner, and make target. Dry-run artifact `tmp/production-benchmark/20260612T195338Z/load-realistic/` passed without touching production and validated scenario weights, manifest-derived Iran URL, runtime flags, and threshold contract. |
 | `L4` | Complete on 2026-06-13 | Added the low-overhead runtime sampler, `make production-load-sampler`, and automatic sampler wiring into non-dry-run `make production-load-realistic`. Dry-run artifacts `tmp/production-benchmark/20260613T052819Z/load-sampler/` and `tmp/production-benchmark/20260613T052804Z/load-realistic/` passed without production pressure. |
@@ -69,7 +69,7 @@ The test must answer these questions:
 ## Current Load-Runner Baseline
 
 The active third host is `root@45.129.39.182` reached through jump host
-`root@87.107.3.22`. It has `4` vCPUs, about `8 GiB` RAM, and `k6 v0.49.0`.
+`root@62.220.124.174`. It has `4` vCPUs, about `8 GiB` RAM, and `k6 v0.49.0`.
 Its SSH session soft `nofile` limit was observed at `1024` while the hard limit
 is `1048576`. The Stage L runner now raises `ulimit -n` to
 `LOAD_RUNNER_NOFILE` before invoking k6 so high-RPS tests do not inherit a
@@ -100,7 +100,7 @@ Required environment for the load runner remains the same as L7:
 
 ```text
 LOAD_RUNNER_HOST=root@45.129.39.182
-LOAD_RUNNER_JUMP_HOST=root@87.107.3.22
+LOAD_RUNNER_JUMP_HOST=root@62.220.124.174
 LOAD_RUNNER_JUMP_SSH_PORT=37067
 ```
 
@@ -150,7 +150,7 @@ Suggested diagnostic run:
 
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
-LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+LOAD_RUNNER_JUMP_HOST=root@62.220.124.174 \
 LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
@@ -159,7 +159,7 @@ Acceptance:
 
 - run is generated from the load-runner host `45.129.39.182`;
 - target remains Iran production `https://coin.gold-trade.ir` on
-  `87.107.3.22`;
+  `62.220.124.174`;
 - endpoint breakdown is present in the matrix artifact;
 - no broad tuning is accepted until the slow endpoint families are classified.
 
@@ -189,7 +189,7 @@ Suggested diagnostic run:
 
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
-LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+LOAD_RUNNER_JUMP_HOST=root@62.220.124.174 \
 LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--workers 8,12,16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
@@ -242,7 +242,7 @@ Suggested diagnostic run:
 
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
-LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+LOAD_RUNNER_JUMP_HOST=root@62.220.124.174 \
 LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--workers 16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
@@ -589,7 +589,7 @@ Needs from operator:
 
 Current implementation status:
 
-- Completed against `root@45.129.39.182` through `root@87.107.3.22`.
+- Completed against `root@45.129.39.182` through `root@62.220.124.174`.
 - Final artifact: `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`.
 - Result: `passed`, Iran health HTTP `200`, `k6 v0.49.0`, `jq-1.7`, `curl 8.5.0`.
 

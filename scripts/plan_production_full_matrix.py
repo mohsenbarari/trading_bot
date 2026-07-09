@@ -14,7 +14,7 @@ from typing import Any
 
 ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
 DEFAULT_ARTIFACT_ROOT = Path("/tmp/trading-bot-production-full-matrix")
-IRAN_HOST = "root@87.107.3.22"
+IRAN_HOST = "root@62.220.124.174"
 IRAN_SSH_PORT = os.getenv("IRAN_SSH_PORT", "37067")
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 PRODUCTION_CLEANUP_CONFIRM = "hard-delete-test-data"

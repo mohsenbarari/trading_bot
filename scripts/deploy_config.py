@@ -9,7 +9,7 @@ from pathlib import Path
 
 DEFAULT_MANIFEST = Path("deploy/production/online.env")
 DEFAULTS = {
-    "IRAN_HOST": "87.107.3.22",
+    "IRAN_HOST": "62.220.124.174",
     "IRAN_SSH_USER": "root",
     "IRAN_SSH_PORT": "37067",
     "IRAN_PROJECT_DIR": "/srv/trading-bot/current",
