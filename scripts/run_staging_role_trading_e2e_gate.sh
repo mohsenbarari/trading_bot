@@ -89,7 +89,7 @@ assert_safe_staging_target() {
   running="$(docker inspect -f '{{.State.Running}}' "$STAGING_REDIS_CONTAINER_NAME" 2>/dev/null || true)"
   [[ "$running" == "true" ]] || die "staging Redis container is not running: $STAGING_REDIS_CONTAINER_NAME"
 
-  docker exec "$STAGING_APP_CONTAINER_NAME" python - <<'PY' >"$ARTIFACT_ROOT/container-env.json"
+  docker exec -i "$STAGING_APP_CONTAINER_NAME" python - <<'PY' >"$ARTIFACT_ROOT/container-env.json"
 import json
 from core.config import settings
 from core.server_routing import current_server

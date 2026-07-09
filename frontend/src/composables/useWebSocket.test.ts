@@ -149,7 +149,7 @@ describe('useWebSocket', () => {
     parseErrorSpy.mockRestore()
   })
 
-  it('uses the direct backend URL in dev mode and closes the socket after websocket errors', async () => {
+  it('uses the current dev-server host and closes the socket after websocket errors', async () => {
     localStorage.setItem('auth_token', 'dev-token')
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -160,7 +160,7 @@ describe('useWebSocket', () => {
     const ws = useWebSocket()
 
     ws.connect()
-    expect(MockWebSocket.instances[0]?.url).toBe('ws://localhost:8000/api/realtime/ws?token=dev-token')
+    expect(MockWebSocket.instances[0]?.url).toBe('ws://localhost:5173/api/realtime/ws?token=dev-token')
 
     MockWebSocket.instances[0]?.emitError()
     expect(errorSpy).toHaveBeenCalled()

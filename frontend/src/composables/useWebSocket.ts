@@ -14,14 +14,7 @@ export function useWebSocket() {
     const connect = () => {
         if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
-        // If running in dev (port 5173), connect directly to backend (8000) to bypass Vite proxy issues
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-
-        // If running in dev (port 5173), connect directly to backend (8000) to bypass Vite proxy issues
-        const isDev = window.location.port === '5173';
-
-        // In dev, we force ws://localhost:8000
-        // In prod, we use relative (which behaves as window.location.host)
 
         // Get auth token for authenticated WebSocket connection
         const authToken = localStorage.getItem('auth_token');
@@ -30,12 +23,7 @@ export function useWebSocket() {
             return;
         }
 
-        let wsUrl = '';
-        if (isDev) {
-            wsUrl = `${protocol}//${window.location.hostname}:8000/api/realtime/ws?token=${encodeURIComponent(authToken)}`;
-        } else {
-            wsUrl = `${protocol}//${window.location.host}/api/realtime/ws?token=${encodeURIComponent(authToken)}`;
-        }
+        const wsUrl = `${protocol}//${window.location.host}/api/realtime/ws?token=${encodeURIComponent(authToken)}`;
 
         console.log('Connecting to WebSocket:', wsUrl);
         socket = new WebSocket(wsUrl);

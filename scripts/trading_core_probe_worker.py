@@ -18,6 +18,7 @@ import math
 import os
 import sys
 import time
+import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
@@ -306,6 +307,8 @@ class CleanupPlan:
 
 
 def json_safe(value: Any) -> Any:
+    if isinstance(value, uuid.UUID):
+        return str(value)
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return value
@@ -1214,11 +1217,11 @@ def cleanup_prefix_patterns(prefix: str) -> tuple[str, str]:
     return f"{escaped}%", f"%{escaped}%"
 
 
-def in_filter(column: Any, values: list[int] | list[str]):
+def in_filter(column: Any, values: list[Any]):
     return column.in_(values) if values else false()
 
 
-def cleanup_in_batches(values: list[int] | list[str], *, batch_size: int = CLEANUP_SQL_IN_BATCH_SIZE):
+def cleanup_in_batches(values: list[Any], *, batch_size: int = CLEANUP_SQL_IN_BATCH_SIZE):
     if batch_size <= 0:
         raise ValueError("cleanup SQL batch size must be positive")
     for offset in range(0, len(values), batch_size):
@@ -1372,6 +1375,10 @@ async def collect_int_ids(db: Any, statement: Any) -> list[int]:
     return [int(item) for item in (await db.execute(statement)).scalars().all()]
 
 
+async def collect_ids(db: Any, statement: Any) -> list[Any]:
+    return list((await db.execute(statement)).scalars().all())
+
+
 async def collect_int_ids_by_batched_filters(
     db: Any,
     id_column: Any,
@@ -1381,6 +1388,18 @@ async def collect_int_ids_by_batched_filters(
     for column, values in filters:
         for batch in cleanup_in_batches(values):
             ids.extend(await collect_int_ids(db, select(id_column).where(column.in_(batch))))
+    return stable_unique(ids)
+
+
+async def collect_ids_by_batched_filters(
+    db: Any,
+    id_column: Any,
+    filters: list[tuple[Any, list[Any]]],
+) -> list[Any]:
+    ids: list[Any] = []
+    for column, values in filters:
+        for batch in cleanup_in_batches(values):
+            ids.extend(await collect_ids(db, select(id_column).where(column.in_(batch))))
     return stable_unique(ids)
 
 
@@ -1464,13 +1483,13 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                 (CustomerRelation.created_by_user_id, user_ids),
             ],
         )
-        user_session_ids = await collect_int_ids_by_batched_filters(
+        user_session_ids = await collect_ids_by_batched_filters(
             db, UserSession.id, [(UserSession.user_id, user_ids)]
         )
-        session_login_request_ids = await collect_int_ids_by_batched_filters(
+        session_login_request_ids = await collect_ids_by_batched_filters(
             db, SessionLoginRequest.id, [(SessionLoginRequest.user_id, user_ids)]
         )
-        recovery_request_ids = await collect_int_ids_by_batched_filters(
+        recovery_request_ids = await collect_ids_by_batched_filters(
             db,
             SingleSessionRecoveryRequest.id,
             [
@@ -1478,7 +1497,7 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                 (SingleSessionRecoveryRequest.session_login_request_id, session_login_request_ids),
             ],
         )
-        recovery_admin_target_ids = await collect_int_ids_by_batched_filters(
+        recovery_admin_target_ids = await collect_ids_by_batched_filters(
             db,
             SingleSessionRecoveryAdminTarget.id,
             [

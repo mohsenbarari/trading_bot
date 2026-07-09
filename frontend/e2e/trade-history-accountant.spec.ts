@@ -738,6 +738,15 @@ async function loginWithSeededSession(page: Page, session: SessionUser) {
   await primeAuthSession(page, session.accessToken, session.refreshToken)
 }
 
+async function waitForRealtimeConnection(page: Page, navigate: () => Promise<unknown>) {
+  const realtimeConnected = page.waitForEvent('console', (message) => (
+    message.type() === 'log' && message.text().includes('✅ WebSocket Connected')
+  ), { timeout: 30000 })
+
+  await navigate()
+  await realtimeConnected
+}
+
 function toPersianDigits(value: string | number) {
   return String(value).replace(/\d/g, (digit) => PERSIAN_DIGITS[Number(digit)] ?? digit)
 }
@@ -837,8 +846,9 @@ test.describe('Trade history accountant context', () => {
     const fixture = seedTradeRealtimeFixture('trade_created_realtime')
 
     await loginWithSeededSession(page, fixture.viewer)
-    await page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
-    await page.waitForTimeout(1200)
+    await waitForRealtimeConnection(page, () => (
+      page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
+    ))
 
     await executeTrade(request, fixture.viewer.accessToken, fixture.offerId, fixture.offerQuantity)
 

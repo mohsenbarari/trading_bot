@@ -772,7 +772,7 @@ test.describe('customer owner lifecycle', () => {
     await expect(adminModal.locator('.customer-context-box')).toContainText(managementName)
     await expect(adminModal.locator('.customer-context-box')).toContainText(owner.accountName)
     await expect(adminModal.locator('.customer-context-box')).toContainText('سطح 2')
-    await page.locator('.admin-user-modal-close').click()
+    await adminModal.getByRole('button', { name: 'بستن' }).click()
     await expect(adminModal).toBeHidden({ timeout: 30000 })
 
     await setAuthTokens(page, owner)

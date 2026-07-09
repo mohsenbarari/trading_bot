@@ -329,7 +329,8 @@ async def create_session_bundle(db, user, device_name):
 
 async def main():
   suffix = uuid.uuid4().hex[:10]
-  commodity_name = f"کالای قیمت مشتری {int(uuid.uuid4().hex[:8], 16) % 10000}"
+  name_suffix = uuid.uuid4().hex[:10].translate(str.maketrans('0123456789abcdef', 'ابپتثجچحخدذرزسشص'))
+  commodity_name = f"کالای قیمت مشتری {name_suffix}"
   source_management_name = f"مشتری سطح ۱ {suffix[:4]}"
 
   async with AsyncSessionLocal() as db:
