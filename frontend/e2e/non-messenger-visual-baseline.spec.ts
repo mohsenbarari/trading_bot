@@ -14,6 +14,7 @@ type RouteCase = {
   path: string
   label: string
   authenticated: boolean
+  readyText: string
 }
 
 const VIEWPORTS: ViewportCase[] = [
@@ -22,19 +23,19 @@ const VIEWPORTS: ViewportCase[] = [
 ]
 
 const ROUTES: RouteCase[] = [
-  { path: '/', label: 'dashboard', authenticated: true },
-  { path: '/market', label: 'market', authenticated: true },
-  { path: '/operations', label: 'operations', authenticated: true },
-  { path: '/operations/customers', label: 'customers', authenticated: true },
-  { path: '/operations/accountants', label: 'accountants', authenticated: true },
-  { path: '/account', label: 'account', authenticated: true },
-  { path: '/profile', label: 'profile', authenticated: true },
-  { path: '/notifications', label: 'notifications', authenticated: true },
-  { path: '/admin/users', label: 'admin-users', authenticated: true },
-  { path: '/admin/commodities', label: 'admin-commodities', authenticated: true },
-  { path: '/login', label: 'login', authenticated: false },
-  { path: '/register', label: 'register', authenticated: false },
-  { path: '/i/uiux-baseline', label: 'invite-landing', authenticated: false },
+  { path: '/', label: 'dashboard', authenticated: true, readyText: 'ورود به بازار' },
+  { path: '/market', label: 'market', authenticated: true, readyText: 'هیچ لفظ فعالی یافت نشد' },
+  { path: '/operations', label: 'operations', authenticated: true, readyText: 'عملیات' },
+  { path: '/operations/customers', label: 'customers', authenticated: true, readyText: 'مشتریان' },
+  { path: '/operations/accountants', label: 'accountants', authenticated: true, readyText: 'حسابداران' },
+  { path: '/account', label: 'account', authenticated: true, readyText: 'پروفایل و تنظیمات' },
+  { path: '/profile', label: 'profile', authenticated: true, readyText: 'اطلاعات شخصی' },
+  { path: '/notifications', label: 'notifications', authenticated: true, readyText: 'هیچ اعلانی یافت نشد' },
+  { path: '/admin/users', label: 'admin-users', authenticated: true, readyText: 'مدیریت کاربران' },
+  { path: '/admin/commodities', label: 'admin-commodities', authenticated: true, readyText: 'مدیریت کالاها' },
+  { path: '/login', label: 'login', authenticated: false, readyText: 'ورود به بازار' },
+  { path: '/register', label: 'register', authenticated: false, readyText: 'تکمیل ثبت‌نام' },
+  { path: '/i/uiux-baseline', label: 'invite-landing', authenticated: false, readyText: 'دعوت‌نامه اختصاصی' },
 ]
 
 const CURRENT_USER = {
@@ -303,6 +304,10 @@ test.describe('Non-messenger visual baseline harness', () => {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await gotoRouteWithNavigationRetry(page, route.path)
         await expect(page.locator('#app')).toBeVisible({ timeout: 10_000 })
+        await expect(page.locator('html')).toHaveAttribute('data-app-mounted', '1', { timeout: 10_000 })
+        await expect(page.locator('#boot-loader')).toBeHidden({ timeout: 10_000 })
+        await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout: 10_000 })
+        await expect(page.getByText('در حال بارگذاری', { exact: false }).first()).toBeHidden({ timeout: 10_000 })
         await page.evaluate(async () => {
           await document.fonts?.ready
         })
@@ -314,7 +319,7 @@ test.describe('Non-messenger visual baseline harness', () => {
         await expect(page).toHaveScreenshot(`${route.label}-${viewport.label}.png`, {
           animations: 'disabled',
           fullPage: true,
-          maxDiffPixelRatio: 0.02,
+          maxDiffPixelRatio: 0.005,
         })
       })
     }

@@ -3,7 +3,11 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import moment from 'moment-jalaali'
 
-import { getE2EBackendBaseUrl, runPythonInApp as runPythonInConfiguredApp } from './helpers/mutationRuntime'
+import {
+  alignE2ETradeNumberSequence,
+  getE2EBackendBaseUrl,
+  runPythonInApp as runPythonInConfiguredApp,
+} from './helpers/mutationRuntime'
 import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = getE2EBackendBaseUrl()
@@ -800,6 +804,7 @@ async function loadPublicProfileTradeHistory(root: Locator, title: string) {
 }
 
 async function executeTrade(request: APIRequestContext, accessToken: string, offerId: number, quantity: number) {
+  alignE2ETradeNumberSequence()
   const response = await request.post(`${BACKEND_BASE_URL}/api/trades/`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,

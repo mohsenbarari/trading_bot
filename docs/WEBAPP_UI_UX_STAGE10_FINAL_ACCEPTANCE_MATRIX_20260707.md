@@ -182,3 +182,39 @@ Artifacts:
 - `tmp/stage10-staging-playwright/runner-viewport-market-20260707T1654Z/`
 
 The local Codex sandbox still cannot launch Chromium directly, but the approved containerized runner completed the real staging gate. The broader role/trading e2e follow-up suite remains a required pre-production gate on a Docker-capable approved host.
+
+## Final Branch Revalidation - 2026-07-10
+
+The final `candidate/webapp-ui-ux-unification` validation was repeated after the
+real Iran/foreign staging transport, market-history, and sequence-parity fixes.
+Production was not released.
+
+Results:
+
+- Real two-server staging matrix: `4/4` drivers passed with zero request errors,
+  clean parity, clean sync health, and zero cleanup residue.
+- Isolated staging role/trading browser gate: `22/22` passed, including Tier 2
+  direct/mediated execution, customer/accountant visibility, market schedule,
+  realtime trade notifications, exports, block policy, and offer mutations.
+- Deterministic visual baseline with accessibility smoke: `26/26` passed on a
+  second compare-only run.
+- Viewport and market mutation gate: `10/10` passed across `360` through `1440`
+  pixel widths.
+- Full frontend unit suite: `127/127` files and `1101/1101` tests passed.
+- UI guard, production frontend build, `git diff --check`, and `45/45`
+  sequence/deployment surface tests passed.
+
+The first fresh visual capture exposed that no screenshot baselines were stored
+in the repository and that sparse pages could falsely compare within the old
+2% pixel tolerance while the boot loader was visible. The harness now waits for
+the app mount marker, boot-loader removal, and route-specific ready content,
+uses a 0.5% pixel tolerance, and stores the reviewed Linux Chromium baselines in
+`frontend/e2e/non-messenger-visual-baseline.spec.ts-snapshots/`.
+
+Artifacts:
+
+- `tmp/staging-two-server-full-matrix/UIUX_FINAL_FIXED_20260710T110500Z/`
+- `tmp/staging-role-trading-e2e/UIUX_FINAL_PASS_20260710T115000Z/`
+- `tmp/stage10-staging-playwright/UIUX_FINAL_20260710T120500Z/`
+- `tmp/claude/full_matrix_logs/UIUX_FINAL_FIXED_20260710T110500Z/`
+- `tmp/chatgpt/full_matrix_logs/UIUX_FINAL_FIXED_20260710T110500Z/`

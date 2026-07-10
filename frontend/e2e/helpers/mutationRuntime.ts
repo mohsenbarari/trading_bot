@@ -132,6 +132,23 @@ export function runPythonInApp<T>(script: string, helperName = 'e2e mutation hel
   return JSON.parse(lastLine) as T
 }
 
+export function alignE2ETradeNumberSequence() {
+  const containerName = getE2EAppContainerName()
+  assertMutatingRuntime(containerName, getE2EBackendBaseUrl())
+
+  const stdout = execFileSync(
+    'docker',
+    ['exec', containerName, 'python', 'scripts/align_trade_number_sequence.py'],
+    { encoding: 'utf8' },
+  ).trim()
+
+  if (!/^trade-number sequence (realigned|verified):/.test(stdout)) {
+    throw new Error(`Unexpected trade-number alignment output: ${stdout || '<empty>'}`)
+  }
+
+  return stdout
+}
+
 export function runRedisCli(args: string[], helperName = 'e2e Redis helper') {
   const redisContainerName = getE2ERedisContainerName()
   assertMutatingRuntime(getE2EAppContainerName(), getE2EBackendBaseUrl())

@@ -2,7 +2,11 @@
 
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
-import { getE2EBackendBaseUrl, runPythonInApp as runPythonInConfiguredApp } from './helpers/mutationRuntime'
+import {
+  alignE2ETradeNumberSequence,
+  getE2EBackendBaseUrl,
+  runPythonInApp as runPythonInConfiguredApp,
+} from './helpers/mutationRuntime'
 import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = getE2EBackendBaseUrl()
@@ -699,15 +703,17 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
 }
 
 async function executeTradeFromCard(page: Page, offerCard: Locator, quantityLabel: string) {
+  alignE2ETradeNumberSequence()
   const tradeButton = offerCard.locator('[data-test="trade-action-button"]').filter({ hasText: quantityLabel }).first()
   await expect(tradeButton).toBeVisible({ timeout: 30000 })
   await tradeButton.evaluate((node: HTMLElement) => node.click())
   await expect(tradeButton).toHaveAttribute('data-state', 'pending')
-  const tradeRequest = page.waitForRequest((request) =>
-    request.url().includes('/api/trades/') && request.method() === 'POST',
+  const tradeResponse = page.waitForResponse((response) =>
+    response.url().includes('/api/trades/') && response.request().method() === 'POST',
   )
   await tradeButton.evaluate((node: HTMLElement) => node.click())
-  await tradeRequest
+  const response = await tradeResponse
+  expect(response.status(), await response.text()).toBe(201)
 }
 
 function authHeaders(accessToken: string) {
