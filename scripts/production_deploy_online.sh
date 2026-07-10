@@ -12,7 +12,7 @@ MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
-SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts"
+SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_notification_preferences, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts, telegram_notification_outbox"
 IRAN_SHARED_RESET_CONFIRM_TEXT="RESET_IRAN_SHARED_DATA"
 LOCAL_HOST_ARCH=""
 LOCAL_DPKG_ARCH=""
@@ -2019,7 +2019,7 @@ mark_foreign_preseed_backlog_synced() {
 UPDATE change_log
 SET synced = true
 WHERE synced = false
-  AND table_name IN ('users', 'accountant_relations', 'customer_relations', 'telegram_link_tokens', 'invitations', 'admin_market_messages', 'admin_broadcast_messages', 'notifications', 'user_blocks', 'commodities', 'commodity_aliases', 'trading_settings', 'market_schedule_overrides', 'market_runtime_state', 'offers', 'offer_publication_states', 'offer_requests', 'trades', 'trade_delivery_receipts', 'telegram_admin_broadcasts', 'telegram_admin_broadcast_receipts')
+  AND table_name IN ('users', 'accountant_relations', 'customer_relations', 'telegram_link_tokens', 'invitations', 'admin_market_messages', 'admin_broadcast_messages', 'notifications', 'user_notification_preferences', 'user_blocks', 'commodities', 'commodity_aliases', 'trading_settings', 'market_schedule_overrides', 'market_runtime_state', 'offers', 'offer_publication_states', 'offer_requests', 'trades', 'trade_delivery_receipts', 'telegram_admin_broadcasts', 'telegram_admin_broadcast_receipts', 'telegram_notification_outbox')
   AND created_at <= '$cutoff'::timestamptz
 RETURNING table_name;"
     log "Marking foreign pre-seed shared backlog as synced up to $cutoff"

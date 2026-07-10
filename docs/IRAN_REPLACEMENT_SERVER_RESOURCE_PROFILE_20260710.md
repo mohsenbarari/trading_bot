@@ -44,6 +44,12 @@ The standalone `bootstrap-iran` command only installs host prerequisites. Sync
 sampler installation remains after `sync-project` in the full release because a
 fresh host does not yet contain the sampler script.
 
+Shared-data recovery is registry-guarded. The reset/backlog list must equal all
+current `SyncPolicy.SYNC` tables, and fresh-host inspection treats every shared
+table as blocking unless it is explicitly allowed to contain migration-created
+bootstrap rows. This prevents a newly synced table from being silently omitted
+from replacement-host recovery.
+
 Before production startup:
 
 1. Render the Iran runtime env and assert every value above.

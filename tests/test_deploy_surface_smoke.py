@@ -202,6 +202,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertNotIn('up -d --wait --wait-timeout 180"', legacy_script)
 
     def test_production_preseed_backlog_covers_all_shared_sync_tables(self):
+        from core.sync_registry import SyncPolicy, sync_registry_entries
+
         production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
         shared_match = re.search(r'^SHARED_SYNC_TABLES_SQL="([^"]+)"', production_script, re.MULTILINE)
         self.assertIsNotNone(shared_match)
@@ -214,8 +216,14 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         mark_function = production_script.split('mark_foreign_preseed_backlog_synced() {', 1)[1]
         mark_function = mark_function.split('\n}', 1)[0]
         preseed_tables = set(re.findall(r"'([a-z_]+)'", mark_function))
+        registry_tables = {
+            table_name
+            for table_name, entry in sync_registry_entries().items()
+            if entry.policy == SyncPolicy.SYNC
+        }
 
         self.assertEqual(preseed_tables, shared_tables)
+        self.assertEqual(shared_tables, registry_tables)
 
     def test_production_release_validates_runtime_identity_files(self):
         production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')

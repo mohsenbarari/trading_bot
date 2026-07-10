@@ -1,6 +1,12 @@
 import unittest
 
-from scripts.inspect_shared_sync_state import SIGNAL_QUERIES, classify_counts
+from core.sync_registry import SyncPolicy, sync_registry_entries
+from scripts.inspect_shared_sync_state import (
+    FRESH_BOOTSTRAP_SHARED_TABLES,
+    SHARED_SYNC_TABLES,
+    SIGNAL_QUERIES,
+    classify_counts,
+)
 
 
 def empty_signal_counts() -> dict[str, int]:
@@ -8,6 +14,24 @@ def empty_signal_counts() -> dict[str, int]:
 
 
 class SharedSyncStateInspectorTests(unittest.TestCase):
+    def test_every_non_bootstrap_sync_table_is_a_freshness_signal(self):
+        registry_tables = {
+            table_name
+            for table_name, entry in sync_registry_entries().items()
+            if entry.policy == SyncPolicy.SYNC
+        }
+
+        self.assertEqual(set(SHARED_SYNC_TABLES), registry_tables)
+        self.assertEqual(
+            set(SIGNAL_QUERIES) - {
+                "non_system_non_mandatory_chats",
+                "non_system_non_mandatory_chat_members",
+            },
+            registry_tables - FRESH_BOOTSTRAP_SHARED_TABLES,
+        )
+        self.assertIn("user_notification_preferences", SIGNAL_QUERIES)
+        self.assertIn("telegram_notification_outbox", SIGNAL_QUERIES)
+
     def test_empty_signal_tables_are_fresh(self):
         payload = classify_counts(empty_signal_counts())
 

@@ -26,19 +26,24 @@ from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.db import AsyncSessionLocal
 
 
+FRESH_BOOTSTRAP_SHARED_TABLES = {
+    "commodities",
+    "commodity_aliases",
+    "market_runtime_state",
+}
+
+SHARED_SYNC_TABLES = tuple(
+    table
+    for table, _order in sorted(TABLE_ORDER.items(), key=lambda item: item[1])
+    if (entry := get_sync_registry_entry(table)) is not None and entry.policy == SyncPolicy.SYNC
+)
+
 SIGNAL_QUERIES = {
-    "users": "SELECT COUNT(*) FROM users",
-    "accountant_relations": "SELECT COUNT(*) FROM accountant_relations",
-    "customer_relations": "SELECT COUNT(*) FROM customer_relations",
-    "invitations": "SELECT COUNT(*) FROM invitations",
-    "admin_market_messages": "SELECT COUNT(*) FROM admin_market_messages",
-    "admin_broadcast_messages": "SELECT COUNT(*) FROM admin_broadcast_messages",
-    "notifications": "SELECT COUNT(*) FROM notifications",
-    "user_blocks": "SELECT COUNT(*) FROM user_blocks",
-    "trading_settings": "SELECT COUNT(*) FROM trading_settings",
-    "market_schedule_overrides": "SELECT COUNT(*) FROM market_schedule_overrides",
-    "offers": "SELECT COUNT(*) FROM offers",
-    "trades": "SELECT COUNT(*) FROM trades",
+    table: f'SELECT COUNT(*) FROM "{table}"'
+    for table in SHARED_SYNC_TABLES
+    if table not in FRESH_BOOTSTRAP_SHARED_TABLES
+}
+SIGNAL_QUERIES.update({
     "non_system_non_mandatory_chats": """
         SELECT COUNT(*)
         FROM chats
@@ -52,7 +57,7 @@ SIGNAL_QUERIES = {
         WHERE COALESCE(c.is_system, false) = false
           AND COALESCE(c.is_mandatory, false) = false
     """,
-}
+})
 
 BASELINE_QUERIES = {
     "all_chats": "SELECT COUNT(*) FROM chats",
@@ -110,11 +115,7 @@ async def inspect_state() -> dict[str, object]:
         **classification,
         "signals": signals,
         "baseline": baseline,
-        "shared_tables": [
-            table
-            for table, _order in sorted(TABLE_ORDER.items(), key=lambda item: item[1])
-            if (entry := get_sync_registry_entry(table)) is not None and entry.policy == SyncPolicy.SYNC
-        ],
+        "shared_tables": list(SHARED_SYNC_TABLES),
     }
 
 
