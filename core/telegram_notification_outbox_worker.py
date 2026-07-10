@@ -156,15 +156,11 @@ async def telegram_notification_outbox_delivery_loop() -> None:
             except Exception as exc:
                 _loop_errors.log(
                     logger,
-                    "Telegram notification outbox worker cycle failed",
-                    extra={
-                        "event": "job.cycle.failed",
-                        "job_name": JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
-                        "run_id": run_id,
-                        "iteration": iteration,
-                        "duration_ms": duration_ms_since(start_time),
-                        "error_type": type(exc).__name__,
-                    },
-                    exc_info=True,
+                    "Error in Telegram notification outbox worker loop: %s",
+                    exc,
+                    job_name=JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
+                    run_id=run_id,
+                    iteration=iteration,
+                    duration_ms=duration_ms_since(start_time),
                 )
         await asyncio.sleep(_worker_interval_seconds())

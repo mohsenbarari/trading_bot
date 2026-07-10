@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -19,6 +20,22 @@ class FakeSessionContext:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+class StrictLoopErrorLogger:
+    def __init__(self):
+        self.calls = []
+
+    def log(self, logger, message, exc, metric_recorded=False, **extra):
+        self.calls.append(
+            {
+                "logger": logger,
+                "message": message,
+                "exc": exc,
+                "metric_recorded": metric_recorded,
+                "extra": extra,
+            }
+        )
 
 
 class TelegramNotificationOutboxWorkerTests(unittest.IsolatedAsyncioTestCase):
@@ -66,6 +83,65 @@ class TelegramNotificationOutboxWorkerTests(unittest.IsolatedAsyncioTestCase):
             "telegram_notification_outbox.delivery_alert",
         )
         self.assertEqual(warning_mock.call_args.kwargs["extra"]["outbox_id"], 44)
+
+    async def test_loop_continues_after_cycle_failure(self):
+        cycle_error = RuntimeError("database unavailable")
+        loop_errors = StrictLoopErrorLogger()
+
+        with patch(
+            "core.telegram_notification_outbox_worker.assert_background_job_authority"
+        ) as authority_mock, patch(
+            "core.telegram_notification_outbox_worker.run_telegram_notification_outbox_delivery_cycle",
+            new=AsyncMock(side_effect=[cycle_error, asyncio.CancelledError()]),
+        ) as cycle_mock, patch(
+            "core.telegram_notification_outbox_worker.asyncio.sleep",
+            new=AsyncMock(),
+        ) as sleep_mock, patch(
+            "core.telegram_notification_outbox_worker._loop_errors",
+            new=loop_errors,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.telegram_notification_outbox_delivery_loop()
+
+        authority_mock.assert_called_once_with("telegram_notification_outbox_delivery")
+        self.assertEqual(cycle_mock.await_count, 2)
+        sleep_mock.assert_awaited_once_with(worker._worker_interval_seconds())
+        self.assertEqual(len(loop_errors.calls), 1)
+        failure_call = loop_errors.calls[0]
+        self.assertIs(failure_call["exc"], cycle_error)
+        self.assertEqual(
+            failure_call["message"],
+            "Error in Telegram notification outbox worker loop: %s",
+        )
+        self.assertEqual(
+            failure_call["extra"]["job_name"],
+            "telegram_notification_outbox_delivery",
+        )
+        self.assertEqual(failure_call["extra"]["iteration"], 1)
+        self.assertIn("run_id", failure_call["extra"])
+        self.assertIn("duration_ms", failure_call["extra"])
+
+    async def test_loop_propagates_cancellation_without_logging_failure(self):
+        loop_errors = StrictLoopErrorLogger()
+
+        with patch(
+            "core.telegram_notification_outbox_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_notification_outbox_worker.run_telegram_notification_outbox_delivery_cycle",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ) as cycle_mock, patch(
+            "core.telegram_notification_outbox_worker.asyncio.sleep",
+            new=AsyncMock(),
+        ) as sleep_mock, patch(
+            "core.telegram_notification_outbox_worker._loop_errors",
+            new=loop_errors,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.telegram_notification_outbox_delivery_loop()
+
+        cycle_mock.assert_awaited_once()
+        sleep_mock.assert_not_awaited()
+        self.assertEqual(loop_errors.calls, [])
 
 
 if __name__ == "__main__":
