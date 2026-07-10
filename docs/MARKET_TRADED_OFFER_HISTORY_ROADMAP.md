@@ -2,7 +2,7 @@
 
 ## Goal
 
-Show traded offers in the two-day read-only market history without changing
+Show every market-visible terminal offer in the two-day read-only market history without changing
 active-market behavior, fair-price validation, Web Push targeting, trade
 execution, offer expiry, or sync write paths except for the explicit
 cross-server read-model/tagging contract below.
@@ -44,7 +44,7 @@ making Iran call Telegram or by making foreign serve the WebApp.
 
 | Display state | Database source | Meaning |
 |---|---|---|
-| `expired` | `offers.status = expired` and no completed trade quantity | Offer died naturally by time limit and no quantity traded. |
+| `expired` | `offers.status in (expired, cancelled)`, no completed trade quantity, and no technical publication-failure reason | A previously visible offer left the active market without a completed trade. |
 | `traded` | `offers.status = completed` | Offer was fully traded. |
 | `traded_partial_expired` | `offers.status = expired` plus completed trade quantity > 0 | A retail offer was partially traded, then expired. |
 
@@ -66,9 +66,11 @@ Required synced inputs:
   with completed/partial state.
 - `offers.lot_sizes`: required so peer surfaces remove stale trade buttons after
   partial trades.
-- `offers.expire_reason`: pure expired history rows must be `time_limit`; an
-  expired offer with completed trade quantity is included as traded history even
-  if the remaining quantity was manually expired.
+- `offers.expire_reason`: user-visible terminal reasons such as `manual`,
+  `cancel_all`, `time_limit`, `market_closed`, and `republished` remain visible;
+  `telegram_send_failed` is excluded because that row never became a published
+  market offer. An expired offer with completed trade quantity is classified as
+  traded history regardless of the terminal reason.
 - `offers.expired_at`, `offers.updated_at`, and `offers.created_at`: required
   for the history window and stable sorting.
 - `trades.offer_id`, `trades.status`, `trades.quantity`, `trades.created_at`,
@@ -83,8 +85,8 @@ Canonical derivation:
   greater than zero, and completed trade quantity less than original offer
   quantity. This includes the product case where the owner manually expires the
   remaining quantity after a partial trade.
-- `expired`: `offers.status = expired`, `expire_reason = time_limit`, and no
-  completed trade quantity.
+- `expired`: a market-visible `offers.status in (expired, cancelled)` row with
+  no completed trade quantity. Pure manual expiry is included.
 - API representation may keep `history_state = traded` for
   `traded_partial_expired`, but it must also set `is_partially_traded = true`
   and include the exact `traded_quantity`.
@@ -178,13 +180,13 @@ Query rules:
 
 - Include only the last 48 hours.
 - Include `offers.status = completed`.
-- Include `offers.status = expired` with `expire_reason = time_limit`.
-- Also include `offers.status = expired` with completed trade quantity greater
-  than zero, even when `expire_reason` is `manual` or another non-time-limit
-  terminal reason.
-- For expired offers, include completed trade aggregate so partially traded
-  retail offers can render as traded history while pure manual-expired rows with
-  no completed trade stay hidden from market history.
+- Include every market-visible `offers.status in (expired, cancelled)` row,
+  including pure manual expiry with no completed trade.
+- Exclude `expire_reason = telegram_send_failed`, because failed initial
+  Telegram publication is a technical record rather than a previously visible
+  market offer.
+- For terminal offers, include completed trade aggregate so partially traded
+  retail offers still render as traded history instead of expired history.
 - Sort by `history_event_at DESC`, where completed offers use latest completed
   trade time and expired offers use `expired_at`.
 - Keep pagination with `skip` and `limit`.
@@ -565,7 +567,7 @@ Implementation notes:
 
 ## Post-TH8 Product Contract Correction - Partial Manual Expiry
 
-Status: Completed on 2026-06-19 in `candidate/market-traded-history`.
+Status: Superseded on 2026-07-10 by the complete two-day history contract below.
 
 Owner-confirmed product rule:
 
@@ -583,3 +585,29 @@ Implementation notes:
 - Frontend did not require a change because `OffersList.vue` already renders
   expired rows with `history_state = traded`, `is_partially_traded = true`, and
   `traded_quantity > 0` as `معامله‌شده · {traded_quantity} عدد`.
+
+## 2026-07-10 Product Contract Correction - Complete Two-Day History
+
+Status: Implemented on `candidate/webapp-ui-ux-unification`; staging validation pending.
+
+The owner superseded the earlier rule that hid pure manual expiry. The market
+must retain every previously visible terminal offer for 48 hours, regardless of
+whether the terminal action originated from WebApp/Iran or Bot/foreign.
+
+Implementation contract:
+
+- Completed offers and terminal offers with completed quantity use the traded
+  history stamp.
+- Pure manual expiry, cancel-all, lifetime expiry, market-close expiry,
+  republish replacement, recovery finalization, admin expiry, and user-deletion
+  expiry use the expired stamp when they have no completed quantity.
+- Legacy terminal rows with no `expire_reason` remain visible.
+- `telegram_send_failed` remains hidden because the offer failed before initial
+  Telegram publication and is not a previously published market row.
+- `CANCELLED` legacy rows are treated as expired read-only history.
+- The active offer endpoint, trade guards, expiry commands, sync payloads,
+  Telegram side effects, customer/accountant access guards, and 48-hour window
+  remain unchanged.
+- Regression coverage must prove pure manual expiry is returned by the backend,
+  rendered read-only by `MarketView`/`OffersList`, and refreshed through the
+  existing terminal realtime events.

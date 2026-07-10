@@ -433,7 +433,7 @@ describe('MarketView.vue', () => {
             history_state: 'expired',
             is_read_only: true,
             is_own_offer: true,
-            expire_reason: 'time_limit',
+            expire_reason: 'manual',
             offer_type: 'buy',
             commodity_name: 'سکه',
             quantity: 10,

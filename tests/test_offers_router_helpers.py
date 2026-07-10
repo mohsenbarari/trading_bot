@@ -521,7 +521,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
         self.assertEqual(hidden_db.statements, [])
 
-    async def test_market_offer_history_query_covers_completed_time_limit_and_traded_expired(self):
+    async def test_market_offer_history_query_covers_all_visible_terminal_offers(self):
         current_user = SimpleNamespace(id=8)
         history_db = CapturingDB(FakeRowExecuteResult([]))
 
@@ -546,10 +546,11 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trades.offer_id IS NOT NULL", history_sql)
         self.assertIn("trades.status = 'COMPLETED'", history_sql)
         self.assertIn("offers.status = 'COMPLETED'", history_sql)
-        self.assertIn("offers.status = 'EXPIRED'", history_sql)
+        self.assertIn("offers.status IN ('EXPIRED', 'CANCELLED')", history_sql)
         self.assertIn("offers.status = 'ACTIVE'", history_sql)
-        self.assertIn("offers.expire_reason = 'time_limit'", history_sql)
-        self.assertIn("coalesce(anon_1.traded_quantity, 0) > 0", history_sql)
+        self.assertIn("offers.expire_reason IS NULL", history_sql)
+        self.assertIn("offers.expire_reason != 'telegram_send_failed'", history_sql)
+        self.assertNotIn("offers.expire_reason = 'time_limit'", history_sql)
         self.assertIn("coalesce(anon_1.traded_quantity, 0) = 0", history_sql)
         self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", history_sql)
         self.assertIn("offers.created_at <=", history_sql)
@@ -605,8 +606,17 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         pure_expired_offer = make_offer_model(
             id=24,
             status=OfferStatus.EXPIRED,
+            expire_reason="manual",
             quantity=15,
             remaining_quantity=15,
+            is_wholesale=True,
+        )
+        cancelled_offer = make_offer_model(
+            id=26,
+            status=OfferStatus.CANCELLED,
+            expire_reason=None,
+            quantity=5,
+            remaining_quantity=5,
             is_wholesale=True,
         )
         active_stale_offer = make_offer_model(
@@ -623,6 +633,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                     (retail_completed_offer, 20, retail_completed_event_at),
                     (partial_expired_offer, 12, partial_event_at),
                     (pure_expired_offer, 0, pure_expired_event_at),
+                    (cancelled_offer, 0, pure_expired_event_at),
                     (active_stale_offer, 0, active_stale_event_at),
                 ]
             )
@@ -632,6 +643,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             make_offer_response(id=22, status="completed", quantity=20, remaining_quantity=0, is_wholesale=False),
             make_offer_response(id=23, status="expired", quantity=20, remaining_quantity=8, is_wholesale=False),
             make_offer_response(id=24, status="expired", quantity=15, remaining_quantity=15),
+            make_offer_response(id=26, status="cancelled", quantity=5, remaining_quantity=5),
             make_offer_response(id=25, status="active", quantity=40, remaining_quantity=40),
         ]
 
@@ -656,7 +668,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                 current_user=current_user,
             )
 
-        self.assertEqual(len(result), 5)
+        self.assertEqual(len(result), 6)
         self.assertEqual(result[0].history_state, "traded")
         self.assertEqual(result[0].history_label, "معامله‌شده")
         self.assertEqual(result[0].traded_quantity, 10)
@@ -682,8 +694,13 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[4].history_label, "منقضی")
         self.assertEqual(result[4].traded_quantity, 0)
         self.assertFalse(result[4].is_partially_traded)
-        self.assertTrue(result[4].is_read_only)
-        self.assertEqual(result[4].history_event_at, "jalali:2026-01-02T08:00:00")
+        self.assertEqual(result[4].history_event_at, "jalali:2026-01-02T08:15:00")
+        self.assertEqual(result[5].history_state, "expired")
+        self.assertEqual(result[5].history_label, "منقضی")
+        self.assertEqual(result[5].traded_quantity, 0)
+        self.assertFalse(result[5].is_partially_traded)
+        self.assertTrue(result[5].is_read_only)
+        self.assertEqual(result[5].history_event_at, "jalali:2026-01-02T08:00:00")
         serialize_mock.assert_awaited_once()
         self.assertEqual(serialize_mock.call_args.kwargs["viewer_user_id"], 8)
         self.assertFalse(serialize_mock.call_args.kwargs["include_owner_identity"])

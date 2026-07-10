@@ -120,14 +120,14 @@ describe('OffersList.vue', () => {
     expect(wrapper.text()).toContain('سطح نامشخص')
   })
 
-  it('renders time-limit expired offers as read-only history cards', async () => {
+  it('renders manually expired offers as read-only history cards', async () => {
     const wrapper = await mountOffersList({
       offers: [
         {
           id: 4,
           user_id: 12,
           status: 'expired',
-          expire_reason: 'time_limit',
+          expire_reason: 'manual',
           offer_type: 'sell',
           commodity_name: 'ربع سکه',
           quantity: 20,

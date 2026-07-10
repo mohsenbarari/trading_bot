@@ -1399,19 +1399,21 @@ async def get_market_offer_history(
         (Offer.status == OfferStatus.ACTIVE, active_stale_event_at_expr),
         else_=expired_at_expr,
     )
+    # Initial Telegram publication failures never became visible market offers.
+    market_visible_expired_condition = and_(
+        Offer.status.in_([OfferStatus.EXPIRED, OfferStatus.CANCELLED]),
+        or_(
+            Offer.expire_reason.is_(None),
+            Offer.expire_reason != OfferExpiryReason.TELEGRAM_SEND_FAILED,
+        ),
+        expired_at_expr >= cutoff_time,
+    )
     history_conditions = [
         and_(
             Offer.status == OfferStatus.COMPLETED,
             completed_event_at_expr >= cutoff_time,
         ),
-        and_(
-            Offer.status == OfferStatus.EXPIRED,
-            or_(
-                Offer.expire_reason == "time_limit",
-                traded_quantity_expr > 0,
-            ),
-            expired_at_expr >= cutoff_time,
-        ),
+        market_visible_expired_condition,
     ]
     if expiry_minutes > 0:
         stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
