@@ -827,44 +827,6 @@ async function cancelOwnOffer(offerId: number) {
   align-items: center;
 }
 
-.customer-context-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 5px;
-  flex-wrap: wrap;
-}
-
-.customer-context-badge,
-.customer-context-tier {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 10.5px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.customer-context-badge {
-  color: #92400e;
-  background: rgba(251, 191, 36, 0.2);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-}
-
-.customer-context-name {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--ds-text-primary);
-}
-
-.customer-context-tier {
-  color: #1d4ed8;
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.22);
-}
-
 .commodity {
   font-weight: 700;
   font-size: 13px;

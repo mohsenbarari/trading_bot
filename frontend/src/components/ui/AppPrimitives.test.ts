@@ -149,6 +149,8 @@ describe('ui primitives', () => {
       props: { managementName: 'مشتری تست', tierLabel: 'سطح 1' },
     })
     expect(customerContext.attributes('data-test')).toBe('customer-context-row')
+    expect(customerContext.classes()).toContain('customer-context-row')
+    expect(customerContext.get('[data-test="customer-context-tier"]').classes()).toContain('customer-context-tier')
     expect(customerContext.text()).toContain('مشتری تست')
     expect(customerContext.text()).toContain('سطح 1')
 
