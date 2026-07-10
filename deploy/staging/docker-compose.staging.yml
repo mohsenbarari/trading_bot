@@ -173,10 +173,14 @@ services:
     image: *app_image
     logging: *default_logging
     build: *app_build
-    command: ["python", "manage.py"]
+    command:
+      - sh
+      - -c
+      - python manage.py && python scripts/align_trade_number_sequence.py
     environment:
       TZ: UTC
       ENVIRONMENT: staging
+      SERVER_MODE: ${STAGING_MIGRATION_SERVER_MODE:-iran}
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}

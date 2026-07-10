@@ -862,8 +862,13 @@ compose() {
     init_compose_cmd
     ensure_env
     assert_staging_frontend_dist_isolated
+    local migration_server_mode="iran"
+    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        migration_server_mode="foreign"
+    fi
     STAGING_APP_PORT="$STAGING_APP_PORT" \
     STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT" \
+    STAGING_MIGRATION_SERVER_MODE="$migration_server_mode" \
     STAGING_FRONTEND_DOCKER_DIST_DIR="$(staging_frontend_dist_relpath)" \
     STAGING_RELEASE_SHA="$(staging_release_sha)" \
     STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL" \
