@@ -2272,7 +2272,7 @@ main() {
         check-local) check_local ;;
         release) run_release ;;
         deploy-foreign) check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
-        bootstrap-iran) check_local; bootstrap_iran; install_sync_sampler_remote; verify_sync_sampler_remote ;;
+        bootstrap-iran) check_local; bootstrap_iran ;;
         configure-nginx) check_local; configure_nginx ;;
         issue-cert) check_local; issue_cert ;;
         build-release) check_local; build_release ;;

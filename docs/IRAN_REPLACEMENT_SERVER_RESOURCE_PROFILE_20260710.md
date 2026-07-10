@@ -40,6 +40,9 @@ The replacement host runs Ubuntu 26.04 (`resolute`). Its archive provides
 `docker-compose-v2` and does not provide the legacy `docker-compose` package.
 The bootstrap must select the available package after refreshing APT metadata;
 it must not hard-code the legacy package name.
+The standalone `bootstrap-iran` command only installs host prerequisites. Sync
+sampler installation remains after `sync-project` in the full release because a
+fresh host does not yet contain the sampler script.
 
 Before production startup:
 

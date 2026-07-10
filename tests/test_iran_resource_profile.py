@@ -22,6 +22,18 @@ class IranResourceProfileTests(unittest.TestCase):
         self.assertIn('apt-cache show "\\$candidate"', release)
         self.assertIn('install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES "\\$compose_package"', release)
 
+    def test_standalone_bootstrap_does_not_require_synced_project_payload(self):
+        release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        command = release.split("bootstrap-iran)", 1)[1].split(";;", 1)[0]
+        self.assertIn("check_local; bootstrap_iran", command)
+        self.assertNotIn("install_sync_sampler_remote", command)
+        self.assertNotIn("verify_sync_sampler_remote", command)
+
+        full_release = release.split("run_release() {", 1)[1].split("\n}", 1)[0]
+        self.assertLess(full_release.index("sync_project"), full_release.index("install_sync_sampler_remote"))
+        self.assertLess(full_release.index("install_sync_sampler_remote"), full_release.index("deploy_iran"))
+
     def test_renderer_defaults_fit_replacement_host_budget(self):
         performance = ROLE_PERFORMANCE_DEFAULTS["iran"]
         postgres = ROLE_POSTGRES_TUNING_DEFAULTS["iran"]
