@@ -48,7 +48,7 @@ EXECUTION_CONFIRM_ENV = "STAGING_TWO_SERVER_FULL_MATRIX_CONFIRM"
 EXECUTION_CONFIRM_VALUE = "execute-staging-two-server-full-matrix"
 DEFAULT_IRAN_SSH_HOST = "root@65.109.220.59"
 DEFAULT_IRAN_SSH_PORT = "37067"
-DEFAULT_IRAN_APP_CONTAINER = "trading_bot_staging_iran_app_1"
+DEFAULT_IRAN_APP_CONTAINER = "trading_bot_staging_iran-app-1"
 DEFAULT_FOREIGN_APP_CONTAINER = "trading_bot_staging-foreign_app-1"
 DEFAULT_IRAN_WORKDIR = "/srv/trading-bot/staging-iran"
 LOCAL_STAGING_PROJECT_NAME = "trading_bot_staging"
@@ -536,7 +536,7 @@ def storage_identity_python() -> str:
         "from core.db import AsyncSessionLocal\n"
         "async def main():\n"
         "    async with AsyncSessionLocal() as db:\n"
-        "        row=(await db.execute(text(\"select coalesce(inet_server_addr()::text, 'local') as addr, inet_server_port() as port, current_database() as db, current_user as usr\"))).mappings().one()\n"
+        "        row=(await db.execute(text(\"select pcs.system_identifier::text as cluster_id, current_database() as db from pg_control_system() as pcs\"))).mappings().one()\n"
         "    redis_run_id=''\n"
         "    redis_errors=0\n"
         "    try:\n"
@@ -548,7 +548,7 @@ def storage_identity_python() -> str:
         "            await client.aclose()\n"
         "    except Exception:\n"
         "        redis_errors=1\n"
-        "    db_material=f\"{row['addr']}:{row['port']}:{row['db']}:{row['usr']}\"\n"
+        "    db_material=f\"{row['cluster_id']}:{row['db']}\"\n"
         "    redis_material=redis_run_id or 'missing'\n"
         "    print(json.dumps({"
         "'server_mode': settings.server_mode, "
@@ -774,10 +774,13 @@ def remote_load_runner_command(args: argparse.Namespace, service: str, remote_ar
     foreign_peer_url = args.foreign_base_url.rstrip("/") + "/foreign-sync"
     inner = (
         f"mkdir -p {shlex.quote(remote_artifact_dir)} && "
+        "if docker compose version >/dev/null 2>&1; then compose=(docker compose); "
+        "elif command -v docker-compose >/dev/null 2>&1; then compose=(docker-compose); "
+        "else echo 'Docker Compose is unavailable on Iran staging.' >&2; exit 1; fi; "
         f"STAGING_RELEASE_SHA={shlex.quote(expected_release_sha(args) or '')} "
         "STAGING_APP_PORT=8100 "
         "STAGING_FRONTEND_DOCKER_DIST_DIR=mini_app_dist_staging "
-        "docker-compose "
+        '"${compose[@]}" '
         f"--env-file {shlex.quote(REMOTE_STAGING_ENV_FILE)} "
         f"-p {shlex.quote(REMOTE_STAGING_PROJECT_NAME)} "
         f"-f {shlex.quote(REMOTE_STAGING_COMPOSE_FILE)} "
@@ -1056,6 +1059,7 @@ def build_run_metadata(args: argparse.Namespace, manifest: dict[str, Any], *, st
         "run_id": args.run_id,
         "status": status,
         "branch": run_git_value(["branch", "--show-current"]),
+        "expected_branch": args.expected_branch,
         "commit": run_git_value(["rev-parse", "HEAD"]),
         "expected_release_sha": expected_release_sha(args),
         "iran_base_url": args.iran_base_url,
@@ -1172,9 +1176,9 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
     checks.append(
         CheckResult(
             "git_branch",
-            "passed" if current_branch == EXPECTED_BRANCH else "failed",
-            "branch matches expected candidate" if current_branch == EXPECTED_BRANCH else "wrong branch",
-            payload={"current_branch": current_branch, "expected_branch": EXPECTED_BRANCH, "commit": current_commit},
+            "passed" if current_branch == args.expected_branch else "failed",
+            "branch matches expected candidate" if current_branch == args.expected_branch else "wrong branch",
+            payload={"current_branch": current_branch, "expected_branch": args.expected_branch, "commit": current_commit},
         )
     )
     checks.append(
@@ -1453,7 +1457,7 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
         return payload
     peer_urls = {
         "iran": args.iran_base_url.rstrip("/") + f"/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
-        "foreign": args.foreign_base_url.rstrip("/") + f"/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
+        "foreign": args.foreign_base_url.rstrip("/") + f"/foreign-sync/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
     }
     failures = []
     for peer, url in peer_urls.items():
@@ -1498,9 +1502,13 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
         )
         payload["comparison"] = comparison
         payload["status"] = "passed" if comparison.get("status") in {"ok", "non_business_difference"} else "failed"
-        for peer, base_url in (("iran", args.iran_base_url), ("foreign", args.foreign_base_url)):
+        status_urls = {
+            "iran": args.iran_base_url.rstrip("/") + "/api/sync/parity/status",
+            "foreign": args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/parity/status",
+        }
+        for peer, status_url in status_urls.items():
             record_status, record_payload, record_raw = fetch_observability_json(
-                base_url.rstrip("/") + "/api/sync/parity/status",
+                status_url,
                 args.observability_api_key,
                 basic_auth=auth,
                 method="POST",
@@ -2509,6 +2517,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--basic-auth-user", default=None)
     parser.add_argument("--basic-auth-password", default=None)
     parser.add_argument("--observability-api-key", default=os.getenv("STAGING_OBSERVABILITY_API_KEY"))
+    parser.add_argument("--expected-branch", default=os.getenv("STAGING_EXPECTED_BRANCH", EXPECTED_BRANCH))
     parser.add_argument("--expected-release-sha", default=os.getenv("STAGING_EXPECTED_RELEASE_SHA"))
     parser.add_argument("--iran-ssh-host", default=os.getenv("STAGING_IRAN_SSH_HOST", DEFAULT_IRAN_SSH_HOST))
     parser.add_argument("--iran-ssh-port", default=os.getenv("STAGING_IRAN_SSH_PORT", DEFAULT_IRAN_SSH_PORT))

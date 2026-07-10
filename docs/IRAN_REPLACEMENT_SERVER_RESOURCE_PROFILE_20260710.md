@@ -133,6 +133,39 @@ the existing local-plus-Iran behavior. Recovery is not complete until the Iran
 timer is enabled and active, a manual service run exits successfully, and the
 official healthcheck passes.
 
+## Isolated Staging Reconstruction
+
+The replacement host also runs Iran staging from
+`/srv/trading-bot/staging-iran`, never from the production checkout. Its
+Compose project is `trading_bot_staging_iran`, its API binds only to
+`127.0.0.1:8100`, and its PostgreSQL, Redis, uploads, and audit volumes are
+project-scoped. `staging.gold-trade.ir` has a dedicated Let's Encrypt
+certificate, Basic Auth, frontend directory, and Nginx server block. The
+production `coin.gold-trade.ir` block remains separate.
+
+Iran staging must not carry Telegram credentials. `BOT_TOKEN` and channel
+metadata are absent/empty, and only the Iran `app` plus Iran `sync_worker` run
+there. The foreign staging project remains `trading_bot_staging` and runs the
+dedicated staging bot, `foreign_app`, and `foreign_sync_worker`. Both peers use
+TLS URLs and the foreign receiver prefix `/foreign-sync`.
+
+A stale foreign staging image initially advertised the new `RELEASE_SHA` while
+still carrying the old sync registry. This correctly triggered
+`registry_fingerprint_mismatch`. Rebuilding the image from the selected commit
+and force-recreating all foreign staging services restored protocol parity.
+Future validation must inspect runtime identity and registry compatibility; an
+environment-provided release label alone is not proof of image contents.
+
+The final reconstruction gate requires zero backlog and retry queues on both
+sides plus a 23-table deep parity result with zero business, critical,
+incomplete, truncated, duplicate, local-only, and volatile differences.
+The matrix preflight proves storage isolation with PostgreSQL's physical cluster
+identifier and Redis run identifiers; logical container addresses and database
+names are not sufficient because separate Compose hosts can legitimately reuse
+them. Foreign parity evidence must be collected and recorded through the
+`/foreign-sync/api/sync/parity/*` receiver surface, while Iran uses
+`/api/sync/parity/*`.
+
 This profile changes no business logic, data model, sync contract, or Telegram
 placement policy except for the reference-safe recovery/sync payload contract
 documented above.
