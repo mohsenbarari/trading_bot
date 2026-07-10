@@ -81,7 +81,10 @@ VOLATILE_FIELDS_BY_TABLE: dict[str, set[str]] = {
 }
 
 LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
-    "offers": {"channel_message_id"},
+    "commodity_aliases": {"commodity_id"},
+    "offers": {"channel_message_id", "commodity_id", "republished_offer_id"},
+    "offer_requests": {"local_offer_id", "resulting_trade_id", "customer_relation_id"},
+    "trades": {"offer_id", "commodity_id"},
     "offer_publication_states": {
         "id",
         "offer_id",
@@ -288,6 +291,69 @@ def synced_parity_table_names(mode: str = "quick") -> tuple[str, ...]:
     raise ValueError("parity mode must be 'quick' or 'deep'")
 
 
+def _parity_select_for_table(table_name: str, table):
+    """Select persisted rows plus stable identities for local FK columns."""
+    if table_name == "commodity_aliases":
+        commodities = Base.metadata.tables["commodities"]
+        return (
+            select(table, commodities.c.name.label("commodity_name"))
+            .select_from(table.outerjoin(commodities, commodities.c.id == table.c.commodity_id))
+        )
+
+    if table_name == "offers":
+        commodities = Base.metadata.tables["commodities"]
+        republished = table.alias("parity_republished_offer")
+        return (
+            select(
+                table,
+                commodities.c.name.label("commodity_name"),
+                republished.c.offer_public_id.label("republished_offer_public_id"),
+            )
+            .select_from(
+                table
+                .outerjoin(commodities, commodities.c.id == table.c.commodity_id)
+                .outerjoin(republished, republished.c.id == table.c.republished_offer_id)
+            )
+        )
+
+    if table_name == "trades":
+        commodities = Base.metadata.tables["commodities"]
+        offers = Base.metadata.tables["offers"]
+        return (
+            select(
+                table,
+                commodities.c.name.label("commodity_name"),
+                offers.c.offer_public_id.label("offer_public_id"),
+            )
+            .select_from(
+                table
+                .outerjoin(commodities, commodities.c.id == table.c.commodity_id)
+                .outerjoin(offers, offers.c.id == table.c.offer_id)
+            )
+        )
+
+    if table_name == "offer_requests":
+        trades = Base.metadata.tables["trades"]
+        customer_relations = Base.metadata.tables["customer_relations"]
+        return (
+            select(
+                table,
+                trades.c.trade_number.label("resulting_trade_number"),
+                customer_relations.c.invitation_token.label("customer_relation_invitation_token"),
+            )
+            .select_from(
+                table
+                .outerjoin(trades, trades.c.id == table.c.resulting_trade_id)
+                .outerjoin(
+                    customer_relations,
+                    customer_relations.c.id == table.c.customer_relation_id,
+                )
+            )
+        )
+
+    return select(table)
+
+
 async def build_database_parity_snapshot(
     db: AsyncSession,
     *,
@@ -302,7 +368,7 @@ async def build_database_parity_snapshot(
         order_columns = [table.c[field] for field in IDENTITY_FIELDS_BY_TABLE.get(table_name, ()) if field in table.c]
         if not order_columns and "id" in table.c:
             order_columns = [table.c.id]
-        stmt = select(table)
+        stmt = _parity_select_for_table(table_name, table)
         if order_columns:
             stmt = stmt.order_by(*order_columns)
         if max_rows_per_table > 0:

@@ -438,6 +438,8 @@ def sample_identity(table_name: str, payload: dict) -> dict:
 
 def business_mutation(table_name: str, payload: dict) -> dict:
     mutated = copy.deepcopy(payload)
+    if table_name == "commodity_aliases" and "commodity_name" not in mutated:
+        mutated["commodity_name"] = "changed-canonical-commodity"
     identity_fields = set(IDENTITY_FIELDS_BY_TABLE.get(table_name, ("id",)))
     local_only_fields = set(LOCAL_ONLY_FIELDS_BY_TABLE.get(table_name, set()))
     if identity_fields and identity_fields != {"id"}:

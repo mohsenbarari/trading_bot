@@ -45,6 +45,10 @@ SEED_TABLE_ORDER = {
     # Current-state recovery therefore seeds trades before request ledgers.
     "trades": 19,
     "offer_requests": 20,
+    # Notifications have no downstream FK consumers in the shared snapshot.
+    # Seed them last so any recovery-time reconciliation cannot remove the
+    # final authoritative notification set.
+    "notifications": 25,
 }
 
 DEFAULT_TABLES = tuple(

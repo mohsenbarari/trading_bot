@@ -95,6 +95,18 @@ After the reset and seed retry, acceptance still requires deep parity by
 stable identity. Matching row counts alone are insufficient; all business
 hashes must match or have an explicitly reviewed local-only classification.
 
+The first deep comparison after the successful retry found two additional
+validation issues. Four historical notifications had been reported as applied
+but were absent after later seed phases; an idempotent notification-only replay
+restored the count from 368 to 372 and it remained stable. Notifications are
+therefore seeded last, and final deep parity remains mandatory. The comparison
+also originally treated target-local commodity, offer, trade, and relationship
+FK integers as business values. Parity now hashes the stable referenced value
+(commodity name, offer public ID, trade number, or relation invitation token)
+while retaining the raw FK under local-only evidence. This prevents both false
+drift from partitioned sequences and false success when a local ID points to
+the wrong business record.
+
 Before production startup:
 
 1. Render the Iran runtime env and assert every value above.

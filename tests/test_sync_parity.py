@@ -61,6 +61,74 @@ class SyncParityTests(unittest.TestCase):
         self.assertEqual(report["tables"]["trades"]["severity"], "local_only_difference")
         self.assertEqual(report["tables"]["trades"]["business_mismatch_count"], 0)
 
+    def test_local_commodity_ids_compare_by_canonical_name(self):
+        local = snapshot(
+            "commodity_aliases",
+            [{"id": 1, "alias": "quarter", "commodity_id": 5, "commodity_name": "quarter-main"}],
+        )
+        peer = snapshot(
+            "commodity_aliases",
+            [{"id": 91, "alias": "quarter", "commodity_id": 105, "commodity_name": "quarter-main"}],
+        )
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "non_business_difference")
+        self.assertEqual(report["tables"]["commodity_aliases"]["severity"], "local_only_difference")
+        self.assertEqual(report["tables"]["commodity_aliases"]["business_mismatch_count"], 0)
+
+    def test_wrong_canonical_commodity_reference_is_business_drift(self):
+        local = snapshot(
+            "offers",
+            [{"offer_public_id": "ofr_1", "commodity_id": 5, "commodity_name": "quarter-main"}],
+        )
+        peer = snapshot(
+            "offers",
+            [{"offer_public_id": "ofr_1", "commodity_id": 105, "commodity_name": "half-main"}],
+        )
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "business_drift")
+        self.assertEqual(report["tables"]["offers"]["business_mismatch_count"], 1)
+
+    def test_offer_request_local_relations_compare_by_stable_identity(self):
+        local = snapshot(
+            "offer_requests",
+            [
+                {
+                    "request_home_server": "foreign",
+                    "idempotency_key": "request-1",
+                    "offer_public_id": "ofr_1",
+                    "local_offer_id": 11,
+                    "resulting_trade_id": 12,
+                    "resulting_trade_number": 10012,
+                    "customer_relation_id": 17,
+                    "customer_relation_invitation_token": "relation-token-17",
+                }
+            ],
+        )
+        peer = snapshot(
+            "offer_requests",
+            [
+                {
+                    "request_home_server": "foreign",
+                    "idempotency_key": "request-1",
+                    "offer_public_id": "ofr_1",
+                    "local_offer_id": 101,
+                    "resulting_trade_id": 102,
+                    "resulting_trade_number": 10012,
+                    "customer_relation_id": 107,
+                    "customer_relation_invitation_token": "relation-token-17",
+                }
+            ],
+        )
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "non_business_difference")
+        self.assertEqual(report["tables"]["offer_requests"]["business_mismatch_count"], 0)
+
     def test_trade_delivery_receipt_local_ids_do_not_fail_business_parity(self):
         local = snapshot(
             "trade_delivery_receipts",

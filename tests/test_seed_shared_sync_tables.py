@@ -51,6 +51,7 @@ class SeedSharedSyncTablesTests(unittest.TestCase):
     def test_seed_order_places_trades_before_terminal_offer_request_ledgers(self):
         self.assertLess(DEFAULT_TABLES.index("trades"), DEFAULT_TABLES.index("offer_requests"))
         self.assertLess(DEFAULT_TABLES.index("offer_requests"), DEFAULT_TABLES.index("trade_delivery_receipts"))
+        self.assertEqual(DEFAULT_TABLES[-1], "notifications")
 
     def test_commodity_references_are_enriched_by_canonical_name(self):
         for table_name in ("commodity_aliases", "offers", "trades"):
