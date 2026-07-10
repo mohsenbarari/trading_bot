@@ -325,6 +325,8 @@ services:
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
     env_file:
       - ../../.env.staging
+    extra_hosts:
+      - "${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}"
     depends_on:
       app:
         condition: service_healthy

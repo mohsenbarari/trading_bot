@@ -278,6 +278,11 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("SERVER_MODE: foreign", telegram_runner)
         self.assertIn('"--role", "webapp_iran"', webapp_runner)
         self.assertIn("SERVER_MODE: iran", webapp_runner)
+        self.assertIn(
+            "${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:"
+            "${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}",
+            webapp_runner,
+        )
 
     def test_staging_bot_profile_is_foreign_only_when_enabled(self):
         repo_root = Path(__file__).resolve().parents[1]

@@ -372,6 +372,19 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN=staging.gold-trade.ir', staging_example)
         self.assertIn('STAGING_IRAN_PUBLIC_IP=62.220.124.174', staging_example)
 
+    def test_staging_iran_load_runner_pins_foreign_domain_for_cold_start_trade_forwarding(self):
+        staging_compose_path = REPO_ROOT / 'deploy/staging/docker-compose.staging.yml'
+        staging_payload = yaml.safe_load(staging_compose_path.read_text(encoding='utf-8'))
+        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+        webapp_runner = staging_payload['services']['load_webapp_iran']
+
+        self.assertIn(
+            '${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}',
+            webapp_runner.get('extra_hosts') or [],
+        )
+        self.assertIn('STAGING_FOREIGN_PUBLIC_DOMAIN=staging.362514.ir', staging_example)
+        self.assertIn('STAGING_FOREIGN_PUBLIC_IP=65.109.216.187', staging_example)
+
     def test_production_hosts_sync_restores_standard_permissions(self):
         release_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
 
