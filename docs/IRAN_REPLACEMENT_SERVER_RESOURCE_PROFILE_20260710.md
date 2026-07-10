@@ -57,6 +57,44 @@ recovery Nginx profile. That profile permits only the HMAC-authenticated
 `503` for every user-facing route. Re-enable jobs and the full Nginx profile
 only after clean shared-table parity.
 
+## Current-State Seed Contract
+
+The first foreign-to-Iran seed on 2026-07-10 stopped safely at
+`commodity_aliases` with `deferred_foreign_key_dependency_missing`. The fresh
+migration had already inserted the canonical `امام` commodity. A natural-key
+conflict consumed a target sequence value, so later commodity integer IDs no
+longer represented the same names on both servers. The raw snapshot payload
+also bypassed `core.sync_field_policy`, which could copy local-only delivery or
+publication fields that normal sync intentionally drops.
+
+The recovery contract is therefore:
+
+1. `scripts/seed_shared_sync_tables.py --dry-run` must build and validate every
+   payload, not merely count rows.
+2. Snapshot rows must pass through `sanitize_sync_payload()` before delivery.
+3. Local foreign keys must carry stable identities: commodity name, offer
+   public ID, trade number, and customer-relation invitation token as
+   applicable. A missing required identity aborts before any network send.
+4. The receiver resolves those identities to target-local IDs before upsert.
+   Republished offers are seeded newest-first, and trades are seeded before
+   completed offer-request ledgers.
+5. The partially seeded Iran database must be backed up and reset before a
+   retry. A partial seed must never be resumed table-by-table as if it were a
+   clean baseline.
+6. Foreign producers and the Iran receiver must run the same reference-aware
+   sync contract before Iran background jobs, the Iran sync worker, or public
+   WebApp traffic are enabled.
+
+Read-only validation against the foreign production database covered all 981
+current shared rows: 46 users, 4 customer relations, 372 notifications, 7
+commodities, 23 aliases, 158 offers, 139 publication states, 27 trades, 2 offer
+requests, 8 trade-delivery receipts, and the remaining shared operational
+rows. No payload was sent during this validation.
+
+After the reset and seed retry, acceptance still requires deep parity by
+stable identity. Matching row counts alone are insufficient; all business
+hashes must match or have an explicitly reviewed local-only classification.
+
 Before production startup:
 
 1. Render the Iran runtime env and assert every value above.
@@ -69,4 +107,5 @@ Before production startup:
    staging benchmark and an explicit capacity decision.
 
 This profile changes no business logic, data model, sync contract, or Telegram
-placement policy.
+placement policy except for the reference-safe recovery/sync payload contract
+documented above.

@@ -147,6 +147,23 @@ def _lookup_commodity_name(connection, commodity_id: int | None) -> str | None:
         return None
 
 
+def _lookup_customer_relation_invitation_token(connection, relation_id: int | None) -> str | None:
+    if not relation_id:
+        return None
+    try:
+        result = connection.execute(
+            text("SELECT invitation_token FROM customer_relations WHERE id = :relation_id"),
+            {"relation_id": relation_id},
+        )
+        row = result.first()
+        if row is None:
+            return None
+        value = row[0]
+        return value if isinstance(value, str) and value.strip() else None
+    except Exception:
+        return None
+
+
 def _chat_sync_payload(target) -> Dict[str, Any]:
     return {
         "id": target.id,
@@ -291,6 +308,11 @@ def setup_offer_events():
             return
         try:
             data = build_offer_sync_payload(target)
+            data["commodity_name"] = _lookup_commodity_name(connection, target.commodity_id)
+            data["republished_offer_public_id"] = _lookup_offer_public_id(
+                connection,
+                getattr(target, "republished_offer_id", None),
+            )
             log_change(connection, "offers", target.id, "INSERT", data)
             publish_event_sync("offer:created", data)
         except Exception as e:
@@ -302,6 +324,11 @@ def setup_offer_events():
             return
         try:
             data = build_offer_sync_payload(target)
+            data["commodity_name"] = _lookup_commodity_name(connection, target.commodity_id)
+            data["republished_offer_public_id"] = _lookup_offer_public_id(
+                connection,
+                getattr(target, "republished_offer_id", None),
+            )
             log_change(connection, "offers", target.id, "UPDATE", data)
             if target.status.value == "expired":
                 publish_event_sync("offer:expired", {"id": target.id})
@@ -353,6 +380,10 @@ def _offer_request_sync_payload(target, connection=None) -> Dict[str, Any]:
         "internal_failure_context": target.internal_failure_context,
         "resulting_trade_number": resulting_trade_number,
         "customer_relation_id": target.customer_relation_id,
+        "customer_relation_invitation_token": _lookup_customer_relation_invitation_token(
+            connection,
+            target.customer_relation_id,
+        ) if connection is not None else None,
         "customer_owner_user_id": target.customer_owner_user_id,
         "customer_tier_snapshot": target.customer_tier_snapshot,
         "customer_management_name_snapshot": target.customer_management_name_snapshot,
@@ -529,6 +560,7 @@ def setup_trade_events():
                 "responder_user_mobile": target.responder_user_mobile,
                 "actor_user_id": getattr(target, "actor_user_id", None),
                 "commodity_id": target.commodity_id,
+                "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
                 "trade_type": trade_type_val,
                 "quantity": target.quantity,
                 "price": target.price,
@@ -565,6 +597,7 @@ def setup_trade_events():
                 "responder_user_mobile": target.responder_user_mobile,
                 "actor_user_id": getattr(target, "actor_user_id", None),
                 "commodity_id": target.commodity_id,
+                "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
                 "trade_type": trade_type_val,
                 "quantity": target.quantity,
                 "price": target.price,

@@ -1556,7 +1556,9 @@ async def _localize_offer_reference_by_public_id(db: AsyncSession, table: str, d
     return True
 
 
-async def _localize_commodity_alias_reference_by_name(db: AsyncSession, data: dict) -> bool:
+async def _localize_commodity_reference_by_name(db: AsyncSession, table: str, data: dict) -> bool:
+    if table not in {"commodity_aliases", "offers", "trades"}:
+        return True
     commodity_name = _nonempty_text(data.get("commodity_name"))
     if not commodity_name:
         return True
@@ -1564,6 +1566,35 @@ async def _localize_commodity_alias_reference_by_name(db: AsyncSession, data: di
     if local_commodity_id is None:
         return False
     data["commodity_id"] = local_commodity_id
+    return True
+
+
+async def _localize_republished_offer_reference(db: AsyncSession, data: dict) -> bool:
+    republished_public_id = _nonempty_text(data.pop("republished_offer_public_id", None))
+    if not republished_public_id:
+        return True
+    local_offer_id = await _resolve_offer_id_by_public_id(db, republished_public_id)
+    if local_offer_id is None:
+        data["republished_offer_id"] = None
+        return False
+    data["republished_offer_id"] = local_offer_id
+    return True
+
+
+async def _localize_offer_request_customer_relation_reference(db: AsyncSession, data: dict) -> bool:
+    invitation_token = _nonempty_text(data.pop("customer_relation_invitation_token", None))
+    if not invitation_token:
+        return True
+    local_relation_id = await _resolve_model_id_by_natural_key(
+        db,
+        CustomerRelation,
+        "invitation_token",
+        invitation_token,
+    )
+    if local_relation_id is None:
+        data["customer_relation_id"] = None
+        return False
+    data["customer_relation_id"] = local_relation_id
     return True
 
 
@@ -2149,14 +2180,24 @@ async def _apply_item(
             )
             return 'deferred'
 
-        if table == "commodity_aliases" and not await _localize_commodity_alias_reference_by_name(db, data):
+        if not await _localize_commodity_reference_by_name(db, table, data):
             logger.warning(
-                "Synced commodity alias references a commodity name that is not available locally; deferring",
+                "Synced row references a commodity name that is not available locally; deferring",
                 extra={
-                    "event": "sync.public_identity.commodity_alias_reference_deferred",
+                    "event": "sync.public_identity.commodity_reference_deferred",
                     "table": table,
                     "record_id": record_id,
-                    "alias": data.get("alias"),
+                },
+            )
+            return 'deferred'
+
+        if table == "offers" and not await _localize_republished_offer_reference(db, data):
+            logger.warning(
+                "Synced offer references a replacement offer that is not available locally; deferring",
+                extra={
+                    "event": "sync.public_identity.republished_offer_reference_deferred",
+                    "table": table,
+                    "record_id": record_id,
                 },
             )
             return 'deferred'
@@ -2178,6 +2219,17 @@ async def _apply_item(
                 "Synced offer request references a trade_number that is not available locally; deferring",
                 extra={
                     "event": "sync.public_identity.offer_request_trade_reference_deferred",
+                    "table": table,
+                    "record_id": record_id,
+                },
+            )
+            return 'deferred'
+
+        if table == "offer_requests" and not await _localize_offer_request_customer_relation_reference(db, data):
+            logger.warning(
+                "Synced offer request references a customer relation that is not available locally; deferring",
+                extra={
+                    "event": "sync.public_identity.offer_request_customer_relation_deferred",
                     "table": table,
                     "record_id": record_id,
                 },

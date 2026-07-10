@@ -157,6 +157,7 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("trades", "offer_user_mobile"): SyncFieldClassification.SYNC,
             ("notifications", "message"): SyncFieldClassification.SYNC,
             ("notifications", "extra_payload"): SyncFieldClassification.SYNC,
+            ("offer_requests", "customer_relation_invitation_token"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcasts", "content"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcast_receipts", "telegram_id_at_enqueue"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcast_receipts", "telegram_id_at_send"): SyncFieldClassification.SYNC,

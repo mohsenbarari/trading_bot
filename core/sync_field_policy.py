@@ -214,6 +214,13 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.SYNC,
         sensitive=True,
     ),
+    ("offer_requests", "customer_relation_invitation_token"): _entry(
+        "offer_requests",
+        "customer_relation_invitation_token",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="stable relationship identity used to localize the target-side customer relation FK",
+    ),
     ("notifications", "message"): _entry("notifications", "message", SyncFieldClassification.SYNC, sensitive=True),
     ("notifications", "extra_payload"): _entry(
         "notifications",
