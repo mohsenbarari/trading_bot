@@ -166,6 +166,15 @@ them. Foreign parity evidence must be collected and recorded through the
 `/foreign-sync/api/sync/parity/*` receiver surface, while Iran uses
 `/api/sync/parity/*`.
 
+The live foreign Nginx site also contained one legacy root proxy using
+`localhost:8000`. Iran's connectivity probe intermittently resolved that value
+to `[::1]`, producing `502` responses even though the IPv4 API listener and all
+cross-server API routes were healthy. The active site was backed up as
+`/etc/nginx/sites-available/coin.362514.ir.recovery-20260710T180000Z`, the root
+proxy was normalized to `127.0.0.1:8000`, and `nginx -t`, graceful reload, local
+HTTPS, and Iran-to-foreign HTTPS probes all passed. The repository Nginx setup
+script already uses the IPv4 upstream and required no source change.
+
 This profile changes no business logic, data model, sync contract, or Telegram
 placement policy except for the reference-safe recovery/sync payload contract
 documented above.
