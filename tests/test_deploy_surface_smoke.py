@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUBPROCESS_ENV = {
@@ -325,6 +327,26 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             with self.subTest(compose_file=compose_file):
                 result = run_checked([*compose_command, '--env-file', '/dev/null', '-f', compose_file, 'config', '-q'])
                 self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+    def test_all_runtime_services_have_bounded_docker_logs(self):
+        compose_files = (
+            'docker-compose.yml',
+            'docker-compose.iran.yml',
+            'deploy/staging/docker-compose.staging.yml',
+        )
+
+        for compose_file in compose_files:
+            with self.subTest(compose_file=compose_file):
+                payload = yaml.safe_load((REPO_ROOT / compose_file).read_text(encoding='utf-8'))
+                services = payload.get('services') or {}
+                self.assertTrue(services)
+                for service_name, service in services.items():
+                    with self.subTest(service=service_name):
+                        logging_config = service.get('logging') or {}
+                        self.assertEqual(logging_config.get('driver'), 'json-file')
+                        options = logging_config.get('options') or {}
+                        self.assertEqual(options.get('max-size'), '${DOCKER_LOG_MAX_SIZE:-20m}')
+                        self.assertEqual(options.get('max-file'), '${DOCKER_LOG_MAX_FILE:-5}')
 
     def test_foreign_compose_pins_iran_domain_inside_containers(self):
         compose = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')

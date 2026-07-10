@@ -4,10 +4,16 @@ x-app-build: &app_build
   dockerfile: Dockerfile
   args:
     FRONTEND_DIST_DIR: ${STAGING_FRONTEND_DOCKER_DIST_DIR:-mini_app_dist_staging}
+x-default-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
 
 services:
   app:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     restart: unless-stopped
     command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${STAGING_API_WORKERS:-2}"
@@ -48,6 +54,7 @@ services:
 
   foreign_app:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     profiles:
       - staging-bot
@@ -96,6 +103,7 @@ services:
 
   sync_worker:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     profiles:
       - staging-sync
@@ -128,6 +136,7 @@ services:
 
   foreign_sync_worker:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     profiles:
       - staging-sync
@@ -162,6 +171,7 @@ services:
 
   migration:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     command: ["python", "manage.py"]
     environment:
@@ -180,6 +190,7 @@ services:
 
   db:
     image: postgres:15-alpine
+    logging: *default_logging
     restart: unless-stopped
     command: postgres -c max_connections=${STAGING_POSTGRES_MAX_CONNECTIONS:-100} -c timezone=UTC -c log_timezone=UTC
     environment:
@@ -202,6 +213,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *default_logging
     restart: unless-stopped
     command:
       - redis-server
@@ -222,6 +234,7 @@ services:
 
   bot:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     profiles:
       - staging-bot
@@ -256,6 +269,7 @@ services:
 
   load_telegram_foreign:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     profiles:
       - staging-load
@@ -289,6 +303,7 @@ services:
 
   load_webapp_iran:
     image: *app_image
+    logging: *default_logging
     build: *app_build
     profiles:
       - staging-load
