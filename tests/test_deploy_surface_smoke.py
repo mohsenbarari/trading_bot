@@ -118,6 +118,19 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'scripts/deploy_staging.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_legacy_staging_recreate_removes_only_stateless_services(self):
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        function_body = staging_script.split('remove_legacy_compose_stateless_containers() {', 1)[1].split('\n}', 1)[0]
+
+        self.assertIn('if [[ "${compose_cmd[0]}" != "docker-compose" ]]', function_body)
+        self.assertIn(
+            'for service in migration app foreign_app bot sync_worker foreign_sync_worker',
+            function_body,
+        )
+        self.assertNotIn(' service in db ', function_body)
+        self.assertNotIn(' service in redis ', function_body)
+        self.assertIn('remove_legacy_compose_stateless_containers\n', staging_script)
+
     def test_staging_frontend_dist_isolated_from_production_artifact(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         vite_config = (REPO_ROOT / 'frontend/vite.config.ts').read_text(encoding='utf-8')

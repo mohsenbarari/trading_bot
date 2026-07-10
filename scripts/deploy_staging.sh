@@ -161,6 +161,26 @@ init_compose_cmd() {
     die "docker compose or docker-compose is required"
 }
 
+remove_legacy_compose_stateless_containers() {
+    init_compose_cmd
+    if [[ "${compose_cmd[0]}" != "docker-compose" ]]; then
+        return
+    fi
+
+    # docker-compose 1.29 cannot recreate images produced by current Docker
+    # when the legacy image metadata omits ContainerConfig. Remove only
+    # stateless services; staging database and Redis containers/volumes remain.
+    local service ids
+    for service in migration app foreign_app bot sync_worker foreign_sync_worker; do
+        ids="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$STAGING_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        if [[ -n "$ids" ]]; then
+            docker rm -f $ids >/dev/null
+        fi
+    done
+}
+
 staging_frontend_dist_relpath() {
     case "$STAGING_FRONTEND_DIST_DIR" in
         "$PROJECT_DIR"/*)
@@ -1133,6 +1153,7 @@ deploy() {
     ensure_env
     ensure_runtime_env_values
     build_frontend
+    remove_legacy_compose_stateless_containers
     if [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]]; then
         compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker
     elif [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
