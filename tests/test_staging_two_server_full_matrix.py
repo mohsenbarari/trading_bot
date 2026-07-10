@@ -9,6 +9,34 @@ from scripts import run_staging_two_server_full_matrix as runner
 
 
 class StagingTwoServerFullMatrixTests(unittest.TestCase):
+    def test_iran_ssh_defaults_match_current_host(self):
+        args = runner.parse_args([])
+
+        self.assertEqual(args.iran_ssh_host, "root@65.109.220.59")
+        self.assertEqual(args.iran_ssh_port, "37067")
+        self.assertEqual(args.iran_app_container, "trading_bot_staging_iran-app-1")
+
+    def test_expected_branch_can_be_selected_for_a_candidate_validation(self):
+        args = runner.parse_args(["--expected-branch", "candidate/iran-server-replacement-20260710"])
+
+        self.assertEqual(args.expected_branch, "candidate/iran-server-replacement-20260710")
+
+    def test_remote_shell_and_scp_commands_include_iran_ssh_port(self):
+        args = runner.parse_args(["--iran-ssh-host", "root@example", "--iran-ssh-port", "37067"])
+
+        self.assertEqual(
+            runner.remote_shell_command(args, "echo ok"),
+            ["ssh", "-p", "37067", "root@example", "cd /srv/trading-bot/staging-iran && echo ok"],
+        )
+        self.assertEqual(
+            runner.scp_from_iran(args, "/remote/file.json", Path("/tmp/local.json")),
+            ["scp", "-P", "37067", "root@example:/remote/file.json", "/tmp/local.json"],
+        )
+        self.assertEqual(
+            runner.scp_to_iran(args, Path("/tmp/local.json"), "/remote/file.json"),
+            ["scp", "-P", "37067", "/tmp/local.json", "root@example:/remote/file.json"],
+        )
+
     def test_manifest_is_complete_controlled_and_branch_change_tagged(self):
         manifest = manifest_builder.build_manifest(prefix="FMX_STAGE_UNIT_20260629_")
         errors = manifest_builder.validate_manifest(manifest)
@@ -406,6 +434,100 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("database identities match", result.detail)
         self.assertIn("Redis identities match", result.detail)
 
+    def test_storage_identity_probe_uses_physical_postgres_cluster_identifier(self):
+        script = runner.storage_identity_python()
+
+        self.assertIn("pg_control_system()", script)
+        self.assertIn("system_identifier", script)
+        self.assertNotIn("inet_server_addr", script)
+
+    def test_storage_identity_separation_passes_when_backends_differ(self):
+        def fake_run_json_command(command, *, timeout_seconds=10.0):
+            server_mode = "iran" if "iran-app" in " ".join(command) else "foreign"
+            suffix = "iran" if server_mode == "iran" else "foreign"
+            return (
+                0,
+                {
+                    "environment": "staging",
+                    "server_mode": server_mode,
+                    "release_sha": "abc123",
+                    "database_identity_hash": f"db-{suffix}",
+                    "redis_identity_hash": f"redis-{suffix}",
+                    "redis_errors": 0,
+                },
+                "{}",
+                "",
+            )
+
+        args = SimpleNamespace(
+            iran_ssh_host="root@example",
+            iran_ssh_port="37067",
+            iran_workdir="/srv/trading-bot/staging-iran",
+            iran_app_container="iran-app",
+            foreign_app_container="foreign-app",
+        )
+        with patch("scripts.run_staging_two_server_full_matrix.run_json_command", side_effect=fake_run_json_command):
+            result = runner.check_storage_identity_separation("storage", args=args)
+
+        self.assertEqual(result.status, "passed")
+
+    def test_capture_parity_uses_role_specific_sync_routes(self):
+        requested_urls = []
+
+        def fake_fetch(url, *_args, method="GET", **_kwargs):
+            requested_urls.append((method, url))
+            if method == "POST":
+                return 200, {"status": "recorded"}, "{}"
+            server_mode = "foreign" if "/foreign-sync/" in url else "iran"
+            return (
+                200,
+                {
+                    "schema_version": 1,
+                    "server_mode": server_mode,
+                    "release_sha": "abc123",
+                    "snapshot_at": "2026-07-10T00:00:00Z",
+                    "mode": "deep",
+                    "table_count": 0,
+                    "tables": {},
+                },
+                "{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            side_effect=fake_fetch,
+        ):
+            args = SimpleNamespace(
+                artifact_dir=Path(tmpdir),
+                observability_api_key="key",
+                iran_base_url="https://staging.gold-trade.ir",
+                foreign_base_url="https://staging.362514.ir",
+                basic_auth_user=None,
+                basic_auth_password=None,
+                parity_mode="deep",
+                parity_max_rows_per_table=5000,
+                expected_release_sha="abc123",
+            )
+            payload = runner.capture_parity(args, label="before")
+
+        self.assertEqual(payload["status"], "passed")
+        self.assertIn(
+            ("GET", "https://staging.gold-trade.ir/api/sync/parity/snapshot?mode=deep&max_rows_per_table=5000"),
+            requested_urls,
+        )
+        self.assertIn(
+            ("GET", "https://staging.362514.ir/foreign-sync/api/sync/parity/snapshot?mode=deep&max_rows_per_table=5000"),
+            requested_urls,
+        )
+        self.assertIn(
+            ("POST", "https://staging.gold-trade.ir/api/sync/parity/status"),
+            requested_urls,
+        )
+        self.assertIn(
+            ("POST", "https://staging.362514.ir/foreign-sync/api/sync/parity/status"),
+            requested_urls,
+        )
+
     def test_driver_refreshes_both_role_plan_barriers_with_same_future_epoch(self):
         calls = []
 
@@ -503,6 +625,31 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("IRAN_SERVER_URL=https://staging.gold-trade.ir", command)
         self.assertIn("GERMANY_SERVER_URL=http://foreign_app:8000", command)
         self.assertIn("FOREIGN_SERVER_URL=http://foreign_app:8000", command)
+
+    def test_remote_load_runner_supports_compose_v2_with_legacy_fallback(self):
+        args = runner.parse_args(
+            [
+                "--iran-ssh-host",
+                "root@example",
+                "--iran-ssh-port",
+                "37067",
+                "--expected-release-sha",
+                "abc123",
+            ]
+        )
+
+        command = runner.remote_load_runner_command(
+            args,
+            "load_webapp_iran",
+            "/tmp/full-matrix-artifacts",
+            ["load-runner-ready", "--role", "webapp_iran"],
+        )
+        remote_command = command[-1]
+
+        self.assertIn("docker compose version", remote_command)
+        self.assertIn("command -v docker-compose", remote_command)
+        self.assertIn('"${compose[@]}"', remote_command)
+        self.assertNotIn(" STAGING_FRONTEND_DOCKER_DIST_DIR=mini_app_dist_staging docker-compose ", remote_command)
 
     def test_worker_split_reindexes_each_role_schedule_from_zero(self):
         from scripts import trading_core_probe_worker as worker

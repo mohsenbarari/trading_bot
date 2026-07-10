@@ -112,6 +112,23 @@ class RenderReleaseArtifactsTests(unittest.TestCase):
         self.assertNotIn('proxy_set_header Connection "upgrade";', api_block)
         self.assertNotIn("location /assets/ {\n        proxy_pass http://127.0.0.1:8000;", nginx)
 
+    def test_recovery_nginx_only_exposes_signed_sync_receiver_to_foreign_ip(self):
+        manifest = self.write_file("online.env", self.manifest_content())
+        template = str(
+            Path(__file__).resolve().parents[1]
+            / "deploy/production/nginx-iran-recovery-https.conf.template"
+        )
+
+        values = derive_release_values(manifest)
+        nginx = render_nginx_config(values, template)
+
+        self.assertIn("server_name coin.gold-trade.ir;", nginx)
+        self.assertIn("allow 65.109.216.187;", nginx)
+        self.assertIn("location = /api/sync/receive", nginx)
+        self.assertIn("return 503;", nginx)
+        self.assertNotIn("__FOREIGN_PUBLIC_IP__", nginx)
+        self.assertNotIn("location /api/", nginx)
+
 
 if __name__ == "__main__":
     unittest.main()

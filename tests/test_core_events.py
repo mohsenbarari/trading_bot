@@ -636,6 +636,8 @@ class CoreEventsTests(unittest.TestCase):
         self.assertTrue(offer_payloads)
         for payload in offer_payloads:
             self.assertEqual(payload['offer_public_id'], 'ofr_event_1')
+            self.assertIn('commodity_name', payload)
+            self.assertIn('republished_offer_public_id', payload)
             self.assertEqual(payload['expired_by_user_id'], 9)
             self.assertEqual(payload['expired_by_actor_user_id'], 7)
             self.assertEqual(payload['expire_source_surface'], 'webapp')
@@ -710,6 +712,7 @@ class CoreEventsTests(unittest.TestCase):
             self.assertEqual(payload['internal_failure_context'], {'redacted': True})
             self.assertEqual(payload['customer_management_name_snapshot'], 'VIP')
             self.assertEqual(payload['resulting_trade_number'], 10088)
+            self.assertIn('customer_relation_invitation_token', payload)
             self.assertNotIn('resulting_trade_id', payload)
 
         sync_connection = _FakeConnection(is_sync=True)

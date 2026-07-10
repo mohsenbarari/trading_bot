@@ -21,6 +21,25 @@ class _AsyncSessionContext:
 
 
 class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lifespan_can_disable_background_jobs_for_isolated_recovery(self):
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        redis_client = AsyncMock()
+
+        with patch.object(main.settings, "server_mode", "iran"), patch.object(
+            main.settings, "background_jobs_enabled", False
+        ), patch("main.init_db", new=AsyncMock()), patch(
+            "main.init_redis", new=AsyncMock(return_value=redis_client)
+        ), patch("main.close_redis", new=AsyncMock()) as close_redis_mock, patch(
+            "main.setup_event_listeners"
+        ), patch("main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "main.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ), patch("main._start_background_leader_task") as leader_mock:
+            async with main.lifespan(main.app):
+                pass
+
+        leader_mock.assert_not_called()
+        close_redis_mock.assert_awaited_once()
+
     async def test_lifespan_starts_background_leader_and_closes_redis(self):
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         redis_client = AsyncMock()

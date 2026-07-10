@@ -8,6 +8,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class IranResourceProfileTests(unittest.TestCase):
+    def test_bootstrap_selects_compose_package_supported_by_remote_os(self):
+        release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"',
+            release,
+        )
+        bootstrap_packages = release.split('IRAN_BOOTSTRAP_APT_PACKAGES="', 1)[1].split('"', 1)[0].split()
+        self.assertNotIn("docker-compose", bootstrap_packages)
+        self.assertNotIn("docker-compose-v2", bootstrap_packages)
+        self.assertGreaterEqual(release.count("for candidate in $IRAN_BOOTSTRAP_COMPOSE_PACKAGES"), 2)
+        self.assertIn('apt-cache show "\\$candidate"', release)
+        self.assertIn('install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES "\\$compose_package"', release)
+
+    def test_standalone_bootstrap_does_not_require_synced_project_payload(self):
+        release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        command = release.split("bootstrap-iran)", 1)[1].split(";;", 1)[0]
+        self.assertIn("check_local; bootstrap_iran", command)
+        self.assertNotIn("install_sync_sampler_remote", command)
+        self.assertNotIn("verify_sync_sampler_remote", command)
+
+        full_release = release.split("run_release() {", 1)[1].split("\n}", 1)[0]
+        self.assertLess(full_release.index("sync_project"), full_release.index("install_sync_sampler_remote"))
+        self.assertLess(full_release.index("install_sync_sampler_remote"), full_release.index("deploy_iran"))
+
     def test_renderer_defaults_fit_replacement_host_budget(self):
         performance = ROLE_PERFORMANCE_DEFAULTS["iran"]
         postgres = ROLE_POSTGRES_TUNING_DEFAULTS["iran"]
@@ -36,6 +62,7 @@ class IranResourceProfileTests(unittest.TestCase):
             "${API_WORKERS:-4}",
             "${DB_POOL_SIZE:-8}",
             "${DB_MAX_OVERFLOW:-4}",
+            "${BACKGROUND_JOBS_ENABLED:-true}",
             "${POSTGRES_MAX_CONNECTIONS:-150}",
             "${POSTGRES_SHARED_BUFFERS:-2GB}",
             "${POSTGRES_EFFECTIVE_CACHE_SIZE:-5GB}",

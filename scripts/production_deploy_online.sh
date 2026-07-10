@@ -10,8 +10,9 @@ PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygie
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
-IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io docker-compose python3-pip python3-setuptools python3-wheel"
-SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts"
+IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
+IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
+SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_notification_preferences, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts, telegram_notification_outbox"
 IRAN_SHARED_RESET_CONFIRM_TEXT="RESET_IRAN_SHARED_DATA"
 LOCAL_HOST_ARCH=""
 LOCAL_DPKG_ARCH=""
@@ -209,7 +210,16 @@ remote_post_bootstrap_guard() {
     cat <<'EOF'
 if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   apt-get -o Acquire::Retries=5 update
-  apt-get -o Acquire::Retries=5 install -y --fix-missing docker-compose || true
+  compose_package=''
+  for candidate in docker-compose-v2 docker-compose; do
+    if apt-cache show "$candidate" >/dev/null 2>&1; then
+      compose_package="$candidate"
+      break
+    fi
+  done
+  if [ -n "$compose_package" ]; then
+    apt-get -o Acquire::Retries=5 install -y --fix-missing "$compose_package" || true
+  fi
 fi
 if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   echo "No Docker Compose command is available on the Iran host after bootstrap." >&2
@@ -810,7 +820,7 @@ install_sync_sampler_remote() {
     log "Ensuring Iran sync health sampler is installed"
     ssh_iran "set -euo pipefail
 cd '$IRAN_PROJECT_DIR'
-bash ./scripts/install_sync_health_monitor.sh"
+SYNC_HEALTH_MONITOR_SKIP_IRAN=1 bash ./scripts/install_sync_health_monitor.sh"
 }
 
 verify_sync_sampler_local() {
@@ -1031,7 +1041,7 @@ prepare_iran_package_bundle() {
     local bundle_tar="$RELEASE_TMP_DIR/iran-packages.tar.gz"
     local bundle_hash_file="$RELEASE_TMP_DIR/iran-packages.sha256"
     local bundle_signature
-    bundle_signature="$(printf '%s\n%s\n%s\n' "$IRAN_OS_CODENAME" "$IRAN_IMAGE_PLATFORM" "$IRAN_BOOTSTRAP_APT_PACKAGES" | sha256sum | cut -d' ' -f1)"
+    bundle_signature="$(printf '%s\n%s\n%s\n%s\n' "$IRAN_OS_CODENAME" "$IRAN_IMAGE_PLATFORM" "$IRAN_BOOTSTRAP_APT_PACKAGES" "$IRAN_BOOTSTRAP_COMPOSE_PACKAGES" | sha256sum | cut -d' ' -f1)"
 
     if [[ -f "$bundle_tar" && -f "$bundle_hash_file" && "$(cat "$bundle_hash_file")" == "$bundle_signature" ]]; then
         return 0
@@ -1057,7 +1067,15 @@ prepare_iran_package_bundle() {
         bash -lc "set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get -o Acquire::Retries=5 -y --download-only -o Dir::Cache::archives=/bundle install $IRAN_BOOTSTRAP_APT_PACKAGES"
+compose_package=''
+for candidate in $IRAN_BOOTSTRAP_COMPOSE_PACKAGES; do
+  if apt-cache show "\$candidate" >/dev/null 2>&1; then
+    compose_package="\$candidate"
+    break
+  fi
+done
+[ -n "\$compose_package" ] || { echo 'No supported Docker Compose package is available.' >&2; exit 1; }
+apt-get -o Acquire::Retries=5 -y --download-only -o Dir::Cache::archives=/bundle install $IRAN_BOOTSTRAP_APT_PACKAGES "\$compose_package""
     tar -C "$bundle_dir" -czf "$bundle_tar" .
     printf '%s\n' "$bundle_signature" > "$bundle_hash_file"
     log "Iran bootstrap package bundle prepared at $bundle_tar"
@@ -1108,7 +1126,15 @@ else
 set -euo pipefail
 apt-get -o Acquire::Retries=5 update
 $docker_cleanup_guard
-apt-get -o Acquire::Retries=5 install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES
+compose_package=''
+for candidate in $IRAN_BOOTSTRAP_COMPOSE_PACKAGES; do
+  if apt-cache show "\$candidate" >/dev/null 2>&1; then
+    compose_package="\$candidate"
+    break
+  fi
+done
+[ -n "\$compose_package" ] || { echo 'No supported Docker Compose package is available.' >&2; exit 1; }
+apt-get -o Acquire::Retries=5 install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES "\$compose_package"
 $docker_service_guard
 systemctl enable --now nginx
 python3 -m pip --version >/dev/null 2>&1 || true
@@ -1997,7 +2023,7 @@ mark_foreign_preseed_backlog_synced() {
 UPDATE change_log
 SET synced = true
 WHERE synced = false
-  AND table_name IN ('users', 'accountant_relations', 'customer_relations', 'telegram_link_tokens', 'invitations', 'admin_market_messages', 'admin_broadcast_messages', 'notifications', 'user_blocks', 'commodities', 'commodity_aliases', 'trading_settings', 'market_schedule_overrides', 'market_runtime_state', 'offers', 'offer_publication_states', 'offer_requests', 'trades', 'trade_delivery_receipts', 'telegram_admin_broadcasts', 'telegram_admin_broadcast_receipts')
+  AND table_name IN ('users', 'accountant_relations', 'customer_relations', 'telegram_link_tokens', 'invitations', 'admin_market_messages', 'admin_broadcast_messages', 'notifications', 'user_notification_preferences', 'user_blocks', 'commodities', 'commodity_aliases', 'trading_settings', 'market_schedule_overrides', 'market_runtime_state', 'offers', 'offer_publication_states', 'offer_requests', 'trades', 'trade_delivery_receipts', 'telegram_admin_broadcasts', 'telegram_admin_broadcast_receipts', 'telegram_notification_outbox')
   AND created_at <= '$cutoff'::timestamptz
 RETURNING table_name;"
     log "Marking foreign pre-seed shared backlog as synced up to $cutoff"
@@ -2250,7 +2276,7 @@ main() {
         check-local) check_local ;;
         release) run_release ;;
         deploy-foreign) check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
-        bootstrap-iran) check_local; bootstrap_iran; install_sync_sampler_remote; verify_sync_sampler_remote ;;
+        bootstrap-iran) check_local; bootstrap_iran ;;
         configure-nginx) check_local; configure_nginx ;;
         issue-cert) check_local; issue_cert ;;
         build-release) check_local; build_release ;;

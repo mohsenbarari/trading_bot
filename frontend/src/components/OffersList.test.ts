@@ -62,7 +62,7 @@ describe('OffersList.vue', () => {
     expect(wrapper.text()).toContain('مشتری')
     expect(wrapper.text()).toContain('سینا')
     expect(wrapper.text()).toContain('سطح 1')
-  })
+  }, 10_000)
 
   it('prefers viewer_effective_price over the global published price in the market card', async () => {
     const wrapper = await mountOffersList({

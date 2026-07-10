@@ -1,13 +1,16 @@
 import unittest
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.dialects import postgresql
 
 from api.routers.sync import (
     _apply_item,
     _build_upsert_stmt,
+    _localize_commodity_reference_by_name,
+    _localize_offer_request_customer_relation_reference,
+    _localize_republished_offer_reference,
     _partitioned_sequence_alignment_sql,
     _resolve_local_record_id_by_public_identity,
     _sync_table_has_public_identity,
@@ -262,6 +265,39 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "deferred")
         builder.assert_not_called()
+
+    async def test_offer_and_trade_commodity_references_localize_by_name(self):
+        for table_name in ("offers", "trades"):
+            with self.subTest(table_name=table_name):
+                db = FakeDB([ScalarOneOrNoneResult(88)])
+                data = {"commodity_id": 14, "commodity_name": "gold-main"}
+
+                resolved = await _localize_commodity_reference_by_name(db, table_name, data)
+
+                self.assertTrue(resolved)
+                self.assertEqual(data["commodity_id"], 88)
+
+    async def test_republished_offer_reference_localizes_by_public_id(self):
+        data = {"republished_offer_id": 31, "republished_offer_public_id": "ofr_source_31"}
+        with patch("api.routers.sync._resolve_offer_id_by_public_id", new=AsyncMock(return_value=91)):
+            resolved = await _localize_republished_offer_reference(SimpleNamespace(), data)
+
+        self.assertTrue(resolved)
+        self.assertEqual(data["republished_offer_id"], 91)
+        self.assertNotIn("republished_offer_public_id", data)
+
+    async def test_offer_request_customer_relation_localizes_by_invitation_token(self):
+        db = FakeDB([ScalarOneOrNoneResult(71)])
+        data = {
+            "customer_relation_id": 17,
+            "customer_relation_invitation_token": "customer-token-17",
+        }
+
+        resolved = await _localize_offer_request_customer_relation_reference(db, data)
+
+        self.assertTrue(resolved)
+        self.assertEqual(data["customer_relation_id"], 71)
+        self.assertNotIn("customer_relation_invitation_token", data)
 
     def test_natural_key_upserts_do_not_conflict_on_remote_id(self):
         relation_stmt = _build_upsert_stmt(
