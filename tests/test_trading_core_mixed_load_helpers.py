@@ -1032,6 +1032,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             publication_state_ids=[40, 41],
             notification_ids=[50],
             chat_member_ids=[60],
+            user_block_ids=[70],
         )
 
         report = worker.cleanup_report_payload(plan=plan, dry_run=True, deleted_redis_keys=3)
@@ -1039,9 +1040,11 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertTrue(report["dry_run"])
         self.assertEqual(report["planned_counts"]["offer_requests"], 2)
         self.assertEqual(report["planned_counts"]["offer_publication_states"], 2)
+        self.assertEqual(report["planned_counts"]["user_blocks"], 1)
         self.assertEqual(report["planned_ids"]["offer_public_ids"], ["ofr_10"])
         self.assertEqual(report["deleted_offer_requests"], 0)
         self.assertEqual(report["deleted_publication_states"], 0)
+        self.assertEqual(report["deleted_user_blocks"], 0)
         self.assertEqual(report["deleted_redis_keys"], 3)
 
     def test_cleanup_mutating_statement_marks_sync_cleanup_and_blocks_production(self):
@@ -1063,6 +1066,20 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn(late_chat_member_delete, source)
         self.assertLess(source.index(user_lock), source.index(late_chat_member_delete))
         self.assertLess(source.index(late_chat_member_delete), source.index(user_delete))
+
+    def test_cleanup_tracks_user_blocks_before_deleting_users_and_change_logs(self):
+        source = inspect.getsource(worker.delete_cleanup_plan)
+
+        user_block_delete = "delete_in_batches(db, UserBlock, UserBlock.id, plan.user_block_ids)"
+        user_delete = "delete_in_batches(db, User, User.id, plan.user_ids)"
+        change_log_clause = "table_name = 'user_blocks' AND record_id = ANY(:user_block_ids)"
+
+        self.assertIn(user_block_delete, source)
+        self.assertIn(change_log_clause, source)
+        self.assertLess(source.index(user_block_delete), source.index(user_delete))
+
+    def test_targeted_prefix_sync_includes_user_block_ids(self):
+        self.assertEqual(worker.TARGETED_SYNC_TABLE_ID_FIELDS["user_blocks"], "user_block_ids")
 
     def test_cleanup_retries_late_chat_member_fk_violation(self):
         exc = worker.DBAPIError(

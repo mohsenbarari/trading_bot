@@ -92,6 +92,7 @@ from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdmi
 from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User, UserRole
+from models.user_block import UserBlock
 
 
 class TradingProbeError(RuntimeError):
@@ -304,6 +305,7 @@ class CleanupPlan:
     publication_state_ids: list[int]
     notification_ids: list[int]
     chat_member_ids: list[int]
+    user_block_ids: list[int]
 
 
 def json_safe(value: Any) -> Any:
@@ -1272,6 +1274,7 @@ def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
         "telegram_link_tokens": len(plan.telegram_link_token_ids),
         "push_subscriptions": len(plan.push_subscription_ids),
         "chat_members": len(plan.chat_member_ids),
+        "user_blocks": len(plan.user_block_ids),
         "offers": len(plan.offer_ids),
         "offer_publication_states": len(plan.publication_state_ids),
         "offer_requests": len(plan.offer_request_ids),
@@ -1298,6 +1301,7 @@ def cleanup_report_payload(
     deleted_telegram_link_tokens: int = 0,
     deleted_push_subscriptions: int = 0,
     deleted_chat_members: int = 0,
+    deleted_user_blocks: int = 0,
     deleted_offers: int = 0,
     deleted_trades: int = 0,
     deleted_trade_delivery_receipts: int = 0,
@@ -1326,6 +1330,7 @@ def cleanup_report_payload(
         "deleted_telegram_link_tokens": deleted_telegram_link_tokens,
         "deleted_push_subscriptions": deleted_push_subscriptions,
         "deleted_chat_members": deleted_chat_members,
+        "deleted_user_blocks": deleted_user_blocks,
         "deleted_offers": deleted_offers,
         "deleted_trades": deleted_trades,
         "deleted_trade_delivery_receipts": deleted_trade_delivery_receipts,
@@ -1606,6 +1611,14 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
         chat_member_ids = await collect_int_ids_by_batched_filters(
             db, ChatMember.id, [(ChatMember.user_id, user_ids)]
         )
+        user_block_ids = await collect_int_ids_by_batched_filters(
+            db,
+            UserBlock.id,
+            [
+                (UserBlock.blocker_id, user_ids),
+                (UserBlock.blocked_id, user_ids),
+            ],
+        )
     return CleanupPlan(
         prefix=normalized_prefix,
         user_ids=user_ids,
@@ -1628,6 +1641,7 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
         publication_state_ids=publication_state_ids,
         notification_ids=notification_ids,
         chat_member_ids=chat_member_ids,
+        user_block_ids=user_block_ids,
     )
 
 
@@ -1659,7 +1673,7 @@ TARGETED_SYNC_TABLE_ID_FIELDS = {
     "customer_relations": "customer_relation_ids",
     "telegram_link_tokens": "telegram_link_token_ids",
     "notifications": "notification_ids",
-    "user_blocks": None,
+    "user_blocks": "user_block_ids",
     "offers": "offer_ids",
     "offer_publication_states": "publication_state_ids",
     "trades": "trade_ids",
@@ -1852,6 +1866,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_push_subscriptions = 0
         deleted_notifications = 0
         deleted_chat_members = 0
+        deleted_user_blocks = 0
         deleted_trade_delivery_receipts = 0
         deleted_telegram_admin_broadcasts = 0
         deleted_telegram_admin_broadcast_receipts = 0
@@ -1901,6 +1916,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         )
         deleted_offer_requests = await delete_in_batches(db, OfferRequest, OfferRequest.id, plan.offer_request_ids)
         deleted_chat_members = await delete_in_batches(db, ChatMember, ChatMember.id, plan.chat_member_ids)
+        deleted_user_blocks = await delete_in_batches(db, UserBlock, UserBlock.id, plan.user_block_ids)
         deleted_accountant_relations = await delete_in_batches(
             db, AccountantRelation, AccountantRelation.id, plan.accountant_relation_ids
         )
@@ -1932,6 +1948,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                        OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
                        OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
                        OR (table_name = 'chat_members' AND record_id = ANY(:chat_member_ids))
+                       OR (table_name = 'user_blocks' AND record_id = ANY(:user_block_ids))
                     """
                 )
             ),
@@ -1950,6 +1967,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                 "publication_state_ids": plan.publication_state_ids or [-1],
                 "notification_ids": plan.notification_ids or [-1],
                 "chat_member_ids": plan.chat_member_ids or [-1],
+                "user_block_ids": plan.user_block_ids or [-1],
             },
         )
         await db.commit()
@@ -1969,6 +1987,7 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_telegram_link_tokens=deleted_telegram_link_tokens,
         deleted_push_subscriptions=deleted_push_subscriptions,
         deleted_chat_members=deleted_chat_members,
+        deleted_user_blocks=deleted_user_blocks,
         deleted_offers=deleted_offers,
         deleted_trades=deleted_trades,
         deleted_trade_delivery_receipts=deleted_trade_delivery_receipts,
