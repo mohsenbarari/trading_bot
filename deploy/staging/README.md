@@ -28,11 +28,15 @@ authority and lets foreign-owned offers expire through the foreign expiry loop,
 without exposing the foreign WebApp/API surface publicly.
 
 For the real two-server staging topology, run the foreign host with
-`STAGING_ENABLE_BOT=1 STAGING_FOREIGN_ONLY=1`. In this mode the deploy starts
-only the foreign API, bot, and foreign sync worker plus shared db/redis/migration
-services. It intentionally does not start the Iran-mode `app` service on the
-foreign host, so the foreign staging database cannot be polluted by local
-Iran-mode runtime rows or source-sequence watermarks.
+`STAGING_ENABLE_BOT=1 STAGING_FOREIGN_ONLY=1 STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=1`.
+In this mode the deploy starts only the foreign API, bot, and foreign sync worker
+plus shared db/redis/migration services.
+It intentionally does not start the Iran-mode `app` service on the foreign host,
+so the foreign staging database cannot be polluted by local Iran-mode runtime
+rows or source-sequence watermarks. Keep the public-surface guard enabled on this
+host: setting it to `0` is valid only for the single-host staging topology where
+the Iran-mode `app` runs locally; on a foreign-only host it routes public API
+health traffic to an absent service and produces `502` responses.
 
 The public staging site is protected with Basic Auth. Credentials are generated
 in `.env.staging` as `STAGING_BASIC_AUTH_USER` and

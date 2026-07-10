@@ -104,17 +104,28 @@ cd frontend
 npx playwright test e2e/non-messenger-viewport.spec.ts e2e/market-mutation-ux.spec.ts --project=chromium
 ```
 
-Recommended role/trading follow-up checks:
+Recommended single-host role/trading follow-up checks:
 
 ```bash
 STAGING_ENABLE_BOT=1 STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=0 scripts/deploy_staging.sh deploy
 scripts/run_staging_role_trading_e2e_gate.sh
 ```
 
-This gate is intentionally wrapped by `scripts/run_staging_role_trading_e2e_gate.sh` instead of running the specs directly. Deploy staging with `STAGING_ENABLE_BOT=1` first so the app, foreign app, bot, and sync worker profiles are all recreated from the same image before the gate runs. Keep `STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=0` for this single-domain staging WebApp surface so `/api/config` remains available to the WebApp. The wrapped runner fail-closes unless the target is an explicit staging app container, the Redis container is explicit staging Redis, the backend URL points at staging, and the staging mutation confirmation environment is present. It also runs scoped pre/post cleanup for the Playwright fixture prefixes. Do not run the role/trading specs directly on a host that also has production containers.
+This gate is intentionally wrapped by `scripts/run_staging_role_trading_e2e_gate.sh` instead of running the specs directly. Deploy staging with `STAGING_ENABLE_BOT=1` first so the app, foreign app, bot, and sync worker profiles are all recreated from the same image before the gate runs. Keep `STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=0` only for this single-host, single-domain staging WebApp surface where the Iran-mode `app` service is running locally and must serve `/api/config`. The wrapped runner fail-closes unless the target is an explicit staging app container, the Redis container is explicit staging Redis, the backend URL points at staging, and the staging mutation confirmation environment is present. It also runs scoped pre/post cleanup for the Playwright fixture prefixes. Do not run the role/trading specs directly on a host that also has production containers.
 
 For the already-provisioned real two-server staging topology, use the existing
 two-server runner instead of the single-host compose gate:
+
+```bash
+STAGING_ENABLE_BOT=1 \
+STAGING_FOREIGN_ONLY=1 \
+STAGING_FOREIGN_PUBLIC_SURFACE_GUARD=1 \
+scripts/deploy_staging.sh deploy
+```
+
+The real foreign-only host does not run an Iran-mode `app` service. Its public
+surface guard must remain enabled; disabling it routes public `/api/*` requests
+to the absent Iran app and makes the staging health probe fail with `502`.
 
 ```bash
 set -a
