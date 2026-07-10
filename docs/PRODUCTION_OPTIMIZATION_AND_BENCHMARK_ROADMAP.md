@@ -37,10 +37,10 @@ Current Iran production-class host:
 | CPU | Intel Xeon E5-2680 v4, 28 physical cores / 56 logical CPUs |
 | RAM | About 125 GiB total, current runtime usage low |
 | Disk | About 1 TB non-rotational logical volume; root ext4 has about 837 GiB usable |
-| API workers | Iran defaults to `API_WORKERS=8` |
-| DB pool | Iran defaults to `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6` |
+| API workers | Replacement Iran host defaults to `API_WORKERS=4` |
+| DB pool | Replacement Iran host defaults to `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=4` |
 | DB connections | Direct PostgreSQL outperformed temporary PgBouncer in the authenticated/chat benchmark |
-| PostgreSQL | Iran P2 profile active: `shared_buffers=8GB`, `effective_cache_size=80GB`, `work_mem=8MB`, `maintenance_work_mem=512MB`, `random_page_cost=1.2`, `effective_io_concurrency=200`, `checkpoint_timeout=15min`, `max_wal_size=8GB`, `min_wal_size=1GB`, `wal_buffers=16MB` |
+| PostgreSQL | Replacement-host safety profile: `max_connections=150`, `shared_buffers=2GB`, `effective_cache_size=5GB`, `work_mem=4MB`, `maintenance_work_mem=256MB`, `max_wal_size=2GB`, `min_wal_size=512MB`; older P2 results below remain historical evidence for the retired host |
 | Redis | AOF enabled with `appendfsync=everysec`; RDB status ok; `maxmemory=0` intentionally left unbounded until alert thresholds are defined; `maxmemory-policy=noeviction` |
 | Static/media path | Iran Nginx serves immutable frontend assets directly with `Cache-Control: public, max-age=31536000, immutable` and `X-Static-Delivery: nginx`; service worker/manifest stay no-cache; raw `/uploads/` is blocked; protected chat media stays behind `/api/chat/files/{file_id}` token authorization |
 | Cross-server sync | P6 targeted sync benchmark passed on both directions; partial receive errors are no longer accepted as success; final foreign/Iran sync-health was clean |

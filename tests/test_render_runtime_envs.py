@@ -51,7 +51,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
-            "IRAN_DB_MAX_OVERFLOW": "6",
+            "IRAN_DB_MAX_OVERFLOW": "4",
             "DB_POOL_RECYCLE_SECONDS": "3600",
             "DB_POOL_PRE_PING": "true",
             "BACKGROUND_LEADER_LOCK_TTL_SECONDS": "90",
@@ -68,15 +68,16 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "POSTGRES_MAX_WAL_SIZE": "1GB",
             "POSTGRES_MIN_WAL_SIZE": "80MB",
             "POSTGRES_WAL_BUFFERS": "4MB",
-            "IRAN_POSTGRES_SHARED_BUFFERS": "8GB",
-            "IRAN_POSTGRES_EFFECTIVE_CACHE_SIZE": "80GB",
-            "IRAN_POSTGRES_WORK_MEM": "8MB",
-            "IRAN_POSTGRES_MAINTENANCE_WORK_MEM": "512MB",
+            "IRAN_POSTGRES_MAX_CONNECTIONS": "150",
+            "IRAN_POSTGRES_SHARED_BUFFERS": "2GB",
+            "IRAN_POSTGRES_EFFECTIVE_CACHE_SIZE": "5GB",
+            "IRAN_POSTGRES_WORK_MEM": "4MB",
+            "IRAN_POSTGRES_MAINTENANCE_WORK_MEM": "256MB",
             "IRAN_POSTGRES_RANDOM_PAGE_COST": "1.2",
             "IRAN_POSTGRES_EFFECTIVE_IO_CONCURRENCY": "200",
             "IRAN_POSTGRES_CHECKPOINT_TIMEOUT": "15min",
-            "IRAN_POSTGRES_MAX_WAL_SIZE": "8GB",
-            "IRAN_POSTGRES_MIN_WAL_SIZE": "1GB",
+            "IRAN_POSTGRES_MAX_WAL_SIZE": "2GB",
+            "IRAN_POSTGRES_MIN_WAL_SIZE": "512MB",
             "IRAN_POSTGRES_WAL_BUFFERS": "16MB",
             "REDIS_APPENDONLY": "yes",
             "REDIS_APPENDFSYNC": "everysec",
@@ -107,14 +108,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             iran_server_domain="coin.gold-trade.ir",
             metrics_backend="memory",
             audit_trail_path="/app/audit.jsonl",
-            api_workers="8",
+            api_workers="4",
             values=values,
         )
 
         self.assertEqual(foreign["SERVER_MODE"], "foreign")
         self.assertEqual(iran["SERVER_MODE"], "iran")
         self.assertEqual(foreign["API_WORKERS"], "2")
-        self.assertEqual(iran["API_WORKERS"], "8")
+        self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
         self.assertEqual(foreign["SYNC_VERIFY_TLS"], "true")
@@ -124,11 +125,15 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["DB_POOL_SIZE"], "15")
         self.assertEqual(foreign["DB_MAX_OVERFLOW"], "10")
         self.assertEqual(iran["DB_POOL_SIZE"], "8")
-        self.assertEqual(iran["DB_MAX_OVERFLOW"], "6")
+        self.assertEqual(iran["DB_MAX_OVERFLOW"], "4")
         self.assertEqual(foreign["POSTGRES_SHARED_BUFFERS"], "128MB")
-        self.assertEqual(iran["POSTGRES_SHARED_BUFFERS"], "8GB")
-        self.assertEqual(iran["POSTGRES_EFFECTIVE_CACHE_SIZE"], "80GB")
-        self.assertEqual(iran["POSTGRES_WORK_MEM"], "8MB")
+        self.assertEqual(iran["POSTGRES_MAX_CONNECTIONS"], "150")
+        self.assertEqual(iran["POSTGRES_SHARED_BUFFERS"], "2GB")
+        self.assertEqual(iran["POSTGRES_EFFECTIVE_CACHE_SIZE"], "5GB")
+        self.assertEqual(iran["POSTGRES_WORK_MEM"], "4MB")
+        self.assertEqual(iran["POSTGRES_MAINTENANCE_WORK_MEM"], "256MB")
+        self.assertEqual(iran["POSTGRES_MAX_WAL_SIZE"], "2GB")
+        self.assertEqual(iran["POSTGRES_MIN_WAL_SIZE"], "512MB")
         self.assertEqual(iran["REDIS_APPENDONLY"], "yes")
         self.assertEqual(iran["REDIS_APPENDFSYNC"], "everysec")
         self.assertEqual(iran["REDIS_MAXMEMORY_POLICY"], "noeviction")
@@ -161,7 +166,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "--foreign-api-workers",
                 "2",
                 "--iran-api-workers",
-                "8",
+                "4",
             ]
             with patch.dict(os.environ, values, clear=False):
                 with patch("sys.argv", argv):
@@ -173,11 +178,16 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
             self.assertIn("API_WORKERS=2", foreign_lines)
-            self.assertIn("API_WORKERS=8", iran_lines)
+            self.assertIn("API_WORKERS=4", iran_lines)
             self.assertIn("DB_POOL_SIZE=8", iran_lines)
-            self.assertIn("DB_MAX_OVERFLOW=6", iran_lines)
-            self.assertIn("POSTGRES_SHARED_BUFFERS=8GB", iran_lines)
-            self.assertIn("POSTGRES_EFFECTIVE_CACHE_SIZE=80GB", iran_lines)
+            self.assertIn("DB_MAX_OVERFLOW=4", iran_lines)
+            self.assertIn("POSTGRES_MAX_CONNECTIONS=150", iran_lines)
+            self.assertIn("POSTGRES_SHARED_BUFFERS=2GB", iran_lines)
+            self.assertIn("POSTGRES_EFFECTIVE_CACHE_SIZE=5GB", iran_lines)
+            self.assertIn("POSTGRES_WORK_MEM=4MB", iran_lines)
+            self.assertIn("POSTGRES_MAINTENANCE_WORK_MEM=256MB", iran_lines)
+            self.assertIn("POSTGRES_MAX_WAL_SIZE=2GB", iran_lines)
+            self.assertIn("POSTGRES_MIN_WAL_SIZE=512MB", iran_lines)
             self.assertIn("POSTGRES_SHARED_BUFFERS=128MB", foreign_lines)
             self.assertIn("REDIS_APPENDONLY=yes", iran_lines)
             self.assertIn("REDIS_APPENDFSYNC=everysec", iran_lines)
