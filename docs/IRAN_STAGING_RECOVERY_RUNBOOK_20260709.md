@@ -45,14 +45,47 @@ Fix the concrete cause found above. At minimum, the foreign host must receive
 a normal OpenSSH banner on `37067` and `ssh -p 37067 root@62.220.124.174 true`
 from the foreign server must complete without the pre-kex reset.
 
-2. Update the Iran staging checkout.
+2. Update the Iran staging release from the foreign/orchestration host.
+
+`/srv/trading-bot/staging-iran` is an artifact receiver, not a Git checkout.
+Do not run `git fetch`, `git switch`, or `git pull` in that directory. Prepare
+the exact candidate revision on the orchestration host, then transfer the
+runtime tree while protecting the receiver's environment and stateful paths:
 
 ```bash
-cd /srv/trading-bot/staging-iran
-git fetch origin
+cd /root/trading-bot/trading_bot
 git switch candidate/webapp-ui-ux-unification
 git pull --ff-only
+
+rsync -az --delete -e 'ssh -p 37067' \
+  --exclude='/.git/' \
+  --exclude='/.github/' \
+  --exclude='/.agents/' \
+  --exclude='/.claude/' \
+  --exclude='/.codex/' \
+  --exclude='/.env*' \
+  --exclude='/.venv/' \
+  --exclude='/.vscode/' \
+  --exclude='/.deploy_count' \
+  --exclude='/__pycache__/' \
+  --exclude='/app_logs/' \
+  --exclude='/docs/' \
+  --exclude='/frontend/' \
+  --exclude='/tests/' \
+  --exclude='/tmp/' \
+  --exclude='/uploads/' \
+  --exclude='/map_data/' \
+  --exclude='/mini_app_dist*/' \
+  ./ root@62.220.124.174:/srv/trading-bot/staging-iran/
+
+rsync -az --delete -e 'ssh -p 37067' \
+  mini_app_dist_staging/ \
+  root@62.220.124.174:/srv/trading-bot/staging-iran/mini_app_dist_staging/
 ```
+
+The excludes are release boundaries, not cleanup candidates. In particular,
+the transfer must never replace `.env.staging`, uploads, temporary evidence,
+or any database/Redis volume.
 
 3. Reinstall and redeploy Iran staging with the hardened script.
 
