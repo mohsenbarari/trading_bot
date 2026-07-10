@@ -139,7 +139,7 @@ def int_env(name: str, default: int) -> int:
 def runtime_env_report() -> dict[str, Any]:
     workers = int_env("API_WORKERS", 8)
     pool_size = int_env("DB_POOL_SIZE", 8)
-    max_overflow = int_env("DB_MAX_OVERFLOW", 6)
+    max_overflow = int_env("DB_MAX_OVERFLOW", 4)
     per_process_ceiling = pool_size + max_overflow
     return {
         "api_workers": workers,

@@ -58,9 +58,9 @@ The test must answer these questions:
 | Surface | Current known profile |
 | --- | --- |
 | Target server | Iran production profile |
-| API workers | `API_WORKERS=8` |
-| DB pool | `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6` |
-| PostgreSQL | Direct Postgres, tuned P2 profile |
+| API workers | Replacement-host baseline: `API_WORKERS=4` |
+| DB pool | `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=4` |
+| PostgreSQL | Direct Postgres, 8 GiB safety profile (`2GB` shared buffers, `150` max connections) |
 | Redis | AOF `everysec`, `noeviction` |
 | Static assets | Nginx direct immutable delivery |
 | Sync | Bidirectional foreign/Iran sync-health must be clean before and after |

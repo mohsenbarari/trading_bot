@@ -41,8 +41,8 @@ class PoolCandidate:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Stage L7.1 DB pool candidates with the realistic load harness.")
     parser.add_argument("--manifest", default=os.environ.get("MANIFEST", "./deploy/production/online.env"))
-    parser.add_argument("--candidates", default="8:6,12:8,16:8")
-    parser.add_argument("--api-workers", type=int, default=int(os.environ.get("IRAN_API_WORKERS", "8")))
+    parser.add_argument("--candidates", default="8:4,12:8,16:8")
+    parser.add_argument("--api-workers", type=int, default=int(os.environ.get("IRAN_API_WORKERS", "4")))
     parser.add_argument("--workers", default=None, help="Optional comma-separated API_WORKERS candidates. Defaults to --api-workers.")
     parser.add_argument("--target-rps", type=int, default=int(os.environ.get("TARGET_RPS", "500")))
     parser.add_argument("--duration", default=os.environ.get("DURATION", "2m"))

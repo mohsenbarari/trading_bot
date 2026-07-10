@@ -91,7 +91,7 @@ ROLE_PERFORMANCE_DEFAULTS = {
     },
     "iran": {
         "DB_POOL_SIZE": "8",
-        "DB_MAX_OVERFLOW": "6",
+        "DB_MAX_OVERFLOW": "4",
     },
 }
 
@@ -123,15 +123,16 @@ REDIS_DURABILITY_DEFAULTS = OrderedDict(
 ROLE_POSTGRES_TUNING_DEFAULTS = {
     "foreign": {},
     "iran": {
-        "POSTGRES_SHARED_BUFFERS": "8GB",
-        "POSTGRES_EFFECTIVE_CACHE_SIZE": "80GB",
-        "POSTGRES_WORK_MEM": "8MB",
-        "POSTGRES_MAINTENANCE_WORK_MEM": "512MB",
+        "POSTGRES_MAX_CONNECTIONS": "150",
+        "POSTGRES_SHARED_BUFFERS": "2GB",
+        "POSTGRES_EFFECTIVE_CACHE_SIZE": "5GB",
+        "POSTGRES_WORK_MEM": "4MB",
+        "POSTGRES_MAINTENANCE_WORK_MEM": "256MB",
         "POSTGRES_RANDOM_PAGE_COST": "1.2",
         "POSTGRES_EFFECTIVE_IO_CONCURRENCY": "200",
         "POSTGRES_CHECKPOINT_TIMEOUT": "15min",
-        "POSTGRES_MAX_WAL_SIZE": "8GB",
-        "POSTGRES_MIN_WAL_SIZE": "1GB",
+        "POSTGRES_MAX_WAL_SIZE": "2GB",
+        "POSTGRES_MIN_WAL_SIZE": "512MB",
         "POSTGRES_WAL_BUFFERS": "16MB",
     },
 }
@@ -151,7 +152,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metrics-backend", default="memory")
     parser.add_argument("--audit-trail-path", default="/app/audit_trail/audit.jsonl")
     parser.add_argument("--foreign-api-workers", default=os.environ.get("FOREIGN_API_WORKERS", "2"))
-    parser.add_argument("--iran-api-workers", default=os.environ.get("IRAN_API_WORKERS", "8"))
+    parser.add_argument("--iran-api-workers", default=os.environ.get("IRAN_API_WORKERS", "4"))
     return parser.parse_args()
 
 def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]:
