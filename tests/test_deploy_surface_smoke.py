@@ -374,14 +374,18 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertGreaterEqual(compose.count('extra_hosts:'), 3)
 
     def test_staging_foreign_compose_pins_iran_domain_inside_containers(self):
-        staging_compose = (REPO_ROOT / 'deploy/staging/docker-compose.staging.yml').read_text(encoding='utf-8')
+        staging_compose_path = REPO_ROOT / 'deploy/staging/docker-compose.staging.yml'
+        staging_payload = yaml.safe_load(staging_compose_path.read_text(encoding='utf-8'))
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        services = staging_payload['services']
+        expected = '${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}'
 
-        self.assertIn(
-            '${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}',
-            staging_compose,
-        )
-        self.assertGreaterEqual(staging_compose.count('extra_hosts:'), 4)
+        for service_name in ('foreign_app', 'foreign_sync_worker', 'bot', 'load_telegram_foreign'):
+            with self.subTest(service=service_name):
+                self.assertIn(expected, services[service_name].get('extra_hosts') or [])
+        for service_name in ('app', 'sync_worker', 'migration'):
+            with self.subTest(service=service_name):
+                self.assertNotIn(expected, services[service_name].get('extra_hosts') or [])
         self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN="${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}"', staging_script)
         self.assertIn('STAGING_IRAN_PUBLIC_IP="${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"', staging_script)
         self.assertIn('export STAGING_IRAN_PUBLIC_DOMAIN STAGING_IRAN_PUBLIC_IP', staging_script)
