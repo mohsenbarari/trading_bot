@@ -270,6 +270,25 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                 result = run_checked([*compose_command, '--env-file', '/dev/null', '-f', compose_file, 'config', '-q'])
                 self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_foreign_compose_pins_current_iran_domain_inside_containers(self):
+        compose = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+
+        self.assertIn(
+            '${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}',
+            compose,
+        )
+        self.assertGreaterEqual(compose.count('extra_hosts:'), 3)
+
+    def test_staging_foreign_services_pin_current_iran_domain(self):
+        compose = (REPO_ROOT / 'deploy/staging/docker-compose.staging.yml').read_text(encoding='utf-8')
+        deploy_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        expected = '${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}'
+
+        self.assertEqual(compose.count(expected), 4)
+        self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN="${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}"', deploy_script)
+        self.assertIn('STAGING_IRAN_PUBLIC_IP="${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"', deploy_script)
+        self.assertIn('export STAGING_IRAN_PUBLIC_DOMAIN STAGING_IRAN_PUBLIC_IP', deploy_script)
+
     def test_dockerfiles_pass_docker_build_check(self):
         if shutil.which('docker') is None:
             self.skipTest('docker is not installed')

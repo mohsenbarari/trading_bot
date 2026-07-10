@@ -88,7 +88,12 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
         )
         self.assertEqual(len(by_name["pre_run_cleanup_dry_run"]["commands"]), 2)
         self.assertTrue(any("docker compose exec -T app" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"]))
-        self.assertTrue(any("ssh root@87.107.3.22" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"]))
+        self.assertTrue(
+            any(
+                "ssh -p 37067 root@65.109.220.59" in item
+                for item in by_name["pre_run_cleanup_dry_run"]["commands"]
+            )
+        )
         self.assertTrue(
             all("--dry-run" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"])
         )

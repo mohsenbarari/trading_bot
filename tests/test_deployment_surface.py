@@ -14,7 +14,7 @@ from core.deployment_surface import (
 class DeploymentSurfaceTests(unittest.TestCase):
     def test_normalize_origin_and_extract_host_handle_bare_domains_urls_and_ports(self):
         self.assertEqual(normalize_origin("coin.gold-trade.ir"), "https://coin.gold-trade.ir")
-        self.assertEqual(normalize_origin("http://87.107.3.22"), "http://87.107.3.22")
+        self.assertEqual(normalize_origin("http://65.109.220.59"), "http://65.109.220.59")
         self.assertEqual(extract_host("https://coin.gold-trade.ir:443/path"), "coin.gold-trade.ir")
         self.assertEqual(extract_host("coin.362514.ir:8443"), "coin.362514.ir")
 
@@ -47,7 +47,7 @@ class DeploymentSurfaceTests(unittest.TestCase):
             iran_server_domain="coin.gold-trade.ir",
             foreign_server_url="https://api.coin.362514.ir",
             iran_server_url="https://api.coin.gold-trade.ir",
-            extra_cors_origins="http://87.107.3.22,https://staging.gold-trade.ir",
+            extra_cors_origins="http://65.109.220.59,https://staging.gold-trade.ir",
         )
 
         origins = allowed_cors_origins(settings)
@@ -57,7 +57,7 @@ class DeploymentSurfaceTests(unittest.TestCase):
         self.assertIn("https://coin.362514.ir", origins)
         self.assertIn("https://api.coin.362514.ir", origins)
         self.assertIn("https://api.coin.gold-trade.ir", origins)
-        self.assertIn("http://87.107.3.22", origins)
+        self.assertIn("http://65.109.220.59", origins)
         self.assertIn("https://staging.gold-trade.ir", origins)
 
     def test_allowed_cors_origins_exclude_localhost_in_production(self):

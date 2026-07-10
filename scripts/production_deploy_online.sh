@@ -329,7 +329,7 @@ ensure_manifest_file() {
     local foreign_timezone="UTC"
     local iran_host=""
     local iran_ssh_user="root"
-    local iran_ssh_port="22"
+    local iran_ssh_port="37067"
     local iran_ssh_auth_method="key"
     local iran_ssh_private_key_path="$HOME/.ssh/id_ed25519"
     local iran_ssh_password=""
@@ -531,6 +531,10 @@ load_manifest() {
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
+
+    # Docker Compose interpolation needs these manifest values exported, but
+    # they must not be copied into the application runtime env.
+    export IRAN_PUBLIC_IP IRAN_PUBLIC_DOMAIN
 
     if [[ "$FOREIGN_TIMEZONE" != "UTC" || "$IRAN_TIMEZONE" != "UTC" ]]; then
         log "Overriding configured timezones to UTC for production release."

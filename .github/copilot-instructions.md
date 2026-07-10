@@ -11,7 +11,7 @@
 | Server | Location | Services | Domain |
 |---|---|---|---|
 | **Foreign** | Germany (current machine) | Bot + API + Sync Worker + DB + Redis | — |
-| **Iran** | 87.107.3.22 | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
+| **Iran** | 65.109.220.59 (`SSH 37067`) | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
 
 ### Tech Stack
 - **Backend**: FastAPI 0.111 + SQLAlchemy 2.0 (async, asyncpg) + PostgreSQL 15 + Redis 7
@@ -217,6 +217,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-10 15:40 UTC | Codex | **Iran Replacement Host Routing Updated**: Replaced active production/staging Iran host defaults with `65.109.220.59:37067`, made full-matrix/backup/parity SSH and SCP paths port-aware, pinned Iran domains inside foreign runtime containers, and added regression coverage so future deploys cannot silently restore an obsolete host. Historical entries retain the addresses that were true when those operations occurred. Production deployment was not run. |
 | 2026-07-01 10:55 UTC | Codex | **Telegram Notification Outbox Rate-Limit Hardening**: Followed up on external-agent review by separating Telegram 429 `retry_after` from the generic 300-second backoff cap, preventing rate-limit retries from burning the terminal retry budget, and adding structured worker warnings/counts for alert-required delivery results. Added focused service and worker tests for long `retry_after`, non-rate-limit retry exhaustion, and alert logging. Production deploy was not run. |
 | 2026-07-01 10:19 UTC | Codex | **Generic Telegram Notification Outbox Added**: Replaced direct Telegram sends for project-user-joined announcements with a synced, durable `telegram_notification_outbox` table, foreign-only worker delivery, live eligibility checks, customer-exclusion policy, lease recovery, retry/backoff and 429 handling. Added sync registry/events/parity/repair/receiver coverage, Alembic revision `f7c8d9e0a1b2`, bot runtime worker wiring, and focused service/auth/sync/authority/runtime tests. Production deploy was not run. |
 | 2026-06-30 05:02 UTC | Codex | **Production Release Nginx Guard Fixed**: During production release, the Iran runtime deployed successfully but the final healthcheck produced a false negative while parsing a large `nginx -T` dump under `set -o pipefail`. Replaced the `printf | grep -q` checks in `scripts/production_deploy_online.sh` with here-string `grep` checks so valid HTTPS listener/certificate config is not rejected by SIGPIPE/pipefail behavior. Production healthcheck must be rerun after this fix. |

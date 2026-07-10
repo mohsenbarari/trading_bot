@@ -99,7 +99,7 @@ def ssh_args(settings: dict[str, str], command: str) -> list[str]:
         "-o",
         f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY_CHECKING}",
         "-p",
-        settings.get("IRAN_SSH_PORT", "22"),
+        settings.get("IRAN_SSH_PORT", "37067"),
         f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
         command,
     ]

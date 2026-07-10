@@ -336,7 +336,7 @@ def pull_iran_files(settings: dict[str, str], payload: dict[str, Any], destinati
         args = [
             "scp",
             "-P",
-            settings.get("IRAN_SSH_PORT", "22"),
+            settings.get("IRAN_SSH_PORT", "37067"),
             "-o",
             "StrictHostKeyChecking=accept-new",
             f"{target}:{remote_path}",

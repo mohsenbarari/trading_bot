@@ -27,7 +27,7 @@ class RenderReleaseArtifactsTests(unittest.TestCase):
             [
                 "FOREIGN_PUBLIC_IP=65.109.216.187",
                 "FOREIGN_PUBLIC_DOMAIN=coin.362514.ir",
-                "IRAN_PUBLIC_IP=87.107.3.22",
+                "IRAN_PUBLIC_IP=65.109.220.59",
                 "IRAN_PUBLIC_DOMAIN=coin.gold-trade.ir",
                 "IRAN_APP_DOMAIN=coin.gold-trade.ir",
                 "IRAN_PROJECT_DIR=/srv/trading-bot/current",
@@ -48,7 +48,7 @@ class RenderReleaseArtifactsTests(unittest.TestCase):
 
         hosts = render_hosts_block(values)
         self.assertIn("65.109.216.187 coin.362514.ir", hosts)
-        self.assertIn("87.107.3.22 coin.gold-trade.ir", hosts)
+        self.assertIn("65.109.220.59 coin.gold-trade.ir", hosts)
 
         nginx = render_nginx_config(values, template)
         self.assertIn("server_name coin.gold-trade.ir;", nginx)

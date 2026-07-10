@@ -230,7 +230,7 @@ def ssh_base(settings: dict[str, str]) -> list[str]:
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-p",
-        settings.get("IRAN_SSH_PORT", "22"),
+        settings.get("IRAN_SSH_PORT", "37067"),
         f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
         "bash",
         "-s",

@@ -52,8 +52,8 @@ class ProductionRecoverabilityToolsTests(unittest.TestCase):
         ):
             pulled = run_production_backup.pull_iran_files(
                 {
-                    "IRAN_HOST": "87.107.3.22",
-                    "IRAN_SSH_PORT": "22",
+                    "IRAN_HOST": "65.109.220.59",
+                    "IRAN_SSH_PORT": "37067",
                     "IRAN_SSH_USER": "root",
                 },
                 payload,

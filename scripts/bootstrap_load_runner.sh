@@ -37,7 +37,7 @@ Options:
 Environment:
   LOAD_RUNNER_HOST             Required unless --host is provided.
   LOAD_RUNNER_SSH_PORT         SSH port.
-  LOAD_RUNNER_JUMP_HOST        Optional SSH jump host, e.g. root@87.107.3.22.
+  LOAD_RUNNER_JUMP_HOST        Optional SSH jump host, e.g. root@65.109.220.59.
   LOAD_RUNNER_JUMP_SSH_PORT    Optional SSH jump host port. Default: 22.
   LOAD_RUNNER_PASSWORD         Optional final-host SSH password. Prefer env only.
   LOAD_RUNNER_REMOTE_DIR       Remote workspace.

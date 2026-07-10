@@ -66,10 +66,11 @@ class DeployConfigTests(unittest.TestCase):
     def test_resolve_deploy_settings_falls_back_to_defaults(self):
         resolved = resolve_deploy_settings(manifest_path="/nonexistent/online.env", environ={})
 
-        self.assertEqual(resolved["IRAN_HOST"], "87.107.3.22")
+        self.assertEqual(resolved["IRAN_HOST"], "65.109.220.59")
         self.assertEqual(resolved["IRAN_SSH_USER"], "root")
+        self.assertEqual(resolved["IRAN_SSH_PORT"], "37067")
         self.assertEqual(resolved["IRAN_PROJECT_DIR"], "/srv/trading-bot/current")
-        self.assertEqual(resolved["IRAN_SSH_TARGET"], "root@87.107.3.22")
+        self.assertEqual(resolved["IRAN_SSH_TARGET"], "root@65.109.220.59")
 
 
 if __name__ == "__main__":

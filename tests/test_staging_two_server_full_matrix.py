@@ -9,6 +9,28 @@ from scripts import run_staging_two_server_full_matrix as runner
 
 
 class StagingTwoServerFullMatrixTests(unittest.TestCase):
+    def test_iran_ssh_defaults_match_current_host(self):
+        args = runner.parse_args([])
+
+        self.assertEqual(args.iran_ssh_host, "root@65.109.220.59")
+        self.assertEqual(args.iran_ssh_port, "37067")
+
+    def test_remote_shell_and_scp_commands_include_iran_ssh_port(self):
+        args = runner.parse_args(["--iran-ssh-host", "root@example", "--iran-ssh-port", "37067"])
+
+        self.assertEqual(
+            runner.remote_shell_command(args, "echo ok"),
+            ["ssh", "-p", "37067", "root@example", "cd /srv/trading-bot/staging-iran && echo ok"],
+        )
+        self.assertEqual(
+            runner.scp_from_iran(args, "/remote/file.json", Path("/tmp/local.json")),
+            ["scp", "-P", "37067", "root@example:/remote/file.json", "/tmp/local.json"],
+        )
+        self.assertEqual(
+            runner.scp_to_iran(args, Path("/tmp/local.json"), "/remote/file.json"),
+            ["scp", "-P", "37067", "/tmp/local.json", "root@example:/remote/file.json"],
+        )
+
     def test_manifest_is_complete_controlled_and_branch_change_tagged(self):
         manifest = manifest_builder.build_manifest(prefix="FMX_STAGE_UNIT_20260629_")
         errors = manifest_builder.validate_manifest(manifest)
