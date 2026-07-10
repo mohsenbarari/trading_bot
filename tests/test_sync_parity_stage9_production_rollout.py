@@ -21,7 +21,7 @@ spec.loader.exec_module(stage9)
 
 FAKE_SETTINGS = {
     "DEPLOY_MANIFEST": "./deploy/production/online.env",
-    "IRAN_HOST": "62.220.124.174",
+    "IRAN_HOST": "65.109.220.59",
     "IRAN_SSH_PORT": "37067",
     "IRAN_SSH_USER": "root",
     "IRAN_PROJECT_DIR": "/srv/trading-bot/current",

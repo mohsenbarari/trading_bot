@@ -4,7 +4,8 @@
 
 Observed from the foreign/orchestration host:
 
-- `ssh -p 37067 root@62.220.124.174` connects at TCP level but resets before SSH key exchange:
+- The retired host `62.220.124.174` previously accepted TCP and then reset before SSH key exchange.
+  The replacement host is `65.109.220.59:37067`, and all current commands below target it.
   `kex_exchange_identification: read: Connection reset by peer`.
 - `https://staging.gold-trade.ir/api/config` with a Bearer header reaches FastAPI and returns `200`.
 - The same endpoint with Basic Auth returns an Nginx `500`.
@@ -42,7 +43,7 @@ nft list ruleset | sed -n '1,260p' || true
 ```
 
 Fix the concrete cause found above. At minimum, the foreign host must receive
-a normal OpenSSH banner on `37067` and `ssh -p 37067 root@62.220.124.174 true`
+a normal OpenSSH banner on `37067` and `ssh -p 37067 root@65.109.220.59 true`
 from the foreign server must complete without the pre-kex reset.
 
 2. Update the Iran staging release from the foreign/orchestration host.
@@ -76,11 +77,11 @@ rsync -az --delete -e 'ssh -p 37067' \
   --exclude='/uploads/' \
   --exclude='/map_data/' \
   --exclude='/mini_app_dist*/' \
-  ./ root@62.220.124.174:/srv/trading-bot/staging-iran/
+  ./ root@65.109.220.59:/srv/trading-bot/staging-iran/
 
 rsync -az --delete -e 'ssh -p 37067' \
   mini_app_dist_staging/ \
-  root@62.220.124.174:/srv/trading-bot/staging-iran/mini_app_dist_staging/
+  root@65.109.220.59:/srv/trading-bot/staging-iran/mini_app_dist_staging/
 ```
 
 The excludes are release boundaries, not cleanup candidates. In particular,
@@ -125,7 +126,7 @@ cd /root/trading-bot/trading_bot
 set -a
 source .env.staging
 set +a
-ssh -p 37067 root@62.220.124.174 true
+ssh -p 37067 root@65.109.220.59 true
 curl -skS -u "$STAGING_BASIC_AUTH_USER:$STAGING_BASIC_AUTH_PASSWORD" https://staging.gold-trade.ir/api/config
 curl -skS -H "X-Observability-Api-Key: $OBSERVABILITY_API_KEY" https://staging.gold-trade.ir/api/sync/health
 ```

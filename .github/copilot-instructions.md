@@ -11,7 +11,7 @@
 | Server | Location | Services | Domain |
 |---|---|---|---|
 | **Foreign** | Germany (current machine) | Bot + API + Sync Worker + DB + Redis | — |
-| **Iran** | 62.220.124.174 | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
+| **Iran** | 65.109.220.59 (`SSH 37067`) | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
 
 ### Tech Stack
 - **Backend**: FastAPI 0.111 + SQLAlchemy 2.0 (async, asyncpg) + PostgreSQL 15 + Redis 7
@@ -219,6 +219,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-10 15:40 UTC | Codex | **Iran Replacement Host Routing Updated**: Replaced active production/staging Iran host defaults with `65.109.220.59:37067`, updated operator runbooks and matrix tooling, and retained explicit container DNS pins for the replacement host. Compose-only IP values are exported by deploy scripts instead of being injected into the application env. Historical entries retain the addresses that were true when those operations occurred. Production deployment was not run. |
 | 2026-07-10 14:27 UTC | Codex | **Iran Staging Recovery Transfer Corrected**: Corrected the recovery runbook to treat `/srv/trading-bot/staging-iran` as an artifact receiver rather than a Git checkout. The documented recovery now prepares the exact candidate revision on the foreign/orchestration host, transfers code and the isolated staging frontend over SSH/rsync, and explicitly protects `.env.staging`, uploads, temporary evidence, and stateful data paths. |
 | 2026-07-09 17:20 UTC | Codex | **Production Hosts Permission Guard Fixed**: During investigation of a duplicate Telegram market-open notice after the Iran host reboot/IP change, found `/etc/hosts` had been rewritten with `0600` permissions because the production release hosts sync copied a `mktemp` file directly. Restored both hosts to `0644` live and hardened `scripts/production_deploy_online.sh` to enforce `root:root` and `0644` after local and remote hosts replacement, with a deploy-surface smoke guard. |
 | 2026-07-09 17:05 UTC | Codex | **Iran Domain Container Mapping Added**: Added explicit Compose `extra_hosts` mappings so foreign production and foreign-staging containers resolve the Iran domains (`coin.gold-trade.ir` and `staging.gold-trade.ir`) to the current Iran public IP `62.220.124.174` even while public DNS propagation still points at the previous address. Added staging env example keys and deploy-surface smoke guards for the mapping. |

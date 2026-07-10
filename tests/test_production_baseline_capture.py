@@ -11,7 +11,7 @@ from scripts import capture_production_baseline as baseline
 class ProductionBaselineCaptureTests(unittest.TestCase):
     def test_redact_mapping_keeps_safe_values_and_redacts_sensitive_keys(self) -> None:
         values = {
-            "IRAN_HOST": "62.220.124.174",
+            "IRAN_HOST": "65.109.220.59",
             "IRAN_SSH_PRIVATE_KEY_PATH": "/root/.ssh/id_prod",
             "OBSERVABILITY_API_KEY": "secret",
         }
@@ -20,7 +20,7 @@ class ProductionBaselineCaptureTests(unittest.TestCase):
             allow_keys=("IRAN_HOST", "IRAN_SSH_PRIVATE_KEY_PATH", "OBSERVABILITY_API_KEY"),
         )
 
-        self.assertEqual(redacted["IRAN_HOST"], "62.220.124.174")
+        self.assertEqual(redacted["IRAN_HOST"], "65.109.220.59")
         self.assertEqual(redacted["IRAN_SSH_PRIVATE_KEY_PATH"], "[REDACTED]")
         self.assertEqual(redacted["OBSERVABILITY_API_KEY"], "[REDACTED]")
 
@@ -57,7 +57,7 @@ class ProductionBaselineCaptureTests(unittest.TestCase):
     def test_remote_args_use_accept_new_host_key_policy(self) -> None:
         args = baseline.remote_args(
             {
-                "IRAN_HOST": "62.220.124.174",
+                "IRAN_HOST": "65.109.220.59",
                 "IRAN_SSH_PORT": "37067",
                 "IRAN_SSH_USER": "root",
             },

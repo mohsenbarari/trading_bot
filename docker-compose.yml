@@ -45,7 +45,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -72,7 +72,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -106,7 +106,7 @@ services:
     env_file:
       - .env
     extra_hosts:
-      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       redis:
         condition: service_started

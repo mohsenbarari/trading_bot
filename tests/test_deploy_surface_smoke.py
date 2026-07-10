@@ -368,35 +368,37 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         compose = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
 
         self.assertIn(
-            '${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-62.220.124.174}',
+            '${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}',
             compose,
         )
         self.assertGreaterEqual(compose.count('extra_hosts:'), 3)
 
     def test_staging_foreign_compose_pins_iran_domain_inside_containers(self):
         staging_compose = (REPO_ROOT / 'deploy/staging/docker-compose.staging.yml').read_text(encoding='utf-8')
-        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
 
         self.assertIn(
-            '${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-62.220.124.174}',
+            '${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}',
             staging_compose,
         )
         self.assertGreaterEqual(staging_compose.count('extra_hosts:'), 4)
-        self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN=staging.gold-trade.ir', staging_example)
-        self.assertIn('STAGING_IRAN_PUBLIC_IP=62.220.124.174', staging_example)
+        self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN="${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}"', staging_script)
+        self.assertIn('STAGING_IRAN_PUBLIC_IP="${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"', staging_script)
+        self.assertIn('export STAGING_IRAN_PUBLIC_DOMAIN STAGING_IRAN_PUBLIC_IP', staging_script)
 
     def test_staging_iran_load_runner_pins_foreign_domain_for_cold_start_trade_forwarding(self):
         staging_compose_path = REPO_ROOT / 'deploy/staging/docker-compose.staging.yml'
         staging_payload = yaml.safe_load(staging_compose_path.read_text(encoding='utf-8'))
-        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         webapp_runner = staging_payload['services']['load_webapp_iran']
 
         self.assertIn(
             '${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}',
             webapp_runner.get('extra_hosts') or [],
         )
-        self.assertIn('STAGING_FOREIGN_PUBLIC_DOMAIN=staging.362514.ir', staging_example)
-        self.assertIn('STAGING_FOREIGN_PUBLIC_IP=65.109.216.187', staging_example)
+        self.assertIn('STAGING_FOREIGN_PUBLIC_DOMAIN="${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}"', staging_script)
+        self.assertIn('STAGING_FOREIGN_PUBLIC_IP="${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}"', staging_script)
+        self.assertIn('export STAGING_FOREIGN_PUBLIC_DOMAIN STAGING_FOREIGN_PUBLIC_IP', staging_script)
 
     def test_production_hosts_sync_restores_standard_permissions(self):
         release_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')

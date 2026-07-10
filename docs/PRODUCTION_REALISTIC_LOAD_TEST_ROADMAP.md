@@ -69,7 +69,7 @@ The test must answer these questions:
 ## Current Load-Runner Baseline
 
 The active third host is `root@45.129.39.182` reached through jump host
-`root@62.220.124.174`. It has `4` vCPUs, about `8 GiB` RAM, and `k6 v0.49.0`.
+`root@65.109.220.59`. It has `4` vCPUs, about `8 GiB` RAM, and `k6 v0.49.0`.
 Its SSH session soft `nofile` limit was observed at `1024` while the hard limit
 is `1048576`. The Stage L runner now raises `ulimit -n` to
 `LOAD_RUNNER_NOFILE` before invoking k6 so high-RPS tests do not inherit a
@@ -100,7 +100,7 @@ Required environment for the load runner remains the same as L7:
 
 ```text
 LOAD_RUNNER_HOST=root@45.129.39.182
-LOAD_RUNNER_JUMP_HOST=root@62.220.124.174
+LOAD_RUNNER_JUMP_HOST=root@65.109.220.59
 LOAD_RUNNER_JUMP_SSH_PORT=37067
 ```
 
@@ -150,7 +150,7 @@ Suggested diagnostic run:
 
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
-LOAD_RUNNER_JUMP_HOST=root@62.220.124.174 \
+LOAD_RUNNER_JUMP_HOST=root@65.109.220.59 \
 LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
@@ -159,7 +159,7 @@ Acceptance:
 
 - run is generated from the load-runner host `45.129.39.182`;
 - target remains Iran production `https://coin.gold-trade.ir` on
-  `62.220.124.174`;
+  `65.109.220.59`;
 - endpoint breakdown is present in the matrix artifact;
 - no broad tuning is accepted until the slow endpoint families are classified.
 
@@ -189,7 +189,7 @@ Suggested diagnostic run:
 
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
-LOAD_RUNNER_JUMP_HOST=root@62.220.124.174 \
+LOAD_RUNNER_JUMP_HOST=root@65.109.220.59 \
 LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--workers 8,12,16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```
@@ -242,7 +242,7 @@ Suggested diagnostic run:
 
 ```bash
 LOAD_RUNNER_HOST=root@45.129.39.182 \
-LOAD_RUNNER_JUMP_HOST=root@62.220.124.174 \
+LOAD_RUNNER_JUMP_HOST=root@65.109.220.59 \
 LOAD_RUNNER_JUMP_SSH_PORT=37067 \
 make production-load-pool-matrix ARGS="--workers 16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
 ```

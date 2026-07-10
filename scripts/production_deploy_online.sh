@@ -532,6 +532,10 @@ load_manifest() {
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
 
+    # Docker Compose interpolation needs these manifest values exported, but
+    # they must not be copied into the application runtime env.
+    export IRAN_PUBLIC_IP IRAN_PUBLIC_DOMAIN
+
     if [[ "$FOREIGN_TIMEZONE" != "UTC" || "$IRAN_TIMEZONE" != "UTC" ]]; then
         log "Overriding configured timezones to UTC for production release."
         FOREIGN_TIMEZONE="UTC"

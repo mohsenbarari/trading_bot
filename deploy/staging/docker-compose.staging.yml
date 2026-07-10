@@ -77,7 +77,7 @@ services:
     env_file:
       - ../../.env.staging
     extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     ports:
       - "127.0.0.1:${STAGING_FOREIGN_APP_PORT:-8121}:8000"
     volumes:
@@ -121,7 +121,7 @@ services:
     env_file:
       - ../../.env.staging
     extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     volumes:
       - staging_audit:/app/audit_trail
     depends_on:
@@ -260,7 +260,7 @@ services:
     env_file:
       - ../../.env.staging
     extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       foreign_app:
         condition: service_healthy
@@ -296,7 +296,7 @@ services:
     env_file:
       - ../../.env.staging
     extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-62.220.124.174}"
+      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       migration:
         condition: service_completed_successfully
