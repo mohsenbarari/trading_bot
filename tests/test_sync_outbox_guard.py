@@ -2,8 +2,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import delete, text, update
+from sqlalchemy import create_engine, delete, event, text, update
+from sqlalchemy.orm import Session
 
+from core import sync_outbox_guard
 from core.sync_outbox_guard import (
     SYNC_OUTBOX_PENDING_KEY,
     SYNC_OUTBOX_WAKEUP_NEEDED_KEY,
@@ -82,8 +84,8 @@ class FakeRedis:
         self.rpush_error = rpush_error
         self.rpush_calls = []
 
-    def rpush(self, queue_name, payload):
-        self.rpush_calls.append((queue_name, payload))
+    def rpush(self, queue_name, *payloads):
+        self.rpush_calls.append((queue_name, payloads))
         if self.rpush_error:
             raise self.rpush_error
 
@@ -111,7 +113,7 @@ class SyncOutboxGuardTests(unittest.TestCase):
         verify_pending_sync_outbox(session, flush_context)
 
         self.assertNotIn(SYNC_OUTBOX_PENDING_KEY, session.info)
-        self.assertTrue(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY])
+        self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 1)
 
     def test_after_commit_wakes_sync_worker_only_after_verified_outbox(self):
         offer = FakeOffer(81)
@@ -129,7 +131,47 @@ class SyncOutboxGuardTests(unittest.TestCase):
 
         self.assertEqual(len(fake_redis.rpush_calls), 1)
         self.assertEqual(fake_redis.rpush_calls[0][0], "sync:outbound")
+        self.assertEqual(len(fake_redis.rpush_calls[0][1]), 1)
         self.assertNotIn(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, session.info)
+
+    def test_verified_outbox_rows_accumulate_one_wakeup_per_row(self):
+        offers = [FakeOffer(82), FakeOffer(83)]
+        connection = FakeConnection()
+        session = FakeSession(new=offers, connection=connection)
+        flush_context = object()
+        fake_redis = FakeRedis()
+
+        collect_pending_sync_writes(session, flush_context, None)
+        for offer in offers:
+            mark_sync_outbox_recorded(connection, "offers", "INSERT", offer.id, {"id": offer.id})
+        verify_pending_sync_outbox(session, flush_context)
+
+        self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 2)
+        with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis):
+            publish_sync_outbox_wakeup_after_commit(session)
+
+        self.assertEqual(len(fake_redis.rpush_calls), 1)
+        queue_name, payloads = fake_redis.rpush_calls[0]
+        self.assertEqual(queue_name, "sync:outbound")
+        self.assertEqual(len(payloads), 2)
+        self.assertEqual(payloads[0], payloads[1])
+
+    def test_verified_outbox_rows_accumulate_across_multiple_flushes(self):
+        connection = FakeConnection()
+        session = FakeSession(new=[FakeOffer(84)], connection=connection)
+
+        first_flush = object()
+        collect_pending_sync_writes(session, first_flush, None)
+        mark_sync_outbox_recorded(connection, "offers", "INSERT", 84, {"id": 84})
+        verify_pending_sync_outbox(session, first_flush)
+
+        session.new = [FakeOffer(85)]
+        second_flush = object()
+        collect_pending_sync_writes(session, second_flush, None)
+        mark_sync_outbox_recorded(connection, "offers", "INSERT", 85, {"id": 85})
+        verify_pending_sync_outbox(session, second_flush)
+
+        self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 2)
 
     def test_after_rollback_clears_pending_sync_worker_wakeup(self):
         session = FakeSession(info={SYNC_OUTBOX_WAKEUP_NEEDED_KEY: True})
@@ -149,6 +191,106 @@ class SyncOutboxGuardTests(unittest.TestCase):
 
         logger.warning.assert_called_once()
         self.assertNotIn(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, session.info)
+
+    def test_real_session_nested_commit_defers_wakeup_until_root_commit(self):
+        class ProbeSession(Session):
+            pass
+
+        engine = create_engine("sqlite:///:memory:")
+        fake_redis = FakeRedis()
+        event.listen(ProbeSession, "after_commit", publish_sync_outbox_wakeup_after_commit)
+        event.listen(ProbeSession, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
+        try:
+            with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis):
+                with ProbeSession(engine) as session:
+                    session.execute(text("CREATE TABLE wake_probe (id INTEGER)"))
+                    session.commit()
+                    fake_redis.rpush_calls.clear()
+
+                    session.execute(text("INSERT INTO wake_probe VALUES (1)"))
+                    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = 2
+                    with session.begin_nested():
+                        session.execute(text("INSERT INTO wake_probe VALUES (2)"))
+
+                    self.assertEqual(fake_redis.rpush_calls, [])
+                    self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 2)
+                    session.commit()
+
+            self.assertEqual(len(fake_redis.rpush_calls), 1)
+            self.assertEqual(len(fake_redis.rpush_calls[0][1]), 2)
+        finally:
+            event.remove(ProbeSession, "after_commit", publish_sync_outbox_wakeup_after_commit)
+            event.remove(ProbeSession, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
+            engine.dispose()
+
+    def test_real_session_nested_rollback_preserves_outer_wakeup(self):
+        class ProbeSession(Session):
+            pass
+
+        engine = create_engine("sqlite:///:memory:")
+        fake_redis = FakeRedis()
+        event.listen(ProbeSession, "after_commit", publish_sync_outbox_wakeup_after_commit)
+        event.listen(ProbeSession, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
+        try:
+            with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis):
+                with ProbeSession(engine) as session:
+                    session.execute(text("CREATE TABLE wake_probe (id INTEGER)"))
+                    session.commit()
+                    fake_redis.rpush_calls.clear()
+
+                    session.execute(text("INSERT INTO wake_probe VALUES (1)"))
+                    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = 1
+                    with self.assertRaisesRegex(RuntimeError, "rollback nested"):
+                        with session.begin_nested():
+                            session.execute(text("INSERT INTO wake_probe VALUES (2)"))
+                            raise RuntimeError("rollback nested")
+
+                    self.assertEqual(fake_redis.rpush_calls, [])
+                    self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 1)
+                    session.commit()
+
+            self.assertEqual(len(fake_redis.rpush_calls), 1)
+            self.assertEqual(len(fake_redis.rpush_calls[0][1]), 1)
+        finally:
+            event.remove(ProbeSession, "after_commit", publish_sync_outbox_wakeup_after_commit)
+            event.remove(ProbeSession, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
+            engine.dispose()
+
+    def test_real_session_root_rollback_clears_wakeup_without_signal(self):
+        class ProbeSession(Session):
+            pass
+
+        engine = create_engine("sqlite:///:memory:")
+        fake_redis = FakeRedis()
+        event.listen(ProbeSession, "after_commit", publish_sync_outbox_wakeup_after_commit)
+        event.listen(ProbeSession, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
+        try:
+            with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis):
+                with ProbeSession(engine) as session:
+                    session.execute(text("CREATE TABLE wake_probe (id INTEGER)"))
+                    session.commit()
+                    fake_redis.rpush_calls.clear()
+
+                    session.execute(text("INSERT INTO wake_probe VALUES (1)"))
+                    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = 1
+                    session.rollback()
+
+                    self.assertEqual(fake_redis.rpush_calls, [])
+                    self.assertNotIn(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, session.info)
+        finally:
+            event.remove(ProbeSession, "after_commit", publish_sync_outbox_wakeup_after_commit)
+            event.remove(ProbeSession, "after_rollback", clear_sync_outbox_wakeup_after_rollback)
+            engine.dispose()
+
+    def test_sync_wakeup_redis_disables_timeout_retry(self):
+        previous_client = sync_outbox_guard._SYNC_WAKEUP_REDIS
+        sync_outbox_guard._SYNC_WAKEUP_REDIS = None
+        try:
+            with patch("redis.Redis") as redis_ctor:
+                sync_outbox_guard._get_sync_wakeup_redis()
+            self.assertFalse(redis_ctor.call_args.kwargs["retry_on_timeout"])
+        finally:
+            sync_outbox_guard._SYNC_WAKEUP_REDIS = previous_client
 
     def test_non_synced_and_sync_apply_writes_do_not_require_outbox(self):
         message = FakeMessage(3)

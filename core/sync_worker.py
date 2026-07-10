@@ -52,6 +52,7 @@ SYNC_OUTBOUND_TABLE_PRIORITY = (
     "notifications",
     "user_blocks",
 )
+SYNC_CHANGE_LOG_POLL_DRAIN_LIMIT = 100
 
 
 class SyncDeliveryError(Exception):
@@ -371,54 +372,65 @@ async def main():
     assert_runtime_sync_transport_allowed()
     async with httpx.AsyncClient(verify=runtime_sync_tls_verify_setting()) as client:
         iteration = 0
+        poll_drain_remaining = 0
         while True:
             iteration += 1
             try:
-                # Wait for queue wake-ups/retries. Fresh outbound queue entries
-                # are treated only as wake-up signals; peer delivery must be
-                # built from committed change_log rows.
-                res = await r.blpop(queue_poll_order(iteration), timeout=5)
-                
                 should_requeue = True
-                if not res:
+                if poll_drain_remaining > 0:
                     data = await fetch_next_unsynced_change_log_item()
                     if data is None:
+                        poll_drain_remaining = 0
                         continue
+                    poll_drain_remaining -= 1
                     origin_queue = "change_log"
                     payload = json.dumps(data, sort_keys=True, default=str)
                     should_requeue = False
                 else:
-                    origin_queue, payload = res
-                    if origin_queue == queue_name:
+                    # Wait for queue wake-ups/retries. Fresh outbound queue
+                    # entries are treated only as wake-up signals; peer
+                    # delivery must be built from committed change_log rows.
+                    res = await r.blpop(queue_poll_order(iteration), timeout=5)
+                    if not res:
                         data = await fetch_next_unsynced_change_log_item()
                         if data is None:
-                            logger.info(
-                                "Dropped outbound sync wake-up with no committed change_log row.",
-                                extra={
-                                    "event": "job.item.outbound_wakeup_no_committed_change",
-                                    "job_name": "sync_worker",
-                                    "origin_queue": origin_queue,
-                                    **summarize_queue_payload(payload),
-                                },
-                            )
                             continue
+                        poll_drain_remaining = max(0, SYNC_CHANGE_LOG_POLL_DRAIN_LIMIT - 1)
                         origin_queue = "change_log"
                         payload = json.dumps(data, sort_keys=True, default=str)
                         should_requeue = False
                     else:
-                        try:
-                            data = json.loads(payload)
-                        except json.JSONDecodeError:
-                            logger.error(
-                                "❌ Invalid JSON in sync queue",
-                                extra={
-                                    "event": "job.item.invalid_payload",
-                                    "job_name": "sync_worker",
-                                    "origin_queue": origin_queue,
-                                    **summarize_queue_payload(payload),
-                                },
-                            )
-                            continue
+                        origin_queue, payload = res
+                        if origin_queue == queue_name:
+                            data = await fetch_next_unsynced_change_log_item()
+                            if data is None:
+                                logger.info(
+                                    "Dropped outbound sync wake-up with no committed change_log row.",
+                                    extra={
+                                        "event": "job.item.outbound_wakeup_no_committed_change",
+                                        "job_name": "sync_worker",
+                                        "origin_queue": origin_queue,
+                                        **summarize_queue_payload(payload),
+                                    },
+                                )
+                                continue
+                            origin_queue = "change_log"
+                            payload = json.dumps(data, sort_keys=True, default=str)
+                            should_requeue = False
+                        else:
+                            try:
+                                data = json.loads(payload)
+                            except json.JSONDecodeError:
+                                logger.error(
+                                    "❌ Invalid JSON in sync queue",
+                                    extra={
+                                        "event": "job.item.invalid_payload",
+                                        "job_name": "sync_worker",
+                                        "origin_queue": origin_queue,
+                                        **summarize_queue_payload(payload),
+                                    },
+                                )
+                                continue
 
                 payload = json.dumps(data, sort_keys=True, default=str)
                 item_hash = data.get('hash', 'unknown')
@@ -433,10 +445,11 @@ async def main():
                 )
                 
                 if not target_url or not api_key:
-                     logger.warning("Target URL or API Key missing. Keeping sync item pending and sleeping.")
-                     await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
-                     await asyncio.sleep(30)
-                     continue
+                    poll_drain_remaining = 0
+                    logger.warning("Target URL or API Key missing. Keeping sync item pending and sleeping.")
+                    await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
+                    await asyncio.sleep(30)
+                    continue
 
                 try:
                     start_time = time.perf_counter()
@@ -493,6 +506,7 @@ async def main():
                             )
 
                 except SyncDeliveryMarkerError as marker_err:
+                    poll_drain_remaining = 0
                     logger.error(
                         "❌ Sync delivery marker failed after peer acceptance",
                         extra={
@@ -508,6 +522,7 @@ async def main():
                     await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                     await asyncio.sleep(1)
                 except SyncDeliveryError as delivery_err:
+                    poll_drain_remaining = 0
                     logger.error(
                         "❌ Sync delivery rejected by peer",
                         extra={
@@ -523,6 +538,7 @@ async def main():
                     await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                     await asyncio.sleep(1) # Backoff slightly
                 except httpx.RequestError as req_err:
+                    poll_drain_remaining = 0
                     _loop_errors.log(
                         logger,
                         "❌ Network error during sync: %s",
@@ -535,6 +551,7 @@ async def main():
                     await asyncio.sleep(5) # Network retry backoff
 
             except Exception as e:
+                poll_drain_remaining = 0
                 _loop_errors.log(logger, "❌ Error in Sync Worker Loop: %s", e, job_name="sync_worker")
                 await asyncio.sleep(5)
 

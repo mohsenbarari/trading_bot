@@ -776,16 +776,84 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
 
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
             blpop_results=[None, asyncio.CancelledError()],
-            fetch_return_value=item,
+            fetch_side_effect=[item, None],
             send_return_value=response,
         )
 
-        self.fetch_mock.assert_awaited_once()
+        self.assertEqual(self.fetch_mock.await_count, 2)
         send_mock.assert_awaited_once()
         self.assertEqual(send_mock.await_args.args[1], item)
         marker_mock.assert_awaited_once_with(item)
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_not_awaited()
+
+    async def test_main_bounded_drains_committed_backlog_after_poll_timeout(self):
+        items = [
+            {
+                "type": "db_change",
+                "operation": "UPDATE",
+                "table": table,
+                "id": index,
+                "data": {"id": index},
+                "hash": f"hash-{index}",
+                "timestamp": 1700000000 + index,
+                "change_log_id": 100 + index,
+            }
+            for index, table in enumerate(("users", "offers", "trades"), start=1)
+        ]
+        response = FakeResponse(
+            200,
+            '{"status":"success","processed":1,"errors":0}',
+            {"status": "success", "processed": 1, "errors": 0},
+        )
+
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[None, asyncio.CancelledError()],
+            fetch_side_effect=[*items, None],
+            send_return_value=response,
+        )
+
+        self.assertEqual(self.fetch_mock.await_count, 4)
+        self.assertEqual(send_mock.await_count, 3)
+        self.assertEqual(
+            [call.args[1]["change_log_id"] for call in send_mock.await_args_list],
+            [101, 102, 103],
+        )
+        self.assertEqual(
+            [call.args[0]["change_log_id"] for call in marker_mock.await_args_list],
+            [101, 102, 103],
+        )
+        self.assertEqual(len(fake_redis.blpop_calls), 2)
+        sleep_mock.assert_not_awaited()
+
+    async def test_main_stops_poll_backlog_drain_after_delivery_failure(self):
+        item = {
+            "type": "db_change",
+            "operation": "UPDATE",
+            "table": "offers",
+            "id": 5,
+            "data": {"id": 5},
+            "hash": "hash-5",
+            "timestamp": 1700000000,
+            "change_log_id": 105,
+        }
+        response = FakeResponse(
+            500,
+            '{"status":"error","processed":0,"errors":1}',
+            {"status": "error", "processed": 0, "errors": 1},
+        )
+
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[None, asyncio.CancelledError()],
+            fetch_side_effect=[item],
+            send_return_value=response,
+        )
+
+        self.fetch_mock.assert_awaited_once()
+        send_mock.assert_awaited_once()
+        marker_mock.assert_not_awaited()
+        self.assertEqual(len(fake_redis.blpop_calls), 2)
+        sleep_mock.assert_awaited_once_with(1)
 
     async def test_main_treats_outbound_payload_as_wakeup_and_sends_committed_change_log(self):
         stale_payload = json.dumps(

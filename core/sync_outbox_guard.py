@@ -165,7 +165,10 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
             + ", ".join(missing)
         )
 
-    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = True
+    current_wakeup_count = _coerce_wakeup_count(
+        session.info.get(SYNC_OUTBOX_WAKEUP_NEEDED_KEY)
+    )
+    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = current_wakeup_count + len(pending)
 
 
 def publish_sync_outbox_wakeup_after_commit(session: Session) -> None:
@@ -175,26 +178,57 @@ def publish_sync_outbox_wakeup_after_commit(session: Session) -> None:
     queued payload for fresh outbound work and reads the committed change_log
     row from the database, so no peer-deliverable data is published pre-commit.
     """
-    if not session.info.pop(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, False):
+    # SQLAlchemy emits after_commit for RELEASE SAVEPOINT as well as for the
+    # root transaction. Preserve the count until the durable root commit.
+    if _session_in_nested_transaction(session):
         return
 
+    wakeup_count = _coerce_wakeup_count(
+        session.info.pop(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, 0)
+    )
+    if wakeup_count <= 0:
+        return
+
+    started_at = time.perf_counter()
     try:
         client = _get_sync_wakeup_redis()
+        payload = json.dumps(
+            {
+                "type": "sync_outbox_wakeup",
+                "timestamp": time.time(),
+            },
+            sort_keys=True,
+        )
         client.rpush(
             "sync:outbound",
-            json.dumps(
-                {
-                    "type": "sync_outbox_wakeup",
-                    "timestamp": time.time(),
-                },
-                sort_keys=True,
-            ),
+            *([payload] * wakeup_count),
+        )
+        logger.debug(
+            "Published committed sync outbox wake-ups.",
+            extra={
+                "event": "sync.outbox_wakeup.published",
+                "wakeup_count": wakeup_count,
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
         )
     except Exception as exc:
-        logger.warning("Could not wake sync worker after commit: %s", exc)
+        logger.warning(
+            "Could not wake sync worker after commit: %s",
+            exc,
+            extra={
+                "event": "sync.outbox_wakeup.failed",
+                "wakeup_count": wakeup_count,
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
 
 
 def clear_sync_outbox_wakeup_after_rollback(session: Session) -> None:
+    # A SAVEPOINT rollback may leave valid work in the outer transaction. Keep
+    # its wake-up count; an extra signal for rolled-back nested-only work is
+    # harmless because the worker reloads committed change_log rows.
+    if _session_in_nested_transaction(session):
+        return
     session.info.pop(SYNC_OUTBOX_WAKEUP_NEEDED_KEY, None)
 
 
@@ -269,9 +303,35 @@ def _get_sync_wakeup_redis():
         socket_connect_timeout=socket_timeout,
         socket_timeout=socket_timeout,
         socket_keepalive=True,
-        retry_on_timeout=True,
+        # This signal is best-effort and the durable DB poll is the fallback.
+        # Retrying synchronously would only extend the API commit path.
+        retry_on_timeout=False,
     )
     return _SYNC_WAKEUP_REDIS
+
+
+def _coerce_wakeup_count(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _session_in_nested_transaction(session: Any) -> bool:
+    checker = getattr(session, "in_nested_transaction", None)
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            pass
+
+    getter = getattr(session, "get_nested_transaction", None)
+    if callable(getter):
+        try:
+            return getter() is not None
+        except Exception:
+            pass
+    return False
 
 
 def object_table_name(obj: Any) -> str | None:
