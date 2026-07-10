@@ -118,6 +118,39 @@ Before production startup:
 5. Increase workers, pools, or PostgreSQL memory only after a production-like
    staging benchmark and an explicit capacity decision.
 
+## Sync Source-Sequence Continuity
+
+The first post-release deep parity capture on 2026-07-10 found one real
+business drift in `market_runtime_state`. The replacement Iran database had
+restarted `change_log.id` at `1`, while the foreign receiver still retained
+Iran-source watermarks up to `893155`. The receiver therefore classified new
+Iran events as older source sequences even though the Iran worker received a
+successful batch response and marked those rows synced. Foreign schedule
+autonomy still sent the close notice, but the authoritative runtime row did not
+converge until operator repair.
+
+The production recovery contract now requires source-sequence continuity in
+addition to row parity:
+
+1. Read the highest `sync_apply_watermarks.last_source_sequence` for
+   `source_server=iran` from foreign.
+2. After Iran migrations and before starting Iran `app` or `sync_worker`, lock
+   the local `change_log` sequence and ensure its next value is strictly above
+   that receiver floor and every existing Iran `change_log.id`.
+3. If shared tables are reset with `RESTART IDENTITY`, restore the same floor
+   inside the reset transaction before releasing the table locks.
+4. Never lower a sequence. Sequence gaps are expected and safe.
+5. After replacement, require deep parity with zero business/critical drift and
+   fresh artifact-backed status on both servers.
+
+`scripts/align_change_log_source_sequence.py` implements the read and alignment
+operations. `scripts/production_deploy_online.sh` invokes it before Iran
+services start and preserves the floor during guarded shared-data reset. The
+one-time production repair first created an Iran DB/Redis/uploads/audit backup,
+aligned the sequence from `55` to `893155`, replayed only the Iran-authoritative
+`market_runtime_state`, and then produced a fresh 23-table comparison with zero
+business, critical, incomplete, truncated, or duplicate-identity findings.
+
 ## Post-online Sampler Gate
 
 The first official post-online healthcheck found that the new Iran host had no

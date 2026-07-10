@@ -34,6 +34,32 @@ class IranResourceProfileTests(unittest.TestCase):
         self.assertLess(full_release.index("sync_project"), full_release.index("install_sync_sampler_remote"))
         self.assertLess(full_release.index("install_sync_sampler_remote"), full_release.index("deploy_iran"))
 
+    def test_iran_deploy_preserves_source_sequence_before_workers_start(self):
+        release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        self.assertIn("foreign_iran_source_sequence_floor() {", release)
+        self.assertIn(
+            "watermark-floor --source-server iran --format value",
+            release,
+        )
+        deploy_body = release.split("deploy_iran() {", 1)[1].split("\n}", 1)[0]
+        align_command = (
+            "python scripts/align_change_log_source_sequence.py align "
+            "--floor '$iran_source_sequence_floor'"
+        )
+        self.assertIn(align_command, deploy_body)
+        self.assertLess(deploy_body.index(align_command), deploy_body.rindex("app sync_worker"))
+
+    def test_shared_reset_preserves_source_sequence_in_same_transaction(self):
+        release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+        reset_body = release.split("reset_iran_shared_tables() {", 1)[1].split("\n}", 1)[0]
+
+        self.assertIn("BEGIN;", reset_body)
+        self.assertIn("TRUNCATE TABLE change_log", reset_body)
+        self.assertIn("pg_get_serial_sequence('change_log', 'id')", reset_body)
+        self.assertIn("GREATEST($iran_source_sequence_floor, 1)", reset_body)
+        self.assertIn("COMMIT;", reset_body)
+
     def test_renderer_defaults_fit_replacement_host_budget(self):
         performance = ROLE_PERFORMANCE_DEFAULTS["iran"]
         postgres = ROLE_POSTGRES_TUNING_DEFAULTS["iran"]

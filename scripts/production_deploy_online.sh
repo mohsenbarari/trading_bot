@@ -7,6 +7,7 @@ RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_runtime_envs.py"
 RELEASE_ARTIFACT_RENDERER="$PROJECT_DIR/scripts/render_release_artifacts.py"
 DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"
 PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygiene.py"
+CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_change_log_source_sequence.py"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -1024,6 +1025,7 @@ check_local() {
     [[ -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" ]] || die "Dockerfile.iran missing"
     [[ -f "$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template" ]] || die "Nginx template missing"
     [[ -f "$RELEASE_ARTIFACT_RENDERER" ]] || die "Release artifact renderer missing: $RELEASE_ARTIFACT_RENDERER"
+    [[ -f "$CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER" ]] || die "Change-log source sequence aligner missing: $CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER"
     validate_runtime_env_source_policy
     ensure_runtime_env_file
     render_release_artifacts
@@ -1848,10 +1850,25 @@ printf '%s\n' '$image_signature' > '$REMOTE_IMAGE_LOADED_SIGNATURE'"
     log "Docker images loaded on the Iran host"
 }
 
+foreign_iran_source_sequence_floor() {
+    local output floor
+    output="$(
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD run --rm --no-deps migration \
+            python scripts/align_change_log_source_sequence.py \
+            watermark-floor --source-server iran --format value
+    )"
+    floor="$(printf '%s\n' "$output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+    [[ "$floor" =~ ^[0-9]+$ ]] || die "Could not determine the Iran source-sequence floor from foreign watermarks: $output"
+    printf '%s\n' "$floor"
+}
+
 deploy_iran() {
     log "Deploying Docker services on the Iran host"
-    local compose_resolver
+    local compose_resolver iran_source_sequence_floor
     compose_resolver="$(remote_compose_resolver)"
+    iran_source_sequence_floor="$(foreign_iran_source_sequence_floor)"
+    log "Iran change_log source-sequence floor from foreign watermarks: $iran_source_sequence_floor"
     ssh_iran "set -euo pipefail
 $compose_resolver
 cd '$IRAN_PROJECT_DIR'
@@ -1885,6 +1902,8 @@ for attempt in \$(seq 1 60); do
   sleep 2
 done
 eval \"\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration\"
+docker rm -f trading_bot_migration >/dev/null 2>&1 || true
+eval \"\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration python scripts/align_change_log_source_sequence.py align --floor '$iran_source_sequence_floor'\"
 docker rm -f trading_bot_migration >/dev/null 2>&1 || true
 eval \"\$compose_cmd -f docker-compose.iran.yml up -d --no-deps \$wait_args app sync_worker\"
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\""
@@ -2005,14 +2024,23 @@ confirm_iran_shared_reset() {
 }
 
 reset_iran_shared_tables() {
+    local iran_source_sequence_floor
+    iran_source_sequence_floor="$(foreign_iran_source_sequence_floor)"
     confirm_iran_shared_reset
     backup_iran_database_before_shared_reset
-    log "Resetting Iran shared tables"
+    log "Resetting Iran shared tables and preserving source-sequence floor=$iran_source_sequence_floor"
 ssh_iran "set -euo pipefail
 $(remote_compose_resolver)
 cd '$IRAN_PROJECT_DIR'
 \$compose_cmd -f docker-compose.iran.yml exec -T db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At' <<'SQL'
+BEGIN;
 TRUNCATE TABLE change_log, $SHARED_SYNC_TABLES_SQL RESTART IDENTITY CASCADE;
+SELECT setval(
+  pg_get_serial_sequence('change_log', 'id'),
+  GREATEST($iran_source_sequence_floor, 1),
+  $iran_source_sequence_floor > 0
+);
+COMMIT;
 SQL"
     log "Iran shared-table reset completed"
 }
