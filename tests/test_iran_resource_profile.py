@@ -8,6 +8,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class IranResourceProfileTests(unittest.TestCase):
+    def test_bootstrap_selects_compose_package_supported_by_remote_os(self):
+        release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"',
+            release,
+        )
+        bootstrap_packages = release.split('IRAN_BOOTSTRAP_APT_PACKAGES="', 1)[1].split('"', 1)[0].split()
+        self.assertNotIn("docker-compose", bootstrap_packages)
+        self.assertNotIn("docker-compose-v2", bootstrap_packages)
+        self.assertGreaterEqual(release.count("for candidate in $IRAN_BOOTSTRAP_COMPOSE_PACKAGES"), 2)
+        self.assertIn('apt-cache show "\\$candidate"', release)
+        self.assertIn('install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES "\\$compose_package"', release)
+
     def test_renderer_defaults_fit_replacement_host_budget(self):
         performance = ROLE_PERFORMANCE_DEFAULTS["iran"]
         postgres = ROLE_POSTGRES_TUNING_DEFAULTS["iran"]

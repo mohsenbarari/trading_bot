@@ -10,7 +10,8 @@ PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygie
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
-IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io docker-compose python3-pip python3-setuptools python3-wheel"
+IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
+IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
 SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts"
 IRAN_SHARED_RESET_CONFIRM_TEXT="RESET_IRAN_SHARED_DATA"
 LOCAL_HOST_ARCH=""
@@ -209,7 +210,16 @@ remote_post_bootstrap_guard() {
     cat <<'EOF'
 if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   apt-get -o Acquire::Retries=5 update
-  apt-get -o Acquire::Retries=5 install -y --fix-missing docker-compose || true
+  compose_package=''
+  for candidate in docker-compose-v2 docker-compose; do
+    if apt-cache show "$candidate" >/dev/null 2>&1; then
+      compose_package="$candidate"
+      break
+    fi
+  done
+  if [ -n "$compose_package" ]; then
+    apt-get -o Acquire::Retries=5 install -y --fix-missing "$compose_package" || true
+  fi
 fi
 if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   echo "No Docker Compose command is available on the Iran host after bootstrap." >&2
@@ -1031,7 +1041,7 @@ prepare_iran_package_bundle() {
     local bundle_tar="$RELEASE_TMP_DIR/iran-packages.tar.gz"
     local bundle_hash_file="$RELEASE_TMP_DIR/iran-packages.sha256"
     local bundle_signature
-    bundle_signature="$(printf '%s\n%s\n%s\n' "$IRAN_OS_CODENAME" "$IRAN_IMAGE_PLATFORM" "$IRAN_BOOTSTRAP_APT_PACKAGES" | sha256sum | cut -d' ' -f1)"
+    bundle_signature="$(printf '%s\n%s\n%s\n%s\n' "$IRAN_OS_CODENAME" "$IRAN_IMAGE_PLATFORM" "$IRAN_BOOTSTRAP_APT_PACKAGES" "$IRAN_BOOTSTRAP_COMPOSE_PACKAGES" | sha256sum | cut -d' ' -f1)"
 
     if [[ -f "$bundle_tar" && -f "$bundle_hash_file" && "$(cat "$bundle_hash_file")" == "$bundle_signature" ]]; then
         return 0
@@ -1057,7 +1067,15 @@ prepare_iran_package_bundle() {
         bash -lc "set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get -o Acquire::Retries=5 -y --download-only -o Dir::Cache::archives=/bundle install $IRAN_BOOTSTRAP_APT_PACKAGES"
+compose_package=''
+for candidate in $IRAN_BOOTSTRAP_COMPOSE_PACKAGES; do
+  if apt-cache show "\$candidate" >/dev/null 2>&1; then
+    compose_package="\$candidate"
+    break
+  fi
+done
+[ -n "\$compose_package" ] || { echo 'No supported Docker Compose package is available.' >&2; exit 1; }
+apt-get -o Acquire::Retries=5 -y --download-only -o Dir::Cache::archives=/bundle install $IRAN_BOOTSTRAP_APT_PACKAGES "\$compose_package""
     tar -C "$bundle_dir" -czf "$bundle_tar" .
     printf '%s\n' "$bundle_signature" > "$bundle_hash_file"
     log "Iran bootstrap package bundle prepared at $bundle_tar"
@@ -1108,7 +1126,15 @@ else
 set -euo pipefail
 apt-get -o Acquire::Retries=5 update
 $docker_cleanup_guard
-apt-get -o Acquire::Retries=5 install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES
+compose_package=''
+for candidate in $IRAN_BOOTSTRAP_COMPOSE_PACKAGES; do
+  if apt-cache show "\$candidate" >/dev/null 2>&1; then
+    compose_package="\$candidate"
+    break
+  fi
+done
+[ -n "\$compose_package" ] || { echo 'No supported Docker Compose package is available.' >&2; exit 1; }
+apt-get -o Acquire::Retries=5 install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES "\$compose_package"
 $docker_service_guard
 systemctl enable --now nginx
 python3 -m pip --version >/dev/null 2>&1 || true
