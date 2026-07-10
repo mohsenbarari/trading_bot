@@ -6370,6 +6370,10 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
 
 
 async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
+    # This command is commonly launched as its own short-lived container
+    # process. Register model listeners here so the terminal offer mutation
+    # produces the same durable sync outbox rows as the long-running app.
+    setup_event_listeners()
     prepare = read_json_artifact(Path(args.prepare))
     prefix = str(prepare.get("prefix") or "")
     scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
@@ -6454,6 +6458,9 @@ async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
 
 
 async def run_time_expiry_race_command(args: argparse.Namespace) -> int:
+    # Keep standalone expiry probes on the production transaction path. Without
+    # these listeners the DB commit succeeds but no change_log row is emitted.
+    setup_event_listeners()
     prepare = read_json_artifact(Path(args.prepare))
     prefix = str(prepare.get("prefix") or "")
     scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")

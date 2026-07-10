@@ -1,8 +1,13 @@
+import asyncio
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from scripts.trading_core_probe_worker import (
     TradingProbeError,
     assert_race_acceptance,
+    run_manual_expiry_race_command,
+    run_time_expiry_race_command,
     summarize_samples,
 )
 
@@ -43,6 +48,24 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
                 status="completed",
                 error_count=1,
             )
+
+    def test_standalone_manual_expiry_registers_model_event_listeners(self) -> None:
+        args = SimpleNamespace(prepare="/missing/manual-expiry-prepare.json")
+
+        with patch("scripts.trading_core_probe_worker.setup_event_listeners") as setup:
+            with self.assertRaises(TradingProbeError):
+                asyncio.run(run_manual_expiry_race_command(args))
+
+        setup.assert_called_once_with()
+
+    def test_standalone_time_expiry_registers_model_event_listeners(self) -> None:
+        args = SimpleNamespace(prepare="/missing/time-expiry-prepare.json")
+
+        with patch("scripts.trading_core_probe_worker.setup_event_listeners") as setup:
+            with self.assertRaises(TradingProbeError):
+                asyncio.run(run_time_expiry_race_command(args))
+
+        setup.assert_called_once_with()
 
 
 if __name__ == "__main__":
