@@ -4,7 +4,7 @@
 
 Observed from the foreign/orchestration host:
 
-- `ssh -p 37067 root@87.107.3.22` connects at TCP level but resets before SSH key exchange:
+- `ssh -p 37067 root@62.220.124.174` connects at TCP level but resets before SSH key exchange:
   `kex_exchange_identification: read: Connection reset by peer`.
 - `https://staging.gold-trade.ir/api/config` with a Bearer header reaches FastAPI and returns `200`.
 - The same endpoint with Basic Auth returns an Nginx `500`.
@@ -42,7 +42,7 @@ nft list ruleset | sed -n '1,260p' || true
 ```
 
 Fix the concrete cause found above. At minimum, the foreign host must receive
-a normal OpenSSH banner on `37067` and `ssh -p 37067 root@87.107.3.22 true`
+a normal OpenSSH banner on `37067` and `ssh -p 37067 root@62.220.124.174 true`
 from the foreign server must complete without the pre-kex reset.
 
 2. Update the Iran staging checkout.
@@ -92,7 +92,7 @@ cd /root/trading-bot/trading_bot
 set -a
 source .env.staging
 set +a
-ssh -p 37067 root@87.107.3.22 true
+ssh -p 37067 root@62.220.124.174 true
 curl -skS -u "$STAGING_BASIC_AUTH_USER:$STAGING_BASIC_AUTH_PASSWORD" https://staging.gold-trade.ir/api/config
 curl -skS -H "X-Observability-Api-Key: $OBSERVABILITY_API_KEY" https://staging.gold-trade.ir/api/sync/health
 ```
