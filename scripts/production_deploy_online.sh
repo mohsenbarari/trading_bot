@@ -820,7 +820,7 @@ install_sync_sampler_remote() {
     log "Ensuring Iran sync health sampler is installed"
     ssh_iran "set -euo pipefail
 cd '$IRAN_PROJECT_DIR'
-bash ./scripts/install_sync_health_monitor.sh"
+SYNC_HEALTH_MONITOR_SKIP_IRAN=1 bash ./scripts/install_sync_health_monitor.sh"
 }
 
 verify_sync_sampler_local() {

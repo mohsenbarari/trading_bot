@@ -7,6 +7,16 @@ SERVICE_NAME="${SERVICE_NAME:-trading-bot-sync-health-sampler}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE_PATH="$SYSTEMD_DIR/$SERVICE_NAME.service"
 TIMER_PATH="$SYSTEMD_DIR/$SERVICE_NAME.timer"
+SKIP_IRAN_ARG=""
+
+case "${SYNC_HEALTH_MONITOR_SKIP_IRAN:-0}" in
+  0) ;;
+  1) SKIP_IRAN_ARG=" --skip-iran" ;;
+  *)
+    echo "SYNC_HEALTH_MONITOR_SKIP_IRAN must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
   echo "python3 was not found in PATH" >&2
@@ -24,7 +34,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$ROOT_DIR
-ExecStart=$PYTHON_BIN $ROOT_DIR/scripts/sample_sync_health.py
+ExecStart=$PYTHON_BIN $ROOT_DIR/scripts/sample_sync_health.py$SKIP_IRAN_ARG
 EOF
 
   cat >"$TIMER_PATH" <<EOF
@@ -47,4 +57,4 @@ EOF
 fi
 
 echo "systemd is not available. Add this cron entry instead:"
-echo "* * * * * cd $ROOT_DIR && $PYTHON_BIN scripts/sample_sync_health.py >> /var/log/trading-bot-sync-health.log 2>&1"
+echo "* * * * * cd $ROOT_DIR && $PYTHON_BIN scripts/sample_sync_health.py$SKIP_IRAN_ARG >> /var/log/trading-bot-sync-health.log 2>&1"

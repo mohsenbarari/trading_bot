@@ -118,6 +118,21 @@ Before production startup:
 5. Increase workers, pools, or PostgreSQL memory only after a production-like
    staging benchmark and an explicit capacity decision.
 
+## Post-online Sampler Gate
+
+The first official post-online healthcheck found that the new Iran host had no
+sync-health sampler installed. Installing the previous unit exposed a latent
+role error: the Iran-host unit sampled its local endpoint successfully and
+then attempted to SSH back into the same Iran host, causing every timer run to
+fail. The cross-server SSH probe belongs only on the foreign control host.
+
+`scripts/install_sync_health_monitor.sh` therefore accepts the validated
+`SYNC_HEALTH_MONITOR_SKIP_IRAN=1` install flag, and
+`install_sync_sampler_remote()` always uses it. The foreign installation keeps
+the existing local-plus-Iran behavior. Recovery is not complete until the Iran
+timer is enabled and active, a manual service run exits successfully, and the
+official healthcheck passes.
+
 This profile changes no business logic, data model, sync contract, or Telegram
 placement policy except for the reference-safe recovery/sync payload contract
 documented above.
