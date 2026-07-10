@@ -121,6 +121,7 @@ def render_nginx_config(values: dict[str, str], template_path: str) -> str:
         template
         .replace("__SERVER_NAME__", values["NGINX_SERVER_NAME"])
         .replace("__APP_ROOT__", values["NGINX_APP_ROOT"])
+        .replace("__FOREIGN_PUBLIC_IP__", values["FOREIGN_PUBLIC_IP"])
     )
 
 

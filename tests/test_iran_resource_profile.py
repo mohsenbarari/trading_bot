@@ -62,6 +62,7 @@ class IranResourceProfileTests(unittest.TestCase):
             "${API_WORKERS:-4}",
             "${DB_POOL_SIZE:-8}",
             "${DB_MAX_OVERFLOW:-4}",
+            "${BACKGROUND_JOBS_ENABLED:-true}",
             "${POSTGRES_MAX_CONNECTIONS:-150}",
             "${POSTGRES_SHARED_BUFFERS:-2GB}",
             "${POSTGRES_EFFECTIVE_CACHE_SIZE:-5GB}",

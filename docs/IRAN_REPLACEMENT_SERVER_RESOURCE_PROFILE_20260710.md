@@ -50,6 +50,13 @@ table as blocking unless it is explicitly allowed to contain migration-created
 bootstrap rows. This prevents a newly synced table from being silently omitted
 from replacement-host recovery.
 
+During a fresh-host seed, start the Iran API with
+`BACKGROUND_JOBS_ENABLED=false`, keep `sync_worker` stopped, and serve the
+recovery Nginx profile. That profile permits only the HMAC-authenticated
+`/api/sync/receive` endpoint from the configured foreign public IP and returns
+`503` for every user-facing route. Re-enable jobs and the full Nginx profile
+only after clean shared-table parity.
+
 Before production startup:
 
 1. Render the Iran runtime env and assert every value above.

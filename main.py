@@ -352,15 +352,26 @@ async def lifespan(app: FastAPI):
         except Exception:
             await session.rollback()
             raise
-    background_leader_task = _start_background_leader_task(redis_client)
+    background_leader_task = None
+    if settings.background_jobs_enabled:
+        background_leader_task = _start_background_leader_task(redis_client)
+    else:
+        logger.warning(
+            "API background jobs are disabled by runtime configuration",
+            extra={
+                "event": "background.jobs.disabled",
+                "server_mode": settings.server_mode,
+            },
+        )
 
     try:
         yield
     finally:
         # Shutdown
         logger.info("🛑 Shutting down...")
-        background_leader_task.cancel()
-        await asyncio.gather(background_leader_task, return_exceptions=True)
+        if background_leader_task is not None:
+            background_leader_task.cancel()
+            await asyncio.gather(background_leader_task, return_exceptions=True)
         await close_redis()
 
 app = FastAPI(
