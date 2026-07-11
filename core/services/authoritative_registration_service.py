@@ -58,7 +58,8 @@ from core.services.registration_notification_service import (
     should_announce_project_user_registration,
 )
 from core.services.user_account_status_service import get_user_account_status
-from core.utils import normalize_account_name, normalize_persian_numerals, utc_now
+from core.registration_identity import normalize_account_name, normalize_mobile_number
+from core.utils import utc_now
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
@@ -510,12 +511,12 @@ def _matching_user_maps(
     mobile_users = [
         user
         for user in users
-        if normalize_persian_numerals(str(user.mobile_number or "")).strip() == identity.mobile_number
+        if normalize_mobile_number(user.mobile_number) == identity.mobile_number
     ]
     account_users = [
         user
         for user in users
-        if normalize_account_name(str(user.account_name or "").strip()) == identity.account_name
+        if normalize_account_name(user.account_name) == identity.account_name
     ]
     telegram_users = [user for user in users if telegram_id is not None and user.telegram_id == telegram_id]
     return mobile_users, account_users, telegram_users

@@ -1,5 +1,10 @@
 # Dual-Platform Registration - Stage 2 Review Remediation
 
+> Later review note: canonical whitespace equivalence and counter reset/error-receipt semantics were
+> reopened after this record. See
+> `docs/DUAL_PLATFORM_REGISTRATION_DUAL_AGENT_FINAL_REVIEW_REMEDIATION_20260711.md` for the current
+> contract and gate.
+
 - Date: 2026-07-11
 - Branch: `candidate/bot-webapp-integration`
 - Stage 2 implementation: `bc2d4fcc`

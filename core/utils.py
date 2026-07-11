@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
 from core.enums import NotificationLevel, NotificationCategory
+from core.registration_identity import normalize_account_name, normalize_persian_numerals
 from core.redis import pool
 from models.notification import Notification
 
@@ -166,32 +167,6 @@ def parse_jalali_str(date_str: str) -> Optional[datetime]:
 
 
 # ===== STRING NORMALIZATION =====
-
-# نگاشت اعداد فارسی
-PERSIAN_NUM_MAP = {
-    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
-}
-
-
-def normalize_persian_numerals(text: str) -> str:
-    """تبدیل اعداد فارسی/عربی به انگلیسی."""
-    if not text:
-        return text
-    for persian, english in PERSIAN_NUM_MAP.items():
-        text = text.replace(persian, english)
-    return text
-
-
-def normalize_account_name(text: str) -> str:
-    """نرمال‌سازی نام حساب (تبدیل اعداد فارسی و lowercase)."""
-    if not text:
-        return text
-    normalized_text = normalize_persian_numerals(text)
-    return normalized_text.lower()
-
 
 def unique_user_ids(user_ids: list[object]) -> list[int]:
     """Return positive user ids once while preserving input order."""

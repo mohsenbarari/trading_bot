@@ -8,6 +8,12 @@
 - Roadmap: `docs/DUAL_PLATFORM_REGISTRATION_AND_SYNCHRONIZED_OTP_ROADMAP_20260710.md`
 - Deployment scope: source and isolated evidence only
 
+> Superseded review status: the later dual-agent review reopened canonical whitespace equivalence
+> and multi-reset/error-receipt counter semantics. Their accepted remediation and current gate are
+> recorded in
+> `docs/DUAL_PLATFORM_REGISTRATION_DUAL_AGENT_FINAL_REVIEW_REMEDIATION_20260711.md`. The disposition
+> table below remains the historical state at `8181d9f6`, not the current approval claim.
+
 ## Gate Status
 
 The combined independent review targeted stale commit `c8bb4a1a`, before the accepted Stage 2

@@ -35,6 +35,7 @@ from core.user_counter_sync import (
     InvalidUserCounterMutation,
     build_user_counter_event,
     build_user_sync_identity,
+    normalize_counter_event_occurred_at,
     user_counter_event_content_hash,
     user_counter_event_payload,
 )
@@ -125,6 +126,36 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
 
 def _record_local_user_counter_event(connection, target, counter_event, source_server: str) -> None:
     """Persist the producer-side ledger row in the User transaction."""
+    if counter_event.kind == "reset":
+        latest_reset = connection.execute(
+            text(
+                """
+                SELECT event_epoch, occurred_at
+                FROM user_counter_event_receipts
+                WHERE user_id = :user_id AND event_kind = 'reset'
+                ORDER BY event_epoch DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": int(target.id)},
+        ).first()
+        expected_previous_epoch = int(counter_event.epoch) - 1
+        if expected_previous_epoch == 1:
+            if latest_reset is not None:
+                raise InvalidUserCounterMutation(
+                    "first counter reset conflicts with existing reset history"
+                )
+        elif latest_reset is None or int(latest_reset[0]) != expected_previous_epoch:
+            raise InvalidUserCounterMutation(
+                "counter reset history is incomplete or non-sequential"
+            )
+        if latest_reset is not None:
+            previous_boundary = normalize_counter_event_occurred_at(latest_reset[1])
+            if counter_event.occurred_at <= previous_boundary:
+                raise InvalidUserCounterMutation(
+                    "counter reset boundary must advance monotonically"
+                )
+
     event_hash = user_counter_event_content_hash(
         source_server=source_server,
         event_id=counter_event.event_id,

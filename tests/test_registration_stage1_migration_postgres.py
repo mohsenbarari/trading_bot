@@ -10,6 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from core.registration_identity import normalize_account_name, normalize_mobile_number
+
 
 MIGRATION_DATABASE_PATTERN = re.compile(r"^stage1_migration_[a-z0-9_]+$")
 
@@ -288,7 +290,7 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         engine = create_async_engine(async_url, pool_pre_ping=True)
         label = uuid4().hex[:10]
         accounts = [
-            f" Canonical_{label}_۱۲۳ ",
+            f"\tCanonical_{label}_۱۲۳\u00a0",
             f"canonical_{label}_123",
             f"mobile_a_{label}",
             f"mobile_b_{label}",
@@ -300,7 +302,7 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         mobiles = [
             f"090{int(label[:7], 16) % 100000000:08d}",
             f"092{int(label[:7], 16) % 100000000:08d}",
-            persian_mobile,
+            f"\u2007{persian_mobile}\u202f",
             canonical_mobile,
         ]
         try:
@@ -362,6 +364,71 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     {"accounts": accounts},
                 )
             await engine.dispose()
+
+    async def test_generated_identity_matches_versioned_python_contract(self):
+        sync_url, async_url = MIGRATION_DATABASE_URLS
+        _run_alembic(sync_url, "upgrade", "f7c8d9e0a1b2")
+        engine = create_async_engine(async_url, pool_pre_ping=True)
+        label = uuid4().hex[:8]
+        cases = (
+            (f"\tProject_{label}_۱۲۳\u00a0", f"\u20070912{int(label, 16) % 10_000_000:07d}\u202f"),
+            (f"\nÄCCOUNT_{label}\r", f"\u30000913{int(label, 16) % 10_000_000:07d}\u1680"),
+            (f"\u205fPlain_{label}\u3000", f"\u00850914{int(label, 16) % 10_000_000:07d}\u00a0"),
+        )
+        try:
+            async with engine.begin() as connection:
+                for index, (account, mobile) in enumerate(cases):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO users (
+                                account_name, mobile_number, full_name, address, role,
+                                has_bot_access, is_deleted, must_change_password, home_server
+                            ) VALUES (
+                                :account, :mobile, :full_name, 'Canonical differential address',
+                                'STANDARD', true, false, false, 'iran'
+                            )
+                            """
+                        ),
+                        {
+                            "account": account,
+                            "mobile": mobile,
+                            "full_name": f"canonical differential {index}",
+                        },
+                    )
+
+            await engine.dispose()
+            _run_alembic(sync_url, "upgrade", "a8d9e0f1b2c3")
+            engine = create_async_engine(async_url, pool_pre_ping=True)
+            async with engine.connect() as connection:
+                rows = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT account_name, mobile_number,
+                                   normalized_account_name, normalized_mobile_number
+                            FROM users
+                            WHERE account_name = ANY(:accounts)
+                            ORDER BY account_name
+                            """
+                        ),
+                        {"accounts": [account for account, _mobile in cases]},
+                    )
+                ).all()
+            self.assertEqual(len(rows), len(cases))
+            for row in rows:
+                with self.subTest(account=repr(row.account_name)):
+                    self.assertEqual(
+                        row.normalized_account_name,
+                        normalize_account_name(row.account_name),
+                    )
+                    self.assertEqual(
+                        row.normalized_mobile_number,
+                        normalize_mobile_number(row.mobile_number),
+                    )
+        finally:
+            await engine.dispose()
+            _run_alembic(sync_url, "downgrade", "f7c8d9e0a1b2")
 
 
 if __name__ == "__main__":

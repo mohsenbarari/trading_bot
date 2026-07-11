@@ -86,6 +86,13 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_normalization_helpers(self):
         self.assertEqual(utils.normalize_persian_numerals('۱۲٣abc'), '123abc')
         self.assertEqual(utils.normalize_account_name('آزمایشی۱۲'), 'آزمایشی12')
+        for whitespace in ('\t', '\n', '\r', '\u00a0', '\u1680', '\u2007', '\u202f', '\u3000'):
+            with self.subTest(whitespace=repr(whitespace)):
+                self.assertEqual(
+                    utils.normalize_account_name(f'{whitespace}Project_۱۲{whitespace}'),
+                    'project_12',
+                )
+        self.assertEqual(utils.normalize_account_name('ÄCCOUNT'), 'Äccount')
         self.assertEqual(utils.normalize_account_name(''), '')
         self.assertEqual(utils.unique_user_ids([5, '6', 5, 0, None, 'bad', 7]), [5, 6, 7])
 

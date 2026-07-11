@@ -28,6 +28,8 @@ from core.user_counter_sync import (
     USER_COUNTER_EVENT_ID_FIELD,
     USER_COUNTER_EVENT_KIND_FIELD,
     USER_COUNTER_EVENT_OCCURRED_AT_FIELD,
+    USER_COUNTER_MAX_EPOCH,
+    USER_COUNTER_MAX_VALUE,
     USER_SYNC_IDENTITY_FIELD,
     is_user_counter_event_payload,
     normalize_counter_event_occurred_at,
@@ -40,7 +42,7 @@ from core.sync_protocol import build_sync_protocol_metadata, validate_sync_proto
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.security import constant_time_secret_equals
-from core.utils import normalize_account_name, normalize_persian_numerals
+from core.registration_identity import normalize_account_name, normalize_mobile_number
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
@@ -2307,14 +2309,14 @@ def _user_sync_identity_conditions(identity: object) -> list:
             values_by_field[field_name].add(value)
     conditions = []
     normalized_account_values = {
-        normalize_account_name(str(value or "").strip())
+        normalize_account_name(value)
         for value in values_by_field["account_name"]
-        if str(value or "").strip()
+        if normalize_account_name(value)
     }
     normalized_mobile_values = {
-        normalize_persian_numerals(str(value or "")).strip()
+        normalize_mobile_number(value)
         for value in values_by_field["mobile_number"]
-        if str(value or "").strip()
+        if normalize_mobile_number(value)
     }
     conditions.extend(
         User.normalized_account_name == value
@@ -2414,12 +2416,16 @@ async def _apply_user_counter_event(
     if user is None:
         return "deferred"
 
-    occurred_at = normalize_counter_event_occurred_at(
-        data[USER_COUNTER_EVENT_OCCURRED_AT_FIELD]
-    )
+    occurred_at = normalize_counter_event_occurred_at(data[USER_COUNTER_EVENT_OCCURRED_AT_FIELD])
     event_kind = data[USER_COUNTER_EVENT_KIND_FIELD]
     incoming_epoch = int(data[USER_COUNTER_EVENT_EPOCH_FIELD])
     deltas = data[USER_COUNTER_EVENT_DELTAS_FIELD]
+    if (
+        event_kind not in {"increment", "reset"}
+        or incoming_epoch < 1
+        or incoming_epoch > USER_COUNTER_MAX_EPOCH
+    ):
+        return "error"
     event_hash = user_counter_event_content_hash(
         source_server=source,
         event_id=data[USER_COUNTER_EVENT_ID_FIELD],
@@ -2428,86 +2434,122 @@ async def _apply_user_counter_event(
         deltas=deltas,
         occurred_at=occurred_at,
     )
-    receipt_stmt = (
-        pg_insert(UserCounterEventReceipt)
-        .values(
-            event_id=data[USER_COUNTER_EVENT_ID_FIELD],
-            source_server=source,
-            user_id=target_user_id,
-            event_hash=event_hash,
-            event_kind=event_kind,
-            event_epoch=incoming_epoch,
-            occurred_at=occurred_at,
-            deltas=deltas,
-        )
-        .on_conflict_do_nothing(index_elements=["event_id"])
-        .returning(UserCounterEventReceipt.event_id)
-    )
-    receipt_result = await db.execute(
-        receipt_stmt,
-        execution_options={"is_sync": True},
-    )
-    if _result_scalar_one_or_none(receipt_result) is None:
-        existing_receipt_result = await db.execute(
+    async def existing_receipt_decision() -> str | None:
+        existing_result = await db.execute(
             select(UserCounterEventReceipt).where(
                 UserCounterEventReceipt.event_id == data[USER_COUNTER_EVENT_ID_FIELD]
             )
         )
-        existing_receipt = _result_scalar_first(existing_receipt_result)
+        existing = _result_scalar_first(existing_result)
+        if existing is None:
+            return None
         if (
-            existing_receipt is None
-            or existing_receipt.source_server != source
-            or int(existing_receipt.user_id) != target_user_id
-            or existing_receipt.event_hash != event_hash
+            existing.source_server == source
+            and int(existing.user_id) == target_user_id
+            and existing.event_hash == event_hash
         ):
-            logger.error(
-                "Counter event UUID was replayed with conflicting content",
-                extra={
-                    "event": "sync.user_counter_event_conflict",
-                    "record_id": record_id,
-                    "event_id_hash": hashlib.sha256(
-                        str(data[USER_COUNTER_EVENT_ID_FIELD]).encode("utf-8")
-                    ).hexdigest()[:16],
-                },
+            return "ignored"
+        logger.error(
+            "Counter event UUID was replayed with conflicting content",
+            extra={
+                "event": "sync.user_counter_event_conflict",
+                "record_id": record_id,
+                "event_id_hash": hashlib.sha256(
+                    str(data[USER_COUNTER_EVENT_ID_FIELD]).encode("utf-8")
+                ).hexdigest()[:16],
+            },
+        )
+        return "error"
+
+    replay_decision = await existing_receipt_decision()
+    if replay_decision is not None:
+        return replay_decision
+
+    async def insert_receipt(outcome: str) -> str | None:
+        receipt_stmt = (
+            pg_insert(UserCounterEventReceipt)
+            .values(
+                event_id=data[USER_COUNTER_EVENT_ID_FIELD],
+                source_server=source,
+                user_id=target_user_id,
+                event_hash=event_hash,
+                event_kind=event_kind,
+                event_epoch=incoming_epoch,
+                occurred_at=occurred_at,
+                deltas=deltas,
+                outcome=outcome,
             )
-            return "error"
-        return "ignored"
+            .on_conflict_do_nothing(index_elements=["event_id"])
+            .returning(UserCounterEventReceipt.event_id)
+        )
+        result = await db.execute(receipt_stmt, execution_options={"is_sync": True})
+        if _result_scalar_one_or_none(result) is not None:
+            return None
+        return await existing_receipt_decision() or "error"
 
     current_epoch = int(getattr(user, "counter_epoch", 1) or 1)
-    if event_kind == "increment":
-        reset_boundary_result = await db.execute(
-            select(UserCounterEventReceipt.occurred_at)
-            .where(
-                UserCounterEventReceipt.user_id == target_user_id,
-                UserCounterEventReceipt.event_kind == "reset",
-                UserCounterEventReceipt.event_epoch == current_epoch,
-            )
-            .order_by(UserCounterEventReceipt.occurred_at.desc())
-            .limit(1)
+    latest_reset_result = await db.execute(
+        select(
+            UserCounterEventReceipt.event_epoch,
+            UserCounterEventReceipt.occurred_at,
         )
-        reset_boundary = _result_scalar_one_or_none(reset_boundary_result)
-        if current_epoch > 1 and reset_boundary is None:
+        .where(
+            UserCounterEventReceipt.user_id == target_user_id,
+            UserCounterEventReceipt.event_kind == "reset",
+        )
+        .order_by(UserCounterEventReceipt.event_epoch.desc())
+        .limit(1)
+    )
+    latest_reset = _result_first(latest_reset_result)
+    reset_boundary = None
+    if current_epoch == 1:
+        if latest_reset is not None:
             return "error"
-        if reset_boundary is not None:
-            reset_boundary = normalize_counter_event_occurred_at(reset_boundary)
-            if occurred_at < reset_boundary:
-                return "ignored"
+    else:
+        if latest_reset is None or int(latest_reset[0]) != current_epoch:
+            return "error"
+        reset_boundary = normalize_counter_event_occurred_at(latest_reset[1])
+
+    if event_kind == "increment":
+        if incoming_epoch > current_epoch + 1:
+            return "deferred"
+        # v2 assigns equality to the new period. Reset boundaries themselves
+        # must advance strictly; increments at the exact boundary are included.
+        if reset_boundary is not None and occurred_at < reset_boundary:
+            async with db.begin_nested():
+                insert_decision = await insert_receipt("excluded_pre_boundary")
+            return insert_decision or "ignored"
 
         values: dict[str, int] = {}
         for field_name in USER_COUNTER_FIELDS:
             delta = int(deltas.get(field_name, 0) or 0)
             if not delta:
                 continue
-            values[field_name] = int(getattr(user, field_name, 0) or 0) + delta
-        await db.execute(
-            update(User).where(User.id == target_user_id).values(**values),
-            execution_options={"is_sync": True},
-        )
+            current_value = int(getattr(user, field_name, 0) or 0)
+            next_value = current_value + delta
+            if (
+                delta < 0
+                or delta > USER_COUNTER_MAX_VALUE
+                or current_value < 0
+                or next_value > USER_COUNTER_MAX_VALUE
+            ):
+                return "error"
+            values[field_name] = next_value
+        async with db.begin_nested():
+            insert_decision = await insert_receipt("applied")
+            if insert_decision is not None:
+                return insert_decision
+            await db.execute(
+                update(User).where(User.id == target_user_id).values(**values),
+                execution_options={"is_sync": True},
+            )
         return "ok"
 
-    if incoming_epoch < current_epoch:
-        return "ignored"
-    if incoming_epoch == current_epoch:
+    if incoming_epoch <= current_epoch:
+        return "error"
+    if incoming_epoch > current_epoch + 1:
+        return "deferred"
+    if reset_boundary is not None and occurred_at <= reset_boundary:
         return "error"
 
     receipt_rows = list(
@@ -2525,12 +2567,18 @@ async def _apply_user_counter_event(
     for receipt_deltas in receipt_rows:
         for field_name in USER_COUNTER_FIELDS:
             rebuilt[field_name] += int((receipt_deltas or {}).get(field_name, 0) or 0)
-    await db.execute(
-        update(User)
-        .where(User.id == target_user_id)
-        .values(counter_epoch=incoming_epoch, **rebuilt),
-        execution_options={"is_sync": True},
-    )
+            if rebuilt[field_name] > USER_COUNTER_MAX_VALUE:
+                return "error"
+    async with db.begin_nested():
+        insert_decision = await insert_receipt("applied")
+        if insert_decision is not None:
+            return insert_decision
+        await db.execute(
+            update(User)
+            .where(User.id == target_user_id)
+            .values(counter_epoch=incoming_epoch, **rebuilt),
+            execution_options={"is_sync": True},
+        )
     return "ok"
 
 

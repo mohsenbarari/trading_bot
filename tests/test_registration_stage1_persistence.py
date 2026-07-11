@@ -7,6 +7,10 @@ import models  # noqa: F401 - register all metadata
 
 from core.config import settings
 from core.registration_contracts import TelegramRegistrationCommand, TelegramRegistrationOutcome
+from core.registration_identity import (
+    NORMALIZED_ACCOUNT_NAME_SQL,
+    NORMALIZED_MOBILE_NUMBER_SQL,
+)
 from core.services.invitation_identity_reservation_service import (
     InvitationIdentityReservationConflict,
     acquire_invitation_identity_locks,
@@ -105,8 +109,8 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
         mobile_column = User.__table__.c.normalized_mobile_number
         self.assertIsNotNone(account_column.computed)
         self.assertIsNotNone(mobile_column.computed)
-        self.assertIn("lower(translate", str(account_column.computed.sqltext))
-        self.assertIn("translate", str(mobile_column.computed.sqltext))
+        self.assertEqual(str(account_column.computed.sqltext), NORMALIZED_ACCOUNT_NAME_SQL)
+        self.assertEqual(str(mobile_column.computed.sqltext), NORMALIZED_MOBILE_NUMBER_SQL)
         unique_indexes = {
             index.name
             for index in User.__table__.indexes
@@ -114,6 +118,15 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn("ux_users_normalized_account_name", unique_indexes)
         self.assertIn("ux_users_normalized_mobile_number", unique_indexes)
+        counter_receipt_indexes = {
+            index.name
+            for index in Base.metadata.tables["user_counter_event_receipts"].indexes
+            if index.unique
+        }
+        self.assertIn(
+            "ux_user_counter_event_receipts_user_reset_epoch",
+            counter_receipt_indexes,
+        )
 
     def test_new_models_enums_constraints_defaults_and_metadata_are_explicit(self):
         self.assertTrue(LOCAL_REGISTRATION_TABLES.issubset(Base.metadata.tables))
@@ -152,6 +165,7 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
                 "ck_user_counter_event_receipts_event_hash",
                 "ck_user_counter_event_receipts_known_kind",
                 "ck_user_counter_event_receipts_epoch_positive",
+                "ck_user_counter_event_receipts_known_outcome",
             },
         }
         for table_name, names in expected_constraints.items():

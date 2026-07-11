@@ -248,6 +248,16 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(counter_events[-1]["_counter_deltas"], {})
 
             async with self.session_factory() as session:
+                user = await session.get(User, self.counter_user.id)
+                reset_user_counters_in_memory(user)
+                await session.commit()
+
+            counter_events = await self._counter_events_for_user(self.counter_user.id)
+            self.assertEqual(len(counter_events), 3)
+            self.assertEqual(counter_events[-1]["_counter_event_kind"], "reset")
+            self.assertEqual(counter_events[-1]["_counter_epoch"], 3)
+
+            async with self.session_factory() as session:
                 user = await session.get(User, self.trade_user.id)
                 trade = Trade(
                     trade_number=10_000_000 + int(uuid4().hex[:6], 16),
@@ -302,13 +312,13 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             self.assertEqual(trade_outbox_count, 1)
-            self.assertEqual(len(local_receipts), 3)
+            self.assertEqual(len(local_receipts), 4)
             self.assertEqual(
                 sorted(row.event_kind for row in local_receipts),
-                ["increment", "increment", "reset"],
+                ["increment", "increment", "reset", "reset"],
             )
             self.assertTrue(all(row.occurred_at is not None for row in local_receipts))
-            self.assertGreaterEqual(len(self.wakeup_redis.payloads), 4)
+            self.assertGreaterEqual(len(self.wakeup_redis.payloads), 5)
 
             suffix = uuid4().hex
             account_name = f"foreign_forbidden_{suffix[:12]}"

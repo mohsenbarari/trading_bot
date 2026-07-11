@@ -6,6 +6,8 @@ from sqlalchemy.orm.attributes import set_committed_value
 from core import events
 from core.user_counter_sync import (
     InvalidUserCounterMutation,
+    USER_COUNTER_MAX_EPOCH,
+    USER_COUNTER_MAX_VALUE,
     build_user_counter_event,
     increment_user_counters,
     reset_user_counters_in_memory,
@@ -110,6 +112,18 @@ class UserCounterSyncTests(unittest.TestCase):
         user.trades_count = 1
         with self.assertRaisesRegex(InvalidUserCounterMutation, "requires an epoch reset"):
             build_user_counter_event(user, {"trades_count"})
+
+    def test_counter_and_epoch_bounds_fail_before_mutation(self):
+        user = _persisted_user()
+        set_committed_value(user, "trades_count", USER_COUNTER_MAX_VALUE)
+        with self.assertRaisesRegex(ValueError, "aggregate range"):
+            increment_user_counters(user, trades=1)
+        self.assertEqual(user.trades_count, USER_COUNTER_MAX_VALUE)
+
+        set_committed_value(user, "counter_epoch", USER_COUNTER_MAX_EPOCH)
+        with self.assertRaisesRegex(ValueError, "epoch exceeds"):
+            reset_user_counters_in_memory(user)
+        self.assertEqual(user.counter_epoch, USER_COUNTER_MAX_EPOCH)
 
     def test_v2_counter_only_update_emits_dedicated_users_outbox_event(self):
         registry = {}

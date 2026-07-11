@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.services.invitation_lifecycle_service import derive_invitation_state
 from core.registration_contracts import InvitationDerivedState
-from core.utils import normalize_account_name, normalize_persian_numerals
+from core.registration_identity import normalize_account_name, normalize_mobile_number
 from models.invitation import Invitation
 from models.invitation_identity_reservation import InvitationIdentityReservation
 
@@ -28,8 +28,8 @@ class InvitationIdentityReservationConflict(RuntimeError):
 
 
 def normalize_invitation_identity(*, mobile_number: str, account_name: str) -> NormalizedInvitationIdentity:
-    mobile = normalize_persian_numerals(str(mobile_number or "")).strip()
-    account = normalize_account_name(str(account_name or "").strip())
+    mobile = normalize_mobile_number(mobile_number)
+    account = normalize_account_name(account_name)
     if len(mobile) != 11 or not mobile.startswith("09") or not mobile.isdigit():
         raise ValueError("شماره موبایل نامعتبر است")
     if not account:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any
@@ -17,6 +17,9 @@ USER_COUNTER_FIELDS = (
     "commodities_traded_count",
     "channel_messages_count",
 )
+USER_COUNTER_MAX_VALUE = 2_147_483_647
+USER_COUNTER_MAX_EPOCH = 9_223_372_036_854_775_807
+USER_COUNTER_MAX_FUTURE_SKEW = timedelta(minutes=5)
 USER_COUNTER_EPOCH_FIELD = "counter_epoch"
 USER_COUNTER_SYNC_CONTRACT = "user_counter_event_v2"
 USER_COUNTER_SYNC_CONTRACT_FIELD = "_sync_contract"
@@ -55,6 +58,16 @@ def normalize_counter_event_occurred_at(value: object) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("counter event occurred_at must be timezone-aware")
     return parsed.astimezone(timezone.utc)
+
+
+def counter_event_time_is_plausible(
+    value: object,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    occurred_at = normalize_counter_event_occurred_at(value)
+    reference = normalize_counter_event_occurred_at(now or datetime.now(timezone.utc))
+    return occurred_at <= reference + USER_COUNTER_MAX_FUTURE_SKEW
 
 
 def user_counter_event_content_hash(
@@ -96,13 +109,21 @@ def increment_user_counters(
     }
     if any(value < 0 for value in deltas.values()):
         raise ValueError("counter increments must be non-negative")
+    next_values: dict[str, int] = {}
     for field_name, delta in deltas.items():
         if delta:
-            setattr(user, field_name, int(getattr(user, field_name, 0) or 0) + delta)
+            next_value = int(getattr(user, field_name, 0) or 0) + delta
+            if delta > USER_COUNTER_MAX_VALUE or next_value > USER_COUNTER_MAX_VALUE:
+                raise ValueError("counter increment exceeds the supported aggregate range")
+            next_values[field_name] = next_value
+    for field_name, next_value in next_values.items():
+        setattr(user, field_name, next_value)
 
 
 def reset_user_counters_in_memory(user: object) -> None:
     current_epoch = int(getattr(user, USER_COUNTER_EPOCH_FIELD, 1) or 1)
+    if current_epoch >= USER_COUNTER_MAX_EPOCH:
+        raise ValueError("counter epoch exceeds the supported range")
     setattr(user, USER_COUNTER_EPOCH_FIELD, current_epoch + 1)
     for field_name in USER_COUNTER_FIELDS:
         setattr(user, field_name, 0)
@@ -167,6 +188,8 @@ def build_user_counter_event(
     if epoch_changed:
         if current_epoch != previous_epoch + 1:
             raise InvalidUserCounterMutation("counter reset must increment epoch exactly once")
+        if current_epoch > USER_COUNTER_MAX_EPOCH:
+            raise InvalidUserCounterMutation("counter epoch exceeds the supported range")
         if any(current != 0 for _, current, _ in histories.values()):
             raise InvalidUserCounterMutation("counter reset must zero every counter")
         return UserCounterEvent(
@@ -184,6 +207,8 @@ def build_user_counter_event(
     }
     if any(delta < 0 for delta in deltas.values()):
         raise InvalidUserCounterMutation("counter decrease requires an epoch reset")
+    if any(delta > USER_COUNTER_MAX_VALUE for delta in deltas.values()):
+        raise InvalidUserCounterMutation("counter increment exceeds the supported range")
     deltas = {field_name: delta for field_name, delta in deltas.items() if delta > 0}
     if not deltas:
         return None

@@ -12,9 +12,12 @@ from core.user_counter_sync import (
     USER_COUNTER_EVENT_ID_FIELD,
     USER_COUNTER_EVENT_KIND_FIELD,
     USER_COUNTER_EVENT_OCCURRED_AT_FIELD,
+    USER_COUNTER_MAX_EPOCH,
+    USER_COUNTER_MAX_VALUE,
     USER_COUNTER_SYNC_CONTRACT,
     USER_COUNTER_SYNC_CONTRACT_FIELD,
     USER_SYNC_IDENTITY_FIELD,
+    counter_event_time_is_plausible,
     is_user_counter_event_payload,
     normalize_counter_event_occurred_at,
 )
@@ -190,13 +193,16 @@ def _sanitize_user_counter_event(
         return RegistrationSyncPayloadDecision(False, {}, reason="counter_event_operation_forbidden")
     try:
         event_id = str(UUID(str(payload.get(USER_COUNTER_EVENT_ID_FIELD))))
-        epoch = int(payload.get(USER_COUNTER_EVENT_EPOCH_FIELD))
+        raw_epoch = payload.get(USER_COUNTER_EVENT_EPOCH_FIELD)
+        if type(raw_epoch) is not int:
+            raise ValueError("counter epoch must be a JSON integer")
+        epoch = raw_epoch
         occurred_at = normalize_counter_event_occurred_at(
             payload.get(USER_COUNTER_EVENT_OCCURRED_AT_FIELD)
         )
     except (TypeError, ValueError, AttributeError):
         return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_metadata")
-    if epoch < 1:
+    if epoch < 1 or epoch > USER_COUNTER_MAX_EPOCH or not counter_event_time_is_plausible(occurred_at):
         return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_metadata")
 
     kind = str(payload.get(USER_COUNTER_EVENT_KIND_FIELD) or "")
@@ -205,17 +211,18 @@ def _sanitize_user_counter_event(
         return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_payload")
     if kind == "reset" and source_server != SERVER_IRAN:
         return RegistrationSyncPayloadDecision(False, {}, reason="counter_reset_source_forbidden")
-    try:
-        deltas = {str(key): int(value) for key, value in raw_deltas.items()}
-    except (TypeError, ValueError):
+    if any(type(key) is not str or type(value) is not int for key, value in raw_deltas.items()):
         return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_payload")
+    deltas = dict(raw_deltas)
     if (
         set(deltas) - set(USER_SYNC_COUNTER_FIELDS)
-        or any(value < 0 for value in deltas.values())
+        or any(value < 0 or value > USER_COUNTER_MAX_VALUE for value in deltas.values())
         or (kind == "increment" and not any(value > 0 for value in deltas.values()))
         or (kind == "reset" and any(value != 0 for value in deltas.values()))
     ):
         return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_payload")
+    if set(payload) - set(USER_COUNTER_EVENT_FIELDS):
+        return RegistrationSyncPayloadDecision(False, {}, reason="unknown_counter_event_field")
     identity = payload.get(USER_SYNC_IDENTITY_FIELD)
     if not _has_user_sync_identity(identity):
         return RegistrationSyncPayloadDecision(False, {}, reason="counter_event_identity_missing")

@@ -1347,6 +1347,10 @@ Challenges and engineering decisions in this stage:
   ownership untouched.
 - `IT-05`: explicitly keep `must_change_password=False` for new Telegram registrations and leave
   existing legacy account state untouched.
+- A successful session commit followed by response loss remains a rollout gate: before any migrated
+  Web completion route is deployed, define and prove a bounded idempotent session issuance/recovery
+  contract. Do not retain OTP authority indefinitely or let a completed Invitation token mint an
+  unbounded new session.
 
 Exit criteria:
 
@@ -1400,6 +1404,17 @@ being silently reclassified: `M-4`, `M-8`, and `L-3` remain visible later-stage/
 and a reviewer finding that invalidates those boundaries reopens this stage. Stage 3 remains
 blocked pending review of the exact final-audit commit.
 
+Dual-agent final-review update (2026-07-11): Claude returned a conditional `GO`, while ChatGPT
+returned `NO-GO` after identifying a reachable Python/PostgreSQL whitespace-equivalence mismatch
+and unsafe counter reset/receipt error semantics. The stricter gate was accepted. Both blockers and
+counter payload bounds were remediated and are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_DUAL_AGENT_FINAL_REVIEW_REMEDIATION_20260711.md`. Stage 3 remains
+blocked pending independent review of the exact remediation commit. The review also keeps the
+post-session-commit response-loss contract open before any Web completion rollout, inventories all
+foreign writers of Iran-owned User fields before Sync-v2 enablement, assigns deletion-driven
+Invitation invalidation to Stage 3 canonical writer work, and retains ledger retention/clock-health
+as Stage 9/10/12 gates. No deploy, runtime migration, or feature enablement occurred.
+
 ### Stage 3 - Canonical Invitation Creation And URL Repair
 
 - Route bot-admin invitation creation to signed Iran authority.
@@ -1424,6 +1439,9 @@ Challenges and engineering decisions in this stage:
   existing login/linked-account UI and reuse current messages except approved pending/rejections.
 - `IT-09`, `IT-13`: use existing mixed-version deployment handling and keep response additions
   backward-compatible for stale PWA clients.
+- `M-8`: include `user_deletion_service` Invitation invalidation in the writer inventory. It must
+  use the shared Invitation transition lock, soft revocation, transactional reservation release,
+  and a deletion-versus-completion race test before schema rollout.
 - User-facing URLs remain environment-driven; only the canonical Iran Web URL is a product
   requirement.
 
@@ -1466,6 +1484,10 @@ Challenges and engineering decisions in this stage:
 - `IT-07`: cover duplicate post-commit notifications in the same reconciliation matrix.
 - `IT-08`, `IT-15`, `IN-02`: place the foreign background job with bounded load and preserve clear
   user-visible pending/outage outcomes.
+- Before Sync-v2 can be enabled on foreign, inventory every local writer of Iran-owned User fields,
+  including account linking, Telegram link-token completion, bot-admin restriction, limit/unlimit,
+  and counter reset. Route each through signed Iran authority or remove it; never weaken the
+  fail-closed ownership guard.
 
 Exit criteria:
 
@@ -1717,6 +1739,11 @@ Challenges and engineering decisions in this stage:
   independent job flags, market p50/p95, queue age, saturation, and recovery to baseline.
 - `IN-02`: perform an Iran/foreign disconnect exercise against the existing recovery mechanism and
   validate pending/terminal user messages without a new incident workflow.
+- Prove the foreign Iran-owned-field writer inventory is empty before enabling
+  `REGISTRATION_SYNC_V2_ENABLED`; a flag-on integration test must exercise every migrated handler.
+- Measure counter receipt growth and reset rebuild query plans at projected volume, define a
+  retention/archival rule that preserves exact replay and rebuild, and enforce NTP offset/maximum
+  skew health thresholds before counter Sync-v2 rollout.
 
 Exit criteria:
 

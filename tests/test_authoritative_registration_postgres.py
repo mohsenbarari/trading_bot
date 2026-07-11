@@ -363,6 +363,35 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_canonical_identity_rejects_arabic_split_and_deleted_variants(self):
         arabic_digits = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 
+        whitespace_invitation = await self._seed_invitation("canonical_whitespace")
+        whitespace_suffix = uuid4().hex
+        async with self.session_factory() as session:
+            session.add(
+                User(
+                    account_name=f"\t{whitespace_invitation.account_name.upper()}\u00a0",
+                    mobile_number=f"095{int(whitespace_suffix[:8], 16) % 100000000:08d}",
+                    full_name="Whitespace canonical user",
+                    address="Whitespace canonical address",
+                    role=UserRole.STANDARD,
+                    home_server="iran",
+                    must_change_password=False,
+                )
+            )
+            await session.commit()
+        async with self.session_factory() as session:
+            with self.assertRaises(registration.AuthoritativeRegistrationError) as exc_info:
+                await registration.complete_invitation_registration(
+                    session,
+                    registration.AuthoritativeRegistrationRequest.for_web(
+                        invitation_token=whitespace_invitation.token,
+                        address="Whitespace collision attempt address",
+                    ),
+                )
+        self.assertEqual(
+            exc_info.exception.outcome,
+            TelegramRegistrationOutcome.ACCOUNT_NAME_CONFLICT,
+        )
+
         arabic_invitation = await self._seed_invitation("canonical_arabic")
         async with self.session_factory() as session:
             session.add(
@@ -1972,6 +2001,253 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 ).scalar_one()
             )
             self.assertEqual(receipt_count, 5)
+            excluded_receipt = await session.get(UserCounterEventReceipt, old_epoch_id)
+            self.assertEqual(excluded_receipt.outcome, "excluded_pre_boundary")
+
+    async def test_counter_multiple_resets_require_monotonic_sequential_boundaries(self):
+        user = await self._seed_telegram_recipient("counter_multi_reset")
+        reset_two_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        reset_three_at = reset_two_at + timedelta(hours=1)
+
+        def payload(event_id, *, kind, epoch, deltas, occurred_at):
+            return {
+                "_counter_event_id": str(event_id),
+                "_counter_event_kind": kind,
+                "_counter_epoch": epoch,
+                "_counter_deltas": deltas,
+                "_counter_occurred_at": occurred_at.isoformat(),
+                "_sync_identity": {
+                    "current": {
+                        "account_name": user.account_name,
+                        "mobile_number": user.mobile_number,
+                        "telegram_id": user.telegram_id,
+                    },
+                    "previous": {},
+                },
+            }
+
+        accepted_ids = [uuid4() for _ in range(6)]
+        invalid_ids = [uuid4() for _ in range(4)]
+        async with self.session_factory() as session:
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        accepted_ids[0],
+                        kind="increment",
+                        epoch=2,
+                        deltas={"trades_count": 2},
+                        occurred_at=reset_two_at + timedelta(minutes=10),
+                    ),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        accepted_ids[1],
+                        kind="reset",
+                        epoch=2,
+                        deltas={},
+                        occurred_at=reset_two_at,
+                    ),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+            # Equality is explicitly inclusive for increments.
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        accepted_ids[2],
+                        kind="increment",
+                        epoch=1,
+                        deltas={"channel_messages_count": 1},
+                        occurred_at=reset_two_at,
+                    ),
+                    source_server=SERVER_FOREIGN,
+                ),
+                "ok",
+            )
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        accepted_ids[3],
+                        kind="increment",
+                        epoch=2,
+                        deltas={"trades_count": 3},
+                        occurred_at=reset_two_at + timedelta(minutes=20),
+                    ),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+
+            invalid_resets = (
+                (invalid_ids[0], 3, reset_two_at - timedelta(seconds=1), "error"),
+                (invalid_ids[1], 3, reset_two_at, "error"),
+                (invalid_ids[2], 4, reset_three_at, "deferred"),
+                (invalid_ids[3], 2, reset_two_at + timedelta(minutes=30), "error"),
+            )
+            for event_id, epoch, occurred_at, expected in invalid_resets:
+                with self.subTest(epoch=epoch, occurred_at=occurred_at, expected=expected):
+                    result = await _apply_user_counter_event(
+                        session,
+                        record_id=user.id,
+                        data=payload(
+                            event_id,
+                            kind="reset",
+                            epoch=epoch,
+                            deltas={},
+                            occurred_at=occurred_at,
+                        ),
+                        source_server=SERVER_IRAN,
+                    )
+                    self.assertEqual(result, expected)
+
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        accepted_ids[4],
+                        kind="increment",
+                        epoch=3,
+                        deltas={"commodities_traded_count": 4},
+                        occurred_at=reset_three_at + timedelta(minutes=5),
+                    ),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        accepted_ids[5],
+                        kind="reset",
+                        epoch=3,
+                        deltas={},
+                        occurred_at=reset_three_at,
+                    ),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+            await session.commit()
+
+        async with self.session_factory() as session:
+            stored = await session.get(User, user.id)
+            self.assertEqual(stored.counter_epoch, 3)
+            self.assertEqual(stored.trades_count, 0)
+            self.assertEqual(stored.channel_messages_count, 0)
+            self.assertEqual(stored.commodities_traded_count, 4)
+            invalid_receipts = int(
+                (
+                    await session.execute(
+                        select(func.count(UserCounterEventReceipt.event_id)).where(
+                            UserCounterEventReceipt.event_id.in_(invalid_ids)
+                        )
+                    )
+                ).scalar_one()
+            )
+            self.assertEqual(invalid_receipts, 0)
+            reset_receipts = list(
+                (
+                    await session.execute(
+                        select(UserCounterEventReceipt).where(
+                            UserCounterEventReceipt.user_id == user.id,
+                            UserCounterEventReceipt.event_kind == "reset",
+                        )
+                    )
+                ).scalars().all()
+            )
+            self.assertEqual(
+                {(row.event_epoch, row.outcome) for row in reset_receipts},
+                {(2, "applied"), (3, "applied")},
+            )
+
+    async def test_counter_nonterminal_error_leaves_no_receipt_and_retry_can_apply(self):
+        user = await self._seed_telegram_recipient("counter_retry_after_repair")
+        boundary = datetime.now(timezone.utc) - timedelta(hours=1)
+        increment_at = boundary + timedelta(minutes=5)
+        increment_id = uuid4()
+
+        def increment_payload():
+            return {
+                "_counter_event_id": str(increment_id),
+                "_counter_event_kind": "increment",
+                "_counter_epoch": 2,
+                "_counter_deltas": {"trades_count": 1},
+                "_counter_occurred_at": increment_at.isoformat(),
+                "_sync_identity": {
+                    "current": {
+                        "account_name": user.account_name,
+                        "mobile_number": user.mobile_number,
+                        "telegram_id": user.telegram_id,
+                    },
+                    "previous": {},
+                },
+            }
+
+        async with self.session_factory() as session:
+            stored = await session.get(User, user.id)
+            stored.counter_epoch = 2
+            await session.commit()
+
+        async with self.session_factory() as session:
+            first = await _apply_user_counter_event(
+                session,
+                record_id=user.id,
+                data=increment_payload(),
+                source_server=SERVER_FOREIGN,
+            )
+            self.assertEqual(first, "error")
+            await session.commit()
+            receipt = await session.get(UserCounterEventReceipt, increment_id)
+            self.assertIsNone(receipt)
+
+        async with self.session_factory() as session:
+            session.add(
+                UserCounterEventReceipt(
+                    event_id=uuid4(),
+                    source_server=SERVER_IRAN,
+                    user_id=user.id,
+                    event_hash="a" * 64,
+                    event_kind="reset",
+                    event_epoch=2,
+                    occurred_at=boundary,
+                    deltas={},
+                    outcome="applied",
+                )
+            )
+            await session.commit()
+
+        async with self.session_factory() as session:
+            retry = await _apply_user_counter_event(
+                session,
+                record_id=user.id,
+                data=increment_payload(),
+                source_server=SERVER_FOREIGN,
+            )
+            self.assertEqual(retry, "ok")
+            await session.commit()
+
+        async with self.session_factory() as session:
+            stored = await session.get(User, user.id)
+            self.assertEqual(stored.trades_count, 1)
+            receipt = await session.get(UserCounterEventReceipt, increment_id)
+            self.assertIsNotNone(receipt)
+            self.assertEqual(receipt.outcome, "applied")
 
 
 if __name__ == "__main__":

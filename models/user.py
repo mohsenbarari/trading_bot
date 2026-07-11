@@ -3,6 +3,10 @@ from datetime import datetime
 from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.sql import func
 from core.enums import UserAccountStatus
+from core.registration_identity import (
+    NORMALIZED_ACCOUNT_NAME_SQL,
+    NORMALIZED_MOBILE_NUMBER_SQL,
+)
 from .database import Base
 
 class UserRole(str, enum.Enum):
@@ -34,24 +38,12 @@ class User(Base):
     mobile_number = Column(String, unique=True, index=True, nullable=False)
     normalized_account_name = Column(
         String,
-        Computed(
-            "lower(translate(btrim(account_name), "
-            "U&'\\06F0\\06F1\\06F2\\06F3\\06F4\\06F5\\06F6\\06F7\\06F8\\06F9"
-            "\\0660\\0661\\0662\\0663\\0664\\0665\\0666\\0667\\0668\\0669', "
-            "'01234567890123456789'))",
-            persisted=True,
-        ),
+        Computed(NORMALIZED_ACCOUNT_NAME_SQL, persisted=True),
         nullable=False,
     )
     normalized_mobile_number = Column(
         String,
-        Computed(
-            "translate(btrim(mobile_number), "
-            "U&'\\06F0\\06F1\\06F2\\06F3\\06F4\\06F5\\06F6\\06F7\\06F8\\06F9"
-            "\\0660\\0661\\0662\\0663\\0664\\0665\\0666\\0667\\0668\\0669', "
-            "'01234567890123456789')",
-            persisted=True,
-        ),
+        Computed(NORMALIZED_MOBILE_NUMBER_SQL, persisted=True),
         nullable=False,
     )
     

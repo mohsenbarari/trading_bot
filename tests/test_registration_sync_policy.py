@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from core.registration_sync_policy import (
@@ -9,6 +10,7 @@ from core.registration_sync_policy import (
     sanitize_registration_sync_payload,
 )
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN
+from core.user_counter_sync import USER_COUNTER_MAX_EPOCH, USER_COUNTER_MAX_VALUE
 
 
 class RegistrationSyncPolicyTests(unittest.TestCase):
@@ -121,6 +123,7 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
         self.assertEqual(decision.reason, "versioned_user_identity_missing")
 
     def test_counter_event_is_explicit_unversioned_and_strict(self):
+        now = datetime.now(timezone.utc)
         valid = {
             "id": 7,
             "_sync_contract": "user_counter_event_v2",
@@ -128,7 +131,7 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
             "_counter_event_kind": "increment",
             "_counter_epoch": 3,
             "_counter_deltas": {"trades_count": 1, "commodities_traded_count": 4},
-            "_counter_occurred_at": "2026-07-11T12:00:00+00:00",
+            "_counter_occurred_at": now.isoformat(),
             "_sync_identity": self._identity(),
         }
         for source in (SERVER_IRAN, SERVER_FOREIGN):
@@ -162,6 +165,20 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
             {**valid, "_counter_event_kind": "increment", "_counter_deltas": {}},
             {**valid, "_counter_event_kind": "reset", "_counter_deltas": {"trades_count": 1}},
             {**valid, "_counter_deltas": {"unknown": 1}},
+            {**valid, "_counter_epoch": "3"},
+            {**valid, "_counter_epoch": 3.5},
+            {**valid, "_counter_epoch": True},
+            {**valid, "_counter_epoch": USER_COUNTER_MAX_EPOCH + 1},
+            {**valid, "_counter_deltas": {"trades_count": "1"}},
+            {**valid, "_counter_deltas": {"trades_count": 1.5}},
+            {**valid, "_counter_deltas": {"trades_count": True}},
+            {**valid, "_counter_deltas": {"trades_count": -1}},
+            {**valid, "_counter_deltas": {"trades_count": USER_COUNTER_MAX_VALUE + 1}},
+            {
+                **valid,
+                "_counter_occurred_at": (now + timedelta(minutes=6)).isoformat(),
+            },
+            {**valid, "unexpected_counter_field": 1},
             {**valid, "_sync_identity": {}},
         ]
         for payload in malformed:

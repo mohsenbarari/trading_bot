@@ -11,6 +11,13 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from core.registration_identity import (
+    NORMALIZED_ACCOUNT_NAME_SQL,
+    NORMALIZED_MOBILE_NUMBER_SQL,
+    canonical_account_name_sql,
+    canonical_mobile_number_sql,
+)
+
 
 revision: str = "a8d9e0f1b2c3"
 down_revision: Union[str, Sequence[str], None] = "f7c8d9e0a1b2"
@@ -46,19 +53,12 @@ telegram_registration_intent_status = postgresql.ENUM(
     create_type=False,
 )
 
-canonical_digit_source_sql = (
-    r"U&'\06F0\06F1\06F2\06F3\06F4\06F5\06F6\06F7\06F8\06F9"
-    r"\0660\0661\0662\0663\0664\0665\0666\0667\0668\0669'"
-)
-canonical_digit_target_sql = "'01234567890123456789'"
-normalized_account_sql = (
-    f"lower(translate(btrim(account_name), {canonical_digit_source_sql}, "
-    f"{canonical_digit_target_sql}))"
-)
-normalized_mobile_sql = (
-    f"translate(btrim(mobile_number), {canonical_digit_source_sql}, "
-    f"{canonical_digit_target_sql})"
-)
+normalized_account_sql = NORMALIZED_ACCOUNT_NAME_SQL
+normalized_mobile_sql = NORMALIZED_MOBILE_NUMBER_SQL
+normalized_invitation_account_sql = canonical_account_name_sql("i.account_name")
+normalized_invitation_mobile_sql = canonical_mobile_number_sql("i.mobile_number")
+normalized_accountant_account_sql = canonical_account_name_sql("ar.global_account_name")
+normalized_accountant_mobile_sql = canonical_mobile_number_sql("ar.mobile_number")
 
 
 def _create_enum_types() -> None:
@@ -227,26 +227,10 @@ def _add_invitation_metadata() -> None:
           AND ar.status::text IN ('active', 'expired')
           AND ar.deleted_at IS NULL
           AND ar.activated_at IS NOT NULL
-          AND u.normalized_account_name = lower(translate(
-                btrim(i.account_name),
-                {canonical_digit_source_sql},
-                {canonical_digit_target_sql}
-              ))
-          AND u.normalized_mobile_number = translate(
-                btrim(i.mobile_number),
-                {canonical_digit_source_sql},
-                {canonical_digit_target_sql}
-              )
-          AND u.normalized_account_name = lower(translate(
-                btrim(ar.global_account_name),
-                {canonical_digit_source_sql},
-                {canonical_digit_target_sql}
-              ))
-          AND u.normalized_mobile_number = translate(
-                btrim(ar.mobile_number),
-                {canonical_digit_source_sql},
-                {canonical_digit_target_sql}
-              )
+          AND u.normalized_account_name = {normalized_invitation_account_sql}
+          AND u.normalized_mobile_number = {normalized_invitation_mobile_sql}
+          AND u.normalized_account_name = {normalized_accountant_account_sql}
+          AND u.normalized_mobile_number = {normalized_accountant_mobile_sql}
           AND COALESCE(u.is_deleted, false) = false
           AND u.account_status::text = 'active'
           AND (i.created_at IS NULL OR ar.activated_at >= i.created_at)
@@ -268,16 +252,8 @@ def _add_invitation_metadata() -> None:
           AND cr.status::text IN ('active', 'expired')
           AND cr.deleted_at IS NULL
           AND cr.activated_at IS NOT NULL
-          AND u.normalized_account_name = lower(translate(
-                btrim(i.account_name),
-                {canonical_digit_source_sql},
-                {canonical_digit_target_sql}
-              ))
-          AND u.normalized_mobile_number = translate(
-                btrim(i.mobile_number),
-                {canonical_digit_source_sql},
-                {canonical_digit_target_sql}
-              )
+          AND u.normalized_account_name = {normalized_invitation_account_sql}
+          AND u.normalized_mobile_number = {normalized_invitation_mobile_sql}
           AND COALESCE(u.is_deleted, false) = false
           AND u.account_status::text = 'active'
           AND (i.created_at IS NULL OR cr.activated_at >= i.created_at)
@@ -571,6 +547,7 @@ def _create_registration_local_state() -> None:
         sa.Column("event_epoch", sa.BigInteger(), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("deltas", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("outcome", sa.String(length=32), nullable=False, server_default=sa.text("'applied'")),
         sa.Column("applied_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.CheckConstraint(
             "source_server IN ('iran', 'foreign')",
@@ -588,6 +565,10 @@ def _create_registration_local_state() -> None:
             "event_epoch >= 1",
             name="ck_user_counter_event_receipts_epoch_positive",
         ),
+        sa.CheckConstraint(
+            "outcome IN ('applied', 'excluded_pre_boundary')",
+            name="ck_user_counter_event_receipts_known_outcome",
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("event_id"),
     )
@@ -602,6 +583,13 @@ def _create_registration_local_state() -> None:
         "user_counter_event_receipts",
         ["user_id", "event_kind", "occurred_at", "event_epoch"],
         unique=False,
+    )
+    op.create_index(
+        "ux_user_counter_event_receipts_user_reset_epoch",
+        "user_counter_event_receipts",
+        ["user_id", "event_epoch"],
+        unique=True,
+        postgresql_where=sa.text("event_kind = 'reset'"),
     )
     op.create_index(
         "ix_telegram_registration_receipts_completed_at",
@@ -621,6 +609,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ux_user_counter_event_receipts_user_reset_epoch",
+        table_name="user_counter_event_receipts",
+    )
     op.drop_index(
         "ix_user_counter_event_receipts_user_period",
         table_name="user_counter_event_receipts",

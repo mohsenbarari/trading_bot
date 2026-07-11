@@ -377,8 +377,9 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
             execute_results=[
                 _QueryResult([user]),
                 _QueryResult([user]),
-                _QueryResult([event_id]),
                 _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([event_id]),
                 _QueryResult(rowcount=1),
             ]
         )
@@ -431,7 +432,6 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
             execute_results=[
                 _QueryResult([user]),
                 _QueryResult([user]),
-                _QueryResult([]),
                 _QueryResult(
                     [
                         SimpleNamespace(
@@ -461,7 +461,7 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, "ignored")
-        self.assertEqual(len(db.statements), 4)
+        self.assertEqual(len(db.statements), 3)
 
     async def test_unknown_source_fails_without_database_write(self):
         db = _ApplyDB()
