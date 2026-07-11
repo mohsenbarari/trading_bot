@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User, set_legacy_has_bot_access_compatibility
 from core.config import settings
+from core.deployment_surface import normalize_origin
 from core.db import AsyncSessionLocal, get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
@@ -52,18 +53,26 @@ class LinkState(StatesGroup):
     waiting_for_address = State()
 
 
+def linked_account_webapp_url() -> str:
+    for field_name in ("public_webapp_url", "iran_server_url", "frontend_url"):
+        origin = normalize_origin(getattr(settings, field_name, None))
+        if origin:
+            return origin
+    return ""
+
+
 def build_webapp_link_line() -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
+    webapp_url = linked_account_webapp_url()
+    if not webapp_url:
         return None
-    return f"🌐 [ورود به وب اپ]({frontend_url})"
+    return f"🌐 [ورود به وب اپ]({webapp_url})"
 
 
 def build_webapp_plain_link_line() -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
+    webapp_url = linked_account_webapp_url()
+    if not webapp_url:
         return None
-    return f"🌐 ورود به وب اپ:\n{frontend_url}"
+    return f"🌐 ورود به وب اپ:\n{webapp_url}"
 
 
 async def build_linked_account_panel_message(
@@ -247,7 +256,7 @@ async def finalize_account_link(
             address_registered=address is not None,
             db=db,
         ),
-        reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+        reply_markup=get_persistent_menu_keyboard(user.role, linked_account_webapp_url()),
     )
 
 
@@ -309,7 +318,7 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
             return
         await message.answer(
             await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True),
-            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+            reply_markup=get_persistent_menu_keyboard(user.role, linked_account_webapp_url()),
         )
         return
 
@@ -406,7 +415,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                 return
             await message.answer(
                 await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True, db=db),
-                reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+                reply_markup=get_persistent_menu_keyboard(user.role, linked_account_webapp_url()),
             )
             await state.clear()
             return

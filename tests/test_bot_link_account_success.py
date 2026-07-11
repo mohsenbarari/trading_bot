@@ -99,11 +99,14 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/+unit_token"),
         ), patch(
             "bot.handlers.link_account.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            SimpleNamespace(
+                iran_server_url="https://coin.gold-trade.ir/",
+                frontend_url="https://coin.362514.ir",
+            ),
         ), patch(
             "bot.handlers.link_account.get_persistent_menu_keyboard",
             return_value="menu",
-        ):
+        ) as keyboard_mock:
             await handle_contact(message, state)
 
         self.assertEqual(user.telegram_id, 10)
@@ -116,9 +119,11 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         answer_text = message.answer.await_args.args[0]
         self.assertIn("با موفقیت", answer_text)
         self.assertIn("https://t.me/+unit_token", answer_text)
-        self.assertIn("https://app.example", answer_text)
+        self.assertIn("https://coin.gold-trade.ir", answer_text)
+        self.assertNotIn("coin.362514.ir", answer_text)
         self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
+        keyboard_mock.assert_called_once_with(user.role, "https://coin.gold-trade.ir")
 
     async def test_handle_contact_rolls_back_and_reports_commit_error(self):
         user = make_user()
