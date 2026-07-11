@@ -257,6 +257,8 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         with patch.object(start.settings, "telegram_direct_registration_enabled", True), patch.object(
             start.settings, "telegram_registration_reconciliation_enabled", True
+        ), patch.object(
+            start.settings, "registration_sync_v2_enabled", True
         ), patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
             start, "AsyncSessionLocal"
         ) as session_factory:
@@ -292,6 +294,10 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
                 "telegram_registration_reconciliation_enabled",
                 reconciliation_enabled,
             ), patch.object(
+                start.settings,
+                "registration_sync_v2_enabled",
+                True,
+            ), patch.object(
                 start, "delete_previous_anchor", new=AsyncMock()
             ), patch.object(
                 start, "AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(inv))
@@ -316,6 +322,8 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
         command = SimpleNamespace(args=inv.token)
         with patch.object(start.settings, "telegram_direct_registration_enabled", True), patch.object(
             start.settings, "telegram_registration_reconciliation_enabled", True
+        ), patch.object(
+            start.settings, "registration_sync_v2_enabled", True
         ):
             for tier, should_begin in (("tier1", True), ("tier2", False)):
                 msg = message()
@@ -962,7 +970,12 @@ class Stage5RedisTTLTests(unittest.IsolatedAsyncioTestCase):
 
 class Stage5IntentLookupTests(unittest.IsolatedAsyncioTestCase):
     async def test_activation_waits_for_exact_local_projection_not_remote_numeric_id(self):
-        user = SimpleNamespace(id=42, telegram_id=7001)
+        user = SimpleNamespace(
+            id=42,
+            telegram_id=7001,
+            mobile_number="09121112233",
+            address="Exact registered address",
+        )
         pending = SimpleNamespace(
             status=TelegramRegistrationIntentStatus.RETRY_WAIT,
             projected_user_id=None,
@@ -975,12 +988,57 @@ class Stage5IntentLookupTests(unittest.IsolatedAsyncioTestCase):
             last_error_code=None,
         )
         for intent, blocked in ((pending, True), (success, False)):
-            db = SimpleNamespace(execute=AsyncMock(return_value=FakeResult(intent)))
+            db = SimpleNamespace(
+                execute=AsyncMock(
+                    side_effect=(
+                        [FakeResult(None), FakeResult(intent)]
+                        if blocked
+                        else [FakeResult(intent)]
+                    )
+                )
+            )
+            with patch.object(
+                intent_service,
+                "evaluate_bot_access",
+                new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+            ):
+                result = await intent_service.registration_activation_block_for_user(
+                    db,
+                    user=user,
+                )
+            self.assertEqual(result is not None, blocked)
+
+    async def test_activation_ignores_unrelated_terminal_history_and_applies_current_policy(self):
+        user = SimpleNamespace(
+            id=42,
+            telegram_id=7001,
+            mobile_number="09121112233",
+            address="Exact registered address",
+        )
+        no_relevant_intent = SimpleNamespace(
+            execute=AsyncMock(side_effect=[FakeResult(None), FakeResult(None)])
+        )
+        result = await intent_service.registration_activation_block_for_user(
+            no_relevant_intent,
+            user=user,
+        )
+        self.assertIsNone(result)
+
+        success = SimpleNamespace(
+            status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+            projected_user_id=42,
+        )
+        denied_db = SimpleNamespace(execute=AsyncMock(return_value=FakeResult(success)))
+        with patch.object(
+            intent_service,
+            "evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=False, reason="accountant")),
+        ):
             result = await intent_service.registration_activation_block_for_user(
-                db,
+                denied_db,
                 user=user,
             )
-            self.assertEqual(result is not None, blocked)
+        self.assertEqual(result.reason, "accountant")
 
     async def test_lookup_uses_deterministic_identity_without_mutating_intent(self):
         row = SimpleNamespace(

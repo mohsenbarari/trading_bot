@@ -19,6 +19,8 @@ from core.config import settings
 from core.services.telegram_registration_intent_service import (
     registration_activation_block_for_user,
 )
+from core.registration_feature_policy import direct_registration_runtime_ready
+from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access
 from models.user import User
 
 
@@ -62,11 +64,7 @@ class AuthMiddleware(BaseMiddleware):
             # تا در تمام handler ها در دسترس باشد.
             data["user"] = user
 
-            if (
-                user
-                and bool(getattr(settings, "telegram_direct_registration_enabled", False))
-                and bool(getattr(settings, "telegram_registration_reconciliation_enabled", False))
-            ):
+            if user and direct_registration_runtime_ready(settings):
                 activation_block = await registration_activation_block_for_user(
                     session,
                     user=user,
@@ -80,6 +78,14 @@ class AuthMiddleware(BaseMiddleware):
                         await inner_event.answer(pending_message)
                     elif isinstance(inner_event, CallbackQuery):
                         await inner_event.answer(pending_message, show_alert=True)
+                    return
+                access_decision = await evaluate_bot_access(session, user)
+                if not access_decision.allowed:
+                    denial_message = bot_access_denial_message(access_decision.reason)
+                    if isinstance(inner_event, Message):
+                        await inner_event.answer(denial_message)
+                    elif isinstance(inner_event, CallbackQuery):
+                        await inner_event.answer(denial_message, show_alert=True)
                     return
             
             # بررسی قفل سراسری حساب بعد از پایان مهلت غیرفعال‌سازی

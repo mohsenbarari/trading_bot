@@ -84,7 +84,10 @@ async def main():
 
     bot = Bot(token=settings.bot_token)
     storage = RedisStorage.from_url(settings.redis_url)
-    dp = Dispatcher(storage=storage)
+    dp = Dispatcher(
+        storage=storage,
+        events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
+    )
 
     # Hot trade callbacks must fail fast before Auth opens a DB session.
     dp.update.outer_middleware(TradeContentionGateMiddleware())

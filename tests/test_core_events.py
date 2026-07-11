@@ -44,6 +44,17 @@ class _FakeInsertResult:
         return self.value
 
 
+class _MappingResult:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def mappings(self):
+        return self
+
+    def one_or_none(self):
+        return self.rows.pop(0) if self.rows else None
+
+
 def _capture_listeners(registry):
     def fake_listens_for(model, event_name):
         def decorator(func):
@@ -58,6 +69,53 @@ def _capture_listeners(registry):
 class CoreEventsTests(unittest.TestCase):
     def setUp(self):
         events._sync_redis = None
+
+    def test_registration_user_reference_metadata_uses_natural_identity(self):
+        connection = _FakeConnection()
+        connection.execute.side_effect = [
+            _MappingResult(
+                [
+                    {
+                        "account_name": "owner-account",
+                        "mobile_number": "09121112233",
+                        "telegram_id": 7001,
+                    }
+                ]
+            ),
+            _MappingResult(
+                [
+                    {
+                        "account_name": "child-account",
+                        "mobile_number": "09121112234",
+                        "telegram_id": None,
+                    }
+                ]
+            ),
+        ]
+        with patch("core.events.settings.registration_sync_v2_enabled", True):
+            result = events._registration_user_references(
+                connection,
+                {"owner_user_id": 100, "customer_user_id": 101},
+            )
+
+        self.assertEqual(
+            result["owner_user_id"]["current"]["account_name"],
+            "owner-account",
+        )
+        self.assertEqual(
+            result["customer_user_id"]["current"]["mobile_number"],
+            "09121112234",
+        )
+        self.assertNotIn("telegram_id", result["customer_user_id"]["current"])
+
+        with patch("core.events.settings.registration_sync_v2_enabled", False):
+            self.assertEqual(
+                events._registration_user_references(
+                    _FakeConnection(),
+                    {"owner_user_id": 100},
+                ),
+                {},
+            )
 
     def _build_listener_targets(self, now):
         chat = SimpleNamespace(

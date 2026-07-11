@@ -14,6 +14,7 @@ from api.routers.sync import (
     _build_upsert_stmt,
     _localize_registration_user_reference,
 )
+from core.registration_sync_policy import REGISTRATION_USER_REFERENCES_FIELD
 from core.user_counter_sync import user_counter_event_content_hash
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
@@ -67,35 +68,112 @@ class _QueryResult:
 
 
 class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _identity(label: str) -> dict:
+        return {
+            "current": {
+                "account_name": f"account-{label}",
+                "mobile_number": f"0912{abs(hash(label)) % 10000000:07d}",
+            },
+            "previous": {},
+        }
+
     async def test_registration_user_foreign_keys_are_localized_by_product_identity(self):
         local_user = SimpleNamespace(id=42)
         invitation_data = {
             "account_name": "canonical-user",
             "mobile_number": "09121112233",
+            "created_by_id": 99,
             "registered_user_id": 100,
+            REGISTRATION_USER_REFERENCES_FIELD: {
+                "created_by_id": self._identity("creator"),
+                "registered_user_id": self._identity("registered"),
+            },
         }
         with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
             resolved = await _localize_registration_user_reference(
-                _ApplyDB(execute_results=[_QueryResult([local_user])]),
+                _ApplyDB(
+                    execute_results=[
+                        _QueryResult([SimpleNamespace(id=41)]),
+                        _QueryResult([local_user]),
+                    ]
+                ),
                 "invitations",
                 invitation_data,
             )
         self.assertTrue(resolved)
+        self.assertEqual(invitation_data["created_by_id"], 41)
         self.assertEqual(invitation_data["registered_user_id"], 42)
 
         relation_data = {
             "invitation_token": "CUST-localized",
+            "owner_user_id": 98,
             "customer_user_id": 100,
+            "created_by_user_id": 98,
+            REGISTRATION_USER_REFERENCES_FIELD: {
+                "owner_user_id": self._identity("owner"),
+                "customer_user_id": self._identity("customer"),
+                "created_by_user_id": self._identity("creator"),
+            },
         }
-        local_invitation = SimpleNamespace(registered_user_id=42)
         with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
             resolved = await _localize_registration_user_reference(
-                _ApplyDB(execute_results=[_QueryResult([local_invitation])]),
+                _ApplyDB(
+                    execute_results=[
+                        _QueryResult([SimpleNamespace(id=40)]),
+                        _QueryResult([SimpleNamespace(id=42)]),
+                        _QueryResult([SimpleNamespace(id=40)]),
+                    ]
+                ),
                 "customer_relations",
                 relation_data,
             )
         self.assertTrue(resolved)
+        self.assertEqual(relation_data["owner_user_id"], 40)
         self.assertEqual(relation_data["customer_user_id"], 42)
+        self.assertEqual(relation_data["created_by_user_id"], 40)
+
+        accountant_data = {
+            "owner_user_id": 98,
+            "accountant_user_id": 101,
+            "created_by_user_id": 98,
+            REGISTRATION_USER_REFERENCES_FIELD: {
+                "owner_user_id": self._identity("owner"),
+                "accountant_user_id": self._identity("accountant"),
+                "created_by_user_id": self._identity("creator"),
+            },
+        }
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            resolved = await _localize_registration_user_reference(
+                _ApplyDB(
+                    execute_results=[
+                        _QueryResult([SimpleNamespace(id=40)]),
+                        _QueryResult([SimpleNamespace(id=43)]),
+                        _QueryResult([SimpleNamespace(id=40)]),
+                    ]
+                ),
+                "accountant_relations",
+                accountant_data,
+            )
+        self.assertTrue(resolved)
+        self.assertEqual(accountant_data["owner_user_id"], 40)
+        self.assertEqual(accountant_data["accountant_user_id"], 43)
+        self.assertEqual(accountant_data["created_by_user_id"], 40)
+
+        token_data = {
+            "user_id": 100,
+            REGISTRATION_USER_REFERENCES_FIELD: {
+                "user_id": self._identity("linked"),
+            },
+        }
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            resolved = await _localize_registration_user_reference(
+                _ApplyDB(execute_results=[_QueryResult([SimpleNamespace(id=42)])]),
+                "telegram_link_tokens",
+                token_data,
+            )
+        self.assertTrue(resolved)
+        self.assertEqual(token_data["user_id"], 42)
 
     async def test_registration_user_reference_defers_until_user_or_invitation_arrives(self):
         with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
@@ -105,7 +183,12 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "account_name": "missing-user",
                     "mobile_number": "09121112233",
+                    "created_by_id": 99,
                     "registered_user_id": 100,
+                    REGISTRATION_USER_REFERENCES_FIELD: {
+                        "created_by_id": self._identity("missing"),
+                        "registered_user_id": self._identity("missing-registered"),
+                    },
                 },
             )
             relation_ready = await _localize_registration_user_reference(
@@ -113,7 +196,14 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
                 "customer_relations",
                 {
                     "invitation_token": "CUST-missing",
+                    "owner_user_id": 99,
                     "customer_user_id": 100,
+                    "created_by_user_id": 99,
+                    REGISTRATION_USER_REFERENCES_FIELD: {
+                        "owner_user_id": self._identity("missing-owner"),
+                        "customer_user_id": self._identity("missing-customer"),
+                        "created_by_user_id": self._identity("missing-creator"),
+                    },
                 },
             )
         self.assertFalse(invitation_ready)

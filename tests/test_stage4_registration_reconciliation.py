@@ -265,6 +265,10 @@ class Stage4InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             auth.settings, "telegram_registration_reconciliation_enabled", True
         ), patch.object(
+            auth.settings, "telegram_direct_registration_enabled", True
+        ), patch.object(
+            auth.settings, "registration_sync_v2_enabled", True
+        ), patch.object(
             auth, "complete_invitation_registration", new=complete
         ):
             result = await auth.reconcile_telegram_registration_internal(
@@ -375,6 +379,27 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result, "retry_wait")
         schedule.assert_awaited_once()
+
+    async def test_repeated_feature_disabled_response_emits_persistent_error(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        session_context = _SessionContext()
+        with patch.object(worker, "AsyncSessionLocal", return_value=session_context), patch.object(
+            worker,
+            "schedule_registration_intent_retry",
+            new=AsyncMock(return_value=True),
+        ), patch.object(worker, "logger") as logger:
+            result = await worker._schedule_retry(
+                self.attempt,
+                error_code="mixed_version_or_feature_disabled",
+            )
+
+        self.assertEqual(result, "retry_wait")
+        logger.error.assert_called_once()
+        self.assertEqual(
+            logger.error.call_args.kwargs["extra"]["error_class"],
+            "mixed_version_or_feature_disabled",
+        )
 
     async def test_protocol_failure_statuses_are_classified_for_operations(self):
         for status_code, expected in (
@@ -500,12 +525,16 @@ class Stage4BackgroundPlacementTests(unittest.TestCase):
 
         with override_current_server(SERVER_FOREIGN), patch.object(
             main.settings, "telegram_registration_reconciliation_enabled", True
+        ), patch.object(
+            main.settings, "registration_sync_v2_enabled", True
         ):
             foreign_names = {name for name, _ in main._background_job_factories()}
         self.assertIn("telegram_registration_reconciliation", foreign_names)
 
         with override_current_server(SERVER_IRAN), patch.object(
             main.settings, "telegram_registration_reconciliation_enabled", True
+        ), patch.object(
+            main.settings, "registration_sync_v2_enabled", True
         ):
             iran_names = {name for name, _ in main._background_job_factories()}
         self.assertNotIn("telegram_registration_reconciliation", iran_names)

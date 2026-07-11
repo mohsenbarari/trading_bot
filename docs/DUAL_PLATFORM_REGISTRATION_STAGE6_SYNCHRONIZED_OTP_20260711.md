@@ -75,7 +75,8 @@ a runtime database, or authorize staging/production rollout.
 
 - Independent review of the exact Stage 6 commit, roadmap alignment, race behavior, tests, and
   evidence package.
-- Stage 5 remediation review remains independently binding and may reopen a dependency.
+- Stage 5 post-review corrections remain independently binding until the exact combined commit and
+  evidence package receive review disposition.
 - Stage 7 source work requires explicit owner authorization after review disposition.
 - Real Redis restart/failover timing, mixed-version transport, provider allowlist/template,
   two-server outage, staging deploy, and owner acceptance remain later roadmap gates.

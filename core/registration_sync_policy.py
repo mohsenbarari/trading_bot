@@ -27,6 +27,22 @@ REGISTRATION_VERSIONED_TABLES = frozenset(
     {"users", "invitations", "customer_relations", "accountant_relations"}
 )
 
+REGISTRATION_USER_REFERENCES_FIELD = "_registration_user_references"
+REGISTRATION_USER_REFERENCE_FIELDS: dict[str, tuple[str, ...]] = {
+    "invitations": ("created_by_id", "registered_user_id"),
+    "accountant_relations": (
+        "owner_user_id",
+        "accountant_user_id",
+        "created_by_user_id",
+    ),
+    "customer_relations": (
+        "owner_user_id",
+        "customer_user_id",
+        "created_by_user_id",
+    ),
+    "telegram_link_tokens": ("user_id",),
+}
+
 USER_SYNC_IDENTITY_FIELDS = frozenset(
     {
         "telegram_id",

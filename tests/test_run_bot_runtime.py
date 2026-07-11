@@ -54,6 +54,9 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.update.outer_middleware = MagicMock()
         auth_middleware = object()
         trade_gate_middleware = object()
+        storage = MagicMock()
+        event_isolation = object()
+        storage.create_isolation.return_value = event_isolation
 
         with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
             run_bot.settings, 'trading_bot_service', 'bot'
@@ -62,8 +65,8 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ), patch('run_bot.init_db', AsyncMock()) as init_db, patch(
             'run_bot.setup_event_listeners'
         ) as setup_event_listeners, patch('run_bot.Bot', return_value=fake_bot), patch(
-            'run_bot.RedisStorage.from_url', return_value='storage'
-        ) as storage_from_url, patch('run_bot.Dispatcher', return_value=fake_dp), patch(
+            'run_bot.RedisStorage.from_url', return_value=storage
+        ) as storage_from_url, patch('run_bot.Dispatcher', return_value=fake_dp) as dispatcher_ctor, patch(
             'run_bot.AuthMiddleware', return_value=auth_middleware
         ) as auth_ctor, patch(
             'run_bot.TradeContentionGateMiddleware', return_value=trade_gate_middleware
@@ -81,6 +84,11 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         init_db.assert_awaited_once()
         setup_event_listeners.assert_called_once_with()
         storage_from_url.assert_called_once_with('redis://localhost:6379/0')
+        storage.create_isolation.assert_called_once_with(lock_kwargs={"timeout": 120})
+        dispatcher_ctor.assert_called_once_with(
+            storage=storage,
+            events_isolation=event_isolation,
+        )
         gate_ctor.assert_called_once_with()
         auth_ctor.assert_called_once_with(run_bot.AsyncSessionLocal)
         self.assertEqual(fake_dp.update.outer_middleware.call_count, 3)
@@ -98,13 +106,15 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling = AsyncMock(side_effect=RuntimeError('boom'))
         fake_dp.update.outer_middleware = MagicMock()
 
+        storage = MagicMock()
+        storage.create_isolation.return_value = object()
         with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
             run_bot.settings, 'trading_bot_service', 'bot'
         ), patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
             run_bot.settings, 'redis_url', 'redis://localhost:6379/0'
         ), patch('run_bot.init_db', AsyncMock()), patch('run_bot.setup_event_listeners'), patch(
             'run_bot.Bot', return_value=fake_bot
-        ), patch('run_bot.RedisStorage.from_url', return_value='storage'), patch(
+        ), patch('run_bot.RedisStorage.from_url', return_value=storage), patch(
             'run_bot.Dispatcher', return_value=fake_dp
         ), patch('run_bot.AuthMiddleware', return_value=object()), patch(
             'run_bot.listen_trade_suggestion_events', _listener_forever

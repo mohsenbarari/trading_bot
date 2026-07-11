@@ -90,6 +90,7 @@ from core.services.otp_delivery_state_service import (
 )
 from core.services.telegram_otp_delivery_service import deliver_telegram_otp_once
 from core.telegram_otp_transport import forward_telegram_otp_delivery
+from core.registration_feature_policy import direct_registration_runtime_ready
 from core.server_routing import (
     SERVER_FOREIGN,
     SERVER_IRAN,
@@ -179,7 +180,7 @@ async def reconcile_telegram_registration_internal(
         command = TelegramRegistrationCommand.model_validate(payload)
     except (json.JSONDecodeError, ValueError, TypeError):
         raise HTTPException(status_code=422, detail="Invalid internal registration command") from None
-    if not settings.telegram_registration_reconciliation_enabled:
+    if not direct_registration_runtime_ready(settings):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return TelegramRegistrationCommandResponse(
             command_id=command.command_id,

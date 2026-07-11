@@ -15,11 +15,15 @@ from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, override_current_se
 from core.services.authoritative_telegram_account_link_service import (
     complete_authoritative_telegram_account_link,
 )
+from core.services.telegram_link_token_service import create_telegram_link_token
+from core.registration_sync_policy import REGISTRATION_USER_REFERENCES_FIELD
+from api.routers.sync import _localize_registration_user_reference
 from core.services.telegram_registration_intent_service import (
     TelegramRegistrationIntentError,
     claim_due_registration_intents,
     create_or_reuse_ready_registration_intent,
     finalize_registration_intent,
+    registration_activation_block_for_user,
     registration_projection_is_ready,
     schedule_registration_intent_retry,
 )
@@ -371,6 +375,314 @@ class Stage4RegistrationReconciliationPostgresTests(unittest.IsolatedAsyncioTest
                 )
             ).scalar_one()
             self.assertEqual(receipt_count, 2)
+
+    async def test_token_reissue_and_consume_share_lock_order_without_deadlock(self):
+        user, raw_token = await self._seed_link_user("issue_consume_race")
+        command = build_telegram_account_link_command(
+            mode="link_token",
+            link_token=raw_token,
+            mobile_number=user.mobile_number,
+            telegram_id=8_450_000_000 + int(uuid4().hex[:6], 16),
+            telegram_username="issue_consume_race",
+            telegram_full_name=None,
+            address=None,
+            contact_verified_at=utc_now(),
+        )
+
+        async def reissue():
+            with override_current_server(SERVER_IRAN):
+                async with self.session_factory() as session:
+                    current_user = await session.get(User, user.id)
+                    result = await create_telegram_link_token(session, current_user)
+                    await session.commit()
+                    return result.token_hash
+
+        async def consume():
+            with override_current_server(SERVER_IRAN), patch(
+                "core.services.authoritative_telegram_account_link_service.ensure_mandatory_channel_membership",
+                new=AsyncMock(),
+            ):
+                async with self.session_factory() as session:
+                    return await complete_authoritative_telegram_account_link(
+                        session,
+                        command=command,
+                        source_server=SERVER_FOREIGN,
+                    )
+
+        new_token_hash, consume_result = await asyncio.wait_for(
+            asyncio.gather(reissue(), consume()),
+            timeout=5,
+        )
+        self.assertIn(
+            consume_result.outcome,
+            {
+                TelegramRegistrationOutcome.LINKED_EXISTING,
+                TelegramRegistrationOutcome.LINK_TOKEN_REVOKED,
+            },
+        )
+        async with self.session_factory() as session:
+            tokens = list(
+                (
+                    await session.execute(
+                        select(TelegramLinkToken)
+                        .where(TelegramLinkToken.user_id == user.id)
+                        .order_by(TelegramLinkToken.id)
+                    )
+                ).scalars().all()
+            )
+            self.assertEqual(len(tokens), 2)
+            self.assertEqual(tokens[-1].token_hash, new_token_hash)
+            self.assertEqual(tokens[-1].status, TelegramLinkTokenStatus.PENDING)
+            self.assertIn(
+                tokens[0].status,
+                {TelegramLinkTokenStatus.USED, TelegramLinkTokenStatus.REVOKED},
+            )
+
+    async def test_handler_rebuild_after_lost_response_replays_one_receipt(self):
+        from bot.handlers import link_account
+
+        user, raw_token = await self._seed_link_user("handler_replay")
+        telegram_id = 8_470_000_000 + int(uuid4().hex[:6], 16)
+        message = type(
+            "Message",
+            (),
+            {
+                "from_user": type(
+                    "FromUser",
+                    (),
+                    {
+                        "id": telegram_id,
+                        "username": "first_profile",
+                        "full_name": "First Profile",
+                    },
+                )()
+            },
+        )()
+        transport_calls = 0
+
+        async def commit_then_maybe_drop(command):
+            nonlocal transport_calls
+            transport_calls += 1
+            with override_current_server(SERVER_IRAN), patch(
+                "core.services.authoritative_telegram_account_link_service.ensure_mandatory_channel_membership",
+                new=AsyncMock(),
+            ):
+                async with self.session_factory() as session:
+                    result = await complete_authoritative_telegram_account_link(
+                        session,
+                        command=command,
+                        source_server=SERVER_FOREIGN,
+                    )
+            if transport_calls == 1:
+                return 504, {"detail": "simulated lost response"}
+            return 200, {
+                "command_id": str(command.command_id),
+                "outcome": result.outcome.value,
+                "authoritative_user_id": result.authoritative_user_id,
+                "terminal": True,
+            }
+
+        with patch.object(
+            link_account,
+            "forward_telegram_account_link_command",
+            new=AsyncMock(side_effect=commit_then_maybe_drop),
+        ), patch.object(
+            link_account,
+            "_wait_for_linked_account_projection",
+            new=AsyncMock(return_value=user),
+        ):
+            with self.assertRaises(link_account.BotAccountLinkPending):
+                await link_account.complete_account_link_via_iran(
+                    message=message,
+                    mobile_number=user.mobile_number,
+                    link_token=raw_token,
+                    address=None,
+                )
+            message.from_user.username = "profile_after_restart"
+            message.from_user.full_name = "Profile After Restart"
+            projected = await link_account.complete_account_link_via_iran(
+                message=message,
+                mobile_number=user.mobile_number,
+                link_token=raw_token,
+                address=None,
+            )
+            with self.assertRaises(link_account.BotAccountLinkDenied) as conflict:
+                await link_account.complete_account_link_via_iran(
+                    message=message,
+                    mobile_number=user.mobile_number,
+                    link_token=raw_token,
+                    address="Changed business address",
+                )
+
+        self.assertEqual(projected.id, user.id)
+        self.assertEqual(
+            conflict.exception.reason,
+            TelegramRegistrationOutcome.CHANGED_PAYLOAD_REPLAY.value,
+        )
+        self.assertEqual(transport_calls, 3)
+        async with self.session_factory() as session:
+            receipt_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(TelegramRegistrationCommandReceipt)
+                    .where(TelegramRegistrationCommandReceipt.authoritative_user_id == user.id)
+                )
+            ).scalar_one()
+            self.assertEqual(receipt_count, 1)
+
+    async def test_all_registration_user_fks_ignore_colliding_source_ids(self):
+        suffix = uuid4().hex
+        users = [
+            User(
+                account_name=f"stage4_fk_{index}_{suffix[:10]}",
+                mobile_number=f"092{index}{int(suffix[index:index + 8], 16) % 10000000:07d}",
+                full_name=f"Stage 4 FK {index}",
+                address="Stage 4 FK address",
+                role=UserRole.STANDARD,
+                home_server=SERVER_IRAN,
+                must_change_password=False,
+            )
+            for index in range(3)
+        ]
+        async with self.session_factory() as session:
+            session.add_all(users)
+            await session.commit()
+
+        def identity(user):
+            return {
+                "current": {
+                    "account_name": user.account_name,
+                    "mobile_number": user.mobile_number,
+                },
+                "previous": {},
+            }
+
+        source_ids = [users[2].id, users[0].id, users[1].id]
+        cases = (
+            (
+                "invitations",
+                {"created_by_id": source_ids[0], "registered_user_id": source_ids[1]},
+                {"created_by_id": users[0], "registered_user_id": users[1]},
+            ),
+            (
+                "customer_relations",
+                {
+                    "owner_user_id": source_ids[0],
+                    "customer_user_id": source_ids[1],
+                    "created_by_user_id": source_ids[2],
+                },
+                {
+                    "owner_user_id": users[0],
+                    "customer_user_id": users[1],
+                    "created_by_user_id": users[2],
+                },
+            ),
+            (
+                "accountant_relations",
+                {
+                    "owner_user_id": source_ids[0],
+                    "accountant_user_id": source_ids[1],
+                    "created_by_user_id": source_ids[2],
+                },
+                {
+                    "owner_user_id": users[0],
+                    "accountant_user_id": users[1],
+                    "created_by_user_id": users[2],
+                },
+            ),
+            (
+                "telegram_link_tokens",
+                {"user_id": source_ids[1]},
+                {"user_id": users[1]},
+            ),
+        )
+        for table, data, expected_users in cases:
+            payload = {
+                **data,
+                REGISTRATION_USER_REFERENCES_FIELD: {
+                    field: identity(expected_user)
+                    for field, expected_user in expected_users.items()
+                },
+            }
+            with self.subTest(table=table), patch(
+                "api.routers.sync.settings.registration_sync_v2_enabled", True
+            ):
+                async with self.session_factory() as session:
+                    self.assertTrue(
+                        await _localize_registration_user_reference(
+                            session,
+                            table,
+                            payload,
+                        )
+                    )
+            for field, expected_user in expected_users.items():
+                self.assertEqual(payload[field], expected_user.id)
+
+    async def test_activation_uses_exact_projection_not_latest_intent_history(self):
+        suffix = uuid4().hex
+        telegram_id = 8_490_000_000 + int(suffix[:6], 16)
+        now = utc_now()
+        user = User(
+            account_name=f"stage4_activation_{suffix[:10]}",
+            mobile_number=f"091{int(suffix[:8], 16) % 100000000:08d}",
+            telegram_id=telegram_id,
+            full_name="Stage 4 Activation",
+            address="Stage 4 activation address",
+            role=UserRole.STANDARD,
+            home_server=SERVER_IRAN,
+            must_change_password=False,
+        )
+        async with self.session_factory() as session:
+            session.add(user)
+            await session.flush()
+            session.add_all(
+                [
+                    TelegramRegistrationIntent(
+                        idempotency_key=f"activation-success-{suffix}",
+                        invitation_token=f"activation-success-{suffix}",
+                        normalized_mobile=user.mobile_number,
+                        telegram_id=telegram_id,
+                        address=user.address,
+                        invitation_expires_at_snapshot=now + timedelta(hours=1),
+                        status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+                        authoritative_user_id=user.id + 1000,
+                        projected_user_id=user.id,
+                        created_at=now - timedelta(minutes=2),
+                    ),
+                    TelegramRegistrationIntent(
+                        idempotency_key=f"activation-rejected-{suffix}",
+                        invitation_token=f"activation-rejected-{suffix}",
+                        normalized_mobile=user.mobile_number,
+                        telegram_id=telegram_id,
+                        address=user.address,
+                        invitation_expires_at_snapshot=now + timedelta(hours=1),
+                        status=TelegramRegistrationIntentStatus.REJECTED,
+                        last_error_code="invitation_revoked",
+                        created_at=now - timedelta(minutes=1),
+                    ),
+                ]
+            )
+            await session.commit()
+
+        async with self.session_factory() as session:
+            current_user = await session.get(User, user.id)
+            self.assertIsNone(
+                await registration_activation_block_for_user(
+                    session,
+                    user=current_user,
+                )
+            )
+            current_user.role = UserRole.WATCH
+            await session.commit()
+
+        async with self.session_factory() as session:
+            current_user = await session.get(User, user.id)
+            block = await registration_activation_block_for_user(
+                session,
+                user=current_user,
+            )
+            self.assertIsNotNone(block)
+            self.assertEqual(block.reason, "role_forbidden")
 
     async def test_projection_gate_requires_completed_invitation_and_kind_specific_relation(self):
         suffix = uuid4().hex

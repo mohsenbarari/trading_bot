@@ -27,6 +27,7 @@ from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outb
 from core.sync_field_policy import sanitize_sync_payload
 from core.config import settings
 from core.registration_sync_policy import (
+    REGISTRATION_USER_REFERENCES_FIELD,
     USER_SYNC_COUNTER_FIELDS,
     allowed_user_fields_for_source,
 )
@@ -68,6 +69,33 @@ def _bump_sync_version(target) -> None:
 
 def _registration_sync_v2_enabled() -> bool:
     return bool(getattr(settings, "registration_sync_v2_enabled", False))
+
+
+def _registration_user_references(connection, references: dict[str, int | None]) -> dict:
+    if not _registration_sync_v2_enabled():
+        return {}
+    result: dict[str, dict] = {}
+    for field_name, user_id in references.items():
+        if user_id is None:
+            continue
+        row = connection.execute(
+            text(
+                "SELECT account_name, mobile_number, telegram_id "
+                "FROM users WHERE id = :user_id"
+            ),
+            {"user_id": int(user_id)},
+        ).mappings().one_or_none()
+        if row is None:
+            raise RuntimeError(f"registration_user_reference_missing:{field_name}")
+        identity = {
+            key: row[key]
+            for key in ("account_name", "mobile_number", "telegram_id")
+            if row[key] not in (None, "")
+        }
+        if not identity:
+            raise RuntimeError(f"registration_user_reference_identity_missing:{field_name}")
+        result[field_name] = {"current": identity, "previous": {}}
+    return result
 
 
 def _get_sync_redis():
@@ -1138,9 +1166,9 @@ def setup_accountant_relation_events():
     """Setup event listeners for AccountantRelation model."""
     from models.accountant_relation import AccountantRelation
 
-    def accountant_relation_payload(target):
+    def accountant_relation_payload(connection, target):
         status = target.status.value if hasattr(target.status, "value") else target.status
-        return {
+        payload = {
             "id": target.id,
             "owner_user_id": target.owner_user_id,
             "accountant_user_id": target.accountant_user_id,
@@ -1158,6 +1186,17 @@ def setup_accountant_relation_events():
             "updated_at": target.updated_at.isoformat() if target.updated_at else None,
             "sync_version": int(getattr(target, "sync_version", 1) or 1),
         }
+        references = _registration_user_references(
+            connection,
+            {
+                "owner_user_id": target.owner_user_id,
+                "accountant_user_id": target.accountant_user_id,
+                "created_by_user_id": target.created_by_user_id,
+            },
+        )
+        if references:
+            payload[REGISTRATION_USER_REFERENCES_FIELD] = references
+        return payload
 
     @event.listens_for(AccountantRelation, 'before_update')
     def bump_accountant_relation_sync_version(mapper, connection, target):
@@ -1173,18 +1212,22 @@ def setup_accountant_relation_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "accountant_relations", target.id, "INSERT", accountant_relation_payload(target))
+            log_change(connection, "accountant_relations", target.id, "INSERT", accountant_relation_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in accountant_relation after_insert event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(AccountantRelation, 'after_update')
     def on_accountant_relation_updated(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "accountant_relations", target.id, "UPDATE", accountant_relation_payload(target))
+            log_change(connection, "accountant_relations", target.id, "UPDATE", accountant_relation_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in accountant_relation after_update event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(AccountantRelation, 'after_delete')
     def on_accountant_relation_deleted(mapper, connection, target):
@@ -1213,13 +1256,13 @@ def setup_customer_relation_events():
     """Setup event listeners for CustomerRelation model."""
     from models.customer_relation import CustomerRelation
 
-    def customer_relation_payload(target):
+    def customer_relation_payload(connection, target):
         status = target.status.value if hasattr(target.status, "value") else target.status
         customer_tier = target.customer_tier.value if hasattr(target.customer_tier, "value") else target.customer_tier
         commission_rate = target.commission_rate
         if commission_rate is not None:
             commission_rate = str(commission_rate)
-        return {
+        payload = {
             "id": target.id,
             "owner_user_id": target.owner_user_id,
             "customer_user_id": target.customer_user_id,
@@ -1241,6 +1284,17 @@ def setup_customer_relation_events():
             "updated_at": target.updated_at.isoformat() if target.updated_at else None,
             "sync_version": int(getattr(target, "sync_version", 1) or 1),
         }
+        references = _registration_user_references(
+            connection,
+            {
+                "owner_user_id": target.owner_user_id,
+                "customer_user_id": target.customer_user_id,
+                "created_by_user_id": target.created_by_user_id,
+            },
+        )
+        if references:
+            payload[REGISTRATION_USER_REFERENCES_FIELD] = references
+        return payload
 
     @event.listens_for(CustomerRelation, 'before_update')
     def bump_customer_relation_sync_version(mapper, connection, target):
@@ -1256,18 +1310,22 @@ def setup_customer_relation_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "customer_relations", target.id, "INSERT", customer_relation_payload(target))
+            log_change(connection, "customer_relations", target.id, "INSERT", customer_relation_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in customer_relation after_insert event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(CustomerRelation, 'after_update')
     def on_customer_relation_updated(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "customer_relations", target.id, "UPDATE", customer_relation_payload(target))
+            log_change(connection, "customer_relations", target.id, "UPDATE", customer_relation_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in customer_relation after_update event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(CustomerRelation, 'after_delete')
     def on_customer_relation_deleted(mapper, connection, target):
@@ -1436,9 +1494,9 @@ def setup_telegram_link_token_events():
     """Setup event listeners for WebApp-issued Telegram account-link tokens."""
     from models.telegram_link_token import TelegramLinkToken
 
-    def telegram_link_token_payload(target):
+    def telegram_link_token_payload(connection, target):
         status = getattr(target, "status", None)
-        return {
+        payload = {
             "id": target.id,
             "user_id": target.user_id,
             "token_hash": target.token_hash,
@@ -1451,24 +1509,35 @@ def setup_telegram_link_token_events():
             "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
             "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
         }
+        references = _registration_user_references(
+            connection,
+            {"user_id": target.user_id},
+        )
+        if references:
+            payload[REGISTRATION_USER_REFERENCES_FIELD] = references
+        return payload
 
     @event.listens_for(TelegramLinkToken, 'after_insert')
     def on_telegram_link_token_created(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "telegram_link_tokens", target.id, "INSERT", telegram_link_token_payload(target))
+            log_change(connection, "telegram_link_tokens", target.id, "INSERT", telegram_link_token_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in telegram_link_token after_insert event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(TelegramLinkToken, 'after_update')
     def on_telegram_link_token_updated(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "telegram_link_tokens", target.id, "UPDATE", telegram_link_token_payload(target))
+            log_change(connection, "telegram_link_tokens", target.id, "UPDATE", telegram_link_token_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in telegram_link_token after_update event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(TelegramLinkToken, 'after_delete')
     def on_telegram_link_token_deleted(mapper, connection, target):
@@ -1633,8 +1702,8 @@ def setup_invitation_events():
     """Setup event listeners for Invitation model"""
     from models.invitation import Invitation
 
-    def invitation_payload(target):
-        return {
+    def invitation_payload(connection, target):
+        payload = {
             "id": target.id,
             "account_name": target.account_name,
             "mobile_number": target.mobile_number,
@@ -1657,6 +1726,16 @@ def setup_invitation_events():
             "created_at": target.created_at.isoformat() if target.created_at else None,
             "updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
         }
+        references = _registration_user_references(
+            connection,
+            {
+                "created_by_id": target.created_by_id,
+                "registered_user_id": getattr(target, "registered_user_id", None),
+            },
+        )
+        if references:
+            payload[REGISTRATION_USER_REFERENCES_FIELD] = references
+        return payload
 
     @event.listens_for(Invitation, 'before_update')
     def bump_invitation_sync_version(mapper, connection, target):
@@ -1672,18 +1751,22 @@ def setup_invitation_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "invitations", target.id, "INSERT", invitation_payload(target))
+            log_change(connection, "invitations", target.id, "INSERT", invitation_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in invitation after_insert event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(Invitation, 'after_update')
     def on_invitation_updated(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "invitations", target.id, "UPDATE", invitation_payload(target))
+            log_change(connection, "invitations", target.id, "UPDATE", invitation_payload(connection, target))
         except Exception as e:
             logger.error(f"Error in invitation after_update event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     @event.listens_for(Invitation, 'after_delete')
     def on_invitation_deleted(mapper, connection, target):

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock, patch
@@ -27,6 +28,8 @@ from core.services.invitation_sms_delivery_service import (
     prepare_invitation_sms_delivery,
 )
 from core.registration_contracts import InvitationDerivedState, InvitationSMSStatus
+from core.sms import SMSDeliveryOutcome
+from core.utils import utc_now
 from core.services.invitation_lifecycle_service import derive_invitation_state
 from core.services.invitation_requester_service import resolve_current_invitation_requester
 from core.invitation_creation_contracts import InvitationRequesterIdentity
@@ -514,6 +517,165 @@ class Stage3InvitationCreationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             ).scalar_one()
+            self.assertEqual(delivery.attempt_count, 1)
+
+    async def test_live_sms_claim_retry_stays_pending_and_owner_records_acceptance(self):
+        owner = await self._owner("sms_live_claim")
+        account, mobile = self._identity("sms_live_claim")
+        _, invitation_id, _ = await self._create_standard(owner.id, account, mobile)
+        async with self.session_factory() as session:
+            invitation = await session.get(Invitation, invitation_id)
+            await prepare_invitation_sms_delivery(
+                session,
+                invitation=invitation,
+                enabled=True,
+                newly_created=True,
+            )
+            await session.commit()
+
+        provider_started = threading.Event()
+        provider_release = threading.Event()
+        provider_calls = 0
+
+        def blocked_sender():
+            nonlocal provider_calls
+            provider_calls += 1
+            provider_started.set()
+            if not provider_release.wait(timeout=5):
+                raise TimeoutError("test provider release timed out")
+            return SMSDeliveryOutcome.ACCEPTED
+
+        async def first_delivery():
+            async with self.session_factory() as session:
+                return await deliver_invitation_sms_once(
+                    session,
+                    invitation_id=invitation_id,
+                    newly_created=True,
+                    sender=blocked_sender,
+                )
+
+        first_task = asyncio.create_task(first_delivery())
+        self.assertTrue(await asyncio.to_thread(provider_started.wait, 2))
+        async with self.session_factory() as retry_session:
+            retry_sender = Mock()
+            retry_status = await deliver_invitation_sms_once(
+                retry_session,
+                invitation_id=invitation_id,
+                newly_created=False,
+                sender=retry_sender,
+            )
+        self.assertEqual(retry_status, InvitationSMSStatus.PENDING)
+        retry_sender.assert_not_called()
+
+        provider_release.set()
+        self.assertEqual(await first_task, InvitationSMSStatus.ACCEPTED)
+        self.assertEqual(provider_calls, 1)
+        async with self.session_factory() as session:
+            delivery = (
+                await session.execute(
+                    select(InvitationSMSDelivery).where(
+                        InvitationSMSDelivery.invitation_id == invitation_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(delivery.status, InvitationSMSStatus.ACCEPTED.value)
+            self.assertEqual(delivery.attempt_count, 1)
+
+    async def test_live_sms_claim_owner_records_explicit_failure(self):
+        owner = await self._owner("sms_live_failure")
+        account, mobile = self._identity("sms_live_failure")
+        _, invitation_id, _ = await self._create_standard(owner.id, account, mobile)
+        async with self.session_factory() as session:
+            invitation = await session.get(Invitation, invitation_id)
+            await prepare_invitation_sms_delivery(
+                session,
+                invitation=invitation,
+                enabled=True,
+                newly_created=True,
+            )
+            await session.commit()
+
+        provider_started = threading.Event()
+        provider_release = threading.Event()
+        provider_calls = 0
+
+        def blocked_sender():
+            nonlocal provider_calls
+            provider_calls += 1
+            provider_started.set()
+            if not provider_release.wait(timeout=5):
+                raise TimeoutError("test provider release timed out")
+            return SMSDeliveryOutcome.FAILED
+
+        async def first_delivery():
+            async with self.session_factory() as session:
+                return await deliver_invitation_sms_once(
+                    session,
+                    invitation_id=invitation_id,
+                    newly_created=True,
+                    sender=blocked_sender,
+                )
+
+        first_task = asyncio.create_task(first_delivery())
+        self.assertTrue(await asyncio.to_thread(provider_started.wait, 2))
+        async with self.session_factory() as retry_session:
+            retry_sender = Mock()
+            retry_status = await deliver_invitation_sms_once(
+                retry_session,
+                invitation_id=invitation_id,
+                newly_created=False,
+                sender=retry_sender,
+            )
+        self.assertEqual(retry_status, InvitationSMSStatus.PENDING)
+        retry_sender.assert_not_called()
+
+        provider_release.set()
+        self.assertEqual(await first_task, InvitationSMSStatus.FAILED)
+        self.assertEqual(provider_calls, 1)
+        async with self.session_factory() as session:
+            delivery = (
+                await session.execute(
+                    select(InvitationSMSDelivery).where(
+                        InvitationSMSDelivery.invitation_id == invitation_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(delivery.status, InvitationSMSStatus.FAILED.value)
+            self.assertEqual(delivery.attempt_count, 1)
+
+    async def test_stale_sms_claim_becomes_ambiguous_without_resend(self):
+        owner = await self._owner("sms_stale_claim")
+        account, mobile = self._identity("sms_stale_claim")
+        _, invitation_id, _ = await self._create_standard(owner.id, account, mobile)
+        async with self.session_factory() as session:
+            invitation = await session.get(Invitation, invitation_id)
+            delivery = await prepare_invitation_sms_delivery(
+                session,
+                invitation=invitation,
+                enabled=True,
+                newly_created=True,
+            )
+            delivery.attempt_count = 1
+            delivery.claimed_at = utc_now() - timedelta(minutes=1)
+            await session.commit()
+
+        sender = Mock()
+        async with self.session_factory() as session:
+            status = await deliver_invitation_sms_once(
+                session,
+                invitation_id=invitation_id,
+                newly_created=False,
+                sender=sender,
+            )
+        self.assertEqual(status, InvitationSMSStatus.AMBIGUOUS)
+        sender.assert_not_called()
+        async with self.session_factory() as session:
+            delivery = await session.scalar(
+                select(InvitationSMSDelivery).where(
+                    InvitationSMSDelivery.invitation_id == invitation_id
+                )
+            )
+            self.assertEqual(delivery.status, InvitationSMSStatus.AMBIGUOUS.value)
             self.assertEqual(delivery.attempt_count, 1)
 
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +15,9 @@ from core.sms import SMSDeliveryOutcome
 from core.utils import utc_now
 from models.invitation import Invitation
 from models.invitation_sms_delivery import InvitationSMSDelivery
+
+
+_CLAIM_LEASE_SECONDS = 30
 
 
 async def prepare_invitation_sms_delivery(
@@ -81,17 +86,24 @@ async def deliver_invitation_sms_once(
     # A committed pending row with no claim is still safe to claim after a
     # process restart. `newly_created` describes the caller, not provider I/O.
     if delivery.attempt_count != 0 or delivery.claimed_at is not None:
+        claimed_at = delivery.claimed_at
+        if claimed_at is not None and claimed_at.tzinfo is None:
+            claimed_at = claimed_at.replace(tzinfo=utc_now().tzinfo)
+        if claimed_at is not None and claimed_at + timedelta(seconds=_CLAIM_LEASE_SECONDS) > utc_now():
+            await db.commit()
+            return InvitationSMSStatus.PENDING
         delivery.status = InvitationSMSStatus.AMBIGUOUS.value
         delivery.completed_at = utc_now()
         await db.commit()
         return InvitationSMSStatus.AMBIGUOUS
 
     delivery.attempt_count = 1
+    claim_generation = int(delivery.attempt_count)
     delivery.claimed_at = utc_now()
     await db.commit()
 
     try:
-        sender_outcome = sender()
+        sender_outcome = await asyncio.to_thread(sender)
     except Exception:
         sender_outcome = SMSDeliveryOutcome.AMBIGUOUS
 
@@ -116,10 +128,23 @@ async def deliver_invitation_sms_once(
             .execution_options(populate_existing=True)
         )
     ).scalar_one()
-    if delivery.status != InvitationSMSStatus.PENDING.value:
+    if int(delivery.attempt_count or 0) != claim_generation:
         status = InvitationSMSStatus(delivery.status)
         await db.commit()
         return status
+    if delivery.status not in {
+        InvitationSMSStatus.PENDING.value,
+        InvitationSMSStatus.AMBIGUOUS.value,
+    }:
+        status = InvitationSMSStatus(delivery.status)
+        await db.commit()
+        return status
+    if (
+        delivery.status == InvitationSMSStatus.AMBIGUOUS.value
+        and result_status == InvitationSMSStatus.AMBIGUOUS
+    ):
+        await db.commit()
+        return InvitationSMSStatus.AMBIGUOUS
     delivery.status = result_status.value
     delivery.completed_at = utc_now()
     await db.commit()

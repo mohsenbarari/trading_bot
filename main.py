@@ -36,6 +36,7 @@ from core.telegram_registration_reconciliation_worker import (
     telegram_registration_reconciliation_loop,
 )
 from core.otp_sms_fallback_worker import otp_sms_fallback_loop
+from core.registration_feature_policy import registration_reconciliation_runtime_ready
 from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 from core.production_test_isolation import (
@@ -213,7 +214,7 @@ def _background_job_factories():
         ("trade_webapp_delivery", webapp_trade_delivery_loop),
         ("trade_telegram_delivery", telegram_trade_delivery_loop),
     ]
-    if settings.telegram_registration_reconciliation_enabled:
+    if registration_reconciliation_runtime_ready(settings):
         jobs.append(
             (
                 "telegram_registration_reconciliation",

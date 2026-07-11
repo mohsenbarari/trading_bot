@@ -207,9 +207,9 @@ def _direct_registration_enabled() -> bool:
 
 
 def _direct_registration_runtime_ready() -> bool:
-    return _direct_registration_enabled() and bool(
-        getattr(settings, "telegram_registration_reconciliation_enabled", False)
-    )
+    from core.registration_feature_policy import direct_registration_runtime_ready
+
+    return direct_registration_runtime_ready(settings)
 
 
 async def _bound_registration_fsm_ttl(

@@ -14,11 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.registration_contracts import TelegramRegistrationCommand, TelegramRegistrationOutcome
 from core.registration_identity import normalize_account_name, normalize_mobile_number
 from core.server_routing import SERVER_FOREIGN, current_server
-from core.services.bot_access_policy import evaluate_bot_access_projection
+from core.services.bot_access_policy import evaluate_bot_access, evaluate_bot_access_projection
 from core.utils import utc_now
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
-from models.invitation import Invitation, InvitationKind
+from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from models.telegram_registration_intent import (
     TelegramRegistrationIntent,
     TelegramRegistrationIntentStatus,
@@ -149,29 +149,81 @@ async def registration_activation_block_for_user(
     *,
     user: User,
 ) -> RegistrationActivationBlock | None:
-    """Keep a direct-registration User projection closed until its exact intent is bound."""
+    """Block only an exact direct-registration projection that is not ready."""
 
     telegram_id = getattr(user, "telegram_id", None)
     if telegram_id is None:
         return None
-    intent = await get_latest_registration_intent_for_telegram(
-        db,
-        telegram_id=int(telegram_id),
+    successful = (
+        await db.execute(
+            select(TelegramRegistrationIntent)
+            .where(
+                TelegramRegistrationIntent.telegram_id == int(telegram_id),
+                TelegramRegistrationIntent.projected_user_id == int(user.id),
+                TelegramRegistrationIntent.status.in_(tuple(SUCCESS_OUTCOME_TO_STATUS.values())),
+            )
+            .order_by(
+                TelegramRegistrationIntent.created_at.desc(),
+                TelegramRegistrationIntent.id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if successful is not None:
+        decision = await evaluate_bot_access(db, user)
+        if decision.allowed:
+            return None
+        return RegistrationActivationBlock(
+            TelegramRegistrationIntentStatus(
+                str(getattr(successful.status, "value", successful.status))
+            ),
+            _safe_code(decision.reason or "bot_access_forbidden"),
+        )
+
+    normalized_mobile = normalize_mobile_number(getattr(user, "mobile_number", None))
+    address = getattr(user, "address", None)
+    if not normalized_mobile:
+        return None
+    pending_statuses = tuple(
+        status
+        for status in TelegramRegistrationIntentStatus
+        if status not in TERMINAL_INTENT_STATUSES
     )
-    if intent is None:
+    relevant_pending = (
+        await db.execute(
+            select(TelegramRegistrationIntent)
+            .outerjoin(
+                Invitation,
+                Invitation.token == TelegramRegistrationIntent.invitation_token,
+            )
+            .where(
+                TelegramRegistrationIntent.telegram_id == int(telegram_id),
+                TelegramRegistrationIntent.normalized_mobile == normalized_mobile,
+                TelegramRegistrationIntent.status.in_(pending_statuses),
+                or_(
+                    and_(
+                        Invitation.registered_user_id == int(user.id),
+                        Invitation.completed_via == InvitationCompletionSurface.TELEGRAM,
+                    ),
+                    and_(
+                        Invitation.id.is_(None),
+                        TelegramRegistrationIntent.address.is_not(None),
+                        TelegramRegistrationIntent.address == address,
+                    ),
+                ),
+            )
+            .order_by(
+                TelegramRegistrationIntent.created_at.desc(),
+                TelegramRegistrationIntent.id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if relevant_pending is None:
         return None
     status = TelegramRegistrationIntentStatus(
-        str(getattr(getattr(intent, "status", None), "value", getattr(intent, "status", "")))
+        str(getattr(relevant_pending.status, "value", relevant_pending.status))
     )
-    if status in SUCCESS_OUTCOME_TO_STATUS.values():
-        if int(getattr(intent, "projected_user_id", 0) or 0) == int(user.id):
-            return None
-        return RegistrationActivationBlock(status, "projection_pending")
-    if status in TERMINAL_INTENT_STATUSES:
-        return RegistrationActivationBlock(
-            status,
-            _safe_code(getattr(intent, "last_error_code", None) or status.value),
-        )
     return RegistrationActivationBlock(status, "pending_sync")
 
 

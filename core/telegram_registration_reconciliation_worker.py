@@ -21,6 +21,7 @@ from core.registration_contracts import (
     TelegramRegistrationCommandResponse,
     TelegramRegistrationOutcome,
 )
+from core.registration_feature_policy import registration_reconciliation_runtime_ready
 from core.services.telegram_registration_intent_service import (
     RegistrationProjectionResolution,
     SUCCESS_OUTCOME_TO_STATUS,
@@ -46,6 +47,7 @@ _PERSISTENT_RETRY_ERRORS = frozenset(
     {
         "authentication_configuration",
         "mixed_version_or_route",
+        "mixed_version_or_feature_disabled",
         "protocol_invalid_response",
         "protocol_command_mismatch",
     }
@@ -205,7 +207,7 @@ async def run_telegram_registration_reconciliation_cycle(
     sync_poll_seconds: float = _SYNC_POLL_SECONDS,
 ) -> TelegramRegistrationReconciliationCycleReport:
     assert_background_job_authority(JOB_TELEGRAM_REGISTRATION_RECONCILIATION)
-    if not settings.telegram_registration_reconciliation_enabled:
+    if not registration_reconciliation_runtime_ready(settings):
         raise RuntimeError("telegram_registration_reconciliation_disabled")
     async with AsyncSessionLocal() as db:
         attempts = await claim_due_registration_intents(
@@ -251,7 +253,7 @@ async def run_telegram_registration_reconciliation_cycle(
 
 async def telegram_registration_reconciliation_loop() -> None:
     assert_background_job_authority(JOB_TELEGRAM_REGISTRATION_RECONCILIATION)
-    if not settings.telegram_registration_reconciliation_enabled:
+    if not registration_reconciliation_runtime_ready(settings):
         raise RuntimeError("telegram_registration_reconciliation_disabled")
     logger.info(
         "Telegram registration reconciliation worker started",

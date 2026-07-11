@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -247,7 +247,25 @@ class Stage3ReviewRemediationTests(unittest.IsolatedAsyncioTestCase):
                 newly_created=False,
                 sender=uncertain_sender,
             )
-        self.assertEqual(uncertain_status, InvitationSMSStatus.AMBIGUOUS)
+        self.assertEqual(uncertain_status, InvitationSMSStatus.PENDING)
+        uncertain_sender.assert_not_called()
+
+        uncertain.claimed_at = datetime.now(timezone.utc) - timedelta(seconds=31)
+        stale_db = SimpleNamespace(
+            execute=AsyncMock(return_value=_ScalarResult(one=uncertain)),
+            commit=AsyncMock(),
+        )
+        with patch(
+            "core.services.invitation_sms_delivery_service.current_server",
+            return_value="iran",
+        ):
+            stale_status = await deliver_invitation_sms_once(
+                stale_db,
+                invitation_id=42,
+                newly_created=False,
+                sender=uncertain_sender,
+            )
+        self.assertEqual(stale_status, InvitationSMSStatus.AMBIGUOUS)
         uncertain_sender.assert_not_called()
 
     async def test_sms_restart_claims_committed_pending_zero_attempt_row_once(self):

@@ -17,6 +17,8 @@ from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, def
 from core.sync_authority import IRAN_AUTHORITATIVE_SYNC_TABLES
 from core.sync_field_policy import sanitize_sync_payload
 from core.registration_sync_policy import (
+    REGISTRATION_USER_REFERENCE_FIELDS,
+    REGISTRATION_USER_REFERENCES_FIELD,
     REGISTRATION_VERSIONED_TABLES,
     sanitize_registration_sync_payload,
     registration_sync_capabilities,
@@ -1669,37 +1671,28 @@ async def _localize_registration_user_reference(
 
     if not bool(getattr(settings, "registration_sync_v2_enabled", False)):
         return True
-    if table == "invitations" and data.get("registered_user_id") is not None:
-        mobile = normalize_mobile_number(data.get("mobile_number"))
-        account = normalize_account_name(data.get("account_name"))
-        if not mobile or not account:
-            return False
-        users = list(
-            (
-                await db.execute(
-                    select(User).where(
-                        User.normalized_mobile_number == mobile,
-                        User.normalized_account_name == account,
-                    )
-                )
-            ).scalars().all()
-        )
-        if len(users) != 1:
-            return False
-        data["registered_user_id"] = int(users[0].id)
+    fields = REGISTRATION_USER_REFERENCE_FIELDS.get(table)
+    if fields is None:
         return True
-    if table in RELATION_LINK_FIELDS and data.get(RELATION_LINK_FIELDS[table]) is not None:
-        invitation_token = _nonempty_text(data.get("invitation_token"))
-        if not invitation_token:
+    references = data.pop(REGISTRATION_USER_REFERENCES_FIELD, None)
+    if not isinstance(references, dict):
+        return False
+    for field_name in fields:
+        source_user_id = data.get(field_name)
+        if source_user_id is None:
+            continue
+        identity = references.get(field_name)
+        if not isinstance(identity, dict):
             return False
-        invitation = (
-            await db.execute(
-                select(Invitation).where(Invitation.token == invitation_token)
-            )
-        ).scalar_one_or_none()
-        if invitation is None or invitation.registered_user_id is None:
+        resolution, local_user_id = await _resolve_user_sync_target(
+            db,
+            record_id=source_user_id,
+            identity=identity,
+            lock=False,
+        )
+        if resolution != "identity" or local_user_id is None:
             return False
-        data[RELATION_LINK_FIELDS[table]] = int(invitation.registered_user_id)
+        data[field_name] = int(local_user_id)
     return True
 
 

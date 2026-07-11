@@ -148,6 +148,10 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
                 "telegram_registration_reconciliation_enabled",
                 True,
             ), patch.object(
+                auth_middleware.settings,
+                "registration_sync_v2_enabled",
+                True,
+            ), patch.object(
                 auth_middleware,
                 "registration_activation_block_for_user",
                 new=AsyncMock(return_value=SimpleNamespace(reason="pending_sync")),
@@ -159,6 +163,47 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         activation_block.assert_awaited_once_with(session, user=user)
         self.assertIn("همگام", message.answer.await_args.args[0])
+        handler.assert_not_awaited()
+
+    async def test_middleware_applies_current_bot_policy_before_onboarding(self):
+        session = AsyncMock()
+        user = MagicMock(
+            id=42,
+            telegram_id=10,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
+        session.execute = AsyncMock(return_value=_ExecuteResult(user))
+        middleware = auth_middleware.AuthMiddleware(
+            session_pool=MagicMock(return_value=_AsyncSessionContext(session))
+        )
+        handler = AsyncMock()
+        original_message = auth_middleware.Message
+        try:
+            auth_middleware.Message = FakeMessage
+            message = FakeMessage(10)
+            with patch.object(
+                auth_middleware.settings, "telegram_direct_registration_enabled", True
+            ), patch.object(
+                auth_middleware.settings, "telegram_registration_reconciliation_enabled", True
+            ), patch.object(
+                auth_middleware.settings, "registration_sync_v2_enabled", True
+            ), patch.object(
+                auth_middleware,
+                "registration_activation_block_for_user",
+                new=AsyncMock(return_value=None),
+            ), patch.object(
+                auth_middleware,
+                "evaluate_bot_access",
+                new=AsyncMock(return_value=SimpleNamespace(allowed=False, reason="accountant")),
+            ):
+                result = await middleware(handler, message, {})
+        finally:
+            auth_middleware.Message = original_message
+
+        self.assertIsNone(result)
+        self.assertIn("حسابدار", message.answer.await_args.args[0])
         handler.assert_not_awaited()
 
     async def test_middleware_ignores_legacy_bot_access_flag(self):

@@ -2441,3 +2441,18 @@ The exact implementation and verification record is
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE6_SYNCHRONIZED_OTP_20260711.md`. This source record does not
 accept the pending Stage 5 review, enable either OTP flag, perform a migration/deployment/push, or
 waive Stage 7 through owner acceptance and production gates.
+
+## Stage 5 Post-Review Remediation Record (2026-07-11)
+
+The independent review of Stage 5 remediation commit `5bc95fd1` found three High defects and five
+Medium source/evidence gaps. The findings were checked against current source before changes were
+made. Activation now binds exact projection and current policy; all registration User foreign keys
+use natural-identity localization; Aiogram Redis event isolation serializes one FSM key; SMS claims
+distinguish live ownership from stale ambiguity; feature dependencies fail closed; repeated
+mixed-version faults escalate; and real PostgreSQL evidence covers account-link and replay races.
+
+The exact disposition, including modified, rejected, deferred, and rollout-only recommendations, is
+recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE5_POSTREVIEW_REMEDIATION_20260711.md`. This update does not
+declare independent `GO`, enable a flag, alter Stage 6 OTP authority, migrate/deploy/push, or waive
+mixed-version, two-server, Web-session response-loss, staging, and production gates.
