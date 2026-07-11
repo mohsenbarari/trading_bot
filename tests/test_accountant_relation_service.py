@@ -26,6 +26,7 @@ from core.services.accountant_relation_service import (
     update_owner_accountant_relation,
     validate_accountant_capacity,
 )
+from core.services.canonical_invitation_creation_service import CanonicalInvitationCreationError
 from models.accountant_relation import AccountantRelation
 from models.accountant_relation import AccountantRelationStatus
 from models.invitation import InvitationKind
@@ -62,6 +63,7 @@ class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
+        self.rollback = AsyncMock()
         self.refresh = AsyncMock()
         self.added = []
 
@@ -227,16 +229,18 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
                 FakeExecuteResult(scalar_one_value=None),
             ]
         )
+        invitation_fixture = SimpleNamespace(
+            account_name="accountant_1",
+            mobile_number="09123456789",
+            role=UserRole.WATCH,
+            kind=InvitationKind.ACCOUNTANT,
+            token=f"{ACCOUNTANT_INVITATION_PREFIX}token",
+            expires_at=expected_expiry,
+        )
 
         with patch(
-            "core.services.accountant_relation_service.generate_accountant_invitation_token",
-            return_value=f"{ACCOUNTANT_INVITATION_PREFIX}token",
-        ), patch(
-            "core.services.accountant_relation_service.generate_accountant_short_code",
-            return_value="SHORTA1",
-        ), patch(
-            "core.services.invitation_lifecycle_service.get_new_invitation_expiry",
-            new=AsyncMock(return_value=expected_expiry),
+            "core.services.accountant_relation_service.create_or_reuse_canonical_invitation",
+            new=AsyncMock(return_value=SimpleNamespace(invitation=invitation_fixture, created=True)),
         ):
             relation, invitation = await create_owner_accountant_relation(
                 db,
@@ -247,7 +251,7 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
                 duty_description="  کارهای روزانه  ",
             )
 
-        self.assertEqual(len(db.added), 2)
+        self.assertEqual(len(db.added), 1)
         self.assertEqual(invitation.account_name, "accountant_1")
         self.assertEqual(invitation.mobile_number, "09123456789")
         self.assertEqual(invitation.role, UserRole.WATCH)
@@ -277,51 +281,33 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(exc_info.exception.status_code, 400)
 
-        db = FakeDB(
-            execute_results=[
-                FakeExecuteResult(values=[]),
-                FakeExecuteResult(scalar_one_value=0),
-                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=1)),
-            ]
-        )
-        with self.assertRaises(HTTPException) as exc_info:
-            await create_owner_accountant_relation(
-                db,
-                owner_user=owner,
-                global_account_name="acc",
-                relation_display_name="disp",
-                mobile_number="09120000000",
-            )
+        db = FakeDB()
+        with patch(
+            "core.services.accountant_relation_service.create_or_reuse_canonical_invitation",
+            new=AsyncMock(side_effect=CanonicalInvitationCreationError("user_identity_exists")),
+        ), self.assertRaises(HTTPException) as exc_info:
+            await create_owner_accountant_relation(db, owner_user=owner, global_account_name="acc", relation_display_name="disp", mobile_number="09120000000")
         self.assertIn("قبلاً ثبت شده", exc_info.exception.detail)
 
-        db = FakeDB(
-            execute_results=[
-                FakeExecuteResult(values=[]),
-                FakeExecuteResult(scalar_one_value=0),
-                FakeExecuteResult(scalar_one_value=None),
-                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=2)),
-            ]
-        )
-        with self.assertRaises(HTTPException) as exc_info:
-            await create_owner_accountant_relation(
-                db,
-                owner_user=owner,
-                global_account_name="acc",
-                relation_display_name="disp",
-                mobile_number="09120000000",
-            )
-        self.assertIn("pending یا active", exc_info.exception.detail)
+        with patch(
+            "core.services.accountant_relation_service.create_or_reuse_canonical_invitation",
+            new=AsyncMock(side_effect=CanonicalInvitationCreationError("invitation_identity_conflict")),
+        ), self.assertRaises(HTTPException) as exc_info:
+            await create_owner_accountant_relation(FakeDB(), owner_user=owner, global_account_name="acc", relation_display_name="disp", mobile_number="09120000000")
+        self.assertEqual(exc_info.exception.status_code, 409)
 
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(values=[]),
                 FakeExecuteResult(scalar_one_value=0),
-                FakeExecuteResult(scalar_one_value=None),
-                FakeExecuteResult(scalar_one_value=None),
                 FakeExecuteResult(scalar_one_value=SimpleNamespace(id=3)),
             ]
         )
-        with self.assertRaises(HTTPException) as exc_info:
+        invitation_fixture = SimpleNamespace(token="ACCT-new", expires_at=datetime.utcnow() + timedelta(days=2))
+        with patch(
+            "core.services.accountant_relation_service.create_or_reuse_canonical_invitation",
+            new=AsyncMock(return_value=SimpleNamespace(invitation=invitation_fixture, created=True)),
+        ), self.assertRaises(HTTPException) as exc_info:
             await create_owner_accountant_relation(
                 db,
                 owner_user=owner,

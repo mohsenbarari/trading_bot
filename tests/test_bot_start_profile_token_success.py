@@ -36,11 +36,13 @@ class BotStartProfileTokenSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_link_helpers_and_logged_in_profile_token_show_keyboard(self):
         from bot.handlers import start as module
 
-        with patch.object(module, "settings", SimpleNamespace(frontend_url="")):
-            self.assertIsNone(build_webapp_link_line())
-            self.assertIsNone(build_accountant_register_link_line("tok"))
+        with patch(
+            "bot.handlers.start.public_webapp_url_for_links",
+            side_effect=ValueError("PUBLIC_WEBAPP_URL is required"),
+        ), self.assertRaises(ValueError):
+            build_webapp_link_line()
 
-        with patch.object(module, "settings", SimpleNamespace(frontend_url="https://app.example")):
+        with patch("bot.handlers.start.public_webapp_url_for_links", return_value="https://app.example"):
             self.assertIn("https://app.example", build_webapp_link_line())
             self.assertIn("register?token=tok", build_accountant_register_link_line("tok"))
 

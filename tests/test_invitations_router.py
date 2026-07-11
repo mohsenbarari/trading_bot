@@ -17,6 +17,7 @@ from api.routers.invitations import (
 )
 from models.invitation import InvitationKind
 from models.user import UserRole
+from core.services.canonical_invitation_creation_service import CanonicalInvitationCreationError
 
 
 class FakeExecuteResult:
@@ -37,6 +38,7 @@ class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
+        self.rollback = AsyncMock()
         self.refresh = AsyncMock()
         self.delete = AsyncMock()
         self.added = []
@@ -51,6 +53,14 @@ class FakeDB:
 
 
 class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.public_url_patcher = patch(
+            "api.routers.invitations.public_webapp_url_for_links",
+            return_value="https://frontend.test",
+        )
+        self.public_url_patcher.start()
+        self.addCleanup(self.public_url_patcher.stop)
+
     def test_generate_token_and_short_code_shapes(self):
         token = generate_token()
         short_code = generate_short_code()
@@ -63,20 +73,21 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_invitation_rejects_invalid_mobile_and_existing_user(self):
         admin = SimpleNamespace(id=1)
 
-        with self.assertRaises(HTTPException) as exc_info:
-            await create_invitation(
-                InvitationCreate(account_name="user1", mobile_number="123", role=UserRole.WATCH),
-                db=FakeDB(),
-                admin=admin,
-            )
+        with patch(
+            "api.routers.invitations.create_or_reuse_canonical_invitation",
+            new=AsyncMock(side_effect=CanonicalInvitationCreationError("invalid_identity")),
+        ), self.assertRaises(HTTPException) as exc_info:
+            await create_invitation(InvitationCreate(account_name="user1", mobile_number="123"), db=FakeDB(), admin=admin)
         self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "شماره موبایل نامعتبر است")
+        self.assertIn("نام کاربری", exc_info.exception.detail)
 
-        existing_user = SimpleNamespace(id=2)
-        with self.assertRaises(HTTPException) as exc_info:
+        with patch(
+            "api.routers.invitations.create_or_reuse_canonical_invitation",
+            new=AsyncMock(side_effect=CanonicalInvitationCreationError("user_identity_exists")),
+        ), self.assertRaises(HTTPException) as exc_info:
             await create_invitation(
                 InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.WATCH),
-                db=FakeDB([FakeExecuteResult(existing_user)]),
+                db=FakeDB(),
                 admin=admin,
             )
         self.assertEqual(exc_info.exception.status_code, 400)
@@ -88,7 +99,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as exc_info:
             await create_invitation(
                 InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.POLICE),
-                db=FakeDB([FakeExecuteResult(None)]),
+                db=FakeDB(),
                 admin=admin,
             )
 
@@ -98,19 +109,29 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_invitation_returns_existing_active_invitation(self):
         admin = SimpleNamespace(id=1)
         active_invitation = SimpleNamespace(
+            id=2,
             token="INV-EXISTING",
             short_code="SHORT123",
             expires_at=datetime.utcnow() + timedelta(days=2),
+            kind=InvitationKind.STANDARD,
+            role=UserRole.STANDARD,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
         )
-        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(active_invitation)])
+        db = FakeDB()
 
-        with patch.object(__import__("api.routers.invitations", fromlist=["settings"]).settings, "bot_username", "test_bot"), patch.object(
-            __import__("api.routers.invitations", fromlist=["settings"]).settings,
-            "frontend_url",
-            "https://frontend.test",
+        with patch.object(__import__("api.routers.invitations", fromlist=["settings"]).settings, "bot_username", "test_bot"), patch(
+            "core.invitation_contract_service.public_webapp_url_for_links",
+            return_value="https://frontend.test",
+        ), patch(
+            "api.routers.invitations.create_or_reuse_canonical_invitation",
+            new=AsyncMock(return_value=SimpleNamespace(invitation=active_invitation, created=False)),
         ):
             result = await create_invitation(
-                InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.WATCH),
+                InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.STANDARD),
                 db=db,
                 admin=admin,
             )
@@ -118,40 +139,50 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["token"], "INV-EXISTING")
         self.assertEqual(result["link"], "https://t.me/test_bot?start=INV-EXISTING")
         self.assertEqual(result["short_link"], "https://frontend.test/i/SHORT123")
-        db.commit.assert_not_awaited()
+        db.commit.assert_awaited_once()
         self.assertEqual(db.added, [])
 
     async def test_create_invitation_creates_new_record_and_sends_sms(self):
         admin = SimpleNamespace(id=9)
-        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(None)])
+        db = FakeDB()
         expected_expiry = datetime.utcnow() + timedelta(days=2)
+        invitation = SimpleNamespace(
+            id=3,
+            account_name="user1",
+            mobile_number="09120000000",
+            role=UserRole.STANDARD,
+            kind=InvitationKind.STANDARD,
+            token="INV-NEW",
+            short_code="SHORTNEW",
+            created_by_id=9,
+            expires_at=expected_expiry,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+        )
 
-        with patch("api.routers.invitations.generate_token", return_value="INV-NEW"), patch(
-            "api.routers.invitations.generate_short_code",
-            return_value="SHORTNEW",
-        ), patch.object(
+        with patch.object(
             __import__("api.routers.invitations", fromlist=["settings"]).settings,
             "bot_username",
             "test_bot",
-        ), patch.object(
-            __import__("api.routers.invitations", fromlist=["settings"]).settings,
-            "frontend_url",
-            "https://frontend.test",
         ), patch(
-            "api.routers.invitations.get_new_invitation_expiry",
-            new=AsyncMock(return_value=expected_expiry),
+            "core.invitation_contract_service.public_webapp_url_for_links",
+            return_value="https://frontend.test",
         ), patch(
-            "api.routers.invitations.is_internet_connected",
-            new=AsyncMock(return_value=True),
-        ), patch("api.routers.invitations.send_invitation_sms") as send_sms_mock:
+            "api.routers.invitations.create_or_reuse_canonical_invitation",
+            new=AsyncMock(return_value=SimpleNamespace(invitation=invitation, created=True)),
+        ), patch("api.routers.invitations.invitation_sms_enabled", return_value=True), patch(
+            "api.routers.invitations.send_invitation_sms", return_value=True
+        ) as send_sms_mock:
             result = await create_invitation(
                 InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.STANDARD),
                 db=db,
                 admin=admin,
             )
 
-        self.assertEqual(len(db.added), 1)
-        invitation = db.added[0]
+        self.assertEqual(len(db.added), 0)
         self.assertEqual(invitation.account_name, "user1")
         self.assertEqual(invitation.mobile_number, "09120000000")
         self.assertEqual(invitation.role, UserRole.STANDARD)
@@ -180,12 +211,17 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             account_name="user1",
             mobile_number="09120000000",
             role=UserRole.WATCH,
+            kind=InvitationKind.STANDARD,
             token="INV-PENDING",
             short_code="SHORT7",
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(hours=1),
             created_at=datetime.utcnow(),
             created_by_id=1,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
         )
         db = FakeDB([FakeExecuteResult([invitation])])
 
@@ -193,10 +229,9 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             __import__("api.routers.invitations", fromlist=["settings"]).settings,
             "bot_username",
             "test_bot",
-        ), patch.object(
-            __import__("api.routers.invitations", fromlist=["settings"]).settings,
-            "frontend_url",
-            "https://frontend.test",
+        ), patch(
+            "core.invitation_contract_service.public_webapp_url_for_links",
+            return_value="https://frontend.test",
         ):
             result = await list_pending_invitations(db=db, admin=admin)
 

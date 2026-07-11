@@ -220,7 +220,17 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=SimpleNamespace(ready=True, message=None)),
         ), patch(
             "bot.handlers.panel.forward_customer_invite_to_iran",
-            new=AsyncMock(return_value=(201, {"created": True, "sms_sent": True})),
+            new=AsyncMock(
+                return_value=(
+                    201,
+                    {
+                        "created": True,
+                        "sms_sent": False,
+                        "bot_link": "https://t.me/test_bot?start=CUST-test",
+                        "web_link": "https://app.example/register?token=CUST-test",
+                    },
+                )
+            ),
         ) as forward_mock, patch(
             "bot.handlers.panel._edit_or_answer_customers_panel",
             new=AsyncMock(),
@@ -232,7 +242,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["customer_tier"], "tier1")
         self.assertTrue(payload["idempotency_key"].startswith("customer-invite:"))
         self.assertTrue(state.cleared)
-        self.assertIn("پیامک", callback.message.answer.await_args_list[0].args[0])
+        result_message = callback.message.answer.await_args_list[0].args[0]
+        self.assertIn("لینک تلگرام", result_message)
+        self.assertIn("لینک وب‌اپ", result_message)
 
     async def test_colleagues_list_shows_non_relation_users(self):
         message = SimpleNamespace(answer=AsyncMock())

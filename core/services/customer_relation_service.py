@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import secrets
 import string
@@ -15,6 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMembershipStatus, ChatType
+from core.services.canonical_invitation_creation_service import (
+    CanonicalInvitationCreationError,
+    create_or_reuse_canonical_invitation,
+)
 from core.services.invitation_identity_reservation_service import (
     release_invitation_identities_for_tokens,
     release_invitation_identity,
@@ -51,8 +55,24 @@ class CustomerOfferReadModel:
     customer_tier: str | None = None
 
 
+@dataclass(frozen=True)
+class CustomerRelationCreationResult:
+    relation: CustomerRelation
+    invitation: Invitation
+    created: bool
+
+
 def _utcnow_naive():
     return utc_now().replace(tzinfo=None)
+
+
+def _same_utc_moment(left: datetime | None, right: datetime | None) -> bool:
+    def normalize(value: datetime | None) -> datetime | None:
+        if value is None or value.tzinfo is None or value.utcoffset() is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return normalize(left) == normalize(right)
 
 
 def _normalize_mobile_number(value: str) -> str:
@@ -351,39 +371,6 @@ async def list_owner_customer_relations(
     return list((await db.execute(stmt)).scalars().all())
 
 
-async def find_capacity_tracked_customer_relation_by_identity(
-    db: AsyncSession,
-    *,
-    account_name: str,
-    mobile_number: str,
-) -> CustomerRelation | None:
-    normalized_account_name = normalize_account_name((account_name or "").strip())
-    normalized_mobile = _normalize_mobile_number(mobile_number)
-    if not normalized_account_name and not normalized_mobile:
-        return None
-
-    conditions = []
-    if normalized_account_name:
-        conditions.append(Invitation.account_name == normalized_account_name)
-    if normalized_mobile:
-        conditions.append(Invitation.mobile_number == normalized_mobile)
-    if not conditions:
-        return None
-
-    stmt = (
-        select(CustomerRelation)
-        .options(joinedload(CustomerRelation.customer_user))
-        .join(Invitation, Invitation.token == CustomerRelation.invitation_token)
-        .where(
-            CustomerRelation.deleted_at.is_(None),
-            CustomerRelation.status.in_(CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES),
-            or_(*conditions),
-        )
-        .order_by(CustomerRelation.created_at.asc(), CustomerRelation.id.asc())
-    )
-    return (await db.execute(stmt)).scalars().first()
-
-
 async def load_customer_relation_invitation_map(
     db: AsyncSession,
     invitation_tokens: list[str] | tuple[str, ...] | set[str],
@@ -445,7 +432,17 @@ def _validate_customer_trade_limit_bounds(*, min_trade_quantity: int | None, max
         raise HTTPException(status_code=400, detail="حداقل مقدار معامله نمی‌تواند از حداکثر بیشتر باشد")
 
 
-async def create_owner_customer_relation(
+def _canonical_customer_error(exc: CanonicalInvitationCreationError) -> HTTPException:
+    if exc.code == "user_identity_exists":
+        return HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
+    if exc.code == "iran_authority_required":
+        return HTTPException(status_code=403, detail="Invitation creation is Iran-authoritative")
+    if exc.code == "invalid_identity":
+        return HTTPException(status_code=400, detail="شماره موبایل یا نام کاربری نامعتبر است")
+    return HTTPException(status_code=409, detail="یک دعوت فعال با این نام کاربری یا موبایل وجود دارد")
+
+
+async def create_or_reuse_owner_customer_relation(
     db: AsyncSession,
     *,
     owner_user: User,
@@ -458,7 +455,7 @@ async def create_owner_customer_relation(
     max_trade_quantity: int | None = None,
     max_daily_trades: int | None = None,
     max_daily_commodity_volume: int | None = None,
-) -> tuple[CustomerRelation, Invitation]:
+) -> CustomerRelationCreationResult:
     normalized_account_name = normalize_account_name((account_name or "").strip())
     normalized_mobile = _normalize_mobile_number(mobile_number)
     normalized_management_name = (management_name or "").strip()
@@ -483,81 +480,109 @@ async def create_owner_customer_relation(
         max_trade_quantity=normalized_max_trade,
     )
 
-    await validate_customer_capacity(db, owner_user)
-
-    existing_user_stmt = select(User).where(
-        or_(
-            User.account_name == normalized_account_name,
-            User.mobile_number == normalized_mobile,
+    try:
+        creation = await create_or_reuse_canonical_invitation(
+            db,
+            creator_user_id=owner_user.id,
+            account_name=normalized_account_name,
+            mobile_number=normalized_mobile,
+            role=UserRole.STANDARD,
+            kind=InvitationKind.CUSTOMER,
         )
-    )
-    existing_user = (await db.execute(existing_user_stmt)).scalar_one_or_none()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
+        invitation = creation.invitation
+        if not creation.created:
+            relation_stmt = (
+                select(CustomerRelation)
+                .where(CustomerRelation.invitation_token == invitation.token)
+                .with_for_update()
+            )
+            relation = (await db.execute(relation_stmt)).scalar_one_or_none()
+            exact_retry = bool(
+                relation
+                and relation.owner_user_id == owner_user.id
+                and relation.created_by_user_id == owner_user.id
+                and relation.customer_user_id is None
+                and relation.deleted_at is None
+                and relation.status == CustomerRelationStatus.PENDING
+                and relation.management_name == normalized_management_name
+                and relation.customer_tier == normalized_tier
+                and relation.commission_rate == normalized_commission_rate
+                and relation.min_trade_quantity == normalized_min_trade
+                and relation.max_trade_quantity == normalized_max_trade
+                and relation.max_daily_trades == normalized_max_daily_trades
+                and relation.max_daily_commodity_volume == normalized_max_daily_volume
+                and _same_utc_moment(relation.expires_at, invitation.expires_at)
+            )
+            if not exact_retry:
+                raise HTTPException(status_code=409, detail="دعوت مشتری فعال با اطلاعات متفاوت وجود دارد")
+            await db.commit()
+            return CustomerRelationCreationResult(relation=relation, invitation=invitation, created=False)
 
-    duplicate_relation_stmt = (
-        select(CustomerRelation)
-        .join(Invitation, Invitation.token == CustomerRelation.invitation_token)
-        .where(
+        await validate_customer_capacity(db, owner_user)
+        duplicate_management_stmt = select(CustomerRelation).where(
+            CustomerRelation.owner_user_id == owner_user.id,
             CustomerRelation.deleted_at.is_(None),
-            CustomerRelation.status.in_(CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES),
-            or_(
-                Invitation.account_name == normalized_account_name,
-                Invitation.mobile_number == normalized_mobile,
-            ),
+            CustomerRelation.management_name == normalized_management_name,
         )
+        if (await db.execute(duplicate_management_stmt)).scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="این نام مدیریتی قبلاً برای یکی از مشتریان این مالک استفاده شده است")
+
+        relation = CustomerRelation(
+            owner_user_id=owner_user.id,
+            customer_user_id=None,
+            created_by_user_id=owner_user.id,
+            invitation_token=invitation.token,
+            management_name=normalized_management_name,
+            customer_tier=normalized_tier,
+            commission_rate=normalized_commission_rate,
+            min_trade_quantity=normalized_min_trade,
+            max_trade_quantity=normalized_max_trade,
+            max_daily_trades=normalized_max_daily_trades,
+            max_daily_commodity_volume=normalized_max_daily_volume,
+            status=CustomerRelationStatus.PENDING,
+            expires_at=invitation.expires_at,
+        )
+        db.add(relation)
+        await db.commit()
+        await db.refresh(invitation)
+        await db.refresh(relation)
+        return CustomerRelationCreationResult(relation=relation, invitation=invitation, created=True)
+    except CanonicalInvitationCreationError as exc:
+        await db.rollback()
+        raise _canonical_customer_error(exc) from exc
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def create_owner_customer_relation(
+    db: AsyncSession,
+    *,
+    owner_user: User,
+    account_name: str,
+    management_name: str,
+    mobile_number: str,
+    customer_tier: CustomerTier | str = CustomerTier.TIER_1,
+    commission_rate: Decimal | float | int | str | None = None,
+    min_trade_quantity: int | None = None,
+    max_trade_quantity: int | None = None,
+    max_daily_trades: int | None = None,
+    max_daily_commodity_volume: int | None = None,
+) -> tuple[CustomerRelation, Invitation]:
+    result = await create_or_reuse_owner_customer_relation(
+        db,
+        owner_user=owner_user,
+        account_name=account_name,
+        management_name=management_name,
+        mobile_number=mobile_number,
+        customer_tier=customer_tier,
+        commission_rate=commission_rate,
+        min_trade_quantity=min_trade_quantity,
+        max_trade_quantity=max_trade_quantity,
+        max_daily_trades=max_daily_trades,
+        max_daily_commodity_volume=max_daily_commodity_volume,
     )
-    duplicate_relation = (await db.execute(duplicate_relation_stmt)).scalar_one_or_none()
-    if duplicate_relation:
-        raise HTTPException(status_code=400, detail="یک مشتری pending یا active با این نام کاربری یا موبایل وجود دارد")
-
-    duplicate_management_stmt = select(CustomerRelation).where(
-        CustomerRelation.owner_user_id == owner_user.id,
-        CustomerRelation.deleted_at.is_(None),
-        CustomerRelation.management_name == normalized_management_name,
-    )
-    duplicate_management = (await db.execute(duplicate_management_stmt)).scalar_one_or_none()
-    if duplicate_management:
-        raise HTTPException(status_code=400, detail="این نام مدیریتی قبلاً برای یکی از مشتریان این مالک استفاده شده است")
-
-    invitation_token = generate_customer_invitation_token()
-    short_code = generate_customer_short_code()
-    from core.services.invitation_lifecycle_service import get_new_invitation_expiry
-
-    expires_at = await get_new_invitation_expiry()
-
-    invitation = Invitation(
-        account_name=normalized_account_name,
-        mobile_number=normalized_mobile,
-        role=UserRole.STANDARD,
-        kind=InvitationKind.CUSTOMER,
-        token=invitation_token,
-        short_code=short_code,
-        created_by_id=owner_user.id,
-        expires_at=expires_at,
-    )
-    relation = CustomerRelation(
-        owner_user_id=owner_user.id,
-        customer_user_id=None,
-        created_by_user_id=owner_user.id,
-        invitation_token=invitation_token,
-        management_name=normalized_management_name,
-        customer_tier=normalized_tier,
-        commission_rate=normalized_commission_rate,
-        min_trade_quantity=normalized_min_trade,
-        max_trade_quantity=normalized_max_trade,
-        max_daily_trades=normalized_max_daily_trades,
-        max_daily_commodity_volume=normalized_max_daily_volume,
-        status=CustomerRelationStatus.PENDING,
-        expires_at=expires_at,
-    )
-
-    db.add(invitation)
-    db.add(relation)
-    await db.commit()
-    await db.refresh(invitation)
-    await db.refresh(relation)
-    return relation, invitation
+    return result.relation, result.invitation
 
 
 async def cancel_pending_customer_relation(

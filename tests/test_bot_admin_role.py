@@ -2,8 +2,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
-
 from bot.handlers.admin import process_invitation_role
 from core.enums import UserRole
 
@@ -62,7 +60,7 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
         return_panel.assert_awaited_once()
 
     async def test_process_invitation_role_handles_missing_data_success_and_existing_active_link(self):
-        bot = SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(username="botname")))
+        bot = SimpleNamespace()
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({})
         with patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()) as return_panel:
@@ -72,43 +70,49 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
 
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789", "last_prompt_message_id": 10})
-        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
-            "bot.handlers.admin.create_invitation", new=AsyncMock(return_value={"token": "tok"})
+        user = SimpleNamespace(id=7, role=UserRole.SUPER_ADMIN)
+        with patch(
+            "bot.handlers.admin.forward_standard_invitation_to_iran",
+            new=AsyncMock(return_value=(201, {"bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/register?token=tok"})),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
-            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
-        self.assertIn("لینک دعوت با موفقیت", callback.message.answer.await_args.args[0])
+            await process_invitation_role(callback, state, user=user, bot=bot)
+        self.assertIn("لینک تلگرام", callback.message.answer.await_args.args[0])
+        self.assertIn("لینک وب‌اپ", callback.message.answer.await_args.args[0])
 
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
-        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
-            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=HTTPException(status_code=400, detail="EXISTING_ACTIVE_LINK::acc::tok"))
+        with patch(
+            "bot.handlers.admin.forward_standard_invitation_to_iran",
+            new=AsyncMock(return_value=(201, {"created": False, "bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/register?token=tok"})),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
-            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
-        self.assertIn("لینک قبلی هنوز فعال است", callback.message.answer.await_args.args[0])
+            await process_invitation_role(callback, state, user=user, bot=bot)
+        self.assertIn("لینک تلگرام", callback.message.answer.await_args.args[0])
 
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
-        broken_bot = SimpleNamespace(get_me=AsyncMock(side_effect=RuntimeError("boom")))
-        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
-            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=HTTPException(status_code=400, detail="EXISTING_ACTIVE_LINK::acc::tok"))
+        with patch(
+            "bot.handlers.admin.forward_standard_invitation_to_iran",
+            new=AsyncMock(return_value=(503, {"detail": "ارتباط برقرار نشد"})),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
-            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=broken_bot)
-        self.assertIn("خطای سیستمی", callback.message.answer.await_args.args[0])
+            await process_invitation_role(callback, state, user=user, bot=bot)
+        self.assertIn("ارتباط برقرار نشد", callback.message.answer.await_args.args[0])
 
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
-        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
-            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=HTTPException(status_code=400, detail="bad detail"))
+        with patch(
+            "bot.handlers.admin.forward_standard_invitation_to_iran",
+            new=AsyncMock(return_value=(200, {"created": True})),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
-            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
-        self.assertIn("خطا در ایجاد دعوت‌نامه", callback.message.answer.await_args.args[0])
+            await process_invitation_role(callback, state, user=user, bot=bot)
+        self.assertIn("ناقص", callback.message.answer.await_args.args[0])
 
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
-        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
-            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=RuntimeError("boom"))
+        with patch(
+            "bot.handlers.admin.forward_standard_invitation_to_iran",
+            new=AsyncMock(side_effect=RuntimeError("boom")),
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
-            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
+            await process_invitation_role(callback, state, user=user, bot=bot)
         self.assertIn("خطای سیستمی", callback.message.answer.await_args.args[0])
 
 

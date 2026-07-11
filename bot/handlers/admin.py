@@ -6,11 +6,11 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from typing import Optional
 import re
-from fastapi import HTTPException
-from core.db import AsyncSessionLocal
 from models.user import User
 from core.enums import UserRole
-from core.config import settings
+from core.invitation_creation_contracts import build_standard_invitation_idempotency_key
+from core.invitation_creation_forwarding import forward_standard_invitation_to_iran
+from core.server_routing import SERVER_FOREIGN
 from core.utils import normalize_account_name, normalize_persian_numerals
 from bot.states import InvitationCreation
 from bot.keyboards import (
@@ -24,8 +24,6 @@ from bot.message_manager import (
     delete_previous_anchor,
     DeleteDelay
 )
-from api.routers.invitations import create_invitation
-from schemas import InvitationCreate
 
 router = Router()
 
@@ -232,62 +230,46 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
         await _return_to_admin_panel(callback, state, bot, user.role)
         return
 
-    invitation_data = InvitationCreate(
-        account_name=account_name,
-        mobile_number=mobile_number,
-        role=role
-    )
-
-    async with AsyncSessionLocal() as db:
-        try:
-            result = await create_invitation(
-                invite=invitation_data,
-                db=db,
-                admin=user
-            )
-            
-            bot_user = await bot.get_me()
-            bot_username = bot_user.username
-            invite_link = f"https://t.me/{bot_username}?start={result['token']}" 
-
-            invite_msg = await callback.message.answer(
-                f"✅ لینک دعوت با موفقیت برای نقش **{role.value}** ایجاد شد:\n\n"
+    payload = {
+        "requester_user_id": user.id,
+        "account_name": account_name,
+        "mobile_number": mobile_number,
+        "role": role.value,
+        "source_server": SERVER_FOREIGN,
+        "idempotency_key": build_standard_invitation_idempotency_key(
+            requester_user_id=user.id,
+            account_name=account_name,
+            mobile_number=mobile_number,
+            role=role,
+        ),
+    }
+    try:
+        status_code, result = await forward_standard_invitation_to_iran(payload)
+    except Exception:
+        await callback.message.answer("❌ خطای سیستمی در ارتباط با سرور ایران.")
+        await _return_to_admin_panel(callback, state, bot, user.role)
+        await callback.answer()
+        return
+    if status_code >= 400 or not isinstance(result, dict):
+        detail = result.get("detail") if isinstance(result, dict) else None
+        await callback.message.answer(
+            f"❌ **خطا در ایجاد دعوت‌نامه:**\n\n{str(detail or 'پاسخ نامعتبر از سرور ایران').replace('**', '')}",
+            parse_mode="Markdown",
+        )
+    else:
+        bot_link = result.get("bot_link") or result.get("link")
+        web_link = result.get("web_link")
+        if not bot_link or not web_link:
+            await callback.message.answer("❌ پاسخ ساخت دعوت‌نامه ناقص است.")
+        else:
+            await callback.message.answer(
+                f"✅ لینک دعوت برای نقش **{role.value}** آماده است:\n\n"
                 f"**نام کاربری:** `{account_name}`\n"
                 f"**موبایل:** `{mobile_number}`\n\n"
-                f"لینک مستقیم:\n`{invite_link}`",
+                f"لینک تلگرام:\n`{bot_link}`\n\n"
+                f"لینک وب‌اپ:\n`{web_link}`",
                 parse_mode="Markdown",
-                reply_markup=None 
-            )
-            # لینک دعوت بعد از 3 روز حذف شود
-
-        except HTTPException as e:
-            if e.detail.startswith("EXISTING_ACTIVE_LINK::"):
-                try:
-                    _, acc_name, token = e.detail.split("::")
-                    bot_user = await bot.get_me()
-                    bot_username = bot_user.username
-                    invite_link = f"https://t.me/{bot_username}?start={token}"
-                    
-                    await callback.message.answer(
-                        f"⚠️ **لینک قبلی هنوز فعال است**\n\n"
-                        f"کاربر **{acc_name}** قبلاً دعوت شده اما هنوز ثبت‌نام نکرده است.\n"
-                        f"لینک دعوت فعال برای ایشان مجدداً ارسال می‌شود:\n\n"
-                        f"`{invite_link}`",
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    error_msg = await callback.message.answer(f"❌ خطای سیستمی: {str(e)}", parse_mode=None)
-            
-            else:
-                error_msg = await callback.message.answer(
-                    f"❌ **خطا در ایجاد دعوت‌نامه:**\n\n{e.detail.replace('**', '')}",
-                    parse_mode="Markdown"
-                )
-            
-        except Exception as e:
-            error_msg = await callback.message.answer(
-                f"❌ خطای سیستمی: {str(e)}",
-                parse_mode=None
+                reply_markup=None,
             )
             
     await _return_to_admin_panel(callback, state, bot, user.role)

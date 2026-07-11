@@ -88,13 +88,13 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "api.routers.accountants.create_owner_accountant_relation",
-            new=AsyncMock(return_value=(relation, SimpleNamespace())),
+            "api.routers.accountants.create_or_reuse_owner_accountant_relation",
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(), created=True)),
         ) as create_mock, patch(
             "api.routers.accountants.send_accountant_invitation_sms"
         ) as sms_mock, patch(
-            "api.routers.accountants.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.accountants.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             created = await create_my_accountant(payload, context=context, db=FakeDB())
 
@@ -106,15 +106,15 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.accountants.list_owner_accountant_relations",
             new=AsyncMock(return_value=[relation]),
         ), patch(
-            "api.routers.accountants.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.accountants.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             listed = await list_my_accountants(context=context, db=FakeDB())
 
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=ACCT-token")
 
-    async def test_create_owner_accountant_skips_sms_when_frontend_url_is_blank(self):
+    async def test_create_owner_accountant_fails_closed_when_public_webapp_url_is_invalid(self):
         relation = SimpleNamespace(
             id=19,
             owner_user_id=7,
@@ -139,19 +139,18 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "api.routers.accountants.create_owner_accountant_relation",
-            new=AsyncMock(return_value=(relation, SimpleNamespace())),
+            "api.routers.accountants.create_or_reuse_owner_accountant_relation",
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(), created=True)),
         ) as create_mock, patch(
             "api.routers.accountants.send_accountant_invitation_sms"
         ) as sms_mock, patch(
-            "api.routers.accountants.settings",
-            SimpleNamespace(frontend_url="   "),
-        ):
-            created = await create_my_accountant(payload, context=context, db=FakeDB())
+            "api.routers.accountants.public_webapp_url_for_links",
+            side_effect=ValueError("invalid public WebApp URL"),
+        ), self.assertRaises(ValueError):
+            await create_my_accountant(payload, context=context, db=FakeDB())
 
-        create_mock.assert_awaited_once()
+        create_mock.assert_not_awaited()
         sms_mock.assert_not_called()
-        self.assertIsNone(created["registration_link"])
 
     async def test_cancel_owner_pending_accountant_returns_serialized_relation(self):
         relation = SimpleNamespace(
@@ -176,8 +175,8 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.accountants.unlink_owner_accountant_relation",
             new=AsyncMock(return_value=relation),
         ), patch(
-            "api.routers.accountants.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.accountants.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             result = await cancel_my_pending_accountant(9, context=context, db=FakeDB())
 
@@ -207,8 +206,8 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.accountants.unlink_owner_accountant_relation",
             new=AsyncMock(return_value=relation),
         ) as unlink_mock, patch(
-            "api.routers.accountants.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.accountants.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             result = await cancel_my_pending_accountant(11, context=context, db=FakeDB())
 
@@ -241,8 +240,8 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.accountants.update_owner_accountant_relation",
             new=AsyncMock(return_value=relation),
         ) as update_mock, patch(
-            "api.routers.accountants.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.accountants.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             result = await update_my_accountant(9, payload, context=context, db=FakeDB())
 

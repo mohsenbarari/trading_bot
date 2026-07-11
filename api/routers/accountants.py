@@ -10,13 +10,17 @@ from api.deps import get_effective_owner_actor_context
 from core.audit_logger import audit_log
 from core.config import settings
 from core.db import get_db
+from core.public_webapp_url import public_webapp_url_for_links
 from core.services.accountant_relation_service import (
     EffectiveOwnerActor,
-    create_owner_accountant_relation,
+    create_or_reuse_owner_accountant_relation,
     list_owner_accountant_relations,
     unlink_owner_accountant_relation,
     update_owner_accountant_relation,
 )
+from core.invitation_sms_policy import invitation_sms_enabled, invitation_sms_status
+from core.registration_contracts import InvitationSMSStatus
+from models.invitation import InvitationKind
 from core.services.customer_relation_service import is_user_customer
 from core.services.session_service import get_active_sessions, logout_session
 from core.sms import send_accountant_invitation_sms
@@ -29,10 +33,7 @@ router = APIRouter()
 
 
 def build_accountant_registration_link(invitation_token: str) -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
-        return None
-    return f"{frontend_url}/register?token={invitation_token}"
+    return f"{public_webapp_url_for_links()}/register?token={invitation_token}"
 
 
 def serialize_accountant_relation(relation) -> dict:
@@ -48,6 +49,8 @@ def serialize_accountant_relation(relation) -> dict:
         "status": relation.status,
         "invitation_token": relation.invitation_token,
         "registration_link": build_accountant_registration_link(relation.invitation_token),
+        "bot_registration_link": None,
+        "web_registration_link": build_accountant_registration_link(relation.invitation_token),
         "expires_at": relation.expires_at,
         "activated_at": relation.activated_at,
         "deleted_at": relation.deleted_at,
@@ -148,7 +151,8 @@ async def create_my_accountant(
     db: AsyncSession = Depends(get_db),
 ):
     await ensure_owner_context(context, db)
-    relation, _invitation = await create_owner_accountant_relation(
+    public_webapp_url_for_links()
+    creation = await create_or_reuse_owner_accountant_relation(
         db,
         owner_user=context.owner_user,
         global_account_name=payload.account_name,
@@ -156,14 +160,23 @@ async def create_my_accountant(
         mobile_number=payload.mobile_number,
         duty_description=payload.duty_description,
     )
+    relation = creation.relation
 
     registration_link = build_accountant_registration_link(relation.invitation_token)
-    if registration_link:
-        send_accountant_invitation_sms(
+    sms_enabled = bool(
+        creation.created
+        and registration_link
+        and invitation_sms_enabled(InvitationKind.ACCOUNTANT)
+    )
+    sms_accepted: bool | None = None
+    if (
+        sms_enabled
+    ):
+        sms_accepted = bool(send_accountant_invitation_sms(
             mobile=relation.mobile_number,
             relation_display_name=relation.relation_display_name,
             web_link=registration_link,
-        )
+        ))
 
     audit_log(
         "accountant.link",
@@ -177,7 +190,12 @@ async def create_my_accountant(
         **audit_actor_context(context),
     )
 
-    return serialize_accountant_relation(relation)
+    response = serialize_accountant_relation(relation)
+    response["sms_status"] = invitation_sms_status(
+        enabled=sms_enabled,
+        accepted=sms_accepted,
+    )
+    return response
 
 
 @router.get("/owner-relations/{relation_id}/sessions", response_model=list[schemas.AccountantSessionRead])

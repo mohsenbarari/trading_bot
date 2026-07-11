@@ -14,6 +14,8 @@ import re
 
 from core.db import AsyncSessionLocal
 from core.config import settings
+from core.audit_logger import audit_log
+from core.public_webapp_url import public_webapp_url_for_links
 from core.services.bot_access_policy import BOT_ACCESS_REASON_SYNC_PENDING, evaluate_bot_access
 from core.services.telegram_link_token_service import (
     TelegramLinkTokenError,
@@ -120,31 +122,19 @@ async def load_pending_telegram_link_token_user_with_sync_grace(session, raw_tok
 
 
 def build_webapp_link_line() -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
-        return None
-    return f"🌐 [ورود به وب اپ]({frontend_url})"
+    return f"🌐 [ورود به وب اپ]({public_webapp_url_for_links()})"
 
 
 def build_register_link_line(token: str) -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
-        return None
-    return f"🌐 [تکمیل ثبت‌نام در وب اپ]({frontend_url}/register?token={token})"
+    return f"🌐 [تکمیل ثبت‌نام در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
 
 
 def build_accountant_register_link_line(token: str) -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
-        return None
-    return f"🌐 [تکمیل ثبت‌نام حسابدار در وب اپ]({frontend_url}/register?token={token})"
+    return f"🌐 [تکمیل ثبت‌نام حسابدار در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
 
 
 def build_customer_register_link_line(token: str) -> str | None:
-    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
-    if not frontend_url:
-        return None
-    return f"🌐 [تکمیل ثبت‌نام مشتری در وب اپ]({frontend_url}/register?token={token})"
+    return f"🌐 [تکمیل ثبت‌نام مشتری در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
 
 
 @router.message(CommandStart(deep_link=True))
@@ -248,6 +238,13 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         ):
             bot_response = await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
             return
+
+        audit_log(
+            "invitation.opened",
+            target_type="invitation",
+            target_id=getattr(invitation, "id", None),
+            extra={"surface": "telegram"},
+        )
 
         if is_accountant_invitation_token(token):
             relation = await get_pending_accountant_relation_by_invitation_token(session, token)

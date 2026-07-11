@@ -24,6 +24,7 @@ from api.routers.customers import (
 from core.customer_invite import build_customer_invite_idempotency_key
 from core.server_routing import SERVER_FOREIGN
 from models.customer_relation import CustomerRelationStatus, CustomerTier
+from models.invitation import InvitationKind
 from core.enums import UserAccountStatus, UserRole
 
 
@@ -136,7 +137,21 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             deleted_at=None,
             created_at=datetime.utcnow(),
         )
-        invitation = SimpleNamespace(account_name="cust1", mobile_number="09120000000")
+        invitation = SimpleNamespace(
+            id=21,
+            account_name="cust1",
+            mobile_number="09120000000",
+            token="CUST-token",
+            short_code="SHORTC1",
+            kind=InvitationKind.CUSTOMER,
+            role=UserRole.STANDARD,
+            expires_at=relation.expires_at,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+        )
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
         payload = schemas.CustomerRelationCreate(
             account_name="cust1",
@@ -151,13 +166,16 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "api.routers.customers.create_owner_customer_relation",
-            new=AsyncMock(return_value=(relation, invitation)),
+            "api.routers.customers.create_or_reuse_owner_customer_relation",
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=invitation, created=True)),
         ) as create_mock, patch(
             "api.routers.customers.send_customer_invitation_sms"
         ) as sms_mock, patch(
-            "api.routers.customers.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.customers.public_webapp_url_for_links",
+            return_value="https://app.example",
+        ), patch(
+            "core.invitation_contract_service.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             created = await create_my_customer(payload, context=context, db=FakeDB())
 
@@ -173,8 +191,11 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.customers.load_customer_relation_invitation_map",
             new=AsyncMock(return_value={"CUST-token": invitation}),
         ), patch(
-            "api.routers.customers.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.customers.public_webapp_url_for_links",
+            return_value="https://app.example",
+        ), patch(
+            "core.invitation_contract_service.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             listed = await list_my_customers(context=context, db=FakeDB())
 
@@ -222,7 +243,25 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         existing_relation = SimpleNamespace(
             id=11,
             owner_user_id=7,
+            customer_user_id=None,
             status=CustomerRelationStatus.PENDING,
+            customer_tier=CustomerTier.TIER_1,
+            invitation_token="CUST-existing",
+            management_name="مشتری",
+        )
+        invitation = SimpleNamespace(
+            id=31,
+            token="CUST-existing",
+            short_code="SHORT31",
+            kind=InvitationKind.CUSTOMER,
+            role=UserRole.STANDARD,
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+            mobile_number="09123456789",
         )
 
         with patch("api.routers.customers.verify_internal_signature", return_value=True), patch(
@@ -232,8 +271,12 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.customers.sweep_expired_pending_customer_relations", new=AsyncMock(return_value=[])
         ), patch(
-            "api.routers.customers.find_capacity_tracked_customer_relation_by_identity",
-            new=AsyncMock(return_value=existing_relation),
+            "api.routers.customers.create_or_reuse_owner_customer_relation",
+            new=AsyncMock(return_value=SimpleNamespace(relation=existing_relation, invitation=invitation, created=False)),
+        ), patch(
+            "api.routers.customers.public_webapp_url_for_links", return_value="https://app.example"
+        ), patch(
+            "core.invitation_contract_service.public_webapp_url_for_links", return_value="https://app.example"
         ), patch("api.routers.customers.send_customer_invitation_sms") as sms_mock:
             result = await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(owner))
 
@@ -272,8 +315,20 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             invitation_token="CUST-token",
             management_name="مشتری",
         )
-        invitation = SimpleNamespace(mobile_number="09123456789")
-        redis_client = SimpleNamespace(set=AsyncMock(return_value=True), delete=AsyncMock())
+        invitation = SimpleNamespace(
+            id=32,
+            token="CUST-token",
+            short_code="SHORT32",
+            kind=InvitationKind.CUSTOMER,
+            role=UserRole.STANDARD,
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+            mobile_number="09123456789",
+        )
 
         with patch("api.routers.customers.verify_internal_signature", return_value=True), patch(
             "api.routers.customers.current_server", return_value="iran"
@@ -282,23 +337,22 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.customers.sweep_expired_pending_customer_relations", new=AsyncMock(return_value=[])
         ), patch(
-            "api.routers.customers.find_capacity_tracked_customer_relation_by_identity",
-            new=AsyncMock(side_effect=[None, None]),
-        ), patch(
-            "api.routers.customers.get_redis_client", return_value=redis_client
-        ), patch(
-            "api.routers.customers.create_owner_customer_relation",
-            new=AsyncMock(return_value=(relation, invitation)),
+            "api.routers.customers.create_or_reuse_owner_customer_relation",
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=invitation, created=True)),
         ) as create_mock, patch(
             "api.routers.customers.send_customer_invitation_sms", return_value=True
+        ) as sms_mock, patch(
+            "api.routers.customers.public_webapp_url_for_links", return_value="https://app.example"
+        ), patch(
+            "core.invitation_contract_service.public_webapp_url_for_links", return_value="https://app.example"
         ):
             result = await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(owner))
 
         self.assertTrue(result.created)
         self.assertFalse(result.already_pending)
-        self.assertTrue(result.sms_sent)
+        self.assertFalse(result.sms_sent)
         create_mock.assert_awaited_once()
-        redis_client.delete.assert_awaited_once()
+        sms_mock.assert_not_called()
 
     async def test_unlink_owner_customer_returns_serialized_relation(self):
         relation = SimpleNamespace(
@@ -328,10 +382,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=relation),
         ), patch(
             "api.routers.customers.load_customer_relation_invitation_map",
-            new=AsyncMock(return_value={"CUST-token": invitation}),
+            new=AsyncMock(return_value={}),
         ), patch(
-            "api.routers.customers.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.customers.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             result = await unlink_my_customer(9, context=context, db=FakeDB())
 
@@ -393,10 +447,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=relation),
         ) as reload_mock, patch(
             "api.routers.customers.load_customer_relation_invitation_map",
-            new=AsyncMock(return_value={"CUST-token": invitation}),
+            new=AsyncMock(return_value={}),
         ), patch(
-            "api.routers.customers.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
+            "api.routers.customers.public_webapp_url_for_links",
+            return_value="https://app.example",
         ):
             result = await update_my_customer(9, payload, context=context, db=FakeDB())
 
@@ -425,9 +479,27 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             deleted_at=None,
             created_at=datetime.utcnow(),
         )
-        invitation = SimpleNamespace(account_name="cust1", mobile_number="09120000000")
+        invitation = SimpleNamespace(
+            id=41,
+            account_name="cust1",
+            mobile_number="09120000000",
+            token="CUST-token",
+            short_code=None,
+            kind=InvitationKind.CUSTOMER,
+            role=UserRole.STANDARD,
+            expires_at=relation.expires_at,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+        )
 
-        result = serialize_customer_relation(relation, invitation=invitation)
+        with patch(
+            "core.invitation_contract_service.public_webapp_url_for_links",
+            return_value="https://app.example",
+        ):
+            result = serialize_customer_relation(relation, invitation=invitation)
 
         self.assertIsNone(result["customer_account_name"])
         self.assertEqual(result["invitation_account_name"], "cust1")
@@ -694,9 +766,12 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 404)
 
-    async def test_customer_router_helpers_cover_blank_frontend_and_successful_lookups(self):
-        with patch("api.routers.customers.settings", SimpleNamespace(frontend_url="   ")):
-            self.assertIsNone(build_customer_registration_link("token-1"))
+    async def test_customer_router_helpers_fail_closed_for_invalid_public_url_and_cover_lookups(self):
+        with patch(
+            "api.routers.customers.public_webapp_url_for_links",
+            side_effect=ValueError("invalid public WebApp URL"),
+        ), self.assertRaises(ValueError):
+            build_customer_registration_link("token-1")
 
         active_relation = SimpleNamespace(
             deleted_at=None,

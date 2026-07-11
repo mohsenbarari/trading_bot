@@ -1,12 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 from pydantic import BaseModel
-import secrets
-import string
 from datetime import datetime
 
 from core.db import get_db
+from core.audit_logger import audit_log
 from core.utils import utc_now_naive
 from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
@@ -21,7 +20,22 @@ from models.user import User, UserRole
 from core.config import settings
 from api.deps import verify_admin_user
 from core.sms import send_invitation_sms
-from core.connectivity import is_internet_connected
+from core.invitation_contract_service import build_invitation_contract_v2
+from core.public_webapp_url import public_webapp_url_for_links
+from core.invitation_creation_contracts import (
+    InternalInvitationCreateRequest,
+    build_standard_invitation_idempotency_key,
+)
+from core.invitation_sms_policy import invitation_sms_enabled, invitation_sms_status
+from core.registration_contracts import InvitationDerivedState, InvitationSMSStatus
+from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
+from core.services.canonical_invitation_creation_service import (
+    CanonicalInvitationCreationError,
+    create_or_reuse_canonical_invitation,
+    generate_invitation_short_code,
+    generate_invitation_token,
+)
+from core.trade_forwarding import verify_internal_signature
 from core.services.invitation_identity_reservation_service import release_invitation_identity
 from core.services.invitation_lifecycle_service import (
     get_new_invitation_expiry,
@@ -45,9 +59,18 @@ class InvitationCreate(BaseModel):
 
 class InvitationResponse(BaseModel):
     token: str
-    link: str
+    link: str | None
     short_link: str | None
+    bot_link: str | None
+    web_link: str
+    web_short_link: str | None
+    bot_available: bool
+    web_available: bool
+    state: InvitationDerivedState
+    kind: str
+    sms_status: InvitationSMSStatus
     expires_at: datetime
+    created: bool
 
 
 class PendingInvitationResponse(BaseModel):
@@ -57,6 +80,7 @@ class PendingInvitationResponse(BaseModel):
     role: UserRole
     token: str
     short_code: str | None
+    bot_link: str | None
     web_link: str
     short_link: str | None
     expires_at: datetime
@@ -64,24 +88,112 @@ class PendingInvitationResponse(BaseModel):
     created_by_id: int | None
 
 def generate_token():
-    return "INV-" + secrets.token_hex(16)
+    return generate_invitation_token(InvitationKind.STANDARD)
 
 
 def generate_short_code():
-    # 8-char random string (alphanumeric)
-    chars = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(chars) for _ in range(8))
+    return generate_invitation_short_code()
 
 
 def build_invitation_links(invitation: Invitation) -> tuple[str, str, str | None]:
-    bot_link = f"https://t.me/{settings.bot_username}?start={invitation.token}"
-    web_link = f"{settings.frontend_url}/register?token={invitation.token}"
-    short_link = f"{settings.frontend_url}/i/{invitation.short_code}" if invitation.short_code else None
-    return bot_link, web_link, short_link
+    contract = build_invitation_contract_v2(
+        invitation,
+        bot_username=settings.bot_username,
+        sms_status=InvitationSMSStatus.DISABLED,
+    )
+    return contract.bot_link or "", contract.web_link, contract.web_short_link
+
+
+def _creation_error_http_exception(exc: CanonicalInvitationCreationError) -> HTTPException:
+    if exc.code == "iran_authority_required":
+        return HTTPException(status_code=403, detail="Invitation creation is Iran-authoritative")
+    if exc.code == "user_identity_exists":
+        return HTTPException(
+            status_code=400,
+            detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است",
+        )
+    if exc.code == "invalid_identity":
+        return HTTPException(status_code=400, detail="شماره موبایل یا نام کاربری نامعتبر است")
+    if exc.code in {
+        "identity_reserved",
+        "mobile_reserved",
+        "account_name_reserved",
+        "identity_split_reserved",
+        "invitation_identity_conflict",
+    }:
+        return HTTPException(
+            status_code=409,
+            detail="دعوت‌نامه فعال دیگری با این نام کاربری یا موبایل وجود دارد",
+        )
+    return HTTPException(status_code=409, detail="ساخت دعوت‌نامه با وضعیت فعلی ممکن نیست")
+
+
+def _validate_standard_inviter(admin: User, role: UserRole) -> None:
+    if (
+        getattr(admin, "role", UserRole.SUPER_ADMIN) == UserRole.MIDDLE_MANAGER
+        and role not in (UserRole.WATCH, UserRole.STANDARD)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="مدیر میانی فقط می‌تواند کاربران عادی یا تماشا را دعوت کند",
+        )
+
+
+async def _create_standard_invitation(
+    *,
+    invite: InvitationCreate,
+    db: AsyncSession,
+    admin: User,
+) -> dict:
+    public_webapp_url_for_links()
+    _validate_standard_inviter(admin, invite.role)
+    try:
+        creation = await create_or_reuse_canonical_invitation(
+            db,
+            creator_user_id=admin.id,
+            account_name=invite.account_name,
+            mobile_number=invite.mobile_number,
+            role=invite.role,
+            kind=InvitationKind.STANDARD,
+        )
+    except CanonicalInvitationCreationError as exc:
+        await db.rollback()
+        raise _creation_error_http_exception(exc) from exc
+
+    await db.commit()
+    if creation.created:
+        await db.refresh(creation.invitation)
+
+    sms_enabled = invitation_sms_enabled(InvitationKind.STANDARD)
+    sms_accepted: bool | None = None
+    if creation.created and sms_enabled:
+        pre_send_contract = build_invitation_contract_v2(
+            creation.invitation,
+            bot_username=settings.bot_username,
+            sms_status=InvitationSMSStatus.DISABLED,
+        )
+        sms_accepted = bool(
+            send_invitation_sms(
+                mobile=creation.invitation.mobile_number,
+                account_name=creation.invitation.account_name,
+                bot_link=pre_send_contract.bot_link or "",
+                web_link=pre_send_contract.web_link,
+            )
+        )
+
+    contract = build_invitation_contract_v2(
+        creation.invitation,
+        bot_username=settings.bot_username,
+        sms_status=invitation_sms_status(
+            enabled=bool(creation.created and sms_enabled),
+            accepted=sms_accepted,
+        ),
+    )
+    return {**contract.model_dump(), "created": creation.created}
 
 
 def serialize_pending_invitation(invitation: Invitation) -> dict:
-    _bot_link, web_link, short_link = build_invitation_links(invitation)
+    bot_link, web_link, short_link = build_invitation_links(invitation)
     return {
         "id": invitation.id,
         "account_name": invitation.account_name,
@@ -89,6 +201,7 @@ def serialize_pending_invitation(invitation: Invitation) -> dict:
         "role": invitation.role,
         "token": invitation.token,
         "short_code": invitation.short_code,
+        "bot_link": bot_link or None,
         "web_link": web_link,
         "short_link": short_link,
         "expires_at": invitation.expires_at,
@@ -163,81 +276,55 @@ async def create_invitation(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(verify_admin_user)
 ):
-    # Normalize mobile (simple check)
-    mobile = invite.mobile_number
-    if not mobile.startswith("09") or len(mobile) != 11:
-        raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
+    return await _create_standard_invitation(invite=invite, db=db, admin=admin)
 
-    # Check if user already exists
-    stmt = select(User).where(
-        (User.account_name == invite.account_name) | 
-        (User.mobile_number == mobile)
-    )
-    existing_user = (await db.execute(stmt)).scalar_one_or_none()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
 
-    if getattr(admin, "role", UserRole.SUPER_ADMIN) == UserRole.MIDDLE_MANAGER and invite.role not in (UserRole.WATCH, UserRole.STANDARD):
-        raise HTTPException(status_code=403, detail="مدیر میانی فقط می‌تواند کاربران عادی یا تماشا را دعوت کند")
+@router.post(
+    "/internal/create",
+    response_model=InvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_invitation_internal_from_bot(
+    payload: InternalInvitationCreateRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await raw_request.body()
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal invitation signature")
+    header_source = normalize_server(raw_request.headers.get("x-source-server"), default="")
+    if current_server() != SERVER_IRAN:
+        raise HTTPException(status_code=403, detail="Invitation creation is Iran-authoritative")
+    if payload.source_server != SERVER_FOREIGN or header_source != SERVER_FOREIGN:
+        raise HTTPException(status_code=401, detail="Invalid internal invitation source")
+    expected_key = build_standard_invitation_idempotency_key(
+        requester_user_id=payload.requester_user_id,
+        account_name=payload.account_name,
+        mobile_number=payload.mobile_number,
+        role=payload.role,
+    )
+    if payload.idempotency_key != expected_key:
+        raise HTTPException(status_code=400, detail="کلید تکرار دعوت‌نامه نامعتبر است")
 
-    # Check active invitation
-    stmt = select(Invitation).where(
-        (Invitation.mobile_number == mobile) &
-        (Invitation.is_used == False) &
-        (Invitation.revoked_at.is_(None)) &
-        (Invitation.kind != InvitationKind.LEGACY_UNKNOWN) &
-        (Invitation.expires_at > func.now())
+    admin = await db.get(User, payload.requester_user_id)
+    if not admin or getattr(admin, "is_deleted", False):
+        raise HTTPException(status_code=404, detail="مدیر دعوت‌کننده یافت نشد")
+    if getattr(admin, "role", None) not in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
+        raise HTTPException(status_code=403, detail="کاربر اجازه ساخت دعوت‌نامه ندارد")
+    return await _create_standard_invitation(
+        invite=InvitationCreate(
+            account_name=payload.account_name,
+            mobile_number=payload.mobile_number,
+            role=payload.role,
+        ),
+        db=db,
+        admin=admin,
     )
-    active_inv = (await db.execute(stmt)).scalar_one_or_none()
-    if active_inv:
-        # Return existing active invitation
-        bot_link, _web_link, short_link = build_invitation_links(active_inv)
-        
-        return {
-            "token": active_inv.token,
-            "link": bot_link,
-            "short_link": short_link,
-            "expires_at": active_inv.expires_at
-        }
-
-    # Create new invitation
-    token = generate_token()
-    short_code = generate_short_code()
-    expires_at = await get_new_invitation_expiry()
-    
-    new_inv = Invitation(
-        account_name=invite.account_name,
-        mobile_number=mobile,
-        role=invite.role,
-        kind=InvitationKind.STANDARD,
-        token=token,
-        short_code=short_code,
-        created_by_id=admin.id,
-        expires_at=expires_at
-    )
-    
-    db.add(new_inv)
-    await db.commit()
-    await db.refresh(new_inv)
-    
-    bot_link, web_link, short_link = build_invitation_links(new_inv)
-    
-    # Send SMS based on connectivity
-    is_connected = await is_internet_connected()
-    
-    send_invitation_sms(
-        mobile=mobile,
-        account_name=invite.account_name,
-        bot_link=bot_link,
-        web_link=web_link
-    )
-    
-    return {
-        "token": token,
-        "link": bot_link,
-        "short_link": short_link,
-        "expires_at": expires_at
-    }
 
 @router.get(
     "/lookup/{short_code}",
@@ -274,7 +361,13 @@ async def lookup_invitation(
         
     if inv.expires_at < utc_now_naive():
         raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-        
+
+    audit_log(
+        "invitation.opened",
+        target_type="invitation",
+        target_id=getattr(inv, "id", None),
+        extra={"surface": "web", "entry": "short_link"},
+    )
     return {"token": inv.token}
 
 @router.get(
@@ -312,7 +405,13 @@ async def validate_invitation(
         
     if inv.expires_at < utc_now_naive():
         raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-        
+
+    audit_log(
+        "invitation.opened",
+        target_type="invitation",
+        target_id=getattr(inv, "id", None),
+        extra={"surface": "web", "entry": "token"},
+    )
     return {
         "valid": True,
         "account_name": inv.account_name,

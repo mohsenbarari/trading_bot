@@ -47,6 +47,7 @@ from core.metrics import metrics_response_body, registry, uptime_seconds
 from core.audit_logger import audit_log
 from core.security import constant_time_secret_equals
 from core.request_logging import install_request_logging_middleware
+from core.public_webapp_url import public_webapp_url_for_links
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -84,6 +85,7 @@ PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES = (
     "/api/sessions/internal",
     "/api/trades/internal",
     "/api/offers/internal",
+    "/api/invitations/internal",
 )
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """
@@ -330,6 +332,8 @@ def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting up...")
+    if settings.invitation_contract_v2_enabled:
+        public_webapp_url_for_links()
     await init_db()
     redis_client = await init_redis()
     setup_event_listeners()

@@ -1417,6 +1417,22 @@ as Stage 9/10/12 gates. No deploy, runtime migration, or feature enablement occu
 
 ### Stage 3 - Canonical Invitation Creation And URL Repair
 
+Execution record (2026-07-11): **Source implementation complete; independent review required**.
+All Standard, accountant, and customer Invitation creation now converges on one Iran-only canonical
+service with global identity reservation, deterministic exact-pending retry, owner-plus-identity
+transaction locks, and one authoritative expiry. The foreign bot forwards Standard commands through
+the existing signed transport and receives canonical Telegram/Web links; relation adapters reuse the
+same primitive and apply the approved category SMS policy without resending on exact retry. Pending
+deletion and user-deletion invalidation now use the shared transition lock, soft revocation, and
+transactional reservation release. `PUBLIC_WEBAPP_URL` is used for every touched user-facing Web
+link and is checked before mutation and at startup when contract v2 is enabled. Focused backend
+(`162`), full backend (`2774`, `29` opt-in skips), and real scratch PostgreSQL (`6`) tests passed.
+The active database remained at `f7c8d9e0a1b2`, no Stage 1 schema was applied there, and all Stage 3
+scratch databases were removed. No migration, feature enablement, deploy, push, or production action
+was performed. Evidence and review instructions are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE3_CANONICAL_INVITATION_CREATION_20260711.md`; a blocking
+independent finding reopens this stage before Stage 4.
+
 - Route bot-admin invitation creation to signed Iran authority.
 - Return canonical Telegram and Iran WebApp URLs.
 - Replace overloaded foreign `FRONTEND_URL` use with `PUBLIC_WEBAPP_URL` for user-facing links.

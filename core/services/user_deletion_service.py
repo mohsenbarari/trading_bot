@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -13,6 +13,16 @@ from core import telegram_gateway
 from core.config import settings
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
+from core.registration_identity import (
+    canonical_account_name_sql,
+    canonical_mobile_number_sql,
+    normalize_account_name,
+    normalize_mobile_number,
+)
+from core.registration_contracts import InvitationDerivedState
+from core.services.invitation_identity_reservation_service import release_invitation_identity
+from core.services.invitation_lifecycle_service import derive_invitation_state, soft_revoke_invitation
+from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from core.services.offer_expiry_service import OfferExpiryReason, OfferExpirySourceSurface
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
 from core.utils import send_telegram_notification, utc_now_naive
@@ -92,19 +102,60 @@ def _scalars_all(result) -> list:
 
 
 async def _invalidate_accountant_invitation(db: AsyncSession, invitation_token: str, now) -> None:
-    invitation_stmt = select(Invitation).where(Invitation.token == invitation_token)
-    invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
-    if invitation:
-        invitation.is_used = True
-        invitation.expires_at = now
+    await _soft_revoke_pending_invitation(db, invitation_token=invitation_token, now=now)
 
 
 async def _invalidate_customer_invitation(db: AsyncSession, invitation_token: str, now) -> None:
-    invitation_stmt = select(Invitation).where(Invitation.token == invitation_token)
-    invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
-    if invitation:
-        invitation.is_used = True
-        invitation.expires_at = now
+    await _soft_revoke_pending_invitation(db, invitation_token=invitation_token, now=now)
+
+
+async def _soft_revoke_pending_invitation(
+    db: AsyncSession,
+    *,
+    invitation_token: str,
+    now,
+) -> None:
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_token=invitation_token,
+    )
+    if invitation is None:
+        return
+    state = derive_invitation_state(invitation, now=now)
+    if state == InvitationDerivedState.PENDING:
+        soft_revoke_invitation(invitation, revoked_at=now)
+        await release_invitation_identity(db, invitation_id=invitation.id)
+
+
+async def _soft_revoke_pending_invitations_for_user_identity(
+    db: AsyncSession,
+    *,
+    mobile_number: str,
+    account_name: str,
+    now,
+) -> None:
+    normalized_mobile = normalize_mobile_number(mobile_number)
+    normalized_account = normalize_account_name(account_name)
+    candidate_stmt = (
+        select(Invitation.id)
+        .where(
+            or_(
+                literal_column(canonical_mobile_number_sql("invitations.mobile_number"))
+                == normalized_mobile,
+                literal_column(canonical_account_name_sql("invitations.account_name"))
+                == normalized_account,
+            )
+        )
+        .order_by(Invitation.id)
+    )
+    invitation_ids = list((await db.execute(candidate_stmt)).scalars().all())
+    for invitation_id in invitation_ids:
+        invitation = await lock_invitation_for_transition(db, invitation_id=invitation_id)
+        if invitation is None:
+            continue
+        if derive_invitation_state(invitation, now=now) == InvitationDerivedState.PENDING:
+            soft_revoke_invitation(invitation, revoked_at=now)
+            await release_invitation_identity(db, invitation_id=invitation.id)
 
 
 async def _close_owned_accountant_relations(
@@ -274,13 +325,12 @@ async def _delete_user_account_in_transaction(
         offer.expire_source_surface = OfferExpirySourceSurface.SYSTEM.value
         offer.expire_source_server = current_server()
 
-    invitation_result = await db.execute(
-        select(Invitation).where(
-            or_(Invitation.mobile_number == mobile_number, Invitation.account_name == account_name)
-        )
+    await _soft_revoke_pending_invitations_for_user_identity(
+        db,
+        mobile_number=mobile_number,
+        account_name=account_name,
+        now=_utcnow_naive(),
     )
-    for invitation in invitation_result.scalars().all():
-        await db.delete(invitation)
 
     revoked_sessions = await deactivate_active_sessions(db, user.id)
     user.soft_delete()

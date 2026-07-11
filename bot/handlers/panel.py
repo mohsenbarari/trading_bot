@@ -858,12 +858,15 @@ def _customer_invite_result_message(status_code: int, body: object) -> str:
     if not isinstance(body, dict):
         return "پاسخ سرور ایران برای دعوت مشتری نامعتبر بود."
     if status_code < 400:
-        if body.get("already_pending"):
-            return "این مشتری قبلاً دعوت شده و دعوت فعال در انتظار ثبت‌نام دارد. دعوت جدیدی ساخته نشد."
-        if body.get("created") and body.get("sms_sent"):
-            return "دعوت مشتری ثبت شد و پیامک دعوت برای مشتری ارسال شد."
-        if body.get("created"):
-            return "دعوت مشتری ثبت شد اما ارسال پیامک با خطا مواجه شد. لطفاً وضعیت را در وب اپ بررسی کنید."
+        bot_link = body.get("bot_link")
+        web_link = body.get("web_link")
+        if bot_link and web_link:
+            prefix = "دعوت فعال قبلی بازیابی شد." if body.get("already_pending") else "دعوت مشتری ثبت شد."
+            return (
+                f"{prefix}\n\n"
+                f"لینک تلگرام:\n{bot_link}\n\n"
+                f"لینک وب‌اپ:\n{web_link}"
+            )
         return "درخواست دعوت مشتری پردازش شد."
     detail = body.get("detail") or body.get("reason") or "دعوت مشتری انجام نشد."
     return str(detail)

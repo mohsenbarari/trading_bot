@@ -46,6 +46,14 @@ class FakeSessionContext:
 
 
 class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.public_url_patcher = patch(
+            "bot.handlers.start.public_webapp_url_for_links",
+            return_value="https://app.example",
+        )
+        self.public_url_patcher.start()
+        self.addCleanup(self.public_url_patcher.stop)
+
     async def test_handle_start_with_token_returns_panel_for_existing_user(self):
         message = SimpleNamespace(
             bot=SimpleNamespace(),

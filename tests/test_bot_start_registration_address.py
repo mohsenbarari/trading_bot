@@ -34,7 +34,9 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
             "bot.handlers.start.set_anchor"
-        ) as set_anchor:
+        ) as set_anchor, patch(
+            "bot.handlers.start.public_webapp_url_for_links", return_value="https://app.example"
+        ):
             await handle_address(message, state)
 
         self.assertEqual(state.cleared, 1)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import string
 
@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from core.utils import normalize_account_name, normalize_persian_numerals, unique_user_ids, utc_now
+from core.services.canonical_invitation_creation_service import (
+    CanonicalInvitationCreationError,
+    create_or_reuse_canonical_invitation,
+)
 from core.services.invitation_identity_reservation_service import (
     release_invitation_identities_for_tokens,
     release_invitation_identity,
@@ -41,8 +45,24 @@ class EffectiveOwnerActor:
     is_accountant_context: bool
 
 
+@dataclass(frozen=True)
+class AccountantRelationCreationResult:
+    relation: AccountantRelation
+    invitation: Invitation
+    created: bool
+
+
 def _utcnow_naive():
     return utc_now().replace(tzinfo=None)
+
+
+def _same_utc_moment(left: datetime | None, right: datetime | None) -> bool:
+    def normalize(value: datetime | None) -> datetime | None:
+        if value is None or value.tzinfo is None or value.utcoffset() is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return normalize(left) == normalize(right)
 
 
 def _normalize_mobile_number(value: str) -> str:
@@ -339,7 +359,17 @@ async def resolve_effective_owner_actor(
     )
 
 
-async def create_owner_accountant_relation(
+def _canonical_accountant_error(exc: CanonicalInvitationCreationError) -> HTTPException:
+    if exc.code == "user_identity_exists":
+        return HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
+    if exc.code == "iran_authority_required":
+        return HTTPException(status_code=403, detail="Invitation creation is Iran-authoritative")
+    if exc.code == "invalid_identity":
+        return HTTPException(status_code=400, detail="شماره موبایل یا نام کاربری نامعتبر است")
+    return HTTPException(status_code=409, detail="یک دعوت فعال با این نام کاربری یا موبایل وجود دارد")
+
+
+async def create_or_reuse_owner_accountant_relation(
     db: AsyncSession,
     *,
     owner_user: User,
@@ -347,7 +377,7 @@ async def create_owner_accountant_relation(
     relation_display_name: str,
     mobile_number: str,
     duty_description: str | None = None,
-) -> tuple[AccountantRelation, Invitation]:
+) -> AccountantRelationCreationResult:
     normalized_account_name = normalize_account_name((global_account_name or "").strip())
     normalized_mobile = _normalize_mobile_number(mobile_number)
     normalized_display_name = (relation_display_name or "").strip()
@@ -360,74 +390,93 @@ async def create_owner_accountant_relation(
     if not normalized_mobile.startswith("09") or len(normalized_mobile) != 11:
         raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
 
-    await validate_accountant_capacity(db, owner_user)
-
-    existing_user_stmt = select(User).where(
-        or_(
-            User.account_name == normalized_account_name,
-            User.mobile_number == normalized_mobile,
+    try:
+        creation = await create_or_reuse_canonical_invitation(
+            db,
+            creator_user_id=owner_user.id,
+            account_name=normalized_account_name,
+            mobile_number=normalized_mobile,
+            role=UserRole.WATCH,
+            kind=InvitationKind.ACCOUNTANT,
         )
+        invitation = creation.invitation
+        if not creation.created:
+            relation_stmt = (
+                select(AccountantRelation)
+                .where(AccountantRelation.invitation_token == invitation.token)
+                .with_for_update()
+            )
+            relation = (await db.execute(relation_stmt)).scalar_one_or_none()
+            exact_retry = bool(
+                relation
+                and relation.owner_user_id == owner_user.id
+                and relation.created_by_user_id == owner_user.id
+                and relation.accountant_user_id is None
+                and relation.deleted_at is None
+                and relation.status == AccountantRelationStatus.PENDING
+                and normalize_account_name(relation.global_account_name) == normalized_account_name
+                and _normalize_mobile_number(relation.mobile_number) == normalized_mobile
+                and relation.relation_display_name == normalized_display_name
+                and relation.duty_description == normalized_duty_description
+                and _same_utc_moment(relation.expires_at, invitation.expires_at)
+            )
+            if not exact_retry:
+                raise HTTPException(status_code=409, detail="دعوت حسابدار فعال با اطلاعات متفاوت وجود دارد")
+            await db.commit()
+            return AccountantRelationCreationResult(relation=relation, invitation=invitation, created=False)
+
+        await validate_accountant_capacity(db, owner_user)
+        duplicate_display_stmt = select(AccountantRelation).where(
+            AccountantRelation.owner_user_id == owner_user.id,
+            AccountantRelation.deleted_at.is_(None),
+            AccountantRelation.relation_display_name == normalized_display_name,
+        )
+        if (await db.execute(duplicate_display_stmt)).scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="این نام نمایشی قبلاً برای یکی از حسابداران این کاربر استفاده شده است")
+
+        relation = AccountantRelation(
+            owner_user_id=owner_user.id,
+            accountant_user_id=None,
+            created_by_user_id=owner_user.id,
+            invitation_token=invitation.token,
+            global_account_name=normalized_account_name,
+            relation_display_name=normalized_display_name,
+            duty_description=normalized_duty_description,
+            mobile_number=normalized_mobile,
+            status=AccountantRelationStatus.PENDING,
+            expires_at=invitation.expires_at,
+        )
+        db.add(relation)
+        await db.commit()
+        await db.refresh(invitation)
+        await db.refresh(relation)
+        return AccountantRelationCreationResult(relation=relation, invitation=invitation, created=True)
+    except CanonicalInvitationCreationError as exc:
+        await db.rollback()
+        raise _canonical_accountant_error(exc) from exc
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def create_owner_accountant_relation(
+    db: AsyncSession,
+    *,
+    owner_user: User,
+    global_account_name: str,
+    relation_display_name: str,
+    mobile_number: str,
+    duty_description: str | None = None,
+) -> tuple[AccountantRelation, Invitation]:
+    result = await create_or_reuse_owner_accountant_relation(
+        db,
+        owner_user=owner_user,
+        global_account_name=global_account_name,
+        relation_display_name=relation_display_name,
+        mobile_number=mobile_number,
+        duty_description=duty_description,
     )
-    existing_user = (await db.execute(existing_user_stmt)).scalar_one_or_none()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
-
-    duplicate_relation_stmt = select(AccountantRelation).where(
-        AccountantRelation.deleted_at.is_(None),
-        AccountantRelation.status.in_(CAPACITY_TRACKED_RELATION_STATUSES),
-        or_(
-            AccountantRelation.mobile_number == normalized_mobile,
-            AccountantRelation.global_account_name == normalized_account_name,
-        ),
-    )
-    duplicate_relation = (await db.execute(duplicate_relation_stmt)).scalar_one_or_none()
-    if duplicate_relation:
-        raise HTTPException(status_code=400, detail="یک حسابدار pending یا active با این نام کاربری یا موبایل وجود دارد")
-
-    duplicate_display_stmt = select(AccountantRelation).where(
-        AccountantRelation.owner_user_id == owner_user.id,
-        AccountantRelation.deleted_at.is_(None),
-        AccountantRelation.relation_display_name == normalized_display_name,
-    )
-    duplicate_display = (await db.execute(duplicate_display_stmt)).scalar_one_or_none()
-    if duplicate_display:
-        raise HTTPException(status_code=400, detail="این نام نمایشی قبلاً برای یکی از حسابداران این کاربر استفاده شده است")
-
-    invitation_token = generate_accountant_invitation_token()
-    short_code = generate_accountant_short_code()
-    from core.services.invitation_lifecycle_service import get_new_invitation_expiry
-
-    expires_at = await get_new_invitation_expiry()
-
-    invitation = Invitation(
-        account_name=normalized_account_name,
-        mobile_number=normalized_mobile,
-        role=UserRole.WATCH,
-        kind=InvitationKind.ACCOUNTANT,
-        token=invitation_token,
-        short_code=short_code,
-        created_by_id=owner_user.id,
-        expires_at=expires_at,
-    )
-    relation = AccountantRelation(
-        owner_user_id=owner_user.id,
-        accountant_user_id=None,
-        created_by_user_id=owner_user.id,
-        invitation_token=invitation_token,
-        global_account_name=normalized_account_name,
-        relation_display_name=normalized_display_name,
-        duty_description=normalized_duty_description,
-        mobile_number=normalized_mobile,
-        status=AccountantRelationStatus.PENDING,
-        expires_at=expires_at,
-    )
-
-    db.add(invitation)
-    db.add(relation)
-    await db.commit()
-    await db.refresh(invitation)
-    await db.refresh(relation)
-    return relation, invitation
+    return result.relation, result.invitation
 
 
 async def cancel_pending_accountant_relation(

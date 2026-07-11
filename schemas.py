@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, field_serial
 from typing import List, Optional
 from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
+from core.registration_contracts import InvitationSMSStatus
 from core.enums import UserRole, UserAccountStatus, NotificationLevel, NotificationCategory
 from models.accountant_relation import AccountantRelationStatus
 from models.customer_relation import CustomerRelationStatus, CustomerTier
@@ -316,6 +317,9 @@ class AccountantRelationRead(BaseModel):
     status: AccountantRelationStatus
     invitation_token: str
     registration_link: str | None = None
+    bot_registration_link: str | None = None
+    web_registration_link: str | None = None
+    sms_status: InvitationSMSStatus | None = None
     expires_at: datetime
     activated_at: datetime | None = None
     deleted_at: datetime | None = None
@@ -395,6 +399,10 @@ class CustomerRelationRead(BaseModel):
     status: CustomerRelationStatus
     invitation_token: str
     registration_link: str | None = None
+    bot_registration_link: str | None = None
+    web_registration_link: str | None = None
+    web_short_link: str | None = None
+    sms_status: InvitationSMSStatus | None = None
     expires_at: datetime | None = None
     activated_at: datetime | None = None
     deleted_at: datetime | None = None
@@ -434,6 +442,11 @@ class InternalCustomerInviteResponse(BaseModel):
     idempotency_key: str
     error_code: str | None = None
     reason: str | None = None
+    bot_link: str | None = None
+    web_link: str | None = None
+    web_short_link: str | None = None
+    expires_at: datetime | None = None
+    sms_status: InvitationSMSStatus = InvitationSMSStatus.DISABLED
 
 
 class CustomerTradeStatsCommodityRead(BaseModel):

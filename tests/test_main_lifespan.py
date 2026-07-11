@@ -21,6 +21,18 @@ class _AsyncSessionContext:
 
 
 class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lifespan_validates_public_webapp_url_before_initializing_when_contract_v2_is_enabled(self):
+        with patch.object(main.settings, "invitation_contract_v2_enabled", True), patch(
+            "main.public_webapp_url_for_links",
+            side_effect=ValueError("invalid public WebApp URL"),
+        ) as validate_url, patch("main.init_db", new=AsyncMock()) as init_db_mock:
+            with self.assertRaisesRegex(ValueError, "invalid public WebApp URL"):
+                async with main.lifespan(main.app):
+                    pass
+
+        validate_url.assert_called_once_with()
+        init_db_mock.assert_not_awaited()
+
     async def test_lifespan_can_disable_background_jobs_for_isolated_recovery(self):
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         redis_client = AsyncMock()
