@@ -118,8 +118,10 @@ implementation.
 42. Existing legacy `must_change_password` and `/setup-password` behavior remains unchanged for
     existing accounts and is not extended into this roadmap. Its eventual removal requires a
     separate audit because `admin_password_hash` is currently stored but not used for login.
-43. All new invitation kinds use the one central `invitation_expiry_days` setting, whose accepted
-    current value is two days. `Invitation.expires_at` is the authoritative timestamp.
+43. All new invitation kinds use `core.trading_settings` as the one authoritative source for
+    `invitation_expiry_days`, whose accepted value is two days. The current direct invitation path
+    incorrectly reads the separate `core.config` default of one day; this duplicate source must no
+    longer be used for invitation lifetime. `Invitation.expires_at` is the authoritative timestamp.
 44. Pending customer/accountant relations use the exact same `expires_at` as their Invitation and
     must not calculate an independent lifetime.
 45. Changing `invitation_expiry_days` affects only invitations created after the change. If future
@@ -139,9 +141,11 @@ implementation.
     registration intents. They follow the project's current database/backup retention behavior,
     remain foreign-local `no-sync` operational state, and their accepted product result is synced
     through authoritative User, Invitation, and Relation records exactly as current product data is.
-50. Every new User completed by either WebApp or Telegram is created with `home_server="iran"`.
-    Bot use never changes it; foreign creates no Web session/JWT/refresh token; later Web login
-    creates an Iran-local session. Existing users and Offer/request ownership are unchanged.
+50. Every new User completed by either WebApp or Telegram is created with literal
+    `home_server="iran"` inside the shared authoritative service, independent of request host,
+    `_login_home_server`, or the model's current `foreign` default. Bot use never changes it;
+    foreign creates no Web session/JWT/refresh token; later Web login creates an Iran-local session.
+    Existing users and Offer/request ownership are unchanged.
 51. WebApp and bot map the same bounded terminal reason codes to approved safe Persian messages.
     Expired/late, revoked, sender-contact ownership, invited-mobile mismatch, and identity conflict
     are distinguishable without exposing another account's mobile, account name, or Telegram ID.
@@ -185,10 +189,12 @@ implementation.
     the existing background leader uses a real async SMS.ir adapter, Redis sorted-set due work, and
     atomic claim. Provider `ambiguous`/timeout is not automatically retried for the same OTP because
     acceptance may already have occurred; restart resumes only unclaimed pending work.
-62. Registration side effects use a transactionally created unique outbox event and durable foreign
-    dedupe receipt. Retry/replay creates neither a second logical event nor success message; delivery
-    failure never rolls back committed registration. Staging OTP logging is disabled and centralized
-    redaction removes raw token/OTP/mobile/address/Telegram ID from logs and metrics.
+62. Registration side effects reuse the existing `telegram_notification_outbox` with a
+    transactionally created unique event and its established foreign delivery/dedupe behavior; no
+    second outbox or worker is introduced. Retry/replay creates neither a second logical event nor
+    success message, and delivery failure never rolls back committed registration. Staging OTP
+    logging is disabled in defaults and deploy-time enforcement; centralized redaction removes raw
+    token/OTP/mobile/address/Telegram ID from logs and metrics.
 63. This roadmap does not add or change User deletion, recovery, or reinvite behavior in bot or
     WebApp. Existing User lifecycle remains untouched and receives regression coverage only.
     Invitation soft revocation is independent and must not create a User deletion/restore surface.
@@ -327,6 +333,18 @@ bot messages and menus.
 
 This logic must move into a shared authoritative registration service before a second surface is
 enabled.
+
+The current invitation lifetime has two conflicting sources with the same field name:
+`core.config.settings.invitation_expiry_days` defaults to one day and is what
+`api/routers/invitations.py:create_invitation()` currently reads, while the existing central
+`core.trading_settings`/`trading_settings.json` value is two days and is already exposed through
+the trading-settings UI. The async shared invitation service must use
+`await get_trading_settings_async()` only; this roadmap does not introduce a third setting, use the
+sync compatibility accessor in a new async path, or silently change existing stored expiries.
+
+All current standard, customer, and accountant invitation creation call sites invoke an SMS.ir
+sender. The approved Standard/admin and Tier-1 disabled policy is therefore an intentional behavior
+change, while accountant and Tier-2 retain their existing template contracts.
 
 ### Current sync conflict risk
 
@@ -524,8 +542,10 @@ retry uses a fresh signed timestamp while retaining the logical command ID.
 
 ### OTP delivery state
 
-OTP values stay in Iran Redis with the existing bounded TTL. Introduce an OTP request identity and
-structured state sufficient for the automatic fallback:
+OTP values stay in Iran Redis with the existing bounded TTL. During the stale-client compatibility
+window, the existing `otp:{mobile}` key remains the single code-of-record. Introduce an OTP request
+identity and structured state that references that same key/value and is sufficient for automatic
+fallback; it must not create a second code store:
 
 ```text
 otp_request_id
@@ -544,7 +564,10 @@ sms_sent_at
 ```
 
 Use a Redis sorted set keyed by `sms_fallback_at` plus an atomic claim/lock for due work. Do not
-use a process-local sleep as the source of truth.
+use a process-local sleep as the source of truth. OTP generation, verification, legacy resend,
+scheduled claim, SMS outcome, and cancellation must update/read the same structured state through
+one atomic Redis contract. The exact legacy-resend-versus-due-claim race is part of the mandatory
+concurrency matrix.
 
 ## Shared Authoritative Registration Service
 
@@ -978,6 +1001,8 @@ Rules:
 - staging enables one feature stage at a time;
 - production defaults remain disabled through all staging work;
 - `PUBLIC_WEBAPP_URL` is distinct from local API/peer/internal transport URLs;
+- startup and link generation fail closed when `PUBLIC_WEBAPP_URL` is empty, malformed, non-HTTPS
+  outside local test, or resolves to a configured foreign Web/API hostname;
 - internal Iran/foreign endpoint base URLs come from environment configuration;
 - the 24-hour reconciliation grace is server configuration with a locked production default of
   `86400` seconds, not a browser- or foreign-supplied value;
@@ -1009,7 +1034,7 @@ exist.
 | DT-12 | Invitation deletion can erase history; code also contains mixed datetime representations. | Closed by owner decisions: Invitation uses soft revocation; existing User lifecycle is unchanged; existing two-server UTC/timezone conventions remain unchanged with no broad migration/refactor; current helpers receive exact boundary tests. | Invitation audit, no-User-lifecycle-change regression, and current-helper boundary tests. |
 | DT-13 | The database has no explicit active-invitation uniqueness invariant; a time-dependent partial unique index cannot safely depend on current time. | Closed by owner decision in Stage 1: Iran-local `no-sync` reservation table with unique mobile/account/invitation constraints, deterministic advisory locks, and transactional create/release. | Migration/registry proof and high-concurrency create/expiry/revoke/complete tests. |
 | DT-14 | Internal commands need strict schemas, canonical signing, replay protection, source/server guards, and atomic idempotency receipts. | Closed by owner decision in Stage 1: reuse existing HMAC headers; stable UUID command/idempotency identity plus canonical request hash; Iran-local no-sync receipt in the mutation transaction; same payload returns prior result, changed payload rejects; OTP uses TTL Redis dedupe only. | Security-negative, concurrent/lost-response replay, receipt-rollback, and route-surface tests. |
-| DT-15 | Post-commit notifications can duplicate on retry; staging/failure paths can log OTP/mobile/Telegram identity. | Closed by owner decision: unique transactional outbox event, post-commit delivery, durable foreign dedupe receipt, first-terminal-transition success message, no registration rollback on delivery failure, staging OTP logging disabled, and centralized sensitive-value redaction. | Retry/replay/outbox tests and zero-match sensitive log scan. |
+| DT-15 | Post-commit notifications can duplicate on retry; staging/failure paths can log OTP/mobile/Telegram identity. | Closed by owner decision: reuse `telegram_notification_outbox` with a unique transactional event, its foreign worker/dedupe behavior, first-terminal-transition success message, no registration rollback on delivery failure, deploy-enforced staging OTP logging disabled, and centralized sensitive-value redaction. | Retry/replay/outbox tests, staging redeploy assertion, and zero-match sensitive log scan. |
 | DT-16 | Web registration currently enforces minimum 10 characters in frontend while registration backend and old bot paths differ. | Closed by owner decision in Stage 1: copy the Web registration rule exactly to bot and enforce the same minimum-10 rule/message authoritatively on Iran for both adapters; add no new max/normalization policy and leave profile editing unchanged. | Shared registration validator tests plus Web/bot exact-message parity. |
 | DT-17 | Invitation call sites invoke SMS inconsistently and a global off switch would incorrectly disable Web-only accountant/Tier-2 delivery. | Closed by refined owner decision: central kind/tier policy with independent flags; Standard/admin and Tier-1 false temporarily, accountant and Tier-2 true; source surface is irrelevant; disabled means no provider call; existing enabled templates/contracts stay unchanged with no Telegram link. | Four-category x two-surface policy tests, zero-call disabled tests, and unchanged-template provider tests. |
 | DT-18 | A delayed intent can be valid at proof time but arrive after expiry; clock drift and explicit revocation complicate the boundary. | Locked policy: auto-reconcile only through `expires_at + 24h`, require proof completed while valid, re-read all state, and always reject revocation. | Boundary tests at expiry, +24h, clock tolerance, and revocation races. |
@@ -1021,7 +1046,7 @@ exist.
 |---|---|---|---|
 | DN-01 | The matrix lists Super Admin Telegram registration, while current invitation UIs may not expose every manager invitation path. | Closed by owner decision in Stage 0: whenever the existing product permits issuing a valid invitation, direct Telegram registration is eligible; no additional high-privilege approval gate is added. | Role matrix and invitation-path contract tests. |
 | DN-02 | Telegram-first registration for Police, Middle Manager, or Super Admin skips OTP. | Closed by owner risk decision in Stage 0: no role-specific OTP or extra approval is added. The universal controls remain a valid authoritative invitation, sender-owned Telegram contact, exact normalized mobile match, identity-conflict checks, and audit. | Identity/role matrix, inviter-permission regression, and abuse/revocation tests. |
-| DN-03 | Generic defaults and customer/accountant constants can produce different invitation and relation lifetimes. | Closed by owner decision in Stage 0: all new invitations use the central setting at its accepted two-day value; `Invitation.expires_at` is final and related pending records copy it exactly. Setting changes affect only future invitations. | Creation/relation timestamp equality, setting-change, copy, and expiry-boundary tests. |
+| DN-03 | `core.config` currently gives direct invitations one day while `core.trading_settings`/`trading_settings.json` gives the central product setting two days; customer/accountant constants can add further drift. | Closed by owner decision in Stage 0: `core.trading_settings` is the sole authoritative setting at its accepted two-day value; all creation paths snapshot it into `Invitation.expires_at`, and related pending records copy that timestamp exactly. Setting changes affect only future invitations. | Source-of-truth guard, effective-value assertion, creation/relation timestamp equality, setting-change, and expiry-boundary tests. |
 | DN-04 | One invitation has two paths and first valid completion wins; UI must not behave as two independent registrations. | Closed by owner decision: add no explanatory first-wins screen; after one path completes, the other routes into the existing Web login or linked-account/panel behavior. Existing copy stays unless a new safe rejection/pending state has no current equivalent. | Cross-path UI routing and manual acceptance. |
 | DN-05 | Invitation SMS policy differs by invitation eligibility/type and is temporarily disabled for some categories. | Closed by refined owner decision: Standard/admin and Tier-1 use manual admin sharing with SMS flag false; accountant and Tier-2 are Web-only and keep current invitation SMS through existing templates; no capability is removed. | Category/source matrix, admin workflow acceptance, and real enabled-template evidence. |
 | DN-06 | Manual-review ownership, SLA, escalation, and user communication would be required only if such a workflow existed. | Closed as not applicable by owner decision in Stage 0: no manual-review workflow exists. The owner approved bounded rejection/new-invitation copy; rejected users restart only with a new valid invitation when allowed. | Copy-contract tests and proof that no review queue/action is exposed. |
@@ -1035,14 +1060,15 @@ exist.
 | IT-01 | Existing Web-to-Telegram link-token flow can still mutate Telegram identity on foreign and race the new registration command. | Locked outcome: route linking through the same Iran-authoritative identity service and conflict rules. | Both old/new link-flow integration tests. |
 | IT-02 | User deletion/reinvite/recovery was considered as a possible indirect impact. | Closed as out of scope by owner decision: add no bot deletion, restore, reinvite, or User lifecycle behavior; preserve all current behavior. Invitation soft revocation remains separate. | Existing lifecycle regression suite and route-surface proof that no new bot action exists. |
 | IT-03 | Relation activation affects customer pricing, trading limits, accountant access, and market behavior beyond registration. Partial or duplicate activation has financial impact. | Locked outcome: preserve current relation semantics in the authoritative transaction and gate access until projection completeness. | Domain regression suite and exact relation-state assertions. |
-| IT-04 | Telegram-created users later log in on Iran; a foreign/default `home_server` could cause unnecessary remote session checks and outage-dependent login failures. | Closed by owner decision in Stage 0: every new User from either surface uses `home_server=iran`; bot use does not mutate it; foreign creates no Web session/token. Existing users and Offer/request home fields are out of scope. | Registration, OTP login, refresh/logout/reset-session, no-foreign-session, and Offer-ownership regression tests. |
+| IT-04 | Telegram-created users later log in on Iran; the model default is `foreign`, and request-derived `_login_home_server` can make a signed foreign-origin command choose the wrong owner. | Closed by owner decision in Stage 0: the shared Iran service writes literal `home_server=iran` for every new User from either surface; request context and model default are not authoritative; bot use does not mutate it; foreign creates no Web session/token. Existing users and Offer/request home fields are out of scope. | Service-mechanism assertion, registration, OTP login, refresh/logout/reset-session, no-foreign-session, and Offer-ownership regressions. |
 | IT-05 | The legacy manager password setup stores `admin_password_hash`, but current authentication does not verify that hash; extending it would add a blocking step without an effective authentication factor. | Closed by owner decision in Stage 0: new Telegram registrations keep `must_change_password=False`; later Web login always uses OTP. Existing legacy password behavior stays unchanged and its removal is a separate scope. | Role-based Telegram-registration-to-Web-OTP tests and regression proof that legacy accounts are unchanged. |
 | IT-06 | New registration must not start existing bot/channel/onboarding behavior from incomplete projections or accidentally reorder current tutorials. | Closed by owner decision: after the approved projection gate, enter the current linked-account/panel flow unchanged; current channel join request, two tutorials, order/conditions, `خواندم` callbacks, welcome/menu copy, and access blocking remain exactly as implemented. | Existing onboarding/join-request regression suite plus direct-registration handoff test. |
 | IT-07 | Generic new-user and invitation notifications can fire twice after command retry, Web/Telegram race, or sync replay. | Closed with `DT-15`: stable unique outbox event identity, post-commit dispatch, foreign durable dedupe, and one success message on first terminal intent transition. | Duplicate-command, race, replay, worker-restart, and delivery-failure tests. |
 | IT-08 | Registration reconciliation and OTP fallback need delayed execution without adding services or duplicate jobs. | Closed by owner decision: add two server-guarded job factories to the existing `main.py` background leader, not new workers/processes/containers/queues. Registration job runs only foreign; OTP fallback job only Iran; existing singleton lease plus atomic claim protects duplicates. | Startup/surface matrix, leader failover, wrong-server absence, and duplicate-claim tests. |
 | IT-09 | New registration contracts must remain safe while server versions differ or connectivity is interrupted. | Closed by owner decision: do not redesign deployment/outage handling; integrate additive migrations, tables, contracts, and flags into the project's existing compatibility, queue, recovery, and rollback mechanisms. | Existing deployment/outage regression suite plus mixed-version staging drill for the added artifacts. |
-| IT-10 | New local-only tables, completion fields, and backfills can break sync registry/parity or fabricate historical truth. | Locked conservative migration policy; ambiguous rows remain unresolved. | Production-shaped migration and parity reports. |
+| IT-10 | New local-only tables, completion fields, `sync_version`, and backfills can break event builders, receiver apply, field policy, sync registry/parity, or fabricate historical truth. | Locked conservative migration and mixed-version policy; ambiguous rows remain unresolved, and every affected sync-stack artifact is inventoried before implementation. | Production-shaped migration, mixed-version, field-policy, and parity reports. |
 | IT-11 | Explicit table/schema lists in reset, fixture, parity, backup verification, purge, migration, or deploy tooling may omit new local state. | Closed by owner decision: extend existing tooling only; register local tables no-sync, update dependency-order staging reset and health checks, verify normal PostgreSQL restore, add no production purge, and preserve data on rollback. | Tool inventory, script report, migration-health assertions, and backup/restore drill. |
+| IT-12 | The required 100% changed-code, state/transition, property/fuzz, deterministic-race, mutation, and traceability gates exceed the repository's current coverage tooling. Without an explicit workstream they are not executable release gates. | Closed by owner decision: Stage 9 first adds and proves the missing test infrastructure using the current coverage/CI foundation; production-safe injectable checkpoints have no runtime/public control path, and no required test may be waived because tooling is absent. | One end-to-end proof for each new tool, CI gate failure fixtures, mutation kill report, deterministic race proof, and traceability completeness test. |
 | IT-13 | PWA/browser cache and legacy-client compatibility were evaluated as a possible indirect scope. | Closed as no-change by owner decision: do not add a compatibility window, deprecation telemetry/header, forced upgrade behavior, or service-worker redesign. Existing PWA, endpoint, and cache behavior remains unchanged; contract-v2 aliases already approved under `DT-11` remain part of that API change only. | Existing PWA/API regression suite. |
 | IT-14 | Sync batches can reorder User/Relation/Invitation changes and stale events can overwrite newer state. | Closed by owner decision: monotonic `sync_version` on authoritative rows/events, newer-only receiver apply, temporary unversioned mixed-deploy compatibility, and kind/tier-derived projection gate without cross-table order assumptions. | Reorder, duplicate/stale-version, mixed-version, per-kind gate, and recovery tests. |
 | IT-15 | New reconciliation and OTP background jobs share process/DB/Redis/HTTP resources with latency-sensitive market updates. | Closed by owner decision: no new process/pool; fully async I/O; no DB transaction across HTTP; registration batch 10/concurrency 1, OTP concurrency 4, configurable and independently disabled; fail staging above 10% market p95 degradation or persistent market backlog growth. | Combined-load event-loop/DB/Redis/HTTP benchmark and recovery-to-baseline report. |
@@ -1112,6 +1138,9 @@ Challenges and engineering decisions in this stage:
   existing users or touching Offer/request ownership.
 - `IT-11`: extend only existing explicit table/schema lists, no-sync registry, dependency-order
   staging reset, migration health, deploy packaging, and restore verification.
+- `IT-12`: inventory the existing coverage workflow and prove the selected property/fuzz, mutation,
+  diff-coverage, deterministic-checkpoint, and traceability tools before treating 100% as an
+  executable gate.
 - `IN-06`: follow the approved existing-deploy staging sequence, per-feature flags/rollback, owner
   acceptance, no role-specific restriction, and explicit production gate.
 
@@ -1130,6 +1159,12 @@ Exit criteria:
 - Register each new table as `sync` or `no-sync` with field-level sensitive policy.
 - Define request/response schemas and outcome enums.
 - Add configuration flags and URL separation.
+- Remove direct invitation-lifetime reads from `core.config`; all new async invitation services use
+  `get_trading_settings_async()` and snapshot the accepted two-day value from the existing
+  `core.trading_settings` source.
+- Inventory and update event payload builders, receiver apply, `core.sync_field_policy`,
+  `core.sync_registry`, parity comparators, reset/fixture/seed lists, migration health, and
+  backup/restore verification for `sync_version` and every new table/field.
 
 Challenges and engineering decisions in this stage:
 
@@ -1137,8 +1172,11 @@ Challenges and engineering decisions in this stage:
   relation-first legacy backfill, `legacy_unknown` rejection, and soft revocation.
 - `DT-02`, `DT-13`: implement global normalized-key reservation, deterministic advisory locks,
   transactional release, exact-retry matching, and safe collision rejection as approved.
-- `DT-05`, `IT-14`: implement patch-only source-aware fields plus authoritative `sync_version`,
-  newer-only apply, temporary unversioned compatibility, and stale full-row sanitizer.
+- `DT-05`, `IT-10`, `IT-14`: implement patch-only source-aware fields plus authoritative
+  `sync_version`, newer-only apply, temporary unversioned compatibility, and stale full-row
+  sanitizer across the complete sync-stack inventory. Unversioned compatibility ends only after
+  both nodes report a release with versioned-event support and an explicit compatibility flag is
+  disabled; later unversioned events fail closed instead of remaining permanently accepted.
 - `DT-08`: preserve link structure while masking public mobile, admin-gating full links, applying
   no-store/rate limits, and redacting Nginx/application logs without a token-exchange redesign.
 - `DT-11`: implement approved contract v2, temporary aliases, explicit availability/state/SMS
@@ -1147,8 +1185,10 @@ Challenges and engineering decisions in this stage:
   approved Invitation soft-revocation lifecycle and exact boundary tests using existing helpers.
 - `DN-07`: register durable intent as foreign-local `no-sync`, retain it under current database and
   backup behavior, and sync only accepted User/Invitation/Relation product state.
-- `DN-03`: snapshot the central two-day setting into Invitation and copy its exact UTC timestamp to
-  related pending records; leave a versioned kind-policy extension point only for future changes.
+- `DN-03`: use `core.trading_settings` as the sole lifetime source, assert its effective two-day
+  value, snapshot it into Invitation, and copy that exact UTC timestamp to related pending records;
+  the old one-day `core.config` default cannot affect creation. Leave a versioned kind-policy
+  extension point only for future changes.
 - `DT-14`: implement the approved existing-HMAC, strict-schema, command/hash/receipt transaction,
   retry, changed-payload rejection, and OTP Redis-dedupe contracts.
 - `DT-18`: preserve the exact `expires_at + 86400` boundary.
@@ -1156,8 +1196,8 @@ Challenges and engineering decisions in this stage:
   and the shared Iran completion boundary; leave profile-edit validation unchanged.
 - `IT-09`: integrate with the existing deployment, queue, outage, recovery, and rollback mechanisms
   without rewriting them.
-- `IT-10`, `IT-13`: make migrations additive, register no-sync tables, and define stale-client
-  compatibility.
+- `IT-10`, `IT-11`, `IT-13`: make migrations additive, register no-sync tables, update every
+  explicit schema/tooling list, and define stale-client compatibility.
 
 Exit criteria:
 
@@ -1175,6 +1215,8 @@ Exit criteria:
 - Preserve relation activation, mandatory membership, user defaults, sync/outbox, and post-commit
   notifications.
 - Route current Web `register-complete` through the service without changing Web behavior.
+- Set literal `home_server="iran"` inside the shared service for both adapters; do not derive it from
+  request host and do not permit the model's `foreign` default to supply it.
 
 Challenges and engineering decisions in this stage:
 
@@ -1189,10 +1231,12 @@ Challenges and engineering decisions in this stage:
 - `DT-12`: use soft revocation for Invitation history.
 - `IT-02`: leave all existing User deletion/recovery/reinvite behavior unchanged and add no bot
   lifecycle surface.
-- `DT-15`, `IT-07`: implement the approved transactional unique outbox, foreign dedupe receipt,
-  first-terminal-transition message, delivery retry, and centralized redaction policy.
-- `IT-04`: set `home_server=iran` for both completion surfaces; create no foreign session/token and
-  leave existing users and Offer/request ownership untouched.
+- `DT-15`, `IT-07`: reuse `telegram_notification_outbox` for the approved transactional unique
+  event, existing foreign delivery/dedupe path, first-terminal-transition message, delivery retry,
+  and centralized redaction policy; add no second outbox or worker.
+- `IT-04`: set literal `home_server=iran` for both completion surfaces and assert the mechanism, not
+  only the result; create no foreign session/token and leave existing users and Offer/request
+  ownership untouched.
 - `IT-05`: explicitly keep `must_change_password=False` for new Telegram registrations and leave
   existing legacy account state untouched.
 
@@ -1209,6 +1253,8 @@ Exit criteria:
 - Route bot-admin invitation creation to signed Iran authority.
 - Return canonical Telegram and Iran WebApp URLs.
 - Replace overloaded foreign `FRONTEND_URL` use with `PUBLIC_WEBAPP_URL` for user-facing links.
+- Validate `PUBLIC_WEBAPP_URL` at startup/link generation and fail closed for an empty, malformed,
+  insecure non-test, or configured foreign-host value.
 - Fix pending-invitation and landing copy contracts.
 - Add invitation-open audit on both surfaces.
 
@@ -1218,8 +1264,9 @@ Challenges and engineering decisions in this stage:
   an explicit deterministic result.
 - `DT-08`, `DT-11`: return explicit contract-v2 canonical links only to authenticated admins;
   public responses mask mobile, logs redact token/mobile, and legacy aliases remain compatible.
-- `DT-17`, `DN-05`: return generated links to admins and apply the central category policy equally
-  for bot/Web creation; preserve existing accountant/Tier-2 template contracts.
+- `DT-17`, `DN-05`: treat Standard/admin and Tier-1 suppression as an intentional change from the
+  current all-category SMS behavior; return generated links to admins and apply the central category
+  policy equally for bot/Web creation while preserving existing accountant/Tier-2 templates.
 - `DN-03`: display the stored authoritative expiry consistently for all invitation kinds.
 - `DN-04`, `IN-05`: add no first-wins explanation or broad copy change; route completed paths into
   existing login/linked-account UI and reuse current messages except approved pending/rejections.
@@ -1323,6 +1370,12 @@ Exit criteria:
 - Integrate verify success with fallback cancellation.
 - Keep the legacy SMS-resend endpoint safe for stale clients without exposing it in the target UI.
 - Treat timeout/ambiguity as immediate SMS fallback.
+- Keep `otp:{mobile}` as the one code-of-record during legacy compatibility; request metadata,
+  verification, manual resend, due claim, and cancellation use one atomic structured Redis contract.
+- Change `scripts/deploy_staging.sh` and `deploy/staging/env.staging.example` so
+  `STAGING_LOG_OTP_CODES` defaults to and is reasserted as `false`; when Telegram OTP testing is
+  enabled, deployment must reject a true value. Existing staging automation uses the separate
+  `STAGING_ENABLE_DEV_LOGIN` path instead of extracting OTP values from logs.
 
 Challenges and engineering decisions in this stage:
 
@@ -1332,14 +1385,15 @@ Challenges and engineering decisions in this stage:
   atomic multi-worker claim, restart behavior, and no ambiguous same-OTP provider retry.
 - `DT-14`: implement strict signed delivery, replay window, atomic foreign dedupe receipt, and
   explicit acknowledgement taxonomy.
-- `DT-15`: remove staging OTP logging, redact Telegram IDs, and keep OTP text out of durable
-  notifications, sync, metrics, and responses.
+- `DT-15`: remove staging OTP logging from both generated env and every-deploy enforcement, redact
+  Telegram IDs, and keep OTP text out of durable notifications, sync, metrics, and responses.
 - `DN-08`, `IN-04`: preserve existing provider operations/rate limits and add no cost/accounting or
   provider-specific alert work; validate only approved functional send behavior.
 - `IT-08`: register the two approved jobs in the existing background leader with foreign/Iran
   server guards, singleton leadership, and atomic claims; add no worker service.
-- `IT-13`: stale manual-resend calls reuse the same code/TTL and no-op the scheduled send after SMS
-  acceptance; collect deprecation telemetry.
+- `IT-13`: stale manual-resend calls use the same structured request/code/TTL, atomically no-op the
+  scheduled send after SMS acceptance, and race safely with a due-job claim at the exact boundary;
+  collect deprecation telemetry.
 - `IT-15`, `IT-16`, `IN-03`: bound background-job concurrency, verify Redis/clock/provider dependencies,
   and alert on scheduler lag without harming market/sync latency.
 
@@ -1351,6 +1405,8 @@ Exit criteria:
 - Telegram failure sends SMS immediately;
 - background leader/API/Redis restart tests preserve correct bounded behavior;
 - OTP never enters logs, sync, or durable notification outbox;
+- a fresh or repeated staging deploy leaves `STAGING_LOG_OTP_CODES=false`, real Telegram/SMS delivery
+  is not short-circuited, and existing dev-login automation remains available for unrelated E2E;
 - existing LoginView text is unchanged; Telegram-method timer is 40 seconds, no manual resend action
   appears at zero, and backend TTL remains 120 seconds.
 
@@ -1429,7 +1485,24 @@ Exit criteria:
 
 ### Stage 9 - Automated Test Matrix
 
-Implement focused unit, integration, concurrency, and two-server tests listed below.
+First implement and prove the missing test infrastructure, then implement focused unit,
+integration, concurrency, and two-server tests listed below. The infrastructure is required product
+work for this roadmap and cannot be deferred or replaced by a coverage waiver:
+
+- pin `hypothesis` in a dedicated test dependency set for property, state-machine, malformed-input,
+  and bounded fuzz generation;
+- pin and configure `mutmut` for the critical invariant modules and maintain the explicit mutant
+  target/ignore manifest required by this roadmap;
+- build on the existing Python branch-coverage and frontend V8 coverage reports: enforce Python
+  changed-line/changed-branch coverage with `diff-cover`, and add a repository script that maps the
+  Git diff to frontend V8 statement/branch/function/line data;
+- define an injectable async checkpoint protocol used only at the named service boundaries, with a
+  production no-op implementation and a deterministic test barrier implementation. It has no env,
+  HTTP, admin, or runtime control surface and cannot alter business results;
+- add a traceability/state-transition artifact generator and CI verifier that compares decisions,
+  registry IDs, scenario tuples, tests, results, coverage, and mutation evidence for set equality;
+- add negative self-tests proving CI fails for a missing tuple, missing transition, surviving
+  critical mutant, uncovered changed branch, skipped required test, or nonexistent test reference.
 
 Challenges and engineering decisions in this stage:
 
@@ -1438,6 +1511,9 @@ Challenges and engineering decisions in this stage:
 - `IT-01` through `IT-16`: run affected session, linking, relation/market, onboarding, sync-order,
   worker-placement, mixed-version, tooling, stale-client, and load regressions; new focused tests do
   not replace these indirect suites.
+- `IT-12`: prove one end-to-end property example, fuzz rejection, deterministic two-party race,
+  killed critical mutant, backend/frontend diff-coverage failure, and traceability failure before
+  accepting the infrastructure as ready for the full matrix.
 - `DN-01` through `DN-08` and `IN-01` through `IN-06`: identify which items require owner approval,
   policy, operational evidence, or external dependency rather than falsely marking them closed by
   an automated test.
@@ -1449,6 +1525,8 @@ Exit criteria:
 - all matrix rows pass;
 - existing auth, invitation, session, bot-access, sync, and onboarding regressions pass;
 - migration, compile, frontend unit, and relevant E2E gates pass;
+- all test-infrastructure self-tests pass and each required artifact is generated from the current
+  commit rather than hand-authored;
 - every registry ID has evidence or an explicit unresolved blocker assigned to a later gate.
 
 ### Stage 10 - Real Two-Server Staging Validation
@@ -1462,6 +1540,11 @@ Exit criteria:
   Iran commit, and during OTP Telegram delivery.
 - Verify SMS.ir staging/production-account IP allowlist and template acceptance before declaring OTP
   fallback ready.
+- Run a fresh staging environment generation and a repeated deploy; both must leave
+  `STAGING_LOG_OTP_CODES=false`, exercise the real Telegram/SMS delivery contract, and retain the
+  separate dev-login mechanism for unrelated E2E setup.
+- Assert the deployed effective invitation lifetime comes from `core.trading_settings`, is two days,
+  and is copied exactly to each applicable pending Relation.
 
 Challenges and engineering decisions in this stage:
 
@@ -1475,9 +1558,9 @@ Challenges and engineering decisions in this stage:
   review queue, admin mutation, or worker retry exists.
 - `IN-03`: validate approved job-health thresholds; under `DN-08`/`IN-04`, perform only functional
   provider send/readiness checks with no new cost or provider alert baseline.
-- `IT-08` through `IT-11`, `IT-13`, `IT-14`, `IT-16`: validate background-job placement, existing
-  mixed-version/outage handling, migrations/parity, backup/restore tooling, unchanged PWA behavior,
-  sync reordering, and runtime dependencies.
+- `IT-08` through `IT-14`, `IT-16`: validate background-job placement, existing mixed-version/outage
+  handling, migrations/parity, test-evidence tooling, backup/restore tooling, unchanged PWA
+  behavior, sync reordering, and runtime dependencies.
 - `IT-15`: validate approved batch/concurrency defaults, async yielding, no transaction across HTTP,
   independent job flags, market p50/p95, queue age, saturation, and recovery to baseline.
 - `IN-02`: perform an Iran/foreign disconnect exercise against the existing recovery mechanism and
@@ -1492,6 +1575,8 @@ Exit criteria:
 - sync backlog returns to zero;
 - market latency/backlog remains within the accepted baseline;
 - the current configured two-server path passes exact signed-transport validation;
+- both staging deploy paths leave OTP logging disabled and real OTP delivery observable only through
+  redacted state/outcomes;
 - staging evidence bundle maps results back to every assigned challenge ID.
 
 ### Stage 11 - Owner-Led Manual Acceptance
@@ -1553,8 +1638,9 @@ Challenges and engineering decisions in this stage:
 - Audit all `DT-*`, `DN-*`, `IT-*`, and `IN-*` registry entries. None may remain merely `Open`;
   each must be `Closed in Stage N` or explicitly accepted as a documented residual risk by the
   authorized owner.
-- Reconfirm `IT-09`, `IT-10`, `IT-11`: deploy order is backward-compatible, backups/restores were
-  tested, queues are drained at the right boundary, and rollback does not delete authoritative data.
+- Reconfirm `IT-09`, `IT-10`, `IT-11`, `IT-12`: deploy order is backward-compatible,
+  backups/restores and test-infrastructure gates were tested, queues are drained at the right
+  boundary, and rollback does not delete authoritative data.
 - Reconfirm `IT-15`, `IT-16`, `IN-03`: capacity, runtime dependencies, and approved job-health
   alerts are ready; `DN-08`/`IN-04` add no provider/cost operating layer.
 - Reconfirm `DN-01`, `DN-02`, `DN-06`, `DN-07`, `IN-01`, `IN-02`, `IN-05`, `IN-06`: uniform role
@@ -1618,7 +1704,7 @@ sampling. Invalid combinations must also be enumerated and rejected explicitly.
 
 | Model | Required dimensions |
 |---|---|
-| Invitation | kind `standard/accountant/customer/legacy_unknown` x derived state `pending/completed/revoked/expired` x source `web/bot` x creator role x existing User `none/exact/conflicting/deleted/inactive` x natural-key reservation `none/exact retry/mobile/account/both` |
+| Invitation | kind `standard/accountant/customer/legacy_unknown` x derived state `pending/completed/revoked/expired` x source `web/bot` x creator role `watch/standard/police/middle_manager/super_admin` x current inviter-permission and relation-ownership result `allowed/denied` x existing User `none/exact/conflicting/deleted/inactive` x natural-key reservation `none/exact retry/mobile/account/both` |
 | Customer/accountant | kind x customer tier `tier1/tier2` or accountant x Relation `missing/pending/active/expired/revoked/deleted` x arrival order x SMS category flag |
 | Telegram identity | contact ownership `owned/forwarded/missing` x normalized mobile `exact/mismatch/malformed` x Telegram ID `free/same User/other User` x invitation eligibility |
 | FSM | state `none/contact/address/confirm/ready/terminal` x input type x duplicate input x Redis present/lost x process restart x Invitation state change |
@@ -1673,7 +1759,7 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `MIG-004` | Backfill completion metadata for exact one-User evidence only; zero, multiple, deleted, inactive, mobile-conflicting, or account-conflicting matches remain conservative. |
 | `MIG-005` | Backfill active identity reservations for every valid pending kind and reject/report every mobile, account, or combined collision without row-order winner selection. |
 | `MIG-006` | Exercise all completion-field constraints with all-null, all-valid, and every partial-null combination; invalid rows must be rejected atomically. |
-| `MIG-007` | Verify Invitation expiry and Relation expiry equality for new rows, legacy rows, changed settings, leap-day/month/year boundaries, and UTC conversion using the existing project time standard. |
+| `MIG-007` | Prove all new async creation paths use `get_trading_settings_async()` from `core.trading_settings`, whose effective accepted value is two days; the one-day `core.config` default and sync compatibility accessor cannot affect lifetime. Verify Invitation/Relation expiry equality, setting changes, legacy rows, leap-day/month/year boundaries, and UTC conversion using the existing project time standard. |
 | `MIG-008` | Restore a backup containing each intent, receipt, outbox, reservation, invitation, relation, and OTP state; verify state, ownership, idempotency, and due-job recovery. |
 | `MIG-009` | Execute the documented schema/feature rollback path after zero, partial, and full traffic; authoritative User/Invitation/Relation data must remain intact and old binaries must remain compatible. |
 | `MIG-010` | Verify registration intent is explicitly absent from generic sync registry/parity requirements while accepted User/Invitation/Relation changes continue through existing sync. |
@@ -1687,7 +1773,7 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `INV-003` | Exact retry by the same authorized creator returns the same Invitation; changed owner, kind, tier, mobile, account, expiry, or payload produces a safe conflict without token disclosure. |
 | `INV-004` | Concurrent creates at every lock barrier for same mobile, same account, both keys, and independent keys produce one deterministic reservation per natural key and no partial Relation. |
 | `INV-005` | Pending, completed, revoked, expired, deleted/inactive-User, and legacy-ambiguous invitations are each accepted or rejected according to the locked state table. |
-| `INV-006` | Standard/admin and tier-1 categories send no SMS while their flag is false; accountant and tier-2 preserve the current template/provider behavior; each flag affects only its category. |
+| `INV-006` | Starting from fixtures proving every category currently invokes SMS, Standard/admin and tier-1 send no SMS while their flag is false; accountant and tier-2 preserve the current template/provider behavior; each flag affects only its category. |
 | `INV-007` | SMS policy covers success, explicit provider failure, timeout/ambiguous acceptance, malformed provider response, retry, duplicate command, restart, and outbox replay without duplicate logical sends. |
 | `INV-008` | Completion, revocation, and expiry release reservation in the same transaction; injected failure at every write/commit boundary leaves either the complete old state or complete new state. |
 
@@ -1717,7 +1803,7 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `REG-007` | Iran unavailable before proof, after proof, after durable intent, during request, after commit, and during response updates produces only the approved pending/resume/terminal behavior. |
 | `REG-008` | Web creates exact or conflicting identity during outage before every reconciliation barrier; reconnect links exact identity or rejects conflict without blind creation. |
 | `REG-009` | Reconciliation job is constructed/runs only on foreign; duplicate leaders, lease handoff, bounded batch, backoff, poison item, restart, and starvation tests prove forward progress and isolation. |
-| `REG-010` | All successful direct registrations set `home_server=iran`; foreign creates no UserSession/JWT/refresh token and later Web login creates only the existing Iran-local session type. |
+| `REG-010` | Both service adapters pass through a literal `home_server=iran` assignment independent of Host, source headers, `_login_home_server`, and the model default; foreign creates no UserSession/JWT/refresh token and later Web login creates only the existing Iran-local session type. |
 
 #### Sync, field authority, and projection gating
 
@@ -1729,7 +1815,7 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `SYN-004` | Standard/admin/police projection never waits for a nonexistent Relation; tier-1 customer projection always waits for its required Relation. |
 | `SYN-005` | Generic User patches containing counters, market/accounting ownership, role/address, Telegram data, unknown fields, or no-op values obey their existing domain authority and emit no raw PII. |
 | `SYN-006` | Sync interruption between every batch row, redelivery after commit, stale replay after newer event, and foreign dedupe-receipt loss produce no duplicate onboarding notification or logical enqueue. |
-| `SYN-007` | Existing Offer/request home fields, market data, messenger exclusion, session ownership, and unrelated table parity remain byte-for-byte/behaviorally unchanged under regression fixtures. |
+| `SYN-007` | Event builders, receiver apply, field policy, registry, parity comparators, reset/fixtures, backup verification, and the mixed-version flag are tested with old unversioned and new versioned peers; after the declared compatibility gate closes, unversioned events fail closed. Existing Offer/request home fields, market data, messenger exclusion, session ownership, and unrelated table parity remain unchanged. |
 
 #### WebApp OTP delivery and fallback
 
@@ -1739,11 +1825,11 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `OTP-002` | One cryptographically generated OTP and one original 120-second expiry are shared across Telegram and SMS; repeat requests during TTL create neither a new code nor extended expiry. |
 | `OTP-003` | Verification at `t=0`, just before/at/just after 40 seconds, and just before/at/just after 120 seconds covers verify-before-claim, claim-before-verify, and simultaneous barrier races. |
 | `OTP-004` | Scheduled fallback sends the same code once after 40 seconds when unverified; verified, expired, already-SMS-accepted, or non-Telegram deliveries become no-ops. |
-| `OTP-005` | Legacy manual SMS endpoint before/at/after 40 seconds uses the same code/TTL and atomically suppresses any later duplicate scheduled fallback. |
+| `OTP-005` | Legacy manual SMS endpoint before/at/after 40 seconds reads the same `otp:{mobile}` code-of-record and structured request/TTL, atomically suppresses later fallback, and races a sorted-set due claim at the exact same deterministic barrier without duplicate acceptance. |
 | `OTP-006` | SMS success, explicit failure, timeout/ambiguous acceptance, malformed response, provider disconnect, Redis failure, API restart, and leader restart preserve fail-closed verification and duplicate policy. |
 | `OTP-007` | Two Iran leader instances, lease handoff, duplicate due rows, and provider-accepted/response-lost barriers prove one atomic claim and no automatic ambiguous resend. |
 | `OTP-008` | Job factory and execution are Iran-only; bot registration/login has no OTP path; no foreign OTP fallback job can mutate state. |
-| `OTP-009` | Login UI preserves current copy, counts from 40 to zero without drift/reflow, exposes no manual resend action at zero, and fallback still occurs when page is hidden, closed, refreshed, or offline. |
+| `OTP-009` | Login UI preserves current copy, counts from 40 to zero without drift/reflow, exposes no manual resend action at zero, and fallback still occurs when page is hidden, closed, refreshed, or offline. Also cover the existing 429-detail digit-extraction path with Persian/ASCII digits, changed detail without digits, and the active-code response so copy changes cannot seed a wrong countdown. |
 | `OTP-010` | Correct code verifies once; wrong, malformed, expired, replayed, cross-user, cross-request, and brute-force/rate-limited attempts fail without account or code leakage. |
 
 #### Transport, API contracts, and security
@@ -1754,9 +1840,10 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `SEC-002` | Timestamp just inside/at/outside replay window, duplicate signature, command replay, changed-body replay, body/header mutation, redirect, and proxy stripping have deterministic outcomes. |
 | `SEC-003` | Registration authority route is absent/forbidden on foreign; Telegram delivery route and bot runtime are absent/forbidden on Iran; wrong-server background jobs cannot be constructed. |
 | `SEC-004` | Public invitation lookup is rate-limited, non-cacheable, enumeration-resistant, and masked for found/not-found/conflict; authenticated authorized response alone exposes full links. |
-| `SEC-005` | Logs, metrics, traces, exceptions, receipts, test artifacts, and alerts contain no raw OTP, token, mobile, address, Telegram ID, secret, signature, or provider credential. |
+| `SEC-005` | Logs, metrics, traces, exceptions, receipts, test artifacts, and alerts contain no raw OTP, token, mobile, address, Telegram ID, secret, signature, or provider credential. Fresh and repeated staging deploy tests prove `STAGING_LOG_OTP_CODES=false`, reject Telegram-OTP mode with it true, and prove real delivery is not short-circuited. |
 | `SEC-006` | Contract v1 and v2 request/response fixtures cover every success/reason code, explicit availability/SMS fields, legacy aliases, omitted/extra/null fields, and mixed old/new peers. |
 | `SEC-007` | Rate limits and authorization cover anonymous, user, inviter, manager, super-admin, cross-owner, inactive, and deleted principals without introducing a force-create/link/review path. |
+| `SEC-008` | Empty, malformed, HTTP outside local test, Iran-host, and each configured foreign Web/API hostname value for `PUBLIC_WEBAPP_URL` are tested; only the canonical valid Iran HTTPS URL may generate user-facing links, and every invalid value fails closed without emitting a link. |
 
 #### UI, regression, load, and real staging
 
@@ -1967,6 +2054,9 @@ Timing misses must be observable. They must not weaken identity, idempotency, or
 
 ## Migration And Backfill Policy
 
+- Invitation creation stops reading `core.config.settings.invitation_expiry_days`; the existing
+  async `core.trading_settings.get_trading_settings_async()` value is the sole source for new stored
+  expiry timestamps.
 - New Invitation completion fields are nullable for legacy rows.
 - Backfill explicit invitation kind from exact relation evidence first and prefix second; ambiguous
   rows become `legacy_unknown` and are terminally rejected for new completion.
@@ -1995,6 +2085,8 @@ Rollback is feature-disable first, not data deletion.
 5. Preserve invitation completion metadata, command receipts, intents, and users.
 6. Do not unlink Telegram IDs or reverse completed registrations automatically.
 7. Re-enable only after root cause and replay/idempotency safety are proven in staging.
+8. Never re-enable raw OTP logging as a rollback mechanism; staging uses dev login for unrelated
+   automation and real redacted delivery evidence for OTP acceptance.
 
 ## Operational Prerequisites
 
@@ -2008,6 +2100,10 @@ Rollback is feature-disable first, not data deletion.
 - Telegram Bot API access and central gateway are healthy on foreign.
 - Both databases have zero relevant sync backlog before enabling each stage.
 - Clocks are synchronized closely enough for signed timestamp validation and 40-second scheduling.
+- Staging environment generation and redeploy both enforce `STAGING_LOG_OTP_CODES=false` before real
+  OTP delivery tests.
+- The pinned test-only dependencies and CI runners required by `IT-12` are available without being
+  installed in production runtime images.
 - Existing operational ownership covers incidents and alerts; current database/backup
   retention behavior is verified for the new local tables.
 
@@ -2043,3 +2139,11 @@ This roadmap is complete only when all of the following are true:
 19. Automated two-server staging matrix passes.
 20. Owner-led manual staging acceptance passes, including the current configured two-server path.
 21. Production remains untouched until explicit final approval.
+22. Every invitation creation path snapshots the accepted two-day value from
+    `core.trading_settings`; the obsolete one-day config default cannot affect a new Invitation.
+23. New registration notifications reuse `telegram_notification_outbox`; no parallel outbox or
+    background-worker service exists.
+24. Fresh and repeated staging deploys keep raw OTP logging disabled while real Telegram/SMS delivery
+    and unrelated dev-login automation both remain testable through their separate paths.
+25. Changed-code coverage, property/fuzz, deterministic race, mutation, state-transition, and
+    traceability CI gates are executable and pass with no required-case waiver.
