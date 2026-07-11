@@ -23,6 +23,7 @@ JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
 JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
+JOB_OTP_SMS_FALLBACK = "otp_sms_fallback"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -37,6 +38,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
         JOB_OFFER_TELEGRAM_PUBLICATION,
         JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+        JOB_OTP_SMS_FALLBACK,
     }
 )
 
@@ -286,6 +288,22 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         ),
         local_runtime=True,
         external_state=("Iran signed registration endpoint",),
+    ),
+    JOB_OTP_SMS_FALLBACK: BackgroundJobAuthorityEntry(
+        job_name=JOB_OTP_SMS_FALLBACK,
+        mutated_tables=(),
+        allowed_servers=(SERVER_IRAN,),
+        authority_rule=(
+            "iran-only local Web-login OTP fallback claimant; Telegram delivery acknowledgement, "
+            "verification, legacy resend, and due claims share one Redis request state"
+        ),
+        outage_behavior=(
+            "resume unconsumed and unexpired sorted-set work after leader/API restart; never retry "
+            "a provider-ambiguous same-code delivery automatically"
+        ),
+        sync_outbox_behavior="no-sync Iran-local Redis state; OTP values never enter sync or a durable outbox",
+        local_runtime=True,
+        external_state=("redis:otp_delivery:*", "SMS.ir"),
     ),
 }
 

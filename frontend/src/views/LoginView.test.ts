@@ -122,7 +122,7 @@ describe('LoginView.vue', () => {
     )
     expect(pushBackStateMock).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
-    expect(wrapper.text()).toContain('00:30')
+    expect(wrapper.text()).toContain('00:40')
     wrapper.unmount()
   }, 10000)
 
@@ -257,12 +257,11 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('resends OTP through SMS after a Telegram delivery and handles rejected approval polling', async () => {
+  it('waits for automatic SMS after Telegram delivery without exposing a manual resend', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({ method: 'telegram' }) as any)
-      .mockResolvedValueOnce(makeJsonResponse({ expires_in: 60 }) as any)
       .mockResolvedValueOnce(
         makeJsonResponse({
           status: 'approval_required',
@@ -278,17 +277,10 @@ describe('LoginView.vue', () => {
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
 
-    vi.advanceTimersByTime(30000)
+    vi.advanceTimersByTime(40000)
     await flushPromises()
-    await findButtonByText(wrapper, 'ارسال مجدد کد').trigger('click')
-    await flushPromises()
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/auth/resend-otp-sms',
-      expect.objectContaining({ method: 'POST' }),
-    )
-    expect(wrapper.text()).toContain('01:00')
+    expect(wrapper.text()).not.toContain('ارسال مجدد کد')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()

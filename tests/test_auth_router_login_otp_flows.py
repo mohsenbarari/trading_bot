@@ -153,8 +153,8 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(is_deleted=False, telegram_id=123)
         redis = FakeRedis()
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.random.randint",
-            return_value=12345,
+            "api.routers.auth._generate_otp_code",
+            return_value="12345",
         ), patch("api.routers.auth.is_internet_connected", new=AsyncMock(return_value=True)), patch(
             "api.routers.auth.send_telegram_message",
             new=AsyncMock(),
@@ -210,8 +210,8 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         redis = FakeRedis()
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.random.randint",
-            return_value=12345,
+            "api.routers.auth._generate_otp_code",
+            return_value="12345",
         ), patch(
             "api.routers.auth.is_internet_connected",
             new=AsyncMock(return_value=True),
@@ -241,8 +241,8 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._find_pending_invitation_for_mobile",
             new=AsyncMock(return_value=(invitation, None, None)),
         ), patch(
-            "api.routers.auth.random.randint",
-            return_value=22222,
+            "api.routers.auth._generate_otp_code",
+            return_value="22222",
         ), patch(
             "api.routers.auth.is_internet_connected",
             new=AsyncMock(return_value=False),
@@ -266,8 +266,8 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._find_pending_invitation_for_mobile",
             new=AsyncMock(return_value=(invitation, None, None)),
         ), patch(
-            "api.routers.auth.random.randint",
-            return_value=67890,
+            "api.routers.auth._generate_otp_code",
+            return_value="67890",
         ), patch(
             "api.routers.auth.is_internet_connected",
             new=AsyncMock(side_effect=AssertionError("staging log delivery must not check connectivity")),
@@ -295,8 +295,8 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         redis = FakeRedis()
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.random.randint",
-            return_value=54321,
+            "api.routers.auth._generate_otp_code",
+            return_value="54321",
         ), patch(
             "api.routers.auth.is_internet_connected",
             new=AsyncMock(return_value=True),
@@ -316,8 +316,8 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(is_deleted=False, telegram_id=None)
         redis = FakeRedis()
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.random.randint",
-            return_value=11111,
+            "api.routers.auth._generate_otp_code",
+            return_value="11111",
         ), patch(
             "api.routers.auth.is_internet_connected",
             new=AsyncMock(return_value=False),

@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import logging
 from pydantic import BaseModel, field_validator
 from typing import Optional
-import random
 import secrets
 import hashlib
 import hmac
@@ -25,7 +24,7 @@ from core.security import (
 from core.config import settings
 import json
 from bot.utils.redis_helpers import get_redis
-from core.sms import send_otp_sms, send_sms
+from core.sms import SMSDeliveryOutcome, send_otp_sms, send_otp_sms_result_async, send_sms
 from core.connectivity import is_internet_connected
 from api.deps import get_current_user, oauth2_scheme
 import schemas
@@ -60,9 +59,13 @@ from core.services.authoritative_telegram_account_link_service import (
     complete_authoritative_telegram_account_link,
 )
 from core.registration_contracts import (
+    OTPDeliveryStatus,
     TelegramRegistrationCommand,
     TelegramRegistrationCommandResponse,
     TelegramRegistrationOutcome,
+    TelegramOTPDeliveryCommand,
+    TelegramOTPDeliveryOutcome,
+    TelegramOTPDeliveryResponse,
 )
 from core.telegram_account_link_contracts import TelegramAccountLinkCommand
 from core.trade_forwarding import verify_internal_signature
@@ -74,6 +77,19 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
+from core.services.otp_delivery_state_service import (
+    arm_sms_fallback,
+    build_otp_delivery_state,
+    cancel_otp_delivery,
+    claim_sms_delivery,
+    consume_otp_code,
+    create_otp_delivery_state,
+    load_otp_delivery_state,
+    record_sms_delivery_result,
+    schedule_sms_fallback,
+)
+from core.services.telegram_otp_delivery_service import deliver_telegram_otp_once
+from core.telegram_otp_transport import forward_telegram_otp_delivery
 from core.server_routing import (
     SERVER_FOREIGN,
     SERVER_IRAN,
@@ -120,6 +136,20 @@ def _verify_foreign_internal_command(raw_request: Request, body: bytes) -> None:
         raise HTTPException(status_code=403, detail="Registration reconciliation is Iran-authoritative")
     if normalize_server(raw_request.headers.get("x-source-server"), default="") != SERVER_FOREIGN:
         raise HTTPException(status_code=401, detail="Invalid internal registration source")
+
+
+def _verify_iran_internal_command(raw_request: Request, body: bytes) -> None:
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal OTP signature")
+    if current_server() != SERVER_FOREIGN:
+        raise HTTPException(status_code=403, detail="Telegram OTP delivery is foreign-only")
+    if normalize_server(raw_request.headers.get("x-source-server"), default="") != SERVER_IRAN:
+        raise HTTPException(status_code=401, detail="Invalid internal OTP source")
 
 
 def _registration_outcome_event(outcome: TelegramRegistrationOutcome) -> str:
@@ -230,6 +260,39 @@ async def complete_telegram_account_link_internal(
         outcome=result.outcome,
         authoritative_user_id=result.authoritative_user_id,
     )
+
+
+@router.post(
+    "/internal/telegram-otp/deliver",
+    response_model=TelegramOTPDeliveryResponse,
+)
+async def deliver_telegram_otp_internal(
+    raw_request: Request,
+    response: Response,
+):
+    body = await raw_request.body()
+    _verify_iran_internal_command(raw_request, body)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        command = TelegramOTPDeliveryCommand.model_validate(json.loads(body))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid internal OTP delivery command") from None
+    if not settings.telegram_login_otp_enabled:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return TelegramOTPDeliveryResponse(
+            otp_request_id=command.otp_request_id,
+            outcome=TelegramOTPDeliveryOutcome.FEATURE_DISABLED,
+            terminal=False,
+        )
+    redis = await get_redis()
+    result = await deliver_telegram_otp_once(redis, command=command)
+    audit_log(
+        "otp.telegram_delivery_result",
+        target_type="otp_request",
+        target_id=str(command.otp_request_id),
+        result=result.outcome.value,
+    )
+    return result
 
 
 def _deliver_otp_via_staging_log(*, mobile: str, otp_code: str, purpose: str) -> bool:
@@ -767,7 +830,7 @@ async def register_otp_request(
     if await redis.get(rate_limit_key):
         raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
 
-    otp_code = str(random.randint(10000, 99999))
+    otp_code = _generate_otp_code()
     otp_key = f"reg_otp:{req.token}" # Use token as key identifier for security
     
     await redis.setex(otp_key, OTP_TTL_SECONDS, otp_code)
@@ -1081,6 +1144,164 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         "role": user.role
     }
 
+def _generate_otp_code() -> str:
+    return f"{secrets.randbelow(90000) + 10000:05d}"
+
+
+def _otp_sms_status(outcome: SMSDeliveryOutcome) -> OTPDeliveryStatus:
+    if outcome == SMSDeliveryOutcome.ACCEPTED:
+        return OTPDeliveryStatus.ACCEPTED
+    if outcome == SMSDeliveryOutcome.AMBIGUOUS:
+        return OTPDeliveryStatus.AMBIGUOUS
+    return OTPDeliveryStatus.FAILED
+
+
+async def _deliver_stage6_sms(redis, *, state) -> SMSDeliveryOutcome:
+    claim = await claim_sms_delivery(redis, state=state, require_due=False)
+    if claim is None:
+        refreshed = await load_otp_delivery_state(
+            redis,
+            request_id=state.otp_request_id,
+        )
+        if refreshed and refreshed.sms_delivery_status == OTPDeliveryStatus.ACCEPTED:
+            return SMSDeliveryOutcome.ACCEPTED
+        return SMSDeliveryOutcome.AMBIGUOUS
+    try:
+        outcome = await send_otp_sms_result_async(claim.mobile_number, claim.otp_code)
+    except Exception:
+        outcome = SMSDeliveryOutcome.AMBIGUOUS
+    await record_sms_delivery_result(
+        redis,
+        request_id=claim.request_id,
+        outcome=_otp_sms_status(outcome),
+    )
+    audit_log(
+        "otp.sms_delivery_result",
+        target_type="otp_request",
+        target_id=str(claim.request_id),
+        result=outcome.value,
+    )
+    return outcome
+
+
+async def _request_stage6_login_otp(
+    redis,
+    *,
+    mobile: str,
+    user: User | None,
+) -> dict:
+    if current_server() != SERVER_IRAN:
+        raise HTTPException(status_code=503, detail="سرویس ارسال کد موقتاً در دسترس نیست")
+    if settings.environment == "staging" and settings.staging_log_otp_codes:
+        raise HTTPException(
+            status_code=503,
+            detail="ارسال واقعی کد در تنظیمات staging غیرفعال است",
+        )
+
+    ttl_seconds = max(30, int(settings.otp_ttl_seconds))
+    otp_code = _generate_otp_code()
+    state = build_otp_delivery_state(
+        mobile=mobile,
+        telegram_id=(int(user.telegram_id) if user and user.telegram_id else None),
+        ttl_seconds=ttl_seconds,
+    )
+    if not await create_otp_delivery_state(
+        redis,
+        state=state,
+        otp_code=otp_code,
+        ttl_seconds=ttl_seconds,
+    ):
+        raise HTTPException(status_code=429, detail="کد قبلی هنوز معتبر است. لطفاً صبر کنید.")
+    audit_log(
+        "otp.requested",
+        target_type="otp_request",
+        target_id=str(state.otp_request_id),
+        result="accepted",
+    )
+
+    use_telegram = bool(
+        state.telegram_id
+        and settings.telegram_login_otp_enabled
+        and settings.otp_sms_auto_fallback_enabled
+    )
+    if use_telegram:
+        fallback_seconds = max(1, int(settings.otp_sms_auto_fallback_seconds))
+        # Persist recovery before the remote side effect. A valid acknowledgement
+        # moves this conservative deadline to exactly fallback_seconds after ack.
+        recovery_at = utc_now() + timedelta(seconds=fallback_seconds + 5)
+        try:
+            fallback_armed = await arm_sms_fallback(
+                redis,
+                request_id=state.otp_request_id,
+                recovery_at=recovery_at,
+            )
+        except Exception:
+            fallback_armed = False
+        command = TelegramOTPDeliveryCommand(
+            otp_request_id=state.otp_request_id,
+            telegram_id=state.telegram_id,
+            otp_code=otp_code,
+            expires_at=state.expires_at,
+        )
+        if fallback_armed:
+            try:
+                status_code, body = await forward_telegram_otp_delivery(command)
+            except Exception:
+                status_code, body = 503, {"detail": "Telegram delivery failed"}
+        else:
+            status_code, body = 503, {"detail": "OTP fallback scheduling failed"}
+        try:
+            delivery = TelegramOTPDeliveryResponse.model_validate(body)
+        except (TypeError, ValueError):
+            delivery = None
+        if (
+            status_code == 200
+            and delivery is not None
+            and delivery.otp_request_id == state.otp_request_id
+            and delivery.outcome
+            in {
+                TelegramOTPDeliveryOutcome.SENT,
+                TelegramOTPDeliveryOutcome.DUPLICATE_SENT,
+            }
+        ):
+            sent_at = utc_now()
+            fallback_at = sent_at + timedelta(seconds=fallback_seconds)
+            try:
+                scheduled = await schedule_sms_fallback(
+                    redis,
+                    request_id=state.otp_request_id,
+                    telegram_sent_at=sent_at,
+                    fallback_at=fallback_at,
+                )
+            except Exception:
+                scheduled = False
+            if scheduled:
+                audit_log(
+                    "otp.sms_fallback_scheduled",
+                    target_type="otp_request",
+                    target_id=str(state.otp_request_id),
+                    result="scheduled",
+                    extra={"fallback_seconds": fallback_seconds},
+                )
+                return {
+                    "detail": "کد تایید ارسال شد",
+                    "method": "telegram",
+                    "expires_in": ttl_seconds,
+                    "sms_fallback_in": fallback_seconds,
+                }
+
+    sms_outcome = await _deliver_stage6_sms(redis, state=state)
+    if sms_outcome == SMSDeliveryOutcome.ACCEPTED:
+        return {
+            "detail": "کد تایید ارسال شد",
+            "method": "sms",
+            "expires_in": ttl_seconds,
+        }
+    if sms_outcome == SMSDeliveryOutcome.FAILED:
+        await cancel_otp_delivery(redis, mobile=mobile)
+    raise HTTPException(status_code=500, detail="خطا در ارسال کد تایید")
+
+
 @router.post("/request-otp", response_model=dict)
 
 async def request_otp(
@@ -1119,10 +1340,13 @@ async def request_otp(
     redis = await get_redis()
     rate_limit_key = f"otp_limit:{mobile}"
     limit_val = await redis.get(rate_limit_key)
-    logger.info(f"OTP Request for {mobile}: LimitKey={rate_limit_key}, Exists={limit_val is not None}")
+    logger.info(
+        "OTP request rate-limit state checked",
+        extra={"event": "otp.rate_limit_checked", "active": limit_val is not None},
+    )
     
     if limit_val:
-        logger.info(f"OTP Request Rate Limit Hit for {mobile}")
+        logger.info("OTP request rate limit hit", extra={"event": "otp.rate_limited"})
         raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
 
     # تولید کد ۵ رقمی
@@ -1131,12 +1355,19 @@ async def request_otp(
     active_otp = await redis.get(otp_key)
     
     if active_otp:
-        logger.info("OTP Request for %s: Active OTP exists. Blocking new generation.", mobile)
+        logger.info("Active OTP exists; blocking new generation", extra={"event": "otp.active_exists"})
         # Raise 429 so frontend triggers timer
         raise HTTPException(status_code=429, detail="کد قبلی هنوز معتبر است. لطفاً صبر کنید.")
 
-    otp_code = str(random.randint(10000, 99999))
-    logger.info("Generated NEW OTP for %s", mobile)
+    if settings.telegram_login_otp_enabled:
+        return await _request_stage6_login_otp(
+            redis,
+            mobile=mobile,
+            user=result,
+        )
+
+    otp_code = _generate_otp_code()
+    logger.info("Generated new OTP", extra={"event": "otp.generated"})
     
     # ذخیره در Redis (۲ دقیقه اعتبار)
     await redis.setex(otp_key, OTP_TTL_SECONDS, otp_code)
@@ -1154,11 +1385,12 @@ async def request_otp(
     has_telegram = result.telegram_id is not None if result else False
     
     logger.info(
-        "OTP Request for %s: Connected=%s, HasTelegram=%s, TelegramID=%s",
-        mobile,
-        is_connected,
-        has_telegram,
-        result.telegram_id if result else None,
+        "Legacy OTP delivery method evaluated",
+        extra={
+            "event": "otp.legacy_delivery_evaluated",
+            "connected": is_connected,
+            "has_telegram": has_telegram,
+        },
     )
 
     sent_via_telegram = False
@@ -1170,21 +1402,21 @@ async def request_otp(
             msg_text = f"🔐 کد ورود شما: `{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
             await send_telegram_message(result.telegram_id, msg_text)
             sent_via_telegram = True
-            logger.info(f"OTP sent via Telegram to {mobile}")
+            logger.info("Legacy OTP sent via Telegram", extra={"event": "otp.legacy_telegram_sent"})
         except Exception as e:
             logger.error(f"Failed to send OTP via Telegram: {e}")
             # Fallback to SMS handled below
     
     # اولویت ۲: SMS (اگر تلگرام نشد یا اینترنت قطعه)
     if not sent_via_telegram:
-        logger.info(f"Attempting SMS fallback for {mobile} (Connected={is_connected}, HasTelegram={has_telegram})")
+        logger.info("Attempting legacy OTP SMS delivery", extra={"event": "otp.legacy_sms_attempt"})
         # اگر اینترنت وصله ولی تلگرام ارسال نشد (یا کاربر تلگرام نداره) -> SMS
         # اگر اینترنت قطعه -> SMS
         if send_otp_sms(mobile, otp_code):
             sent_via_sms = True
-            logger.info(f"OTP sent via SMS to {mobile}")
+            logger.info("Legacy OTP sent via SMS", extra={"event": "otp.legacy_sms_sent"})
         else:
-            logger.error(f"Failed to send OTP via SMS to {mobile}")
+            logger.error("Failed to send legacy OTP via SMS", extra={"event": "otp.legacy_sms_failed"})
             await redis.delete(otp_key)
             await redis.delete(rate_limit_key)
             raise HTTPException(status_code=500, detail="خطا در ارسال کد تایید")
@@ -1209,7 +1441,7 @@ async def resend_otp_sms(
     mobile = normalize_persian_numerals(request.mobile_number)
     redis = await get_redis()
     
-    logger.info(f"Resend SMS Request for {mobile}")
+    logger.info("Legacy OTP SMS resend requested", extra={"event": "otp.legacy_resend_requested"})
 
     # Check if OTP exists
     otp_key = f"otp:{mobile}"
@@ -1217,7 +1449,7 @@ async def resend_otp_sms(
     
     if not otp_code:
          # Session expired
-         logger.warning(f"Resend failed for {mobile}: OTP code not found or expired")
+         logger.warning("OTP resend failed because code is missing or expired")
          raise HTTPException(status_code=400, detail="کد تایید منقضی شده است. لطفاً مجدد درخواست دهید.")
 
     stmt = select(User).where(User.mobile_number == mobile)
@@ -1236,23 +1468,35 @@ async def resend_otp_sms(
     # Rate limit for SMS resend (prevent spamming button)
     sms_limit_key = f"sms_limit:{mobile}"
     if await redis.get(sms_limit_key):
-        logger.info(f"Resend SMS Rate Limit Hit for {mobile}")
+        logger.info("OTP SMS resend rate limit hit")
         raise HTTPException(status_code=429, detail="لطفاً ۱ دقیقه صبر کنید")
         
-    logger.info("Resending existing OTP via SMS to %s", mobile)
+    logger.info("Resending existing OTP via SMS")
     
     # Get remaining TTL for the timer
     ttl = await redis.ttl(otp_key)
-    logger.info(f"TTL for {mobile} (resend-otp-sms): {ttl}")
+    logger.info("OTP SMS resend TTL checked", extra={"remaining_ttl_seconds": ttl})
     
     if ttl < 0: 
         # -1 (no expiry) or -2 (missing). Should not happen here due to check above.
         # But if it does, default to 0 (or strictly, handle error)
-        logger.warning(f"Unexpected TTL for {mobile}: {ttl}")
+        logger.warning("Unexpected OTP TTL", extra={"remaining_ttl_seconds": ttl})
         ttl = 0
 
 
-    # Send SMS
+    if settings.telegram_login_otp_enabled:
+        state = await load_otp_delivery_state(redis, mobile=mobile)
+        if state is not None:
+            outcome = await _deliver_stage6_sms(redis, state=state)
+            if outcome == SMSDeliveryOutcome.ACCEPTED:
+                await redis.setex(sms_limit_key, 60, "1")
+                return {
+                    "detail": "کد از طریق پیامک ارسال شد",
+                    "expires_in": ttl,
+                }
+            raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
+
+    # Legacy compatibility when Stage 6 state is disabled or absent.
     if send_otp_sms(mobile, otp_code):
         await redis.setex(sms_limit_key, 60, "1") # 1 min limit for SMS resend
         return {
@@ -1260,7 +1504,7 @@ async def resend_otp_sms(
             "expires_in": ttl
         }
     else:
-        logger.error(f"Failed to resend OTP via SMS to {mobile}")
+        logger.error("Failed to resend OTP via SMS")
         raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
 
 
@@ -1283,6 +1527,22 @@ async def verify_otp(
     if not constant_time_secret_equals(code, _redis_text(stored_code)):
         await _record_otp_verify_failure(redis, subject=mobile, raw_request=raw_request, otp_key=otp_key)
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
+
+    if settings.telegram_login_otp_enabled:
+        if not await consume_otp_code(
+            redis,
+            mobile=mobile,
+            expected_code=code,
+        ):
+            raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
+        state = await load_otp_delivery_state(redis, mobile=mobile)
+        if state is not None:
+            audit_log(
+                "otp.verified",
+                target_type="otp_request",
+                target_id=str(state.otp_request_id),
+                result="success",
+            )
         
     # کد درست است
     stmt = select(User).where(User.mobile_number == mobile)

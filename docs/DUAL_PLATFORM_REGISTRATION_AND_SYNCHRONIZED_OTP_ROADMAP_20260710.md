@@ -2419,3 +2419,25 @@ The exact accepted, modified, rejected, and deferred decisions are recorded in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE5_REVIEW_REMEDIATION_20260711.md`. This record does not mark
 Stage 5 `GO`, enable flags, migrate a runtime database, authorize Stage 6, or waive any later
 mixed-version/two-server/staging/production gate.
+
+## Stage 6 Source Implementation Record (2026-07-11)
+
+The owner subsequently authorized Stage 6 source work while the Stage 5 remediation review remained
+pending. The implementation keeps `otp:{mobile}` as the only 120-second code-of-record, adds strict
+signed Iran-to-foreign Telegram delivery with short-lived foreign dedupe, and uses one Iran-local
+Redis state machine for acknowledgement, automatic SMS fallback, legacy resend, verification, and
+cancellation. The fallback job is registered inside the existing background leader and is allowed
+only on Iran; no new worker service or database schema was introduced.
+
+To close the API-restart gap, Iran writes a conservative recovery deadline before starting the
+foreign side effect. A valid acknowledgement moves it to exactly 40 seconds after confirmed send.
+Normal transport/protocol failure still claims immediate same-code SMS, while provider-ambiguous SMS
+is terminal for automatic retry. LoginView preserves current copy, uses the backend 40-second value,
+and exposes no Telegram manual-resend action at zero. Staging generation, every-deploy enforcement,
+the example env, and the active local staging env now keep `STAGING_LOG_OTP_CODES=false`; both Stage
+6 feature flags remain off.
+
+The exact implementation and verification record is
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE6_SYNCHRONIZED_OTP_20260711.md`. This source record does not
+accept the pending Stage 5 review, enable either OTP flag, perform a migration/deployment/push, or
+waive Stage 7 through owner acceptance and production gates.

@@ -138,8 +138,8 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._load_valid_invitation_by_token",
             new=AsyncMock(return_value=(invitation, None, None)),
         ), patch(
-            "api.routers.auth.random.randint",
-            return_value=12345,
+            "api.routers.auth._generate_otp_code",
+            return_value="12345",
         ), patch("api.routers.auth.send_otp_sms", return_value=True) as send_sms_mock:
             result = await register_otp_request(req, db=FakeDB())
 
@@ -155,8 +155,8 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._load_valid_invitation_by_token",
             new=AsyncMock(return_value=(invitation, None, None)),
         ), patch(
-            "api.routers.auth.random.randint",
-            return_value=12345,
+            "api.routers.auth._generate_otp_code",
+            return_value="12345",
         ), patch("api.routers.auth.send_otp_sms", return_value=False):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_otp_request(req, db=FakeDB())
@@ -179,8 +179,8 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._load_valid_invitation_by_token",
             new=AsyncMock(return_value=(invitation, None, None)),
         ), patch(
-            "api.routers.auth.random.randint",
-            return_value=54321,
+            "api.routers.auth._generate_otp_code",
+            return_value="54321",
         ), patch("api.routers.auth.send_otp_sms") as send_sms_mock, self.assertLogs(
             "api.routers.auth", level="WARNING"
         ) as captured:

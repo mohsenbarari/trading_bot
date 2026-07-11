@@ -104,6 +104,52 @@ def _post_smsir_result(
     return SMSDeliveryOutcome.ACCEPTED, data
 
 
+async def _post_smsir_result_async(
+    path: str,
+    payload: dict[str, Any],
+) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    try:
+        async with httpx.AsyncClient(timeout=settings.smsir_timeout_seconds) as client:
+            response = await client.post(
+                _api_url(path),
+                headers=_smsir_headers(),
+                json=payload,
+            )
+    except RuntimeError as exc:
+        logger.error("SMS.ir async request configuration failed for %s: %s", path, exc)
+        return SMSDeliveryOutcome.FAILED, None
+    except Exception as exc:
+        logger.error("SMS.ir async request failed for %s: %s", path, exc)
+        return SMSDeliveryOutcome.AMBIGUOUS, None
+
+    try:
+        data = response.json()
+    except ValueError:
+        logger.error(
+            "SMS.ir returned non-JSON async response for %s: http_status=%s",
+            path,
+            response.status_code,
+        )
+        return SMSDeliveryOutcome.AMBIGUOUS, None
+    if response.status_code < 200 or response.status_code >= 300:
+        outcome = (
+            SMSDeliveryOutcome.FAILED
+            if 400 <= response.status_code < 500 and response.status_code not in (408, 429)
+            else SMSDeliveryOutcome.AMBIGUOUS
+        )
+        logger.error(
+            "SMS.ir async HTTP error for %s: http_status=%s provider_status=%s",
+            path,
+            response.status_code,
+            data.get("status"),
+        )
+        return outcome, None
+    if not _response_is_success(data):
+        logger.error("SMS.ir rejected async request for %s", path)
+        return SMSDeliveryOutcome.FAILED, None
+    return SMSDeliveryOutcome.ACCEPTED, data
+
+
 def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     outcome, data = _post_smsir_result(path, payload)
     return data if outcome == SMSDeliveryOutcome.ACCEPTED else None
@@ -219,6 +265,42 @@ def send_otp_sms(mobile: str, code: str) -> bool:
         template_id=template_id,
         parameters=[{"name": parameter_name, "value": str(code)}],
     )
+
+
+async def send_otp_sms_result_async(mobile: str, code: str) -> SMSDeliveryOutcome:
+    """Send one OTP without blocking the API/background-leader event loop."""
+
+    try:
+        template_id = _configured_template_id(
+            settings.smsir_otp_template_id,
+            setting_name="SMSIR_OTP_TEMPLATE_ID",
+        )
+    except RuntimeError as exc:
+        logger.error("Invalid SMS.ir OTP configuration: %s", exc)
+        return SMSDeliveryOutcome.FAILED
+    if template_id is None:
+        logger.error("SMSIR_OTP_TEMPLATE_ID is not configured")
+        return SMSDeliveryOutcome.FAILED
+
+    normalized_mobile = _normalize_mobile(mobile)
+    parameter_name = (settings.smsir_otp_template_parameter or "CODE").strip() or "CODE"
+    payload = {
+        "mobile": normalized_mobile,
+        "templateId": template_id,
+        "parameters": [{"name": parameter_name, "value": str(code)}],
+    }
+    outcome, data = await _post_smsir_result_async("v1/send/verify", payload)
+    if outcome != SMSDeliveryOutcome.ACCEPTED:
+        return outcome
+    provider_data = data.get("data") if data is not None else None
+    if not isinstance(provider_data, dict) or provider_data.get("messageId") in (None, 0, "0"):
+        logger.error(
+            "SMS.ir async verify send returned no usable messageId for %s",
+            mask_mobile(normalized_mobile),
+        )
+        return SMSDeliveryOutcome.AMBIGUOUS
+    logger.info("SMS.ir async OTP accepted for %s", mask_mobile(normalized_mobile))
+    return SMSDeliveryOutcome.ACCEPTED
 
 
 def send_invitation_sms_result(

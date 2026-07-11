@@ -6,6 +6,7 @@ from core.background_job_authority import (
     JOB_MARKET_SCHEDULE,
     JOB_OFFER_EXPIRY,
     JOB_OFFER_TELEGRAM_PUBLICATION,
+    JOB_OTP_SMS_FALLBACK,
     JOB_SESSION_EXPIRY,
     JOB_SYNC_WORKER,
     JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
@@ -78,6 +79,11 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertEqual(notification_outbox_decision.reason, "background_job_not_allowed_on_server")
         self.assertFalse(offer_publication_decision.ok)
         self.assertEqual(offer_publication_decision.reason, "background_job_not_allowed_on_server")
+        otp_fallback_decision = check_background_job_authority(
+            JOB_OTP_SMS_FALLBACK,
+            server_mode="foreign",
+        )
+        self.assertFalse(otp_fallback_decision.ok)
 
         with self.assertRaises(BackgroundJobAuthorityError):
             assert_background_job_authority(JOB_USER_ACCOUNT_STATUS, server_mode="foreign")
@@ -100,6 +106,7 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertTrue(check_background_job_authority(JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY, server_mode="foreign").ok)
         self.assertTrue(check_background_job_authority(JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY, server_mode="foreign").ok)
         self.assertTrue(check_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION, server_mode="foreign").ok)
+        self.assertTrue(check_background_job_authority(JOB_OTP_SMS_FALLBACK, server_mode="iran").ok)
 
     def test_unknown_jobs_fail_closed_when_filtering_factories(self):
         rejected = []

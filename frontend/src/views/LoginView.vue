@@ -196,8 +196,8 @@ async function requestOtp() {
     const data = await res.json()
     lastMethod.value = data.method
     
-    // If Telegram -> 30s timer, else 120s
-    const timerSeconds = data.method === 'telegram' ? 30 : 120
+    // Telegram countdown represents the automatic SMS fallback, not OTP expiry.
+    const timerSeconds = data.method === 'telegram' ? (data.sms_fallback_in || 40) : 120
     startTimer(timerSeconds)
     goToOtpStep()
     
@@ -242,9 +242,7 @@ async function resendOtpSms() {
 }
 
 function handleResend() {
-    if (lastMethod.value === 'telegram') {
-        resendOtpSms()
-    } else {
+    if (lastMethod.value !== 'telegram') {
         requestOtp()
     }
 }
@@ -895,7 +893,7 @@ function goBackToMobile() {
                 <Clock :size="14" />
                 <span>{{ formattedTimer }} تا ارسال مجدد</span>
               </div>
-              <button v-else type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
+              <button v-else-if="lastMethod !== 'telegram'" type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
             </div>
           </div>
 

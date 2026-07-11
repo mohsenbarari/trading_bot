@@ -109,6 +109,16 @@ class OTPDeliveryStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class TelegramOTPDeliveryOutcome(str, Enum):
+    SENT = "sent"
+    DUPLICATE_SENT = "duplicate_sent"
+    UNREACHABLE = "unreachable"
+    RATE_LIMITED = "rate_limited"
+    PROVIDER_ERROR = "provider_error"
+    INVALID = "invalid"
+    FEATURE_DISABLED = "feature_disabled"
+
+
 class TelegramRegistrationCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -233,6 +243,30 @@ class OTPDeliveryStateContract(BaseModel):
         if self.expires_at <= self.created_at:
             raise ValueError("OTP expiry must be after creation")
         return self
+
+
+class TelegramOTPDeliveryCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    otp_request_id: UUID
+    telegram_id: int = Field(gt=0)
+    otp_code: str = Field(pattern=r"^[0-9]{5}$")
+    expires_at: datetime
+
+    @field_validator("expires_at")
+    @classmethod
+    def require_expiry_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("OTP delivery expiry must include a timezone")
+        return value
+
+
+class TelegramOTPDeliveryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    otp_request_id: UUID
+    outcome: TelegramOTPDeliveryOutcome
+    terminal: bool = True
 
 
 def canonical_registration_command_bytes(command: TelegramRegistrationCommand | dict[str, Any]) -> bytes:
