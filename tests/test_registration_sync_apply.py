@@ -12,6 +12,7 @@ from api.routers.sync import (
     _apply_user_counter_event,
     _apply_versioned_user_patch,
     _build_upsert_stmt,
+    _localize_registration_user_reference,
 )
 from core.user_counter_sync import user_counter_event_content_hash
 from models.accountant_relation import AccountantRelation
@@ -66,6 +67,58 @@ class _QueryResult:
 
 
 class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registration_user_foreign_keys_are_localized_by_product_identity(self):
+        local_user = SimpleNamespace(id=42)
+        invitation_data = {
+            "account_name": "canonical-user",
+            "mobile_number": "09121112233",
+            "registered_user_id": 100,
+        }
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            resolved = await _localize_registration_user_reference(
+                _ApplyDB(execute_results=[_QueryResult([local_user])]),
+                "invitations",
+                invitation_data,
+            )
+        self.assertTrue(resolved)
+        self.assertEqual(invitation_data["registered_user_id"], 42)
+
+        relation_data = {
+            "invitation_token": "CUST-localized",
+            "customer_user_id": 100,
+        }
+        local_invitation = SimpleNamespace(registered_user_id=42)
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            resolved = await _localize_registration_user_reference(
+                _ApplyDB(execute_results=[_QueryResult([local_invitation])]),
+                "customer_relations",
+                relation_data,
+            )
+        self.assertTrue(resolved)
+        self.assertEqual(relation_data["customer_user_id"], 42)
+
+    async def test_registration_user_reference_defers_until_user_or_invitation_arrives(self):
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            invitation_ready = await _localize_registration_user_reference(
+                _ApplyDB(execute_results=[_QueryResult([])]),
+                "invitations",
+                {
+                    "account_name": "missing-user",
+                    "mobile_number": "09121112233",
+                    "registered_user_id": 100,
+                },
+            )
+            relation_ready = await _localize_registration_user_reference(
+                _ApplyDB(execute_results=[_QueryResult([])]),
+                "customer_relations",
+                {
+                    "invitation_token": "CUST-missing",
+                    "customer_user_id": 100,
+                },
+            )
+        self.assertFalse(invitation_ready)
+        self.assertFalse(relation_ready)
+
     def test_versioned_upserts_use_newer_only_guards_on_natural_keys(self):
         cases = [
             (

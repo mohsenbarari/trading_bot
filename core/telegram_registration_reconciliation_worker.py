@@ -22,6 +22,7 @@ from core.registration_contracts import (
     TelegramRegistrationOutcome,
 )
 from core.services.telegram_registration_intent_service import (
+    RegistrationProjectionResolution,
     SUCCESS_OUTCOME_TO_STATUS,
     TelegramRegistrationIntentAttempt,
     claim_due_registration_intents,
@@ -41,6 +42,14 @@ _RETRY_BASE_SECONDS = 2.0
 _RETRY_MAX_SECONDS = 300.0
 _SYNC_WAIT_SECONDS = 5.0
 _SYNC_POLL_SECONDS = 0.25
+_PERSISTENT_RETRY_ERRORS = frozenset(
+    {
+        "authentication_configuration",
+        "mixed_version_or_route",
+        "protocol_invalid_response",
+        "protocol_command_mismatch",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,15 +80,16 @@ async def _wait_for_projection(
     *,
     timeout_seconds: float,
     poll_seconds: float,
-) -> bool:
+) -> RegistrationProjectionResolution | None:
     deadline = asyncio.get_running_loop().time() + max(0.0, float(timeout_seconds))
     while True:
         async with AsyncSessionLocal() as db:
-            if await registration_projection_is_ready(db, command=attempt.command):
-                return True
+            resolution = await registration_projection_is_ready(db, command=attempt.command)
+            if resolution is not None:
+                return resolution
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
-            return False
+            return None
         await asyncio.sleep(min(max(0.01, float(poll_seconds)), remaining))
 
 
@@ -89,6 +99,16 @@ async def _schedule_retry(
     error_code: str,
     authoritative_user_id: int | None = None,
 ) -> str:
+    if error_code in _PERSISTENT_RETRY_ERRORS and attempt.attempt >= 3:
+        logger.error(
+            "Persistent Telegram registration reconciliation incompatibility",
+            extra={
+                "event": "telegram_registration.persistent_retry_error",
+                "error_class": error_code,
+                "attempt": attempt.attempt,
+                "command_id": str(attempt.command.command_id),
+            },
+        )
     retry_at = utc_now() + timedelta(
         seconds=_retry_delay_seconds(attempt.intent_id, attempt.attempt)
     )
@@ -115,23 +135,37 @@ async def _process_attempt(
     try:
         response = TelegramRegistrationCommandResponse.model_validate(body)
     except (TypeError, ValueError):
-        return await _schedule_retry(attempt, error_code="invalid_response")
+        if status_code in {401, 403}:
+            error_code = "authentication_configuration"
+        elif status_code == 404:
+            error_code = "mixed_version_or_route"
+        elif status_code >= 500:
+            error_code = "transport_or_server_outage"
+        else:
+            error_code = "protocol_invalid_response"
+        return await _schedule_retry(attempt, error_code=error_code)
     if response.command_id != attempt.command.command_id:
-        return await _schedule_retry(attempt, error_code="response_command_mismatch")
-    if status_code >= 500 or not response.terminal or response.outcome == TelegramRegistrationOutcome.FEATURE_DISABLED:
-        return await _schedule_retry(attempt, error_code=response.outcome.value)
-    if status_code >= 400:
-        return await _schedule_retry(attempt, error_code="remote_http_error")
+        return await _schedule_retry(attempt, error_code="protocol_command_mismatch")
+    if status_code >= 500:
+        return await _schedule_retry(attempt, error_code="transport_or_server_outage")
+    if response.outcome == TelegramRegistrationOutcome.FEATURE_DISABLED:
+        return await _schedule_retry(attempt, error_code="mixed_version_or_feature_disabled")
+    if not response.terminal:
+        return await _schedule_retry(attempt, error_code="remote_nonterminal")
+    if status_code in {401, 403}:
+        return await _schedule_retry(attempt, error_code="authentication_configuration")
+    if status_code == 404:
+        return await _schedule_retry(attempt, error_code="mixed_version_or_route")
 
     if response.outcome in SUCCESS_OUTCOME_TO_STATUS:
         if response.authoritative_user_id is None:
             return await _schedule_retry(attempt, error_code="success_user_missing")
-        projection_ready = await _wait_for_projection(
+        projection = await _wait_for_projection(
             attempt,
             timeout_seconds=sync_wait_seconds,
             poll_seconds=sync_poll_seconds,
         )
-        if not projection_ready:
+        if projection is None:
             return await _schedule_retry(
                 attempt,
                 error_code="projection_pending",
@@ -145,6 +179,7 @@ async def _process_attempt(
             attempt=attempt.attempt,
             outcome=response.outcome,
             authoritative_user_id=response.authoritative_user_id,
+            projected_user_id=(projection.local_user_id if response.outcome in SUCCESS_OUTCOME_TO_STATUS else None),
         )
         await db.commit()
     if not updated:

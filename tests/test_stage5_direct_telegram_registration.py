@@ -4,6 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
+from aiogram.fsm.storage.redis import RedisStorage
+
 from bot.handlers import start
 from bot.states import Registration
 from core.enums import UserRole
@@ -56,12 +60,13 @@ class FakeSessionContext:
 
 
 class FakeState:
-    def __init__(self, data=None, *, events=None, storage=None, key=None):
+    def __init__(self, data=None, *, events=None, storage=None, key=None, current_state=None):
         self.data = dict(data or {})
         self.events = events if events is not None else []
         self.states = []
         self.storage = storage
         self.key = key
+        self.current_state = current_state
 
     async def get_data(self):
         return dict(self.data)
@@ -69,12 +74,23 @@ class FakeState:
     async def clear(self):
         self.events.append("clear")
         self.data.clear()
+        self.current_state = None
+
+    async def get_state(self):
+        return self.current_state
 
     async def update_data(self, **kwargs):
         self.data.update(kwargs)
 
     async def set_state(self, value):
         self.states.append(value)
+        self.current_state = getattr(value, "state", value)
+
+
+class ClearFailingState(FakeState):
+    async def clear(self):
+        self.events.append("clear_failed")
+        raise RuntimeError("redis unavailable")
 
 
 def invitation(**overrides):
@@ -99,7 +115,7 @@ def message(*, telegram_id=7001, phone="09121112233", contact_user_id=None, text
     answer = AsyncMock(return_value=SimpleNamespace(message_id=77))
     return SimpleNamespace(
         bot=SimpleNamespace(),
-        chat=SimpleNamespace(id=88),
+        chat=SimpleNamespace(id=88, type="private"),
         from_user=SimpleNamespace(
             id=telegram_id,
             username="stage5_user",
@@ -162,6 +178,98 @@ class Stage5MobileContractTests(unittest.TestCase):
 
 
 class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
+    def test_customer_relation_lifecycle_distinguishes_telegram_first_and_web_first(self):
+        pending_invitation = invitation(
+            token="CUST-lifecycle-pending",
+            kind=InvitationKind.CUSTOMER,
+        )
+        pending_relation = SimpleNamespace(
+            invitation_token=pending_invitation.token,
+            customer_tier="tier1",
+            status="pending",
+            customer_user_id=None,
+            deleted_at=None,
+            expires_at=pending_invitation.expires_at,
+        )
+        self.assertTrue(
+            start._customer_relation_allows_direct_registration(
+                pending_invitation,
+                pending_relation,
+            )
+        )
+        for status, customer_user_id, deleted_at in (
+            ("active", None, None),
+            ("pending", 91, None),
+            ("expired", None, None),
+            ("revoked", None, None),
+            ("deleted", None, datetime.now(timezone.utc)),
+        ):
+            with self.subTest(status=status, customer_user_id=customer_user_id):
+                relation = SimpleNamespace(
+                    **{
+                        **pending_relation.__dict__,
+                        "status": status,
+                        "customer_user_id": customer_user_id,
+                        "deleted_at": deleted_at,
+                    }
+                )
+                self.assertFalse(
+                    start._customer_relation_allows_direct_registration(
+                        pending_invitation,
+                        relation,
+                    )
+                )
+
+        web_invitation = invitation(
+            token="CUST-lifecycle-web",
+            kind=InvitationKind.CUSTOMER,
+            is_used=True,
+            registered_user_id=42,
+            completed_at=datetime.now(timezone.utc),
+            completed_via="web",
+        )
+        web_relation = SimpleNamespace(
+            invitation_token=web_invitation.token,
+            customer_tier="tier1",
+            status="active",
+            customer_user_id=42,
+            deleted_at=None,
+            expires_at=web_invitation.expires_at,
+        )
+        self.assertTrue(
+            start._customer_relation_allows_direct_registration(
+                web_invitation,
+                web_relation,
+            )
+        )
+        web_relation.customer_user_id = 43
+        self.assertFalse(
+            start._customer_relation_allows_direct_registration(
+                web_invitation,
+                web_relation,
+            )
+        )
+
+    async def test_direct_registration_rejects_group_before_database_or_fsm_mutation(self):
+        inv = invitation()
+        msg = message()
+        msg.chat.type = "group"
+        state = FakeState()
+        with patch.object(start.settings, "telegram_direct_registration_enabled", True), patch.object(
+            start.settings, "telegram_registration_reconciliation_enabled", True
+        ), patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+            start, "AsyncSessionLocal"
+        ) as session_factory:
+            await start.handle_start_with_token(
+                msg,
+                SimpleNamespace(args=inv.token),
+                state,
+                user=None,
+            )
+        session_factory.assert_not_called()
+        self.assertEqual(state.events, [])
+        self.assertIn("خصوصی", msg.answer.await_args.args[0])
+
     async def test_standard_route_requires_both_flags_before_entering_direct_fsm(self):
         inv = invitation()
         command = SimpleNamespace(args=inv.token)
@@ -211,7 +319,14 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
         ):
             for tier, should_begin in (("tier1", True), ("tier2", False)):
                 msg = message()
-                relation = SimpleNamespace(customer_tier=tier)
+                relation = SimpleNamespace(
+                    invitation_token=inv.token,
+                    customer_tier=tier,
+                    status="pending",
+                    customer_user_id=None,
+                    deleted_at=None,
+                    expires_at=inv.expires_at,
+                )
                 with self.subTest(tier=tier), patch.object(
                     start, "delete_previous_anchor", new=AsyncMock()
                 ), patch.object(
@@ -284,6 +399,41 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.data, {"old": "preserved"})
         send.assert_awaited_once_with(msg, resolution)
 
+    async def test_existing_intent_clears_only_registration_owned_fsm(self):
+        inv = invitation()
+        existing = SimpleNamespace(id=uuid4())
+        resolution = start.RegistrationHandoffResolution(
+            status=TelegramRegistrationIntentStatus.RETRY_WAIT
+        )
+
+        for current_state, should_clear in (
+            (Registration.awaiting_address.state, True),
+            ("Trade:awaiting_amount", False),
+        ):
+            with self.subTest(current_state=current_state):
+                state = FakeState(
+                    {"old": "transient"},
+                    current_state=current_state,
+                )
+                with patch.object(
+                    start,
+                    "get_registration_intent_for_invitation",
+                    new=AsyncMock(return_value=existing),
+                ), patch.object(
+                    start,
+                    "_load_registration_handoff_resolution",
+                    new=AsyncMock(return_value=resolution),
+                ), patch.object(start, "_send_registration_handoff", new=AsyncMock()):
+                    await start._begin_direct_registration(
+                        message(),
+                        state,
+                        session=FakeSession(inv),
+                        invitation=inv,
+                    )
+
+                self.assertEqual(state.events, ["clear"] if should_clear else [])
+                self.assertEqual(state.data, {} if should_clear else {"old": "transient"})
+
     async def test_entry_ttl_failure_clears_partial_state(self):
         inv = invitation()
         state = FakeState()
@@ -322,6 +472,21 @@ class Stage5ContactAndAddressTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = patch.object(start, "_direct_registration_runtime_ready", return_value=True)
         self.runtime.start()
         self.addAsyncCleanup(self.runtime.stop)
+
+    async def test_group_address_is_rejected_without_echo_or_intent(self):
+        state = FakeState(
+            ready_state_data(),
+            current_state=Registration.awaiting_address.state,
+        )
+        msg = message(text="sensitive exact address")
+        msg.chat.type = "supergroup"
+        with patch.object(start, "create_or_reuse_ready_registration_intent", new=AsyncMock()) as create:
+            await start.handle_address(msg, state)
+        create.assert_not_awaited()
+        self.assertEqual(state.data, {})
+        response = msg.answer.await_args.args[0]
+        self.assertIn("خصوصی", response)
+        self.assertNotIn("sensitive", response)
 
     async def test_contact_requires_sender_ownership_and_exact_invited_mobile(self):
         base = ready_state_data()
@@ -475,6 +640,32 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cb.answer.await_args.kwargs["show_alert"])
         wait.assert_not_awaited()
 
+    async def test_post_commit_clear_failure_still_acknowledges_durable_intent(self):
+        inv = invitation()
+        events = []
+        state = ClearFailingState(ready_state_data(inv), events=events)
+        cb = callback()
+        intent_id = uuid4()
+        creation = SimpleNamespace(intent=SimpleNamespace(id=intent_id), created=True)
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(inv, events=events)),
+        ), patch.object(
+            start,
+            "create_or_reuse_ready_registration_intent",
+            new=AsyncMock(return_value=creation),
+        ), patch.object(
+            start,
+            "_wait_for_registration_handoff",
+            new=AsyncMock(return_value=None),
+        ), patch.object(start, "audit_log"):
+            await start.handle_registration_confirm(cb, state)
+
+        self.assertEqual(events, ["commit", "clear_failed"])
+        self.assertEqual(cb.answer.await_args_list[-1].args[0], "درخواست ثبت شد.")
+        self.assertIn("در حال بررسی", cb.message.answer.await_args_list[0].args[0])
+
     async def test_post_commit_poll_failure_returns_explicit_pending_state(self):
         inv = invitation()
         state = FakeState(ready_state_data(inv))
@@ -573,6 +764,7 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
         success_intent = SimpleNamespace(
             status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
             authoritative_user_id=19,
+            projected_user_id=19,
             last_error_code=None,
         )
         matching_user = SimpleNamespace(id=19, telegram_id=7001, role=UserRole.STANDARD)
@@ -707,6 +899,39 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class Stage5RedisTTLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_fsm_context_writes_state_data_and_expiry_in_one_pipeline(self):
+        class Pipeline:
+            def __init__(self):
+                self.calls = []
+
+            def set(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return self
+
+            async def execute(self):
+                return [True, True]
+
+        pipeline = Pipeline()
+        redis = SimpleNamespace(pipeline=MagicMock(return_value=pipeline))
+        storage = RedisStorage(redis=redis)
+        state = FSMContext(
+            storage=storage,
+            key=StorageKey(bot_id=1, chat_id=2, user_id=3),
+        )
+        expiry = datetime.now(timezone.utc) + timedelta(seconds=90)
+
+        await start._write_registration_fsm(
+            state,
+            data={"registration_invitation_token": "opaque"},
+            next_state=Registration.awaiting_contact,
+            expires_at=expiry,
+        )
+
+        redis.pipeline.assert_called_once_with(transaction=True)
+        self.assertEqual(len(pipeline.calls), 2)
+        self.assertTrue(all(0 < call[1]["ex"] <= 90 for call in pipeline.calls))
+        self.assertEqual(pipeline.calls[1][0][1], Registration.awaiting_contact.state)
+
     async def test_binds_both_redis_keys_to_invitation_lifetime(self):
         redis = SimpleNamespace(expire=AsyncMock(side_effect=[True, True]))
         key_builder = SimpleNamespace(build=MagicMock(side_effect=["state-key", "data-key"]))
@@ -736,6 +961,27 @@ class Stage5RedisTTLTests(unittest.IsolatedAsyncioTestCase):
 
 
 class Stage5IntentLookupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_activation_waits_for_exact_local_projection_not_remote_numeric_id(self):
+        user = SimpleNamespace(id=42, telegram_id=7001)
+        pending = SimpleNamespace(
+            status=TelegramRegistrationIntentStatus.RETRY_WAIT,
+            projected_user_id=None,
+            last_error_code="projection_pending",
+        )
+        success = SimpleNamespace(
+            status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+            authoritative_user_id=100,
+            projected_user_id=42,
+            last_error_code=None,
+        )
+        for intent, blocked in ((pending, True), (success, False)):
+            db = SimpleNamespace(execute=AsyncMock(return_value=FakeResult(intent)))
+            result = await intent_service.registration_activation_block_for_user(
+                db,
+                user=user,
+            )
+            self.assertEqual(result is not None, blocked)
+
     async def test_lookup_uses_deterministic_identity_without_mutating_intent(self):
         row = SimpleNamespace(
             invitation_token="INV-stage5-token",

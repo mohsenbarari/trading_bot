@@ -62,6 +62,17 @@ class TelegramRegistrationIntentAttempt:
     command: TelegramRegistrationCommand
 
 
+@dataclass(frozen=True, slots=True)
+class RegistrationProjectionResolution:
+    local_user_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrationActivationBlock:
+    status: TelegramRegistrationIntentStatus
+    reason: str
+
+
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=timezone.utc)
@@ -113,6 +124,55 @@ async def get_registration_intent_for_invitation(
     ):
         raise TelegramRegistrationIntentError("intent_identity_conflict")
     return intent
+
+
+async def get_latest_registration_intent_for_telegram(
+    db: AsyncSession,
+    *,
+    telegram_id: int,
+) -> TelegramRegistrationIntent | None:
+    return (
+        await db.execute(
+            select(TelegramRegistrationIntent)
+            .where(TelegramRegistrationIntent.telegram_id == int(telegram_id))
+            .order_by(
+                TelegramRegistrationIntent.created_at.desc(),
+                TelegramRegistrationIntent.id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def registration_activation_block_for_user(
+    db: AsyncSession,
+    *,
+    user: User,
+) -> RegistrationActivationBlock | None:
+    """Keep a direct-registration User projection closed until its exact intent is bound."""
+
+    telegram_id = getattr(user, "telegram_id", None)
+    if telegram_id is None:
+        return None
+    intent = await get_latest_registration_intent_for_telegram(
+        db,
+        telegram_id=int(telegram_id),
+    )
+    if intent is None:
+        return None
+    status = TelegramRegistrationIntentStatus(
+        str(getattr(getattr(intent, "status", None), "value", getattr(intent, "status", "")))
+    )
+    if status in SUCCESS_OUTCOME_TO_STATUS.values():
+        if int(getattr(intent, "projected_user_id", 0) or 0) == int(user.id):
+            return None
+        return RegistrationActivationBlock(status, "projection_pending")
+    if status in TERMINAL_INTENT_STATUSES:
+        return RegistrationActivationBlock(
+            status,
+            _safe_code(getattr(intent, "last_error_code", None) or status.value),
+        )
+    return RegistrationActivationBlock(status, "pending_sync")
 
 
 def intent_to_command(intent: TelegramRegistrationIntent) -> TelegramRegistrationCommand:
@@ -331,6 +391,7 @@ async def finalize_registration_intent(
     attempt: int,
     outcome: TelegramRegistrationOutcome,
     authoritative_user_id: int | None,
+    projected_user_id: int | None = None,
 ) -> bool:
     intent = (
         await db.execute(
@@ -347,8 +408,11 @@ async def finalize_registration_intent(
     if success_status is not None:
         if authoritative_user_id is None:
             raise TelegramRegistrationIntentError("success_user_missing")
+        if projected_user_id is None:
+            raise TelegramRegistrationIntentError("success_projection_missing")
         intent.status = success_status
         intent.authoritative_user_id = int(authoritative_user_id)
+        intent.projected_user_id = int(projected_user_id)
         intent.last_error_code = None
     else:
         if authoritative_user_id is not None:
@@ -368,7 +432,7 @@ async def registration_projection_is_ready(
     db: AsyncSession,
     *,
     command: TelegramRegistrationCommand,
-) -> bool:
+) -> RegistrationProjectionResolution | None:
     invitation = (
         await db.execute(select(Invitation).where(Invitation.token == command.invitation_token))
     ).scalar_one_or_none()
@@ -378,7 +442,12 @@ async def registration_projection_is_ready(
         or invitation.revoked_at is not None
         or invitation.completed_at is None
     ):
-        return False
+        return None
+    if (
+        normalize_mobile_number(invitation.mobile_number) != command.mobile_number
+        or normalize_account_name(invitation.account_name) == ""
+    ):
+        return None
     users = list(
         (
             await db.execute(
@@ -398,14 +467,15 @@ async def registration_projection_is_ready(
         and user.telegram_id == command.telegram_id
     ]
     if len(exact_users) != 1:
-        return False
+        return None
     user = exact_users[0]
     if (
         user.role != invitation.role
         or normalize_account_name(user.account_name)
         != normalize_account_name(invitation.account_name)
+        or int(getattr(invitation, "registered_user_id", 0) or 0) != int(user.id)
     ):
-        return False
+        return None
 
     accountant_relations = list(
         (
@@ -430,33 +500,33 @@ async def registration_projection_is_ready(
         ).scalars().all()
     )
     if len(accountant_relations) > 1 or len(customer_relations) > 1:
-        return False
+        return None
 
     try:
         kind = InvitationKind(str(getattr(invitation.kind, "value", invitation.kind)))
     except ValueError:
-        return False
+        return None
     if kind == InvitationKind.STANDARD:
         if accountant_relations or customer_relations:
-            return False
+            return None
         decision = evaluate_bot_access_projection(
             user,
             is_accountant=False,
             customer_relation_present=False,
             customer_tier=None,
         )
-        return decision.allowed
+        return RegistrationProjectionResolution(int(user.id)) if decision.allowed else None
     if kind == InvitationKind.CUSTOMER:
         if accountant_relations or len(customer_relations) != 1:
-            return False
+            return None
         relation = customer_relations[0]
         if relation.customer_user_id != user.id:
-            return False
+            return None
         decision = evaluate_bot_access_projection(
             user,
             is_accountant=False,
             customer_relation_present=True,
             customer_tier=relation.customer_tier,
         )
-        return decision.allowed
-    return False
+        return RegistrationProjectionResolution(int(user.id)) if decision.allowed else None
+    return None

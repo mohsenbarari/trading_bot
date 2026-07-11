@@ -28,7 +28,7 @@ class FakeState:
 def make_message(phone="9123334444", contact_user_id=10, from_user_id=10):
     return SimpleNamespace(
         bot=SimpleNamespace(),
-        chat=SimpleNamespace(id=20),
+        chat=SimpleNamespace(id=20, type="private"),
         contact=SimpleNamespace(phone_number=phone, user_id=contact_user_id),
         from_user=SimpleNamespace(id=from_user_id),
         answer=AsyncMock(return_value=SimpleNamespace(message_id=91)),

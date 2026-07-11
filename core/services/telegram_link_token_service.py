@@ -18,6 +18,10 @@ from core.services.bot_access_policy import (
     evaluate_bot_access,
     normalize_telegram_datetime,
 )
+from core.services.invitation_identity_reservation_service import (
+    acquire_invitation_transition_locks,
+    normalize_invitation_identity,
+)
 from core.utils import utc_now
 from models.telegram_link_token import TelegramLinkToken, TelegramLinkTokenStatus
 from models.user import User, set_legacy_has_bot_access_compatibility
@@ -66,7 +70,22 @@ async def create_telegram_link_token(
     if user_id is None:
         raise TelegramLinkTokenError(BOT_ACCESS_REASON_SYNC_PENDING)
 
-    locked_user_stmt = select(User).where(User.id == int(user_id)).with_for_update()
+    identity = normalize_invitation_identity(
+        mobile_number=getattr(user, "mobile_number", None),
+        account_name=getattr(user, "account_name", None),
+    )
+    await acquire_invitation_transition_locks(
+        db,
+        invitation_token=None,
+        identity=identity,
+        telegram_id=getattr(user, "telegram_id", None),
+    )
+    locked_user_stmt = (
+        select(User)
+        .where(User.id == int(user_id))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     locked_user = (await db.execute(locked_user_stmt)).scalar_one_or_none()
     if locked_user is None:
         raise TelegramLinkTokenError(BOT_ACCESS_REASON_SYNC_PENDING)
@@ -77,9 +96,15 @@ async def create_telegram_link_token(
         raise TelegramLinkTokenError(decision.reason or BOT_ACCESS_REASON_SYNC_PENDING)
 
     now = utc_now()
-    revoke_stmt = select(TelegramLinkToken).where(
-        TelegramLinkToken.user_id == user.id,
-        TelegramLinkToken.status == TelegramLinkTokenStatus.PENDING,
+    revoke_stmt = (
+        select(TelegramLinkToken)
+        .where(
+            TelegramLinkToken.user_id == user.id,
+            TelegramLinkToken.status == TelegramLinkTokenStatus.PENDING,
+        )
+        .order_by(TelegramLinkToken.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     existing_pending = list((await db.execute(revoke_stmt)).scalars().all())
     for record in existing_pending:
@@ -105,13 +130,28 @@ async def load_pending_telegram_link_token_user_for_update(
     raw_token: str,
 ) -> tuple[TelegramLinkToken, User, BotAccessDecision]:
     token_hash = hash_telegram_link_token(raw_token)
+    token_probe = (
+        await db.execute(
+            select(TelegramLinkToken).where(TelegramLinkToken.token_hash == token_hash)
+        )
+    ).scalar_one_or_none()
+    if token_probe is None:
+        raise TelegramLinkTokenError("invalid")
+    user_stmt = (
+        select(User)
+        .where(User.id == token_probe.user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    user = (await db.execute(user_stmt)).scalar_one_or_none()
     stmt = (
         select(TelegramLinkToken)
         .where(TelegramLinkToken.token_hash == token_hash)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     token_record = (await db.execute(stmt)).scalar_one_or_none()
-    if token_record is None:
+    if token_record is None or user is None or token_record.user_id != user.id:
         raise TelegramLinkTokenError("invalid")
     if token_record.status != TelegramLinkTokenStatus.PENDING:
         raise TelegramLinkTokenError(str(getattr(token_record.status, "value", token_record.status)))
@@ -122,10 +162,8 @@ async def load_pending_telegram_link_token_user_for_update(
         token_record.status = TelegramLinkTokenStatus.EXPIRED
         raise TelegramLinkTokenError("expired")
 
-    user_stmt = select(User).where(User.id == token_record.user_id).with_for_update()
-    user = (await db.execute(user_stmt)).scalar_one_or_none()
     decision = await evaluate_bot_access(db, user)
-    if user is None or not decision.allowed:
+    if not decision.allowed:
         raise TelegramLinkTokenError(decision.reason or BOT_ACCESS_REASON_SYNC_PENDING)
     return token_record, user, decision
 

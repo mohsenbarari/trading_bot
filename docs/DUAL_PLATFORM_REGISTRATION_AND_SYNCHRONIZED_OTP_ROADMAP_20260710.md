@@ -2406,3 +2406,16 @@ This roadmap is complete only when all of the following are true:
     and unrelated dev-login automation both remain testable through their separate paths.
 25. Changed-code coverage, property/fuzz, deterministic race, mutation, state-transition, and
     traceability CI gates are executable and pass with no required-case waiver.
+
+## Stage 5 Independent Review Remediation Record (2026-07-11)
+
+The Stage 5 `NO-GO` findings were independently checked against current source and this roadmap.
+Implemented corrections cover activation gating, cross-server User-id localization, token lock
+ordering, lost-response receipt identity, private-chat boundaries, current Relation validation,
+registration-only Redis lifetime, interruption handling, SMS pre-claim restart, operational retry
+classification, and fail-closed scratch database automation.
+
+The exact accepted, modified, rejected, and deferred decisions are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE5_REVIEW_REMEDIATION_20260711.md`. This record does not mark
+Stage 5 `GO`, enable flags, migrate a runtime database, authorize Stage 6, or waive any later
+mixed-version/two-server/staging/production gate.

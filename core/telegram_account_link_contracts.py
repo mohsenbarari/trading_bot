@@ -119,8 +119,18 @@ def build_telegram_account_link_command(
 
 
 def canonical_account_link_command_bytes(command: TelegramAccountLinkCommand) -> bytes:
+    payload = command.model_dump(mode="json")
+    # These are first-request profile/proof snapshots, not authoritative replay
+    # identity. Business fields (mode, credential, mobile, Telegram id and
+    # exact address) remain covered by the receipt hash.
+    for volatile_field in (
+        "telegram_username",
+        "telegram_full_name",
+        "contact_verified_at",
+    ):
+        payload.pop(volatile_field, None)
     return json.dumps(
-        command.model_dump(mode="json"),
+        payload,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),

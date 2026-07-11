@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Enum, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
@@ -63,5 +63,10 @@ class TelegramRegistrationIntent(Base):
     next_retry_at = Column(DateTime(timezone=True), nullable=True)
     last_error_code = Column(String(96), nullable=True)
     authoritative_user_id = Column(Integer, nullable=True)
+    projected_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())

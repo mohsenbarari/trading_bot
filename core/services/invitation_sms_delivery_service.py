@@ -78,7 +78,9 @@ async def deliver_invitation_sms_once(
     if status != InvitationSMSStatus.PENDING:
         await db.commit()
         return status
-    if not newly_created or delivery.attempt_count != 0:
+    # A committed pending row with no claim is still safe to claim after a
+    # process restart. `newly_created` describes the caller, not provider I/O.
+    if delivery.attempt_count != 0 or delivery.claimed_at is not None:
         delivery.status = InvitationSMSStatus.AMBIGUOUS.value
         delivery.completed_at = utc_now()
         await db.commit()

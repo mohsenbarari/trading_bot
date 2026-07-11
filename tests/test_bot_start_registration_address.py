@@ -20,7 +20,7 @@ class FakeState:
 def make_message(text="تهران خیابان آزادی پلاک ۱۰"):
     return SimpleNamespace(
         bot=SimpleNamespace(),
-        chat=SimpleNamespace(id=21),
+        chat=SimpleNamespace(id=21, type="private"),
         text=text,
         from_user=SimpleNamespace(id=5, username="u", full_name="Full Name"),
         answer=AsyncMock(return_value=SimpleNamespace(message_id=66)),

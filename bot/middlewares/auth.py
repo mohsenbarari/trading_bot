@@ -15,6 +15,10 @@ from bot.onboarding import (
     user_requires_bot_onboarding,
 )
 from core.services.user_account_status_service import is_user_global_web_locked
+from core.config import settings
+from core.services.telegram_registration_intent_service import (
+    registration_activation_block_for_user,
+)
 from models.user import User
 
 
@@ -57,6 +61,26 @@ class AuthMiddleware(BaseMiddleware):
             # آبجکت کاربر دیتابیس (که ممکن است None باشد) را به data اضافه می‌کنیم
             # تا در تمام handler ها در دسترس باشد.
             data["user"] = user
+
+            if (
+                user
+                and bool(getattr(settings, "telegram_direct_registration_enabled", False))
+                and bool(getattr(settings, "telegram_registration_reconciliation_enabled", False))
+            ):
+                activation_block = await registration_activation_block_for_user(
+                    session,
+                    user=user,
+                )
+                if activation_block is not None:
+                    pending_message = (
+                        "⏳ ثبت‌نام شما هنوز نهایی نشده است. "
+                        "پس از تکمیل همگام‌سازی دوباره تلاش کنید."
+                    )
+                    if isinstance(inner_event, Message):
+                        await inner_event.answer(pending_message)
+                    elif isinstance(inner_event, CallbackQuery):
+                        await inner_event.answer(pending_message, show_alert=True)
+                    return
             
             # بررسی قفل سراسری حساب بعد از پایان مهلت غیرفعال‌سازی
             if user and is_user_global_web_locked(user):

@@ -80,11 +80,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         init_db.assert_awaited_once()
         setup_event_listeners.assert_called_once_with()
-        storage_from_url.assert_called_once_with(
-            'redis://localhost:6379/0',
-            state_ttl=2 * 24 * 60 * 60,
-            data_ttl=2 * 24 * 60 * 60,
-        )
+        storage_from_url.assert_called_once_with('redis://localhost:6379/0')
         gate_ctor.assert_called_once_with()
         auth_ctor.assert_called_once_with(run_bot.AsyncSessionLocal)
         self.assertEqual(fake_dp.update.outer_middleware.call_count, 3)

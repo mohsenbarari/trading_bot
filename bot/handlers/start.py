@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from uuid import UUID
 import asyncio
 import logging
+import math
 import re
 
 from core.db import AsyncSessionLocal
@@ -34,6 +35,7 @@ from core.services.telegram_registration_intent_service import (
     TelegramRegistrationIntentError,
     create_or_reuse_ready_registration_intent,
     get_registration_intent_for_invitation,
+    registration_activation_block_for_user,
 )
 from core.services.telegram_link_token_service import (
     TelegramLinkTokenError,
@@ -49,7 +51,8 @@ from core.services.customer_relation_service import (
     is_customer_invitation_token,
 )
 from core.utils import utc_now
-from models.invitation import Invitation, InvitationKind
+from models.customer_relation import CustomerRelationStatus, CustomerTier
+from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from models.telegram_registration_intent import (
     TelegramRegistrationIntent,
     TelegramRegistrationIntentStatus,
@@ -140,6 +143,65 @@ def _utc_datetime(value: datetime | str | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _is_private_chat(message: types.Message | None) -> bool:
+    chat_type = getattr(getattr(message, "chat", None), "type", None)
+    return str(getattr(chat_type, "value", chat_type) or "").lower() == "private"
+
+
+async def _reject_non_private_registration(
+    event: types.Message | types.CallbackQuery,
+    state: FSMContext,
+) -> bool:
+    is_callback = isinstance(event, types.CallbackQuery) or (
+        getattr(event, "message", None) is not None
+        and getattr(event, "chat", None) is None
+    )
+    message = event.message if is_callback else event
+    if _is_private_chat(message):
+        return False
+    await _clear_registration_owned_fsm(state)
+    text = "برای حفظ امنیت اطلاعات، ثبت‌نام را فقط در گفت‌وگوی خصوصی بات انجام دهید."
+    if is_callback:
+        await event.answer(text, show_alert=True)
+    elif getattr(event, "chat", None) is not None:
+        await event.answer(text, reply_markup=types.ReplyKeyboardRemove())
+    return True
+
+
+def _customer_relation_allows_direct_registration(
+    invitation: Invitation,
+    relation: object | None,
+) -> bool:
+    if relation is None:
+        return False
+    if getattr(relation, "invitation_token", invitation.token) != invitation.token:
+        return False
+    if _enum_value(getattr(relation, "customer_tier", None)) != CustomerTier.TIER_1.value:
+        return False
+    if getattr(relation, "deleted_at", None) is not None:
+        return False
+    relation_status = _enum_value(getattr(relation, "status", None))
+    invitation_state = _enum_value(derive_invitation_state(invitation))
+    if invitation_state == "pending":
+        relation_expiry = _utc_datetime(getattr(relation, "expires_at", None))
+        return (
+            relation_status == CustomerRelationStatus.PENDING.value
+            and getattr(relation, "customer_user_id", None) is None
+            and relation_expiry is not None
+            and relation_expiry > utc_now()
+        )
+    return (
+        invitation_state == "completed"
+        and _enum_value(getattr(invitation, "completed_via", None))
+        == InvitationCompletionSurface.WEB.value
+        and relation_status == CustomerRelationStatus.ACTIVE.value
+        and getattr(relation, "customer_user_id", None) is not None
+        and getattr(invitation, "registered_user_id", None) is not None
+        and int(getattr(relation, "customer_user_id"))
+        == int(getattr(invitation, "registered_user_id"))
+    )
+
+
 def _direct_registration_enabled() -> bool:
     return bool(getattr(settings, "telegram_direct_registration_enabled", False))
 
@@ -158,7 +220,7 @@ async def _bound_registration_fsm_ttl(
     expiry = _utc_datetime(expires_at)
     if expiry is None:
         raise RuntimeError("registration_fsm_expiry_invalid")
-    ttl_seconds = int((expiry - utc_now()).total_seconds())
+    ttl_seconds = math.ceil((expiry - utc_now()).total_seconds())
     if ttl_seconds <= 0:
         raise RuntimeError("registration_fsm_expired")
 
@@ -167,6 +229,8 @@ async def _bound_registration_fsm_ttl(
     redis = getattr(storage, "redis", None)
     key_builder = getattr(storage, "key_builder", None)
     if redis is None or key_builder is None or storage_key is None:
+        if isinstance(state, FSMContext):
+            raise RuntimeError("registration_fsm_storage_unsupported")
         return
     state_key = key_builder.build(storage_key, "state")
     data_key = key_builder.build(storage_key, "data")
@@ -176,6 +240,122 @@ async def _bound_registration_fsm_ttl(
     )
     if not state_expired or not data_expired:
         raise RuntimeError("registration_fsm_ttl_not_applied")
+
+
+async def _write_registration_fsm(
+    state: FSMContext,
+    *,
+    data: dict[str, object],
+    next_state: object,
+    expires_at: datetime,
+) -> None:
+    expiry = _utc_datetime(expires_at)
+    if expiry is None:
+        raise RuntimeError("registration_fsm_expiry_invalid")
+    ttl_seconds = math.ceil((expiry - utc_now()).total_seconds())
+    if ttl_seconds <= 0:
+        raise RuntimeError("registration_fsm_expired")
+
+    storage = getattr(state, "storage", None)
+    storage_key = getattr(state, "key", None)
+    redis = getattr(storage, "redis", None)
+    key_builder = getattr(storage, "key_builder", None)
+    json_dumps = getattr(storage, "json_dumps", None)
+    if redis is not None and key_builder is not None and storage_key is not None and callable(json_dumps):
+        state_key = key_builder.build(storage_key, "state")
+        data_key = key_builder.build(storage_key, "data")
+        state_value = getattr(next_state, "state", next_state)
+        pipeline = redis.pipeline(transaction=True)
+        pipeline.set(data_key, json_dumps(data), ex=ttl_seconds)
+        pipeline.set(state_key, state_value, ex=ttl_seconds)
+        results = await pipeline.execute()
+        if len(results) != 2 or not all(results):
+            raise RuntimeError("registration_fsm_atomic_write_failed")
+        return
+    if isinstance(state, FSMContext):
+        raise RuntimeError("registration_fsm_storage_unsupported")
+
+    await state.update_data(**data)
+    await state.set_state(next_state)
+    await _bound_registration_fsm_ttl(state, expires_at=expiry)
+
+
+async def _read_registration_fsm(state: FSMContext) -> dict[str, object] | None:
+    try:
+        return await state.get_data()
+    except Exception as exc:
+        logger.warning(
+            "Direct Telegram registration state read failed",
+            extra={
+                "event": "telegram_registration.fsm_read_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+        return None
+
+
+async def _clear_registration_owned_fsm(state: FSMContext) -> None:
+    """Clear only this flow's stale transient state; never cancel another bot workflow."""
+
+    get_state = getattr(state, "get_state", None)
+    if not callable(get_state):
+        return
+    try:
+        current_state = await get_state()
+    except Exception as exc:
+        logger.warning(
+            "Direct Telegram registration state probe failed",
+            extra={
+                "event": "telegram_registration.fsm_state_probe_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+        return
+    registration_states = {
+        Registration.awaiting_contact.state,
+        Registration.awaiting_address.state,
+        Registration.awaiting_confirmation.state,
+    }
+    if current_state in registration_states:
+        try:
+            await state.clear()
+        except Exception as exc:
+            logger.warning(
+                "Could not clear stale direct Telegram registration state",
+                extra={
+                    "event": "telegram_registration.fsm_clear_failed",
+                    "error_type": type(exc).__name__,
+                },
+            )
+
+
+async def _claim_registration_handoff_message(
+    state: FSMContext,
+    *,
+    intent_id: UUID,
+) -> bool:
+    storage = getattr(state, "storage", None)
+    redis = getattr(storage, "redis", None)
+    if redis is None:
+        return not isinstance(state, FSMContext)
+    try:
+        return bool(
+            await redis.set(
+                f"telegram-registration:handoff:{intent_id}",
+                "1",
+                ex=120,
+                nx=True,
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            "Direct Telegram registration handoff claim failed",
+            extra={
+                "event": "telegram_registration.handoff_claim_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+        return False
 
 
 def _registration_rejection_message(reason: str | None) -> str:
@@ -213,7 +393,10 @@ async def _load_registration_handoff_resolution(
         if status in _SUCCESS_INTENT_STATUSES:
             if intent.authoritative_user_id is None:
                 return None
-            user = await session.get(User, int(intent.authoritative_user_id))
+            projected_user_id = getattr(intent, "projected_user_id", None)
+            if projected_user_id is None:
+                return None
+            user = await session.get(User, int(projected_user_id))
             if user is None or int(getattr(user, "telegram_id", 0) or 0) != int(telegram_id):
                 return None
             if not (await evaluate_bot_access(session, user)).allowed:
@@ -310,6 +493,7 @@ async def _begin_direct_registration(
         telegram_id=telegram_id,
     )
     if existing_intent is not None:
+        await _clear_registration_owned_fsm(state)
         resolution = await _load_registration_handoff_resolution(
             intent_id=existing_intent.id,
             telegram_id=telegram_id,
@@ -348,17 +532,18 @@ async def _begin_direct_registration(
             reply_markup=types.ReplyKeyboardRemove(),
         )
         return
-    await state.update_data(
-        **{
-            _REGISTRATION_STATE_TOKEN: invitation.token,
-            _REGISTRATION_STATE_MOBILE: normalized_mobile,
-            _REGISTRATION_STATE_EXPIRES_AT: expires_at.isoformat(),
-            _REGISTRATION_STATE_TELEGRAM_ID: telegram_id,
-        }
-    )
-    await state.set_state(Registration.awaiting_contact)
     try:
-        await _bound_registration_fsm_ttl(state, expires_at=expires_at)
+        await _write_registration_fsm(
+            state,
+            data={
+                _REGISTRATION_STATE_TOKEN: invitation.token,
+                _REGISTRATION_STATE_MOBILE: normalized_mobile,
+                _REGISTRATION_STATE_EXPIRES_AT: expires_at.isoformat(),
+                _REGISTRATION_STATE_TELEGRAM_ID: telegram_id,
+            },
+            next_state=Registration.awaiting_contact,
+            expires_at=expires_at,
+        )
     except Exception:
         await state.clear()
         raise
@@ -516,9 +701,31 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
     
     # --- حذف پیام و لنگر برای سایر حالات ---
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
+
+    if _direct_registration_runtime_ready() and await _reject_non_private_registration(message, state):
+        return
     
     # --- کاربر قبلاً ثبت‌نام کرده ---
     if user:
+        if _direct_registration_runtime_ready():
+            async with AsyncSessionLocal() as session:
+                activation_block = await registration_activation_block_for_user(
+                    session,
+                    user=user,
+                )
+                decision = await evaluate_bot_access(session, user)
+            if activation_block is not None:
+                await message.answer(
+                    _registration_pending_message(),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                return
+            if not decision.allowed:
+                await message.answer(
+                    build_bot_account_access_denial_message(decision.reason),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                return
         anchor_msg = await message.answer(
             "شما قبلاً ثبت‌نام کرده‌اید. برای دسترسی به پنل از دکمه زیر استفاده کنید.",
             reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
@@ -583,7 +790,10 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                     invitation_kind=invitation.kind,
                     customer_tier=relation.customer_tier,
                 )
-                if decision.allowed:
+                if decision.allowed and _customer_relation_allows_direct_registration(
+                    invitation,
+                    relation,
+                ):
                     try:
                         await _begin_direct_registration(
                             message,
@@ -673,6 +883,27 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     if user:
+        if _direct_registration_runtime_ready():
+            async with AsyncSessionLocal() as session:
+                activation_block = await registration_activation_block_for_user(
+                    session,
+                    user=user,
+                )
+                decision = await evaluate_bot_access(session, user)
+            if activation_block is not None:
+                anchor_msg = await message.answer(
+                    _registration_pending_message(),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                set_anchor(message.chat.id, anchor_msg.message_id)
+                return
+            if not decision.allowed:
+                anchor_msg = await message.answer(
+                    build_bot_account_access_denial_message(decision.reason),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                set_anchor(message.chat.id, anchor_msg.message_id)
+                return
         logger.warning(f"DEBUG: Building keyboard with URL: '{settings.frontend_url}'")
         
         anchor_msg = await message.answer(
@@ -690,8 +921,13 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
 
 @router.message(Registration.awaiting_contact, F.contact)
 async def handle_contact(message: types.Message, state: FSMContext):
+    if await _reject_non_private_registration(message, state):
+        return
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    state_data = await state.get_data()
+    state_data = await _read_registration_fsm(state)
+    if state_data is None:
+        await message.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
+        return
     if not _direct_registration_runtime_ready():
         token = state_data.get("token") or state_data.get(_REGISTRATION_STATE_TOKEN)
         await state.clear()
@@ -743,14 +979,14 @@ async def handle_contact(message: types.Message, state: FSMContext):
         await message.answer(_registration_rejection_message("contact_mobile_mismatch"))
         return
 
-    await state.update_data(
-        **{
-            _REGISTRATION_STATE_CONTACT_VERIFIED_AT: utc_now().isoformat(),
-        }
-    )
-    await state.set_state(Registration.awaiting_address)
     try:
-        await _bound_registration_fsm_ttl(state, expires_at=expires_at)
+        state_data[_REGISTRATION_STATE_CONTACT_VERIFIED_AT] = utc_now().isoformat()
+        await _write_registration_fsm(
+            state,
+            data=state_data,
+            next_state=Registration.awaiting_address,
+            expires_at=expires_at,
+        )
     except Exception:
         await state.clear()
         await message.answer(
@@ -767,6 +1003,8 @@ async def handle_contact(message: types.Message, state: FSMContext):
 
 @router.message(Registration.awaiting_contact)
 async def handle_contact_non_contact(message: types.Message, state: FSMContext):
+    if await _reject_non_private_registration(message, state):
+        return
     if not _direct_registration_runtime_ready():
         await handle_contact(message, state)
         return
@@ -776,8 +1014,13 @@ async def handle_contact_non_contact(message: types.Message, state: FSMContext):
 
 @router.message(Registration.awaiting_address)
 async def handle_address(message: types.Message, state: FSMContext):
+    if await _reject_non_private_registration(message, state):
+        return
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    state_data = await state.get_data()
+    state_data = await _read_registration_fsm(state)
+    if state_data is None:
+        await message.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست. کمی بعد دوباره تلاش کنید.")
+        return
     if not _direct_registration_runtime_ready():
         token = state_data.get("token") or state_data.get(_REGISTRATION_STATE_TOKEN)
         await state.clear()
@@ -817,10 +1060,14 @@ async def handle_address(message: types.Message, state: FSMContext):
         await message.answer(REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE)
         return
 
-    await state.update_data(**{_REGISTRATION_STATE_ADDRESS: address})
-    await state.set_state(Registration.awaiting_confirmation)
     try:
-        await _bound_registration_fsm_ttl(state, expires_at=expires_at)
+        state_data[_REGISTRATION_STATE_ADDRESS] = address
+        await _write_registration_fsm(
+            state,
+            data=state_data,
+            next_state=Registration.awaiting_confirmation,
+            expires_at=expires_at,
+        )
     except Exception:
         await state.clear()
         await message.answer(
@@ -858,7 +1105,12 @@ async def handle_registration_edit_address(
     callback: types.CallbackQuery,
     state: FSMContext,
 ):
-    state_data = await state.get_data()
+    if await _reject_non_private_registration(callback, state):
+        return
+    state_data = await _read_registration_fsm(state)
+    if state_data is None:
+        await callback.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
+        return
     expires_at = _utc_datetime(state_data.get(_REGISTRATION_STATE_EXPIRES_AT))
     if (
         not _direct_registration_runtime_ready()
@@ -870,9 +1122,13 @@ async def handle_registration_edit_address(
         await state.clear()
         await callback.answer("فرآیند ثبت‌نام منقضی شده است.", show_alert=True)
         return
-    await state.set_state(Registration.awaiting_address)
     try:
-        await _bound_registration_fsm_ttl(state, expires_at=expires_at)
+        await _write_registration_fsm(
+            state,
+            data=state_data,
+            next_state=Registration.awaiting_address,
+            expires_at=expires_at,
+        )
     except Exception:
         await state.clear()
         await callback.answer(
@@ -901,10 +1157,15 @@ async def handle_registration_confirm(
     callback: types.CallbackQuery,
     state: FSMContext,
 ):
+    if await _reject_non_private_registration(callback, state):
+        return
     if callback.message is None:
         await callback.answer("امکان تکمیل ثبت‌نام وجود ندارد.", show_alert=True)
         return
-    state_data = await state.get_data()
+    state_data = await _read_registration_fsm(state)
+    if state_data is None:
+        await callback.answer("ثبت‌نام مستقیم تلگرام موقتاً در دسترس نیست.", show_alert=True)
+        return
     expires_at = _utc_datetime(state_data.get(_REGISTRATION_STATE_EXPIRES_AT))
     token = state_data.get(_REGISTRATION_STATE_TOKEN)
     mobile_number = state_data.get(_REGISTRATION_STATE_MOBILE)
@@ -985,6 +1246,17 @@ async def handle_registration_confirm(
                     session,
                     token,
                 )
+                if not _customer_relation_allows_direct_registration(
+                    invitation,
+                    customer_relation,
+                ):
+                    await state.clear()
+                    await callback.answer("دعوت‌نامه مشتری معتبر نیست.", show_alert=True)
+                    await callback.message.answer(
+                        _registration_rejection_message("invitation_revoked"),
+                        reply_markup=types.ReplyKeyboardRemove(),
+                    )
+                    return
             decision = evaluate_invitation_bot_access(
                 role=invitation.role,
                 invitation_kind=invitation.kind,
@@ -1047,7 +1319,17 @@ async def handle_registration_confirm(
         await callback.answer("ثبت درخواست انجام نشد. دوباره تلاش کنید.", show_alert=True)
         return
 
-    await state.clear()
+    try:
+        await state.clear()
+    except Exception as exc:
+        logger.warning(
+            "Durable Telegram registration intent committed but FSM clear failed",
+            extra={
+                "event": "telegram_registration.post_commit_clear_failed",
+                "error_type": type(exc).__name__,
+                "intent_id": str(intent_id),
+            },
+        )
     audit_log(
         "telegram_registration.intent_ready",
         target_type="telegram_registration_intent",
@@ -1059,6 +1341,8 @@ async def handle_registration_confirm(
         "⏳ اطلاعات شما ثبت شد و در حال بررسی نهایی است.",
         reply_markup=types.ReplyKeyboardRemove(),
     )
+    if not await _claim_registration_handoff_message(state, intent_id=intent_id):
+        return
     try:
         resolution = await _wait_for_registration_handoff(
             intent_id=intent_id,
@@ -1081,7 +1365,8 @@ async def handle_registration_confirmation_message(
     message: types.Message,
     state: FSMContext,
 ):
-    del state
+    if await _reject_non_private_registration(message, state):
+        return
     await message.answer("برای ادامه از دکمه «تایید و تکمیل ثبت‌نام» یا «اصلاح آدرس» استفاده کنید.")
 
 
@@ -1100,8 +1385,16 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
 
         denial_reason = bot_account_access_denial_reason(user)
         if user:
+            activation_block = None
+            if _direct_registration_runtime_ready():
+                activation_block = await registration_activation_block_for_user(
+                    session,
+                    user=user,
+                )
             decision = await evaluate_bot_access(session, user)
-            if not decision.allowed:
+            if activation_block is not None:
+                denial_reason = BOT_ACCESS_REASON_SYNC_PENDING
+            elif not decision.allowed:
                 denial_reason = decision.reason or BOT_ACCOUNT_INACTIVE_REASON
 
         if not denial_reason and user:

@@ -490,6 +490,7 @@ def _create_registration_local_state() -> None:
         sa.Column("next_retry_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error_code", sa.String(length=96), nullable=True),
         sa.Column("authoritative_user_id", sa.Integer(), nullable=True),
+        sa.Column("projected_user_id", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
@@ -501,6 +502,7 @@ def _create_registration_local_state() -> None:
             name="ck_telegram_registration_intents_retry_count_nonnegative",
         ),
         sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(["projected_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.UniqueConstraint("idempotency_key", name="ux_telegram_registration_intents_idempotency_key"),
     )
     op.create_index(

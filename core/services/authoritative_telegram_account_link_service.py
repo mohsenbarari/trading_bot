@@ -99,20 +99,10 @@ async def _load_token_candidate(
         identity=identity,
         telegram_id=command.telegram_id,
     )
-    token = (
-        await db.execute(
-            select(TelegramLinkToken)
-            .where(TelegramLinkToken.token_hash == token_hash)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
-    if token is None:
-        raise _error(TelegramRegistrationOutcome.LINK_TOKEN_NOT_FOUND, "لینک اتصال نامعتبر است")
     user = (
         await db.execute(
             select(User)
-            .where(User.id == token.user_id)
+            .where(User.id == token_probe.user_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -122,6 +112,16 @@ async def _load_token_candidate(
             TelegramRegistrationOutcome.AUTHORITATIVE_USER_MISSING,
             "حساب کاربری اتصال یافت نشد",
         )
+    token = (
+        await db.execute(
+            select(TelegramLinkToken)
+            .where(TelegramLinkToken.token_hash == token_hash)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if token is None or token.user_id != user.id:
+        raise _error(TelegramRegistrationOutcome.LINK_TOKEN_NOT_FOUND, "لینک اتصال نامعتبر است")
     return token, user
 
 

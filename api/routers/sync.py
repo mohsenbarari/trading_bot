@@ -1660,6 +1660,49 @@ async def _localize_offer_request_customer_relation_reference(db: AsyncSession, 
     return True
 
 
+async def _localize_registration_user_reference(
+    db: AsyncSession,
+    table: str,
+    data: dict,
+) -> bool:
+    """Translate Iran User FKs to the already-localized foreign User row."""
+
+    if not bool(getattr(settings, "registration_sync_v2_enabled", False)):
+        return True
+    if table == "invitations" and data.get("registered_user_id") is not None:
+        mobile = normalize_mobile_number(data.get("mobile_number"))
+        account = normalize_account_name(data.get("account_name"))
+        if not mobile or not account:
+            return False
+        users = list(
+            (
+                await db.execute(
+                    select(User).where(
+                        User.normalized_mobile_number == mobile,
+                        User.normalized_account_name == account,
+                    )
+                )
+            ).scalars().all()
+        )
+        if len(users) != 1:
+            return False
+        data["registered_user_id"] = int(users[0].id)
+        return True
+    if table in RELATION_LINK_FIELDS and data.get(RELATION_LINK_FIELDS[table]) is not None:
+        invitation_token = _nonempty_text(data.get("invitation_token"))
+        if not invitation_token:
+            return False
+        invitation = (
+            await db.execute(
+                select(Invitation).where(Invitation.token == invitation_token)
+            )
+        ).scalar_one_or_none()
+        if invitation is None or invitation.registered_user_id is None:
+            return False
+        data[RELATION_LINK_FIELDS[table]] = int(invitation.registered_user_id)
+    return True
+
+
 async def _localize_trade_delivery_receipt_references(db: AsyncSession, data: dict) -> bool:
     trade_number = data.get("trade_number")
     if trade_number in (None, ""):
@@ -2743,6 +2786,17 @@ async def _apply_item(
                 "Synced offer request references a customer relation that is not available locally; deferring",
                 extra={
                     "event": "sync.public_identity.offer_request_customer_relation_deferred",
+                    "table": table,
+                    "record_id": record_id,
+                },
+            )
+            return 'deferred'
+
+        if not await _localize_registration_user_reference(db, table, data):
+            logger.warning(
+                "Synced registration row references a User not yet localized",
+                extra={
+                    "event": "sync.registration_user_reference_deferred",
                     "table": table,
                     "record_id": record_id,
                 },

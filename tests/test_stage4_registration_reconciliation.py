@@ -26,12 +26,14 @@ from core.services.telegram_registration_intent_service import (
 )
 from core.telegram_account_link_contracts import (
     TelegramAccountLinkCommand,
+    account_link_command_hash,
     build_telegram_account_link_command,
 )
 from core.telegram_registration_reconciliation_worker import (
     _process_attempt,
     _retry_delay_seconds,
 )
+from core.services.telegram_registration_intent_service import RegistrationProjectionResolution
 from core.trade_forwarding import _json_body
 
 
@@ -95,6 +97,33 @@ class Stage4ContractTests(unittest.TestCase):
             TelegramAccountLinkCommand.model_validate(
                 {**first.model_dump(mode="json"), "unexpected": True}
             )
+
+    def test_account_link_receipt_hash_ignores_retry_snapshots_but_not_business_fields(self):
+        first = build_telegram_account_link_command(
+            mode="link_token",
+            link_token="r" * 40,
+            mobile_number="09121112233",
+            telegram_id=77,
+            telegram_username="first-profile",
+            telegram_full_name="First Profile",
+            address="exact address value",
+            contact_verified_at=datetime.now(timezone.utc),
+        )
+        retry = first.model_copy(
+            update={
+                "telegram_username": "later-profile",
+                "telegram_full_name": "Later Profile",
+                "contact_verified_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+            }
+        )
+        changed_address = first.model_copy(update={"address": "different exact address"})
+
+        self.assertEqual(first.command_id, retry.command_id)
+        self.assertEqual(account_link_command_hash(first), account_link_command_hash(retry))
+        self.assertNotEqual(
+            account_link_command_hash(first),
+            account_link_command_hash(changed_address),
+        )
         with self.assertRaises(ValidationError):
             build_telegram_account_link_command(
                 mode="existing_linked_user",
@@ -347,6 +376,60 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "retry_wait")
         schedule.assert_awaited_once()
 
+    async def test_protocol_failure_statuses_are_classified_for_operations(self):
+        for status_code, expected in (
+            (401, "authentication_configuration"),
+            (403, "authentication_configuration"),
+            (404, "mixed_version_or_route"),
+            (422, "protocol_invalid_response"),
+        ):
+            with self.subTest(status_code=status_code), patch(
+                "core.telegram_registration_reconciliation_worker.forward_telegram_registration_command",
+                new=AsyncMock(return_value=(status_code, {"detail": "invalid"})),
+            ), patch(
+                "core.telegram_registration_reconciliation_worker._schedule_retry",
+                new=AsyncMock(return_value="retry_wait"),
+            ) as schedule:
+                result = await _process_attempt(
+                    self.attempt,
+                    sync_wait_seconds=0,
+                    sync_poll_seconds=0.01,
+                )
+
+            self.assertEqual(result, "retry_wait")
+            self.assertEqual(schedule.await_args.kwargs["error_code"], expected)
+
+    async def test_valid_terminal_domain_rejection_does_not_retry_forever(self):
+        response = TelegramRegistrationCommandResponse(
+            command_id=self.attempt.command.command_id,
+            outcome=TelegramRegistrationOutcome.IDENTITY_CONFLICT,
+        )
+        session_context = _SessionContext()
+        with patch(
+            "core.telegram_registration_reconciliation_worker.forward_telegram_registration_command",
+            new=AsyncMock(return_value=(422, response.model_dump(mode="json"))),
+        ), patch(
+            "core.telegram_registration_reconciliation_worker.AsyncSessionLocal",
+            return_value=session_context,
+        ), patch(
+            "core.telegram_registration_reconciliation_worker.finalize_registration_intent",
+            new=AsyncMock(return_value=True),
+        ) as finalize, patch(
+            "core.telegram_registration_reconciliation_worker.audit_log"
+        ), patch(
+            "core.telegram_registration_reconciliation_worker._schedule_retry",
+            new=AsyncMock(),
+        ) as schedule:
+            result = await _process_attempt(
+                self.attempt,
+                sync_wait_seconds=0,
+                sync_poll_seconds=0.01,
+            )
+
+        self.assertEqual(result, TelegramRegistrationOutcome.IDENTITY_CONFLICT.value)
+        finalize.assert_awaited_once()
+        schedule.assert_not_awaited()
+
     async def test_success_waits_for_projection_before_terminal_state(self):
         response = TelegramRegistrationCommandResponse(
             command_id=self.attempt.command.command_id,
@@ -358,7 +441,7 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=(200, response.model_dump(mode="json"))),
         ), patch(
             "core.telegram_registration_reconciliation_worker._wait_for_projection",
-            new=AsyncMock(return_value=False),
+            new=AsyncMock(return_value=None),
         ), patch(
             "core.telegram_registration_reconciliation_worker._schedule_retry",
             new=AsyncMock(return_value="retry_wait"),
@@ -384,7 +467,7 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=(200, response.model_dump(mode="json"))),
         ), patch(
             "core.telegram_registration_reconciliation_worker._wait_for_projection",
-            new=AsyncMock(return_value=True),
+            new=AsyncMock(return_value=RegistrationProjectionResolution(local_user_id=42)),
         ), patch(
             "core.telegram_registration_reconciliation_worker.AsyncSessionLocal",
             return_value=session_context,
@@ -401,6 +484,7 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result, TelegramRegistrationOutcome.CREATED.value)
         finalize.assert_awaited_once()
+        self.assertEqual(finalize.await_args.kwargs["projected_user_id"], 42)
         session_context.session.commit.assert_awaited_once()
 
 

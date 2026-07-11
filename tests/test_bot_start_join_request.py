@@ -99,6 +99,36 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(join_request.bot.send_message.await_args.kwargs.get("reply_markup"))
         logger_mock.assert_called_once()
 
+    async def test_join_request_declines_user_with_pending_registration_activation(self):
+        active_user = SimpleNamespace(
+            id=7,
+            role=UserRole.STANDARD,
+            account_status=UserAccountStatus.ACTIVE,
+            is_deleted=False,
+        )
+        join_request = make_join_request(chat_id=100)
+        with patch("bot.handlers.start.settings.channel_id", 100), patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(active_user)),
+        ), patch(
+            "bot.handlers.start._direct_registration_runtime_ready",
+            return_value=True,
+        ), patch(
+            "bot.handlers.start.registration_activation_block_for_user",
+            new=AsyncMock(return_value=SimpleNamespace(reason="pending_sync")),
+        ), patch(
+            "bot.handlers.start.evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+        ):
+            await handle_channel_join_request(join_request)
+
+        join_request.bot.decline_chat_join_request.assert_awaited_once_with(
+            chat_id=100,
+            user_id=7,
+        )
+        join_request.bot.approve_chat_join_request.assert_not_awaited()
+        self.assertIn("همگام", join_request.bot.send_message.await_args.kwargs["text"])
+
         join_request = make_join_request(chat_id=100)
         join_request.bot.send_message = AsyncMock(side_effect=RuntimeError("boom"))
         with patch("bot.handlers.start.settings.channel_id", 100), patch(

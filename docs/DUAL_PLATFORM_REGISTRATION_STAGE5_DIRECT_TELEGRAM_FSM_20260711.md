@@ -2,7 +2,7 @@
 
 Date: 2026-07-11
 
-Status: source implementation complete; independent review required; flags remain off.
+Status: source implementation complete; post-review remediation documented separately; flags remain off.
 
 ## Purpose
 
@@ -43,8 +43,8 @@ still pending. That authorization does not waive the review or rollout gates.
   address, profile text, contact payload, and command body are not logged by the new path.
 - Post-commit polling failure returns the explicit pending-not-final state. It cannot roll back or
   duplicate the already durable intent.
-- `RedisStorage` has a two-day defense TTL; per-invitation expiry is reapplied after each legal state
-  transition and a partial Redis expiry fails closed.
+- Registration state and data are written atomically with an Invitation-bounded Redis TTL. Unrelated
+  bot FSM workflows keep their existing storage lifetime.
 
 ## Test Coverage
 
@@ -97,3 +97,10 @@ rows as part of a later rollback after rollout; their durable evidence follows t
 Stage 6 adds WebApp-login OTP delivery through Telegram with the same code automatically falling
 back to SMS after 40 seconds. It introduces dedicated signed delivery acknowledgement and one Iran-
 owned Redis state machine; it does not use Telegram OTP for bot login or registration.
+
+## Post-Review Remediation Supersession
+
+The verification counts and open findings above describe the original Stage 5 commit. The accepted,
+modified, rejected, and deferred review findings are superseded by
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE5_REVIEW_REMEDIATION_20260711.md`. Stage 6 remains gated on
+review of the exact remediation commit and its new evidence package.

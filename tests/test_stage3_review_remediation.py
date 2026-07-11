@@ -250,6 +250,36 @@ class Stage3ReviewRemediationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(uncertain_status, InvitationSMSStatus.AMBIGUOUS)
         uncertain_sender.assert_not_called()
 
+    async def test_sms_restart_claims_committed_pending_zero_attempt_row_once(self):
+        delivery = InvitationSMSDelivery(
+            invitation_id=43,
+            status=InvitationSMSStatus.PENDING.value,
+            attempt_count=0,
+            claimed_at=None,
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                side_effect=[_ScalarResult(one=delivery), _ScalarResult(one=delivery)]
+            ),
+            commit=AsyncMock(),
+        )
+        sender = Mock(return_value=SMSDeliveryOutcome.ACCEPTED)
+        with patch(
+            "core.services.invitation_sms_delivery_service.current_server",
+            return_value="iran",
+        ):
+            result = await deliver_invitation_sms_once(
+                db,
+                invitation_id=43,
+                newly_created=False,
+                sender=sender,
+            )
+
+        self.assertEqual(result, InvitationSMSStatus.ACCEPTED)
+        self.assertEqual(delivery.attempt_count, 1)
+        self.assertIsNotNone(delivery.claimed_at)
+        sender.assert_called_once_with()
+
     async def test_sms_prepare_marks_enabled_legacy_retry_ambiguous_without_send(self):
         invitation = SimpleNamespace(id=51)
         db = SimpleNamespace(

@@ -31,7 +31,7 @@ class FakeDB:
         self.added = []
         self.flush_count = 0
 
-    async def execute(self, stmt):
+    async def execute(self, stmt, *_args, **_kwargs):
         self.execute_calls.append(stmt)
         if self.results:
             return self.results.pop(0)
@@ -62,6 +62,9 @@ class TelegramLinkTokenServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_token_locks_user_row_before_revoking_pending_tokens(self):
         user = SimpleNamespace(
             id=7,
+            mobile_number="09121112233",
+            account_name="safe-user",
+            telegram_id=None,
             role=UserRole.STANDARD,
             account_status=UserAccountStatus.ACTIVE,
             is_deleted=False,
@@ -70,11 +73,13 @@ class TelegramLinkTokenServiceTests(unittest.IsolatedAsyncioTestCase):
             status=TelegramLinkTokenStatus.PENDING,
             revoked_at=None,
         )
-        db = FakeDB([FakeResult(user), FakeResult(values=[pending])])
+        db = FakeDB(
+            [FakeResult(), FakeResult(), FakeResult(user), FakeResult(values=[pending])]
+        )
 
         result = await create_telegram_link_token(db, user)
 
-        self.assertIsNotNone(getattr(db.execute_calls[0], "_for_update_arg", None))
+        self.assertIsNotNone(getattr(db.execute_calls[2], "_for_update_arg", None))
         self.assertEqual(pending.status, TelegramLinkTokenStatus.REVOKED)
         self.assertIsNotNone(pending.revoked_at)
         self.assertEqual(len(db.added), 1)

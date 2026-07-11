@@ -288,8 +288,19 @@ class Stage4RegistrationReconciliationPostgresTests(unittest.IsolatedAsyncioTest
         self.assertEqual(replay.outcome, TelegramRegistrationOutcome.LINKED_EXISTING)
         self.assertTrue(replay.replayed)
 
-        changed = command.model_copy(update={"telegram_username": "changed_after_response_loss"})
-        conflict = await complete(changed)
+        changed_profile = command.model_copy(
+            update={
+                "telegram_username": "changed_after_response_loss",
+                "telegram_full_name": "Changed snapshot must not replace Web name",
+                "contact_verified_at": utc_now() + timedelta(seconds=5),
+            }
+        )
+        profile_replay = await complete(changed_profile)
+        self.assertEqual(profile_replay.outcome, TelegramRegistrationOutcome.LINKED_EXISTING)
+        self.assertTrue(profile_replay.replayed)
+
+        changed_business_payload = command.model_copy(update={"address": "Different address"})
+        conflict = await complete(changed_business_payload)
         self.assertEqual(conflict.outcome, TelegramRegistrationOutcome.CHANGED_PAYLOAD_REPLAY)
 
         async with self.session_factory() as session:
