@@ -1106,6 +1106,49 @@ Closing an item requires updating its registry status to `Closed in Stage N` and
 test, migration report, benchmark, owner approval, or staging evidence. A passing happy-path test by
 itself does not close a race, outage, privacy, or operational challenge.
 
+### Mandatory ChatGPT Review Handoff At Every Stage
+
+After a stage implementation, verification, documentation, and local commit are complete, and
+before implementation of the next stage begins, produce an external-review handoff under the
+ignored `tmp/chatgpt/` path. This is a mandatory stage boundary, not a replacement for repository
+tests or owner acceptance.
+
+The handoff must contain:
+
+1. one ZIP named `dual-platform-registration-stage-N-review-YYYYMMDD.zip`;
+2. an English `review-prompt.md` that identifies the exact branch, commit/range, roadmap path,
+   stage evidence path, architecture rationale, locked product decisions, out-of-scope surfaces,
+   and review questions;
+3. the reviewed commit patch, changed-file list, commit metadata, and clean-worktree evidence;
+4. raw logs with commands and exit status for every test/migration/static/deploy/build gate actually
+   used to close the stage, plus a non-overlapping summary that does not claim mathematical 100%
+   coverage without Stage 9 evidence;
+5. environment-safe evidence for any live read-only check, explicitly distinguishing repository
+   evidence from runtime evidence because the ChatGPT advisor can inspect the GitHub repository but
+   cannot inspect this server unless outputs are attached;
+6. a package manifest with relative file path, byte size, and SHA-256 for every payload file; hash
+   the manifest through the checksum index and validate the final ZIP with a separate outer SHA-256.
+
+The package must not contain `.env` files, credentials, tokens, OTP values, raw invitation links,
+database dumps, user PII, private keys, object-storage secrets, or unredacted server logs. Scan both
+the unpacked directory and final ZIP before handoff. Generated packages remain outside Git.
+
+The English prompt must explain why this roadmap exists, not only what changed: Telegram is
+foreign-only, the WebApp is Iran-only, Iran is the final identity/registration writer, accepted
+non-messenger product state syncs near-real-time, messenger runtime state does not sync, users may
+use both surfaces concurrently, outage reconciliation must compare against current Iran truth, and
+the rollout is deliberately additive and flags-off to contain cross-server race and migration risk.
+It must also restate the approved Telegram contact proof, no-Telegram-registration-OTP rule, later
+Web-login OTP behavior, invitation SMS category policy, no-manual-review rule, and unchanged
+CDN/Object Storage runtime architecture.
+
+The reviewer must report findings first, ordered by severity, with exact repository file/line and
+roadmap-section references. It must check code/roadmap consistency, reuse of existing services,
+project invariants, migration/rollback safety, sync ownership and mixed-version behavior, security
+and privacy, test completeness for that stage, and risk to later stages. A blocking finding reopens
+the stage; the next stage starts only after findings are classified and any accepted blocker is
+resolved and re-verified.
+
 ## Implementation Roadmap
 
 ### Stage 0 - Freshness, Branch, And Scope Guard
@@ -1223,6 +1266,12 @@ upgrade/downgrade/backfill/collision tests and the complete backend regression s
 staging remains on `f7c8d9e0a1b2`, no production action occurred, and every new entry/worker/Sync-v2
 flag remains off. Before any migration rollout that permits invitation writes, Stage 3 must connect
 all canonical writers to the reservation service.
+
+External review handoff (2026-07-11): the mandatory English prompt, implementation patch, command
+logs, migration evidence, read-only staging proof, redaction report, and per-file hashes are packaged
+outside Git at
+`tmp/chatgpt/dual-platform-registration-stage1-review-20260711.zip`. The review target is
+`4a36574f..37c4451d`; a blocking ChatGPT finding reopens Stage 1 before Stage 2 may begin.
 
 ### Stage 2 - Shared Authoritative Registration Service
 
