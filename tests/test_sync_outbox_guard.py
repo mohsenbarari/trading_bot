@@ -156,6 +156,28 @@ class SyncOutboxGuardTests(unittest.TestCase):
         self.assertEqual(len(payloads), 2)
         self.assertEqual(payloads[0], payloads[1])
 
+    def test_one_dirty_object_with_two_outbox_rows_emits_two_wakeups(self):
+        connection = FakeConnection()
+        session = FakeSession(dirty=[FakeOffer(86)], connection=connection)
+        flush_context = object()
+        fake_redis = FakeRedis()
+
+        collect_pending_sync_writes(session, flush_context, None)
+        mark_sync_outbox_recorded(connection, "offers", "UPDATE", 86, {"id": 86})
+        mark_sync_outbox_recorded(
+            connection,
+            "offers",
+            "UPDATE",
+            86,
+            {"id": 86, "_sync_contract": "second-logical-event"},
+        )
+        verify_pending_sync_outbox(session, flush_context)
+
+        self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 2)
+        with patch("core.sync_outbox_guard._get_sync_wakeup_redis", return_value=fake_redis):
+            publish_sync_outbox_wakeup_after_commit(session)
+        self.assertEqual(len(fake_redis.rpush_calls[0][1]), 2)
+
     def test_verified_outbox_rows_accumulate_across_multiple_flushes(self):
         connection = FakeConnection()
         session = FakeSession(new=[FakeOffer(84)], connection=connection)

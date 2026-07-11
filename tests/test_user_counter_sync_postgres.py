@@ -14,11 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from api.routers.trades import _apply_trade_counter_increment
 from core import events
 from core.sync_outbox_guard import register_sync_outbox_guards
-from core.user_counter_sync import increment_user_counters
+from core.user_counter_sync import increment_user_counters, reset_user_counters_in_memory
 from models.change_log import ChangeLog
 from models.commodity import Commodity
 from models.trade import Trade, TradeStatus, TradeType
 from models.user import User, UserRole
+from models.user_counter_event_receipt import UserCounterEventReceipt
 
 
 COUNTER_DATABASE_NAME_PATTERN = re.compile(r"^stage1_counter_[a-z0-9_]+$")
@@ -212,7 +213,7 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
         events = []
         for row in rows:
             payload = json.loads(row.data) if isinstance(row.data, str) else dict(row.data)
-            if payload.get("_sync_contract") == "user_counter_event_v1":
+            if payload.get("_sync_contract") == "user_counter_event_v2":
                 events.append(payload)
         return events
 
@@ -235,6 +236,16 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
                 counter_events[0]["_counter_deltas"],
                 {"channel_messages_count": 1},
             )
+
+            async with self.session_factory() as session:
+                user = await session.get(User, self.counter_user.id)
+                reset_user_counters_in_memory(user)
+                await session.commit()
+
+            counter_events = await self._counter_events_for_user(self.counter_user.id)
+            self.assertEqual(len(counter_events), 2)
+            self.assertEqual(counter_events[-1]["_counter_event_kind"], "reset")
+            self.assertEqual(counter_events[-1]["_counter_deltas"], {})
 
             async with self.session_factory() as session:
                 user = await session.get(User, self.trade_user.id)
@@ -265,6 +276,17 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
                 {"commodities_traded_count": 3, "trades_count": 1},
             )
             async with self.session_factory() as session:
+                local_receipts = list(
+                    (
+                        await session.execute(
+                            select(UserCounterEventReceipt).where(
+                                UserCounterEventReceipt.user_id.in_(
+                                    [self.counter_user.id, self.trade_user.id]
+                                )
+                            )
+                        )
+                    ).scalars().all()
+                )
                 trade_outbox_count = len(
                     list(
                         (
@@ -280,7 +302,13 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             self.assertEqual(trade_outbox_count, 1)
-            self.assertGreaterEqual(len(self.wakeup_redis.payloads), 3)
+            self.assertEqual(len(local_receipts), 3)
+            self.assertEqual(
+                sorted(row.event_kind for row in local_receipts),
+                ["increment", "increment", "reset"],
+            )
+            self.assertTrue(all(row.occurred_at is not None for row in local_receipts))
+            self.assertGreaterEqual(len(self.wakeup_redis.payloads), 4)
 
 
 if __name__ == "__main__":

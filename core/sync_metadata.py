@@ -49,7 +49,7 @@ def _authority_server(table_name: str, data: dict[str, Any]) -> str | None:
 
 
 def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -> str:
-    if table_name == "users" and data.get("_sync_contract") == "user_counter_event_v1":
+    if table_name == "users" and data.get("_sync_contract") == "user_counter_event_v2":
         event_id = _string_or_none(data.get("_counter_event_id"))
         if event_id:
             return f"counter-event:{event_id}"

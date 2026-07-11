@@ -11,10 +11,12 @@ from core.user_counter_sync import (
     USER_COUNTER_EVENT_EPOCH_FIELD,
     USER_COUNTER_EVENT_ID_FIELD,
     USER_COUNTER_EVENT_KIND_FIELD,
+    USER_COUNTER_EVENT_OCCURRED_AT_FIELD,
     USER_COUNTER_SYNC_CONTRACT,
     USER_COUNTER_SYNC_CONTRACT_FIELD,
     USER_SYNC_IDENTITY_FIELD,
     is_user_counter_event_payload,
+    normalize_counter_event_occurred_at,
 )
 
 
@@ -74,6 +76,7 @@ USER_COUNTER_EVENT_FIELDS = frozenset(
         USER_COUNTER_EVENT_KIND_FIELD,
         USER_COUNTER_EVENT_EPOCH_FIELD,
         USER_COUNTER_EVENT_DELTAS_FIELD,
+        USER_COUNTER_EVENT_OCCURRED_AT_FIELD,
         USER_SYNC_IDENTITY_FIELD,
     }
 )
@@ -188,6 +191,9 @@ def _sanitize_user_counter_event(
     try:
         event_id = str(UUID(str(payload.get(USER_COUNTER_EVENT_ID_FIELD))))
         epoch = int(payload.get(USER_COUNTER_EVENT_EPOCH_FIELD))
+        occurred_at = normalize_counter_event_occurred_at(
+            payload.get(USER_COUNTER_EVENT_OCCURRED_AT_FIELD)
+        )
     except (TypeError, ValueError, AttributeError):
         return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_metadata")
     if epoch < 1:
@@ -220,5 +226,6 @@ def _sanitize_user_counter_event(
     sanitized[USER_COUNTER_EVENT_EPOCH_FIELD] = epoch
     sanitized[USER_COUNTER_EVENT_KIND_FIELD] = kind
     sanitized[USER_COUNTER_EVENT_DELTAS_FIELD] = deltas
+    sanitized[USER_COUNTER_EVENT_OCCURRED_AT_FIELD] = occurred_at.isoformat()
     dropped = tuple(sorted(set(payload) - set(sanitized)))
     return RegistrationSyncPayloadDecision(True, sanitized, dropped_fields=dropped)

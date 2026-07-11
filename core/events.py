@@ -35,6 +35,7 @@ from core.user_counter_sync import (
     InvalidUserCounterMutation,
     build_user_counter_event,
     build_user_sync_identity,
+    user_counter_event_content_hash,
     user_counter_event_payload,
 )
 
@@ -120,6 +121,41 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
     })
     _extract_change_log_id(result)
     mark_sync_outbox_recorded(connection, table_name, operation, record_id, data)
+
+
+def _record_local_user_counter_event(connection, target, counter_event, source_server: str) -> None:
+    """Persist the producer-side ledger row in the User transaction."""
+    event_hash = user_counter_event_content_hash(
+        source_server=source_server,
+        event_id=counter_event.event_id,
+        kind=counter_event.kind,
+        epoch=counter_event.epoch,
+        deltas=counter_event.deltas,
+        occurred_at=counter_event.occurred_at,
+    )
+    connection.execute(
+        text(
+            """
+            INSERT INTO user_counter_event_receipts (
+                event_id, source_server, user_id, event_hash, event_kind,
+                event_epoch, occurred_at, deltas
+            ) VALUES (
+                :event_id, :source_server, :user_id, :event_hash, :event_kind,
+                :event_epoch, :occurred_at, CAST(:deltas AS jsonb)
+            )
+            """
+        ),
+        {
+            "event_id": counter_event.event_id,
+            "source_server": source_server,
+            "user_id": int(target.id),
+            "event_hash": event_hash,
+            "event_kind": counter_event.kind,
+            "event_epoch": int(counter_event.epoch),
+            "occurred_at": counter_event.occurred_at,
+            "deltas": json.dumps(counter_event.deltas, sort_keys=True),
+        },
+    )
 
 
 def _extract_change_log_id(result) -> int | None:
@@ -1041,6 +1077,12 @@ def setup_user_events():
                     )
                     log_change(connection, "users", target.id, "UPDATE", data)
                 if counter_event is not None:
+                    _record_local_user_counter_event(
+                        connection,
+                        target,
+                        counter_event,
+                        source_server,
+                    )
                     log_change(
                         connection,
                         "users",
@@ -1055,6 +1097,8 @@ def setup_user_events():
             raise
         except Exception as e:
             logger.error(f"Error in user after_update event: {e}")
+            if _registration_sync_v2_enabled():
+                raise
 
     logger.info("✅ User event listeners registered")
 

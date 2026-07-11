@@ -406,10 +406,10 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "user_counter_event_receipts": _entry(
         "user_counter_event_receipts",
         SyncPolicy.NO_SYNC,
-        ("sync_receiver",),
-        "local receiving server",
-        "immutable event UUID exactly-once receipt",
-        "counter sync replay protection only",
+        ("counter_event_producer", "sync_receiver"),
+        "local server that produces or receives the event",
+        "immutable event UUID ledger; never copied as a table",
+        "counter period reconstruction and replay protection only",
     ),
 }
 

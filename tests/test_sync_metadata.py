@@ -64,7 +64,7 @@ class SyncMetadataTests(unittest.TestCase):
             5,
             "UPDATE",
             {
-                "_sync_contract": "user_counter_event_v1",
+                "_sync_contract": "user_counter_event_v2",
                 "_counter_event_id": "11111111-2222-4333-8444-555555555555",
             },
             change_log_id=92,
@@ -74,7 +74,7 @@ class SyncMetadataTests(unittest.TestCase):
             5,
             "UPDATE",
             {
-                "_sync_contract": "user_counter_event_v1",
+                "_sync_contract": "user_counter_event_v2",
                 "_counter_event_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
             },
             change_log_id=93,

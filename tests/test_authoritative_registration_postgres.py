@@ -39,6 +39,7 @@ from api.routers import invitations as invitation_router
 from core.services.registration_notification_service import (
     publish_project_user_joined_web_notifications,
 )
+from core.utils import check_user_limits
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.session import UserSession
@@ -1630,12 +1631,15 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_counter_events_are_exactly_once_and_reset_ordered_by_epoch(self):
         user = await self._seed_telegram_recipient("counter_event")
 
-        def payload(event_id, *, kind, epoch, deltas):
+        reset_at = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+
+        def payload(event_id, *, kind, epoch, deltas, occurred_at):
             return {
                 "_counter_event_id": str(event_id),
                 "_counter_event_kind": kind,
                 "_counter_epoch": epoch,
                 "_counter_deltas": deltas,
+                "_counter_occurred_at": occurred_at.isoformat(),
                 "_sync_identity": {
                     "current": {
                         "account_name": user.account_name,
@@ -1656,6 +1660,7 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     kind="increment",
                     epoch=1,
                     deltas={"trades_count": 1, "commodities_traded_count": 3},
+                    occurred_at=reset_at - timedelta(minutes=5),
                 ),
                 source_server=SERVER_FOREIGN,
             )
@@ -1667,6 +1672,7 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     kind="increment",
                     epoch=1,
                     deltas={"trades_count": 1, "commodities_traded_count": 3},
+                    occurred_at=reset_at - timedelta(minutes=5),
                 ),
                 source_server=SERVER_FOREIGN,
             )
@@ -1679,13 +1685,14 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     kind="increment",
                     epoch=1,
                     deltas={"trades_count": 2, "commodities_traded_count": 3},
+                    occurred_at=reset_at - timedelta(minutes=5),
                 ),
                 source_server=SERVER_FOREIGN,
             )
             self.assertEqual(conflicting_replay, "error")
 
-            # A post-reset increment may arrive before the reset event. It
-            # advances the epoch, clears prior counts, and remains after reset.
+            # A post-reset increment may arrive before the reset event. The
+            # later reset rebuilds the period from the local receipt ledger.
             post_reset_id = uuid4()
             reset_id = uuid4()
             old_epoch_id = uuid4()
@@ -1696,8 +1703,9 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     data=payload(
                         post_reset_id,
                         kind="increment",
-                        epoch=2,
+                        epoch=1,
                         deltas={"channel_messages_count": 2},
+                        occurred_at=reset_at + timedelta(minutes=1),
                     ),
                     source_server=SERVER_IRAN,
                 ),
@@ -1707,7 +1715,13 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await _apply_user_counter_event(
                     session,
                     record_id=user.id,
-                    data=payload(reset_id, kind="reset", epoch=2, deltas={}),
+                    data=payload(
+                        reset_id,
+                        kind="reset",
+                        epoch=2,
+                        deltas={},
+                        occurred_at=reset_at,
+                    ),
                     source_server=SERVER_IRAN,
                 ),
                 "ok",
@@ -1721,10 +1735,27 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                         kind="increment",
                         epoch=1,
                         deltas={"trades_count": 8},
+                        occurred_at=reset_at - timedelta(seconds=1),
                     ),
                     source_server=SERVER_FOREIGN,
                 ),
                 "ignored",
+            )
+            disconnected_post_reset_id = uuid4()
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        disconnected_post_reset_id,
+                        kind="increment",
+                        epoch=1,
+                        deltas={"trades_count": 4},
+                        occurred_at=reset_at + timedelta(minutes=2),
+                    ),
+                    source_server=SERVER_FOREIGN,
+                ),
+                "ok",
             )
             await session.commit()
 
@@ -1733,21 +1764,32 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.execute(select(User).where(User.id == user.id))
             ).scalar_one()
             self.assertEqual(stored.counter_epoch, 2)
-            self.assertEqual(stored.trades_count, 0)
+            self.assertEqual(stored.trades_count, 4)
             self.assertEqual(stored.commodities_traded_count, 0)
             self.assertEqual(stored.channel_messages_count, 2)
+            stored.limitations_expire_at = datetime.utcnow() + timedelta(days=1)
+            stored.max_daily_trades = 4
+            allowed, message = check_user_limits(stored, "trade")
+            self.assertFalse(allowed)
+            self.assertIn("حداکثر تعداد معاملات", message)
             receipt_count = int(
                 (
                     await session.execute(
                         select(func.count(UserCounterEventReceipt.event_id)).where(
                             UserCounterEventReceipt.event_id.in_(
-                                [increment_id, post_reset_id, reset_id, old_epoch_id]
+                                [
+                                    increment_id,
+                                    post_reset_id,
+                                    reset_id,
+                                    old_epoch_id,
+                                    disconnected_post_reset_id,
+                                ]
                             )
                         )
                     )
                 ).scalar_one()
             )
-            self.assertEqual(receipt_count, 4)
+            self.assertEqual(receipt_count, 5)
 
 
 if __name__ == "__main__":

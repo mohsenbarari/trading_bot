@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -15,12 +18,13 @@ USER_COUNTER_FIELDS = (
     "channel_messages_count",
 )
 USER_COUNTER_EPOCH_FIELD = "counter_epoch"
-USER_COUNTER_SYNC_CONTRACT = "user_counter_event_v1"
+USER_COUNTER_SYNC_CONTRACT = "user_counter_event_v2"
 USER_COUNTER_SYNC_CONTRACT_FIELD = "_sync_contract"
 USER_COUNTER_EVENT_ID_FIELD = "_counter_event_id"
 USER_COUNTER_EVENT_KIND_FIELD = "_counter_event_kind"
 USER_COUNTER_EVENT_EPOCH_FIELD = "_counter_epoch"
 USER_COUNTER_EVENT_DELTAS_FIELD = "_counter_deltas"
+USER_COUNTER_EVENT_OCCURRED_AT_FIELD = "_counter_occurred_at"
 USER_SYNC_IDENTITY_FIELD = "_sync_identity"
 USER_SYNC_IDENTITY_FIELDS = ("account_name", "mobile_number", "telegram_id")
 
@@ -35,6 +39,47 @@ class UserCounterEvent:
     kind: str
     epoch: int
     deltas: dict[str, int]
+    occurred_at: datetime
+
+
+def normalize_counter_event_occurred_at(value: object) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("counter event occurred_at is invalid") from exc
+    else:
+        raise ValueError("counter event occurred_at is required")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("counter event occurred_at must be timezone-aware")
+    return parsed.astimezone(timezone.utc)
+
+
+def user_counter_event_content_hash(
+    *,
+    source_server: str,
+    event_id: object,
+    kind: str,
+    epoch: int,
+    deltas: dict[str, int],
+    occurred_at: object,
+) -> str:
+    canonical_time = normalize_counter_event_occurred_at(occurred_at).isoformat()
+    encoded = json.dumps(
+        {
+            "source_server": str(source_server or "").strip().lower(),
+            "event_id": str(event_id),
+            "kind": str(kind),
+            "epoch": int(epoch),
+            "deltas": {str(key): int(value) for key, value in deltas.items()},
+            "occurred_at": canonical_time,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def increment_user_counters(
@@ -94,7 +139,12 @@ def _history_values(user: object, field_name: str) -> tuple[int, int, bool]:
     return previous, current, True
 
 
-def build_user_counter_event(user: object, changed_fields: set[str]) -> UserCounterEvent | None:
+def build_user_counter_event(
+    user: object,
+    changed_fields: set[str],
+    *,
+    occurred_at: datetime | None = None,
+) -> UserCounterEvent | None:
     counter_changed = bool(set(USER_COUNTER_FIELDS) & changed_fields)
     epoch_changed = USER_COUNTER_EPOCH_FIELD in changed_fields
     if not counter_changed and not epoch_changed:
@@ -111,6 +161,9 @@ def build_user_counter_event(user: object, changed_fields: set[str]) -> UserCoun
         field_name: _history_values(user, field_name)
         for field_name in USER_COUNTER_FIELDS
     }
+    event_time = normalize_counter_event_occurred_at(
+        occurred_at or datetime.now(timezone.utc)
+    )
     if epoch_changed:
         if current_epoch != previous_epoch + 1:
             raise InvalidUserCounterMutation("counter reset must increment epoch exactly once")
@@ -121,6 +174,7 @@ def build_user_counter_event(user: object, changed_fields: set[str]) -> UserCoun
             kind="reset",
             epoch=current_epoch,
             deltas={},
+            occurred_at=event_time,
         )
 
     deltas = {
@@ -138,6 +192,7 @@ def build_user_counter_event(user: object, changed_fields: set[str]) -> UserCoun
         kind="increment",
         epoch=current_epoch,
         deltas=deltas,
+        occurred_at=event_time,
     )
 
 
@@ -149,6 +204,7 @@ def user_counter_event_payload(user: object, event: UserCounterEvent) -> dict[st
         USER_COUNTER_EVENT_KIND_FIELD: event.kind,
         USER_COUNTER_EVENT_EPOCH_FIELD: event.epoch,
         USER_COUNTER_EVENT_DELTAS_FIELD: event.deltas,
+        USER_COUNTER_EVENT_OCCURRED_AT_FIELD: event.occurred_at.isoformat(),
         USER_SYNC_IDENTITY_FIELD: build_user_sync_identity(user, include_previous=True),
     }
 

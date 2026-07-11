@@ -35,8 +35,11 @@ performed.
 | `L-1` same-command live race | Fixed | Two live PostgreSQL sessions execute one command behind barriers; exactly one terminal receipt and one logical outbox event remain. |
 | `L-2` concurrent outbox dedupe | Fixed for Stage 2 transaction | The same live command race proves one transactional registration outbox event and replay bypasses enqueue. Existing unique outbox constraints remain reused; no second outbox or worker was added. |
 
-The Stage 1 remediation at `c8bb4a1a` already closed `C-2`, `H-5`, `H-6`, `H-7`, `H-8`, `M-3`,
-`M-6`, and `M-7`; this change retains those implementations and regression tests.
+The Stage 1 remediation at `c8bb4a1a` closed `H-5`, `H-6`, `H-7`, `H-8`, `M-3`, `M-6`, and `M-7`.
+The later combined review correctly reopened counter finding `C-2`; the current follow-up replaces
+the arrival/epoch-only rule with a persisted UTC-period ledger and verifies both partition delivery
+orders. It also closes the newly reported bounded `/register/` logging gap and exact outbox wake-up
+count issue. This document must be read together with the follow-up evidence package.
 
 ## Intentionally Deferred Findings
 

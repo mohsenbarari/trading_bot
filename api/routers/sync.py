@@ -27,8 +27,11 @@ from core.user_counter_sync import (
     USER_COUNTER_EVENT_EPOCH_FIELD,
     USER_COUNTER_EVENT_ID_FIELD,
     USER_COUNTER_EVENT_KIND_FIELD,
+    USER_COUNTER_EVENT_OCCURRED_AT_FIELD,
     USER_SYNC_IDENTITY_FIELD,
     is_user_counter_event_payload,
+    normalize_counter_event_occurred_at,
+    user_counter_event_content_hash,
 )
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
@@ -2411,20 +2414,20 @@ async def _apply_user_counter_event(
     if user is None:
         return "deferred"
 
-    event_hash = hashlib.sha256(
-        json.dumps(
-            {
-                "source_server": source,
-                "user_id": target_user_id,
-                "event_id": data[USER_COUNTER_EVENT_ID_FIELD],
-                "kind": data[USER_COUNTER_EVENT_KIND_FIELD],
-                "epoch": data[USER_COUNTER_EVENT_EPOCH_FIELD],
-                "deltas": data[USER_COUNTER_EVENT_DELTAS_FIELD],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    occurred_at = normalize_counter_event_occurred_at(
+        data[USER_COUNTER_EVENT_OCCURRED_AT_FIELD]
+    )
+    event_kind = data[USER_COUNTER_EVENT_KIND_FIELD]
+    incoming_epoch = int(data[USER_COUNTER_EVENT_EPOCH_FIELD])
+    deltas = data[USER_COUNTER_EVENT_DELTAS_FIELD]
+    event_hash = user_counter_event_content_hash(
+        source_server=source,
+        event_id=data[USER_COUNTER_EVENT_ID_FIELD],
+        kind=event_kind,
+        epoch=incoming_epoch,
+        deltas=deltas,
+        occurred_at=occurred_at,
+    )
     receipt_stmt = (
         pg_insert(UserCounterEventReceipt)
         .values(
@@ -2432,6 +2435,10 @@ async def _apply_user_counter_event(
             source_server=source,
             user_id=target_user_id,
             event_hash=event_hash,
+            event_kind=event_kind,
+            event_epoch=incoming_epoch,
+            occurred_at=occurred_at,
+            deltas=deltas,
         )
         .on_conflict_do_nothing(index_elements=["event_id"])
         .returning(UserCounterEventReceipt.event_id)
@@ -2466,38 +2473,64 @@ async def _apply_user_counter_event(
             return "error"
         return "ignored"
 
-    incoming_epoch = int(data[USER_COUNTER_EVENT_EPOCH_FIELD])
     current_epoch = int(getattr(user, "counter_epoch", 1) or 1)
-    if incoming_epoch < current_epoch:
-        return "ignored"
-
-    values: dict[str, int] = {}
-    if incoming_epoch > current_epoch:
-        values.update(
-            {
-                "counter_epoch": incoming_epoch,
-                "trades_count": 0,
-                "commodities_traded_count": 0,
-                "channel_messages_count": 0,
-            }
+    if event_kind == "increment":
+        reset_boundary_result = await db.execute(
+            select(UserCounterEventReceipt.occurred_at)
+            .where(
+                UserCounterEventReceipt.user_id == target_user_id,
+                UserCounterEventReceipt.event_kind == "reset",
+                UserCounterEventReceipt.event_epoch == current_epoch,
+            )
+            .order_by(UserCounterEventReceipt.occurred_at.desc())
+            .limit(1)
         )
+        reset_boundary = _result_scalar_one_or_none(reset_boundary_result)
+        if current_epoch > 1 and reset_boundary is None:
+            return "error"
+        if reset_boundary is not None:
+            reset_boundary = normalize_counter_event_occurred_at(reset_boundary)
+            if occurred_at < reset_boundary:
+                return "ignored"
 
-    if data[USER_COUNTER_EVENT_KIND_FIELD] == "increment":
-        deltas = data[USER_COUNTER_EVENT_DELTAS_FIELD]
+        values: dict[str, int] = {}
         for field_name in USER_COUNTER_FIELDS:
             delta = int(deltas.get(field_name, 0) or 0)
             if not delta:
                 continue
-            base = 0 if incoming_epoch > current_epoch else int(getattr(user, field_name, 0) or 0)
-            values[field_name] = base + delta
-
-    # A reset for an epoch already observed is intentionally a no-op. This
-    # preserves post-reset increments if their event arrived before the reset.
-    if values:
+            values[field_name] = int(getattr(user, field_name, 0) or 0) + delta
         await db.execute(
             update(User).where(User.id == target_user_id).values(**values),
             execution_options={"is_sync": True},
         )
+        return "ok"
+
+    if incoming_epoch < current_epoch:
+        return "ignored"
+    if incoming_epoch == current_epoch:
+        return "error"
+
+    receipt_rows = list(
+        (
+            await db.execute(
+                select(UserCounterEventReceipt.deltas).where(
+                    UserCounterEventReceipt.user_id == target_user_id,
+                    UserCounterEventReceipt.event_kind == "increment",
+                    UserCounterEventReceipt.occurred_at >= occurred_at,
+                )
+            )
+        ).scalars().all()
+    )
+    rebuilt = {field_name: 0 for field_name in USER_COUNTER_FIELDS}
+    for receipt_deltas in receipt_rows:
+        for field_name in USER_COUNTER_FIELDS:
+            rebuilt[field_name] += int((receipt_deltas or {}).get(field_name, 0) or 0)
+    await db.execute(
+        update(User)
+        .where(User.id == target_user_id)
+        .values(counter_epoch=incoming_epoch, **rebuilt),
+        execution_options={"is_sync": True},
+    )
     return "ok"
 
 

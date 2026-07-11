@@ -55,8 +55,14 @@ def _persisted_user() -> User:
 
 
 class _Connection:
+    def __init__(self):
+        self.executed = []
+
     def get_execution_options(self):
         return {}
+
+    def execute(self, statement, parameters):
+        self.executed.append((statement, parameters))
 
 
 class UserCounterSyncTests(unittest.TestCase):
@@ -77,7 +83,8 @@ class UserCounterSyncTests(unittest.TestCase):
             {"trades_count": 1, "commodities_traded_count": 4},
         )
         payload = user_counter_event_payload(user, event)
-        self.assertEqual(payload["_sync_contract"], "user_counter_event_v1")
+        self.assertEqual(payload["_sync_contract"], "user_counter_event_v2")
+        self.assertIn("_counter_occurred_at", payload)
         self.assertNotIn("address", payload)
         self.assertNotIn("full_name", payload)
 
@@ -111,11 +118,12 @@ class UserCounterSyncTests(unittest.TestCase):
 
         user = _persisted_user()
         increment_user_counters(user, channel_messages=1)
+        connection = _Connection()
         with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
             "core.events.settings.server_mode",
             "foreign",
         ), patch("core.events.log_change") as log_change:
-            registry[("User", "after_update")](None, _Connection(), user)
+            registry[("User", "after_update")](None, connection, user)
 
         log_change.assert_called_once()
         table_name, operation, payload = (
@@ -126,6 +134,29 @@ class UserCounterSyncTests(unittest.TestCase):
         self.assertEqual((table_name, operation), ("users", "UPDATE"))
         self.assertEqual(payload["_counter_deltas"], {"channel_messages_count": 1})
         self.assertNotIn("sync_version", payload)
+        self.assertEqual(len(connection.executed), 1)
+        self.assertNotIn("counter_user", repr(connection.executed[0]))
+
+    def test_v2_mixed_profile_and_counter_update_fails_if_counter_ledger_fails(self):
+        registry = {}
+        with patch("core.events.event.listens_for", side_effect=_capture_listeners(registry)):
+            events.setup_user_events()
+
+        user = _persisted_user()
+        user.address = "Updated Iran address"
+        increment_user_counters(user, trades=1)
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode",
+            "iran",
+        ), patch("core.events.log_change") as log_change, patch(
+            "core.events._record_local_user_counter_event",
+            side_effect=RuntimeError("ledger unavailable"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "ledger unavailable"):
+                registry[("User", "after_update")](None, _Connection(), user)
+
+        log_change.assert_called_once()
+        self.assertNotIn("_sync_contract", log_change.call_args.args[4])
 
     def test_v2_foreign_identity_mutation_fails_before_flush(self):
         registry = {}

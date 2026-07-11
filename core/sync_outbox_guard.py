@@ -22,6 +22,7 @@ SYNC_OUTBOX_PENDING_KEY = "_sync_outbox_pending"
 SYNC_OUTBOX_TOKEN_KEY = "_sync_outbox_flush_token"
 SYNC_OUTBOX_CURRENT_TOKEN_KEY = "_sync_outbox_current_token"
 SYNC_OUTBOX_RECORDED_KEY = "_sync_outbox_recorded"
+SYNC_OUTBOX_RECORDED_COUNT_KEY = "_sync_outbox_recorded_count"
 SYNC_OUTBOX_WAKEUP_NEEDED_KEY = "_sync_outbox_wakeup_needed"
 
 _REGISTERED = False
@@ -85,6 +86,8 @@ def mark_sync_outbox_recorded(
             _outbox_identity(table_name, record_id, data=data),
         )
     )
+    recorded_counts = info.setdefault(SYNC_OUTBOX_RECORDED_COUNT_KEY, {})
+    recorded_counts[token] = _coerce_wakeup_count(recorded_counts.get(token)) + 1
 
 
 def collect_pending_sync_writes(session: Session, flush_context: Any, instances: Any) -> None:
@@ -139,6 +142,12 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
         if isinstance(connection_info, dict)
         else set()
     )
+    recorded_counts = (
+        connection_info.get(SYNC_OUTBOX_RECORDED_COUNT_KEY, {})
+        if isinstance(connection_info, dict)
+        else {}
+    )
+    recorded_row_count = _coerce_wakeup_count(recorded_counts.get(token))
 
     missing: list[str] = []
     for item in pending:
@@ -158,6 +167,8 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
             recorded_set.difference_update(
                 [key for key in recorded_set if key and key[0] == token]
             )
+        if isinstance(recorded_counts, dict):
+            recorded_counts.pop(token, None)
 
     if missing:
         raise SyncOutboxError(
@@ -168,7 +179,9 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
     current_wakeup_count = _coerce_wakeup_count(
         session.info.get(SYNC_OUTBOX_WAKEUP_NEEDED_KEY)
     )
-    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = current_wakeup_count + len(pending)
+    session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY] = (
+        current_wakeup_count + recorded_row_count
+    )
 
 
 def publish_sync_outbox_wakeup_after_commit(session: Session) -> None:

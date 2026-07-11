@@ -567,6 +567,10 @@ def _create_registration_local_state() -> None:
         sa.Column("source_server", sa.String(length=16), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("event_hash", sa.String(length=64), nullable=False),
+        sa.Column("event_kind", sa.String(length=16), nullable=False),
+        sa.Column("event_epoch", sa.BigInteger(), nullable=False),
+        sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("deltas", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("applied_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.CheckConstraint(
             "source_server IN ('iran', 'foreign')",
@@ -576,6 +580,14 @@ def _create_registration_local_state() -> None:
             "length(event_hash) = 64",
             name="ck_user_counter_event_receipts_event_hash",
         ),
+        sa.CheckConstraint(
+            "event_kind IN ('increment', 'reset')",
+            name="ck_user_counter_event_receipts_known_kind",
+        ),
+        sa.CheckConstraint(
+            "event_epoch >= 1",
+            name="ck_user_counter_event_receipts_epoch_positive",
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("event_id"),
     )
@@ -583,6 +595,12 @@ def _create_registration_local_state() -> None:
         "ix_user_counter_event_receipts_user_id",
         "user_counter_event_receipts",
         ["user_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_user_counter_event_receipts_user_period",
+        "user_counter_event_receipts",
+        ["user_id", "event_kind", "occurred_at", "event_epoch"],
         unique=False,
     )
     op.create_index(
@@ -603,6 +621,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_user_counter_event_receipts_user_period",
+        table_name="user_counter_event_receipts",
+    )
     op.drop_index(
         "ix_user_counter_event_receipts_user_id",
         table_name="user_counter_event_receipts",

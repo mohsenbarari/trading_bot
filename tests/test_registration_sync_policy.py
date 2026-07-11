@@ -123,11 +123,12 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
     def test_counter_event_is_explicit_unversioned_and_strict(self):
         valid = {
             "id": 7,
-            "_sync_contract": "user_counter_event_v1",
+            "_sync_contract": "user_counter_event_v2",
             "_counter_event_id": "11111111-2222-4333-8444-555555555555",
             "_counter_event_kind": "increment",
             "_counter_epoch": 3,
             "_counter_deltas": {"trades_count": 1, "commodities_traded_count": 4},
+            "_counter_occurred_at": "2026-07-11T12:00:00+00:00",
             "_sync_identity": self._identity(),
         }
         for source in (SERVER_IRAN, SERVER_FOREIGN):
@@ -156,6 +157,8 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
 
         malformed = [
             {**valid, "_counter_event_id": "not-a-uuid"},
+            {**valid, "_counter_occurred_at": "not-a-time"},
+            {**valid, "_counter_occurred_at": "2026-07-11T12:00:00"},
             {**valid, "_counter_event_kind": "increment", "_counter_deltas": {}},
             {**valid, "_counter_event_kind": "reset", "_counter_deltas": {"trades_count": 1}},
             {**valid, "_counter_deltas": {"unknown": 1}},

@@ -150,6 +150,8 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
             "user_counter_event_receipts": {
                 "ck_user_counter_event_receipts_known_source",
                 "ck_user_counter_event_receipts_event_hash",
+                "ck_user_counter_event_receipts_known_kind",
+                "ck_user_counter_event_receipts_epoch_positive",
             },
         }
         for table_name, names in expected_constraints.items():

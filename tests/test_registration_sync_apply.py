@@ -1,6 +1,4 @@
 import unittest
-import hashlib
-import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -15,6 +13,7 @@ from api.routers.sync import (
     _apply_versioned_user_patch,
     _build_upsert_stmt,
 )
+from core.user_counter_sync import user_counter_event_content_hash
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
 from models.invitation import Invitation
@@ -368,7 +367,7 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
     async def test_counter_event_applies_once_with_epoch_and_local_identity(self):
         user = SimpleNamespace(
             id=91,
-            counter_epoch=2,
+            counter_epoch=1,
             trades_count=3,
             commodities_traded_count=4,
             channel_messages_count=5,
@@ -379,6 +378,7 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
                 _QueryResult([user]),
                 _QueryResult([user]),
                 _QueryResult([event_id]),
+                _QueryResult([]),
                 _QueryResult(rowcount=1),
             ]
         )
@@ -388,8 +388,9 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
             data={
                 "_counter_event_id": str(event_id),
                 "_counter_event_kind": "increment",
-                "_counter_epoch": 3,
+                "_counter_epoch": 1,
                 "_counter_deltas": {"trades_count": 1, "commodities_traded_count": 6},
+                "_counter_occurred_at": "2026-07-11T12:00:00+00:00",
                 "_sync_identity": {
                     "current": {"account_name": "same_user"},
                     "previous": {},
@@ -402,12 +403,12 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FOR UPDATE", str(db.statements[0][0]))
         update_statement = db.statements[-1][0]
         sql = str(update_statement)
-        self.assertIn("counter_epoch", sql)
+        self.assertNotIn("counter_epoch", sql)
         self.assertIn("trades_count", sql)
         self.assertIn("commodities_traded_count", sql)
         compiled = update_statement.compile(dialect=postgresql.dialect())
         self.assertIn(91, compiled.params.values())
-        self.assertIn(3, compiled.params.values())
+        self.assertIn(4, compiled.params.values())
 
     async def test_duplicate_counter_event_does_not_update_user(self):
         user = SimpleNamespace(
@@ -418,20 +419,14 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
             channel_messages_count=5,
         )
         event_id = "11111111-2222-4333-8444-555555555555"
-        event_hash = hashlib.sha256(
-            json.dumps(
-                {
-                    "source_server": "foreign",
-                    "user_id": 91,
-                    "event_id": event_id,
-                    "kind": "increment",
-                    "epoch": 3,
-                    "deltas": {"trades_count": 1},
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        event_hash = user_counter_event_content_hash(
+            source_server="foreign",
+            event_id=event_id,
+            kind="increment",
+            epoch=3,
+            deltas={"trades_count": 1},
+            occurred_at="2026-07-11T12:00:00+00:00",
+        )
         db = _ApplyDB(
             execute_results=[
                 _QueryResult([user]),
@@ -456,6 +451,7 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
                 "_counter_event_kind": "increment",
                 "_counter_epoch": 3,
                 "_counter_deltas": {"trades_count": 1},
+                "_counter_occurred_at": "2026-07-11T12:00:00+00:00",
                 "_sync_identity": {
                     "current": {"account_name": "same_user"},
                     "previous": {},

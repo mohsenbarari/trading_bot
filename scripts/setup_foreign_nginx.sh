@@ -122,7 +122,7 @@ server {
         return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
     }
 
-    location = /register {
+    location ~ ^/register(?:/|$) {
         access_log off;
         add_header Cache-Control "no-store, max-age=0" always;
         add_header Referrer-Policy "no-referrer" always;

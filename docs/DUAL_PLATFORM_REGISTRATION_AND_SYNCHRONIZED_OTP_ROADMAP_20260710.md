@@ -1291,6 +1291,19 @@ application deployment or feature flag was applied. One evidence command briefly
 active database migration dependency; the official downgrade restored `f7c8d9e0a1b2`, schema
 absence and sync health were verified, and all later scratch runs used `--no-deps`.
 
+Combined-review follow-up (2026-07-11): the later independent report targeted stale commit
+`c8bb4a1a`. After reconciling it with the Stage 2 remediation at `1fa269ee`, three findings still
+required work. `C-2` is addressed by `user_counter_event_v2`: local producer and receiver ledgers
+persist UTC occurrence time, Iran reset time defines the authoritative period, and reset rebuilds
+from qualifying receipts so a disconnected foreign post-boundary increment is not discarded merely
+because it carries the prior local epoch. `H-6` is addressed by bounded no-log Nginx coverage for
+the complete `/register` route family, including normalized slash variants. `L-4` is addressed by
+counting actual emitted outbox rows for commit wake-ups. Design, clock dependency, tests, and
+deployment boundaries are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_COMBINED_REVIEW_FOLLOWUP_20260711.md`. Stage 3 remains blocked
+pending independent review of the exact follow-up commit; no deployment or feature enablement
+occurred.
+
 ### Stage 2 - Shared Authoritative Registration Service
 
 - Extract current Web registration mutation into a shared Iran service.

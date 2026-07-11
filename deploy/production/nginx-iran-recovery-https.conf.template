@@ -11,7 +11,7 @@ server {
         root /var/www/html;
     }
 
-    location = /register {
+    location ~ ^/register(?:/|$) {
         access_log off;
         add_header Referrer-Policy "no-referrer" always;
         add_header Retry-After "300" always;
@@ -60,7 +60,7 @@ server {
         proxy_set_header Connection "";
     }
 
-    location = /register {
+    location ~ ^/register(?:/|$) {
         access_log off;
         add_header Referrer-Policy "no-referrer" always;
         add_header Retry-After "300" always;

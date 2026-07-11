@@ -26,7 +26,7 @@ scratch command used `--no-deps`. All registration and Sync-v2 flags remain disa
 
 | Review finding | Remediation | Primary evidence |
 |---|---|---|
-| `C-1` User counter writes conflict with the mandatory outbox guard | Added a dedicated `user_counter_event_v1` contract. Counter-only User writes now create a transactional `change_log` row, increments are delta events, reset advances an Iran-owned epoch, and a local no-sync receipt applies each event exactly once. Every direct counter writer uses the shared mutation helpers. | `tests/test_user_counter_sync.py`, `tests/test_registration_sync_apply.py`, real PostgreSQL counter ordering/replay test |
+| `C-1` User counter writes conflict with the mandatory outbox guard | Added a dedicated counter-event contract. Counter-only User writes now create a transactional `change_log` row, increments are delta events, reset advances an Iran-owned epoch, and a local no-sync receipt applies each event exactly once. Every direct counter writer uses the shared mutation helpers. The later combined-review follow-up upgrades this wire contract to `user_counter_event_v2` with an authoritative UTC period boundary. | `tests/test_user_counter_sync.py`, `tests/test_registration_sync_apply.py`, real PostgreSQL counter ordering/replay test |
 | `H-1` legacy Invitation completion backfill can attach a reused identity | Removed natural-key-only completion inference. Only an active/expired relation linked to the same User, with non-deleted state and activation inside Invitation lifetime, may backfill completion. Standard used rows without durable relation evidence stay ambiguous. | `tests/test_registration_stage1_migration_postgres.py` five-case real migration matrix |
 | `H-2` Telegram address is trimmed | Declared the command address as a field-level non-stripping Pydantic string while retaining strict trimming for other command strings. The exact minimum-10 rule and Persian message are unchanged. | exact spaces, 9/10 boundary, and canonical hash tests |
 | `H-3` invitation surface availability diverges from bot access policy | Added one pure role/kind/tier evaluator in `bot_access_policy` and reused it from contract-v2 generation and authoritative completion. Unknown kind/tier and Watch fail closed; Standard/admin/police and tier-1 rules remain owner-approved. | exhaustive role/kind/tier matrix |
@@ -54,12 +54,14 @@ exists. The review's low-severity Stage 6/9 evidence items remain assigned to th
    the event. Receipt and counter update commit or roll back together.
 5. Replaying the same UUID and canonical event hash is ignored. Reusing a UUID with a different
    source, target User, epoch, kind, or delta fails closed.
-6. An event from an older epoch is recorded and ignored. A new-epoch increment arriving before its
-   reset clears the old epoch and applies the increment; the later same-epoch reset is a no-op so it
-   cannot erase post-reset work.
-7. During a network partition, Iran's reset epoch is authoritative. Foreign events produced against
-   an older epoch are ignored after reconnection; this is the explicit fail-safe behavior rather
-   than silently reintroducing pre-reset usage.
+6. The `user_counter_event_v2` ledger records a timezone-aware UTC occurrence time for every local
+   and received event. Iran's reset occurrence time is the authoritative period boundary.
+7. An increment before the current reset boundary is recorded and ignored. An increment at or after
+   the boundary is applied even if a disconnected producer still carries the prior local epoch.
+8. Delivery order does not alter the converged value: a delayed reset rebuilds the aggregate from
+   all locally persisted increment receipts in its period, while a reset that arrived first admits
+   later post-boundary increments. This contract relies on the project's existing synchronized UTC
+   server-clock standard; it does not infer periods from receipt arrival order.
 
 ## Migration And Runtime Safety Evidence
 

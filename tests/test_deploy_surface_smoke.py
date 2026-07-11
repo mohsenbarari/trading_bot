@@ -69,13 +69,16 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             with self.subTest(relative_path=relative_path):
                 self.assertRegex(
                     source,
-                    r'location = /register \{\s+access_log off;',
+                    r'location ~ \^/register\(\?:/\|\$\) \{\s+access_log off;',
                 )
                 self.assertRegex(
                     source,
                     r'location \^~ /i/ \{\s+access_log off;',
                 )
-                for location_pattern in (r'location = /register', r'location \^~ /i/'):
+                for location_pattern in (
+                    r'location ~ \^/register\(\?:/\|\$\)',
+                    r'location \^~ /i/',
+                ):
                     block = re.search(
                         rf'{location_pattern} \{{(?P<body>.*?)\n    \}}',
                         source,
@@ -96,7 +99,10 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         foreign_setup = (REPO_ROOT / 'scripts/setup_foreign_nginx.sh').read_text(
             encoding='utf-8'
         )
-        for location_pattern in (r'location = /register', r'location \^~ /i/'):
+        for location_pattern in (
+            r'location ~ \^/register\(\?:/\|\$\)',
+            r'location \^~ /i/',
+        ):
             with self.subTest(foreign_location=location_pattern):
                 block = re.search(
                     rf'{location_pattern} \{{(?P<body>.*?)\n    \}}',
@@ -140,7 +146,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                 '  server {\n'
                 f'    listen 127.0.0.1:{port};\n'
                 f'    root {root};\n'
-                '    location = /register { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
+                '    location ~ ^/register(?:/|$) { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
                 '    location ^~ /i/ { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
                 '    location / { try_files $uri /index.html; }\n'
                 '  }\n'
@@ -183,6 +189,24 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                     self.assertEqual(response.status, 200)
                     self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
                 with urlopen(
+                    f'http://127.0.0.1:{port}/register/?token=INV-trailing-slash-secret',
+                    timeout=1,
+                ) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
+                with urlopen(
+                    f'http://127.0.0.1:{port}/register//?token=INV-repeated-slash-secret',
+                    timeout=1,
+                ) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
+                with urlopen(
+                    f'http://127.0.0.1:{port}/register%2F?token=INV-encoded-slash-secret',
+                    timeout=1,
+                ) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
+                with urlopen(
                     f'http://127.0.0.1:{port}/i/runtime-short-secret',
                     timeout=1,
                 ) as response:
@@ -203,6 +227,9 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             logged = access_log.read_text(encoding='utf-8')
             self.assertIn('/health?visible=yes', logged)
             self.assertNotIn('INV-runtime-secret', logged)
+            self.assertNotIn('INV-trailing-slash-secret', logged)
+            self.assertNotIn('INV-repeated-slash-secret', logged)
+            self.assertNotIn('INV-encoded-slash-secret', logged)
             self.assertNotIn('runtime-short-secret', logged)
 
     def test_run_checked_applies_default_and_extra_environment(self):

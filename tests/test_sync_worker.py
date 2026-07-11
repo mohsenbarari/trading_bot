@@ -353,11 +353,12 @@ class ChangeLogPayloadTests(unittest.TestCase):
         event_id = "11111111-2222-4333-8444-555555555555"
         payload = {
             "id": 7,
-            "_sync_contract": "user_counter_event_v1",
+            "_sync_contract": "user_counter_event_v2",
             "_counter_event_id": event_id,
             "_counter_event_kind": "increment",
             "_counter_epoch": 3,
             "_counter_deltas": {"trades_count": 1},
+            "_counter_occurred_at": "2026-07-11T12:00:00+00:00",
             "_sync_identity": {
                 "current": {"account_name": "counter_user"},
                 "previous": {},
