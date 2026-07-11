@@ -65,6 +65,15 @@ def _add_version_columns() -> None:
             table_name,
             "sync_version >= 1",
         )
+    op.add_column(
+        "users",
+        sa.Column("counter_epoch", sa.BigInteger(), nullable=False, server_default=sa.text("1")),
+    )
+    op.create_check_constraint(
+        "ck_users_counter_epoch_positive",
+        "users",
+        "counter_epoch >= 1",
+    )
 
 
 def _add_invitation_metadata() -> None:
@@ -119,32 +128,55 @@ def _add_invitation_metadata() -> None:
         """
     )
 
-    # All historical completion paths were Web-only. Backfill only when one active,
-    # non-deleted User matches both natural keys and has a trustworthy created_at.
+    # A used flag and matching natural keys do not prove completion: account
+    # deletion historically invalidated invitations by setting is_used. Only a
+    # relation row linked to the same User plus an in-window activation timestamp
+    # is sufficiently strong evidence. Legacy standard invitations stay
+    # intentionally ambiguous because they have no equivalent durable relation.
     op.execute(
         """
         UPDATE invitations AS i
         SET registered_user_id = u.id,
-            completed_at = u.created_at,
+            completed_at = ar.activated_at,
             completed_via = 'web'::invitationcompletionsurface,
-            updated_at = COALESCE(i.updated_at, u.created_at)
-        FROM users AS u
+            updated_at = COALESCE(i.updated_at, ar.activated_at)
+        FROM accountant_relations AS ar
+        JOIN users AS u ON u.id = ar.accountant_user_id
         WHERE COALESCE(i.is_used, false) = true
-          AND i.kind <> 'legacy_unknown'::invitationkind
+          AND i.kind = 'accountant'::invitationkind
+          AND ar.invitation_token = i.token
+          AND ar.status::text IN ('active', 'expired')
+          AND ar.deleted_at IS NULL
+          AND ar.activated_at IS NOT NULL
           AND u.account_name = i.account_name
           AND u.mobile_number = i.mobile_number
           AND COALESCE(u.is_deleted, false) = false
           AND u.account_status::text = 'active'
-          AND u.created_at IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1
-              FROM users conflict_user
-              WHERE conflict_user.id <> u.id
-                AND (
-                    conflict_user.account_name = i.account_name
-                    OR conflict_user.mobile_number = i.mobile_number
-                )
-          )
+          AND (i.created_at IS NULL OR ar.activated_at >= i.created_at)
+          AND ar.activated_at <= i.expires_at
+        """
+    )
+    op.execute(
+        """
+        UPDATE invitations AS i
+        SET registered_user_id = u.id,
+            completed_at = cr.activated_at,
+            completed_via = 'web'::invitationcompletionsurface,
+            updated_at = COALESCE(i.updated_at, cr.activated_at)
+        FROM customer_relations AS cr
+        JOIN users AS u ON u.id = cr.customer_user_id
+        WHERE COALESCE(i.is_used, false) = true
+          AND i.kind = 'customer'::invitationkind
+          AND cr.invitation_token = i.token
+          AND cr.status::text IN ('active', 'expired')
+          AND cr.deleted_at IS NULL
+          AND cr.activated_at IS NOT NULL
+          AND u.account_name = i.account_name
+          AND u.mobile_number = i.mobile_number
+          AND COALESCE(u.is_deleted, false) = false
+          AND u.account_status::text = 'active'
+          AND (i.created_at IS NULL OR cr.activated_at >= i.created_at)
+          AND cr.activated_at <= i.expires_at
         """
     )
 
@@ -400,6 +432,19 @@ def _create_registration_local_state() -> None:
             "source_server = 'foreign'",
             name="ck_telegram_registration_receipts_source_foreign",
         ),
+        sa.CheckConstraint(
+            "((outcome_code IS NULL AND completed_at IS NULL AND authoritative_user_id IS NULL) "
+            "OR (outcome_code IS NOT NULL AND completed_at IS NOT NULL))",
+            name="ck_telegram_registration_receipts_terminal_atomic",
+        ),
+        sa.CheckConstraint(
+            "((outcome_code IN ('created', 'linked_existing', 'already_linked') "
+            "AND authoritative_user_id IS NOT NULL) "
+            "OR (outcome_code IS NULL AND authoritative_user_id IS NULL) "
+            "OR (outcome_code NOT IN ('created', 'linked_existing', 'already_linked') "
+            "AND authoritative_user_id IS NULL))",
+            name="ck_telegram_registration_receipts_user_outcome",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("command_id", name="ux_telegram_registration_receipts_command_id"),
         sa.UniqueConstraint("idempotency_key", name="ux_telegram_registration_receipts_idempotency_key"),
@@ -408,6 +453,31 @@ def _create_registration_local_state() -> None:
         op.f("ix_telegram_registration_command_receipts_id"),
         "telegram_registration_command_receipts",
         ["id"],
+        unique=False,
+    )
+
+    op.create_table(
+        "user_counter_event_receipts",
+        sa.Column("event_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("source_server", sa.String(length=16), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("event_hash", sa.String(length=64), nullable=False),
+        sa.Column("applied_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.CheckConstraint(
+            "source_server IN ('iran', 'foreign')",
+            name="ck_user_counter_event_receipts_known_source",
+        ),
+        sa.CheckConstraint(
+            "length(event_hash) = 64",
+            name="ck_user_counter_event_receipts_event_hash",
+        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("event_id"),
+    )
+    op.create_index(
+        "ix_user_counter_event_receipts_user_id",
+        "user_counter_event_receipts",
+        ["user_id"],
         unique=False,
     )
     op.create_index(
@@ -427,6 +497,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_user_counter_event_receipts_user_id",
+        table_name="user_counter_event_receipts",
+    )
+    op.drop_table("user_counter_event_receipts")
+
     op.drop_index(
         "ix_telegram_registration_receipts_completed_at",
         table_name="telegram_registration_command_receipts",
@@ -469,6 +545,9 @@ def downgrade() -> None:
     op.drop_column("invitations", "completed_at")
     op.drop_column("invitations", "registered_user_id")
     op.drop_column("invitations", "kind")
+
+    op.drop_constraint("ck_users_counter_epoch_positive", "users", type_="check")
+    op.drop_column("users", "counter_epoch")
 
     for table_name in ("accountant_relations", "customer_relations", "invitations", "users"):
         op.drop_constraint(f"ck_{table_name}_sync_version_positive", table_name, type_="check")

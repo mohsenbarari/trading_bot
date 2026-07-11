@@ -30,6 +30,13 @@ from core.registration_sync_policy import (
     USER_SYNC_COUNTER_FIELDS,
     allowed_user_fields_for_source,
 )
+from core.user_counter_sync import (
+    USER_SYNC_IDENTITY_FIELD,
+    InvalidUserCounterMutation,
+    build_user_counter_event,
+    build_user_sync_identity,
+    user_counter_event_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -927,6 +934,7 @@ def setup_user_events():
             "trades_count": target.trades_count,
             "commodities_traded_count": target.commodities_traded_count,
             "channel_messages_count": target.channel_messages_count,
+            "counter_epoch": int(getattr(target, "counter_epoch", 1) or 1),
             "max_sessions": target.max_sessions,
             "max_accountants": getattr(target, "max_accountants", 3),
             "max_customers": getattr(target, "max_customers", 5),
@@ -943,9 +951,20 @@ def setup_user_events():
     def bump_user_sync_version(mapper, connection, target):
         if not _registration_sync_v2_enabled():
             return
-        if str(getattr(settings, "server_mode", "") or "").strip().lower() != "iran":
-            return
+        source_server = str(getattr(settings, "server_mode", "") or "").strip().lower()
         changed = _changed_column_fields(target)
+        if source_server == "foreign":
+            allowed = set(allowed_user_fields_for_source("foreign"))
+            allowed.update(USER_SYNC_COUNTER_FIELDS)
+            unauthorized = changed - allowed - {"sync_version", "updated_at"}
+            if unauthorized:
+                raise RuntimeError(
+                    "foreign_user_write_authority_forbidden:"
+                    + ",".join(sorted(unauthorized))
+                )
+            return
+        if source_server != "iran":
+            return
         allowed = allowed_user_fields_for_source("iran")
         if changed & (set(allowed) - {"id", "created_at", "updated_at", "sync_version"}):
             _bump_sync_version(target)
@@ -966,6 +985,14 @@ def setup_user_events():
             if _registration_sync_v2_enabled():
                 allowed = allowed_user_fields_for_source(source_server)
                 data = {key: value for key, value in data.items() if key in allowed}
+                data[USER_SYNC_IDENTITY_FIELD] = build_user_sync_identity(
+                    target,
+                    include_previous=False,
+                )
+            else:
+                # Keep the compatibility stream genuinely unversioned. A peer
+                # may have v2 code deployed but its emitter flag still off.
+                data.pop("sync_version", None)
             log_change(connection, "users", target.id, "INSERT", data)
             logger.info(f"📡 Published sync: user:created ID={target.id}")
         except Exception as e:
@@ -980,11 +1007,14 @@ def setup_user_events():
             if _registration_sync_v2_enabled():
                 source_server = str(getattr(settings, "server_mode", "") or "").strip().lower()
                 changed = _changed_column_fields(target)
+                counter_event = build_user_counter_event(target, changed)
                 allowed = allowed_user_fields_for_source(source_server)
                 changed_allowed = changed & set(allowed)
                 unauthorized = sorted(
                     changed
                     - set(allowed)
+                    - set(USER_SYNC_COUNTER_FIELDS)
+                    - {"counter_epoch"}
                     - {"sync_version", "updated_at"}
                 )
                 if unauthorized:
@@ -1003,9 +1033,26 @@ def setup_user_events():
                 }
                 for counter_field in USER_SYNC_COUNTER_FIELDS:
                     data.pop(counter_field, None)
-                if not (set(data) - {"id", "sync_version", "updated_at"}):
-                    return
+                has_user_patch = bool(set(data) - {"id", "sync_version", "updated_at"})
+                if has_user_patch:
+                    data[USER_SYNC_IDENTITY_FIELD] = build_user_sync_identity(
+                        target,
+                        include_previous=True,
+                    )
+                    log_change(connection, "users", target.id, "UPDATE", data)
+                if counter_event is not None:
+                    log_change(
+                        connection,
+                        "users",
+                        target.id,
+                        "UPDATE",
+                        user_counter_event_payload(target, counter_event),
+                    )
+                return
+            data.pop("sync_version", None)
             log_change(connection, "users", target.id, "UPDATE", data)
+        except InvalidUserCounterMutation:
+            raise
         except Exception as e:
             logger.error(f"Error in user after_update event: {e}")
 

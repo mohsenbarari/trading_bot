@@ -178,6 +178,7 @@ class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
                         trades_count INTEGER,
                         commodities_traded_count INTEGER,
                         channel_messages_count INTEGER,
+                        counter_epoch BIGINT NOT NULL DEFAULT 1,
                         max_sessions INTEGER,
                         max_accountants INTEGER,
                         max_customers INTEGER,

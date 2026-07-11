@@ -156,6 +156,22 @@ server {
         return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
     }
 
+    location = /register {
+        access_log off;
+        try_files /index.html =404;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location ^~ /i/ {
+        access_log off;
+        try_files /index.html =404;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
     # Favicon
     location /favicon.ico {
         try_files \$uri =404;

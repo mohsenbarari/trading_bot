@@ -7,6 +7,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -21,7 +22,9 @@ from models.invitation import Invitation, InvitationCompletionSurface, Invitatio
 from models.invitation_identity_reservation import InvitationIdentityReservation
 from models.telegram_notification_outbox import TelegramNotificationOutbox
 from models.telegram_registration_command_receipt import TelegramRegistrationCommandReceipt
+from models.user_counter_event_receipt import UserCounterEventReceipt
 from models.user import User, UserRole
+from api.routers.sync import _apply_user_counter_event
 
 from tests.test_authoritative_registration_service import _telegram_command
 
@@ -437,6 +440,197 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 (await session.execute(select(func.count(TelegramNotificationOutbox.id)))).scalar_one()
             )
             self.assertEqual(outbox_after, outbox_before)
+
+    async def test_registration_receipt_terminal_constraints_reject_partial_states(self):
+        invalid_rows = (
+            {
+                "outcome_code": None,
+                "completed_at": None,
+                "authoritative_user_id": 1,
+            },
+            {
+                "outcome_code": TelegramRegistrationOutcome.CREATED.value,
+                "completed_at": datetime.now(timezone.utc),
+                "authoritative_user_id": None,
+            },
+            {
+                "outcome_code": TelegramRegistrationOutcome.INVALID_COMMAND.value,
+                "completed_at": datetime.now(timezone.utc),
+                "authoritative_user_id": 1,
+            },
+            {
+                "outcome_code": TelegramRegistrationOutcome.INVALID_COMMAND.value,
+                "completed_at": None,
+                "authoritative_user_id": None,
+            },
+        )
+        async with self.session_factory() as session:
+            for index, state in enumerate(invalid_rows):
+                with self.subTest(state=state):
+                    with self.assertRaises(IntegrityError):
+                        async with session.begin_nested():
+                            session.add(
+                                TelegramRegistrationCommandReceipt(
+                                    command_id=uuid4(),
+                                    idempotency_key=f"stage2-receipt-invalid-{index}-{uuid4().hex}",
+                                    request_hash="a" * 64,
+                                    invitation_token_hash="b" * 64,
+                                    source_server=SERVER_FOREIGN,
+                                    **state,
+                                )
+                            )
+                            await session.flush()
+
+            valid_pending = TelegramRegistrationCommandReceipt(
+                command_id=uuid4(),
+                idempotency_key=f"stage2-receipt-pending-{uuid4().hex}",
+                request_hash="c" * 64,
+                invitation_token_hash="d" * 64,
+                source_server=SERVER_FOREIGN,
+            )
+            valid_failure = TelegramRegistrationCommandReceipt(
+                command_id=uuid4(),
+                idempotency_key=f"stage2-receipt-failure-{uuid4().hex}",
+                request_hash="e" * 64,
+                invitation_token_hash="f" * 64,
+                source_server=SERVER_FOREIGN,
+                outcome_code=TelegramRegistrationOutcome.INVALID_COMMAND.value,
+                completed_at=datetime.now(timezone.utc),
+            )
+            valid_success = TelegramRegistrationCommandReceipt(
+                command_id=uuid4(),
+                idempotency_key=f"stage2-receipt-success-{uuid4().hex}",
+                request_hash="1" * 64,
+                invitation_token_hash="2" * 64,
+                source_server=SERVER_FOREIGN,
+                outcome_code=TelegramRegistrationOutcome.CREATED.value,
+                authoritative_user_id=1,
+                completed_at=datetime.now(timezone.utc),
+            )
+            session.add_all([valid_pending, valid_failure, valid_success])
+            await session.commit()
+
+    async def test_counter_events_are_exactly_once_and_reset_ordered_by_epoch(self):
+        user = await self._seed_telegram_recipient("counter_event")
+
+        def payload(event_id, *, kind, epoch, deltas):
+            return {
+                "_counter_event_id": str(event_id),
+                "_counter_event_kind": kind,
+                "_counter_epoch": epoch,
+                "_counter_deltas": deltas,
+                "_sync_identity": {
+                    "current": {
+                        "account_name": user.account_name,
+                        "mobile_number": user.mobile_number,
+                        "telegram_id": user.telegram_id,
+                    },
+                    "previous": {},
+                },
+            }
+
+        increment_id = uuid4()
+        async with self.session_factory() as session:
+            first = await _apply_user_counter_event(
+                session,
+                record_id=user.id + 10_000,
+                data=payload(
+                    increment_id,
+                    kind="increment",
+                    epoch=1,
+                    deltas={"trades_count": 1, "commodities_traded_count": 3},
+                ),
+                source_server=SERVER_FOREIGN,
+            )
+            duplicate = await _apply_user_counter_event(
+                session,
+                record_id=user.id + 10_000,
+                data=payload(
+                    increment_id,
+                    kind="increment",
+                    epoch=1,
+                    deltas={"trades_count": 1, "commodities_traded_count": 3},
+                ),
+                source_server=SERVER_FOREIGN,
+            )
+            self.assertEqual((first, duplicate), ("ok", "ignored"))
+            conflicting_replay = await _apply_user_counter_event(
+                session,
+                record_id=user.id + 10_000,
+                data=payload(
+                    increment_id,
+                    kind="increment",
+                    epoch=1,
+                    deltas={"trades_count": 2, "commodities_traded_count": 3},
+                ),
+                source_server=SERVER_FOREIGN,
+            )
+            self.assertEqual(conflicting_replay, "error")
+
+            # A post-reset increment may arrive before the reset event. It
+            # advances the epoch, clears prior counts, and remains after reset.
+            post_reset_id = uuid4()
+            reset_id = uuid4()
+            old_epoch_id = uuid4()
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        post_reset_id,
+                        kind="increment",
+                        epoch=2,
+                        deltas={"channel_messages_count": 2},
+                    ),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(reset_id, kind="reset", epoch=2, deltas={}),
+                    source_server=SERVER_IRAN,
+                ),
+                "ok",
+            )
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    session,
+                    record_id=user.id,
+                    data=payload(
+                        old_epoch_id,
+                        kind="increment",
+                        epoch=1,
+                        deltas={"trades_count": 8},
+                    ),
+                    source_server=SERVER_FOREIGN,
+                ),
+                "ignored",
+            )
+            await session.commit()
+
+        async with self.session_factory() as session:
+            stored = (
+                await session.execute(select(User).where(User.id == user.id))
+            ).scalar_one()
+            self.assertEqual(stored.counter_epoch, 2)
+            self.assertEqual(stored.trades_count, 0)
+            self.assertEqual(stored.commodities_traded_count, 0)
+            self.assertEqual(stored.channel_messages_count, 2)
+            receipt_count = int(
+                (
+                    await session.execute(
+                        select(func.count(UserCounterEventReceipt.event_id)).where(
+                            UserCounterEventReceipt.event_id.in_(
+                                [increment_id, post_reset_id, reset_id, old_epoch_id]
+                            )
+                        )
+                    )
+                ).scalar_one()
+            )
+            self.assertEqual(receipt_count, 4)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,16 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN
+from core.user_counter_sync import (
+    USER_COUNTER_EVENT_DELTAS_FIELD,
+    USER_COUNTER_EVENT_EPOCH_FIELD,
+    USER_COUNTER_EVENT_ID_FIELD,
+    USER_COUNTER_EVENT_KIND_FIELD,
+    USER_COUNTER_SYNC_CONTRACT,
+    USER_COUNTER_SYNC_CONTRACT_FIELD,
+    USER_SYNC_IDENTITY_FIELD,
+    is_user_counter_event_payload,
+)
 
 
 REGISTRATION_VERSIONED_TABLES = frozenset(
@@ -52,7 +62,21 @@ USER_SYNC_SHARED_FIELDS = frozenset({"last_seen_at"})
 USER_SYNC_COUNTER_FIELDS = frozenset(
     {"trades_count", "commodities_traded_count", "channel_messages_count"}
 )
-USER_SYNC_METADATA_FIELDS = frozenset({"id", "created_at", "updated_at", "sync_version"})
+USER_SYNC_METADATA_FIELDS = frozenset(
+    {"id", "created_at", "updated_at", "sync_version", USER_SYNC_IDENTITY_FIELD}
+)
+
+USER_COUNTER_EVENT_FIELDS = frozenset(
+    {
+        "id",
+        USER_COUNTER_SYNC_CONTRACT_FIELD,
+        USER_COUNTER_EVENT_ID_FIELD,
+        USER_COUNTER_EVENT_KIND_FIELD,
+        USER_COUNTER_EVENT_EPOCH_FIELD,
+        USER_COUNTER_EVENT_DELTAS_FIELD,
+        USER_SYNC_IDENTITY_FIELD,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +124,13 @@ def sanitize_registration_sync_payload(
     if source not in {SERVER_IRAN, SERVER_FOREIGN}:
         return RegistrationSyncPayloadDecision(False, {}, reason="missing_or_invalid_source_server")
 
+    if table == "users" and is_user_counter_event_payload(payload):
+        return _sanitize_user_counter_event(
+            operation=operation,
+            payload=payload,
+            source_server=source,
+        )
+
     has_version = payload.get("sync_version") is not None
     if not has_version and not accept_unversioned:
         return RegistrationSyncPayloadDecision(False, {}, reason="unversioned_event_forbidden")
@@ -117,10 +148,77 @@ def sanitize_registration_sync_payload(
             return RegistrationSyncPayloadDecision(False, {}, reason=f"source_authority_forbidden:{source}")
         return RegistrationSyncPayloadDecision(True, payload)
 
-    if operation == "INSERT" and source != SERVER_IRAN:
+    if operation in {"INSERT", "DELETE"} and source != SERVER_IRAN:
         return RegistrationSyncPayloadDecision(False, {}, reason=f"source_authority_forbidden:{source}")
+
+    if has_version and not _has_user_sync_identity(payload.get(USER_SYNC_IDENTITY_FIELD)):
+        return RegistrationSyncPayloadDecision(False, {}, reason="versioned_user_identity_missing")
 
     allowed = allowed_user_fields_for_source(source)
     sanitized = {key: value for key, value in payload.items() if key in allowed}
+    dropped = tuple(sorted(set(payload) - set(sanitized)))
+    return RegistrationSyncPayloadDecision(True, sanitized, dropped_fields=dropped)
+
+
+def _has_user_sync_identity(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    for section_name in ("current", "previous"):
+        section = value.get(section_name)
+        if not isinstance(section, Mapping):
+            continue
+        if any(
+            section.get(field_name) is not None and section.get(field_name) != ""
+            for field_name in ("account_name", "mobile_number", "telegram_id")
+        ):
+            return True
+    return False
+
+
+def _sanitize_user_counter_event(
+    *,
+    operation: str,
+    payload: dict[str, Any],
+    source_server: str,
+) -> RegistrationSyncPayloadDecision:
+    from uuid import UUID
+
+    if operation != "UPDATE":
+        return RegistrationSyncPayloadDecision(False, {}, reason="counter_event_operation_forbidden")
+    try:
+        event_id = str(UUID(str(payload.get(USER_COUNTER_EVENT_ID_FIELD))))
+        epoch = int(payload.get(USER_COUNTER_EVENT_EPOCH_FIELD))
+    except (TypeError, ValueError, AttributeError):
+        return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_metadata")
+    if epoch < 1:
+        return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_metadata")
+
+    kind = str(payload.get(USER_COUNTER_EVENT_KIND_FIELD) or "")
+    raw_deltas = payload.get(USER_COUNTER_EVENT_DELTAS_FIELD)
+    if kind not in {"increment", "reset"} or not isinstance(raw_deltas, Mapping):
+        return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_payload")
+    if kind == "reset" and source_server != SERVER_IRAN:
+        return RegistrationSyncPayloadDecision(False, {}, reason="counter_reset_source_forbidden")
+    try:
+        deltas = {str(key): int(value) for key, value in raw_deltas.items()}
+    except (TypeError, ValueError):
+        return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_payload")
+    if (
+        set(deltas) - set(USER_SYNC_COUNTER_FIELDS)
+        or any(value < 0 for value in deltas.values())
+        or (kind == "increment" and not any(value > 0 for value in deltas.values()))
+        or (kind == "reset" and any(value != 0 for value in deltas.values()))
+    ):
+        return RegistrationSyncPayloadDecision(False, {}, reason="invalid_counter_event_payload")
+    identity = payload.get(USER_SYNC_IDENTITY_FIELD)
+    if not _has_user_sync_identity(identity):
+        return RegistrationSyncPayloadDecision(False, {}, reason="counter_event_identity_missing")
+
+    sanitized = {key: value for key, value in payload.items() if key in USER_COUNTER_EVENT_FIELDS}
+    sanitized[USER_COUNTER_SYNC_CONTRACT_FIELD] = USER_COUNTER_SYNC_CONTRACT
+    sanitized[USER_COUNTER_EVENT_ID_FIELD] = event_id
+    sanitized[USER_COUNTER_EVENT_EPOCH_FIELD] = epoch
+    sanitized[USER_COUNTER_EVENT_KIND_FIELD] = kind
+    sanitized[USER_COUNTER_EVENT_DELTAS_FIELD] = deltas
     dropped = tuple(sorted(set(payload) - set(sanitized)))
     return RegistrationSyncPayloadDecision(True, sanitized, dropped_fields=dropped)

@@ -43,6 +43,17 @@ server {
 
     # Prometheus scrapes should use the app container's local loopback binding
     # or an explicit observability key, never the public reverse proxy.
+    location ~ ^/api/invitations/(lookup|validate)/ {
+        access_log off;
+        proxy_pass http://trading_bot_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Pragma "no-cache" always;
+    }
+
     location /api/ {
         proxy_pass http://trading_bot_api;
         proxy_set_header Host $host;
@@ -111,6 +122,20 @@ server {
         return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
     }
 
+    location = /register {
+        access_log off;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Referrer-Policy "no-referrer" always;
+        return 404;
+    }
+
+    location ^~ /i/ {
+        access_log off;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Referrer-Policy "no-referrer" always;
+        return 404;
+    }
+
     # Keep the default SPA/app serving path proxied to the FastAPI container.
     location / {
         proxy_pass http://trading_bot_api;
@@ -138,6 +163,7 @@ server {
     listen 80;
     server_name coin.362514.ir;
     client_max_body_size 50M;
+    access_log off;
     return 404;
 }
 EOF

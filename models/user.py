@@ -16,6 +16,7 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("sync_version >= 1", name="ck_users_sync_version_positive"),
+        CheckConstraint("counter_epoch >= 1", name="ck_users_counter_epoch_positive"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -66,6 +67,7 @@ class User(Base):
     trades_count = Column(Integer, default=0, nullable=False)
     commodities_traded_count = Column(Integer, default=0, nullable=False)
     channel_messages_count = Column(Integer, default=0, nullable=False)
+    counter_epoch = Column(BigInteger, nullable=False, default=1, server_default=text("1"))
 
     # Session management
     max_sessions = Column(Integer, default=1, nullable=False)

@@ -31,6 +31,7 @@ REGISTRATION_STAGE1_RESTORE_TABLES = (
     "invitation_identity_reservations",
     "telegram_registration_command_receipts",
     "telegram_registration_intents",
+    "user_counter_event_receipts",
 )
 
 

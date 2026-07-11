@@ -33,6 +33,7 @@ BOT_ACCESS_REASON_ROLE_FORBIDDEN = "role_forbidden"
 BOT_ACCESS_REASON_ACCOUNTANT = "accountant"
 BOT_ACCESS_REASON_CUSTOMER_TIER2 = "customer_tier2"
 BOT_ACCESS_REASON_CUSTOMER_UNAVAILABLE = "customer_unavailable"
+BOT_ACCESS_REASON_INVITATION_KIND_FORBIDDEN = "invitation_kind_forbidden"
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,40 @@ def evaluate_bot_access_local_state(user: User | object | None) -> BotAccessDeci
     if _enum_value(raw_role) not in BOT_ACCESS_ALLOWED_ROLE_VALUES:
         return BotAccessDecision(False, BOT_ACCESS_REASON_ROLE_FORBIDDEN)
     return BotAccessDecision(True)
+
+
+def evaluate_invitation_bot_access(
+    *,
+    role: object,
+    invitation_kind: object,
+    customer_tier: object | None,
+) -> BotAccessDecision:
+    """Pure pre-registration policy shared by links and authoritative completion."""
+    role_value = _enum_value(role)
+    kind_value = _enum_value(invitation_kind).strip().lower()
+    tier_value = _enum_value(customer_tier).strip().lower()
+
+    if role_value not in BOT_ACCESS_ALLOWED_ROLE_VALUES:
+        return BotAccessDecision(False, BOT_ACCESS_REASON_ROLE_FORBIDDEN)
+    if kind_value == "standard":
+        return BotAccessDecision(True)
+    if kind_value == "accountant":
+        return BotAccessDecision(False, BOT_ACCESS_REASON_ACCOUNTANT)
+    if kind_value == "customer":
+        if tier_value == CustomerTier.TIER_1.value:
+            return BotAccessDecision(True, customer_tier=tier_value)
+        if tier_value == CustomerTier.TIER_2.value:
+            return BotAccessDecision(
+                False,
+                BOT_ACCESS_REASON_CUSTOMER_TIER2,
+                customer_tier=tier_value,
+            )
+        return BotAccessDecision(
+            False,
+            BOT_ACCESS_REASON_CUSTOMER_UNAVAILABLE,
+            customer_tier=tier_value or None,
+        )
+    return BotAccessDecision(False, BOT_ACCESS_REASON_INVITATION_KIND_FORBIDDEN)
 
 
 async def evaluate_bot_access(db: AsyncSession, user: User | object | None) -> BotAccessDecision:

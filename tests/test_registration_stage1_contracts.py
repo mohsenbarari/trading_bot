@@ -31,6 +31,7 @@ from core.services.invitation_lifecycle_service import (
     soft_revoke_invitation,
     validate_registration_address,
 )
+from core.enums import UserRole
 from models.customer_relation import CustomerTier
 from models.invitation import InvitationCompletionSurface, InvitationKind
 
@@ -96,6 +97,31 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(registration_command_hash(command)), 64)
         self.assertEqual(len(invitation_token_hash(command.invitation_token)), 64)
+
+    def test_telegram_command_preserves_registration_address_exactly(self):
+        exact = " 1234567890 "
+        command = TelegramRegistrationCommand.model_validate(
+            _command_payload(address=exact)
+        )
+        self.assertEqual(command.address, exact)
+        self.assertNotEqual(
+            registration_command_hash(command),
+            registration_command_hash(
+                TelegramRegistrationCommand.model_validate(
+                    _command_payload(address=exact.strip())
+                )
+            ),
+        )
+        self.assertEqual(
+            TelegramRegistrationCommand.model_validate(
+                _command_payload(address="          ")
+            ).address,
+            "          ",
+        )
+        with self.assertRaisesRegex(ValidationError, REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE):
+            TelegramRegistrationCommand.model_validate(
+                _command_payload(address="         ")
+            )
 
     def test_telegram_command_rejects_wrong_surface_proof_timeline_and_extra_fields(self):
         invalid_payloads = [
@@ -283,11 +309,22 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_invitation_contract_v2_reports_surface_availability_and_aliases(self):
-        self.assertTrue(invitation_surface_availability(InvitationKind.STANDARD).bot)
-        self.assertFalse(invitation_surface_availability(InvitationKind.ACCOUNTANT).bot)
+        self.assertTrue(
+            invitation_surface_availability(
+                InvitationKind.STANDARD,
+                role=UserRole.STANDARD,
+            ).bot
+        )
+        self.assertFalse(
+            invitation_surface_availability(
+                InvitationKind.ACCOUNTANT,
+                role=UserRole.STANDARD,
+            ).bot
+        )
         self.assertFalse(
             invitation_surface_availability(
                 InvitationKind.CUSTOMER,
+                role=UserRole.STANDARD,
                 customer_tier=CustomerTier.TIER_2,
             ).bot
         )
@@ -297,6 +334,7 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             token="INV-contract-test",
             short_code="Ab12Cd34",
             kind=InvitationKind.STANDARD,
+            role=UserRole.STANDARD,
             expires_at=expiry,
             is_used=False,
             registered_user_id=None,
@@ -319,6 +357,38 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contract.link, contract.bot_link)
         self.assertEqual(contract.short_link, contract.web_short_link)
         self.assertEqual(contract.state.value, "pending")
+
+    def test_public_webapp_peer_classification_depends_on_local_server_role(self):
+        foreign_settings = _url_settings(
+            server_mode="foreign",
+            public_webapp_url="https://staging.gold-trade.ir",
+            peer_server_url="https://staging.gold-trade.ir",
+        )
+        self.assertEqual(
+            validate_public_webapp_url(
+                foreign_settings.public_webapp_url,
+                settings_obj=foreign_settings,
+            ),
+            "https://staging.gold-trade.ir",
+        )
+
+        iran_settings = _url_settings(
+            server_mode="iran",
+            public_webapp_url="https://staging.362514.ir",
+            iran_server_domain="staging.362514.ir",
+            iran_server_url="https://staging.362514.ir",
+            foreign_server_domain=None,
+            foreign_server_url=None,
+            peer_server_url="https://staging.362514.ir",
+        )
+        with self.assertRaisesRegex(
+            PublicWebAppURLConfigurationError,
+            "must not target a foreign server",
+        ):
+            validate_public_webapp_url(
+                iran_settings.public_webapp_url,
+                settings_obj=iran_settings,
+            )
 
 
 if __name__ == "__main__":

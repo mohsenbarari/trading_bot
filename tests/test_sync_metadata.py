@@ -58,6 +58,34 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["event_sequence"], 91)
         self.assertEqual(metadata["outbox_id"], 91)
 
+    def test_counter_events_use_event_uuid_as_independent_watermark_aggregate(self):
+        first = build_sync_metadata(
+            "users",
+            5,
+            "UPDATE",
+            {
+                "_sync_contract": "user_counter_event_v1",
+                "_counter_event_id": "11111111-2222-4333-8444-555555555555",
+            },
+            change_log_id=92,
+        )
+        second = build_sync_metadata(
+            "users",
+            5,
+            "UPDATE",
+            {
+                "_sync_contract": "user_counter_event_v1",
+                "_counter_event_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            },
+            change_log_id=93,
+        )
+
+        self.assertEqual(
+            first["aggregate_id"],
+            "counter-event:11111111-2222-4333-8444-555555555555",
+        )
+        self.assertNotEqual(first["aggregate_id"], second["aggregate_id"])
+
     def test_publication_state_metadata_uses_dedupe_key_and_owner_server(self):
         metadata = build_sync_metadata(
             "offer_publication_states",

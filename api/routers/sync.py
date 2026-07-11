@@ -21,6 +21,15 @@ from core.registration_sync_policy import (
     sanitize_registration_sync_payload,
     registration_sync_capabilities,
 )
+from core.user_counter_sync import (
+    USER_COUNTER_FIELDS,
+    USER_COUNTER_EVENT_DELTAS_FIELD,
+    USER_COUNTER_EVENT_EPOCH_FIELD,
+    USER_COUNTER_EVENT_ID_FIELD,
+    USER_COUNTER_EVENT_KIND_FIELD,
+    USER_SYNC_IDENTITY_FIELD,
+    is_user_counter_event_payload,
+)
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
 from core.sync_parity_observability import summarize_parity_comparison
@@ -485,7 +494,7 @@ async def verify_signature(request: Request):
         raise HTTPException(status_code=401, detail="Verification failed")
 
 from sqlalchemy import case as sa_case
-from sqlalchemy import insert, update, delete, literal as sa_literal, select, text as sa_text
+from sqlalchemy import insert, update, delete, literal as sa_literal, or_, select, text as sa_text
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -493,6 +502,7 @@ from core.enums import ChatType
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
 from models.user import User
+from models.user_counter_event_receipt import UserCounterEventReceipt
 from models.user_notification_preference import UserNotificationPreference
 from models.invitation import Invitation
 from models.notification import Notification
@@ -1263,6 +1273,13 @@ def _result_scalar_one_or_none(result):
     except AttributeError:
         pass
     return _result_scalar_first(result)
+
+
+def _result_scalars_all(result) -> list:
+    try:
+        return list(result.scalars().all())
+    except AttributeError:
+        return []
 
 
 def _sync_truthy(value) -> bool:
@@ -2148,8 +2165,23 @@ async def _apply_versioned_user_patch(
     source_server: str | None,
 ) -> str:
     source = str(source_server or "").strip().lower()
+    if source not in {SERVER_IRAN, SERVER_FOREIGN}:
+        return "error"
+    resolution, target_user_id = await _resolve_user_sync_target(
+        db,
+        record_id=record_id,
+        identity=data.get(USER_SYNC_IDENTITY_FIELD),
+        lock=True,
+    )
+    if resolution == "conflict":
+        return "error"
+    if resolution == "missing":
+        return "deferred"
+    if target_user_id is None:
+        return "error"
+
     values: dict[str, object] = {}
-    where_clause = User.id == record_id
+    where_clause = User.id == target_user_id
 
     if source == SERVER_FOREIGN:
         for field_name in ("bot_onboarding_required_step", "bot_onboarding_completed_step"):
@@ -2158,33 +2190,32 @@ async def _apply_versioned_user_patch(
                     sa_func.coalesce(getattr(User, field_name), 0),
                     sa_func.coalesce(data[field_name], 0),
                 )
-        for field_name in ("bot_onboarding_completed_at", "last_seen_at", "updated_at"):
+        for field_name in ("bot_onboarding_completed_at", "last_seen_at"):
             if field_name in data:
                 values[field_name] = _nullable_greatest(
                     getattr(User, field_name),
                     sa_literal(data[field_name]),
                 )
+        if not values:
+            return "ignored"
+        # SQLAlchemy Column.onupdate would otherwise advance this shared row
+        # clock for a foreign-only onboarding patch.
+        values["updated_at"] = User.updated_at
     elif source == SERVER_IRAN:
         values = {
             key: value
             for key, value in data.items()
-            if key not in {"id", "created_at"}
+            if key not in {"id", "created_at", "updated_at", USER_SYNC_IDENTITY_FIELD}
         }
         if "last_seen_at" in data:
             values["last_seen_at"] = _nullable_greatest(
                 User.last_seen_at,
                 sa_literal(data["last_seen_at"]),
             )
+        values["updated_at"] = data.get("updated_at", User.updated_at)
         incoming_version = data.get("sync_version")
         if incoming_version is not None:
             where_clause = where_clause & (User.sync_version < int(incoming_version))
-        elif data.get("updated_at") is not None:
-            where_clause = where_clause & (
-                User.updated_at.is_(None) | (User.updated_at <= data["updated_at"])
-            )
-    else:
-        return 'error'
-
     if not values:
         return 'ignored'
 
@@ -2194,11 +2225,260 @@ async def _apply_versioned_user_patch(
     if getattr(result, "rowcount", None):
         return 'ok'
 
-    existing_result = await db.execute(select(User.id, User.sync_version).where(User.id == record_id))
+    existing_result = await db.execute(
+        select(User.id, User.sync_version).where(User.id == target_user_id)
+    )
     existing = _result_first(existing_result)
     if existing is None:
         return 'deferred'
     return 'ignored'
+
+
+async def _apply_versioned_user_insert(
+    db: AsyncSession,
+    *,
+    record_id,
+    data: dict,
+    source_server: str | None,
+) -> str | None:
+    if str(source_server or "").strip().lower() != SERVER_IRAN:
+        return "error"
+    identity = data.get(USER_SYNC_IDENTITY_FIELD)
+    if not _user_sync_identity_conditions(identity):
+        # During the mixed-version window, an older Iran sender has neither
+        # sync_version nor the v2 natural-identity envelope. Preserve the
+        # existing ID/natural-key upsert path when compatibility is enabled by
+        # the caller. A versioned event without identity is always malformed.
+        if data.get("sync_version") is None:
+            return None
+        return "error"
+
+    resolution, target_user_id = await _resolve_user_sync_target(
+        db,
+        record_id=record_id,
+        identity=identity,
+        lock=True,
+    )
+    if resolution == "conflict":
+        return "error"
+    if resolution == "identity":
+        return await _apply_versioned_user_patch(
+            db,
+            record_id=target_user_id,
+            data=data,
+            source_server=source_server,
+        )
+
+    existing_id_result = await db.execute(
+        select(User).where(User.id == record_id).with_for_update()
+    )
+    if _result_scalar_first(existing_id_result) is not None:
+        logger.error(
+            "Versioned User insert found a conflicting local numeric id",
+            extra={
+                "event": "sync.user_insert_id_conflict",
+                "record_id": record_id,
+            },
+        )
+        return "error"
+    return None
+
+
+def _user_sync_identity_conditions(identity: object) -> list:
+    if not isinstance(identity, dict):
+        return []
+    values_by_field: dict[str, set[object]] = {
+        "account_name": set(),
+        "mobile_number": set(),
+        "telegram_id": set(),
+    }
+    for section_name in ("current", "previous"):
+        section = identity.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        for field_name in values_by_field:
+            value = section.get(field_name)
+            if value is None or value == "":
+                continue
+            values_by_field[field_name].add(value)
+    conditions = []
+    for field_name, values in values_by_field.items():
+        column = getattr(User, field_name)
+        conditions.extend(column == value for value in values)
+    return conditions
+
+
+async def _resolve_user_sync_target(
+    db: AsyncSession,
+    *,
+    record_id,
+    identity: object,
+    lock: bool,
+) -> tuple[str, int | None]:
+    conditions = _user_sync_identity_conditions(identity)
+    if not conditions:
+        try:
+            return "legacy_id", int(record_id)
+        except (TypeError, ValueError):
+            return "missing", None
+
+    stmt = select(User).where(or_(*conditions))
+    if lock:
+        stmt = stmt.with_for_update()
+    result = await db.execute(stmt)
+    users = _result_scalars_all(result)
+    distinct_users = {
+        int(user.id): user
+        for user in users
+        if getattr(user, "id", None) is not None
+    }
+    if len(distinct_users) > 1:
+        logger.error(
+            "User sync identity resolved to multiple local rows",
+            extra={
+                "event": "sync.user_identity_conflict",
+                "record_id": record_id,
+                "matched_user_count": len(distinct_users),
+                "identity_fields": sorted(
+                    {
+                        field_name
+                        for section_name in ("current", "previous")
+                        for field_name in (
+                            identity.get(section_name, {}).keys()
+                            if isinstance(identity.get(section_name), dict)
+                            else ()
+                        )
+                    }
+                ),
+            },
+        )
+        return "conflict", None
+    if not distinct_users:
+        return "missing", None
+    return "identity", next(iter(distinct_users))
+
+
+async def _apply_user_counter_event(
+    db: AsyncSession,
+    *,
+    record_id,
+    data: dict,
+    source_server: str | None,
+) -> str:
+    source = str(source_server or "").strip().lower()
+    if source not in {SERVER_IRAN, SERVER_FOREIGN}:
+        return "error"
+    if (
+        data.get(USER_COUNTER_EVENT_KIND_FIELD) == "reset"
+        and source != SERVER_IRAN
+    ):
+        return "error"
+    resolution, target_user_id = await _resolve_user_sync_target(
+        db,
+        record_id=record_id,
+        identity=data.get(USER_SYNC_IDENTITY_FIELD),
+        lock=True,
+    )
+    if resolution == "conflict":
+        return "error"
+    if resolution == "missing" or target_user_id is None:
+        return "deferred"
+
+    user_result = await db.execute(
+        select(User).where(User.id == target_user_id).with_for_update()
+    )
+    user = _result_scalar_first(user_result)
+    if user is None:
+        return "deferred"
+
+    event_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "source_server": source,
+                "user_id": target_user_id,
+                "event_id": data[USER_COUNTER_EVENT_ID_FIELD],
+                "kind": data[USER_COUNTER_EVENT_KIND_FIELD],
+                "epoch": data[USER_COUNTER_EVENT_EPOCH_FIELD],
+                "deltas": data[USER_COUNTER_EVENT_DELTAS_FIELD],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    receipt_stmt = (
+        pg_insert(UserCounterEventReceipt)
+        .values(
+            event_id=data[USER_COUNTER_EVENT_ID_FIELD],
+            source_server=source,
+            user_id=target_user_id,
+            event_hash=event_hash,
+        )
+        .on_conflict_do_nothing(index_elements=["event_id"])
+        .returning(UserCounterEventReceipt.event_id)
+    )
+    receipt_result = await db.execute(
+        receipt_stmt,
+        execution_options={"is_sync": True},
+    )
+    if _result_scalar_one_or_none(receipt_result) is None:
+        existing_receipt_result = await db.execute(
+            select(UserCounterEventReceipt).where(
+                UserCounterEventReceipt.event_id == data[USER_COUNTER_EVENT_ID_FIELD]
+            )
+        )
+        existing_receipt = _result_scalar_first(existing_receipt_result)
+        if (
+            existing_receipt is None
+            or existing_receipt.source_server != source
+            or int(existing_receipt.user_id) != target_user_id
+            or existing_receipt.event_hash != event_hash
+        ):
+            logger.error(
+                "Counter event UUID was replayed with conflicting content",
+                extra={
+                    "event": "sync.user_counter_event_conflict",
+                    "record_id": record_id,
+                    "event_id_hash": hashlib.sha256(
+                        str(data[USER_COUNTER_EVENT_ID_FIELD]).encode("utf-8")
+                    ).hexdigest()[:16],
+                },
+            )
+            return "error"
+        return "ignored"
+
+    incoming_epoch = int(data[USER_COUNTER_EVENT_EPOCH_FIELD])
+    current_epoch = int(getattr(user, "counter_epoch", 1) or 1)
+    if incoming_epoch < current_epoch:
+        return "ignored"
+
+    values: dict[str, int] = {}
+    if incoming_epoch > current_epoch:
+        values.update(
+            {
+                "counter_epoch": incoming_epoch,
+                "trades_count": 0,
+                "commodities_traded_count": 0,
+                "channel_messages_count": 0,
+            }
+        )
+
+    if data[USER_COUNTER_EVENT_KIND_FIELD] == "increment":
+        deltas = data[USER_COUNTER_EVENT_DELTAS_FIELD]
+        for field_name in USER_COUNTER_FIELDS:
+            delta = int(deltas.get(field_name, 0) or 0)
+            if not delta:
+                continue
+            base = 0 if incoming_epoch > current_epoch else int(getattr(user, field_name, 0) or 0)
+            values[field_name] = base + delta
+
+    # A reset for an epoch already observed is intentionally a no-op. This
+    # preserves post-reset increments if their event arrived before the reset.
+    if values:
+        await db.execute(
+            update(User).where(User.id == target_user_id).values(**values),
+            execution_options={"is_sync": True},
+        )
+    return "ok"
 
 
 async def _apply_item(
@@ -2248,9 +2528,29 @@ async def _apply_item(
     if operation in ("INSERT", "UPDATE"):
         if (
             table == "users"
+            and operation == "INSERT"
+            and bool(getattr(settings, "registration_sync_v2_enabled", False))
+        ):
+            insert_decision = await _apply_versioned_user_insert(
+                db,
+                record_id=record_id,
+                data=data,
+                source_server=source_server,
+            )
+            if insert_decision is not None:
+                return insert_decision
+        if (
+            table == "users"
             and operation == "UPDATE"
             and bool(getattr(settings, "registration_sync_v2_enabled", False))
         ):
+            if is_user_counter_event_payload(data):
+                return await _apply_user_counter_event(
+                    db,
+                    record_id=record_id,
+                    data=data,
+                    source_server=source_server,
+                )
             return await _apply_versioned_user_patch(
                 db,
                 record_id=record_id,

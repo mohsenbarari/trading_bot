@@ -8,7 +8,8 @@
 
 ## Status
 
-Stage 2 is complete as a source-code milestone. The existing Web registration completion route now
+Stage 2 is implemented as a source-code milestone, but is provisional pending the reopened Stage 1
+remediation review. The existing Web registration completion route now
 uses one shared Iran-authoritative transaction. The same service contains the future strict
 Telegram-command projection, but no Telegram route, reconciliation loop, job, worker, or feature
 entry point is enabled.
@@ -135,8 +136,19 @@ The following entry paths remain disabled by default and were not changed in Sta
 - `INVITATION_CONTRACT_V2_ENABLED=0`
 - `REGISTRATION_SYNC_V2_ENABLED=0`
 
-No environment, deploy manifest, Nginx route, staging runtime, production runtime, bot handler,
-background leader, or worker definition changed.
+In the original Stage 2 implementation, no environment, deploy manifest, Nginx route, staging
+runtime, production runtime, bot handler, background leader, or worker definition changed. The
+later Stage 1 remediation changed Nginx source templates only; it did not deploy them.
+
+## Stage 1 Remediation Revalidation
+
+The delayed independent Stage 1 review arrived after Stage 2 implementation and returned `NO-GO`.
+Stage 2 was not rewritten or discarded. It was revalidated against the remediation's stricter
+receipt tuples, shared role/kind/tier policy, opaque advisory locks, natural-identity User sync,
+counter event contract, and migration schema. The real PostgreSQL module now also covers receipt
+constraint failures and exact-once counter epoch/replay behavior (`8` passing tests after
+remediation, replacing the original `6`-test evidence). Stage 3 remains blocked until the
+independent reviewer accepts the remediation.
 
 ## Preconditions For Stage 3
 

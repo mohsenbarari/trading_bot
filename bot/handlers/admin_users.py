@@ -760,9 +760,9 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
             target_user.max_daily_requests = None
             target_user.limitations_expire_at = None
             # ریست شمارنده‌ها
-            target_user.trades_count = 0
-            target_user.commodities_traded_count = 0
-            target_user.channel_messages_count = 0
+            from core.user_counter_sync import reset_user_counters_in_memory
+
+            reset_user_counters_in_memory(target_user)
             await session.commit()
             
             # ارسال نوتیفیکیشن با تاخیر ۲ دقیقه
@@ -1157,9 +1157,9 @@ async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[Use
             target_user.max_daily_requests = max_requests
             target_user.limitations_expire_at = expire_at
             # ریست شمارنده‌ها
-            target_user.trades_count = 0
-            target_user.commodities_traded_count = 0
-            target_user.channel_messages_count = 0
+            from core.user_counter_sync import reset_user_counters_in_memory
+
+            reset_user_counters_in_memory(target_user)
             await session.commit()
             
             # --- Send Notification to limited user ---

@@ -12,11 +12,38 @@ from core.services.bot_access_policy import (
     BOT_ACCESS_REASON_SYNC_PENDING,
     evaluate_bot_access,
     evaluate_bot_access_local_state,
+    evaluate_invitation_bot_access,
 )
 from models.customer_relation import CustomerTier
+from models.invitation import InvitationKind
 
 
 class BotAccessPolicyTests(unittest.IsolatedAsyncioTestCase):
+    def test_invitation_policy_role_kind_tier_matrix_fails_closed(self):
+        allowed_roles = {
+            UserRole.STANDARD,
+            UserRole.POLICE,
+            UserRole.MIDDLE_MANAGER,
+            UserRole.SUPER_ADMIN,
+        }
+        for role in UserRole:
+            for kind in InvitationKind:
+                tiers = (None, CustomerTier.TIER_1, CustomerTier.TIER_2)
+                for tier in tiers:
+                    with self.subTest(role=role, kind=kind, tier=tier):
+                        decision = evaluate_invitation_bot_access(
+                            role=role,
+                            invitation_kind=kind,
+                            customer_tier=tier,
+                        )
+                        expected = role in allowed_roles and (
+                            kind == InvitationKind.STANDARD
+                            or (
+                                kind == InvitationKind.CUSTOMER
+                                and tier == CustomerTier.TIER_1
+                            )
+                        )
+                        self.assertEqual(decision.allowed, expected)
     async def test_local_policy_denies_watch_and_inactive_users(self):
         watch_user = SimpleNamespace(role=UserRole.WATCH, account_status=UserAccountStatus.ACTIVE, is_deleted=False)
         inactive_user = SimpleNamespace(role=UserRole.STANDARD, account_status=UserAccountStatus.INACTIVE, is_deleted=False)

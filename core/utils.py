@@ -507,15 +507,14 @@ async def increment_user_counter(
             await session.commit()
             return
 
+        from core.user_counter_sync import increment_user_counters
+
         if action_type == 'trade':
-            locked_user.trades_count = (locked_user.trades_count or 0) + 1
-            locked_user.commodities_traded_count = (
-                (locked_user.commodities_traded_count or 0) + quantity
-            )
+            increment_user_counters(locked_user, trades=1, commodities=quantity)
             logger.info(f"Locked ORM update: trades_count += 1, commodities_traded_count += {quantity}")
             
         elif action_type == 'channel_message':
-            locked_user.channel_messages_count = (locked_user.channel_messages_count or 0) + 1
+            increment_user_counters(locked_user, channel_messages=1)
             logger.info("Locked ORM update: channel_messages_count += 1")
         
         await session.commit()
@@ -543,8 +542,8 @@ async def reset_user_counters(session: AsyncSession, user: "User") -> None:
     if py_inspect.isawaitable(locked_user):
         locked_user = await locked_user
     if locked_user is not None:
-        locked_user.trades_count = 0
-        locked_user.commodities_traded_count = 0
-        locked_user.channel_messages_count = 0
+        from core.user_counter_sync import reset_user_counters_in_memory
+
+        reset_user_counters_in_memory(locked_user)
     await session.commit()
     await session.refresh(user)

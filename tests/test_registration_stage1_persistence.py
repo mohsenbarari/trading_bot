@@ -42,6 +42,7 @@ LOCAL_REGISTRATION_TABLES = {
     "invitation_identity_reservations",
     "telegram_registration_command_receipts",
     "telegram_registration_intents",
+    "user_counter_event_receipts",
 }
 
 
@@ -128,6 +129,12 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
                 "ck_telegram_registration_receipts_request_hash",
                 "ck_telegram_registration_receipts_token_hash",
                 "ck_telegram_registration_receipts_source_foreign",
+                "ck_telegram_registration_receipts_terminal_atomic",
+                "ck_telegram_registration_receipts_user_outcome",
+            },
+            "user_counter_event_receipts": {
+                "ck_user_counter_event_receipts_known_source",
+                "ck_user_counter_event_receipts_event_hash",
             },
         }
         for table_name, names in expected_constraints.items():
@@ -205,6 +212,11 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("U&'\\06F0", source)
         self.assertNotIn("ROW_NUMBER()", source.upper())
         self.assertNotIn("ON CONFLICT DO NOTHING", source.upper())
+        self.assertIn("Legacy standard invitations stay", source)
+        self.assertIn("ar.accountant_user_id", source)
+        self.assertIn("cr.customer_user_id", source)
+        self.assertIn("ar.activated_at <= i.expires_at", source)
+        self.assertIn("cr.activated_at <= i.expires_at", source)
         for table_name in LOCAL_REGISTRATION_TABLES:
             self.assertIn(f'op.create_table(\n        "{table_name}"', source)
             self.assertIn(f'op.drop_table("{table_name}")', source)
@@ -219,6 +231,9 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
         keys = invitation_identity_lock_keys(identity)
         self.assertEqual(keys, tuple(sorted(keys)))
         self.assertEqual(len(set(keys)), 2)
+        self.assertNotIn(identity.mobile_number, " ".join(keys))
+        self.assertNotIn(identity.account_name, " ".join(keys))
+        self.assertTrue(all(key.startswith("registration-identity:") for key in keys))
 
     async def test_identity_lock_and_reservation_are_flush_only(self):
         identity = normalize_invitation_identity(

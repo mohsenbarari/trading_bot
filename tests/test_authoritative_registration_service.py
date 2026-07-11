@@ -195,6 +195,9 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         lock_keys = [params["lock_key"] for _, params in lock_db.calls]
         self.assertEqual(lock_keys, sorted(lock_keys))
         self.assertEqual(len(lock_keys), 3)
+        self.assertNotIn(identity.mobile_number, " ".join(lock_keys))
+        self.assertNotIn(identity.account_name, " ".join(lock_keys))
+        self.assertNotIn("123456789", " ".join(lock_keys))
 
     async def test_web_creation_uses_literal_iran_owner_and_one_transaction(self):
         db = _FakeDB()

@@ -8,12 +8,16 @@
 
 ## Status
 
-Stage 1 is complete as a source-code milestone.
+Stage 1 was reopened by the mandatory independent review, has been remediated, and is awaiting an
+explicit re-review `GO`. The original milestone is not treated as approved for Stage 3.
 
-No staging or production deployment was run. The active staging database remains at
-`f7c8d9e0a1b2`; the Stage 1 migration was exercised only in automatically cleaned scratch
-databases. All direct Telegram registration, reconciliation, Telegram-first login OTP, automatic
-SMS fallback, contract-v2, and registration-sync-v2 entry flags remain disabled by default.
+No staging or production application deployment was run. A final evidence command accidentally
+started the Compose migration dependency against the active local runtime database; the temporary
+`a8d9e0f1b2c3` upgrade was immediately downgraded and verified back at `f7c8d9e0a1b2` with the new
+table/column absent, healthy sync, and zero backlog. Intended migration tests ran only in cleaned
+scratch databases, and all later Compose test runs used `--no-deps`. All direct Telegram
+registration, reconciliation, Telegram-first login OTP, automatic SMS fallback, contract-v2, and
+registration-sync-v2 entry flags remain disabled by default.
 
 Stage 1 is not an independent rollout unit. Stage 3 must connect every invitation writer to the
 global reservation service before this migration is applied to an environment that accepts new
@@ -43,6 +47,7 @@ invitations. This prevents invitations created between stages from bypassing the
 | `invitation_identity_reservations` | Iran | `no-sync` | Unique pending mobile/account/invitation reservation with deterministic advisory locks |
 | `telegram_registration_intents` | Foreign | `no-sync` | Durable post-collection Telegram registration evidence and retry state |
 | `telegram_registration_command_receipts` | Iran | `no-sync` | Atomic command/idempotency/hash receipt for replay-safe authoritative completion |
+| `user_counter_event_receipts` | Local receiver | `no-sync` | Exact-once UUID/hash ledger for dedicated cross-server counter events |
 
 The registry, field policy, parity, seed/reset, worker-priority, full-matrix, migration import, and
 backup/restore lists explicitly include or exclude these tables according to that policy. Sensitive
@@ -60,7 +65,9 @@ entries.
 - Public invitation validation masks mobile numbers, sets `no-store`, is protected by an atomic
   Redis fixed-window rate limit, and fails closed if rate-limit state is unavailable.
 - Application request paths redact lookup/validation credentials. Nginx access logging is disabled
-  for those secret-bearing paths and responses carry no-cache headers.
+  for API credentials, `/register?token=...`, and `/i/<short_code>` across active templates. The
+  sensitive SPA locations avoid internal redirects that would otherwise re-enable access logging,
+  and emit `Referrer-Policy: no-referrer` so asset requests cannot disclose the URL through logs.
 - `PUBLIC_WEBAPP_URL` must be an origin, use HTTPS outside local/test, match an explicit Iran
   host/alias, and must not match a foreign host. WebApp and sync/API hostnames can therefore remain
   separate without permitting links to point at the foreign server.
@@ -71,10 +78,13 @@ entries.
   fields; foreign emits only monotonic bot-onboarding fields and approved `last_seen_at`.
 - User inserts are accepted only from Iran. Foreign writes to Invitation or customer/accountant
   Relation records are rejected by the registration sync policy.
-- Counters are omitted from generic User patches. Unauthorized fields are dropped with field names
-  only, without raw values.
-- Iran User and all Invitation/Relation changes apply only when `sync_version` is newer. The main
-  upsert and natural-key fallback both enforce the version guard.
+- Counters are omitted from generic User patches. A dedicated transactional UUID delta/epoch event
+  and local hash receipt preserve increment/reset behavior while satisfying the mandatory outbox
+  guard. Reset/epoch authority is Iran-only.
+- Versioned User events include current/previous natural identity; numeric cross-server IDs are not
+  trusted for UPDATE, and unrelated INSERT ID collisions fail closed. Iran User and all
+  Invitation/Relation changes apply only when `sync_version` is newer. During the explicit
+  compatibility window, accepted unversioned Iran User INSERTs retain the legacy upsert path.
 - `last_seen_at` uses a maximum merge in direct patch, replay, and natural-key fallback paths;
   foreign onboarding steps and completion timestamps cannot regress.
 - Mixed-version acceptance is controlled independently by
@@ -97,10 +107,22 @@ entries.
 
 No `manual_review` enum, state, route, queue, or override was added.
 
+## Independent Review Remediation
+
+The original review package returned `NO-GO`. Accepted findings, code-level dispositions, remaining
+stage assignments, real PostgreSQL migration/counter evidence, and the re-review gate are recorded
+in `docs/DUAL_PLATFORM_REGISTRATION_STAGE1_REMEDIATION_20260711.md`. This file's original evidence
+below remains historical; the remediation package supersedes it for the Stage 3 decision.
+
+The remediation verification completed with `2730` full-backend passes, `182` focused passes, `2`
+real migration passes, `8` real PostgreSQL service/counter passes, `3` real sender-side
+counter/outbox passes, and `3` real Nginx passes.
+
 ## Migration Evidence
 
-All destructive migration operations targeted generated `stage1_*` scratch databases and used an
-exit trap to terminate sessions and drop those databases.
+All planned migration evidence targeted generated `stage1_*` scratch databases and used an exit
+trap to terminate sessions and drop them. The separate active-database corrective downgrade caused
+by the final evidence orchestration incident is disclosed in Status and the remediation package.
 
 1. Empty database: upgrade to head, second upgrade, downgrade to `f7c8d9e0a1b2`, and re-upgrade all
    passed; tables, non-null version columns, constraints, indexes, enums, and head were verified.

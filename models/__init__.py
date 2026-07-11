@@ -9,6 +9,7 @@ from .invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from .invitation_identity_reservation import InvitationIdentityReservation
 from .telegram_registration_intent import TelegramRegistrationIntent, TelegramRegistrationIntentStatus
 from .telegram_registration_command_receipt import TelegramRegistrationCommandReceipt
+from .user_counter_event_receipt import UserCounterEventReceipt
 from .session import (
     UserSession,
     Platform,
@@ -92,6 +93,7 @@ __all__ = [
     "TelegramRegistrationIntent",
     "TelegramRegistrationIntentStatus",
     "TelegramRegistrationCommandReceipt",
+    "UserCounterEventReceipt",
     "UserSession",
     "Platform",
     "SessionLoginRequest",

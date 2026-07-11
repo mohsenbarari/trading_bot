@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from core.config import settings
 from core.deployment_surface import csv_hosts, extract_host
+from core.server_routing import SERVER_IRAN, normalize_server
 
 
 class PublicWebAppURLConfigurationError(ValueError):
@@ -41,9 +42,12 @@ def _foreign_hosts(settings_obj) -> set[str]:
         "foreign_server_domain",
         "foreign_server_url",
         "germany_server_url",
-        "peer_server_url",
     ):
         hosts.add(_normalize_host(extract_host(getattr(settings_obj, field_name, None))))
+    if normalize_server(getattr(settings_obj, "server_mode", None), default="") == SERVER_IRAN:
+        hosts.add(
+            _normalize_host(extract_host(getattr(settings_obj, "peer_server_url", None)))
+        )
     hosts.discard("")
     return hosts
 

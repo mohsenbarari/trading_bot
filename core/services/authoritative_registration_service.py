@@ -24,6 +24,7 @@ from core.services.accountant_relation_service import (
     activate_accountant_relation_for_registration,
     lock_accountant_relation_for_registration,
 )
+from core.services.bot_access_policy import evaluate_invitation_bot_access
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.customer_relation_service import (
     activate_customer_relation_for_registration,
@@ -32,6 +33,7 @@ from core.services.customer_relation_service import (
 from core.services.invitation_identity_reservation_service import (
     NormalizedInvitationIdentity,
     invitation_identity_lock_keys,
+    telegram_identity_lock_key,
     normalize_invitation_identity,
     release_invitation_identity,
 )
@@ -53,10 +55,10 @@ from core.services.registration_notification_service import (
 from core.services.user_account_status_service import get_user_account_status
 from core.utils import normalize_account_name, normalize_persian_numerals, utc_now
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
-from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from models.telegram_registration_command_receipt import TelegramRegistrationCommandReceipt
-from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
+from models.user import User, set_legacy_has_bot_access_compatibility
 
 
 RegistrationCheckpoint = Callable[[str], Awaitable[None]]
@@ -195,7 +197,7 @@ async def _acquire_registration_identity_locks(
 ) -> None:
     lock_keys = list(invitation_identity_lock_keys(identity))
     if telegram_id is not None:
-        lock_keys.append(f"registration:telegram-id:{int(telegram_id)}")
+        lock_keys.append(telegram_identity_lock_key(int(telegram_id)))
     for lock_key in sorted(set(lock_keys)):
         await db.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
@@ -339,26 +341,16 @@ def _validate_telegram_projection_eligibility(
     accountant_relation: AccountantRelation | None,
     customer_relation: CustomerRelation | None,
 ) -> None:
-    if accountant_relation is not None:
-        raise _error(
-            TelegramRegistrationOutcome.INVALID_RELATION,
-            "این دعوت‌نامه فقط از طریق وب‌اپ قابل تکمیل است",
-        )
-    if (
-        customer_relation is not None
-        and _enum_value(customer_relation.customer_tier) != CustomerTier.TIER_1.value
-    ):
-        raise _error(
-            TelegramRegistrationOutcome.INVALID_RELATION,
-            "این دعوت‌نامه فقط از طریق وب‌اپ قابل تکمیل است",
-        )
-    allowed_roles = {
-        UserRole.STANDARD.value,
-        UserRole.POLICE.value,
-        UserRole.MIDDLE_MANAGER.value,
-        UserRole.SUPER_ADMIN.value,
-    }
-    if _enum_value(invitation.role) not in allowed_roles:
+    decision = evaluate_invitation_bot_access(
+        role=invitation.role,
+        invitation_kind=invitation.kind,
+        customer_tier=(
+            customer_relation.customer_tier
+            if customer_relation is not None
+            else None
+        ),
+    )
+    if not decision.allowed:
         raise _error(
             TelegramRegistrationOutcome.INVALID_RELATION,
             "این دعوت‌نامه فقط از طریق وب‌اپ قابل تکمیل است",

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from core.public_webapp_url import public_webapp_url_for_links
 from core.registration_contracts import InvitationContractV2, InvitationSMSStatus
 from core.services.invitation_lifecycle_service import derive_invitation_state
+from core.services.bot_access_policy import evaluate_invitation_bot_access
 from models.customer_relation import CustomerTier
 from models.invitation import Invitation, InvitationKind
 
@@ -20,19 +21,23 @@ class InvitationSurfaceAvailability:
 def invitation_surface_availability(
     kind: InvitationKind | str,
     *,
+    role: object,
     customer_tier: CustomerTier | str | None = None,
 ) -> InvitationSurfaceAvailability:
     kind_value = str(getattr(kind, "value", kind) or "").strip().lower()
-    tier_value = str(getattr(customer_tier, "value", customer_tier) or "").strip().lower()
     if kind_value == InvitationKind.LEGACY_UNKNOWN.value:
         return InvitationSurfaceAvailability(bot=False, web=False)
-    if kind_value == InvitationKind.ACCOUNTANT.value:
-        return InvitationSurfaceAvailability(bot=False, web=True)
-    if kind_value == InvitationKind.CUSTOMER.value and tier_value == CustomerTier.TIER_2.value:
-        return InvitationSurfaceAvailability(bot=False, web=True)
-    if kind_value in {InvitationKind.STANDARD.value, InvitationKind.CUSTOMER.value}:
-        return InvitationSurfaceAvailability(bot=True, web=True)
-    return InvitationSurfaceAvailability(bot=False, web=False)
+    decision = evaluate_invitation_bot_access(
+        role=role,
+        invitation_kind=kind,
+        customer_tier=customer_tier,
+    )
+    web_available = kind_value in {
+        InvitationKind.STANDARD.value,
+        InvitationKind.ACCOUNTANT.value,
+        InvitationKind.CUSTOMER.value,
+    }
+    return InvitationSurfaceAvailability(bot=decision.allowed, web=web_available)
 
 
 def build_invitation_contract_v2(
@@ -49,6 +54,7 @@ def build_invitation_contract_v2(
     web_origin = public_webapp_url_for_links(settings_obj=settings_obj)
     availability = invitation_surface_availability(
         invitation.kind,
+        role=invitation.role,
         customer_tier=customer_tier,
     )
     bot_name = str(bot_username or "").strip().lstrip("@")

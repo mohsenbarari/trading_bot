@@ -1257,7 +1257,7 @@ Exit criteria:
 - ADRs/decision records for `DT-01`, `DT-02`, `DT-05`, `DT-08`, `DT-12`, `DT-13`, `DT-14`,
   `DT-16`, and `DT-18` are approved.
 
-Execution record (2026-07-11): **Complete as a source milestone; not deployed**. The additive
+Original execution record (2026-07-11): **Completed as a source milestone; not deployed**. The additive
 migration, models, strict contracts, reservation/receipt primitives, source-aware versioned sync
 policy, public invitation protections, runtime configuration, explicit registry/tooling updates,
 decision records, and verification evidence are recorded in
@@ -1272,6 +1272,24 @@ logs, migration evidence, read-only staging proof, redaction report, and per-fil
 outside Git at
 `tmp/chatgpt/dual-platform-registration-stage1-review-20260711.zip`. The review target is
 `4a36574f..37c4451d`; a blocking ChatGPT finding reopens Stage 1 before Stage 2 may begin.
+
+Independent review update (2026-07-11): **Reopened, remediated, and awaiting re-review**. The
+review returned `NO-GO` with one critical, six high, and related medium findings. The accepted
+findings were reproduced against current code and remediated without rewriting Stage 1/2 history.
+The remediation adds transactional delta/epoch counter events and exact-once receipts, conservative
+relation-and-time-backed legacy completion, exact non-trimmed command addresses, one shared
+role/kind/tier bot policy, real Nginx credential-log suppression, natural-identity User sync,
+source-watermark-only unversioned ordering, foreign local-write enforcement, role-aware WebApp URL
+classification, command-receipt tuple constraints, and hashed identity locks. Design and evidence
+are recorded in `docs/DUAL_PLATFORM_REGISTRATION_STAGE1_REMEDIATION_20260711.md`. Stage 1 is not
+self-approved: Stage 3 remains blocked until the mandatory independent remediation review returns
+`GO`. The mixed-version apply matrix also retains the accepted legacy Iran User INSERT path while
+requiring natural identity for versioned events. Final remediation evidence reports `2730`
+full-backend passes, `182` focused passes, `2` real migration passes, `8` real PostgreSQL
+service/counter passes, `3` real sender-side counter/outbox passes, and `3` real Nginx passes. No
+application deployment or feature flag was applied. One evidence command briefly started the
+active database migration dependency; the official downgrade restored `f7c8d9e0a1b2`, schema
+absence and sync health were verified, and all later scratch runs used `--no-deps`.
 
 ### Stage 2 - Shared Authoritative Registration Service
 
@@ -1313,7 +1331,7 @@ Exit criteria:
 - no Telegram path is enabled yet;
 - field-authority, relation-completeness, session, and side-effect invariants have regression tests.
 
-Execution record (2026-07-11): **Complete as a source-code milestone**. The existing Web
+Original execution record (2026-07-11): **Completed as a source-code milestone**. The existing Web
 `register-complete` adapter now delegates all registration product-state mutation to one
 Iran-guarded authoritative transaction. Invitation/User/Relation locks, deterministic natural-key
 and Telegram-ID serialization, command receipt replay, mandatory membership, transactional reuse
@@ -1331,6 +1349,13 @@ packaged outside Git at
 `tmp/chatgpt/dual-platform-registration-stage2-review-20260711.zip`. The review target is the Stage
 2 range beginning at `00aab349`; a blocking ChatGPT finding reopens Stage 2 before Stage 3 may
 begin.
+
+Dependency update (2026-07-11): **Provisional and frozen before Stage 3**. Stage 2 was implemented
+before the delayed independent Stage 1 review was received. It has been revalidated against the
+accepted Stage 1 remediation, including the stricter receipt constraints, shared projection policy,
+hashed locks, natural-identity sync, counter contract, race/rollback paths, and real PostgreSQL
+suite. This preserves the Stage 2 implementation commit rather than rewriting history, but does not
+override the Stage 1 `NO-GO`; both milestones require a clean remediation review before Stage 3.
 
 ### Stage 3 - Canonical Invitation Creation And URL Repair
 

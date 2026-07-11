@@ -11,6 +11,27 @@ server {
         root /var/www/html;
     }
 
+    location = /register {
+        access_log off;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Retry-After "300" always;
+        return 503;
+    }
+
+    location ^~ /i/ {
+        access_log off;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Retry-After "300" always;
+        return 503;
+    }
+
+    location ~ ^/api/invitations/(lookup|validate)/ {
+        access_log off;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Retry-After "300" always;
+        return 503;
+    }
+
     location / {
         add_header Retry-After "300" always;
         return 503;
@@ -37,6 +58,27 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+    }
+
+    location = /register {
+        access_log off;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Retry-After "300" always;
+        return 503;
+    }
+
+    location ^~ /i/ {
+        access_log off;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Retry-After "300" always;
+        return 503;
+    }
+
+    location ~ ^/api/invitations/(lookup|validate)/ {
+        access_log off;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Retry-After "300" always;
+        return 503;
     }
 
     location / {

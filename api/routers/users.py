@@ -24,6 +24,7 @@ from api.deps import verify_admin_or_dev_key
 
 from core.utils import create_user_notification, send_telegram_notification, to_jalali_str
 from core.enums import NotificationLevel, NotificationCategory, UserRole, UserAccountStatus
+from core.user_counter_sync import reset_user_counters_in_memory
 import schemas
 
 
@@ -93,9 +94,7 @@ def track_limitation_changes(user: User, update_data: Dict[str, Any]) -> Tuple[L
     
     # ریست شمارنده‌ها در هر دو حالت
     if limitation_needed or unlimit_needed:
-        user.trades_count = 0
-        user.commodities_traded_count = 0
-        user.channel_messages_count = 0
+        reset_user_counters_in_memory(user)
     
     return limitations_changed, limitation_needed, unlimit_needed
 

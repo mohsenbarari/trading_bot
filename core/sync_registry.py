@@ -403,6 +403,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "profile/account product data: telegram_id, account status, role, limits, and counters",
         notes="user.home_server is legacy/account-origin compatibility only and must not represent current active runtime surface.",
     ),
+    "user_counter_event_receipts": _entry(
+        "user_counter_event_receipts",
+        SyncPolicy.NO_SYNC,
+        ("sync_receiver",),
+        "local receiving server",
+        "immutable event UUID exactly-once receipt",
+        "counter sync replay protection only",
+    ),
 }
 
 

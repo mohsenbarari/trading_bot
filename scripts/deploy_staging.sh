@@ -920,11 +920,12 @@ render_nginx_template() {
     local redirect_server listen_directives ssl_directives foreign_public_surface_guard
     foreign_public_surface_guard="$(foreign_public_surface_guard_nginx)"
     if staging_ssl_enabled; then
-        printf -v redirect_server '%s\n%s\n%s\n%s\n%s\n%s' \
+        printf -v redirect_server '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             'server {' \
             '    listen 80;' \
             '    listen [::]:80;' \
             "    server_name $STAGING_DOMAIN;" \
+            '    access_log off;' \
             '    return 301 https://$host$request_uri;' \
             '}'
         printf -v listen_directives '%s\n%s' \

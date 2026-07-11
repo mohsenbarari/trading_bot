@@ -349,6 +349,37 @@ class ChangeLogPayloadTests(unittest.TestCase):
         self.assertNotIn("must_change_password", item["data"])
         self.assertNotIn("avatar_file_id", item["data"])
 
+    def test_change_log_transport_preserves_each_counter_event_contract(self):
+        event_id = "11111111-2222-4333-8444-555555555555"
+        payload = {
+            "id": 7,
+            "_sync_contract": "user_counter_event_v1",
+            "_counter_event_id": event_id,
+            "_counter_event_kind": "increment",
+            "_counter_epoch": 3,
+            "_counter_deltas": {"trades_count": 1},
+            "_sync_identity": {
+                "current": {"account_name": "counter_user"},
+                "previous": {},
+            },
+        }
+        entry = SimpleNamespace(
+            id=80,
+            operation="UPDATE",
+            table_name="users",
+            record_id=7,
+            data=payload,
+            hash="hash-80",
+            timestamp=datetime(2026, 1, 2, 3, 4, 5),
+        )
+
+        item = sync_worker.change_log_entry_to_sync_item(entry)
+
+        self.assertEqual(item["data"], payload)
+        self.assertEqual(item["change_log_id"], 80)
+        self.assertEqual(item["sync_meta"]["aggregate_id"], f"counter-event:{event_id}")
+        self.assertEqual(item["sync_meta"]["source_sequence"], 80)
+
 
 def make_offer_snapshot(**overrides):
     data = {

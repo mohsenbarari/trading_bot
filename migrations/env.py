@@ -25,6 +25,7 @@ import models.customer_relation
 import models.invitation_identity_reservation
 import models.telegram_registration_intent
 import models.telegram_registration_command_receipt
+import models.user_counter_event_receipt
 
 # --- خواندن تنظیمات Alembic ---
 config = context.config

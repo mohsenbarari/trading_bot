@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 
 from sqlalchemy import delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +38,23 @@ def normalize_invitation_identity(*, mobile_number: str, account_name: str) -> N
 
 
 def invitation_identity_lock_keys(identity: NormalizedInvitationIdentity) -> tuple[str, str]:
-    return tuple(sorted((f"invitation:account:{identity.account_name}", f"invitation:mobile:{identity.mobile_number}")))
+    return tuple(
+        sorted(
+            (
+                _hashed_identity_lock_key("account", identity.account_name),
+                _hashed_identity_lock_key("mobile", identity.mobile_number),
+            )
+        )
+    )
+
+
+def _hashed_identity_lock_key(namespace: str, value: object) -> str:
+    digest = hashlib.sha256(f"{namespace}:{value}".encode("utf-8")).hexdigest()
+    return f"registration-identity:{digest}"
+
+
+def telegram_identity_lock_key(telegram_id: int) -> str:
+    return _hashed_identity_lock_key("telegram-id", int(telegram_id))
 
 
 async def acquire_invitation_identity_locks(

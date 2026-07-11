@@ -6,16 +6,17 @@ import hashlib
 import json
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from core.utils import normalize_persian_numerals
 
 
 REGISTRATION_ADDRESS_MIN_LENGTH = 10
 REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE = "آدرس باید حداقل ۱۰ کاراکتر باشد."
+ExactRegistrationAddress = Annotated[str, StringConstraints(strip_whitespace=False)]
 
 
 class RegistrationSourceSurface(str, Enum):
@@ -98,7 +99,7 @@ class TelegramRegistrationCommand(BaseModel):
     telegram_id: int = Field(gt=0)
     telegram_username: str | None = Field(default=None, max_length=255)
     telegram_full_name: str | None = Field(default=None, max_length=255)
-    address: str
+    address: ExactRegistrationAddress
     contact_verified_at: datetime
     local_completed_at: datetime
     invitation_expires_at_snapshot: datetime

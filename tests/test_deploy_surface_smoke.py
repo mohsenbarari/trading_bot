@@ -1,9 +1,12 @@
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
+import time
 import unittest
+from urllib.request import urlopen
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,6 +53,158 @@ def resolve_docker_compose_command() -> list[str] | None:
 
 
 class DeploySurfaceSmokeTests(unittest.TestCase):
+    def test_invitation_bearing_nginx_routes_disable_access_logs(self):
+        config_paths = (
+            'nginx.conf',
+            'deploy/staging/nginx-staging.conf.template',
+            'deploy/production/nginx-iran-online.conf.template',
+            'deploy/production/nginx-iran-online-https.conf.template',
+            'deploy/production/nginx-iran-recovery-http.conf.template',
+            'deploy/production/nginx-iran-recovery-https.conf.template',
+            'scripts/setup_iran_nginx.sh',
+            'scripts/setup_foreign_nginx.sh',
+        )
+        for relative_path in config_paths:
+            source = (REPO_ROOT / relative_path).read_text(encoding='utf-8')
+            with self.subTest(relative_path=relative_path):
+                self.assertRegex(
+                    source,
+                    r'location = /register \{\s+access_log off;',
+                )
+                self.assertRegex(
+                    source,
+                    r'location \^~ /i/ \{\s+access_log off;',
+                )
+                for location_pattern in (r'location = /register', r'location \^~ /i/'):
+                    block = re.search(
+                        rf'{location_pattern} \{{(?P<body>.*?)\n    \}}',
+                        source,
+                        re.DOTALL,
+                    )
+                    self.assertIsNotNone(block)
+                    self.assertIn(
+                        'add_header Referrer-Policy "no-referrer" always;',
+                        block.group('body'),
+                    )
+        for relative_path in config_paths:
+            source = (REPO_ROOT / relative_path).read_text(encoding='utf-8')
+            with self.subTest(api_relative_path=relative_path):
+                self.assertRegex(
+                    source,
+                    r'location ~ \^/api/invitations/\(lookup\|validate\)/ \{\s+access_log off;',
+                )
+        foreign_setup = (REPO_ROOT / 'scripts/setup_foreign_nginx.sh').read_text(
+            encoding='utf-8'
+        )
+        for location_pattern in (r'location = /register', r'location \^~ /i/'):
+            with self.subTest(foreign_location=location_pattern):
+                block = re.search(
+                    rf'{location_pattern} \{{(?P<body>.*?)\n    \}}',
+                    foreign_setup,
+                    re.DOTALL,
+                )
+                self.assertIsNotNone(block)
+                body = block.group('body')
+                self.assertIn('access_log off;', body)
+                self.assertIn('return 404;', body)
+                self.assertNotIn('proxy_pass', body)
+        root_config = (REPO_ROOT / 'nginx.conf').read_text(encoding='utf-8')
+        self.assertIn('error_log /var/log/nginx/trading_bot_error.log warn;', root_config)
+        self.assertNotIn('trading_bot_error.log debug', root_config)
+
+    def test_nginx_runtime_logs_normal_route_but_not_invitation_credentials(self):
+        if shutil.which('nginx') is None:
+            self.skipTest('nginx is not installed')
+
+        try:
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0))
+                port = probe.getsockname()[1]
+        except PermissionError:
+            self.skipTest('sandbox does not permit local sockets')
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            Path(temp_dir).chmod(0o755)
+            root = Path(temp_dir) / 'root'
+            root.mkdir()
+            root.chmod(0o755)
+            (root / 'index.html').write_text('ok', encoding='utf-8')
+            access_log = Path(temp_dir) / 'access.log'
+            config_path = Path(temp_dir) / 'nginx.conf'
+            pid_path = Path(temp_dir) / 'nginx.pid'
+            config_path.write_text(
+                'events {}\n'
+                'http {\n'
+                f'  access_log {access_log};\n'
+                '  error_log stderr notice;\n'
+                '  server {\n'
+                f'    listen 127.0.0.1:{port};\n'
+                f'    root {root};\n'
+                '    location = /register { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
+                '    location ^~ /i/ { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
+                '    location / { try_files $uri /index.html; }\n'
+                '  }\n'
+                '}\n',
+                encoding='utf-8',
+            )
+            process = subprocess.Popen(
+                [
+                    'nginx',
+                    '-c',
+                    str(config_path),
+                    '-p',
+                    temp_dir,
+                    '-g',
+                    f'daemon off; pid {pid_path};',
+                ],
+                cwd=REPO_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                for _ in range(40):
+                    try:
+                        with urlopen(f'http://127.0.0.1:{port}/health?visible=yes', timeout=0.25) as response:
+                            self.assertEqual(response.status, 200)
+                        break
+                    except OSError:
+                        if process.poll() is not None:
+                            stderr = process.stderr.read() if process.stderr else ''
+                            self.fail(f'nginx exited before request: {stderr}')
+                        time.sleep(0.05)
+                else:
+                    self.fail('nginx did not become ready')
+
+                with urlopen(
+                    f'http://127.0.0.1:{port}/register?token=INV-runtime-secret',
+                    timeout=1,
+                ) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
+                with urlopen(
+                    f'http://127.0.0.1:{port}/i/runtime-short-secret',
+                    timeout=1,
+                ) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
+
+            logged = access_log.read_text(encoding='utf-8')
+            self.assertIn('/health?visible=yes', logged)
+            self.assertNotIn('INV-runtime-secret', logged)
+            self.assertNotIn('runtime-short-secret', logged)
+
     def test_run_checked_applies_default_and_extra_environment(self):
         with patch(__name__ + '.subprocess.run') as run_mock:
             run_mock.return_value = subprocess.CompletedProcess(args=['echo'], returncode=0, stdout='ok', stderr='')
@@ -454,7 +609,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             '    include /etc/letsencrypt/options-ssl-nginx.conf;': '',
             '    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;': '',
             '    access_log /var/log/nginx/trading_bot_access.log;': '',
-            '    error_log /var/log/nginx/trading_bot_error.log debug;': '',
+            '    error_log /var/log/nginx/trading_bot_error.log warn;': '',
         }
         for old, new in replacements.items():
             sanitized_config = sanitized_config.replace(old, new)

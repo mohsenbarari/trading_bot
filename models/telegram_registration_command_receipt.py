@@ -23,6 +23,19 @@ class TelegramRegistrationCommandReceipt(Base):
             "source_server = 'foreign'",
             name="ck_telegram_registration_receipts_source_foreign",
         ),
+        CheckConstraint(
+            "((outcome_code IS NULL AND completed_at IS NULL AND authoritative_user_id IS NULL) "
+            "OR (outcome_code IS NOT NULL AND completed_at IS NOT NULL))",
+            name="ck_telegram_registration_receipts_terminal_atomic",
+        ),
+        CheckConstraint(
+            "((outcome_code IN ('created', 'linked_existing', 'already_linked') "
+            "AND authoritative_user_id IS NOT NULL) "
+            "OR (outcome_code IS NULL AND authoritative_user_id IS NULL) "
+            "OR (outcome_code NOT IN ('created', 'linked_existing', 'already_linked') "
+            "AND authoritative_user_id IS NULL))",
+            name="ck_telegram_registration_receipts_user_outcome",
+        ),
         UniqueConstraint("command_id", name="ux_telegram_registration_receipts_command_id"),
         UniqueConstraint("idempotency_key", name="ux_telegram_registration_receipts_idempotency_key"),
         Index("ix_telegram_registration_receipts_completed_at", "completed_at"),

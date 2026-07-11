@@ -723,6 +723,16 @@ class CoreEventsTests(unittest.TestCase):
         self.assertNotIn("global_lock_grace_expires_at", payload)
         self.assertNotIn("global_web_locked_at", payload)
 
+        with patch("core.events.settings.registration_sync_v2_enabled", False), patch(
+            "core.events.settings.server_mode",
+            "iran",
+        ), patch("core.events.log_change") as legacy_log_change:
+            registry[("User", "after_insert")](None, connection, user)
+
+        legacy_payload = legacy_log_change.call_args.args[4]
+        self.assertNotIn("sync_version", legacy_payload)
+        self.assertNotIn("_sync_identity", legacy_payload)
+
     def test_offer_request_event_listener_syncs_ledger_payload(self):
         registry = {}
         now = datetime(2025, 1, 1, 12, 0, 0)

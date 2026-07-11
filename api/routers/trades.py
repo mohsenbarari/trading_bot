@@ -498,8 +498,9 @@ async def _commit_trade_execution(db: AsyncSession) -> None:
 
 
 def _apply_trade_counter_increment(user: User | object, quantity: int) -> None:
-    user.trades_count = (getattr(user, "trades_count", None) or 0) + 1
-    user.commodities_traded_count = (getattr(user, "commodities_traded_count", None) or 0) + quantity
+    from core.user_counter_sync import increment_user_counters
+
+    increment_user_counters(user, trades=1, commodities=quantity)
 
 
 def _resolve_trade_participant_name(
