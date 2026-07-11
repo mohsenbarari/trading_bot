@@ -1151,6 +1151,12 @@ Exit criteria:
 - implementation file list and migration heads are current;
 - the inventory and open-decision owner list cover every registry ID assigned above.
 
+Execution record (2026-07-11): **Complete**. The read-only source/runtime inventory, two-server
+staging health and migration baseline, test results, implementation file map, assigned challenge
+disposition, and forward preconditions are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE0_BASELINE_20260711.md`. No application code, schema, runtime
+configuration, feature flag, staging deployment, or production surface changed in Stage 0.
+
 ### Stage 1 - Contracts, Schema, And Registry
 
 - Add invitation completion metadata migration.
