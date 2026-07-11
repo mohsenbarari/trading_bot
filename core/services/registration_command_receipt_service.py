@@ -85,19 +85,39 @@ async def prepare_registration_command_receipt(
     command: TelegramRegistrationCommand,
     source_server: str,
 ) -> tuple[TelegramRegistrationCommandReceipt, bool]:
+    return await prepare_internal_registration_command_receipt(
+        db,
+        command_id=command.command_id,
+        idempotency_key=command.idempotency_key,
+        request_hash=registration_command_hash(command),
+        credential_hash=invitation_token_hash(command.invitation_token),
+        source_server=source_server,
+    )
+
+
+async def prepare_internal_registration_command_receipt(
+    db: AsyncSession,
+    *,
+    command_id: UUID,
+    idempotency_key: str,
+    request_hash: str,
+    credential_hash: str,
+    source_server: str,
+) -> tuple[TelegramRegistrationCommandReceipt, bool]:
     if str(source_server or "").strip().lower() != SERVER_FOREIGN:
         raise RegistrationCommandReplayConflict("source_server_forbidden")
+    if len(str(request_hash or "")) != 64 or len(str(credential_hash or "")) != 64:
+        raise RegistrationCommandReplayConflict("invalid_command_hash")
 
     await acquire_registration_command_locks(
         db,
-        command_id=command.command_id,
-        idempotency_key=command.idempotency_key,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
     )
-    request_hash = registration_command_hash(command)
     existing = await load_registration_command_receipt(
         db,
-        command_id=command.command_id,
-        idempotency_key=command.idempotency_key,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
     )
     if existing is not None:
         if existing.request_hash != request_hash:
@@ -107,10 +127,10 @@ async def prepare_registration_command_receipt(
         return existing, True
 
     receipt = TelegramRegistrationCommandReceipt(
-        command_id=command.command_id,
-        idempotency_key=command.idempotency_key,
+        command_id=command_id,
+        idempotency_key=idempotency_key,
         request_hash=request_hash,
-        invitation_token_hash=invitation_token_hash(command.invitation_token),
+        invitation_token_hash=credential_hash,
         source_server=SERVER_FOREIGN,
     )
     db.add(receipt)

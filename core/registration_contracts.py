@@ -53,6 +53,10 @@ class TelegramRegistrationOutcome(str, Enum):
     AUTHORITATIVE_USER_MISSING = "authoritative_user_missing"
     ACCOUNT_INACTIVE = "account_inactive"
     ACCOUNT_DELETED = "account_deleted"
+    LINK_TOKEN_NOT_FOUND = "link_token_not_found"
+    LINK_TOKEN_EXPIRED = "link_token_expired"
+    LINK_TOKEN_REVOKED = "link_token_revoked"
+    LINK_TOKEN_ALREADY_USED = "link_token_already_used"
 
 
 class InvitationDerivedState(str, Enum):

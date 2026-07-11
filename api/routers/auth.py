@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime, timedelta
@@ -56,6 +56,17 @@ from core.services.authoritative_registration_service import (
     AuthoritativeRegistrationRequest,
     complete_invitation_registration,
 )
+from core.services.authoritative_telegram_account_link_service import (
+    complete_authoritative_telegram_account_link,
+)
+from core.registration_contracts import (
+    TelegramRegistrationCommand,
+    TelegramRegistrationCommandResponse,
+    TelegramRegistrationOutcome,
+)
+from core.telegram_account_link_contracts import TelegramAccountLinkCommand
+from core.trade_forwarding import verify_internal_signature
+from core.audit_logger import audit_log
 from core.services.registration_notification_service import (
     publish_project_user_joined_web_notifications,
 )
@@ -63,7 +74,13 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
-from core.server_routing import SERVER_FOREIGN, server_from_request
+from core.server_routing import (
+    SERVER_FOREIGN,
+    SERVER_IRAN,
+    current_server,
+    normalize_server,
+    server_from_request,
+)
 from core.request_logging import client_ip_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
@@ -89,6 +106,130 @@ OTP_VERIFY_LOCK_SECONDS = 300
 OTP_VERIFY_SUBJECT_MAX_FAILURES = 5
 OTP_VERIFY_IP_MAX_FAILURES = 30
 OTP_VERIFY_LOCKED_DETAIL = "تعداد تلاش‌های ناموفق زیاد است. چند دقیقه دیگر دوباره تلاش کنید."
+
+
+def _verify_foreign_internal_command(raw_request: Request, body: bytes) -> None:
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal registration signature")
+    if current_server() != SERVER_IRAN:
+        raise HTTPException(status_code=403, detail="Registration reconciliation is Iran-authoritative")
+    if normalize_server(raw_request.headers.get("x-source-server"), default="") != SERVER_FOREIGN:
+        raise HTTPException(status_code=401, detail="Invalid internal registration source")
+
+
+def _registration_outcome_event(outcome: TelegramRegistrationOutcome) -> str:
+    if outcome == TelegramRegistrationOutcome.CREATED:
+        return "telegram_registration.reconciled_created"
+    if outcome == TelegramRegistrationOutcome.LINKED_EXISTING:
+        return "telegram_registration.reconciled_linked_existing"
+    if outcome == TelegramRegistrationOutcome.ALREADY_LINKED:
+        return "telegram_registration.reconciled_already_linked"
+    return "telegram_registration.rejected"
+
+
+@router.post(
+    "/internal/telegram-registration/reconcile",
+    response_model=TelegramRegistrationCommandResponse,
+)
+async def reconcile_telegram_registration_internal(
+    raw_request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await raw_request.body()
+    _verify_foreign_internal_command(raw_request, body)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        payload = json.loads(body)
+        command = TelegramRegistrationCommand.model_validate(payload)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid internal registration command") from None
+    if not settings.telegram_registration_reconciliation_enabled:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return TelegramRegistrationCommandResponse(
+            command_id=command.command_id,
+            outcome=TelegramRegistrationOutcome.FEATURE_DISABLED,
+            terminal=False,
+        )
+
+    result = await complete_invitation_registration(
+        db,
+        AuthoritativeRegistrationRequest.for_telegram(
+            command=command,
+            source_server=SERVER_FOREIGN,
+        ),
+    )
+    if result.first_terminal_transition:
+        audit_log(
+            _registration_outcome_event(result.outcome),
+            target_type="telegram_registration_command",
+            target_id=str(command.command_id),
+            result=("success" if result.authoritative_user_id is not None else "denied"),
+            extra={"outcome": result.outcome.value},
+        )
+        if result.outcome == TelegramRegistrationOutcome.LINKED_EXISTING:
+            audit_log(
+                "telegram_registration_intent.linked_existing_user",
+                target_type="user",
+                target_id=result.authoritative_user_id,
+                result="success",
+            )
+    return TelegramRegistrationCommandResponse(
+        command_id=command.command_id,
+        outcome=result.outcome,
+        authoritative_user_id=result.authoritative_user_id,
+    )
+
+
+@router.post(
+    "/internal/telegram-link/complete",
+    response_model=TelegramRegistrationCommandResponse,
+)
+async def complete_telegram_account_link_internal(
+    raw_request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await raw_request.body()
+    _verify_foreign_internal_command(raw_request, body)
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        payload = json.loads(body)
+        command = TelegramAccountLinkCommand.model_validate(payload)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid internal account-link command") from None
+    if not settings.registration_sync_v2_enabled:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return TelegramRegistrationCommandResponse(
+            command_id=command.command_id,
+            outcome=TelegramRegistrationOutcome.FEATURE_DISABLED,
+            terminal=False,
+        )
+    result = await complete_authoritative_telegram_account_link(
+        db,
+        command=command,
+        source_server=SERVER_FOREIGN,
+    )
+    if result.first_terminal_transition:
+        audit_log(
+            "telegram_account_link.completed"
+            if result.authoritative_user_id is not None
+            else "telegram_account_link.rejected",
+            target_type="telegram_account_link_command",
+            target_id=str(command.command_id),
+            result=("success" if result.authoritative_user_id is not None else "denied"),
+            extra={"outcome": result.outcome.value},
+        )
+    return TelegramRegistrationCommandResponse(
+        command_id=command.command_id,
+        outcome=result.outcome,
+        authoritative_user_id=result.authoritative_user_id,
+    )
 
 
 def _deliver_otp_via_staging_log(*, mobile: str, otp_code: str, purpose: str) -> bool:

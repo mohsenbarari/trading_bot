@@ -22,6 +22,7 @@ JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
 JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
 JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
+JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -30,11 +31,12 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_SESSION_EXPIRY,
         JOB_USER_ACCOUNT_STATUS,
         JOB_CONNECTIVITY_MONITOR,
-            JOB_TRADE_WEBAPP_DELIVERY,
-            JOB_TRADE_TELEGRAM_DELIVERY,
-            JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
-            JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
-            JOB_OFFER_TELEGRAM_PUBLICATION,
+        JOB_TRADE_WEBAPP_DELIVERY,
+        JOB_TRADE_TELEGRAM_DELIVERY,
+        JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
+        JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
+        JOB_OFFER_TELEGRAM_PUBLICATION,
+        JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
     }
 )
 
@@ -265,6 +267,25 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         offer_impacting=True,
         external_state=("Telegram Bot API",),
         side_effects=("Telegram channel offer post", "Telegram channel offer message text/markup"),
+    ),
+    JOB_TELEGRAM_REGISTRATION_RECONCILIATION: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+        mutated_tables=("telegram_registration_intents",),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only local intent claimant; submit stable signed commands to Iran and finalize "
+            "only after required synced projections are locally visible"
+        ),
+        outage_behavior=(
+            "retain ready/retryable intents with bounded backoff while Iran or sync is unavailable; "
+            "never create a foreign User or grant access from an HTTP response alone"
+        ),
+        sync_outbox_behavior=(
+            "telegram_registration_intents is foreign-local no-sync state; accepted Iran User, "
+            "Invitation, and Relation mutations converge through the existing sync worker"
+        ),
+        local_runtime=True,
+        external_state=("Iran signed registration endpoint",),
     ),
 }
 

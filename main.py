@@ -32,6 +32,9 @@ from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop, webapp_trade_delivery_loop
+from core.telegram_registration_reconciliation_worker import (
+    telegram_registration_reconciliation_loop,
+)
 from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 from core.production_test_isolation import (
@@ -86,6 +89,8 @@ PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES = (
     "/api/trades/internal",
     "/api/offers/internal",
     "/api/invitations/internal",
+    "/api/auth/internal/telegram-registration",
+    "/api/auth/internal/telegram-link",
 )
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """
@@ -206,6 +211,13 @@ def _background_job_factories():
         ("trade_webapp_delivery", webapp_trade_delivery_loop),
         ("trade_telegram_delivery", telegram_trade_delivery_loop),
     ]
+    if settings.telegram_registration_reconciliation_enabled:
+        jobs.append(
+            (
+                "telegram_registration_reconciliation",
+                telegram_registration_reconciliation_loop,
+            )
+        )
     return filter_allowed_background_job_factories(
         jobs,
         on_rejected=_log_background_job_authority_rejection,

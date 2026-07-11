@@ -10,7 +10,8 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.server_routing import current_server
+from core.config import settings
+from core.server_routing import SERVER_IRAN, current_server
 from core.services.bot_access_policy import (
     BOT_ACCESS_REASON_SYNC_PENDING,
     BotAccessDecision,
@@ -138,6 +139,8 @@ async def consume_telegram_link_token(
     username: str | None,
     full_name: str | None,
 ) -> None:
+    if current_server() != SERVER_IRAN and settings.registration_sync_v2_enabled:
+        raise TelegramLinkTokenError("iran_authority_required")
     duplicate_stmt = select(User).where(
         User.telegram_id == telegram_id,
         User.id != user.id,

@@ -130,6 +130,9 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.ensure_mandatory_channel_membership",
             new=AsyncMock(),
         ), patch(
+            "bot.handlers.link_account.build_channel_join_request_text",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "bot.handlers.link_account.settings",
             SimpleNamespace(frontend_url="https://app.example"),
         ):
@@ -299,6 +302,153 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
         self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
+
+    async def test_legacy_address_completion_keeps_deployed_trim_behavior(self):
+        user = make_user(address="System Default")
+        db = FakeDB(user)
+        state = FakeState()
+        await state.update_data(link_user_id=99)
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            text="  تهران خیابان آزادی پلاک ۱۰  ",
+            from_user=SimpleNamespace(id=10, username="u", full_name="Linked User"),
+            answer=AsyncMock(),
+        )
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.link_account.build_linked_account_panel_message",
+            new=AsyncMock(return_value="linked"),
+        ), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(
+                frontend_url="https://app.example",
+                registration_sync_v2_enabled=False,
+            ),
+        ):
+            await handle_address_completion(message, state)
+
+        self.assertEqual(user.address, "تهران خیابان آزادی پلاک ۱۰")
+
+    async def test_sync_v2_contact_forwards_without_foreign_user_mutation(self):
+        user = make_user()
+        projected_user = make_user(telegram_id=10, has_bot_access=True)
+        db = FakeDB(user)
+        state = FakeState()
+        message = make_message(username="mohsen_telegram", full_name="Linked User")
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(
+                frontend_url="https://foreign.invalid",
+                registration_sync_v2_enabled=True,
+            ),
+        ), patch(
+            "bot.handlers.link_account.complete_account_link_via_iran",
+            new=AsyncMock(return_value=projected_user),
+        ) as complete, patch(
+            "bot.handlers.link_account.build_linked_account_panel_message",
+            new=AsyncMock(return_value="linked"),
+        ), patch(
+            "bot.handlers.link_account.public_webapp_url_for_links",
+            return_value="https://iran.example",
+        ), patch(
+            "bot.handlers.link_account.get_persistent_menu_keyboard",
+            return_value="menu",
+        ):
+            await handle_contact(message, state)
+
+        self.assertIsNone(user.telegram_id)
+        self.assertFalse(user.has_bot_access)
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(db.rollbacks, 1)
+        complete.assert_awaited_once_with(
+            message=message,
+            mobile_number="09121111111",
+            link_token="unit-token",
+            address=None,
+        )
+        self.assertEqual(state.cleared, 1)
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
+
+    async def test_sync_v2_contact_defers_incomplete_address_without_consuming_token(self):
+        user = make_user(address="System Default")
+        db = FakeDB(user)
+        state = FakeState()
+        message = make_message()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(registration_sync_v2_enabled=True),
+        ), patch(
+            "bot.handlers.link_account.finalize_account_link",
+            new=AsyncMock(),
+        ) as legacy_finalize, patch(
+            "bot.handlers.link_account.complete_account_link_via_iran",
+            new=AsyncMock(),
+        ) as complete:
+            await handle_contact(message, state)
+
+        self.assertIsNone(user.telegram_id)
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(db.rollbacks, 1)
+        self.assertEqual(state.data["telegram_link_token"], "unit-token")
+        self.assertEqual(state.data["telegram_link_mobile"], "09121111111")
+        self.assertEqual(state.states, [LinkState.waiting_for_address])
+        legacy_finalize.assert_not_awaited()
+        complete.assert_not_awaited()
+
+    async def test_sync_v2_address_is_forwarded_exactly_and_not_written_on_foreign(self):
+        user = make_user(address="System Default")
+        projected_user = make_user(
+            telegram_id=10,
+            address="  تهران خیابان آزادی پلاک ۱۰  ",
+            has_bot_access=True,
+        )
+        db = FakeDB(user)
+        state = FakeState()
+        await state.update_data(
+            link_user_id=99,
+            telegram_link_mobile="09121111111",
+        )
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            text="  تهران خیابان آزادی پلاک ۱۰  ",
+            from_user=SimpleNamespace(id=10, username="u", full_name="Linked User"),
+            answer=AsyncMock(),
+        )
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(registration_sync_v2_enabled=True),
+        ), patch(
+            "bot.handlers.link_account.complete_account_link_via_iran",
+            new=AsyncMock(return_value=projected_user),
+        ) as complete, patch(
+            "bot.handlers.link_account.build_linked_account_panel_message",
+            new=AsyncMock(return_value="linked"),
+        ), patch(
+            "bot.handlers.link_account.public_webapp_url_for_links",
+            return_value="https://iran.example",
+        ), patch(
+            "bot.handlers.link_account.get_persistent_menu_keyboard",
+            return_value="menu",
+        ):
+            await handle_address_completion(message, state)
+
+        self.assertEqual(user.address, "System Default")
+        self.assertIsNone(user.telegram_id)
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(db.rollbacks, 1)
+        complete.assert_awaited_once_with(
+            message=message,
+            mobile_number="09121111111",
+            link_token="unit-token",
+            address="  تهران خیابان آزادی پلاک ۱۰  ",
+        )
+        self.assertEqual(state.cleared, 1)
 
 
 if __name__ == "__main__":

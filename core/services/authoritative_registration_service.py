@@ -489,6 +489,14 @@ async def _validate_current_telegram_eligibility(
         )
 
 
+async def validate_current_telegram_eligibility(
+    db: AsyncSession,
+    *,
+    user: User,
+) -> None:
+    await _validate_current_telegram_eligibility(db, user=user)
+
+
 def _registration_full_name(
     invitation: Invitation,
     accountant_relation: AccountantRelation | None,
@@ -915,7 +923,7 @@ async def complete_invitation_registration(
                 accountant_relation=accountant_relation,
                 customer_relation=customer_relation,
             )
-            await _validate_current_telegram_eligibility(db, user=user)
+            await validate_current_telegram_eligibility(db, user=user)
             _, _, telegram_users = _matching_user_maps(
                 users,
                 identity=identity,

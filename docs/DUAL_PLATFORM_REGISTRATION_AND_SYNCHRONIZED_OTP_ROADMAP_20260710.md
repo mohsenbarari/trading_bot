@@ -1473,6 +1473,27 @@ Exit criteria:
 
 ### Stage 4 - Telegram Registration Intent And Reconciliation
 
+Execution record (2026-07-11): **Source implementation complete; independent review required**.
+The Stage 1 foreign-local intent and Iran-local receipt schema now has a strict persistence adapter,
+signed Iran reconciliation endpoint, recoverable `SKIP LOCKED` claim/lease state machine, bounded
+exponential retry, and a foreign-only job in the existing API background leader. A successful Iran
+response remains nonterminal locally until the exact kind/tier-specific User/Invitation/Relation
+projection is visible; Standard/admin/police do not wait for a Relation and Tier-1 does. The legacy
+Web-to-Telegram link-token writer is routed through a separate strict Iran command whenever Sync-v2
+is enabled, while the exact legacy path remains available only while Sync-v2 is off so source-only
+deployment does not break current production behavior. Real PostgreSQL testing exposed and fixed a
+stale SQLAlchemy identity-map race after an advisory-lock wait by forcing locked Token/User reloads.
+Focused backend (`135`), full backend (`2800`, `35` opt-in skips), and real scratch PostgreSQL (`7`)
+tests passed. During final PostgreSQL verification, one unsafe `docker compose run` invocation
+started the Compose migration dependency against the active database. All four Stage 1 local-state
+tables were verified empty, the official downgrade immediately restored `f7c8d9e0a1b2`, Stage 1
+schema object count returned to zero, services remained operational, and all Stage 4 scratch
+databases were removed. Future scratch runs must use an already-migrated scratch target and
+`docker compose run --no-deps` (or an equivalent isolated runner). No feature enablement, deploy,
+push, or production release occurred. Details and open gates are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE4_INTENT_RECONCILIATION_20260711.md`; a blocking Stage 3 or
+Stage 4 independent finding reopens the applicable stage before Stage 5.
+
 - Add foreign intent persistence and a server-guarded job to the existing background leader.
 - Add signed Iran reconciliation endpoint.
 - Implement full decision matrix and command receipts.
