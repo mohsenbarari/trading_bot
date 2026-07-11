@@ -70,7 +70,13 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
 
         callback = make_callback(data="set_role_STANDARD")
         state = FakeState({"account_name": "acc", "mobile_number": "09123456789", "last_prompt_message_id": 10})
-        user = SimpleNamespace(id=7, role=UserRole.SUPER_ADMIN)
+        user = SimpleNamespace(
+            id=7,
+            role=UserRole.SUPER_ADMIN,
+            account_name="admin7",
+            mobile_number="09120000007",
+            telegram_id=700,
+        )
         with patch(
             "bot.handlers.admin.forward_standard_invitation_to_iran",
             new=AsyncMock(return_value=(201, {"bot_link": "https://t.me/bot?start=tok", "web_link": "https://app/register?token=tok"})),

@@ -44,6 +44,7 @@ from core.customer_invite import (
     normalize_customer_invite_management_name,
     normalize_customer_invite_mobile,
 )
+from core.invitation_creation_contracts import InvitationRequesterIdentity
 from core.customer_invite_forwarding import forward_customer_invite_to_iran
 from core.server_routing import SERVER_FOREIGN, current_server
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
@@ -896,14 +897,19 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
         return
 
     try:
+        owner_identity = InvitationRequesterIdentity(
+            account_name=user.account_name,
+            mobile_number=user.mobile_number,
+            telegram_id=user.telegram_id,
+        )
         account_name = build_customer_invite_account_name(mobile_number)
         idempotency_key = build_customer_invite_idempotency_key(
             source_server=SERVER_FOREIGN,
-            owner_user_id=user.id,
+            owner_identity=owner_identity,
             mobile_number=mobile_number,
         )
         payload = {
-            "owner_user_id": user.id,
+            "owner_identity": owner_identity.model_dump(mode="json"),
             "account_name": account_name,
             "management_name": management_name,
             "mobile_number": mobile_number,

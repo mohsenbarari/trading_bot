@@ -18,6 +18,7 @@ from api.routers.invitations import (
 from models.invitation import InvitationKind
 from models.user import UserRole
 from core.services.canonical_invitation_creation_service import CanonicalInvitationCreationError
+from core.registration_contracts import InvitationSMSStatus
 
 
 class FakeExecuteResult:
@@ -60,6 +61,18 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.public_url_patcher.start()
         self.addCleanup(self.public_url_patcher.stop)
+        prepare_sms = patch(
+            "api.routers.invitations.prepare_invitation_sms_delivery",
+            new=AsyncMock(),
+        )
+        prepare_sms.start()
+        self.addCleanup(prepare_sms.stop)
+        deliver_sms = patch(
+            "api.routers.invitations.deliver_invitation_sms_once",
+            new=AsyncMock(return_value=InvitationSMSStatus.DISABLED),
+        )
+        deliver_sms.start()
+        self.addCleanup(deliver_sms.stop)
 
     def test_generate_token_and_short_code_shapes(self):
         token = generate_token()
@@ -174,8 +187,15 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.invitations.create_or_reuse_canonical_invitation",
             new=AsyncMock(return_value=SimpleNamespace(invitation=invitation, created=True)),
         ), patch("api.routers.invitations.invitation_sms_enabled", return_value=True), patch(
-            "api.routers.invitations.send_invitation_sms", return_value=True
-        ) as send_sms_mock:
+            "api.routers.invitations.send_invitation_sms_result", return_value=True
+        ) as send_sms_mock, patch(
+            "api.routers.invitations.deliver_invitation_sms_once",
+            new=AsyncMock(side_effect=lambda *args, **kwargs: (
+                InvitationSMSStatus.ACCEPTED
+                if kwargs["sender"]()
+                else InvitationSMSStatus.AMBIGUOUS
+            )),
+        ):
             result = await create_invitation(
                 InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.STANDARD),
                 db=db,

@@ -289,10 +289,17 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_invitation_relation_and_identity_locks_are_explicit_and_commit_free(self):
         invitation_db = _CaptureDB()
         await registration._load_invitation_for_update(invitation_db, "INV-stage2-unit-123456")
-        invitation_sql = str(
-            invitation_db.calls[0][0].compile(dialect=postgresql.dialect())
-        ).upper()
-        self.assertIn("FOR UPDATE", invitation_sql)
+        invitation_sql = [
+            str(call[0].compile(dialect=postgresql.dialect())).upper()
+            for call in invitation_db.calls
+        ]
+        row_lock_index = next(
+            index for index, sql in enumerate(invitation_sql) if "FOR UPDATE" in sql
+        )
+        advisory_index = next(
+            index for index, sql in enumerate(invitation_sql) if "PG_ADVISORY_XACT_LOCK" in sql
+        )
+        self.assertLess(advisory_index, row_lock_index)
 
         accountant_db = _CaptureDB()
         await registration.lock_accountant_relation_for_registration(

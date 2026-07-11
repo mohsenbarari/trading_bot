@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from typing import Any
 
 import httpx
@@ -12,6 +13,12 @@ from core.log_redaction import mask_mobile
 from core.utils import normalize_persian_numerals
 
 logger = logging.getLogger(__name__)
+
+
+class SMSDeliveryOutcome(str, Enum):
+    ACCEPTED = "accepted"
+    FAILED = "failed"
+    AMBIGUOUS = "ambiguous"
 
 
 def _api_url(path: str) -> str:
@@ -42,7 +49,10 @@ def _response_is_success(data: dict[str, Any]) -> bool:
     return data.get("status") in (1, "1", True)
 
 
-def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+def _post_smsir_result(
+    path: str,
+    payload: dict[str, Any],
+) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
     try:
         response = httpx.post(
             _api_url(path),
@@ -50,9 +60,12 @@ def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
             json=payload,
             timeout=settings.smsir_timeout_seconds,
         )
+    except RuntimeError as exc:
+        logger.error("SMS.ir request configuration failed for %s: %s", path, exc)
+        return SMSDeliveryOutcome.FAILED, None
     except Exception as exc:
         logger.error("SMS.ir request failed for %s: %s", path, exc)
-        return None
+        return SMSDeliveryOutcome.AMBIGUOUS, None
 
     try:
         data = response.json()
@@ -62,7 +75,7 @@ def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
             path,
             response.status_code,
         )
-        return None
+        return SMSDeliveryOutcome.AMBIGUOUS, None
 
     if response.status_code < 200 or response.status_code >= 300:
         logger.error(
@@ -72,7 +85,12 @@ def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
             data.get("status"),
             data.get("message"),
         )
-        return None
+        outcome = (
+            SMSDeliveryOutcome.FAILED
+            if 400 <= response.status_code < 500 and response.status_code not in (408, 429)
+            else SMSDeliveryOutcome.AMBIGUOUS
+        )
+        return outcome, None
 
     if not _response_is_success(data):
         logger.error(
@@ -81,9 +99,14 @@ def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
             data.get("status"),
             data.get("message"),
         )
-        return None
+        return SMSDeliveryOutcome.FAILED, None
 
-    return data
+    return SMSDeliveryOutcome.ACCEPTED, data
+
+
+def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    outcome, data = _post_smsir_result(path, payload)
+    return data if outcome == SMSDeliveryOutcome.ACCEPTED else None
 
 
 def _configured_template_id(raw_template_id: str | int | None, *, setting_name: str) -> int | None:
@@ -102,23 +125,39 @@ def _send_template_sms(
     template_id: int,
     parameters: list[dict[str, str]],
 ) -> bool:
+    return (
+        _send_template_sms_result(
+            mobile,
+            template_id=template_id,
+            parameters=parameters,
+        )
+        == SMSDeliveryOutcome.ACCEPTED
+    )
+
+
+def _send_template_sms_result(
+    mobile: str,
+    *,
+    template_id: int,
+    parameters: list[dict[str, str]],
+) -> SMSDeliveryOutcome:
     normalized_mobile = _normalize_mobile(mobile)
     payload = {
         "mobile": normalized_mobile,
         "templateId": template_id,
         "parameters": parameters,
     }
-    data = _post_smsir("v1/send/verify", payload)
-    if data is None:
-        return False
+    outcome, data = _post_smsir_result("v1/send/verify", payload)
+    if outcome != SMSDeliveryOutcome.ACCEPTED:
+        return outcome
 
-    provider_data = data.get("data")
+    provider_data = data.get("data") if data is not None else None
     if not isinstance(provider_data, dict) or provider_data.get("messageId") in (None, 0, "0"):
         logger.error("SMS.ir verify send returned no usable messageId for %s", mask_mobile(normalized_mobile))
-        return False
+        return SMSDeliveryOutcome.AMBIGUOUS
 
     logger.info("SMS.ir template SMS sent to %s template_id=%s", mask_mobile(normalized_mobile), template_id)
-    return True
+    return SMSDeliveryOutcome.ACCEPTED
 
 
 def send_sms(mobile: str, message: str) -> bool:
@@ -182,12 +221,12 @@ def send_otp_sms(mobile: str, code: str) -> bool:
     )
 
 
-def send_invitation_sms(
+def send_invitation_sms_result(
     mobile: str,
     account_name: str,
     bot_link: str,
     web_link: str,
-) -> bool:
+) -> SMSDeliveryOutcome:
     """Send general invitation SMS through the dedicated SMS.ir template."""
     del bot_link, web_link
     try:
@@ -197,25 +236,34 @@ def send_invitation_sms(
         )
     except RuntimeError as exc:
         logger.error("Invalid SMS.ir invitation configuration: %s", exc)
-        return False
+        return SMSDeliveryOutcome.FAILED
 
     if template_id is None:
         logger.error("SMSIR_INVITATION_TEMPLATE_ID is not configured")
-        return False
+        return SMSDeliveryOutcome.FAILED
 
     parameter_name = (settings.smsir_invitation_template_parameter or "NAME").strip() or "NAME"
-    return _send_template_sms(
+    return _send_template_sms_result(
         mobile,
         template_id=template_id,
         parameters=[{"name": parameter_name, "value": str(account_name).strip() or "کاربر"}],
     )
 
 
-def send_accountant_invitation_sms(
+def send_invitation_sms(
+    mobile: str,
+    account_name: str,
+    bot_link: str,
+    web_link: str,
+) -> bool:
+    return send_invitation_sms_result(mobile, account_name, bot_link, web_link) == SMSDeliveryOutcome.ACCEPTED
+
+
+def send_accountant_invitation_sms_result(
     mobile: str,
     relation_display_name: str,
     web_link: str,
-) -> bool:
+) -> SMSDeliveryOutcome:
     """Send accountant invitation SMS through the dedicated SMS.ir template."""
     del web_link
     try:
@@ -225,25 +273,36 @@ def send_accountant_invitation_sms(
         )
     except RuntimeError as exc:
         logger.error("Invalid SMS.ir accountant invitation configuration: %s", exc)
-        return False
+        return SMSDeliveryOutcome.FAILED
 
     if template_id is None:
         logger.error("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID is not configured")
-        return False
+        return SMSDeliveryOutcome.FAILED
 
     parameter_name = (settings.smsir_invitation_template_parameter or "NAME").strip() or "NAME"
-    return _send_template_sms(
+    return _send_template_sms_result(
         mobile,
         template_id=template_id,
         parameters=[{"name": parameter_name, "value": str(relation_display_name).strip() or "کاربر"}],
     )
 
 
-def send_customer_invitation_sms(
+def send_accountant_invitation_sms(
+    mobile: str,
+    relation_display_name: str,
+    web_link: str,
+) -> bool:
+    return (
+        send_accountant_invitation_sms_result(mobile, relation_display_name, web_link)
+        == SMSDeliveryOutcome.ACCEPTED
+    )
+
+
+def send_customer_invitation_sms_result(
     mobile: str,
     management_name: str,
     web_link: str,
-) -> bool:
+) -> SMSDeliveryOutcome:
     """Send customer invitation SMS through the dedicated SMS.ir template."""
     del web_link
     try:
@@ -253,15 +312,26 @@ def send_customer_invitation_sms(
         )
     except RuntimeError as exc:
         logger.error("Invalid SMS.ir customer invitation configuration: %s", exc)
-        return False
+        return SMSDeliveryOutcome.FAILED
 
     if template_id is None:
         logger.error("SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID is not configured")
-        return False
+        return SMSDeliveryOutcome.FAILED
 
     parameter_name = (settings.smsir_invitation_template_parameter or "NAME").strip() or "NAME"
-    return _send_template_sms(
+    return _send_template_sms_result(
         mobile,
         template_id=template_id,
         parameters=[{"name": parameter_name, "value": str(management_name).strip() or "کاربر"}],
+    )
+
+
+def send_customer_invitation_sms(
+    mobile: str,
+    management_name: str,
+    web_link: str,
+) -> bool:
+    return (
+        send_customer_invitation_sms_result(mobile, management_name, web_link)
+        == SMSDeliveryOutcome.ACCEPTED
     )

@@ -3,7 +3,7 @@ import os
 import re
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -21,9 +21,19 @@ from core.services.invitation_identity_reservation_service import release_invita
 from core.services.invitation_lifecycle_service import complete_invitation
 from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from core.services.user_deletion_service import _soft_revoke_pending_invitation
-from models.customer_relation import CustomerRelation, CustomerTier
+from core.services.user_deletion_service import _close_owned_customer_relations
+from core.services.invitation_sms_delivery_service import (
+    deliver_invitation_sms_once,
+    prepare_invitation_sms_delivery,
+)
+from core.registration_contracts import InvitationDerivedState, InvitationSMSStatus
+from core.services.invitation_lifecycle_service import derive_invitation_state
+from core.services.invitation_requester_service import resolve_current_invitation_requester
+from core.invitation_creation_contracts import InvitationRequesterIdentity
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from models.invitation_identity_reservation import InvitationIdentityReservation
+from models.invitation_sms_delivery import InvitationSMSDelivery
 from models.user import User, UserRole
 
 
@@ -315,6 +325,196 @@ class Stage3InvitationCreationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 (await session.execute(select(func.count()).select_from(InvitationIdentityReservation).where(InvitationIdentityReservation.invitation_id == invitation_id))).scalar_one(),
                 0,
             )
+
+    async def test_exact_retry_and_terminal_transition_share_advisory_before_row_order(self):
+        owner = await self._owner("cross_order")
+        account, mobile = self._identity("cross_order")
+        _, invitation_id, token = await self._create_standard(owner.id, account, mobile)
+        retry_has_locks = asyncio.Event()
+        transition_started = asyncio.Event()
+
+        from core.services import canonical_invitation_creation_service as canonical
+
+        original_find = canonical.find_identity_reservation
+
+        async def barrier_find(db, identity):
+            retry_has_locks.set()
+            await transition_started.wait()
+            return await original_find(db, identity)
+
+        async def exact_retry():
+            async with self.session_factory() as session:
+                with patch.object(canonical, "find_identity_reservation", new=barrier_find):
+                    result = await canonical.create_or_reuse_canonical_invitation(
+                        session,
+                        creator_user_id=owner.id,
+                        account_name=account,
+                        mobile_number=mobile,
+                        role=UserRole.STANDARD,
+                        kind=InvitationKind.STANDARD,
+                    )
+                    await session.commit()
+                    return result.created
+
+        async def revoke_after_retry_locks():
+            await retry_has_locks.wait()
+            transition_started.set()
+            async with self.session_factory() as session:
+                await _soft_revoke_pending_invitation(
+                    session,
+                    invitation_token=token,
+                    now=datetime.utcnow(),
+                )
+                await session.commit()
+
+        retry_created, _ = await asyncio.wait_for(
+            asyncio.gather(exact_retry(), revoke_after_retry_locks()),
+            timeout=5,
+        )
+        self.assertFalse(retry_created)
+        async with self.session_factory() as session:
+            invitation = await session.get(Invitation, invitation_id)
+            self.assertIsNotNone(invitation.revoked_at)
+
+    async def test_owner_relation_close_never_stale_overwrites_completed_relation_as_revoked(self):
+        owner = await self._owner("relation_close")
+        account, mobile = self._identity("relation_close")
+        async with self.session_factory() as session:
+            owner_row = await session.get(User, owner.id)
+            created = await create_or_reuse_owner_customer_relation(
+                session,
+                owner_user=owner_row,
+                account_name=account,
+                management_name="Stage 3 relation close",
+                mobile_number=mobile,
+                customer_tier=CustomerTier.TIER_1,
+            )
+            invitation_id = created.invitation.id
+            relation_id = created.relation.id
+
+        async def complete_relation():
+            async with self.session_factory() as session:
+                invitation = await lock_invitation_for_transition(
+                    session,
+                    invitation_id=invitation_id,
+                )
+                relation = (
+                    await session.execute(
+                        select(CustomerRelation)
+                        .where(CustomerRelation.id == relation_id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                ).scalar_one()
+                if derive_invitation_state(invitation) != InvitationDerivedState.PENDING:
+                    await session.rollback()
+                    return "revoked_first"
+                suffix = uuid4().hex
+                customer = User(
+                    account_name=account,
+                    mobile_number=mobile,
+                    full_name="Stage 3 customer",
+                    address="Stage 3 customer address",
+                    role=UserRole.STANDARD,
+                    home_server=SERVER_IRAN,
+                    must_change_password=False,
+                )
+                session.add(customer)
+                await session.flush()
+                complete_invitation(
+                    invitation,
+                    registered_user_id=customer.id,
+                    completed_via=InvitationCompletionSurface.WEB,
+                )
+                relation.customer_user_id = customer.id
+                relation.status = CustomerRelationStatus.ACTIVE
+                relation.activated_at = datetime.now(timezone.utc)
+                await release_invitation_identity(session, invitation_id=invitation.id)
+                await session.commit()
+                return "completed_first"
+
+        async def close_owner_relations():
+            async with self.session_factory() as session:
+                owner_row = await session.get(User, owner.id)
+                with patch(
+                    "core.services.user_deletion_service._delete_user_account_in_transaction",
+                    new=AsyncMock(),
+                ):
+                    await _close_owned_customer_relations(
+                        session,
+                        owner_row,
+                        processed_user_ids=set(),
+                        effects=[],
+                    )
+                    await session.commit()
+                return "closed"
+
+        await asyncio.wait_for(
+            asyncio.gather(complete_relation(), close_owner_relations()),
+            timeout=5,
+        )
+        async with self.session_factory() as session:
+            invitation = await session.get(Invitation, invitation_id)
+            relation = await session.get(CustomerRelation, relation_id)
+            if invitation.completed_at is not None:
+                self.assertNotEqual(str(getattr(relation.status, "value", relation.status)), "revoked")
+            else:
+                self.assertIsNotNone(invitation.revoked_at)
+                self.assertEqual(str(getattr(relation.status, "value", relation.status)), "revoked")
+
+    async def test_sms_delivery_and_requester_identity_are_durable_on_postgres(self):
+        owner = await self._owner("sms_principal")
+        async with self.session_factory() as session:
+            owner_row = await session.get(User, owner.id)
+            owner_row.telegram_id = 8_900_000_000 + owner.id
+            await session.commit()
+            identity = InvitationRequesterIdentity(
+                account_name=owner_row.account_name,
+                mobile_number=owner_row.mobile_number,
+                telegram_id=owner_row.telegram_id,
+            )
+
+        async with self.session_factory() as session:
+            resolved = await resolve_current_invitation_requester(session, identity=identity)
+            self.assertEqual(resolved.id, owner.id)
+            await session.rollback()
+
+        account, mobile = self._identity("sms")
+        _, invitation_id, _ = await self._create_standard(owner.id, account, mobile)
+        async with self.session_factory() as session:
+            invitation = await session.get(Invitation, invitation_id)
+            await prepare_invitation_sms_delivery(
+                session,
+                invitation=invitation,
+                enabled=True,
+                newly_created=True,
+            )
+            await session.commit()
+            sender = Mock(return_value=True)
+            status = await deliver_invitation_sms_once(
+                session,
+                invitation_id=invitation_id,
+                newly_created=True,
+                sender=sender,
+            )
+            self.assertEqual(status, InvitationSMSStatus.ACCEPTED)
+            replay_sender = Mock()
+            replay = await deliver_invitation_sms_once(
+                session,
+                invitation_id=invitation_id,
+                newly_created=False,
+                sender=replay_sender,
+            )
+            self.assertEqual(replay, InvitationSMSStatus.ACCEPTED)
+            replay_sender.assert_not_called()
+            delivery = (
+                await session.execute(
+                    select(InvitationSMSDelivery).where(
+                        InvitationSMSDelivery.invitation_id == invitation_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(delivery.attempt_count, 1)
 
 
 if __name__ == "__main__":

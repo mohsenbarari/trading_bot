@@ -77,6 +77,20 @@ class FakeDB:
 
 
 class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        authority = patch(
+            "core.services.accountant_relation_service.current_server",
+            return_value="iran",
+        )
+        authority.start()
+        self.addCleanup(authority.stop)
+        sms_delivery = patch(
+            "core.services.accountant_relation_service.prepare_invitation_sms_delivery",
+            new=AsyncMock(),
+        )
+        sms_delivery.start()
+        self.addCleanup(sms_delivery.stop)
+
     def test_accountant_relation_status_column_uses_database_values(self):
         self.assertEqual(
             AccountantRelation.__table__.c.status.type.enums,

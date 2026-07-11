@@ -180,7 +180,10 @@ class CoreSmsTests(unittest.TestCase):
     def test_send_invitation_sms_uses_template_parameters(self):
         with patch.object(sms.settings, "smsir_invitation_template_id", "657938"), patch.object(
             sms.settings, "smsir_invitation_template_parameter", "NAME"
-        ), patch("core.sms._send_template_sms", return_value=True) as template_mock:
+        ), patch(
+            "core.sms._send_template_sms_result",
+            return_value=sms.SMSDeliveryOutcome.ACCEPTED,
+        ) as template_mock:
             self.assertTrue(
                 sms.send_invitation_sms(
                     "09120000000",
@@ -199,7 +202,10 @@ class CoreSmsTests(unittest.TestCase):
     def test_send_accountant_invitation_sms_uses_template_parameters(self):
         with patch.object(sms.settings, "smsir_accountant_invitation_template_id", "162103"), patch.object(
             sms.settings, "smsir_invitation_template_parameter", "NAME"
-        ), patch("core.sms._send_template_sms", return_value=True) as template_mock:
+        ), patch(
+            "core.sms._send_template_sms_result",
+            return_value=sms.SMSDeliveryOutcome.ACCEPTED,
+        ) as template_mock:
             self.assertTrue(
                 sms.send_accountant_invitation_sms(
                     "09120000000",
@@ -217,7 +223,10 @@ class CoreSmsTests(unittest.TestCase):
     def test_send_customer_invitation_sms_uses_template_parameters(self):
         with patch.object(sms.settings, "smsir_customer_invitation_template_id", "903643"), patch.object(
             sms.settings, "smsir_invitation_template_parameter", "NAME"
-        ), patch("core.sms._send_template_sms", return_value=True) as template_mock:
+        ), patch(
+            "core.sms._send_template_sms_result",
+            return_value=sms.SMSDeliveryOutcome.ACCEPTED,
+        ) as template_mock:
             self.assertTrue(
                 sms.send_customer_invitation_sms(
                     "09120000000",
@@ -231,6 +240,62 @@ class CoreSmsTests(unittest.TestCase):
             template_id=903643,
             parameters=[{"name": "NAME", "value": "customer alias"}],
         )
+
+    def test_invitation_result_distinguishes_provider_rejection_from_ambiguous_transport(self):
+        rejected = smsir_response(
+            payload={"status": 0, "message": "rejected", "data": None}
+        )
+        patches = self.configured_smsir()
+        with patches[0], patches[1], patches[2], patches[3], patch.object(
+            sms.settings, "smsir_invitation_template_id", "657938"
+        ), patch(
+            "core.sms.httpx.post", return_value=rejected
+        ):
+            self.assertEqual(
+                sms.send_invitation_sms_result(
+                    "09120000000",
+                    "demo",
+                    "https://t.me/demo",
+                    "https://app.example/register",
+                ),
+                sms.SMSDeliveryOutcome.FAILED,
+            )
+
+        patches = self.configured_smsir()
+        with patches[0], patches[1], patches[2], patches[3], patch.object(
+            sms.settings, "smsir_invitation_template_id", "657938"
+        ), patch(
+            "core.sms.httpx.post", side_effect=httpx.ReadTimeout("timeout")
+        ):
+            self.assertEqual(
+                sms.send_invitation_sms_result(
+                    "09120000000",
+                    "demo",
+                    "https://t.me/demo",
+                    "https://app.example/register",
+                ),
+                sms.SMSDeliveryOutcome.AMBIGUOUS,
+            )
+
+    def test_invitation_result_treats_success_without_message_id_as_ambiguous(self):
+        response = smsir_response(
+            payload={"status": 1, "message": "ok", "data": {}}
+        )
+        patches = self.configured_smsir()
+        with patches[0], patches[1], patches[2], patches[3], patch.object(
+            sms.settings, "smsir_invitation_template_id", "657938"
+        ), patch(
+            "core.sms.httpx.post", return_value=response
+        ):
+            self.assertEqual(
+                sms.send_invitation_sms_result(
+                    "09120000000",
+                    "demo",
+                    "https://t.me/demo",
+                    "https://app.example/register",
+                ),
+                sms.SMSDeliveryOutcome.AMBIGUOUS,
+            )
 
 
 if __name__ == "__main__":

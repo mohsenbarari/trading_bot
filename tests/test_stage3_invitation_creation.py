@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from api.routers.invitations import create_invitation_internal_from_bot
 from core.invitation_creation_contracts import (
     InternalInvitationCreateRequest,
+    InvitationRequesterIdentity,
     build_standard_invitation_idempotency_key,
 )
 from core.invitation_creation_forwarding import forward_standard_invitation_to_iran
@@ -222,21 +223,30 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_internal_contract_and_idempotency_are_strict_and_canonical(self):
+        requester = InvitationRequesterIdentity(
+            account_name="Admin۷",
+            mobile_number="۰۹۱۲۰۰۰۰۰۰۰",
+            telegram_id=700,
+        )
         first = build_standard_invitation_idempotency_key(
-            requester_user_id=7,
+            requester_identity=requester,
             account_name=" User۱۲۳ ",
             mobile_number="۰۹۱۲۳۴۵۶۷۸۹",
             role=UserRole.STANDARD,
         )
         second = build_standard_invitation_idempotency_key(
-            requester_user_id=7,
+            requester_identity={
+                "account_name": "admin7",
+                "mobile_number": "09120000000",
+                "telegram_id": 700,
+            },
             account_name="user123",
             mobile_number="09123456789",
             role=UserRole.STANDARD.value,
         )
         self.assertEqual(first, second)
         payload = InternalInvitationCreateRequest(
-            requester_user_id=7,
+            requester_identity=requester,
             account_name="User۱۲۳",
             mobile_number="۰۹۱۲۳۴۵۶۷۸۹",
             role=UserRole.STANDARD,
@@ -285,14 +295,19 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_internal_endpoint_requires_signature_source_authority_and_exact_key(self):
+        requester = InvitationRequesterIdentity(
+            account_name="admin7",
+            mobile_number="09120000000",
+            telegram_id=700,
+        )
         key = build_standard_invitation_idempotency_key(
-            requester_user_id=7,
+            requester_identity=requester,
             account_name="user123",
             mobile_number="09123456789",
             role=UserRole.STANDARD,
         )
         payload = InternalInvitationCreateRequest(
-            requester_user_id=7,
+            requester_identity=requester,
             account_name="user123",
             mobile_number="09123456789",
             role=UserRole.STANDARD,
@@ -310,6 +325,9 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.invitations.verify_internal_signature",
             return_value=True,
         ), patch(
+            "api.routers.invitations.resolve_current_invitation_requester",
+            new=AsyncMock(return_value=admin),
+        ), patch(
             "api.routers.invitations._create_standard_invitation",
             new=AsyncMock(return_value=expected),
         ) as create_mock:
@@ -319,7 +337,11 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_forwarder_reuses_existing_signed_transport_and_rejects_wrong_server(self):
         payload = {
-            "requester_user_id": 7,
+            "requester_identity": {
+                "account_name": "admin7",
+                "mobile_number": "09120000000",
+                "telegram_id": 700,
+            },
             "account_name": "user123",
             "mobile_number": "09123456789",
             "role": UserRole.STANDARD.value,

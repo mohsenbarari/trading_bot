@@ -158,6 +158,68 @@ async def _soft_revoke_pending_invitations_for_user_identity(
             await release_invitation_identity(db, invitation_id=invitation.id)
 
 
+async def _lock_accountant_relation_transition(
+    db: AsyncSession,
+    *,
+    relation_id: int,
+    invitation_token: str,
+) -> tuple[Invitation | None, AccountantRelation | None]:
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_token=invitation_token,
+    )
+    relation = (
+        await db.execute(
+            select(AccountantRelation)
+            .options(joinedload(AccountantRelation.accountant_user))
+            .where(AccountantRelation.id == relation_id)
+            .with_for_update(of=AccountantRelation)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if relation is not None and relation.invitation_token != invitation_token:
+        raise RuntimeError("accountant_relation_invitation_changed_during_transition_lock")
+    return invitation, relation
+
+
+async def _lock_customer_relation_transition(
+    db: AsyncSession,
+    *,
+    relation_id: int,
+    invitation_token: str,
+) -> tuple[Invitation | None, CustomerRelation | None]:
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_token=invitation_token,
+    )
+    relation = (
+        await db.execute(
+            select(CustomerRelation)
+            .options(joinedload(CustomerRelation.customer_user))
+            .where(CustomerRelation.id == relation_id)
+            .with_for_update(of=CustomerRelation)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if relation is not None and relation.invitation_token != invitation_token:
+        raise RuntimeError("customer_relation_invitation_changed_during_transition_lock")
+    return invitation, relation
+
+
+async def _revoke_pending_relation_invitation(
+    db: AsyncSession,
+    *,
+    invitation: Invitation | None,
+    now,
+) -> None:
+    if invitation is None:
+        raise RuntimeError("pending_relation_invitation_missing")
+    if derive_invitation_state(invitation, now=now) != InvitationDerivedState.PENDING:
+        raise RuntimeError("pending_relation_invitation_transition_conflict")
+    soft_revoke_invitation(invitation, revoked_at=now)
+    await release_invitation_identity(db, invitation_id=invitation.id)
+
+
 async def _close_owned_accountant_relations(
     db: AsyncSession,
     user: User,
@@ -173,9 +235,17 @@ async def _close_owned_accountant_relations(
             AccountantRelation.owner_user_id == user.id,
             AccountantRelation.deleted_at.is_(None),
         )
+        .order_by(AccountantRelation.id.asc())
     )
-    relations = list((await db.execute(stmt)).scalars().all())
-    for relation in relations:
+    candidates = _scalars_all(await db.execute(stmt))
+    for candidate in candidates:
+        invitation, relation = await _lock_accountant_relation_transition(
+            db,
+            relation_id=candidate.id,
+            invitation_token=candidate.invitation_token,
+        )
+        if relation is None or relation.deleted_at is not None:
+            continue
         if (
             relation.status == AccountantRelationStatus.ACTIVE
             and relation.accountant_user is not None
@@ -189,8 +259,12 @@ async def _close_owned_accountant_relations(
             )
 
         if relation.status == AccountantRelationStatus.PENDING:
+            await _revoke_pending_relation_invitation(
+                db,
+                invitation=invitation,
+                now=now,
+            )
             relation.status = AccountantRelationStatus.REVOKED
-            await _invalidate_accountant_invitation(db, relation.invitation_token, now)
         elif relation.status == AccountantRelationStatus.ACTIVE:
             relation.status = AccountantRelationStatus.DELETED
 
@@ -204,15 +278,30 @@ async def _close_owned_accountant_relations(
 
 async def _close_linked_accountant_relations(db: AsyncSession, user: User) -> None:
     now = _utcnow_naive()
-    stmt = select(AccountantRelation).where(
-        AccountantRelation.accountant_user_id == user.id,
-        AccountantRelation.deleted_at.is_(None),
+    stmt = (
+        select(AccountantRelation)
+        .where(
+            AccountantRelation.accountant_user_id == user.id,
+            AccountantRelation.deleted_at.is_(None),
+        )
+        .order_by(AccountantRelation.id.asc())
     )
-    relations = list((await db.execute(stmt)).scalars().all())
-    for relation in relations:
+    candidates = _scalars_all(await db.execute(stmt))
+    for candidate in candidates:
+        invitation, relation = await _lock_accountant_relation_transition(
+            db,
+            relation_id=candidate.id,
+            invitation_token=candidate.invitation_token,
+        )
+        if relation is None or relation.deleted_at is not None:
+            continue
         if relation.status == AccountantRelationStatus.PENDING:
+            await _revoke_pending_relation_invitation(
+                db,
+                invitation=invitation,
+                now=now,
+            )
             relation.status = AccountantRelationStatus.REVOKED
-            await _invalidate_accountant_invitation(db, relation.invitation_token, now)
         elif relation.status == AccountantRelationStatus.ACTIVE:
             relation.status = AccountantRelationStatus.DELETED
         relation.deleted_at = relation.deleted_at or now
@@ -233,9 +322,17 @@ async def _close_owned_customer_relations(
             CustomerRelation.owner_user_id == user.id,
             CustomerRelation.deleted_at.is_(None),
         )
+        .order_by(CustomerRelation.id.asc())
     )
-    relations = list((await db.execute(stmt)).scalars().all())
-    for relation in relations:
+    candidates = _scalars_all(await db.execute(stmt))
+    for candidate in candidates:
+        invitation, relation = await _lock_customer_relation_transition(
+            db,
+            relation_id=candidate.id,
+            invitation_token=candidate.invitation_token,
+        )
+        if relation is None or relation.deleted_at is not None:
+            continue
         if (
             relation.status == CustomerRelationStatus.ACTIVE
             and relation.customer_user is not None
@@ -249,8 +346,12 @@ async def _close_owned_customer_relations(
             )
 
         if relation.status == CustomerRelationStatus.PENDING:
+            await _revoke_pending_relation_invitation(
+                db,
+                invitation=invitation,
+                now=now,
+            )
             relation.status = CustomerRelationStatus.REVOKED
-            await _invalidate_customer_invitation(db, relation.invitation_token, now)
         elif relation.status == CustomerRelationStatus.ACTIVE:
             relation.status = CustomerRelationStatus.DELETED
 
@@ -264,15 +365,30 @@ async def _close_owned_customer_relations(
 
 async def _close_linked_customer_relations(db: AsyncSession, user: User) -> None:
     now = _utcnow_naive()
-    stmt = select(CustomerRelation).where(
-        CustomerRelation.customer_user_id == user.id,
-        CustomerRelation.deleted_at.is_(None),
+    stmt = (
+        select(CustomerRelation)
+        .where(
+            CustomerRelation.customer_user_id == user.id,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .order_by(CustomerRelation.id.asc())
     )
-    relations = list((await db.execute(stmt)).scalars().all())
-    for relation in relations:
+    candidates = _scalars_all(await db.execute(stmt))
+    for candidate in candidates:
+        invitation, relation = await _lock_customer_relation_transition(
+            db,
+            relation_id=candidate.id,
+            invitation_token=candidate.invitation_token,
+        )
+        if relation is None or relation.deleted_at is not None:
+            continue
         if relation.status == CustomerRelationStatus.PENDING:
+            await _revoke_pending_relation_invitation(
+                db,
+                invitation=invitation,
+                now=now,
+            )
             relation.status = CustomerRelationStatus.REVOKED
-            await _invalidate_customer_invitation(db, relation.invitation_token, now)
         elif relation.status == CustomerRelationStatus.ACTIVE:
             relation.status = CustomerRelationStatus.DELETED
         relation.deleted_at = relation.deleted_at or now

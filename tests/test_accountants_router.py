@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 import schemas
+from core.registration_contracts import InvitationSMSStatus
 from api.routers.accountants import (
     cancel_my_pending_accountant,
     create_my_accountant,
@@ -89,10 +90,17 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.accountants.create_or_reuse_owner_accountant_relation",
-            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(), created=True)),
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(id=99), created=True)),
         ) as create_mock, patch(
-            "api.routers.accountants.send_accountant_invitation_sms"
+            "api.routers.accountants.send_accountant_invitation_sms_result"
         ) as sms_mock, patch(
+            "api.routers.accountants.deliver_invitation_sms_once",
+            new=AsyncMock(side_effect=lambda *args, **kwargs: (
+                InvitationSMSStatus.ACCEPTED
+                if kwargs["sender"]()
+                else InvitationSMSStatus.AMBIGUOUS
+            )),
+        ), patch(
             "api.routers.accountants.public_webapp_url_for_links",
             return_value="https://app.example",
         ):
@@ -140,9 +148,9 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.accountants.create_or_reuse_owner_accountant_relation",
-            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(), created=True)),
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(id=100), created=True)),
         ) as create_mock, patch(
-            "api.routers.accountants.send_accountant_invitation_sms"
+            "api.routers.accountants.send_accountant_invitation_sms_result"
         ) as sms_mock, patch(
             "api.routers.accountants.public_webapp_url_for_links",
             side_effect=ValueError("invalid public WebApp URL"),

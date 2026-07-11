@@ -22,6 +22,7 @@ from api.routers.customers import (
     update_my_customer,
 )
 from core.customer_invite import build_customer_invite_idempotency_key
+from core.registration_contracts import InvitationSMSStatus
 from core.server_routing import SERVER_FOREIGN
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.invitation import InvitationKind
@@ -169,8 +170,15 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.customers.create_or_reuse_owner_customer_relation",
             new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=invitation, created=True)),
         ) as create_mock, patch(
-            "api.routers.customers.send_customer_invitation_sms"
+            "api.routers.customers.send_customer_invitation_sms_result"
         ) as sms_mock, patch(
+            "api.routers.customers.deliver_invitation_sms_once",
+            new=AsyncMock(side_effect=lambda *args, **kwargs: (
+                InvitationSMSStatus.ACCEPTED
+                if kwargs["sender"]()
+                else InvitationSMSStatus.AMBIGUOUS
+            )),
+        ), patch(
             "api.routers.customers.public_webapp_url_for_links",
             return_value="https://app.example",
         ), patch(
@@ -205,7 +213,11 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_internal_bot_customer_invite_rejects_bad_signature(self):
         payload = schemas.InternalCustomerInviteRequest(
-            owner_user_id=7,
+            owner_identity={
+                "account_name": "owner7",
+                "mobile_number": "09120000007",
+                "telegram_id": 700,
+            },
             account_name="customer_09123456789",
             management_name="مشتری",
             mobile_number="09123456789",
@@ -228,11 +240,19 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         idempotency_key = build_customer_invite_idempotency_key(
             source_server=SERVER_FOREIGN,
-            owner_user_id=7,
+            owner_identity={
+                "account_name": "owner7",
+                "mobile_number": "09120000007",
+                "telegram_id": 700,
+            },
             mobile_number="09123456789",
         )
         payload = schemas.InternalCustomerInviteRequest(
-            owner_user_id=7,
+            owner_identity={
+                "account_name": "owner7",
+                "mobile_number": "09120000007",
+                "telegram_id": 700,
+            },
             account_name="customer_09123456789",
             management_name="مشتری",
             mobile_number="09123456789",
@@ -269,6 +289,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)), patch(
             "api.routers.customers.is_user_accountant", new=AsyncMock(return_value=False)
         ), patch(
+            "api.routers.customers.resolve_current_invitation_requester",
+            new=AsyncMock(return_value=owner),
+        ), patch(
             "api.routers.customers.sweep_expired_pending_customer_relations", new=AsyncMock(return_value=[])
         ), patch(
             "api.routers.customers.create_or_reuse_owner_customer_relation",
@@ -277,7 +300,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.customers.public_webapp_url_for_links", return_value="https://app.example"
         ), patch(
             "core.invitation_contract_service.public_webapp_url_for_links", return_value="https://app.example"
-        ), patch("api.routers.customers.send_customer_invitation_sms") as sms_mock:
+        ), patch(
+            "api.routers.customers.deliver_invitation_sms_once",
+            new=AsyncMock(return_value=InvitationSMSStatus.DISABLED),
+        ), patch("api.routers.customers.send_customer_invitation_sms_result") as sms_mock:
             result = await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(owner))
 
         self.assertFalse(result.created)
@@ -294,11 +320,19 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         idempotency_key = build_customer_invite_idempotency_key(
             source_server=SERVER_FOREIGN,
-            owner_user_id=7,
+            owner_identity={
+                "account_name": "owner7",
+                "mobile_number": "09120000007",
+                "telegram_id": 700,
+            },
             mobile_number="09123456789",
         )
         payload = schemas.InternalCustomerInviteRequest(
-            owner_user_id=7,
+            owner_identity={
+                "account_name": "owner7",
+                "mobile_number": "09120000007",
+                "telegram_id": 700,
+            },
             account_name="customer_09123456789",
             management_name="مشتری",
             mobile_number="09123456789",
@@ -335,16 +369,22 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)), patch(
             "api.routers.customers.is_user_accountant", new=AsyncMock(return_value=False)
         ), patch(
+            "api.routers.customers.resolve_current_invitation_requester",
+            new=AsyncMock(return_value=owner),
+        ), patch(
             "api.routers.customers.sweep_expired_pending_customer_relations", new=AsyncMock(return_value=[])
         ), patch(
             "api.routers.customers.create_or_reuse_owner_customer_relation",
             new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=invitation, created=True)),
         ) as create_mock, patch(
-            "api.routers.customers.send_customer_invitation_sms", return_value=True
+            "api.routers.customers.send_customer_invitation_sms_result", return_value=True
         ) as sms_mock, patch(
             "api.routers.customers.public_webapp_url_for_links", return_value="https://app.example"
         ), patch(
             "core.invitation_contract_service.public_webapp_url_for_links", return_value="https://app.example"
+        ), patch(
+            "api.routers.customers.deliver_invitation_sms_once",
+            new=AsyncMock(return_value=InvitationSMSStatus.DISABLED),
         ):
             result = await create_owner_customer_internal_from_bot(payload, FakeRequest(), db=InternalInviteDB(owner))
 

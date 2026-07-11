@@ -439,6 +439,35 @@ def _create_identity_reservations() -> None:
 
 def _create_registration_local_state() -> None:
     op.create_table(
+        "invitation_sms_deliveries",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("invitation_id", sa.Integer(), nullable=False),
+        sa.Column("status", sa.String(length=16), nullable=False),
+        sa.Column("attempt_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.CheckConstraint(
+            "status IN ('disabled', 'pending', 'accepted', 'failed', 'ambiguous')",
+            name="ck_invitation_sms_deliveries_known_status",
+        ),
+        sa.CheckConstraint(
+            "attempt_count >= 0 AND attempt_count <= 1",
+            name="ck_invitation_sms_deliveries_attempt_count",
+        ),
+        sa.ForeignKeyConstraint(["invitation_id"], ["invitations.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("invitation_id", name="ux_invitation_sms_deliveries_invitation_id"),
+    )
+    op.create_index(
+        op.f("ix_invitation_sms_deliveries_id"),
+        "invitation_sms_deliveries",
+        ["id"],
+        unique=False,
+    )
+
+    op.create_table(
         "telegram_registration_intents",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("idempotency_key", sa.String(length=192), nullable=False),
@@ -609,6 +638,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index(
+        op.f("ix_invitation_sms_deliveries_id"),
+        table_name="invitation_sms_deliveries",
+    )
+    op.drop_table("invitation_sms_deliveries")
+
     op.drop_index(
         "ux_user_counter_event_receipts_user_reset_epoch",
         table_name="user_counter_event_receipts",

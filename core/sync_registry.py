@@ -315,6 +315,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "idempotency key and terminal local state; no cross-server merge",
         "durable Telegram proof/retry evidence only",
     ),
+    "invitation_sms_deliveries": _entry(
+        "invitation_sms_deliveries",
+        SyncPolicy.NO_SYNC,
+        ("iran_invitation_service",),
+        "Iran-local Invitation SMS claim/result authority",
+        "one durable status per Invitation; no cross-server merge",
+        "replay-stable admin response and duplicate-send prevention",
+    ),
     "telegram_admin_broadcasts": _entry(
         "telegram_admin_broadcasts",
         SyncPolicy.SYNC,

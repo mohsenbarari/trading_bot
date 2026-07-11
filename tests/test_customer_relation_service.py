@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -89,6 +89,20 @@ class FakeDB:
 
 
 class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        authority = patch(
+            "core.services.customer_relation_service.current_server",
+            return_value="iran",
+        )
+        authority.start()
+        self.addCleanup(authority.stop)
+        sms_delivery = patch(
+            "core.services.customer_relation_service.prepare_invitation_sms_delivery",
+            new=AsyncMock(),
+        )
+        sms_delivery.start()
+        self.addCleanup(sms_delivery.stop)
+
     def test_customer_relation_status_and_tier_columns_use_database_values(self):
         self.assertEqual(
             CustomerRelation.__table__.c.status.type.enums,

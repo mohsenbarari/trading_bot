@@ -8,7 +8,10 @@ from typing import Optional
 import re
 from models.user import User
 from core.enums import UserRole
-from core.invitation_creation_contracts import build_standard_invitation_idempotency_key
+from core.invitation_creation_contracts import (
+    InvitationRequesterIdentity,
+    build_standard_invitation_idempotency_key,
+)
 from core.invitation_creation_forwarding import forward_standard_invitation_to_iran
 from core.server_routing import SERVER_FOREIGN
 from core.utils import normalize_account_name, normalize_persian_numerals
@@ -230,14 +233,19 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
         await _return_to_admin_panel(callback, state, bot, user.role)
         return
 
+    requester_identity = InvitationRequesterIdentity(
+        account_name=user.account_name,
+        mobile_number=user.mobile_number,
+        telegram_id=user.telegram_id,
+    )
     payload = {
-        "requester_user_id": user.id,
+        "requester_identity": requester_identity.model_dump(mode="json"),
         "account_name": account_name,
         "mobile_number": mobile_number,
         "role": role.value,
         "source_server": SERVER_FOREIGN,
         "idempotency_key": build_standard_invitation_idempotency_key(
-            requester_user_id=user.id,
+            requester_identity=requester_identity,
             account_name=account_name,
             mobile_number=mobile_number,
             role=role,

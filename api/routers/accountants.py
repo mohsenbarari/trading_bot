@@ -18,12 +18,10 @@ from core.services.accountant_relation_service import (
     unlink_owner_accountant_relation,
     update_owner_accountant_relation,
 )
-from core.invitation_sms_policy import invitation_sms_enabled, invitation_sms_status
-from core.registration_contracts import InvitationSMSStatus
-from models.invitation import InvitationKind
+from core.services.invitation_sms_delivery_service import deliver_invitation_sms_once
 from core.services.customer_relation_service import is_user_customer
 from core.services.session_service import get_active_sessions, logout_session
-from core.sms import send_accountant_invitation_sms
+from core.sms import send_accountant_invitation_sms_result
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.session import UserSession
 from models.user import User
@@ -161,22 +159,19 @@ async def create_my_accountant(
         duty_description=payload.duty_description,
     )
     relation = creation.relation
+    invitation = creation.invitation
 
     registration_link = build_accountant_registration_link(relation.invitation_token)
-    sms_enabled = bool(
-        creation.created
-        and registration_link
-        and invitation_sms_enabled(InvitationKind.ACCOUNTANT)
-    )
-    sms_accepted: bool | None = None
-    if (
-        sms_enabled
-    ):
-        sms_accepted = bool(send_accountant_invitation_sms(
+    sms_status = await deliver_invitation_sms_once(
+        db,
+        invitation_id=invitation.id,
+        newly_created=creation.created,
+        sender=lambda: send_accountant_invitation_sms_result(
             mobile=relation.mobile_number,
             relation_display_name=relation.relation_display_name,
-            web_link=registration_link,
-        ))
+            web_link=registration_link or "",
+        ),
+    )
 
     audit_log(
         "accountant.link",
@@ -191,10 +186,7 @@ async def create_my_accountant(
     )
 
     response = serialize_accountant_relation(relation)
-    response["sms_status"] = invitation_sms_status(
-        enabled=sms_enabled,
-        accepted=sms_accepted,
-    )
+    response["sms_status"] = sms_status
     return response
 
 

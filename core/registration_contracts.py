@@ -68,8 +68,10 @@ class InvitationDerivedState(str, Enum):
 
 class InvitationSMSStatus(str, Enum):
     DISABLED = "disabled"
+    PENDING = "pending"
     ACCEPTED = "accepted"
     FAILED = "failed"
+    AMBIGUOUS = "ambiguous"
 
 
 class OTPRequestStatus(str, Enum):

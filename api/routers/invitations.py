@@ -19,14 +19,14 @@ from models.invitation import Invitation, InvitationKind
 from models.user import User, UserRole
 from core.config import settings
 from api.deps import verify_admin_user
-from core.sms import send_invitation_sms
+from core.sms import send_invitation_sms_result
 from core.invitation_contract_service import build_invitation_contract_v2
 from core.public_webapp_url import public_webapp_url_for_links
 from core.invitation_creation_contracts import (
     InternalInvitationCreateRequest,
     build_standard_invitation_idempotency_key,
 )
-from core.invitation_sms_policy import invitation_sms_enabled, invitation_sms_status
+from core.invitation_sms_policy import invitation_sms_enabled
 from core.registration_contracts import InvitationDerivedState, InvitationSMSStatus
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
 from core.services.canonical_invitation_creation_service import (
@@ -34,6 +34,14 @@ from core.services.canonical_invitation_creation_service import (
     create_or_reuse_canonical_invitation,
     generate_invitation_short_code,
     generate_invitation_token,
+)
+from core.services.invitation_requester_service import (
+    InvitationRequesterResolutionError,
+    resolve_current_invitation_requester,
+)
+from core.services.invitation_sms_delivery_service import (
+    deliver_invitation_sms_once,
+    prepare_invitation_sms_delivery,
 )
 from core.trade_forwarding import verify_internal_signature
 from core.services.invitation_identity_reservation_service import release_invitation_identity
@@ -160,34 +168,38 @@ async def _create_standard_invitation(
         await db.rollback()
         raise _creation_error_http_exception(exc) from exc
 
+    sms_enabled = invitation_sms_enabled(InvitationKind.STANDARD)
+    await prepare_invitation_sms_delivery(
+        db,
+        invitation=creation.invitation,
+        enabled=sms_enabled,
+        newly_created=creation.created,
+    )
     await db.commit()
     if creation.created:
         await db.refresh(creation.invitation)
 
-    sms_enabled = invitation_sms_enabled(InvitationKind.STANDARD)
-    sms_accepted: bool | None = None
-    if creation.created and sms_enabled:
-        pre_send_contract = build_invitation_contract_v2(
-            creation.invitation,
-            bot_username=settings.bot_username,
-            sms_status=InvitationSMSStatus.DISABLED,
-        )
-        sms_accepted = bool(
-            send_invitation_sms(
+    pre_send_contract = build_invitation_contract_v2(
+        creation.invitation,
+        bot_username=settings.bot_username,
+        sms_status=InvitationSMSStatus.PENDING,
+    )
+    sms_status = await deliver_invitation_sms_once(
+        db,
+        invitation_id=creation.invitation.id,
+        newly_created=creation.created,
+        sender=lambda: send_invitation_sms_result(
                 mobile=creation.invitation.mobile_number,
                 account_name=creation.invitation.account_name,
                 bot_link=pre_send_contract.bot_link or "",
                 web_link=pre_send_contract.web_link,
-            )
-        )
+            ),
+    )
 
     contract = build_invitation_contract_v2(
         creation.invitation,
         bot_username=settings.bot_username,
-        sms_status=invitation_sms_status(
-            enabled=bool(creation.created and sms_enabled),
-            accepted=sms_accepted,
-        ),
+        sms_status=sms_status,
     )
     return {**contract.model_dump(), "created": creation.created}
 
@@ -303,7 +315,7 @@ async def create_invitation_internal_from_bot(
     if payload.source_server != SERVER_FOREIGN or header_source != SERVER_FOREIGN:
         raise HTTPException(status_code=401, detail="Invalid internal invitation source")
     expected_key = build_standard_invitation_idempotency_key(
-        requester_user_id=payload.requester_user_id,
+        requester_identity=payload.requester_identity,
         account_name=payload.account_name,
         mobile_number=payload.mobile_number,
         role=payload.role,
@@ -311,9 +323,15 @@ async def create_invitation_internal_from_bot(
     if payload.idempotency_key != expected_key:
         raise HTTPException(status_code=400, detail="کلید تکرار دعوت‌نامه نامعتبر است")
 
-    admin = await db.get(User, payload.requester_user_id)
-    if not admin or getattr(admin, "is_deleted", False):
-        raise HTTPException(status_code=404, detail="مدیر دعوت‌کننده یافت نشد")
+    try:
+        admin = await resolve_current_invitation_requester(
+            db,
+            identity=payload.requester_identity,
+        )
+    except InvitationRequesterResolutionError as exc:
+        if exc.code == "requester_missing":
+            raise HTTPException(status_code=404, detail="مدیر دعوت‌کننده یافت نشد") from exc
+        raise HTTPException(status_code=403, detail="هویت یا وضعیت مدیر دعوت‌کننده معتبر نیست") from exc
     if getattr(admin, "role", None) not in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         raise HTTPException(status_code=403, detail="کاربر اجازه ساخت دعوت‌نامه ندارد")
     return await _create_standard_invitation(

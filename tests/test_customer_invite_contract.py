@@ -12,6 +12,13 @@ from core.customer_invite import (
 from models.customer_relation import CustomerTier
 
 
+OWNER_IDENTITY = {
+    "account_name": "owner7",
+    "mobile_number": "09120000007",
+    "telegram_id": 700,
+}
+
+
 class CustomerInviteContractTests(unittest.IsolatedAsyncioTestCase):
     def test_normalizes_mobile_account_name_and_idempotency_without_management_name(self):
         self.assertEqual(normalize_customer_invite_mobile("۰۹۱۲۳۴۵۶۷۸۹"), "09123456789")
@@ -20,13 +27,13 @@ class CustomerInviteContractTests(unittest.IsolatedAsyncioTestCase):
 
         first_key = build_customer_invite_idempotency_key(
             source_server="foreign",
-            owner_user_id=7,
+            owner_identity=OWNER_IDENTITY,
             mobile_number="09123456789",
             customer_tier=CustomerTier.TIER_1,
         )
         second_key = build_customer_invite_idempotency_key(
             source_server="foreign",
-            owner_user_id=7,
+            owner_identity=OWNER_IDENTITY,
             mobile_number="۰۹۱۲۳۴۵۶۷۸۹",
             customer_tier="tier1",
         )

@@ -7,6 +7,7 @@ from .accountant_relation import AccountantRelation, AccountantRelationStatus
 from .customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from .invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from .invitation_identity_reservation import InvitationIdentityReservation
+from .invitation_sms_delivery import InvitationSMSDelivery
 from .telegram_registration_intent import TelegramRegistrationIntent, TelegramRegistrationIntentStatus
 from .telegram_registration_command_receipt import TelegramRegistrationCommandReceipt
 from .user_counter_event_receipt import UserCounterEventReceipt
@@ -90,6 +91,7 @@ __all__ = [
     "InvitationCompletionSurface",
     "InvitationKind",
     "InvitationIdentityReservation",
+    "InvitationSMSDelivery",
     "TelegramRegistrationIntent",
     "TelegramRegistrationIntentStatus",
     "TelegramRegistrationCommandReceipt",

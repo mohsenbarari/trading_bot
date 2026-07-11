@@ -13,6 +13,7 @@ import redis.asyncio as redis
 from redis.asyncio import Redis
 
 from core.config import settings
+from core.invitation_creation_contracts import InvitationRequesterIdentity
 from core.log_redaction import mask_mobile
 from core.redis import get_redis_client, pool
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
@@ -76,13 +77,23 @@ def normalize_customer_invite_tier(value: CustomerTier | str | None = None) -> C
 def build_customer_invite_idempotency_key(
     *,
     source_server: str,
-    owner_user_id: int,
+    owner_identity: InvitationRequesterIdentity | dict,
     mobile_number: object,
     customer_tier: CustomerTier | str | None = None,
 ) -> str:
+    principal = InvitationRequesterIdentity.model_validate(owner_identity)
     normalized_mobile = normalize_customer_invite_mobile(mobile_number)
     tier = normalize_customer_invite_tier(customer_tier)
-    material = f"{source_server}:{owner_user_id}:{normalized_mobile}:{tier.value}"
+    material = ":".join(
+        (
+            source_server,
+            principal.account_name,
+            principal.mobile_number,
+            str(principal.telegram_id),
+            normalized_mobile,
+            tier.value,
+        )
+    )
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"customer-invite:{digest[:40]}"
 

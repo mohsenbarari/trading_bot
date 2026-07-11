@@ -1433,6 +1433,24 @@ was performed. Evidence and review instructions are recorded in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE3_CANONICAL_INVITATION_CREATION_20260711.md`; a blocking
 independent finding reopens this stage before Stage 4.
 
+Independent review remediation record (2026-07-11): ChatGPT review
+`tmp/chatgpt/dual-platform-registration-stage3-independent-review-2.md` returned `NO-GO` with four
+High and three Medium findings. `H-1` through `H-4`, `M-1`, and `M-2` are remediated in source:
+signed cross-server commands now resolve one exact canonical Iran principal and re-check current
+status/role/policy; every create/terminal writer uses advisory-before-row ordering with locked fresh
+reloads; user deletion locks and revalidates Invitation then Relation before mutation; foreign
+Relation lookup is read-only and foreign-origin Invitation/Relation writes are rejected; SMS policy,
+claim, attempt, accepted/failed/ambiguous result, and exact replay are durable per Invitation; and
+both signed command schemas reject unknown fields. `M-3` was addressed by adding direct identity,
+authority, replay, provider-outcome, explicit-barrier, deletion/completion, and real PostgreSQL
+coverage. `L-1` remains a documented nonblocking HTTP convention, `L-2` remains a continuing static
+plus behavioral gate, and `L-3` remains out of scope under the accepted UTC standard. Focused
+remediation (`166`), full backend (`2812`, `38` opt-in skips), Stage 3 PostgreSQL (`9`), and Stage 4
+compatibility PostgreSQL (`7`) tests passed. The active database is still `f7c8d9e0a1b2`, the Stage 1
+table count and scratch database count are zero, and no migration, flag change, deploy, push, or
+runtime release occurred. Stage 3 and Stage 4 now require one combined independent review before
+Stage 5 source work.
+
 - Route bot-admin invitation creation to signed Iran authority.
 - Return canonical Telegram and Iran WebApp URLs.
 - Replace overloaded foreign `FRONTEND_URL` use with `PUBLIC_WEBAPP_URL` for user-facing links.
@@ -1493,6 +1511,12 @@ databases were removed. Future scratch runs must use an already-migrated scratch
 push, or production release occurred. Details and open gates are recorded in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE4_INTENT_RECONCILIATION_20260711.md`; a blocking Stage 3 or
 Stage 4 independent finding reopens the applicable stage before Stage 5.
+
+Dependency update (2026-07-11): the blocking Stage 3 review was accepted and its confirmed findings
+were remediated after this Stage 4 commit. Stage 4 compatibility was revalidated against the
+remediation with focused, full-backend, and seven-test real PostgreSQL evidence. This does not
+self-approve either stage; the combined review of the exact Stage 3 remediation plus Stage 4 range
+must return `GO` before Stage 5 begins.
 
 - Add foreign intent persistence and a server-guarded job to the existing background leader.
 - Add signed Iran reconciliation endpoint.

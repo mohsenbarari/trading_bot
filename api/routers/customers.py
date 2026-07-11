@@ -32,17 +32,21 @@ from core.services.customer_relation_service import (
     unlink_owner_customer_relation,
     update_owner_customer_relation,
 )
-from core.invitation_sms_policy import invitation_sms_enabled, invitation_sms_status
+from core.services.invitation_sms_delivery_service import deliver_invitation_sms_once
 from core.invitation_contract_service import build_invitation_contract_v2
 from core.registration_contracts import InvitationSMSStatus
 from models.invitation import InvitationKind
 from core.services.session_service import get_active_sessions, logout_session
-from core.sms import send_customer_invitation_sms
+from core.sms import send_customer_invitation_sms_result
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.trade import Trade, TradeStatus
 from models.session import UserSession
 from models.user import User
 from core.enums import UserAccountStatus
+from core.services.invitation_requester_service import (
+    InvitationRequesterResolutionError,
+    resolve_current_invitation_requester,
+)
 
 
 router = APIRouter()
@@ -390,23 +394,16 @@ async def create_my_customer(
     invitation = creation.invitation
 
     registration_link = build_customer_registration_link(relation.invitation_token)
-    sms_enabled = bool(
-        creation.created
-        and registration_link
-        and invitation_sms_enabled(
-            InvitationKind.CUSTOMER,
-            customer_tier=relation.customer_tier,
-        )
-    )
-    sms_accepted: bool | None = None
-    if (
-        sms_enabled
-    ):
-        sms_accepted = bool(send_customer_invitation_sms(
+    sms_status = await deliver_invitation_sms_once(
+        db,
+        invitation_id=invitation.id,
+        newly_created=creation.created,
+        sender=lambda: send_customer_invitation_sms_result(
             mobile=invitation.mobile_number,
             management_name=relation.management_name,
-            web_link=registration_link,
-        ))
+            web_link=registration_link or "",
+        ),
+    )
 
     audit_log(
         "customer.link",
@@ -422,10 +419,7 @@ async def create_my_customer(
     )
 
     response = serialize_customer_relation(relation, invitation=invitation)
-    response["sms_status"] = invitation_sms_status(
-        enabled=sms_enabled,
-        accepted=sms_accepted,
-    )
+    response["sms_status"] = sms_status
     return response
 
 
@@ -473,7 +467,7 @@ async def create_owner_customer_internal_from_bot(
         expected_account_name = build_customer_invite_account_name(normalized_mobile)
         expected_idempotency_key = build_customer_invite_idempotency_key(
             source_server=SERVER_FOREIGN,
-            owner_user_id=payload.owner_user_id,
+            owner_identity=payload.owner_identity,
             mobile_number=normalized_mobile,
             customer_tier=tier,
         )
@@ -485,13 +479,15 @@ async def create_owner_customer_internal_from_bot(
     if payload.idempotency_key != expected_idempotency_key:
         raise HTTPException(status_code=400, detail="کلید تکرار دعوت مشتری نامعتبر است")
 
-    owner_user = await db.get(User, payload.owner_user_id)
-    if not owner_user or getattr(owner_user, "is_deleted", False):
-        raise HTTPException(status_code=404, detail="سرگروه یافت نشد")
-    owner_status = getattr(owner_user, "account_status", UserAccountStatus.ACTIVE)
-    owner_status_value = getattr(owner_status, "value", owner_status)
-    if owner_status_value != UserAccountStatus.ACTIVE.value:
-        raise HTTPException(status_code=403, detail="حساب سرگروه فعال نیست")
+    try:
+        owner_user = await resolve_current_invitation_requester(
+            db,
+            identity=payload.owner_identity,
+        )
+    except InvitationRequesterResolutionError as exc:
+        if exc.code == "requester_missing":
+            raise HTTPException(status_code=404, detail="سرگروه یافت نشد") from exc
+        raise HTTPException(status_code=403, detail="هویت یا وضعیت سرگروه معتبر نیست") from exc
     if await is_user_customer(db, owner_user.id):
         raise HTTPException(status_code=403, detail="مشتریان اجازه دعوت مشتری ندارند")
     if await is_user_accountant(db, owner_user.id):
@@ -513,21 +509,17 @@ async def create_owner_customer_internal_from_bot(
     invitation = creation.invitation
 
     registration_link = build_customer_registration_link(relation.invitation_token)
-    sms_enabled = bool(
-        creation.created
-        and invitation_sms_enabled(
-            InvitationKind.CUSTOMER,
-            customer_tier=relation.customer_tier,
-        )
-    )
-    sms_sent = bool(
-        sms_enabled
-        and send_customer_invitation_sms(
+    sms_status = await deliver_invitation_sms_once(
+        db,
+        invitation_id=invitation.id,
+        newly_created=creation.created,
+        sender=lambda: send_customer_invitation_sms_result(
             mobile=invitation.mobile_number,
             management_name=relation.management_name,
             web_link=registration_link,
-        )
+        ),
     )
+    sms_sent = sms_status == InvitationSMSStatus.ACCEPTED
     contract = build_invitation_contract_v2(
         invitation,
         bot_username=getattr(settings, "bot_username", None),
@@ -562,7 +554,7 @@ async def create_owner_customer_internal_from_bot(
         web_link=contract.web_link,
         web_short_link=contract.web_short_link,
         expires_at=contract.expires_at,
-        sms_status=invitation_sms_status(enabled=sms_enabled, accepted=sms_sent),
+        sms_status=sms_status,
     )
 
 

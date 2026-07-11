@@ -183,6 +183,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(
             id=1,
             role=UserRole.STANDARD,
+            account_name="owner1",
+            mobile_number="09120000001",
+            telegram_id=1001,
             account_status=None,
             messenger_blocked_at=None,
             messenger_grace_expires_at=None,
@@ -210,6 +213,9 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(
             id=1,
             role=UserRole.STANDARD,
+            account_name="owner1",
+            mobile_number="09120000001",
+            telegram_id=1001,
             account_status=None,
             messenger_blocked_at=None,
             messenger_grace_expires_at=None,
@@ -240,6 +246,14 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         payload = forward_mock.await_args.args[0]
         self.assertEqual(payload["account_name"], "customer_09123456789")
         self.assertEqual(payload["customer_tier"], "tier1")
+        self.assertEqual(
+            payload["owner_identity"],
+            {
+                "account_name": "owner1",
+                "mobile_number": "09120000001",
+                "telegram_id": 1001,
+            },
+        )
         self.assertTrue(payload["idempotency_key"].startswith("customer-invite:"))
         self.assertTrue(state.cleared)
         result_message = callback.message.answer.await_args_list[0].args[0]

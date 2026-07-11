@@ -40,7 +40,7 @@ from core.services.invitation_identity_reservation_service import (
     release_invitation_identity,
 )
 from core.services.invitation_transition_lock_service import (
-    lock_invitation_row_for_transition,
+    lock_invitation_for_transition,
 )
 from core.services.invitation_lifecycle_service import (
     complete_invitation,
@@ -196,10 +196,16 @@ def _validate_request_shape(request: AuthoritativeRegistrationRequest) -> None:
         raise ValueError("telegram_command_required")
 
 
-async def _load_invitation_for_update(db: AsyncSession, token: str) -> Invitation | None:
-    return await lock_invitation_row_for_transition(
+async def _load_invitation_for_update(
+    db: AsyncSession,
+    token: str,
+    *,
+    telegram_id: int | None = None,
+) -> Invitation | None:
+    return await lock_invitation_for_transition(
         db,
         invitation_token=token,
+        telegram_id=telegram_id,
     )
 
 
@@ -731,7 +737,11 @@ async def _persist_integrity_conflict_receipt(
 
     outcome = conflict.outcome
     authoritative_user_id: int | None = None
-    invitation = await _load_invitation_for_update(db, request.invitation_token)
+    invitation = await _load_invitation_for_update(
+        db,
+        request.invitation_token,
+        telegram_id=command.telegram_id,
+    )
     if invitation is None:
         outcome = TelegramRegistrationOutcome.INVITATION_NOT_FOUND
     elif invitation.revoked_at is not None:
@@ -835,7 +845,12 @@ async def complete_invitation_registration(
                 return result
 
         await _checkpoint(checkpoint, "before_invitation_lock")
-        invitation = await _load_invitation_for_update(db, request.invitation_token)
+        command = request.telegram_command
+        invitation = await _load_invitation_for_update(
+            db,
+            request.invitation_token,
+            telegram_id=(command.telegram_id if command is not None else None),
+        )
         await _checkpoint(checkpoint, "after_invitation_lock")
         if invitation is None:
             raise _error(

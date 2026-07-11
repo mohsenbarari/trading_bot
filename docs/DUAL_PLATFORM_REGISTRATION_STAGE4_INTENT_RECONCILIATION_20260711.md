@@ -118,7 +118,9 @@ migration or rollout.
 
 ## Open Gates
 
-- The pending independent Stage 3 review can reopen Stage 3 assumptions used here.
+- The Stage 3 independent review returned `NO-GO`; all confirmed High/Medium findings were
+  remediated after the Stage 4 commit and Stage 4 PostgreSQL compatibility was rerun. The exact
+  remediation plus Stage 4 range still requires a combined independent `GO` before Stage 5.
 - Stage 4 itself requires independent review of the exact commit and evidence package.
 - The known Stage 2 post-Web-session-commit response-loss issue still blocks deployment of the
   migrated Web completion route; Stage 4 does not claim to fix Web session token recovery.

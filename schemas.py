@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
 from core.registration_contracts import InvitationSMSStatus
+from core.invitation_creation_contracts import InvitationRequesterIdentity
 from core.enums import UserRole, UserAccountStatus, NotificationLevel, NotificationCategory
 from models.accountant_relation import AccountantRelationStatus
 from models.customer_relation import CustomerRelationStatus, CustomerTier
@@ -413,7 +414,9 @@ class CustomerRelationRead(BaseModel):
 
 
 class InternalCustomerInviteRequest(BaseModel):
-    owner_user_id: int = Field(..., gt=0)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    owner_identity: InvitationRequesterIdentity
     account_name: str | None = None
     management_name: str = Field(..., min_length=1, max_length=120)
     mobile_number: str = Field(..., pattern=r"^09[0-9]{9}$")

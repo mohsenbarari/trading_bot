@@ -135,6 +135,7 @@ async def create_or_reuse_canonical_invitation(
             select(Invitation)
             .where(Invitation.id == reservation.invitation_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
         if invitation is None:

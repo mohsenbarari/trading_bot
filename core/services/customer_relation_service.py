@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMembershipStatus, ChatType
+from core.server_routing import SERVER_IRAN, current_server
 from core.services.canonical_invitation_creation_service import (
     CanonicalInvitationCreationError,
     create_or_reuse_canonical_invitation,
@@ -25,6 +26,8 @@ from core.services.invitation_identity_reservation_service import (
 )
 from core.services.invitation_lifecycle_service import soft_revoke_invitation
 from core.services.invitation_transition_lock_service import lock_invitation_for_transition
+from core.invitation_sms_policy import invitation_sms_enabled
+from core.services.invitation_sms_delivery_service import prepare_invitation_sms_delivery
 from core.utils import normalize_account_name, normalize_persian_numerals, utc_now
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.chat import Chat
@@ -165,6 +168,8 @@ async def sweep_expired_pending_customer_relations(
     owner_user_id: int | None = None,
     invitation_token: str | None = None,
 ) -> list[CustomerRelation]:
+    if current_server() != SERVER_IRAN:
+        raise RuntimeError("customer_relation_expiry_requires_iran")
     now = _utcnow_naive()
     stmt = (
         select(CustomerRelation)
@@ -273,9 +278,13 @@ async def get_pending_customer_relation_by_invitation_token(
     db: AsyncSession,
     invitation_token: str,
 ) -> CustomerRelation | None:
-    expired_relations = await sweep_expired_pending_customer_relations(db, invitation_token=invitation_token)
-    if expired_relations:
-        await db.commit()
+    if current_server() == SERVER_IRAN:
+        expired_relations = await sweep_expired_pending_customer_relations(
+            db,
+            invitation_token=invitation_token,
+        )
+        if expired_relations:
+            await db.commit()
 
     stmt = (
         select(CustomerRelation)
@@ -287,6 +296,8 @@ async def get_pending_customer_relation_by_invitation_token(
             CustomerRelation.invitation_token == invitation_token,
             CustomerRelation.status == CustomerRelationStatus.PENDING,
             CustomerRelation.deleted_at.is_(None),
+            CustomerRelation.expires_at.is_not(None),
+            CustomerRelation.expires_at > _utcnow_naive(),
         )
     )
     return (await db.execute(stmt)).scalar_one_or_none()
@@ -515,6 +526,15 @@ async def create_or_reuse_owner_customer_relation(
             )
             if not exact_retry:
                 raise HTTPException(status_code=409, detail="دعوت مشتری فعال با اطلاعات متفاوت وجود دارد")
+            await prepare_invitation_sms_delivery(
+                db,
+                invitation=invitation,
+                enabled=invitation_sms_enabled(
+                    InvitationKind.CUSTOMER,
+                    customer_tier=relation.customer_tier,
+                ),
+                newly_created=False,
+            )
             await db.commit()
             return CustomerRelationCreationResult(relation=relation, invitation=invitation, created=False)
 
@@ -543,6 +563,15 @@ async def create_or_reuse_owner_customer_relation(
             expires_at=invitation.expires_at,
         )
         db.add(relation)
+        await prepare_invitation_sms_delivery(
+            db,
+            invitation=invitation,
+            enabled=invitation_sms_enabled(
+                InvitationKind.CUSTOMER,
+                customer_tier=normalized_tier,
+            ),
+            newly_created=True,
+        )
         await db.commit()
         await db.refresh(invitation)
         await db.refresh(relation)
