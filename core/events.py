@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Any, Dict
 from datetime import datetime
-from sqlalchemy import event
+from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 import hashlib
@@ -25,11 +25,40 @@ from core.utils import utc_now_naive
 from core.offer_sync_payload import build_offer_sync_payload
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
 from core.sync_field_policy import sanitize_sync_payload
+from core.config import settings
+from core.registration_sync_policy import (
+    USER_SYNC_COUNTER_FIELDS,
+    allowed_user_fields_for_source,
+)
 
 logger = logging.getLogger(__name__)
 
 # ─── Persistent Redis connection for sync pushes ───
 _sync_redis = None
+
+
+def _changed_column_fields(target) -> set[str]:
+    try:
+        state = sa_inspect(target)
+        return {
+            attribute.key
+            for attribute in state.mapper.column_attrs
+            if state.attrs[attribute.key].history.has_changes()
+        }
+    except Exception:
+        return set()
+
+
+def _bump_sync_version(target) -> None:
+    try:
+        current = int(getattr(target, "sync_version", 1) or 1)
+    except (TypeError, ValueError):
+        current = 1
+    target.sync_version = max(current, 1) + 1
+
+
+def _registration_sync_v2_enabled() -> bool:
+    return bool(getattr(settings, "registration_sync_v2_enabled", False))
 
 
 def _get_sync_redis():
@@ -902,6 +931,7 @@ def setup_user_events():
             "max_accountants": getattr(target, "max_accountants", 3),
             "max_customers": getattr(target, "max_customers", 5),
             "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
+            "sync_version": int(getattr(target, "sync_version", 1) or 1),
         }
         if include_created_at:
             data["created_at"] = target.created_at.isoformat() if target.created_at else None
@@ -909,12 +939,33 @@ def setup_user_events():
             data["updated_at"] = target.updated_at.isoformat() if target.updated_at else None
         return data
 
+    @event.listens_for(User, 'before_update')
+    def bump_user_sync_version(mapper, connection, target):
+        if not _registration_sync_v2_enabled():
+            return
+        if str(getattr(settings, "server_mode", "") or "").strip().lower() != "iran":
+            return
+        changed = _changed_column_fields(target)
+        allowed = allowed_user_fields_for_source("iran")
+        if changed & (set(allowed) - {"id", "created_at", "updated_at", "sync_version"}):
+            _bump_sync_version(target)
+
     @event.listens_for(User, 'after_insert')
     def on_user_created(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
+            source_server = str(getattr(settings, "server_mode", "") or "").strip().lower()
+            if _registration_sync_v2_enabled() and source_server != "iran":
+                logger.warning(
+                    "Suppressed non-authoritative User insert sync event",
+                    extra={"event": "sync.user_insert_suppressed", "source_server": settings.server_mode},
+                )
+                return
             data = user_payload(target, include_created_at=True)
+            if _registration_sync_v2_enabled():
+                allowed = allowed_user_fields_for_source(source_server)
+                data = {key: value for key, value in data.items() if key in allowed}
             log_change(connection, "users", target.id, "INSERT", data)
             logger.info(f"📡 Published sync: user:created ID={target.id}")
         except Exception as e:
@@ -926,6 +977,34 @@ def setup_user_events():
             return
         try:
             data = user_payload(target, include_created_at=False)
+            if _registration_sync_v2_enabled():
+                source_server = str(getattr(settings, "server_mode", "") or "").strip().lower()
+                changed = _changed_column_fields(target)
+                allowed = allowed_user_fields_for_source(source_server)
+                changed_allowed = changed & set(allowed)
+                unauthorized = sorted(
+                    changed
+                    - set(allowed)
+                    - {"sync_version", "updated_at"}
+                )
+                if unauthorized:
+                    logger.warning(
+                        "Dropped unauthorized User sync fields",
+                        extra={
+                            "event": "sync.user_patch_fields_dropped",
+                            "source_server": source_server,
+                            "dropped_fields": unauthorized,
+                        },
+                    )
+                data = {
+                    key: value
+                    for key, value in data.items()
+                    if key in changed_allowed or key in {"id", "sync_version", "updated_at"}
+                }
+                for counter_field in USER_SYNC_COUNTER_FIELDS:
+                    data.pop(counter_field, None)
+                if not (set(data) - {"id", "sync_version", "updated_at"}):
+                    return
             log_change(connection, "users", target.id, "UPDATE", data)
         except Exception as e:
             logger.error(f"Error in user after_update event: {e}")
@@ -955,7 +1034,17 @@ def setup_accountant_relation_events():
             "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
             "created_at": target.created_at.isoformat() if target.created_at else None,
             "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+            "sync_version": int(getattr(target, "sync_version", 1) or 1),
         }
+
+    @event.listens_for(AccountantRelation, 'before_update')
+    def bump_accountant_relation_sync_version(mapper, connection, target):
+        if (
+            _registration_sync_v2_enabled()
+            and str(getattr(settings, "server_mode", "") or "").strip().lower() == "iran"
+            and (_changed_column_fields(target) - {"sync_version", "updated_at"})
+        ):
+            _bump_sync_version(target)
 
     @event.listens_for(AccountantRelation, 'after_insert')
     def on_accountant_relation_created(mapper, connection, target):
@@ -1028,7 +1117,17 @@ def setup_customer_relation_events():
             "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
             "created_at": target.created_at.isoformat() if target.created_at else None,
             "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+            "sync_version": int(getattr(target, "sync_version", 1) or 1),
         }
+
+    @event.listens_for(CustomerRelation, 'before_update')
+    def bump_customer_relation_sync_version(mapper, connection, target):
+        if (
+            _registration_sync_v2_enabled()
+            and str(getattr(settings, "server_mode", "") or "").strip().lower() == "iran"
+            and (_changed_column_fields(target) - {"sync_version", "updated_at"})
+        ):
+            _bump_sync_version(target)
 
     @event.listens_for(CustomerRelation, 'after_insert')
     def on_customer_relation_created(mapper, connection, target):
@@ -1423,8 +1522,28 @@ def setup_invitation_events():
             "created_by_id": target.created_by_id,
             "is_used": target.is_used,
             "expires_at": target.expires_at.isoformat() if target.expires_at else None,
+            "kind": getattr(getattr(target, "kind", None), "value", getattr(target, "kind", None)),
+            "registered_user_id": getattr(target, "registered_user_id", None),
+            "completed_at": target.completed_at.isoformat() if getattr(target, "completed_at", None) else None,
+            "completed_via": getattr(
+                getattr(target, "completed_via", None),
+                "value",
+                getattr(target, "completed_via", None),
+            ),
+            "revoked_at": target.revoked_at.isoformat() if getattr(target, "revoked_at", None) else None,
+            "sync_version": int(getattr(target, "sync_version", 1) or 1),
             "created_at": target.created_at.isoformat() if target.created_at else None,
+            "updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
         }
+
+    @event.listens_for(Invitation, 'before_update')
+    def bump_invitation_sync_version(mapper, connection, target):
+        if (
+            _registration_sync_v2_enabled()
+            and str(getattr(settings, "server_mode", "") or "").strip().lower() == "iran"
+            and (_changed_column_fields(target) - {"sync_version", "updated_at"})
+        ):
+            _bump_sync_version(target)
 
     @event.listens_for(Invitation, 'after_insert')
     def on_invitation_created(mapper, connection, target):

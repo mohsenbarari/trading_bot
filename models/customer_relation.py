@@ -2,7 +2,7 @@
 
 import enum
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -35,6 +35,7 @@ class CustomerRelation(Base):
 
     __tablename__ = "customer_relations"
     __table_args__ = (
+        CheckConstraint("sync_version >= 1", name="ck_customer_relations_sync_version_positive"),
         Index("ix_customer_relations_owner_status", "owner_user_id", "status"),
         Index("ix_customer_relations_customer_status", "customer_user_id", "status"),
         Index("ix_customer_relations_expires_at", "expires_at"),
@@ -95,6 +96,11 @@ class CustomerRelation(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    sync_version = Column(BigInteger, nullable=False, default=1, server_default=text("1"))
+    __mapper_args__ = {
+        "version_id_col": sync_version,
+        "version_id_generator": False,
+    }
 
     owner_user = relationship("User", foreign_keys=[owner_user_id])
     customer_user = relationship("User", foreign_keys=[customer_user_id])

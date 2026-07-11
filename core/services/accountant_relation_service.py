@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
 import secrets
 import string
 
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from core.utils import normalize_account_name, normalize_persian_numerals, unique_user_ids, utc_now
-from models.invitation import Invitation
+from models.invitation import Invitation, InvitationKind
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.user import User, UserRole
 
@@ -23,7 +22,8 @@ CAPACITY_TRACKED_RELATION_STATUSES = (
     AccountantRelationStatus.ACTIVE,
 )
 ACCOUNTANT_INVITATION_PREFIX = "ACCT-"
-ACCOUNTANT_PENDING_LIFETIME = timedelta(days=2)
+# Deprecated compatibility constant. New invitations use core.trading_settings.
+ACCOUNTANT_PENDING_LIFETIME = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +89,20 @@ async def sweep_expired_pending_accountant_relations(
     for relation in expired_relations:
         relation.status = AccountantRelationStatus.EXPIRED
         relation.deleted_at = now
+
+    if expired_relations:
+        from core.services.invitation_identity_reservation_service import (
+            release_invitation_identities_for_tokens,
+        )
+
+        await release_invitation_identities_for_tokens(
+            db,
+            invitation_tokens=[
+                relation.invitation_token
+                for relation in expired_relations
+                if getattr(relation, "invitation_token", None)
+            ],
+        )
 
     return expired_relations
 
@@ -319,12 +333,15 @@ async def create_owner_accountant_relation(
 
     invitation_token = generate_accountant_invitation_token()
     short_code = generate_accountant_short_code()
-    expires_at = _utcnow_naive() + ACCOUNTANT_PENDING_LIFETIME
+    from core.services.invitation_lifecycle_service import get_new_invitation_expiry
+
+    expires_at = await get_new_invitation_expiry()
 
     invitation = Invitation(
         account_name=normalized_account_name,
         mobile_number=normalized_mobile,
         role=UserRole.WATCH,
+        kind=InvitationKind.ACCOUNTANT,
         token=invitation_token,
         short_code=short_code,
         created_by_id=owner_user.id,
@@ -374,8 +391,12 @@ async def cancel_pending_accountant_relation(
     invitation_stmt = select(Invitation).where(Invitation.token == relation.invitation_token)
     invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
     if invitation:
-        invitation.is_used = True
-        invitation.expires_at = now
+        from core.services.invitation_identity_reservation_service import release_invitation_identity
+        from core.services.invitation_lifecycle_service import soft_revoke_invitation
+
+        soft_revoke_invitation(invitation, revoked_at=now)
+        if getattr(invitation, "id", None) is not None:
+            await release_invitation_identity(db, invitation_id=invitation.id)
 
     await db.commit()
     await db.refresh(relation)

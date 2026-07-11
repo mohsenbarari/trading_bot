@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     trade_contention_gate_ttl_seconds: float = 2.5
     trade_contention_gate_max_inflight: int = 3
     foreign_server_url: str | None = None
+    public_webapp_url: str | None = None
     sync_api_key: str | None = None
     sync_direct_push_cooldown_seconds: float = 90.0
     sync_verify_tls: bool = True
@@ -92,6 +93,24 @@ class Settings(BaseSettings):
     telegram_notification_outbox_worker_lease_seconds: int = 30
     telegram_notification_outbox_worker_recover_limit: int = 100
     telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
+    telegram_direct_registration_enabled: bool = False
+    telegram_registration_reconciliation_enabled: bool = False
+    telegram_login_otp_enabled: bool = False
+    otp_sms_auto_fallback_enabled: bool = False
+    otp_sms_auto_fallback_seconds: int = 40
+    otp_ttl_seconds: int = 120
+    telegram_registration_post_expiry_grace_seconds: int = 86400
+    telegram_registration_job_batch_size: int = 10
+    telegram_registration_job_concurrency: int = 1
+    otp_sms_fallback_job_concurrency: int = 4
+    invitation_sms_standard_enabled: bool = False
+    invitation_sms_customer_tier1_enabled: bool = False
+    invitation_sms_accountant_enabled: bool = True
+    invitation_sms_customer_tier2_enabled: bool = True
+    invitation_contract_v2_enabled: bool = False
+    registration_sync_v2_enabled: bool = False
+    registration_sync_accept_unversioned: bool = True
+    invitation_public_rate_limit_per_minute: int = 30
 
     database_url: str
     sync_database_url: str
@@ -112,6 +131,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str  # ❗ اجباری - باید در .env تعریف شود (JWT_SECRET_KEY)
     jwt_algorithm: str = "HS256"
     dev_api_key: str | None = None
+    # Deprecated compatibility field. Invitation creation must use core.trading_settings.
     invitation_expiry_days: int = 1
 
     # Web Push Notifications

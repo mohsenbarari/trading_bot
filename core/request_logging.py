@@ -39,12 +39,14 @@ _REDACT_NEXT_SEGMENT_AFTER = frozenset(
     {
         "accept",
         "files",
+        "lookup",
         "media",
         "otp",
         "password",
         "recovery",
         "reset",
         "upload-sessions",
+        "validate",
         "verify",
     }
 )

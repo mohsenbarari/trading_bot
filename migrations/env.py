@@ -20,6 +20,11 @@ import models.market_channel_notice_receipt
 import models.message  # مدل پیام چت
 import models.conversation  # مدل مکالمات چت
 import models.push_subscription
+import models.accountant_relation
+import models.customer_relation
+import models.invitation_identity_reservation
+import models.telegram_registration_intent
+import models.telegram_registration_command_receipt
 
 # --- خواندن تنظیمات Alembic ---
 config = context.config

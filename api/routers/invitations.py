@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from pydantic import BaseModel
 import secrets
 import string
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from core.db import get_db
 from core.utils import utc_now_naive
@@ -16,12 +16,22 @@ from core.services.customer_relation_service import (
     get_pending_customer_relation_by_invitation_token,
     is_customer_invitation_token,
 )
-from models.invitation import Invitation
+from models.invitation import Invitation, InvitationKind
 from models.user import User, UserRole
 from core.config import settings
 from api.deps import verify_admin_user
 from core.sms import send_invitation_sms
 from core.connectivity import is_internet_connected
+from core.services.invitation_identity_reservation_service import release_invitation_identity
+from core.services.invitation_lifecycle_service import (
+    get_new_invitation_expiry,
+    soft_revoke_invitation,
+)
+from core.log_redaction import mask_mobile
+from core.services.invitation_public_access_service import (
+    enforce_public_invitation_access,
+    public_invitation_http_exception,
+)
 
 router = APIRouter()
 
@@ -88,6 +98,8 @@ def pending_invitation_select(now: datetime):
     return select(Invitation).where(
         Invitation.token.like("INV-%"),
         Invitation.is_used == False,
+        Invitation.revoked_at.is_(None),
+        Invitation.kind != InvitationKind.LEGACY_UNKNOWN,
         Invitation.expires_at > now,
     )
 
@@ -131,10 +143,12 @@ async def delete_pending_invitation(
     ):
         raise HTTPException(status_code=404, detail="دعوت‌نامه پیدا نشد")
 
-    if invitation.is_used or invitation.expires_at <= utc_now_naive():
+    if invitation.is_used or getattr(invitation, "revoked_at", None) is not None or invitation.expires_at <= utc_now_naive():
         raise HTTPException(status_code=400, detail="دعوت‌نامه pending نیست")
 
-    await db.delete(invitation)
+    soft_revoke_invitation(invitation)
+    if getattr(invitation, "id", None) is not None:
+        await release_invitation_identity(db, invitation_id=invitation.id)
     await db.commit()
     return None
 
@@ -165,6 +179,8 @@ async def create_invitation(
     stmt = select(Invitation).where(
         (Invitation.mobile_number == mobile) &
         (Invitation.is_used == False) &
+        (Invitation.revoked_at.is_(None)) &
+        (Invitation.kind != InvitationKind.LEGACY_UNKNOWN) &
         (Invitation.expires_at > func.now())
     )
     active_inv = (await db.execute(stmt)).scalar_one_or_none()
@@ -182,12 +198,13 @@ async def create_invitation(
     # Create new invitation
     token = generate_token()
     short_code = generate_short_code()
-    expires_at = utc_now_naive() + timedelta(days=settings.invitation_expiry_days)
+    expires_at = await get_new_invitation_expiry()
     
     new_inv = Invitation(
         account_name=invite.account_name,
         mobile_number=mobile,
         role=invite.role,
+        kind=InvitationKind.STANDARD,
         token=token,
         short_code=short_code,
         created_by_id=admin.id,
@@ -217,7 +234,10 @@ async def create_invitation(
         "expires_at": expires_at
     }
 
-@router.get("/lookup/{short_code}")
+@router.get(
+    "/lookup/{short_code}",
+    dependencies=[Depends(enforce_public_invitation_access)],
+)
 async def lookup_invitation(
     short_code: str,
     db: AsyncSession = Depends(get_db)
@@ -229,26 +249,33 @@ async def lookup_invitation(
     inv = (await db.execute(stmt)).scalar_one_or_none()
     
     if not inv:
-        raise HTTPException(status_code=404, detail="Invalid short code")
+        raise public_invitation_http_exception(status_code=404, detail="Invalid short code")
         
     if inv.is_used:
-        raise HTTPException(status_code=400, detail="Invitation already used")
+        raise public_invitation_http_exception(status_code=400, detail="Invitation already used")
+    if getattr(inv, "revoked_at", None) is not None:
+        raise public_invitation_http_exception(status_code=400, detail="Invitation revoked")
+    if getattr(inv, "kind", None) == InvitationKind.LEGACY_UNKNOWN:
+        raise public_invitation_http_exception(status_code=400, detail="Invitation state is ambiguous")
 
     if is_accountant_invitation_token(inv.token):
         relation = await get_pending_accountant_relation_by_invitation_token(db, inv.token)
         if not relation:
-            raise HTTPException(status_code=400, detail="Invitation expired")
+            raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
     elif is_customer_invitation_token(inv.token):
         relation = await get_pending_customer_relation_by_invitation_token(db, inv.token)
         if not relation:
-            raise HTTPException(status_code=400, detail="Invitation expired")
+            raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
         
     if inv.expires_at < utc_now_naive():
-        raise HTTPException(status_code=400, detail="Invitation expired")
+        raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
         
     return {"token": inv.token}
 
-@router.get("/validate/{token}")
+@router.get(
+    "/validate/{token}",
+    dependencies=[Depends(enforce_public_invitation_access)],
+)
 async def validate_invitation(
     token: str,
     db: AsyncSession = Depends(get_db)
@@ -260,26 +287,30 @@ async def validate_invitation(
     inv = (await db.execute(stmt)).scalar_one_or_none()
     
     if not inv:
-        raise HTTPException(status_code=404, detail="Invalid token")
+        raise public_invitation_http_exception(status_code=404, detail="Invalid token")
         
     if inv.is_used:
-        raise HTTPException(status_code=400, detail="Invitation already used")
+        raise public_invitation_http_exception(status_code=400, detail="Invitation already used")
+    if getattr(inv, "revoked_at", None) is not None:
+        raise public_invitation_http_exception(status_code=400, detail="Invitation revoked")
+    if getattr(inv, "kind", None) == InvitationKind.LEGACY_UNKNOWN:
+        raise public_invitation_http_exception(status_code=400, detail="Invitation state is ambiguous")
 
     if is_accountant_invitation_token(token):
         relation = await get_pending_accountant_relation_by_invitation_token(db, token)
         if not relation:
-            raise HTTPException(status_code=400, detail="Invitation expired")
+            raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
     elif is_customer_invitation_token(token):
         relation = await get_pending_customer_relation_by_invitation_token(db, token)
         if not relation:
-            raise HTTPException(status_code=400, detail="Invitation expired")
+            raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
         
     if inv.expires_at < utc_now_naive():
-        raise HTTPException(status_code=400, detail="Invitation expired")
+        raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
         
     return {
         "valid": True,
         "account_name": inv.account_name,
-        "mobile_number": inv.mobile_number,
+        "mobile_number": mask_mobile(inv.mobile_number),
         "role": inv.role
     }

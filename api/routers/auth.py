@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime, timedelta
 import logging
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from urllib.parse import quote
 import random
@@ -16,7 +16,7 @@ from core.db import get_db
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
-from models.invitation import Invitation
+from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from core.enums import NotificationCategory, NotificationLevel
 from core.security import (
     constant_time_secret_equals,
@@ -418,6 +418,13 @@ class RegisterComplete(BaseModel):
     registration_token: str | None = None
     address: str
 
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, value: str) -> str:
+        from core.services.invitation_lifecycle_service import validate_registration_address
+
+        return validate_registration_address(value)
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
@@ -457,6 +464,10 @@ async def _load_valid_invitation_by_token(
         raise HTTPException(status_code=404, detail=missing_detail)
     if invitation.is_used:
         raise HTTPException(status_code=400, detail="دعوت‌نامه قبلاً استفاده شده است")
+    if getattr(invitation, "revoked_at", None) is not None:
+        raise HTTPException(status_code=400, detail="دعوت‌نامه لغو شده است")
+    if getattr(invitation, "kind", None) == InvitationKind.LEGACY_UNKNOWN:
+        raise HTTPException(status_code=400, detail="وضعیت دعوت‌نامه قدیمی نامشخص است؛ دعوت‌نامه جدید دریافت کنید")
     if invitation.expires_at < utc_now_naive():
         raise HTTPException(status_code=400, detail="دعوت‌نامه منقضی شده است")
 
@@ -483,6 +494,8 @@ async def _find_pending_invitation_for_mobile(
         .where(
             Invitation.mobile_number == mobile,
             Invitation.is_used == False,
+            Invitation.revoked_at.is_(None),
+            Invitation.kind != InvitationKind.LEGACY_UNKNOWN,
         )
         .order_by(Invitation.created_at.desc(), Invitation.id.desc())
     )
@@ -822,7 +835,6 @@ async def register_complete(
     
     db.add(new_user)
     
-    inv.is_used = True
     if accountant_relation:
         accountant_relation.accountant_user_id = new_user.id
         accountant_relation.status = AccountantRelationStatus.ACTIVE
@@ -836,6 +848,17 @@ async def register_complete(
     
     try:
         await db.flush()
+        from core.services.invitation_identity_reservation_service import release_invitation_identity
+        from core.services.invitation_lifecycle_service import complete_invitation
+
+        complete_invitation(
+            inv,
+            registered_user_id=new_user.id,
+            completed_via=InvitationCompletionSurface.WEB,
+            completed_at=utc_now(),
+        )
+        if getattr(inv, "id", None) is not None:
+            await release_invitation_identity(db, invitation_id=inv.id)
         if accountant_relation:
             accountant_relation.accountant_user_id = new_user.id
         if customer_relation:

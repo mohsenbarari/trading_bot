@@ -1214,6 +1214,16 @@ Exit criteria:
 - ADRs/decision records for `DT-01`, `DT-02`, `DT-05`, `DT-08`, `DT-12`, `DT-13`, `DT-14`,
   `DT-16`, and `DT-18` are approved.
 
+Execution record (2026-07-11): **Complete as a source milestone; not deployed**. The additive
+migration, models, strict contracts, reservation/receipt primitives, source-aware versioned sync
+policy, public invitation protections, runtime configuration, explicit registry/tooling updates,
+decision records, and verification evidence are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE1_CONTRACTS_SCHEMA_REGISTRY_20260711.md`. Scratch migration
+upgrade/downgrade/backfill/collision tests and the complete backend regression suite passed. Active
+staging remains on `f7c8d9e0a1b2`, no production action occurred, and every new entry/worker/Sync-v2
+flag remains off. Before any migration rollout that permits invitation writes, Stage 3 must connect
+all canonical writers to the reservation service.
+
 ### Stage 2 - Shared Authoritative Registration Service
 
 - Extract current Web registration mutation into a shared Iran service.

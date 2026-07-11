@@ -51,6 +51,27 @@ COMMON_RUNTIME_KEYS = (
     "WEB_PUSH_VAPID_SUBJECT",
     "WEB_PUSH_TTL_SECONDS",
     "WEB_PUSH_TIMEOUT_SECONDS",
+    "PUBLIC_WEBAPP_URL",
+    "FOREIGN_SERVER_ALIASES",
+    "IRAN_SERVER_ALIASES",
+    "TELEGRAM_DIRECT_REGISTRATION_ENABLED",
+    "TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED",
+    "TELEGRAM_LOGIN_OTP_ENABLED",
+    "OTP_SMS_AUTO_FALLBACK_ENABLED",
+    "OTP_SMS_AUTO_FALLBACK_SECONDS",
+    "OTP_TTL_SECONDS",
+    "TELEGRAM_REGISTRATION_POST_EXPIRY_GRACE_SECONDS",
+    "TELEGRAM_REGISTRATION_JOB_BATCH_SIZE",
+    "TELEGRAM_REGISTRATION_JOB_CONCURRENCY",
+    "OTP_SMS_FALLBACK_JOB_CONCURRENCY",
+    "INVITATION_SMS_STANDARD_ENABLED",
+    "INVITATION_SMS_CUSTOMER_TIER1_ENABLED",
+    "INVITATION_SMS_ACCOUNTANT_ENABLED",
+    "INVITATION_SMS_CUSTOMER_TIER2_ENABLED",
+    "INVITATION_CONTRACT_V2_ENABLED",
+    "REGISTRATION_SYNC_V2_ENABLED",
+    "REGISTRATION_SYNC_ACCEPT_UNVERSIONED",
+    "INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE",
 )
 
 OPTIONAL_RUNTIME_DEFAULTS = {
@@ -70,6 +91,27 @@ OPTIONAL_RUNTIME_DEFAULTS = {
     "WEB_PUSH_VAPID_SUBJECT": "",
     "WEB_PUSH_TTL_SECONDS": "3600",
     "WEB_PUSH_TIMEOUT_SECONDS": "5.0",
+    "PUBLIC_WEBAPP_URL": "",
+    "FOREIGN_SERVER_ALIASES": "",
+    "IRAN_SERVER_ALIASES": "",
+    "TELEGRAM_DIRECT_REGISTRATION_ENABLED": "false",
+    "TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED": "false",
+    "TELEGRAM_LOGIN_OTP_ENABLED": "false",
+    "OTP_SMS_AUTO_FALLBACK_ENABLED": "false",
+    "OTP_SMS_AUTO_FALLBACK_SECONDS": "40",
+    "OTP_TTL_SECONDS": "120",
+    "TELEGRAM_REGISTRATION_POST_EXPIRY_GRACE_SECONDS": "86400",
+    "TELEGRAM_REGISTRATION_JOB_BATCH_SIZE": "10",
+    "TELEGRAM_REGISTRATION_JOB_CONCURRENCY": "1",
+    "OTP_SMS_FALLBACK_JOB_CONCURRENCY": "4",
+    "INVITATION_SMS_STANDARD_ENABLED": "false",
+    "INVITATION_SMS_CUSTOMER_TIER1_ENABLED": "false",
+    "INVITATION_SMS_ACCOUNTANT_ENABLED": "true",
+    "INVITATION_SMS_CUSTOMER_TIER2_ENABLED": "true",
+    "INVITATION_CONTRACT_V2_ENABLED": "false",
+    "REGISTRATION_SYNC_V2_ENABLED": "false",
+    "REGISTRATION_SYNC_ACCEPT_UNVERSIONED": "true",
+    "INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE": "30",
 }
 
 PERFORMANCE_RUNTIME_DEFAULTS = OrderedDict(
@@ -199,6 +241,7 @@ def build_runtime_env(
     *,
     role: str,
     frontend_url: str,
+    public_webapp_url: str,
     foreign_server_url: str,
     foreign_server_domain: str,
     iran_server_url: str,
@@ -215,7 +258,7 @@ def build_runtime_env(
         rendered[key] = values[key]
     rendered["FRONTEND_URL"] = frontend_url
     for key in COMMON_RUNTIME_KEYS[6:]:
-        rendered[key] = values[key]
+        rendered[key] = values.get(key, OPTIONAL_RUNTIME_DEFAULTS.get(key, ""))
     role_prefix = role.upper()
     for key in PERFORMANCE_RUNTIME_DEFAULTS:
         rendered[key] = values.get(f"{role_prefix}_{key}", values[key])
@@ -229,6 +272,7 @@ def build_runtime_env(
     rendered["FOREIGN_SERVER_DOMAIN"] = foreign_server_domain
     rendered["IRAN_SERVER_URL"] = iran_server_url
     rendered["IRAN_SERVER_DOMAIN"] = iran_server_domain
+    rendered["PUBLIC_WEBAPP_URL"] = values.get("PUBLIC_WEBAPP_URL") or public_webapp_url
     return rendered
 
 
@@ -248,6 +292,7 @@ def main() -> int:
         build_runtime_env(
             role="foreign",
             frontend_url=args.foreign_frontend_url,
+            public_webapp_url=args.iran_frontend_url,
             foreign_server_url=args.foreign_server_url,
             foreign_server_domain=args.foreign_server_domain,
             iran_server_url=args.iran_server_url,
@@ -263,6 +308,7 @@ def main() -> int:
         build_runtime_env(
             role="iran",
             frontend_url=args.iran_frontend_url,
+            public_webapp_url=args.iran_frontend_url,
             foreign_server_url=args.foreign_server_url,
             foreign_server_domain=args.foreign_server_domain,
             iran_server_url=args.iran_server_url,

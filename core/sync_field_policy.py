@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any
 
 
-SYNC_FIELD_POLICY_VERSION = 1
+SYNC_FIELD_POLICY_VERSION = 2
 
 
 class SyncFieldClassification(str, Enum):
@@ -63,6 +63,27 @@ def _entry(
 _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
     ("users", "mobile_number"): _entry("users", "mobile_number", SyncFieldClassification.SYNC, sensitive=True),
     ("users", "address"): _entry("users", "address", SyncFieldClassification.SYNC, sensitive=True),
+    ("users", "telegram_id"): _entry(
+        "users",
+        "telegram_id",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="Telegram identity is shared product state committed by Iran",
+    ),
+    ("users", "username"): _entry(
+        "users",
+        "username",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="Telegram username/profile identity",
+    ),
+    ("users", "full_name"): _entry(
+        "users",
+        "full_name",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="user profile identity",
+    ),
     ("users", "admin_password_hash"): _entry(
         "users",
         "admin_password_hash",
@@ -91,6 +112,93 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
     ("trades", "responder_user_mobile"): _entry("trades", "responder_user_mobile", SyncFieldClassification.SYNC, sensitive=True),
     ("invitations", "mobile_number"): _entry("invitations", "mobile_number", SyncFieldClassification.SYNC, sensitive=True),
     ("invitations", "token"): _entry("invitations", "token", SyncFieldClassification.SYNC, sensitive=True),
+    ("invitations", "short_code"): _entry(
+        "invitations",
+        "short_code",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="short invitation credential used to resolve the full token",
+    ),
+    ("invitation_identity_reservations", "normalized_mobile"): _entry(
+        "invitation_identity_reservations",
+        "normalized_mobile",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="Iran-local pending identity reservation",
+    ),
+    ("invitation_identity_reservations", "normalized_account_name"): _entry(
+        "invitation_identity_reservations",
+        "normalized_account_name",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="Iran-local pending identity reservation",
+    ),
+    ("telegram_registration_intents", "invitation_token"): _entry(
+        "telegram_registration_intents",
+        "invitation_token",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="foreign-local Telegram registration secret",
+    ),
+    ("telegram_registration_intents", "normalized_mobile"): _entry(
+        "telegram_registration_intents",
+        "normalized_mobile",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="foreign-local registration identity",
+    ),
+    ("telegram_registration_intents", "telegram_id"): _entry(
+        "telegram_registration_intents",
+        "telegram_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="foreign-local registration identity",
+    ),
+    ("telegram_registration_intents", "telegram_username"): _entry(
+        "telegram_registration_intents",
+        "telegram_username",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="foreign-local Telegram profile snapshot",
+    ),
+    ("telegram_registration_intents", "telegram_full_name"): _entry(
+        "telegram_registration_intents",
+        "telegram_full_name",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="foreign-local Telegram profile snapshot",
+    ),
+    ("telegram_registration_intents", "address"): _entry(
+        "telegram_registration_intents",
+        "address",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="foreign-local registration address",
+    ),
+    ("telegram_registration_command_receipts", "request_hash"): _entry(
+        "telegram_registration_command_receipts",
+        "request_hash",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="Iran-local command replay fingerprint",
+    ),
+    ("telegram_registration_command_receipts", "invitation_token_hash"): _entry(
+        "telegram_registration_command_receipts",
+        "invitation_token_hash",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="Iran-local invitation reference hash",
+    ),
     ("telegram_link_tokens", "token_hash"): _entry(
         "telegram_link_tokens",
         "token_hash",

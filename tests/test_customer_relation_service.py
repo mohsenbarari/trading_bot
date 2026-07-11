@@ -1,5 +1,5 @@
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -36,6 +36,7 @@ from core.services.customer_relation_service import (
 )
 from core.utils import utc_now
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.invitation import InvitationKind
 from models.offer import OfferType
 from models.user import UserRole
 from unittest.mock import patch
@@ -261,6 +262,7 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_owner_customer_relation_creates_pending_relation_and_standard_invitation(self):
         owner = SimpleNamespace(id=7, max_customers=4)
+        expected_expiry = datetime.utcnow() + timedelta(days=2)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(values=[]),
@@ -271,21 +273,28 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        relation, invitation = await create_owner_customer_relation(
-            db,
-            owner_user=owner,
-            account_name="customer_one",
-            management_name="مشتری اول",
-            mobile_number="09120000000",
-            customer_tier=CustomerTier.TIER_2,
-            commission_rate="0.5",
-            min_trade_quantity=1,
-            max_trade_quantity=5,
-            max_daily_trades=3,
-            max_daily_commodity_volume=10,
-        )
+        with patch(
+            "core.services.invitation_lifecycle_service.get_new_invitation_expiry",
+            new=AsyncMock(return_value=expected_expiry),
+        ):
+            relation, invitation = await create_owner_customer_relation(
+                db,
+                owner_user=owner,
+                account_name="customer_one",
+                management_name="مشتری اول",
+                mobile_number="09120000000",
+                customer_tier=CustomerTier.TIER_2,
+                commission_rate="0.5",
+                min_trade_quantity=1,
+                max_trade_quantity=5,
+                max_daily_trades=3,
+                max_daily_commodity_volume=10,
+            )
 
         self.assertEqual(invitation.role, UserRole.STANDARD)
+        self.assertEqual(invitation.kind, InvitationKind.CUSTOMER)
+        self.assertEqual(invitation.expires_at, expected_expiry)
+        self.assertEqual(relation.expires_at, expected_expiry)
         self.assertTrue(invitation.token.startswith(CUSTOMER_INVITATION_PREFIX))
         self.assertEqual(relation.owner_user_id, 7)
         self.assertEqual(relation.customer_tier, CustomerTier.TIER_2)
@@ -385,7 +394,7 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(management_exc.exception.detail, "این نام مدیریتی قبلاً برای یکی از مشتریان این مالک استفاده شده است")
 
-    async def test_cancel_pending_customer_relation_revokes_relation_and_marks_invitation_used(self):
+    async def test_cancel_pending_customer_relation_soft_revokes_invitation(self):
         relation = SimpleNamespace(
             id=9,
             owner_user_id=7,
@@ -405,7 +414,8 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(result, relation)
         self.assertEqual(relation.status, CustomerRelationStatus.REVOKED)
-        self.assertTrue(invitation.is_used)
+        self.assertFalse(invitation.is_used)
+        self.assertIsNotNone(invitation.revoked_at)
         self.assertIsNotNone(relation.deleted_at)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)

@@ -27,6 +27,11 @@ from scripts.deploy_config import resolve_deploy_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BACKUP_DIR = "/srv/trading-bot/backups"
+REGISTRATION_STAGE1_RESTORE_TABLES = (
+    "invitation_identity_reservations",
+    "telegram_registration_command_receipts",
+    "telegram_registration_intents",
+)
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,7 @@ def build_backup_shell(
     include_redis_s = shell_bool(include_redis)
     restore_smoke_s = shell_bool(restore_smoke)
     restore_name = shlex.quote(f"trading_bot_restore_drill_{target.role}_{stamp}".replace("-", "_"))
+    required_restore_tables = shlex.quote(" ".join(REGISTRATION_STAGE1_RESTORE_TABLES))
     return f"""
 set -euo pipefail
 cd {project_dir}
@@ -116,6 +122,7 @@ include_uploads={include_uploads_s}
 include_audit={include_audit_s}
 include_redis={include_redis_s}
 restore_smoke={restore_smoke_s}
+required_restore_tables={required_restore_tables}
 mkdir -p "$backup_dir"
 files_jsonl="$backup_dir/$role-manifest-files-$stamp.jsonl"
 : > "$files_jsonl"
@@ -211,7 +218,18 @@ if [ "$restore_smoke" = "1" ]; then
     fi
     if [ "$restore_ready" = "1" ] && [ "$roles_ready" = "1" ] && gzip -dc "$db_file" | docker exec -i "$restore_name" psql -v ON_ERROR_STOP=1 -U restore -d restore >>"$restore_log" 2>&1; then
       restore_table_count="$(docker exec "$restore_name" psql -U restore -d restore -tAc "select count(*) from information_schema.tables where table_schema='public';" | tr -d '[:space:]')"
-      restore_status=passed
+      restore_missing_tables=''
+      for required_table in $required_restore_tables; do
+        table_present="$(docker exec "$restore_name" psql -U restore -d restore -tAc "select to_regclass('public.$required_table') is not null;" | tr -d '[:space:]')"
+        if [ "$table_present" != "t" ]; then
+          restore_missing_tables="$restore_missing_tables $required_table"
+        fi
+      done
+      if [ -z "$restore_missing_tables" ]; then
+        restore_status=passed
+      else
+        restore_error="restored database is missing required tables:$restore_missing_tables"
+      fi
     elif [ -z "${{restore_error:-}}" ]; then
       restore_error="$(tail -40 "$restore_log" 2>/dev/null | tr '\\n' ' ' | cut -c1-1000)"
       if [ -z "$restore_error" ]; then

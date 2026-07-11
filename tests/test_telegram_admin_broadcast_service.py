@@ -182,6 +182,7 @@ class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
                         max_accountants INTEGER,
                         max_customers INTEGER,
                         home_server VARCHAR,
+                        sync_version BIGINT NOT NULL DEFAULT 1,
                         can_block_users BOOLEAN,
                         max_blocked_users INTEGER,
                         last_seen_at DATETIME,

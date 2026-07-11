@@ -656,6 +656,73 @@ class CoreEventsTests(unittest.TestCase):
         log_change.assert_not_called()
         publish_event_sync.assert_not_called()
 
+    def test_registration_v2_user_insert_emits_only_iran_owned_fields(self):
+        registry = {}
+        now = datetime(2026, 7, 11, 10, 0, 0)
+        with patch(
+            "core.events.event.listens_for",
+            side_effect=_capture_listeners(registry),
+        ):
+            events.setup_user_events()
+
+        user = SimpleNamespace(
+            id=3,
+            telegram_id=99,
+            username="user",
+            full_name="User Name",
+            mobile_number="09120000000",
+            account_name="acct",
+            address="registered address",
+            role=SimpleNamespace(value="عادی"),
+            account_status=SimpleNamespace(value="active"),
+            deactivated_at=None,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+            has_bot_access=True,
+            bot_onboarding_required_step=2,
+            bot_onboarding_completed_step=1,
+            bot_onboarding_completed_at=now,
+            home_server="iran",
+            is_deleted=False,
+            deleted_at=None,
+            can_block_users=True,
+            max_blocked_users=5,
+            max_daily_trades=2,
+            max_active_commodities=3,
+            max_daily_requests=4,
+            trading_restricted_until=None,
+            limitations_expire_at=None,
+            trades_count=11,
+            commodities_traded_count=12,
+            channel_messages_count=13,
+            max_sessions=1,
+            max_accountants=3,
+            max_customers=5,
+            last_seen_at=now,
+            sync_version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        connection = _FakeConnection()
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode",
+            "iran",
+        ), patch("core.events.log_change") as log_change:
+            registry[("User", "after_insert")](None, connection, user)
+
+        payload = log_change.call_args.args[4]
+        self.assertEqual(payload["home_server"], "iran")
+        self.assertEqual(payload["sync_version"], 1)
+        self.assertNotIn("bot_onboarding_required_step", payload)
+        self.assertNotIn("bot_onboarding_completed_step", payload)
+        self.assertNotIn("bot_onboarding_completed_at", payload)
+        self.assertNotIn("trades_count", payload)
+        self.assertNotIn("commodities_traded_count", payload)
+        self.assertNotIn("channel_messages_count", payload)
+        self.assertNotIn("global_lock_grace_expires_at", payload)
+        self.assertNotIn("global_web_locked_at", payload)
+
     def test_offer_request_event_listener_syncs_ledger_payload(self):
         registry = {}
         now = datetime(2025, 1, 1, 12, 0, 0)

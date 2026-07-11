@@ -56,6 +56,18 @@ class SyncRegistryTests(unittest.TestCase):
                 self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
                 self.assertIn("local", entry.authority)
 
+    def test_registration_local_state_tables_are_no_sync(self):
+        expected_authority = {
+            "invitation_identity_reservations": "iran local",
+            "telegram_registration_command_receipts": "iran local",
+            "telegram_registration_intents": "foreign local",
+        }
+        for table_name, authority_fragment in expected_authority.items():
+            with self.subTest(table_name=table_name):
+                entry = get_sync_registry_entry(table_name)
+                self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+                self.assertIn(authority_fragment, entry.authority)
+
     def test_user_account_product_fields_are_separate_from_runtime_surface(self):
         users = get_sync_registry_entry("users")
 

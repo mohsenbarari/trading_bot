@@ -240,7 +240,12 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
     async with AsyncSessionLocal() as session:
         inv_stmt = select(Invitation).where(Invitation.token == token)
         invitation = (await session.execute(inv_stmt)).scalar_one_or_none()
-        if not invitation or invitation.is_used:
+        if (
+            not invitation
+            or invitation.is_used
+            or getattr(invitation, "revoked_at", None) is not None
+            or str(getattr(getattr(invitation, "kind", None), "value", getattr(invitation, "kind", ""))) == "legacy_unknown"
+        ):
             bot_response = await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
             return
 

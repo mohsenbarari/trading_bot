@@ -99,6 +99,14 @@ class RequestLoggingTests(unittest.TestCase):
             redact_sensitive_path_segments("/api/auth/register-otp-request"),
             "/api/auth/register-otp-request",
         )
+        self.assertEqual(
+            redact_sensitive_path_segments("/api/invitations/lookup/short-secret"),
+            "/api/invitations/lookup/[REDACTED]",
+        )
+        self.assertEqual(
+            redact_sensitive_path_segments("/api/invitations/validate/INV-secret"),
+            "/api/invitations/validate/[REDACTED]",
+        )
 
     def test_middleware_sets_request_id_header_and_sanitized_access_log(self):
         app = make_test_app()

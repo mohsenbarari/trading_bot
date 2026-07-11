@@ -3,7 +3,8 @@
 ## Language & Communication
 - User speaks **Persian (Farsi)**. Respond in Persian for explanations.
 - Code, comments, and commit messages in **English**.
-- After every fix: **commit with descriptive message + deploy via `make up`**.
+- After every fix: **commit with a descriptive message**. Deploy only when the current owner request
+  and the applicable staging/production gate explicitly require it; never infer a production release.
 
 ## Architecture Overview
 
@@ -29,8 +30,11 @@ Iran is identical but **no bot service**. Nginx proxies `/api/` → backend, `/`
 ## Database Models
 
 ### Core Tables
-- **users**: id, account_name (unique), mobile_number (unique), telegram_id (nullable, unique), full_name, address, role (Enum), has_bot_access, is_deleted, deleted_at, trading_restricted_until, max_daily_trades, max_active_commodities, max_daily_requests, limitations_expire_at, trades_count, commodities_traded_count, channel_messages_count, can_block_users, max_blocked_users, last_seen_at
-- **invitations**: id, account_name, mobile_number, token (unique), short_code (unique), role, created_by_id→users, is_used, expires_at
+- **users**: id, account_name (unique), mobile_number (unique), telegram_id (nullable, unique), full_name, address, role (Enum), has_bot_access, is_deleted, deleted_at, trading_restricted_until, max_daily_trades, max_active_commodities, max_daily_requests, limitations_expire_at, trades_count, commodities_traded_count, channel_messages_count, can_block_users, max_blocked_users, last_seen_at, sync_version
+- **invitations**: id, account_name, mobile_number, token (unique), short_code (unique), role, kind, created_by_id→users, is_used, registered_user_id→users, completed_at, completed_via, revoked_at, expires_at, sync_version
+- **invitation_identity_reservations**: Iran-local/no-sync pending invitation natural-key reservations
+- **telegram_registration_intents**: foreign-local/no-sync durable Telegram registration collection state
+- **telegram_registration_command_receipts**: Iran-local/no-sync command replay/idempotency receipts
 - **offers**: id, version_id (optimistic lock), user_id→users, offer_type (buy/sell), commodity_id, quantity, price, remaining_quantity, is_wholesale, lot_sizes (JSON), status (active/completed/cancelled/expired), notes, channel_message_id, idempotency_key
 - **trades**: id, version_id, trade_number (unique, starts 10000), offer_id, offer_user_id, offer_user_mobile, responder_user_id, responder_user_mobile, commodity_id, trade_type, quantity, price, status (pending/confirmed/completed/cancelled), idempotency_key
 - **messages**: id, sender_id, receiver_id, reply_to_message_id, forwarded_from_id, content, message_type (text/image/sticker), is_read, is_deleted, edit_history (JSON)
@@ -117,6 +121,13 @@ Frontend `apiBaseUrl` is `''` for same-origin. **NEVER use falsy checks** like `
 ### Two-Server Sync
 SQLAlchemy event listeners → durable `change_log`; after the outermost commit, the sync outbox guard sends one signal-only Redis `sync:outbound` wake-up per verified outbox row. SAVEPOINT callbacks preserve the pending wake-up count until the root transaction ends. Sync worker treats fresh outbound queue payloads as wake-ups and always reads committed `change_log` rows from DB before peer delivery; after a signal-loss polling fallback it drains a bounded committed batch before blocking again. Receiver does dependency-ordered upserts. FK violations deferred and retried.
 
+- **Registration Stage 1 contract**: Keep `REGISTRATION_SYNC_V2_ENABLED=false` until the mixed-version
+  gate is explicitly approved. Under v2, Iran owns User identity/account/access fields plus all
+  Invitation and customer/accountant Relation writes; foreign owns only monotonic bot-onboarding
+  fields; `last_seen_at` merges by maximum; generic User counters never travel in User patches.
+  `users`, `invitations`, and both Relation tables apply only newer `sync_version` values. The three
+  registration reservation/intent/receipt tables are local `no-sync` state.
+
 ### Real-time
 WebSocket + SSE via Redis pub/sub. Events: `offer:created/expired/updated/cancelled/completed`, `trade:created`. Per-user events via `notifications:{user_id}` channel.
 
@@ -130,7 +141,10 @@ Store UTC → display Iran time (Asia/Tehran) + Jalali calendar. Persian numeral
 - Plain SMS uses SMS.ir REST `POST /v1/send/bulk` with `X-API-KEY`, `lineNumber`, `messageText`, and `mobiles`.
 - OTP SMS uses SMS.ir Verify `POST /v1/send/verify` when `SMSIR_OTP_TEMPLATE_ID` is configured; otherwise it falls back to plain SMS.
 - Required env: `SMSIR_API_KEY`, `SMSIR_LINE_NUMBER`. Optional Verify env: `SMSIR_OTP_TEMPLATE_ID`, `SMSIR_OTP_TEMPLATE_PARAMETER` (default `Code`).
-- Invitation SMS is temporarily web-only and role-worded: general invitations say `معامله گر`, accountant invitations say `حسابدار`, and customer invitations say `مشتری`. Send only the direct `/register?token=...` link and do not include Telegram text, names, or `t.me` links in the SMS body. Keep it under 3 UCS-2 segments (~161 chars).
+- Invitation SMS is category-gated independently of source surface. Standard/admin and Tier-1
+  categories are temporarily disabled; accountant and Tier-2 remain enabled and Web-only. Enabled
+  categories keep the existing templates and direct Web registration link; never add a Telegram
+  link to SMS. Manual admin sharing of generated Web/Telegram links remains unchanged.
 - Melipayamak is not wired into production yet. Use `scripts/melipayamak_probe.py` for isolated manual tests; pass credentials via env (`MELIPAYAMAK_USERNAME`, `MELIPAYAMAK_API_KEY` or `MELIPAYAMAK_PASSWORD`, `MELIPAYAMAK_FROM`) and do not commit provider secrets.
 - Arvan Object Storage is only being evaluated as a foreign-staging artifact bridge. Use `scripts/arvan_object_storage_probe.py` for isolated manual tests and `scripts/deploy_staging.sh object-storage-package|object-storage-upload` for staging artifact packaging/upload. Pass credentials via env or ignored `.env.staging` (`ARVAN_OBJECT_STORAGE_ACCESS_KEY`, `ARVAN_OBJECT_STORAGE_SECRET_KEY`, `ARVAN_OBJECT_STORAGE_BUCKET`, optional `ARVAN_OBJECT_STORAGE_ENDPOINT`) and keep prefixes under `staging/` or `staging-probe/`. Do not wire it into production deploy or sync paths without a separate approved design.
 
@@ -219,6 +233,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-11 08:30 UTC | Codex | **Dual-Platform Registration Stage 1 Foundation Added**: Added additive Invitation completion/kind/revocation metadata, local reservation/intent/command-receipt tables, strict registration/OTP/invitation-v2 contracts, central two-day invitation expiry, soft revocation, masked and rate-limited public invitation validation, Iran-only public WebApp URL validation, source-aware patch-only versioned registration sync, no-sync/sensitive registry coverage, backup/deploy/env tooling, and migration `a8d9e0f1b2c3`. All direct Telegram registration, reconciliation, Telegram OTP/SMS fallback, contract-v2, and registration-sync-v2 flags remain off. Scratch migration round trips/collision matrices, `2678` backend tests, focused frontend tests, deploy smoke, and frontend build passed. Staging stayed on `f7c8d9e0a1b2`; no staging or production deploy was run. |
 | 2026-07-10 20:50 UTC | Codex | **Telegram Notification Outbox Worker Recovery Fixed**: Corrected the generic Telegram notification worker's `RepeatedErrorLogger` call so transient database failures are logged without terminating the background task. Added focused regressions proving that the loop continues after an ordinary cycle failure and still propagates `CancelledError` for clean shutdown. Queue, recipient, retry, sync, and Telegram delivery semantics were not changed. |
 | 2026-07-10 18:59 UTC | Codex | **Two-Server Role Gate Cleanup Hardening**: Final candidate staging review passed the real Iran-host role/trading browser gate (`22/22`) but exposed a test-harness residue: prefix cleanup deleted synthetic users and cascaded `user_blocks` rows without tracking those block IDs, so the related `change_log` entry could remain unsynced. Extended `CleanupPlan`, dry-run/report counters, targeted prefix sync, explicit deletion order, and ChangeLog cleanup to include `user_blocks`; added regression assertions and passed `79/79` helper tests. Runtime market/API/sync behavior was not changed. |
 | 2026-07-10 18:29 UTC | Codex | **Iran Recovery Integrated Into UI/UX Candidate**: Merged `candidate/iran-server-replacement-20260710` into `candidate/webapp-ui-ux-unification` before main review. Resolved nine deployment/runner/test/documentation conflicts by preserving the UI candidate's object-storage, Compose fallback, DNS pin, market guard, and broader test contracts while adding the replacement-host bootstrap, recovery-only background-job/Nginx controls, reference-safe seed/parity behavior, physical staging storage identity, and Iran sampler role fix. Hardened one cold-import market test timeout without changing runtime code. Validation passed UI guards, frontend build, all `254/254` Vitest suites (`1101/1101` tests), `179` recovery/deploy tests, `174` offer tests, `390` trade tests, and `77` sync/publication tests. Production release was not run. |

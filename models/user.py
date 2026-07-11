@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Enum, BigInteger, Text, DateTime, ForeignKey
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Enum, ForeignKey, Integer, String, Text, text
 from sqlalchemy.sql import func
 from core.enums import UserAccountStatus
 from .database import Base
@@ -14,6 +14,9 @@ class UserRole(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("sync_version >= 1", name="ck_users_sync_version_positive"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     account_name = Column(String, unique=True, index=True, nullable=False)
@@ -69,6 +72,11 @@ class User(Base):
     max_accountants = Column(Integer, default=3, nullable=False)
     max_customers = Column(Integer, default=5, nullable=False)
     home_server = Column(String(16), nullable=False, default="foreign")
+    sync_version = Column(BigInteger, nullable=False, default=1, server_default=text("1"))
+    __mapper_args__ = {
+        "version_id_col": sync_version,
+        "version_id_generator": False,
+    }
 
     can_block_users = Column(Boolean, default=True)
     max_blocked_users = Column(Integer, default=10)

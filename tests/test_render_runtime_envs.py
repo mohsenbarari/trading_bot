@@ -48,6 +48,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "WEB_PUSH_VAPID_SUBJECT": "mailto:ops@example.com",
             "WEB_PUSH_TTL_SECONDS": "7200",
             "WEB_PUSH_TIMEOUT_SECONDS": "7.5",
+            "PUBLIC_WEBAPP_URL": "https://app.gold-trade.ir",
+            "FOREIGN_SERVER_ALIASES": "sync-foreign.example.com,foreign-app",
+            "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -90,6 +93,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         foreign = build_runtime_env(
             role="foreign",
             frontend_url="https://coin.362514.ir",
+            public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
             foreign_server_domain="coin.362514.ir",
             iran_server_url="https://coin.gold-trade.ir",
@@ -102,6 +106,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         iran = build_runtime_env(
             role="iran",
             frontend_url="https://coin.gold-trade.ir",
+            public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
             foreign_server_domain="coin.362514.ir",
             iran_server_url="https://coin.gold-trade.ir",
@@ -118,6 +123,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
+        self.assertEqual(foreign["PUBLIC_WEBAPP_URL"], "https://app.gold-trade.ir")
+        self.assertEqual(iran["PUBLIC_WEBAPP_URL"], "https://app.gold-trade.ir")
+        self.assertEqual(foreign["FOREIGN_SERVER_ALIASES"], "sync-foreign.example.com,foreign-app")
+        self.assertEqual(iran["IRAN_SERVER_ALIASES"], "sync-iran.example.com,iran-app")
         self.assertEqual(foreign["SYNC_VERIFY_TLS"], "true")
         self.assertEqual(iran["SYNC_VERIFY_TLS"], "true")
         self.assertEqual(foreign["SYNC_CA_BUNDLE"], "")
@@ -139,6 +148,26 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["REDIS_MAXMEMORY_POLICY"], "noeviction")
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
+
+    def test_build_runtime_env_uses_iran_frontend_as_public_webapp_fallback(self):
+        values = self.sample_values()
+        values["PUBLIC_WEBAPP_URL"] = ""
+
+        rendered = build_runtime_env(
+            role="foreign",
+            frontend_url="https://foreign.example.com",
+            public_webapp_url="https://webapp.example.ir",
+            foreign_server_url="https://sync.example.com",
+            foreign_server_domain="sync.example.com",
+            iran_server_url="http://iran-app:8000",
+            iran_server_domain="",
+            metrics_backend="memory",
+            audit_trail_path="/app/audit.jsonl",
+            api_workers="2",
+            values=values,
+        )
+
+        self.assertEqual(rendered["PUBLIC_WEBAPP_URL"], "https://webapp.example.ir")
 
     def test_main_renders_both_files_from_environment(self):
         values = self.sample_values()
@@ -194,6 +223,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("DB_POOL_SIZE=15", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.362514.ir", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)
+            self.assertIn("PUBLIC_WEBAPP_URL=https://app.gold-trade.ir", foreign_lines)
+            self.assertIn("PUBLIC_WEBAPP_URL=https://app.gold-trade.ir", iran_lines)
+            self.assertIn("FOREIGN_SERVER_ALIASES=sync-foreign.example.com,foreign-app", foreign_lines)
+            self.assertIn("IRAN_SERVER_ALIASES=sync-iran.example.com,iran-app", iran_lines)
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)
             self.assertIn("FOREIGN_SERVER_URL=https://coin.362514.ir", iran_lines)
             self.assertIn("SMSIR_OTP_TEMPLATE_ID=123456", iran_lines)

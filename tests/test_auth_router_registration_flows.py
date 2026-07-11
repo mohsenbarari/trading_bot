@@ -228,7 +228,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(call[0].startswith("otp_verify_lock:subject:") for call in redis.setex_calls))
 
     async def test_register_complete_requires_verified_token_and_valid_invitation(self):
-        req = RegisterComplete(token="abc", address="Tehran")
+        req = RegisterComplete(token="abc", address="Tehran address")
         redis = FakeRedis()
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
@@ -270,7 +270,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await register_complete(RegisterComplete(token="abc", address="Tehran"), raw_request=make_request(), db=db)
+                await register_complete(RegisterComplete(token="abc", address="Tehran address"), raw_request=make_request(), db=db)
 
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "خطا در ثبت کاربر")
@@ -313,7 +313,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             return_value="access-token",
         ) as access_mock:
             result = await register_complete(
-                RegisterComplete(token="abc", address="Tehran"),
+                RegisterComplete(token="abc", address="Tehran address"),
                 raw_request=request,
                 db=db,
             )
@@ -322,11 +322,14 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         new_user = db.added[0]
         self.assertEqual(new_user.account_name, "user1")
         self.assertEqual(new_user.mobile_number, "09120000000")
-        self.assertEqual(new_user.address, "Tehran")
+        self.assertEqual(new_user.address, "Tehran address")
         self.assertEqual(new_user.home_server, "iran")
         self.assertTrue(new_user.has_bot_access)
         self.assertIsNone(new_user.telegram_id)
         self.assertTrue(invitation.is_used)
+        self.assertEqual(invitation.registered_user_id, 77)
+        self.assertIsNotNone(invitation.completed_at)
+        self.assertEqual(invitation.completed_via.value, "web")
         db.flush.assert_awaited_once()
         self.assertIs(mandatory_mock.await_args.kwargs["user"], new_user)
         db.commit.assert_awaited_once()
@@ -404,7 +407,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             return_value="access-token",
         ):
             result = await register_complete(
-                RegisterComplete(registration_token="REG-123", address="Tehran"),
+                RegisterComplete(registration_token="REG-123", address="Tehran address"),
                 raw_request=make_request(),
                 db=db,
             )
@@ -480,7 +483,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(
-                    RegisterComplete(token="ACCT-token", address="Tehran"),
+                    RegisterComplete(token="ACCT-token", address="Tehran address"),
                     raw_request=make_request(),
                     db=FakeDB([FakeExecuteResult(invitation)]),
                 )
@@ -557,7 +560,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(
-                    RegisterComplete(token="CUST-token", address="Tehran"),
+                    RegisterComplete(token="CUST-token", address="Tehran address"),
                     raw_request=make_request(),
                     db=FakeDB([FakeExecuteResult(invitation)]),
                 )

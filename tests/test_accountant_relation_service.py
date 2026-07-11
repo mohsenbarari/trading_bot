@@ -28,6 +28,7 @@ from core.services.accountant_relation_service import (
 )
 from models.accountant_relation import AccountantRelation
 from models.accountant_relation import AccountantRelationStatus
+from models.invitation import InvitationKind
 from models.user import UserRole
 
 
@@ -185,6 +186,7 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_owner_accountant_relation_creates_pending_relation_and_invitation(self):
         owner = SimpleNamespace(id=7, max_accountants=3)
+        expected_expiry = datetime.utcnow() + timedelta(days=2)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(values=[]),
@@ -201,6 +203,9 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.accountant_relation_service.generate_accountant_short_code",
             return_value="SHORTA1",
+        ), patch(
+            "core.services.invitation_lifecycle_service.get_new_invitation_expiry",
+            new=AsyncMock(return_value=expected_expiry),
         ):
             relation, invitation = await create_owner_accountant_relation(
                 db,
@@ -215,6 +220,9 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invitation.account_name, "accountant_1")
         self.assertEqual(invitation.mobile_number, "09123456789")
         self.assertEqual(invitation.role, UserRole.WATCH)
+        self.assertEqual(invitation.kind, InvitationKind.ACCOUNTANT)
+        self.assertEqual(invitation.expires_at, expected_expiry)
+        self.assertEqual(relation.expires_at, expected_expiry)
         self.assertEqual(invitation.token, f"{ACCOUNTANT_INVITATION_PREFIX}token")
         self.assertEqual(relation.owner_user_id, 7)
         self.assertEqual(relation.global_account_name, "accountant_1")
@@ -327,7 +335,8 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(result, relation)
         self.assertEqual(relation.status, AccountantRelationStatus.REVOKED)
-        self.assertTrue(invitation.is_used)
+        self.assertFalse(invitation.is_used)
+        self.assertIsNotNone(invitation.revoked_at)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)
 

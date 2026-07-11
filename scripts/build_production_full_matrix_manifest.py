@@ -176,6 +176,7 @@ READ_PATHS = [
 
 SYNC_TABLES = [
     "users",
+    "invitations",
     "offers",
     "offer_requests",
     "trades",

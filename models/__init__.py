@@ -5,7 +5,10 @@
 from .user import User
 from .accountant_relation import AccountantRelation, AccountantRelationStatus
 from .customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
-from .invitation import Invitation
+from .invitation import Invitation, InvitationCompletionSurface, InvitationKind
+from .invitation_identity_reservation import InvitationIdentityReservation
+from .telegram_registration_intent import TelegramRegistrationIntent, TelegramRegistrationIntentStatus
+from .telegram_registration_command_receipt import TelegramRegistrationCommandReceipt
 from .session import (
     UserSession,
     Platform,
@@ -83,6 +86,12 @@ __all__ = [
     "CustomerRelationStatus",
     "CustomerTier",
     "Invitation",
+    "InvitationCompletionSurface",
+    "InvitationKind",
+    "InvitationIdentityReservation",
+    "TelegramRegistrationIntent",
+    "TelegramRegistrationIntentStatus",
+    "TelegramRegistrationCommandReceipt",
     "UserSession",
     "Platform",
     "SessionLoginRequest",

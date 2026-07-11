@@ -15,6 +15,7 @@ from api.routers.invitations import (
     lookup_invitation,
     validate_invitation,
 )
+from models.invitation import InvitationKind
 from models.user import UserRole
 
 
@@ -123,6 +124,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_invitation_creates_new_record_and_sends_sms(self):
         admin = SimpleNamespace(id=9)
         db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(None)])
+        expected_expiry = datetime.utcnow() + timedelta(days=2)
 
         with patch("api.routers.invitations.generate_token", return_value="INV-NEW"), patch(
             "api.routers.invitations.generate_short_code",
@@ -135,10 +137,9 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             __import__("api.routers.invitations", fromlist=["settings"]).settings,
             "frontend_url",
             "https://frontend.test",
-        ), patch.object(
-            __import__("api.routers.invitations", fromlist=["settings"]).settings,
-            "invitation_expiry_days",
-            3,
+        ), patch(
+            "api.routers.invitations.get_new_invitation_expiry",
+            new=AsyncMock(return_value=expected_expiry),
         ), patch(
             "api.routers.invitations.is_internet_connected",
             new=AsyncMock(return_value=True),
@@ -154,9 +155,11 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invitation.account_name, "user1")
         self.assertEqual(invitation.mobile_number, "09120000000")
         self.assertEqual(invitation.role, UserRole.STANDARD)
+        self.assertEqual(invitation.kind, InvitationKind.STANDARD)
         self.assertEqual(invitation.token, "INV-NEW")
         self.assertEqual(invitation.short_code, "SHORTNEW")
         self.assertEqual(invitation.created_by_id, 9)
+        self.assertEqual(invitation.expires_at, expected_expiry)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(invitation)
         send_sms_mock.assert_called_once_with(
@@ -168,6 +171,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["token"], "INV-NEW")
         self.assertEqual(result["link"], "https://t.me/test_bot?start=INV-NEW")
         self.assertEqual(result["short_link"], "https://frontend.test/i/SHORTNEW")
+        self.assertEqual(result["expires_at"], expected_expiry)
 
     async def test_list_pending_invitations_serializes_active_general_invites(self):
         admin = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN)
@@ -202,7 +206,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["web_link"], "https://frontend.test/register?token=INV-PENDING")
         self.assertEqual(result[0]["short_link"], "https://frontend.test/i/SHORT7")
 
-    async def test_delete_pending_invitation_deletes_only_manageable_pending_general_invites(self):
+    async def test_delete_pending_invitation_soft_revokes_only_manageable_pending_general_invites(self):
         admin = SimpleNamespace(id=9, role=UserRole.MIDDLE_MANAGER)
         invitation = SimpleNamespace(
             id=3,
@@ -211,12 +215,14 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(hours=1),
         )
-        db = FakeDB([FakeExecuteResult(invitation)])
+        db = FakeDB([FakeExecuteResult(invitation), FakeExecuteResult(None)])
 
         result = await delete_pending_invitation(3, db=db, admin=admin)
 
         self.assertIsNone(result)
-        db.delete.assert_awaited_once_with(invitation)
+        db.delete.assert_not_awaited()
+        self.assertIsNotNone(invitation.revoked_at)
+        self.assertEqual(db.execute_results, [])
         db.commit.assert_awaited_once()
 
         used_invitation = SimpleNamespace(
@@ -245,6 +251,10 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as exc_info:
             await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(None)]))
         self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(
+            exc_info.exception.headers["Cache-Control"],
+            "no-store, max-age=0",
+        )
 
         used = SimpleNamespace(is_used=True, expires_at=datetime.utcnow() + timedelta(minutes=5), token="INV")
         with self.assertRaises(HTTPException) as exc_info:
@@ -334,6 +344,10 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as exc_info:
             await validate_invitation("INV", db=FakeDB([FakeExecuteResult(None)]))
         self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(
+            exc_info.exception.headers["Cache-Control"],
+            "no-store, max-age=0",
+        )
 
         used = SimpleNamespace(is_used=True, expires_at=datetime.utcnow() + timedelta(minutes=5))
         with self.assertRaises(HTTPException) as exc_info:
@@ -360,7 +374,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             {
                 "valid": True,
                 "account_name": "user1",
-                "mobile_number": "09120000000",
+                "mobile_number": "0912****000",
                 "role": UserRole.WATCH,
             },
         )

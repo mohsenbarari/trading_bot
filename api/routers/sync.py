@@ -16,6 +16,11 @@ from core.redis import get_redis_client
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, default_peer_server_url, normalize_server, peer_server_url_for
 from core.sync_authority import IRAN_AUTHORITATIVE_SYNC_TABLES
 from core.sync_field_policy import sanitize_sync_payload
+from core.registration_sync_policy import (
+    REGISTRATION_VERSIONED_TABLES,
+    sanitize_registration_sync_payload,
+    registration_sync_capabilities,
+)
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
 from core.sync_parity_observability import summarize_parity_comparison
@@ -480,7 +485,7 @@ async def verify_signature(request: Request):
         raise HTTPException(status_code=401, detail="Verification failed")
 
 from sqlalchemy import case as sa_case
-from sqlalchemy import insert, update, delete, select, text as sa_text
+from sqlalchemy import insert, update, delete, literal as sa_literal, select, text as sa_text
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -1018,6 +1023,40 @@ def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
 def _build_upsert_stmt(model, table, data):
     """Build the INSERT ON CONFLICT statement for a given model and data."""
     stmt = pg_insert(model).values(**data)
+
+    registration_v2 = bool(getattr(settings, "registration_sync_v2_enabled", False))
+    has_sync_version = data.get("sync_version") is not None
+
+    if registration_v2 and has_sync_version and table == "users":
+        set_dict = {key: stmt.excluded[key] for key in data if key != "id"}
+        if "last_seen_at" in data:
+            set_dict["last_seen_at"] = _nullable_greatest(
+                model.last_seen_at,
+                stmt.excluded["last_seen_at"],
+            )
+        return stmt.on_conflict_do_update(
+            index_elements=['id'],
+            set_=set_dict,
+            where=model.sync_version < stmt.excluded["sync_version"],
+        )
+    if registration_v2 and has_sync_version and table == "invitations" and data.get("token"):
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "token"}}
+        return stmt.on_conflict_do_update(
+            index_elements=['token'],
+            set_=set_dict,
+            where=model.sync_version < stmt.excluded["sync_version"],
+        )
+    if registration_v2 and has_sync_version and table in RELATION_LINK_FIELDS and data.get("invitation_token"):
+        set_dict = {
+            key: stmt.excluded[key]
+            for key in data
+            if key not in {"id", "invitation_token"}
+        }
+        return stmt.on_conflict_do_update(
+            index_elements=['invitation_token'],
+            set_=set_dict,
+            where=model.sync_version < stmt.excluded["sync_version"],
+        )
 
     if table == "users":
         set_dict = _user_upsert_set_dict(model, stmt, data)
@@ -2101,6 +2140,67 @@ def _log_stale_offer_request_sync_ignored(record_id, operation: str, data: dict,
     )
 
 
+async def _apply_versioned_user_patch(
+    db: AsyncSession,
+    *,
+    record_id,
+    data: dict,
+    source_server: str | None,
+) -> str:
+    source = str(source_server or "").strip().lower()
+    values: dict[str, object] = {}
+    where_clause = User.id == record_id
+
+    if source == SERVER_FOREIGN:
+        for field_name in ("bot_onboarding_required_step", "bot_onboarding_completed_step"):
+            if field_name in data:
+                values[field_name] = sa_func.greatest(
+                    sa_func.coalesce(getattr(User, field_name), 0),
+                    sa_func.coalesce(data[field_name], 0),
+                )
+        for field_name in ("bot_onboarding_completed_at", "last_seen_at", "updated_at"):
+            if field_name in data:
+                values[field_name] = _nullable_greatest(
+                    getattr(User, field_name),
+                    sa_literal(data[field_name]),
+                )
+    elif source == SERVER_IRAN:
+        values = {
+            key: value
+            for key, value in data.items()
+            if key not in {"id", "created_at"}
+        }
+        if "last_seen_at" in data:
+            values["last_seen_at"] = _nullable_greatest(
+                User.last_seen_at,
+                sa_literal(data["last_seen_at"]),
+            )
+        incoming_version = data.get("sync_version")
+        if incoming_version is not None:
+            where_clause = where_clause & (User.sync_version < int(incoming_version))
+        elif data.get("updated_at") is not None:
+            where_clause = where_clause & (
+                User.updated_at.is_(None) | (User.updated_at <= data["updated_at"])
+            )
+    else:
+        return 'error'
+
+    if not values:
+        return 'ignored'
+
+    stmt = update(User).where(where_clause).values(**values)
+    async with db.begin_nested():
+        result = await db.execute(stmt, execution_options={"is_sync": True})
+    if getattr(result, "rowcount", None):
+        return 'ok'
+
+    existing_result = await db.execute(select(User.id, User.sync_version).where(User.id == record_id))
+    existing = _result_first(existing_result)
+    if existing is None:
+        return 'deferred'
+    return 'ignored'
+
+
 async def _apply_item(
     db: AsyncSession,
     table: str,
@@ -2110,6 +2210,7 @@ async def _apply_item(
     model,
     new_offers: list,
     terminal_offers: list | None = None,
+    source_server: str | None = None,
 ):
     """
     Apply a single sync item using SAVEPOINT so failures don't kill the transaction.
@@ -2145,6 +2246,17 @@ async def _apply_item(
         return 'ok'
 
     if operation in ("INSERT", "UPDATE"):
+        if (
+            table == "users"
+            and operation == "UPDATE"
+            and bool(getattr(settings, "registration_sync_v2_enabled", False))
+        ):
+            return await _apply_versioned_user_patch(
+                db,
+                record_id=record_id,
+                data=data,
+                source_server=source_server,
+            )
         if table == "chats" and _is_mandatory_channel_record(data):
             existing_mandatory_chat_id = await _resolve_existing_mandatory_chat_id(db)
             if existing_mandatory_chat_id is not None:
@@ -2277,6 +2389,22 @@ async def _apply_item(
             async with db.begin_nested():
                 execute_result = await db.execute(stmt, execution_options={"is_sync": True})
                 if (
+                    table in REGISTRATION_VERSIONED_TABLES
+                    and bool(getattr(settings, "registration_sync_v2_enabled", False))
+                    and persist_data.get("sync_version") is not None
+                    and getattr(execute_result, "rowcount", None) == 0
+                ):
+                    logger.info(
+                        "Ignored stale registration sync event",
+                        extra={
+                            "event": "sync.registration_stale_version_ignored",
+                            "table": table,
+                            "record_id": record_id,
+                            "incoming_sync_version": persist_data.get("sync_version"),
+                        },
+                    )
+                    return 'ignored'
+                if (
                     table == "offers"
                     and _offer_payload_needs_ordering_check(persist_data)
                     and getattr(execute_result, "rowcount", None) == 0
@@ -2358,11 +2486,42 @@ async def _apply_item(
                                     .where(natural_col == natural_value)
                                     .values(**update_data)
                                 )
+                                if (
+                                    table in REGISTRATION_VERSIONED_TABLES
+                                    and bool(getattr(settings, "registration_sync_v2_enabled", False))
+                                    and persist_data.get("sync_version") is not None
+                                ):
+                                    if table == "users" and "last_seen_at" in update_data:
+                                        stmt_update = stmt_update.values(
+                                            last_seen_at=_nullable_greatest(
+                                                User.last_seen_at,
+                                                sa_literal(update_data["last_seen_at"]),
+                                            )
+                                        )
+                                    stmt_update = stmt_update.where(
+                                        model.sync_version < int(persist_data["sync_version"])
+                                    )
                                 if table == "trades":
                                     where_clause = _trade_completed_update_where_clause(model, persist_data)
                                     if where_clause is not None:
                                         stmt_update = stmt_update.where(where_clause)
                                 update_result = await db.execute(stmt_update, execution_options={"is_sync": True})
+                                if (
+                                    table in REGISTRATION_VERSIONED_TABLES
+                                    and bool(getattr(settings, "registration_sync_v2_enabled", False))
+                                    and persist_data.get("sync_version") is not None
+                                    and getattr(update_result, "rowcount", None) == 0
+                                ):
+                                    logger.info(
+                                        "Ignored stale registration natural-key merge",
+                                        extra={
+                                            "event": "sync.registration_stale_version_ignored",
+                                            "table": table,
+                                            "record_id": record_id,
+                                            "incoming_sync_version": persist_data.get("sync_version"),
+                                        },
+                                    )
+                                    return 'ignored'
                                 if (
                                     table == "trades"
                                     and getattr(update_result, "rowcount", None) == 0
@@ -2917,6 +3076,7 @@ async def receive_sync_data(
                 continue
 
             table, operation, model, data, record_id = parsed
+            source_server = _sync_item_source_server(item)
             authority_rejection_reason = _sync_item_authority_rejection_reason(item, table)
             if authority_rejection_reason:
                 error_detail = _sync_error_detail(item, authority_rejection_reason)
@@ -2935,6 +3095,44 @@ async def receive_sync_data(
                     },
                 )
                 continue
+
+            registration_sync_decision = sanitize_registration_sync_payload(
+                table=table,
+                operation=operation,
+                data=data,
+                source_server=source_server,
+                v2_enabled=bool(getattr(settings, "registration_sync_v2_enabled", False)),
+                accept_unversioned=bool(
+                    getattr(settings, "registration_sync_accept_unversioned", True)
+                ),
+            )
+            if not registration_sync_decision.accepted:
+                error_detail = _sync_error_detail(
+                    item,
+                    registration_sync_decision.reason or "registration_sync_policy_rejected",
+                )
+                errors.append(error_detail)
+                error_details.append(error_detail)
+                logger.warning(
+                    "Rejected registration sync item",
+                    extra={
+                        "event": "sync.registration_policy_rejected",
+                        **error_detail,
+                    },
+                )
+                continue
+            if registration_sync_decision.dropped_fields:
+                logger.warning(
+                    "Dropped unauthorized registration sync fields",
+                    extra={
+                        "event": "sync.registration_fields_dropped",
+                        "table": table,
+                        "record_id": record_id,
+                        "source_server": source_server,
+                        "dropped_fields": list(registration_sync_decision.dropped_fields),
+                    },
+                )
+            data = registration_sync_decision.data
 
             try:
                 watermark_context = _sync_watermark_context_from_item(
@@ -2981,7 +3179,22 @@ async def receive_sync_data(
                     record_id=record_id,
                     data=data,
                 )
-                result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
+                apply_args = (
+                    {"source_server": source_server}
+                    if bool(getattr(settings, "registration_sync_v2_enabled", False))
+                    else {}
+                )
+                result = await _apply_item(
+                    db,
+                    table,
+                    operation,
+                    record_id,
+                    data,
+                    model,
+                    new_offers,
+                    terminal_offers,
+                    **apply_args,
+                )
                 if result in {'ok', 'ignored'}:
                     await _record_sync_watermark_applied(db, watermark_context)
                     processed_count += 1
@@ -3068,7 +3281,22 @@ async def receive_sync_data(
                         record_id=record_id,
                         data=data,
                     )
-                    result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
+                    apply_args = (
+                        {"source_server": _sync_item_source_server(item)}
+                        if bool(getattr(settings, "registration_sync_v2_enabled", False))
+                        else {}
+                    )
+                    result = await _apply_item(
+                        db,
+                        table,
+                        operation,
+                        record_id,
+                        data,
+                        model,
+                        new_offers,
+                        terminal_offers,
+                        **apply_args,
+                    )
                     if result in {'ok', 'ignored'}:
                         await _record_sync_watermark_applied(db, watermark_context)
                         processed_count += 1
@@ -3815,6 +4043,7 @@ async def get_sync_health(
         "active_publication_gate": active_publication_gate,
         "publication_reconciliation": publication_reconciliation,
         "parity_status": _parity_status_payload(latest_parity_summary),
+        "registration_sync": registration_sync_capabilities(settings),
     }
     latest_parity = payload["parity_status"].get("latest_comparison") if isinstance(payload.get("parity_status"), dict) else None
     if isinstance(latest_parity, dict):

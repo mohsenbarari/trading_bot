@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import secrets
 import string
@@ -20,7 +19,7 @@ from models.accountant_relation import AccountantRelation, AccountantRelationSta
 from models.chat import Chat
 from models.chat_member import ChatMember
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
-from models.invitation import Invitation
+from models.invitation import Invitation, InvitationKind
 from models.offer import OfferType
 from models.user import User, UserRole
 
@@ -30,7 +29,8 @@ CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES = (
     CustomerRelationStatus.ACTIVE,
 )
 CUSTOMER_INVITATION_PREFIX = "CUST-"
-CUSTOMER_PENDING_LIFETIME = timedelta(days=2)
+# Deprecated compatibility constant. New invitations use core.trading_settings.
+CUSTOMER_PENDING_LIFETIME = None
 PRICE_ROUNDING_UNIT = Decimal("100")
 
 
@@ -158,6 +158,20 @@ async def sweep_expired_pending_customer_relations(
     for relation in expired_relations:
         relation.status = CustomerRelationStatus.EXPIRED
         relation.deleted_at = now
+
+    if expired_relations:
+        from core.services.invitation_identity_reservation_service import (
+            release_invitation_identities_for_tokens,
+        )
+
+        await release_invitation_identities_for_tokens(
+            db,
+            invitation_tokens=[
+                relation.invitation_token
+                for relation in expired_relations
+                if getattr(relation, "invitation_token", None)
+            ],
+        )
 
     return expired_relations
 
@@ -450,12 +464,15 @@ async def create_owner_customer_relation(
 
     invitation_token = generate_customer_invitation_token()
     short_code = generate_customer_short_code()
-    expires_at = _utcnow_naive() + CUSTOMER_PENDING_LIFETIME
+    from core.services.invitation_lifecycle_service import get_new_invitation_expiry
+
+    expires_at = await get_new_invitation_expiry()
 
     invitation = Invitation(
         account_name=normalized_account_name,
         mobile_number=normalized_mobile,
         role=UserRole.STANDARD,
+        kind=InvitationKind.CUSTOMER,
         token=invitation_token,
         short_code=short_code,
         created_by_id=owner_user.id,
@@ -508,8 +525,12 @@ async def cancel_pending_customer_relation(
     invitation_stmt = select(Invitation).where(Invitation.token == relation.invitation_token)
     invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
     if invitation:
-        invitation.is_used = True
-        invitation.expires_at = now
+        from core.services.invitation_identity_reservation_service import release_invitation_identity
+        from core.services.invitation_lifecycle_service import soft_revoke_invitation
+
+        soft_revoke_invitation(invitation, revoked_at=now)
+        if getattr(invitation, "id", None) is not None:
+            await release_invitation_identity(db, invitation_id=invitation.id)
 
     await db.commit()
     await db.refresh(relation)
