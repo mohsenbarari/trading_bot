@@ -1357,6 +1357,18 @@ hashed locks, natural-identity sync, counter contract, race/rollback paths, and 
 suite. This preserves the Stage 2 implementation commit rather than rewriting history, but does not
 override the Stage 1 `NO-GO`; both milestones require a clean remediation review before Stage 3.
 
+Independent Stage 2 review remediation (2026-07-11): **Implemented and awaiting combined
+re-review**. The accepted open findings `C-1`, `H-1`, `H-2`, `H-3`, `H-4`, `H-9`, `M-1`, `M-2`,
+`M-5`, `L-1`, and `L-2` are addressed through database-enforced canonical User identity, one
+Invitation-first terminal-transition lock hierarchy, durable receipt-only uniqueness outcomes,
+dedicated notification sessions, current Iran eligibility projection, guarded scratch Alembic,
+strict Relation consistency, real adapter/session retry tests, opaque advisory parameters, and
+two-session receipt/outbox races. The implementation and evidence contract are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE2_REMEDIATION_20260711.md`. Findings `M-4`, `M-8`, and `L-3`
+remain intentionally deferred under their existing disabled-runtime and migration/deployment gates.
+Stage 3 is still blocked until the mandatory combined independent review returns `GO`; no feature
+flag, staging deployment, production action, or runtime migration was performed.
+
 ### Stage 3 - Canonical Invitation Creation And URL Repair
 
 - Route bot-admin invitation creation to signed Iran authority.

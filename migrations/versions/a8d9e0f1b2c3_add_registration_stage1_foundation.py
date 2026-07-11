@@ -46,6 +46,20 @@ telegram_registration_intent_status = postgresql.ENUM(
     create_type=False,
 )
 
+canonical_digit_source_sql = (
+    r"U&'\06F0\06F1\06F2\06F3\06F4\06F5\06F6\06F7\06F8\06F9"
+    r"\0660\0661\0662\0663\0664\0665\0666\0667\0668\0669'"
+)
+canonical_digit_target_sql = "'01234567890123456789'"
+normalized_account_sql = (
+    f"lower(translate(btrim(account_name), {canonical_digit_source_sql}, "
+    f"{canonical_digit_target_sql}))"
+)
+normalized_mobile_sql = (
+    f"translate(btrim(mobile_number), {canonical_digit_source_sql}, "
+    f"{canonical_digit_target_sql})"
+)
+
 
 def _create_enum_types() -> None:
     bind = op.get_bind()
@@ -73,6 +87,71 @@ def _add_version_columns() -> None:
         "ck_users_counter_epoch_positive",
         "users",
         "counter_epoch >= 1",
+    )
+
+
+def _add_user_canonical_identity() -> None:
+    # Raw unique keys do not catch Persian/Arabic digit, case, or surrounding
+    # whitespace variants. Abort without exposing values rather than choosing a
+    # historical winner that could bind registration to the wrong User.
+    op.execute(
+        f"""
+        DO $$
+        DECLARE
+            collision_group_count bigint;
+        BEGIN
+            SELECT COUNT(*)
+            INTO collision_group_count
+            FROM (
+                SELECT {normalized_mobile_sql} AS canonical_value
+                FROM users
+                GROUP BY canonical_value
+                HAVING COUNT(*) > 1
+                UNION ALL
+                SELECT {normalized_account_sql} AS canonical_value
+                FROM users
+                GROUP BY canonical_value
+                HAVING COUNT(*) > 1
+            ) collisions;
+
+            IF collision_group_count > 0 THEN
+                RAISE EXCEPTION
+                    'canonical User identity audit found % collision groups',
+                    collision_group_count;
+            END IF;
+        END
+        $$;
+        """
+    )
+    op.add_column(
+        "users",
+        sa.Column(
+            "normalized_account_name",
+            sa.String(),
+            sa.Computed(normalized_account_sql, persisted=True),
+            nullable=False,
+        ),
+    )
+    op.add_column(
+        "users",
+        sa.Column(
+            "normalized_mobile_number",
+            sa.String(),
+            sa.Computed(normalized_mobile_sql, persisted=True),
+            nullable=False,
+        ),
+    )
+    op.create_index(
+        "ux_users_normalized_account_name",
+        "users",
+        ["normalized_account_name"],
+        unique=True,
+    )
+    op.create_index(
+        "ux_users_normalized_mobile_number",
+        "users",
+        ["normalized_mobile_number"],
+        unique=True,
     )
 
 
@@ -134,7 +213,7 @@ def _add_invitation_metadata() -> None:
     # is sufficiently strong evidence. Legacy standard invitations stay
     # intentionally ambiguous because they have no equivalent durable relation.
     op.execute(
-        """
+        f"""
         UPDATE invitations AS i
         SET registered_user_id = u.id,
             completed_at = ar.activated_at,
@@ -148,8 +227,26 @@ def _add_invitation_metadata() -> None:
           AND ar.status::text IN ('active', 'expired')
           AND ar.deleted_at IS NULL
           AND ar.activated_at IS NOT NULL
-          AND u.account_name = i.account_name
-          AND u.mobile_number = i.mobile_number
+          AND u.normalized_account_name = lower(translate(
+                btrim(i.account_name),
+                {canonical_digit_source_sql},
+                {canonical_digit_target_sql}
+              ))
+          AND u.normalized_mobile_number = translate(
+                btrim(i.mobile_number),
+                {canonical_digit_source_sql},
+                {canonical_digit_target_sql}
+              )
+          AND u.normalized_account_name = lower(translate(
+                btrim(ar.global_account_name),
+                {canonical_digit_source_sql},
+                {canonical_digit_target_sql}
+              ))
+          AND u.normalized_mobile_number = translate(
+                btrim(ar.mobile_number),
+                {canonical_digit_source_sql},
+                {canonical_digit_target_sql}
+              )
           AND COALESCE(u.is_deleted, false) = false
           AND u.account_status::text = 'active'
           AND (i.created_at IS NULL OR ar.activated_at >= i.created_at)
@@ -157,7 +254,7 @@ def _add_invitation_metadata() -> None:
         """
     )
     op.execute(
-        """
+        f"""
         UPDATE invitations AS i
         SET registered_user_id = u.id,
             completed_at = cr.activated_at,
@@ -171,8 +268,16 @@ def _add_invitation_metadata() -> None:
           AND cr.status::text IN ('active', 'expired')
           AND cr.deleted_at IS NULL
           AND cr.activated_at IS NOT NULL
-          AND u.account_name = i.account_name
-          AND u.mobile_number = i.mobile_number
+          AND u.normalized_account_name = lower(translate(
+                btrim(i.account_name),
+                {canonical_digit_source_sql},
+                {canonical_digit_target_sql}
+              ))
+          AND u.normalized_mobile_number = translate(
+                btrim(i.mobile_number),
+                {canonical_digit_source_sql},
+                {canonical_digit_target_sql}
+              )
           AND COALESCE(u.is_deleted, false) = false
           AND u.account_status::text = 'active'
           AND (i.created_at IS NULL OR cr.activated_at >= i.created_at)
@@ -491,6 +596,7 @@ def _create_registration_local_state() -> None:
 def upgrade() -> None:
     _create_enum_types()
     _add_version_columns()
+    _add_user_canonical_identity()
     _add_invitation_metadata()
     _create_identity_reservations()
     _create_registration_local_state()
@@ -545,6 +651,11 @@ def downgrade() -> None:
     op.drop_column("invitations", "completed_at")
     op.drop_column("invitations", "registered_user_id")
     op.drop_column("invitations", "kind")
+
+    op.drop_index("ux_users_normalized_mobile_number", table_name="users")
+    op.drop_index("ux_users_normalized_account_name", table_name="users")
+    op.drop_column("users", "normalized_mobile_number")
+    op.drop_column("users", "normalized_account_name")
 
     op.drop_constraint("ck_users_counter_epoch_positive", "users", type_="check")
     op.drop_column("users", "counter_epoch")

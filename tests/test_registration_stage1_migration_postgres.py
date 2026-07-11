@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -36,17 +37,24 @@ MIGRATION_DATABASE_URLS = _migration_database_urls()
 
 
 def _run_alembic(sync_url: str, *args: str) -> None:
+    result = _run_alembic_result(sync_url, *args)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout)
+
+
+def _run_alembic_result(sync_url: str, *args: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["SYNC_DATABASE_URL"] = sync_url
-    result = subprocess.run(
-        ["alembic", *args],
+    env["DATABASE_URL"] = sync_url
+    env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
+    env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
+    return subprocess.run(
+        [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
         text=True,
         check=False,
         env=env,
     )
-    if result.returncode != 0:
-        raise AssertionError(result.stderr or result.stdout)
 
 
 class Stage1MigrationDatabaseSafetyTests(unittest.TestCase):
@@ -273,6 +281,87 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
             _run_alembic(sync_url, "downgrade", "f7c8d9e0a1b2")
+
+    async def test_canonical_user_collision_aborts_without_partial_schema(self):
+        sync_url, async_url = MIGRATION_DATABASE_URLS
+        _run_alembic(sync_url, "upgrade", "f7c8d9e0a1b2")
+        engine = create_async_engine(async_url, pool_pre_ping=True)
+        label = uuid4().hex[:10]
+        accounts = [
+            f" Canonical_{label}_۱۲۳ ",
+            f"canonical_{label}_123",
+            f"mobile_a_{label}",
+            f"mobile_b_{label}",
+        ]
+        canonical_mobile = f"091{(int(label[:8], 16) + 77) % 100000000:08d}"
+        persian_mobile = canonical_mobile.translate(
+            str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+        )
+        mobiles = [
+            f"090{int(label[:7], 16) % 100000000:08d}",
+            f"092{int(label[:7], 16) % 100000000:08d}",
+            persian_mobile,
+            canonical_mobile,
+        ]
+        try:
+            async with engine.begin() as connection:
+                for index, (account, mobile) in enumerate(zip(accounts, mobiles, strict=True)):
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO users (
+                                account_name, mobile_number, full_name, address, role,
+                                has_bot_access, is_deleted, must_change_password, home_server
+                            ) VALUES (
+                                :account, :mobile, :full_name, 'Canonical migration address',
+                                'STANDARD', true, false, false, 'iran'
+                            )
+                            """
+                        ),
+                        {
+                            "account": account,
+                            "mobile": mobile,
+                            "full_name": f"canonical collision {index}",
+                        },
+                    )
+
+            result = _run_alembic_result(sync_url, "upgrade", "a8d9e0f1b2c3")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "canonical User identity audit found 2 collision groups",
+                f"{result.stdout}\n{result.stderr}",
+            )
+            async with engine.connect() as connection:
+                revision = (
+                    await connection.execute(text("SELECT version_num FROM alembic_version"))
+                ).scalar_one()
+                self.assertEqual(revision, "f7c8d9e0a1b2")
+                generated_column_count = int(
+                    (
+                        await connection.execute(
+                            text(
+                                """
+                                SELECT COUNT(*)
+                                FROM information_schema.columns
+                                WHERE table_schema = current_schema()
+                                  AND table_name = 'users'
+                                  AND column_name IN (
+                                      'normalized_account_name',
+                                      'normalized_mobile_number'
+                                  )
+                                """
+                            )
+                        )
+                    ).scalar_one()
+                )
+                self.assertEqual(generated_column_count, 0)
+        finally:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM users WHERE account_name = ANY(:accounts)"),
+                    {"accounts": accounts},
+                )
+            await engine.dispose()
 
 
 if __name__ == "__main__":

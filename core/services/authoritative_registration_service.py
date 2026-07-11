@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,10 @@ from core.services.accountant_relation_service import (
     activate_accountant_relation_for_registration,
     lock_accountant_relation_for_registration,
 )
-from core.services.bot_access_policy import evaluate_invitation_bot_access
+from core.services.bot_access_policy import (
+    evaluate_bot_access_projection,
+    evaluate_invitation_bot_access,
+)
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.customer_relation_service import (
     activate_customer_relation_for_registration,
@@ -32,10 +35,12 @@ from core.services.customer_relation_service import (
 )
 from core.services.invitation_identity_reservation_service import (
     NormalizedInvitationIdentity,
-    invitation_identity_lock_keys,
-    telegram_identity_lock_key,
+    acquire_invitation_transition_locks,
     normalize_invitation_identity,
     release_invitation_identity,
+)
+from core.services.invitation_transition_lock_service import (
+    lock_invitation_row_for_transition,
 )
 from core.services.invitation_lifecycle_service import (
     complete_invitation,
@@ -55,10 +60,10 @@ from core.services.registration_notification_service import (
 from core.services.user_account_status_service import get_user_account_status
 from core.utils import normalize_account_name, normalize_persian_numerals, utc_now
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
-from models.customer_relation import CustomerRelation, CustomerRelationStatus
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
 from models.telegram_registration_command_receipt import TelegramRegistrationCommandReceipt
-from models.user import User, set_legacy_has_bot_access_compatibility
+from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 
 
 RegistrationCheckpoint = Callable[[str], Awaitable[None]]
@@ -146,6 +151,12 @@ def _utc_naive(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _same_utc_instant(left: datetime | None, right: datetime | None) -> bool:
+    if left is None or right is None:
+        return False
+    return _utc_naive(left) == _utc_naive(right)
+
+
 async def _checkpoint(callback: RegistrationCheckpoint | None, name: str) -> None:
     if callback is not None:
         await callback(name)
@@ -185,8 +196,10 @@ def _validate_request_shape(request: AuthoritativeRegistrationRequest) -> None:
 
 
 async def _load_invitation_for_update(db: AsyncSession, token: str) -> Invitation | None:
-    stmt = select(Invitation).where(Invitation.token == token).with_for_update()
-    return (await db.execute(stmt)).scalar_one_or_none()
+    return await lock_invitation_row_for_transition(
+        db,
+        invitation_token=token,
+    )
 
 
 async def _acquire_registration_identity_locks(
@@ -194,15 +207,14 @@ async def _acquire_registration_identity_locks(
     *,
     identity: NormalizedInvitationIdentity,
     telegram_id: int | None,
+    invitation_token: str | None = None,
 ) -> None:
-    lock_keys = list(invitation_identity_lock_keys(identity))
-    if telegram_id is not None:
-        lock_keys.append(telegram_identity_lock_key(int(telegram_id)))
-    for lock_key in sorted(set(lock_keys)):
-        await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
-            {"lock_key": lock_key},
-        )
+    await acquire_invitation_transition_locks(
+        db,
+        invitation_token=invitation_token,
+        identity=identity,
+        telegram_id=telegram_id,
+    )
 
 
 async def _load_matching_users_for_update(
@@ -213,8 +225,8 @@ async def _load_matching_users_for_update(
     telegram_id: int | None,
 ) -> list[User]:
     conditions = [
-        User.mobile_number == identity.mobile_number,
-        func.lower(User.account_name) == identity.account_name,
+        User.normalized_mobile_number == identity.mobile_number,
+        User.normalized_account_name == identity.account_name,
     ]
     if telegram_id is not None:
         conditions.append(User.telegram_id == int(telegram_id))
@@ -277,32 +289,101 @@ async def _load_relation_for_registration(
     invitation: Invitation,
     kind: InvitationKind,
 ) -> tuple[AccountantRelation | None, CustomerRelation | None]:
+    accountant_relation = await lock_accountant_relation_for_registration(
+        db,
+        invitation.token,
+    )
+    customer_relation = await lock_customer_relation_for_registration(
+        db,
+        invitation.token,
+    )
     if kind == InvitationKind.ACCOUNTANT:
-        relation = await lock_accountant_relation_for_registration(db, invitation.token)
-        if relation is None:
+        if accountant_relation is None or customer_relation is not None:
             raise _error(
                 TelegramRegistrationOutcome.INVALID_RELATION,
                 "دعوت‌نامه حسابدار نامعتبر یا منقضی شده است",
             )
-        return relation, None
+        return accountant_relation, None
     if kind == InvitationKind.CUSTOMER:
-        relation = await lock_customer_relation_for_registration(db, invitation.token)
-        if relation is None:
+        if customer_relation is None or accountant_relation is not None:
             raise _error(
                 TelegramRegistrationOutcome.INVALID_RELATION,
                 "دعوت‌نامه مشتری نامعتبر یا منقضی شده است",
             )
-        return None, relation
+        return None, customer_relation
+    if accountant_relation is not None or customer_relation is not None:
+        raise _error(
+            TelegramRegistrationOutcome.INVALID_RELATION,
+            "اطلاعات رابطه دعوت‌نامه معتبر نیست",
+        )
     return None, None
+
+
+def _validate_relation_contract(
+    *,
+    invitation: Invitation,
+    identity: NormalizedInvitationIdentity,
+    accountant_relation: AccountantRelation | None,
+    customer_relation: CustomerRelation | None,
+) -> None:
+    invitation_creator_id = getattr(invitation, "created_by_id", None)
+    if accountant_relation is not None:
+        try:
+            relation_identity = normalize_invitation_identity(
+                mobile_number=accountant_relation.mobile_number,
+                account_name=accountant_relation.global_account_name,
+            )
+        except ValueError as exc:
+            raise _error(
+                TelegramRegistrationOutcome.INVALID_RELATION,
+                "دعوت‌نامه حسابدار نامعتبر یا منقضی شده است",
+            ) from exc
+        if (
+            invitation.kind != InvitationKind.ACCOUNTANT
+            or invitation.role != UserRole.WATCH
+            or accountant_relation.invitation_token != invitation.token
+            or relation_identity != identity
+            or invitation_creator_id is None
+            or accountant_relation.owner_user_id != invitation_creator_id
+            or accountant_relation.created_by_user_id != invitation_creator_id
+            or not _same_utc_instant(accountant_relation.expires_at, invitation.expires_at)
+        ):
+            raise _error(
+                TelegramRegistrationOutcome.INVALID_RELATION,
+                "دعوت‌نامه حسابدار نامعتبر یا منقضی شده است",
+            )
+    if customer_relation is not None:
+        customer_tier = _enum_value(customer_relation.customer_tier)
+        if (
+            invitation.kind != InvitationKind.CUSTOMER
+            or invitation.role != UserRole.STANDARD
+            or customer_relation.invitation_token != invitation.token
+            or invitation_creator_id is None
+            or customer_relation.owner_user_id != invitation_creator_id
+            or customer_relation.created_by_user_id != invitation_creator_id
+            or not _same_utc_instant(customer_relation.expires_at, invitation.expires_at)
+            or customer_tier not in {CustomerTier.TIER_1.value, CustomerTier.TIER_2.value}
+        ):
+            raise _error(
+                TelegramRegistrationOutcome.INVALID_RELATION,
+                "دعوت‌نامه مشتری نامعتبر یا منقضی شده است",
+            )
 
 
 def _validate_pending_relation(
     *,
     request: AuthoritativeRegistrationRequest,
     invitation: Invitation,
+    identity: NormalizedInvitationIdentity,
     accountant_relation: AccountantRelation | None,
     customer_relation: CustomerRelation | None,
 ) -> None:
+    _validate_relation_contract(
+        invitation=invitation,
+        identity=identity,
+        accountant_relation=accountant_relation,
+        customer_relation=customer_relation,
+    )
     proof_time = (
         request.telegram_command.local_completed_at
         if request.telegram_command is not None
@@ -354,6 +435,56 @@ def _validate_telegram_projection_eligibility(
         raise _error(
             TelegramRegistrationOutcome.INVALID_RELATION,
             "این دعوت‌نامه فقط از طریق وب‌اپ قابل تکمیل است",
+        )
+
+
+async def _validate_current_telegram_eligibility(
+    db: AsyncSession,
+    *,
+    user: User,
+) -> None:
+    accountant_stmt = (
+        select(AccountantRelation)
+        .where(
+            AccountantRelation.accountant_user_id == user.id,
+            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+            AccountantRelation.deleted_at.is_(None),
+        )
+        .order_by(AccountantRelation.id.asc())
+        .with_for_update()
+    )
+    customer_stmt = (
+        select(CustomerRelation)
+        .where(
+            CustomerRelation.customer_user_id == user.id,
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .order_by(CustomerRelation.id.asc())
+        .with_for_update()
+    )
+    accountant_relations = list((await db.execute(accountant_stmt)).scalars().all())
+    customer_relations = list((await db.execute(customer_stmt)).scalars().all())
+    if len(accountant_relations) > 1 or len(customer_relations) > 1:
+        raise _error(
+            TelegramRegistrationOutcome.INVALID_RELATION,
+            "وضعیت دسترسی این حساب به ربات معتبر نیست",
+        )
+    customer_relation = customer_relations[0] if customer_relations else None
+    decision = evaluate_bot_access_projection(
+        user,
+        is_accountant=bool(accountant_relations),
+        customer_relation_present=customer_relation is not None,
+        customer_tier=(
+            customer_relation.customer_tier
+            if customer_relation is not None
+            else None
+        ),
+    )
+    if not decision.allowed:
+        raise _error(
+            TelegramRegistrationOutcome.INVALID_RELATION,
+            "این حساب در حال حاضر فقط از طریق وب‌اپ قابل استفاده است",
         )
 
 
@@ -474,10 +605,18 @@ def _registered_user_for_completed_invitation(
 
 def _validate_completed_relation(
     *,
+    invitation: Invitation,
+    identity: NormalizedInvitationIdentity,
     user: User,
     accountant_relation: AccountantRelation | None,
     customer_relation: CustomerRelation | None,
 ) -> None:
+    _validate_relation_contract(
+        invitation=invitation,
+        identity=identity,
+        accountant_relation=accountant_relation,
+        customer_relation=customer_relation,
+    )
     if accountant_relation is not None and (
         accountant_relation.status != AccountantRelationStatus.ACTIVE
         or accountant_relation.deleted_at is not None
@@ -516,17 +655,25 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 
 def _integrity_conflict(exc: IntegrityError) -> AuthoritativeRegistrationError | None:
     constraint = _constraint_name(exc)
-    if constraint == "users_mobile_number_key":
+    if constraint in {
+        "users_mobile_number_key",
+        "ix_users_mobile_number",
+        "ux_users_normalized_mobile_number",
+    }:
         return _error(
             TelegramRegistrationOutcome.MOBILE_CONFLICT,
             "کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است",
         )
-    if constraint == "users_account_name_key":
+    if constraint in {
+        "users_account_name_key",
+        "ix_users_account_name",
+        "ux_users_normalized_account_name",
+    }:
         return _error(
             TelegramRegistrationOutcome.ACCOUNT_NAME_CONFLICT,
             "کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است",
         )
-    if constraint == "users_telegram_id_key":
+    if constraint in {"users_telegram_id_key", "ix_users_telegram_id"}:
         return _error(
             TelegramRegistrationOutcome.TELEGRAM_ID_ALREADY_USED,
             "این حساب تلگرام قبلاً به کاربر دیگری متصل شده است",
@@ -549,6 +696,95 @@ def _receipt_replay_result(
         replayed=True,
         first_terminal_transition=False,
     )
+
+
+async def _persist_integrity_conflict_receipt(
+    db: AsyncSession,
+    *,
+    request: AuthoritativeRegistrationRequest,
+    conflict: AuthoritativeRegistrationError,
+    checkpoint: RegistrationCheckpoint | None,
+) -> AuthoritativeRegistrationResult:
+    command = request.telegram_command
+    if command is None:
+        raise conflict
+
+    receipt, replayed = await prepare_registration_command_receipt(
+        db,
+        command=command,
+        source_server=request.source_server or "",
+    )
+    if replayed and receipt.completed_at is not None and receipt.outcome_code is not None:
+        result = _receipt_replay_result(receipt)
+        await db.commit()
+        await _checkpoint(checkpoint, "after_commit")
+        return result
+
+    outcome = conflict.outcome
+    authoritative_user_id: int | None = None
+    invitation = await _load_invitation_for_update(db, request.invitation_token)
+    if invitation is None:
+        outcome = TelegramRegistrationOutcome.INVITATION_NOT_FOUND
+    elif invitation.revoked_at is not None:
+        outcome = TelegramRegistrationOutcome.INVITATION_REVOKED
+    else:
+        try:
+            identity = normalize_invitation_identity(
+                mobile_number=invitation.mobile_number,
+                account_name=invitation.account_name,
+            )
+            await _acquire_registration_identity_locks(
+                db,
+                identity=identity,
+                telegram_id=command.telegram_id,
+                invitation_token=invitation.token,
+            )
+            users = await _load_matching_users_for_update(
+                db,
+                invitation=invitation,
+                identity=identity,
+                telegram_id=command.telegram_id,
+            )
+            if invitation.is_used:
+                registered_user = _registered_user_for_completed_invitation(
+                    invitation,
+                    users,
+                    identity=identity,
+                )
+                _raise_for_existing_user_state([registered_user])
+                if registered_user.telegram_id == command.telegram_id:
+                    outcome = TelegramRegistrationOutcome.ALREADY_LINKED
+                    authoritative_user_id = registered_user.id
+                elif registered_user.telegram_id is not None:
+                    outcome = TelegramRegistrationOutcome.TELEGRAM_ACCOUNT_CONFLICT
+            else:
+                try:
+                    _validate_pending_natural_keys(
+                        users,
+                        identity=identity,
+                        telegram_id=command.telegram_id,
+                    )
+                except AuthoritativeRegistrationError as current_conflict:
+                    outcome = current_conflict.outcome
+        except AuthoritativeRegistrationError as current_conflict:
+            outcome = current_conflict.outcome
+            authoritative_user_id = None
+        except ValueError:
+            outcome = TelegramRegistrationOutcome.LEGACY_STATE_AMBIGUOUS
+
+    finalize_registration_command_receipt(
+        receipt,
+        outcome=outcome,
+        authoritative_user_id=authoritative_user_id,
+    )
+    await db.flush()
+    await _checkpoint(checkpoint, "after_receipt_outbox_insert")
+    result = AuthoritativeRegistrationResult(
+        outcome=outcome,
+        authoritative_user_id=authoritative_user_id,
+        invitation=invitation,
+    )
+    return await _commit_result(db, result, checkpoint=checkpoint)
 
 
 async def _commit_result(
@@ -602,12 +838,12 @@ async def complete_invitation_registration(
         kind = _validate_invitation_kind(invitation)
         if invitation.revoked_at is not None:
             raise _error(TelegramRegistrationOutcome.INVITATION_REVOKED, "دعوت‌نامه لغو شده است")
-        if request.source_surface == RegistrationSourceSurface.WEBAPP and invitation.is_used:
-            raise _error(
-                TelegramRegistrationOutcome.INVITATION_ALREADY_USED,
-                "دعوت‌نامه قبلاً استفاده شده است",
-            )
-        _validate_invitation_time(request, invitation)
+        if not (
+            request.source_surface == RegistrationSourceSurface.WEBAPP
+            and invitation.is_used
+            and invitation.completed_via == InvitationCompletionSurface.WEB
+        ):
+            _validate_invitation_time(request, invitation)
 
         command = request.telegram_command
         telegram_id = command.telegram_id if command is not None else None
@@ -625,6 +861,7 @@ async def complete_invitation_registration(
             db,
             identity=identity,
             telegram_id=telegram_id,
+            invitation_token=invitation.token,
         )
         users = await _load_matching_users_for_update(
             db,
@@ -640,23 +877,44 @@ async def complete_invitation_registration(
         )
 
         if invitation.is_used:
-            if command is None:
-                raise _error(
-                    TelegramRegistrationOutcome.INVITATION_ALREADY_USED,
-                    "دعوت‌نامه قبلاً استفاده شده است",
-                )
             user = _registered_user_for_completed_invitation(invitation, users, identity=identity)
             _raise_for_existing_user_state([user])
             _validate_completed_relation(
+                invitation=invitation,
+                identity=identity,
                 user=user,
                 accountant_relation=accountant_relation,
                 customer_relation=customer_relation,
             )
+            if command is None:
+                if (
+                    invitation.completed_via != InvitationCompletionSurface.WEB
+                    or user.address != request.address
+                ):
+                    raise _error(
+                        TelegramRegistrationOutcome.INVITATION_ALREADY_USED,
+                        "دعوت‌نامه قبلاً استفاده شده است",
+                    )
+                result = AuthoritativeRegistrationResult(
+                    outcome=TelegramRegistrationOutcome.CREATED,
+                    authoritative_user_id=user.id,
+                    user=user,
+                    invitation=invitation,
+                    accountant_relation=accountant_relation,
+                    customer_relation=customer_relation,
+                    replayed=True,
+                    first_terminal_transition=False,
+                    announce_project_user=False,
+                )
+                await db.commit()
+                await _checkpoint(checkpoint, "after_commit")
+                return result
             _validate_telegram_projection_eligibility(
                 invitation=invitation,
                 accountant_relation=accountant_relation,
                 customer_relation=customer_relation,
             )
+            await _validate_current_telegram_eligibility(db, user=user)
             _, _, telegram_users = _matching_user_maps(
                 users,
                 identity=identity,
@@ -699,6 +957,7 @@ async def complete_invitation_registration(
             _validate_pending_relation(
                 request=request,
                 invitation=invitation,
+                identity=identity,
                 accountant_relation=accountant_relation,
                 customer_relation=customer_relation,
             )
@@ -828,6 +1087,17 @@ async def complete_invitation_registration(
         await db.rollback()
         conflict = _integrity_conflict(exc)
         if conflict is not None:
+            if request.telegram_command is not None:
+                try:
+                    return await _persist_integrity_conflict_receipt(
+                        db,
+                        request=request,
+                        conflict=conflict,
+                        checkpoint=checkpoint,
+                    )
+                except Exception:
+                    await db.rollback()
+                    raise
             raise conflict from None
         raise
     except Exception:

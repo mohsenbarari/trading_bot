@@ -163,3 +163,16 @@ independent reviewer accepts the remediation.
 6. Preserve the approved per-category SMS policy and return both canonical links only to an
    authenticated administrator.
 7. Do not deploy staging or touch production without the later roadmap gates and owner approval.
+
+## Independent Stage 2 Review Remediation
+
+The independent Stage 2 report was reconciled against the later Stage 1 remediation baseline at
+`c8bb4a1a`. The remaining accepted findings were implemented and are documented in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE2_REMEDIATION_20260711.md`. The remediation adds canonical
+User identity columns/indexes, shared terminal-writer locks, durable uniqueness-conflict receipts,
+dedicated notification sessions, current eligibility reads, a guarded scratch migration entrypoint,
+strict Relation contracts, opaque command locks, and expanded real PostgreSQL race/adapter tests.
+
+The original counts and operational record above are historical evidence for `bc2d4fcc`; the new
+handoff package contains the current combined results. Stage 3 remains blocked pending independent
+acceptance. No runtime migration, deploy, route, worker, or feature flag was enabled by remediation.

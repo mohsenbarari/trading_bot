@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 from uuid import UUID
 
 from sqlalchemy import or_, select, text
@@ -27,11 +28,15 @@ def registration_command_lock_keys(
     command_id: UUID,
     idempotency_key: str,
 ) -> tuple[str, str]:
+    def lock_key(namespace: str, value: object) -> str:
+        digest = hashlib.sha256(f"{namespace}:{value}".encode("utf-8")).hexdigest()
+        return f"telegram-registration:{digest}"
+
     return tuple(
         sorted(
             (
-                f"telegram-registration:command:{command_id}",
-                f"telegram-registration:idempotency:{idempotency_key}",
+                lock_key("command", command_id),
+                lock_key("idempotency", idempotency_key),
             )
         )
     )

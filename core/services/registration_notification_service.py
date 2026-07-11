@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
+from typing import Any, Callable
 from urllib.parse import quote
 
 from sqlalchemy import select
@@ -22,6 +24,13 @@ from models.user import User
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrationNotificationUserSnapshot:
+    id: int
+    account_name: str
+    full_name: str
 
 
 def should_announce_project_user_registration(
@@ -98,50 +107,77 @@ async def enqueue_project_user_joined_telegram_outbox(
 
 
 async def publish_project_user_joined_web_notifications(
-    db: AsyncSession,
     *,
-    new_user: User,
+    new_user_id: int,
+    account_name: str,
+    full_name: str,
+    session_factory: Callable[[], Any] | None = None,
 ) -> None:
     """Publish non-authoritative Web notifications after registration commit."""
-    if not getattr(new_user, "id", None):
+    if not new_user_id:
         return
-
-    recipient_stmt = select(User.id).where(
-        User.is_deleted.is_(False),
-        User.id != new_user.id,
+    snapshot = RegistrationNotificationUserSnapshot(
+        id=int(new_user_id),
+        account_name=str(account_name or ""),
+        full_name=str(full_name or ""),
     )
+    if session_factory is None:
+        from core.db import AsyncSessionLocal
+
+        session_factory = AsyncSessionLocal
+
     try:
-        recipient_ids = list((await db.execute(recipient_stmt)).scalars().all())
+        async with session_factory() as notification_db:
+            recipient_stmt = select(User.id).where(
+                User.is_deleted.is_(False),
+                User.id != snapshot.id,
+            )
+            try:
+                recipient_ids = list(
+                    (await notification_db.execute(recipient_stmt)).scalars().all()
+                )
+            except Exception as exc:
+                await notification_db.rollback()
+                logger.warning(
+                    "Project user joined notification recipient lookup failed",
+                    extra={
+                        "event": "registration.notification_recipient_lookup_failed",
+                        "error_class": type(exc).__name__,
+                    },
+                )
+                return
+
+            message = project_user_joined_message(snapshot)
+            route = project_user_profile_route(snapshot)
+            for recipient_id in recipient_ids:
+                try:
+                    await create_user_notification(
+                        notification_db,
+                        int(recipient_id),
+                        message,
+                        NotificationLevel.INFO,
+                        NotificationCategory.SYSTEM,
+                        extra_payload={
+                            "title": "پیام مدیریت",
+                            "route": route,
+                        },
+                    )
+                except Exception as exc:
+                    await notification_db.rollback()
+                    logger.warning(
+                        "Project user joined Web notification failed",
+                        extra={
+                            "event": "registration.web_notification_failed",
+                            "recipient_id": recipient_id,
+                            "new_user_id": snapshot.id,
+                            "error_class": type(exc).__name__,
+                        },
+                    )
     except Exception as exc:
         logger.warning(
-            "Project user joined notification recipient lookup failed",
-            extra={"event": "registration.notification_recipient_lookup_failed", "error_class": type(exc).__name__},
+            "Project user joined notification session failed",
+            extra={
+                "event": "registration.notification_session_failed",
+                "error_class": type(exc).__name__,
+            },
         )
-        return
-
-    message = project_user_joined_message(new_user)
-    route = project_user_profile_route(new_user)
-    for recipient_id in recipient_ids:
-        try:
-            await create_user_notification(
-                db,
-                int(recipient_id),
-                message,
-                NotificationLevel.INFO,
-                NotificationCategory.SYSTEM,
-                extra_payload={
-                    "title": "پیام مدیریت",
-                    "route": route,
-                },
-            )
-        except Exception as exc:
-            await db.rollback()
-            logger.warning(
-                "Project user joined Web notification failed",
-                extra={
-                    "event": "registration.web_notification_failed",
-                    "recipient_id": recipient_id,
-                    "new_user_id": new_user.id,
-                    "error_class": type(exc).__name__,
-                },
-            )

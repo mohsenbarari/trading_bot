@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -77,8 +78,11 @@ COUNTER_DATABASE_URLS = _counter_database_urls()
 def _run_alembic(sync_url: str, *args: str) -> None:
     env = os.environ.copy()
     env["SYNC_DATABASE_URL"] = sync_url
+    env["DATABASE_URL"] = sync_url
+    env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
+    env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
     result = subprocess.run(
-        ["alembic", *args],
+        [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
         text=True,
         check=False,

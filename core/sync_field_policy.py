@@ -62,6 +62,22 @@ def _entry(
 
 _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
     ("users", "mobile_number"): _entry("users", "mobile_number", SyncFieldClassification.SYNC, sensitive=True),
+    ("users", "normalized_account_name"): _entry(
+        "users",
+        "normalized_account_name",
+        SyncFieldClassification.ENCRYPTED_DERIVED,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="database-generated canonical identity derived from account_name",
+    ),
+    ("users", "normalized_mobile_number"): _entry(
+        "users",
+        "normalized_mobile_number",
+        SyncFieldClassification.ENCRYPTED_DERIVED,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="database-generated canonical identity derived from mobile_number",
+    ),
     ("users", "address"): _entry("users", "address", SyncFieldClassification.SYNC, sensitive=True),
     ("users", "telegram_id"): _entry(
         "users",

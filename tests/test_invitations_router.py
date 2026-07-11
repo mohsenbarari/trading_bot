@@ -215,9 +215,13 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(hours=1),
         )
-        db = FakeDB([FakeExecuteResult(invitation), FakeExecuteResult(None)])
+        db = FakeDB([FakeExecuteResult(None)])
 
-        result = await delete_pending_invitation(3, db=db, admin=admin)
+        with patch(
+            "api.routers.invitations.lock_invitation_for_transition",
+            new=AsyncMock(return_value=invitation),
+        ):
+            result = await delete_pending_invitation(3, db=db, admin=admin)
 
         self.assertIsNone(result)
         db.delete.assert_not_awaited()
@@ -232,8 +236,11 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             is_used=True,
             expires_at=datetime.utcnow() + timedelta(hours=1),
         )
-        with self.assertRaises(HTTPException) as exc_info:
-            await delete_pending_invitation(4, db=FakeDB([FakeExecuteResult(used_invitation)]), admin=admin)
+        with patch(
+            "api.routers.invitations.lock_invitation_for_transition",
+            new=AsyncMock(return_value=used_invitation),
+        ), self.assertRaises(HTTPException) as exc_info:
+            await delete_pending_invitation(4, db=FakeDB(), admin=admin)
         self.assertEqual(exc_info.exception.status_code, 400)
 
         foreign_invitation = SimpleNamespace(
@@ -243,8 +250,11 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(hours=1),
         )
-        with self.assertRaises(HTTPException) as exc_info:
-            await delete_pending_invitation(5, db=FakeDB([FakeExecuteResult(foreign_invitation)]), admin=admin)
+        with patch(
+            "api.routers.invitations.lock_invitation_for_transition",
+            new=AsyncMock(return_value=foreign_invitation),
+        ), self.assertRaises(HTTPException) as exc_info:
+            await delete_pending_invitation(5, db=FakeDB(), admin=admin)
         self.assertEqual(exc_info.exception.status_code, 404)
 
     async def test_lookup_invitation_handles_error_states_and_success(self):

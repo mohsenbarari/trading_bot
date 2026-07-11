@@ -276,6 +276,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         new_user = SimpleNamespace(
             id=77,
             account_name="user1",
+            full_name="User One",
             mobile_number="09120000000",
             address="Tehran address",
             home_server="iran",
@@ -330,7 +331,11 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service_request.source_surface.value, "webapp")
         self.assertEqual(service_request.identity_proof_type.value, "web_otp")
         home_server_mock.assert_not_called()
-        notification_mock.assert_awaited_once_with(db, new_user=new_user)
+        notification_mock.assert_awaited_once_with(
+            new_user_id=77,
+            account_name="user1",
+            full_name="User One",
+        )
         self.assertEqual(redis.delete_calls, ["reg_otp:abc", "reg_verified:abc"])
         refresh_mock.assert_called_once_with(subject=77, expires_delta=timedelta(days=30))
         handle_session_mock.assert_awaited_once()
@@ -353,6 +358,65 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 "token_type": "bearer",
             },
         )
+
+    async def test_post_commit_cleanup_failure_does_not_block_tokens_and_session_failure_keeps_proof(self):
+        new_user = SimpleNamespace(
+            id=88,
+            account_name="cleanup_user",
+            full_name="Cleanup User",
+            home_server="iran",
+        )
+        registration_result = AuthoritativeRegistrationResult(
+            outcome=TelegramRegistrationOutcome.CREATED,
+            authoritative_user_id=88,
+            user=new_user,
+            announce_project_user=False,
+            first_terminal_transition=True,
+        )
+        redis = FakeRedis({"reg_verified:cleanup": "1", "reg_otp:cleanup": "12345"})
+        redis.delete = AsyncMock(side_effect=RuntimeError("redis unavailable"))
+        session = SimpleNamespace(id="cleanup-session")
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-cleanup",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"session": session}),
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-cleanup",
+        ), patch("api.routers.auth.logger.warning") as warning_mock:
+            result = await register_complete(
+                RegisterComplete(token="cleanup", address="Cleanup test address"),
+                raw_request=make_request(),
+                db=FakeDB(),
+            )
+
+        self.assertEqual(result["access_token"], "access-cleanup")
+        self.assertEqual(warning_mock.call_count, 2)
+
+        retry_redis = FakeRedis({"reg_verified:retry": "1", "reg_otp:retry": "12345"})
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=retry_redis)), patch(
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-retry",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(side_effect=RuntimeError("session commit failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "session commit failed"):
+                await register_complete(
+                    RegisterComplete(token="retry", address="Cleanup test address"),
+                    raw_request=make_request(),
+                    db=FakeDB(),
+                )
+        self.assertEqual(retry_redis.delete_calls, [])
 
     async def test_get_pending_registration_and_registration_session_complete(self):
         invitation = SimpleNamespace(

@@ -26,6 +26,21 @@ class _FakeDb:
         self.commit = AsyncMock()
 
 
+class _SessionContext:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return self.db
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _session_factory(db):
+    return lambda: _SessionContext(db)
+
+
 class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
     def test_project_registration_announcement_skips_accountants_and_customers(self):
         self.assertTrue(notifications.should_announce_project_user_registration(None, None))
@@ -40,7 +55,12 @@ class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
             "core.services.registration_notification_service.create_user_notification",
             new=AsyncMock(),
         ) as create_notification:
-            await notifications.publish_project_user_joined_web_notifications(db, new_user=new_user)
+            await notifications.publish_project_user_joined_web_notifications(
+                new_user_id=new_user.id,
+                account_name=new_user.account_name,
+                full_name=new_user.full_name,
+                session_factory=_session_factory(db),
+            )
 
         self.assertEqual(create_notification.await_count, 2)
         first_call = create_notification.await_args_list[0]
@@ -95,11 +115,34 @@ class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
             "core.services.registration_notification_service.create_user_notification",
             new=AsyncMock(side_effect=RuntimeError("db down")),
         ) as create_notification, patch.object(notifications.logger, "warning") as warning_mock:
-            await notifications.publish_project_user_joined_web_notifications(db, new_user=new_user)
+            await notifications.publish_project_user_joined_web_notifications(
+                new_user_id=new_user.id,
+                account_name=new_user.account_name,
+                full_name=new_user.full_name,
+                session_factory=_session_factory(db),
+            )
 
         create_notification.assert_awaited_once()
         db.rollback.assert_awaited_once()
         warning_mock.assert_called_once()
+
+    async def test_web_notification_recipient_lookup_failure_rolls_back_only_dedicated_session(self):
+        notification_db = _FakeDb()
+        notification_db.execute = AsyncMock(side_effect=RuntimeError("lookup failed"))
+
+        with patch.object(notifications.logger, "warning") as warning_mock:
+            await notifications.publish_project_user_joined_web_notifications(
+                new_user_id=9,
+                account_name="ali",
+                full_name="Ali",
+                session_factory=_session_factory(notification_db),
+            )
+
+        notification_db.rollback.assert_awaited_once()
+        self.assertEqual(
+            warning_mock.call_args.kwargs["extra"]["event"],
+            "registration.notification_recipient_lookup_failed",
+        )
 
     async def test_telegram_outbox_failure_propagates_to_outer_registration_transaction(self):
         db = _FakeDb([(7, 111)])

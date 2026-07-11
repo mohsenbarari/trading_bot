@@ -57,6 +57,44 @@ def telegram_identity_lock_key(telegram_id: int) -> str:
     return _hashed_identity_lock_key("telegram-id", int(telegram_id))
 
 
+def invitation_transition_lock_key(invitation_token: str) -> str:
+    return _hashed_identity_lock_key("invitation-token", str(invitation_token or ""))
+
+
+def invitation_transition_lock_keys(
+    *,
+    invitation_token: str | None,
+    identity: NormalizedInvitationIdentity | None,
+    telegram_id: int | None = None,
+) -> tuple[str, ...]:
+    keys: list[str] = []
+    if invitation_token:
+        keys.append(invitation_transition_lock_key(invitation_token))
+    if identity is not None:
+        keys.extend(invitation_identity_lock_keys(identity))
+    if telegram_id is not None:
+        keys.append(telegram_identity_lock_key(int(telegram_id)))
+    return tuple(sorted(set(keys)))
+
+
+async def acquire_invitation_transition_locks(
+    db: AsyncSession,
+    *,
+    invitation_token: str | None,
+    identity: NormalizedInvitationIdentity | None,
+    telegram_id: int | None = None,
+) -> None:
+    for lock_key in invitation_transition_lock_keys(
+        invitation_token=invitation_token,
+        identity=identity,
+        telegram_id=telegram_id,
+    ):
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
+
+
 async def acquire_invitation_identity_locks(
     db: AsyncSession,
     identity: NormalizedInvitationIdentity,

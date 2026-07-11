@@ -27,6 +27,9 @@ from core.services.invitation_lifecycle_service import (
     get_new_invitation_expiry,
     soft_revoke_invitation,
 )
+from core.services.invitation_transition_lock_service import (
+    lock_invitation_for_transition,
+)
 from core.log_redaction import mask_mobile
 from core.services.invitation_public_access_service import (
     enforce_public_invitation_access,
@@ -134,8 +137,10 @@ async def delete_pending_invitation(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(verify_admin_user),
 ):
-    stmt = select(Invitation).where(Invitation.id == invitation_id)
-    invitation = (await db.execute(stmt)).scalar_one_or_none()
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_id=invitation_id,
+    )
     if (
         not invitation
         or not str(invitation.token or "").startswith("INV-")

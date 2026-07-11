@@ -100,6 +100,21 @@ def _command(**overrides):
 
 
 class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
+    def test_user_canonical_identity_is_generated_and_uniquely_indexed(self):
+        account_column = User.__table__.c.normalized_account_name
+        mobile_column = User.__table__.c.normalized_mobile_number
+        self.assertIsNotNone(account_column.computed)
+        self.assertIsNotNone(mobile_column.computed)
+        self.assertIn("lower(translate", str(account_column.computed.sqltext))
+        self.assertIn("translate", str(mobile_column.computed.sqltext))
+        unique_indexes = {
+            index.name
+            for index in User.__table__.indexes
+            if index.unique
+        }
+        self.assertIn("ux_users_normalized_account_name", unique_indexes)
+        self.assertIn("ux_users_normalized_mobile_number", unique_indexes)
+
     def test_new_models_enums_constraints_defaults_and_metadata_are_explicit(self):
         self.assertTrue(LOCAL_REGISTRATION_TABLES.issubset(Base.metadata.tables))
         self.assertEqual(
@@ -301,6 +316,10 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(keys, tuple(sorted(keys)))
         self.assertEqual(len(set(keys)), 2)
+        joined = " ".join(keys)
+        self.assertNotIn(str(command.command_id), joined)
+        self.assertNotIn(command.idempotency_key, joined)
+        self.assertTrue(all(key.startswith("telegram-registration:") for key in keys))
 
     async def test_command_receipt_replay_is_idempotent_and_changed_payload_rejects(self):
         command = _command()

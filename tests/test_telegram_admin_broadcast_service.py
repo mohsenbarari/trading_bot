@@ -152,6 +152,8 @@ class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
                         id INTEGER PRIMARY KEY,
                         account_name VARCHAR,
                         mobile_number VARCHAR,
+                        normalized_account_name VARCHAR,
+                        normalized_mobile_number VARCHAR,
                         telegram_id BIGINT,
                         username VARCHAR,
                         full_name VARCHAR,

@@ -157,12 +157,26 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sweep_expired_pending_customer_relations_marks_rows_deleted(self):
         expired = SimpleNamespace(
+            id=31,
+            invitation_token=f"{CUSTOMER_INVITATION_PREFIX}sweep",
             status=CustomerRelationStatus.PENDING,
             deleted_at=None,
         )
-        db = FakeDB(execute_results=[FakeExecuteResult(values=[expired])])
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[expired]),
+                FakeExecuteResult(scalar_one_value=expired),
+            ]
+        )
 
-        expired_relations = await sweep_expired_pending_customer_relations(db)
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=SimpleNamespace(id=81)),
+        ), patch(
+            "core.services.customer_relation_service.release_invitation_identity",
+            new=AsyncMock(),
+        ):
+            expired_relations = await sweep_expired_pending_customer_relations(db)
 
         self.assertEqual(expired_relations, [expired])
         self.assertEqual(expired.status, CustomerRelationStatus.EXPIRED)
@@ -170,14 +184,31 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_pending_customer_relation_by_invitation_token_commits_expired_rows_before_lookup(self):
         pending_relation = SimpleNamespace(id=12)
+        expired = SimpleNamespace(
+            id=13,
+            invitation_token=f"{CUSTOMER_INVITATION_PREFIX}token",
+            status=CustomerRelationStatus.PENDING,
+            deleted_at=None,
+        )
         db = FakeDB(
             execute_results=[
-                FakeExecuteResult(values=[SimpleNamespace(status=CustomerRelationStatus.PENDING, deleted_at=None)]),
+                FakeExecuteResult(values=[expired]),
+                FakeExecuteResult(scalar_one_value=expired),
                 FakeExecuteResult(scalar_one_value=pending_relation),
             ]
         )
 
-        result = await get_pending_customer_relation_by_invitation_token(db, f"{CUSTOMER_INVITATION_PREFIX}token")
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=SimpleNamespace(id=82)),
+        ), patch(
+            "core.services.customer_relation_service.release_invitation_identity",
+            new=AsyncMock(),
+        ):
+            result = await get_pending_customer_relation_by_invitation_token(
+                db,
+                f"{CUSTOMER_INVITATION_PREFIX}token",
+            )
 
         self.assertIs(result, pending_relation)
         db.commit.assert_awaited_once()
@@ -213,14 +244,28 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_owner_customer_relations_commits_expired_rows_then_returns_pending_and_active(self):
         relation_one = SimpleNamespace(id=1)
         relation_two = SimpleNamespace(id=2)
+        expired = SimpleNamespace(
+            id=3,
+            invitation_token=f"{CUSTOMER_INVITATION_PREFIX}list",
+            status=CustomerRelationStatus.PENDING,
+            deleted_at=None,
+        )
         db = FakeDB(
             execute_results=[
-                FakeExecuteResult(values=[SimpleNamespace(status=CustomerRelationStatus.PENDING, deleted_at=None)]),
+                FakeExecuteResult(values=[expired]),
+                FakeExecuteResult(scalar_one_value=expired),
                 FakeExecuteResult(values=[relation_one, relation_two]),
             ]
         )
 
-        result = await list_owner_customer_relations(db, 7)
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=SimpleNamespace(id=83)),
+        ), patch(
+            "core.services.customer_relation_service.release_invitation_identity",
+            new=AsyncMock(),
+        ):
+            result = await list_owner_customer_relations(db, 7)
 
         self.assertEqual(result, [relation_one, relation_two])
         db.commit.assert_awaited_once()
@@ -402,15 +447,32 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             deleted_at=None,
             invitation_token=f"{CUSTOMER_INVITATION_PREFIX}cancel",
         )
-        invitation = SimpleNamespace(token=relation.invitation_token, is_used=False, expires_at=None)
+        invitation = SimpleNamespace(
+            id=84,
+            token=relation.invitation_token,
+            is_used=False,
+            revoked_at=None,
+            expires_at=None,
+        )
         db = FakeDB(
             execute_results=[
+                FakeExecuteResult(scalar_one_value=relation.invitation_token),
                 FakeExecuteResult(scalar_one_value=relation),
-                FakeExecuteResult(scalar_one_value=invitation),
             ]
         )
 
-        result = await cancel_pending_customer_relation(db, owner_user_id=7, relation_id=9)
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=invitation),
+        ), patch(
+            "core.services.customer_relation_service.release_invitation_identity",
+            new=AsyncMock(),
+        ):
+            result = await cancel_pending_customer_relation(
+                db,
+                owner_user_id=7,
+                relation_id=9,
+            )
 
         self.assertIs(result, relation)
         self.assertEqual(relation.status, CustomerRelationStatus.REVOKED)
@@ -434,10 +496,20 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             owner_user_id=7,
             status=CustomerRelationStatus.ACTIVE,
             deleted_at=None,
+            invitation_token=f"{CUSTOMER_INVITATION_PREFIX}closed",
         )
-        with self.assertRaises(HTTPException) as cancel_closed_exc:
+        closed_db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalar_one_value=closed_pending.invitation_token),
+                FakeExecuteResult(scalar_one_value=closed_pending),
+            ]
+        )
+        with patch(
+            "core.services.customer_relation_service.lock_invitation_for_transition",
+            new=AsyncMock(return_value=None),
+        ), self.assertRaises(HTTPException) as cancel_closed_exc:
             await cancel_pending_customer_relation(
-                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=closed_pending)]),
+                closed_db,
                 owner_user_id=7,
                 relation_id=2,
             )

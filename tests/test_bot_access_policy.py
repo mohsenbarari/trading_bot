@@ -12,6 +12,7 @@ from core.services.bot_access_policy import (
     BOT_ACCESS_REASON_SYNC_PENDING,
     evaluate_bot_access,
     evaluate_bot_access_local_state,
+    evaluate_bot_access_projection,
     evaluate_invitation_bot_access,
 )
 from models.customer_relation import CustomerTier
@@ -19,6 +20,35 @@ from models.invitation import InvitationKind
 
 
 class BotAccessPolicyTests(unittest.IsolatedAsyncioTestCase):
+    def test_locked_projection_policy_uses_current_relation_truth(self):
+        user = SimpleNamespace(
+            id=9,
+            role=UserRole.STANDARD,
+            account_status=UserAccountStatus.ACTIVE,
+            is_deleted=False,
+        )
+        accountant = evaluate_bot_access_projection(
+            user,
+            is_accountant=True,
+            customer_relation_present=False,
+            customer_tier=None,
+        )
+        tier2 = evaluate_bot_access_projection(
+            user,
+            is_accountant=False,
+            customer_relation_present=True,
+            customer_tier=CustomerTier.TIER_2,
+        )
+        missing_tier = evaluate_bot_access_projection(
+            user,
+            is_accountant=False,
+            customer_relation_present=True,
+            customer_tier=None,
+        )
+        self.assertEqual(accountant.reason, BOT_ACCESS_REASON_ACCOUNTANT)
+        self.assertEqual(tier2.reason, BOT_ACCESS_REASON_CUSTOMER_TIER2)
+        self.assertFalse(missing_tier.allowed)
+
     def test_invitation_policy_role_kind_tier_matrix_fails_closed(self):
         allowed_roles = {
             UserRole.STANDARD,

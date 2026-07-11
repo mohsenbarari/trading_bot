@@ -82,6 +82,7 @@ def _invitation(
         mobile_number="09120000001",
         role=role,
         kind=kind,
+        created_by_id=5,
         is_used=is_used,
         expires_at=expires_at or (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)),
         registered_user_id=registered_user_id,
@@ -137,6 +138,85 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self._server_override.__exit__(None, None, None)
+
+    def test_relation_contract_fails_closed_on_identity_owner_role_and_tier_drift(self):
+        accountant_invitation = _invitation(
+            token="ACCT-stage2-contract",
+            kind=InvitationKind.ACCOUNTANT,
+            role=UserRole.WATCH,
+        )
+        identity = registration.normalize_invitation_identity(
+            mobile_number=accountant_invitation.mobile_number,
+            account_name=accountant_invitation.account_name,
+        )
+        accountant = AccountantRelation(
+            owner_user_id=5,
+            created_by_user_id=5,
+            invitation_token=accountant_invitation.token,
+            global_account_name=accountant_invitation.account_name,
+            relation_display_name="Accountant",
+            mobile_number=accountant_invitation.mobile_number,
+            status=AccountantRelationStatus.PENDING,
+            expires_at=accountant_invitation.expires_at,
+        )
+        registration._validate_relation_contract(
+            invitation=accountant_invitation,
+            identity=identity,
+            accountant_relation=accountant,
+            customer_relation=None,
+        )
+        accountant.mobile_number = "09129999999"
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_relation_contract(
+                invitation=accountant_invitation,
+                identity=identity,
+                accountant_relation=accountant,
+                customer_relation=None,
+            )
+
+        customer_invitation = _invitation(
+            token="CUST-stage2-contract",
+            kind=InvitationKind.CUSTOMER,
+            role=UserRole.STANDARD,
+        )
+        customer_identity = registration.normalize_invitation_identity(
+            mobile_number=customer_invitation.mobile_number,
+            account_name=customer_invitation.account_name,
+        )
+        customer = CustomerRelation(
+            owner_user_id=999,
+            created_by_user_id=5,
+            invitation_token=customer_invitation.token,
+            management_name="Customer",
+            customer_tier=CustomerTier.TIER_1,
+            status=CustomerRelationStatus.PENDING,
+            expires_at=customer_invitation.expires_at,
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_relation_contract(
+                invitation=customer_invitation,
+                identity=customer_identity,
+                accountant_relation=None,
+                customer_relation=customer,
+            )
+
+    async def test_relation_loader_rejects_cross_kind_token_projection(self):
+        accountant = SimpleNamespace(id=1)
+        with patch.object(
+            registration,
+            "lock_accountant_relation_for_registration",
+            new=AsyncMock(return_value=accountant),
+        ), patch.object(
+            registration,
+            "lock_customer_relation_for_registration",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(registration.AuthoritativeRegistrationError):
+                await registration._load_relation_for_registration(
+                    _FakeDB(),
+                    invitation=_invitation(),
+                    kind=InvitationKind.STANDARD,
+                )
 
     async def test_foreign_server_is_rejected_before_database_access(self):
         db = _FakeDB()
@@ -277,6 +357,7 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         relation = CustomerRelation(
             id=21,
             owner_user_id=5,
+            created_by_user_id=5,
             invitation_token=invitation.token,
             management_name="Customer Management Name",
             customer_tier=CustomerTier.TIER_1,
@@ -323,6 +404,7 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         relation = AccountantRelation(
             id=22,
             owner_user_id=5,
+            created_by_user_id=5,
             invitation_token=invitation.token,
             global_account_name=invitation.account_name,
             relation_display_name="Accountant Display Name",
@@ -547,6 +629,8 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             registration, "_load_relation_for_registration", new=AsyncMock(return_value=(None, None))
         ), patch.object(
+            registration, "_validate_current_telegram_eligibility", new=AsyncMock()
+        ), patch.object(
             registration, "ensure_mandatory_channel_membership", new=AsyncMock()
         ) as membership_mock, patch.object(
             registration, "enqueue_project_user_joined_telegram_outbox", new=AsyncMock()
@@ -570,6 +654,60 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         membership_mock.assert_awaited_once_with(db, user=existing)
         enqueue_mock.assert_not_awaited()
         self.assertEqual(receipt.outcome_code, TelegramRegistrationOutcome.LINKED_EXISTING.value)
+
+    async def test_web_retry_recovers_only_same_completed_web_payload(self):
+        existing = _existing_user()
+        invitation = _invitation(
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1),
+            is_used=True,
+            registered_user_id=existing.id,
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+            completed_via=InvitationCompletionSurface.WEB,
+        )
+        with patch.object(
+            registration,
+            "_load_invitation_for_update",
+            new=AsyncMock(return_value=invitation),
+        ), patch.object(
+            registration,
+            "_acquire_registration_identity_locks",
+            new=AsyncMock(),
+        ), patch.object(
+            registration,
+            "_load_matching_users_for_update",
+            new=AsyncMock(return_value=[existing]),
+        ), patch.object(
+            registration,
+            "_load_relation_for_registration",
+            new=AsyncMock(return_value=(None, None)),
+        ):
+            result = await registration.complete_invitation_registration(
+                _FakeDB(),
+                registration.AuthoritativeRegistrationRequest.for_web(
+                    invitation_token=invitation.token,
+                    address=existing.address,
+                ),
+            )
+
+        self.assertTrue(result.replayed)
+        self.assertFalse(result.first_terminal_transition)
+        self.assertFalse(result.announce_project_user)
+        self.assertIs(result.user, existing)
+
+        invitation.completed_via = InvitationCompletionSurface.TELEGRAM
+        with patch.object(
+            registration,
+            "_load_invitation_for_update",
+            new=AsyncMock(return_value=invitation),
+        ):
+            with self.assertRaises(registration.AuthoritativeRegistrationError):
+                await registration.complete_invitation_registration(
+                    _FakeDB(),
+                    registration.AuthoritativeRegistrationRequest.for_web(
+                        invitation_token=invitation.token,
+                        address=existing.address,
+                    ),
+                )
 
     async def test_telegram_receipt_replay_returns_prior_result_before_invitation_lock(self):
         db = _FakeDB()

@@ -109,6 +109,38 @@ def evaluate_invitation_bot_access(
     return BotAccessDecision(False, BOT_ACCESS_REASON_INVITATION_KIND_FORBIDDEN)
 
 
+def evaluate_bot_access_projection(
+    user: User | object | None,
+    *,
+    is_accountant: bool,
+    customer_relation_present: bool,
+    customer_tier: object | None,
+) -> BotAccessDecision:
+    """Evaluate one locked/current User and Relation projection without I/O."""
+    local_decision = evaluate_bot_access_local_state(user)
+    if not local_decision.allowed:
+        return local_decision
+    if is_accountant:
+        return BotAccessDecision(False, BOT_ACCESS_REASON_ACCOUNTANT)
+    if not customer_relation_present:
+        return local_decision
+
+    customer_tier_value = _enum_value(customer_tier)
+    if customer_tier_value == CustomerTier.TIER_2.value:
+        return BotAccessDecision(
+            False,
+            BOT_ACCESS_REASON_CUSTOMER_TIER2,
+            customer_tier=customer_tier_value,
+        )
+    if customer_tier_value == CustomerTier.TIER_1.value:
+        return BotAccessDecision(True, customer_tier=customer_tier_value)
+    return BotAccessDecision(
+        False,
+        BOT_ACCESS_REASON_CUSTOMER_UNAVAILABLE,
+        customer_tier=customer_tier_value or None,
+    )
+
+
 async def evaluate_bot_access(db: AsyncSession, user: User | object | None) -> BotAccessDecision:
     """Return whether a user may connect to and use Telegram bot market features."""
     local_decision = evaluate_bot_access_local_state(user)
@@ -119,25 +151,29 @@ async def evaluate_bot_access(db: AsyncSession, user: User | object | None) -> B
     if user_id is None:
         return local_decision
 
-    if await _safe_is_user_accountant(db, int(user_id)):
-        return BotAccessDecision(False, BOT_ACCESS_REASON_ACCOUNTANT)
+    is_accountant = await _safe_is_user_accountant(db, int(user_id))
+    if is_accountant:
+        return evaluate_bot_access_projection(
+            user,
+            is_accountant=True,
+            customer_relation_present=False,
+            customer_tier=None,
+        )
 
     if isinstance(db, AsyncSession):
         relation = await get_active_customer_relation_for_user(db, int(user_id))
     else:
         relation = None
 
-    if relation is None:
-        return local_decision
-    if getattr(relation, "deleted_at", None) is not None:
+    relation_present = relation is not None
+    if relation is not None and getattr(relation, "deleted_at", None) is not None:
         return BotAccessDecision(False, BOT_ACCESS_REASON_CUSTOMER_UNAVAILABLE)
-
-    customer_tier_value = _enum_value(getattr(relation, "customer_tier", None))
-    if customer_tier_value == CustomerTier.TIER_2.value:
-        return BotAccessDecision(False, BOT_ACCESS_REASON_CUSTOMER_TIER2, customer_tier=customer_tier_value)
-    if customer_tier_value == CustomerTier.TIER_1.value:
-        return BotAccessDecision(True, customer_tier=customer_tier_value)
-    return BotAccessDecision(False, BOT_ACCESS_REASON_CUSTOMER_UNAVAILABLE, customer_tier=customer_tier_value)
+    return evaluate_bot_access_projection(
+        user,
+        is_accountant=is_accountant,
+        customer_relation_present=relation_present,
+        customer_tier=(getattr(relation, "customer_tier", None) if relation is not None else None),
+    )
 
 
 def bot_access_denial_message(reason: str | None) -> str:

@@ -722,14 +722,11 @@ async def register_complete(
         raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
 
     if registration_result.announce_project_user:
-        await publish_project_user_joined_web_notifications(db, new_user=new_user)
-        
-    if invitation_token:
-        await redis.delete(f"reg_otp:{invitation_token}")
-    if verify_key:
-        await redis.delete(verify_key)
-    if registration_token:
-        await redis.delete(_registration_session_key(registration_token))
+        await publish_project_user_joined_web_notifications(
+            new_user_id=int(new_user.id),
+            account_name=str(new_user.account_name or ""),
+            full_name=str(getattr(new_user, "full_name", "") or ""),
+        )
 
     refresh_token_expires = timedelta(days=30)
     access_token_expires = timedelta(minutes=60)
@@ -756,6 +753,28 @@ async def register_complete(
         session_id=session_id,
         server_id=new_user.home_server,
     )
+
+    cleanup_keys = []
+    if invitation_token:
+        cleanup_keys.append(("registration_otp", f"reg_otp:{invitation_token}"))
+    if verify_key:
+        cleanup_keys.append(("registration_verification", verify_key))
+    if registration_token:
+        cleanup_keys.append(
+            ("registration_session", _registration_session_key(registration_token))
+        )
+    for cleanup_kind, cleanup_key in cleanup_keys:
+        try:
+            await redis.delete(cleanup_key)
+        except Exception as exc:
+            logger.warning(
+                "Post-registration Redis cleanup failed",
+                extra={
+                    "event": "registration.redis_cleanup_failed",
+                    "cleanup_kind": cleanup_kind,
+                    "error_class": type(exc).__name__,
+                },
+            )
     
     return {
         "access_token": access_token,

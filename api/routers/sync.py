@@ -37,6 +37,7 @@ from core.sync_protocol import build_sync_protocol_metadata, validate_sync_proto
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.security import constant_time_secret_equals
+from core.utils import normalize_account_name, normalize_persian_numerals
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
@@ -2302,9 +2303,28 @@ def _user_sync_identity_conditions(identity: object) -> list:
                 continue
             values_by_field[field_name].add(value)
     conditions = []
-    for field_name, values in values_by_field.items():
-        column = getattr(User, field_name)
-        conditions.extend(column == value for value in values)
+    normalized_account_values = {
+        normalize_account_name(str(value or "").strip())
+        for value in values_by_field["account_name"]
+        if str(value or "").strip()
+    }
+    normalized_mobile_values = {
+        normalize_persian_numerals(str(value or "")).strip()
+        for value in values_by_field["mobile_number"]
+        if str(value or "").strip()
+    }
+    conditions.extend(
+        User.normalized_account_name == value
+        for value in normalized_account_values
+    )
+    conditions.extend(
+        User.normalized_mobile_number == value
+        for value in normalized_mobile_values
+    )
+    conditions.extend(
+        User.telegram_id == value
+        for value in values_by_field["telegram_id"]
+    )
     return conditions
 
 

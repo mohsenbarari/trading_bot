@@ -26,7 +26,11 @@ from core.sync_protocol import build_sync_protocol_metadata
 REPAIR_TOOL_SCHEMA_VERSION = 1
 
 REPLAY_SKIP_COLUMNS_BY_TABLE: dict[str, set[str]] = {
-    "users": {"avatar_file_id"},
+    "users": {
+        "avatar_file_id",
+        "normalized_account_name",
+        "normalized_mobile_number",
+    },
     "offers": {"channel_message_id"},
     "offer_publication_states": {
         "id",

@@ -52,6 +52,22 @@ class SyncRepairTests(unittest.TestCase):
         self.assertIn("identity_hash", summary)
 
     def test_row_to_sync_data_drops_local_only_and_lease_fields(self):
+        user_row = fake_row(
+            [
+                "id",
+                "account_name",
+                "mobile_number",
+                "normalized_account_name",
+                "normalized_mobile_number",
+                "avatar_file_id",
+            ],
+            id=9,
+            account_name="CanonicalUser",
+            mobile_number="09120000009",
+            normalized_account_name="canonicaluser",
+            normalized_mobile_number="09120000009",
+            avatar_file_id="local-avatar",
+        )
         offer_row = fake_row(
             ["id", "offer_public_id", "price", "channel_message_id"],
             id=1,
@@ -68,6 +84,14 @@ class SyncRepairTests(unittest.TestCase):
             lease_until="2026-06-27T12:00:00",
         )
 
+        self.assertEqual(
+            row_to_sync_data("users", user_row),
+            {
+                "id": 9,
+                "account_name": "CanonicalUser",
+                "mobile_number": "09120000009",
+            },
+        )
         self.assertEqual(row_to_sync_data("offers", offer_row), {"id": 1, "offer_public_id": "ofr_1", "price": 100})
         self.assertEqual(
             row_to_sync_data("trade_delivery_receipts", receipt_row),

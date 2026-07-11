@@ -13,6 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from core.utils import normalize_account_name, normalize_persian_numerals, unique_user_ids, utc_now
+from core.services.invitation_identity_reservation_service import (
+    release_invitation_identities_for_tokens,
+    release_invitation_identity,
+)
+from core.services.invitation_lifecycle_service import soft_revoke_invitation
+from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from models.invitation import Invitation, InvitationKind
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.user import User, UserRole
@@ -79,30 +85,51 @@ async def sweep_expired_pending_accountant_relations(
             AccountantRelation.deleted_at.is_(None),
             AccountantRelation.expires_at <= now,
         )
-        .order_by(AccountantRelation.id.asc())
+        .order_by(
+            AccountantRelation.invitation_token.asc(),
+            AccountantRelation.id.asc(),
+        )
     )
     if owner_user_id is not None:
         stmt = stmt.where(AccountantRelation.owner_user_id == owner_user_id)
     if invitation_token is not None:
         stmt = stmt.where(AccountantRelation.invitation_token == invitation_token)
 
-    expired_relations = list((await db.execute(stmt)).scalars().all())
-    for relation in expired_relations:
+    candidates = list((await db.execute(stmt)).scalars().all())
+    expired_relations: list[AccountantRelation] = []
+    missing_invitation_tokens: list[str] = []
+    for candidate in candidates:
+        relation_id = candidate.id
+        relation_token = candidate.invitation_token
+        invitation = await lock_invitation_for_transition(
+            db,
+            invitation_token=relation_token,
+        )
+        relation_stmt = (
+            select(AccountantRelation)
+            .where(
+                AccountantRelation.id == relation_id,
+                AccountantRelation.status == AccountantRelationStatus.PENDING,
+                AccountantRelation.deleted_at.is_(None),
+                AccountantRelation.expires_at <= now,
+            )
+            .with_for_update()
+        )
+        relation = (await db.execute(relation_stmt)).scalar_one_or_none()
+        if relation is None:
+            continue
         relation.status = AccountantRelationStatus.EXPIRED
         relation.deleted_at = now
+        expired_relations.append(relation)
+        if invitation is not None and invitation.id is not None:
+            await release_invitation_identity(db, invitation_id=invitation.id)
+        else:
+            missing_invitation_tokens.append(relation_token)
 
-    if expired_relations:
-        from core.services.invitation_identity_reservation_service import (
-            release_invitation_identities_for_tokens,
-        )
-
+    if missing_invitation_tokens:
         await release_invitation_identities_for_tokens(
             db,
-            invitation_tokens=[
-                relation.invitation_token
-                for relation in expired_relations
-                if getattr(relation, "invitation_token", None)
-            ],
+            invitation_tokens=missing_invitation_tokens,
         )
 
     return expired_relations
@@ -409,26 +436,40 @@ async def cancel_pending_accountant_relation(
     owner_user_id: int,
     relation_id: int,
 ) -> AccountantRelation:
-    stmt = select(AccountantRelation).where(
+    candidate_stmt = select(AccountantRelation.invitation_token).where(
         AccountantRelation.id == relation_id,
         AccountantRelation.owner_user_id == owner_user_id,
     )
-    relation = (await db.execute(stmt)).scalar_one_or_none()
-    if not relation:
+    invitation_token = (await db.execute(candidate_stmt)).scalar_one_or_none()
+    if invitation_token is None:
+        raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
+    invitation = await lock_invitation_for_transition(
+        db,
+        invitation_token=invitation_token,
+    )
+    relation_stmt = (
+        select(AccountantRelation)
+        .where(
+            AccountantRelation.id == relation_id,
+            AccountantRelation.owner_user_id == owner_user_id,
+        )
+        .with_for_update()
+    )
+    relation = (await db.execute(relation_stmt)).scalar_one_or_none()
+    if relation is None:
         raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
     if relation.deleted_at is not None or relation.status != AccountantRelationStatus.PENDING:
+        raise HTTPException(status_code=400, detail="فقط حسابدار pending قابل لغو است")
+    if invitation is not None and (
+        invitation.is_used or getattr(invitation, "revoked_at", None) is not None
+    ):
         raise HTTPException(status_code=400, detail="فقط حسابدار pending قابل لغو است")
 
     now = _utcnow_naive()
     relation.status = AccountantRelationStatus.REVOKED
     relation.deleted_at = now
 
-    invitation_stmt = select(Invitation).where(Invitation.token == relation.invitation_token)
-    invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
     if invitation:
-        from core.services.invitation_identity_reservation_service import release_invitation_identity
-        from core.services.invitation_lifecycle_service import soft_revoke_invitation
-
         soft_revoke_invitation(invitation, revoked_at=now)
         if getattr(invitation, "id", None) is not None:
             await release_invitation_identity(db, invitation_id=invitation.id)

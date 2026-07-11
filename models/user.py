@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, Enum, ForeignKey, Integer, String, Text, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.sql import func
 from core.enums import UserAccountStatus
 from .database import Base
@@ -17,11 +17,43 @@ class User(Base):
     __table_args__ = (
         CheckConstraint("sync_version >= 1", name="ck_users_sync_version_positive"),
         CheckConstraint("counter_epoch >= 1", name="ck_users_counter_epoch_positive"),
+        Index(
+            "ux_users_normalized_account_name",
+            "normalized_account_name",
+            unique=True,
+        ),
+        Index(
+            "ux_users_normalized_mobile_number",
+            "normalized_mobile_number",
+            unique=True,
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     account_name = Column(String, unique=True, index=True, nullable=False)
     mobile_number = Column(String, unique=True, index=True, nullable=False)
+    normalized_account_name = Column(
+        String,
+        Computed(
+            "lower(translate(btrim(account_name), "
+            "U&'\\06F0\\06F1\\06F2\\06F3\\06F4\\06F5\\06F6\\06F7\\06F8\\06F9"
+            "\\0660\\0661\\0662\\0663\\0664\\0665\\0666\\0667\\0668\\0669', "
+            "'01234567890123456789'))",
+            persisted=True,
+        ),
+        nullable=False,
+    )
+    normalized_mobile_number = Column(
+        String,
+        Computed(
+            "translate(btrim(mobile_number), "
+            "U&'\\06F0\\06F1\\06F2\\06F3\\06F4\\06F5\\06F6\\06F7\\06F8\\06F9"
+            "\\0660\\0661\\0662\\0663\\0664\\0665\\0666\\0667\\0668\\0669', "
+            "'01234567890123456789')",
+            persisted=True,
+        ),
+        nullable=False,
+    )
     
     # telegram_id nullable to support web-only users
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=True)
