@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import secrets
 import string
 
@@ -120,6 +121,40 @@ async def get_accountant_relation_by_invitation_token(
         .where(AccountantRelation.invitation_token == invitation_token)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def lock_accountant_relation_for_registration(
+    db: AsyncSession,
+    invitation_token: str,
+) -> AccountantRelation | None:
+    """Lock one relation for an outer registration transaction.
+
+    Unlike the legacy pending lookup, this helper never sweeps or commits. The
+    authoritative registration service owns validation, mutation, and the
+    transaction boundary.
+    """
+    stmt = (
+        select(AccountantRelation)
+        .where(AccountantRelation.invitation_token == invitation_token)
+        .with_for_update()
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+def activate_accountant_relation_for_registration(
+    relation: AccountantRelation,
+    *,
+    user_id: int,
+    activated_at: datetime,
+) -> None:
+    if relation.status != AccountantRelationStatus.PENDING or relation.deleted_at is not None:
+        raise ValueError("accountant_relation_not_pending")
+    if relation.accountant_user_id is not None:
+        raise ValueError("accountant_relation_already_bound")
+    relation.accountant_user_id = int(user_id)
+    relation.status = AccountantRelationStatus.ACTIVE
+    relation.activated_at = activated_at
+    relation.deleted_at = None
 
 
 async def get_pending_accountant_relation_by_invitation_token(

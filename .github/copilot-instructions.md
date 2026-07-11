@@ -224,6 +224,17 @@ make status      # Container status
   PII, private keys, database dumps, and raw sensitive logs. A blocking review finding reopens the
   stage and must be resolved before the next stage starts.
 
+### Registration Scratch Migration Safety
+- `migrations/env.py` reads `SYNC_DATABASE_URL`, not `DATABASE_URL`. A scratch migration command
+  must set and validate `SYNC_DATABASE_URL`; set both variables when a helper process imports normal
+  application settings.
+- Registration concurrency tests must fail closed unless the parsed target database name matches
+  the stage-specific scratch prefix such as `stage2_registration_*`. Print and verify active and
+  scratch `current_database()|alembic_version` before tests, then drop only explicit scratch names
+  and prove the remaining scratch count is zero.
+- Never infer a container's source checkout from its service name. Verify its mounted migration
+  file and `alembic heads` against the current checkout before using it as a migration source.
+
 ### Branch Rules
 - Branch names must expose release intent. Use `staging/<topic>` for staging-only environment/tooling work, `candidate/<topic>` for work intended for production after staging validation, `hotfix/<topic>` for urgent production fixes, `experiment/<topic>` for throwaway/risky exploration, and `archive/<topic>` for reference-only branches.
 - Never assume every branch should merge to `main`. `staging/*`, `experiment/*`, and `archive/*` are non-release branches by default.
@@ -248,6 +259,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-11 10:45 UTC | Codex | **Dual-Platform Registration Stage 2 Authoritative Service Completed**: Extracted Web registration mutation into one Iran-guarded transaction with Invitation/User/Relation locks, sorted natural-key and Telegram-ID advisory locks, command-receipt replay, deterministic Web/Web and cross-surface outcomes, literal `home_server=iran`, unchanged password/session defaults, reservation release, mandatory membership, and transactional reuse of the existing Telegram notification outbox. The Web adapter retains OTP/session/token and best-effort Web-notification duties; no Telegram route, job, worker, flag, deploy, or production action was enabled. Real PostgreSQL race/rollback tests passed `6/6`, the complete backend suite passed `2700/2700` with four separately exercised opt-in tests, scratch databases were removed, and the active database was verified at `f7c8d9e0a1b2`. Added fail-closed scratch target and container-mount checks after an immediately recovered `SYNC_DATABASE_URL` setup error. |
 | 2026-07-11 09:00 UTC | Codex | **Mandatory Per-Stage ChatGPT Review Handoff Added**: Updated the dual-platform registration roadmap and repository workflow so every completed stage must produce an ignored credential-free ZIP before the next stage starts. Each package contains a detailed English architecture/review prompt, exact commit patch and metadata, raw-but-sanitized command logs with exit codes, migration/runtime evidence when applicable, and per-file SHA-256 metadata. The prompt explicitly accounts for ChatGPT's repository access but lack of direct server-runtime access, requires findings-first roadmap/code/reuse/invariant/migration/sync/security/test/risk review, and treats blocking findings as reopening the stage. Stage 1 evidence was regenerated through 11 passing gates; no deploy or production action was performed. |
 | 2026-07-11 08:30 UTC | Codex | **Dual-Platform Registration Stage 1 Foundation Added**: Added additive Invitation completion/kind/revocation metadata, local reservation/intent/command-receipt tables, strict registration/OTP/invitation-v2 contracts, central two-day invitation expiry, soft revocation, masked and rate-limited public invitation validation, Iran-only public WebApp URL validation, source-aware patch-only versioned registration sync, no-sync/sensitive registry coverage, backup/deploy/env tooling, and migration `a8d9e0f1b2c3`. All direct Telegram registration, reconciliation, Telegram OTP/SMS fallback, contract-v2, and registration-sync-v2 flags remain off. Scratch migration round trips/collision matrices, `2678` backend tests, focused frontend tests, deploy smoke, and frontend build passed. Staging stayed on `f7c8d9e0a1b2`; no staging or production deploy was run. |
 | 2026-07-10 20:50 UTC | Codex | **Telegram Notification Outbox Worker Recovery Fixed**: Corrected the generic Telegram notification worker's `RepeatedErrorLogger` call so transient database failures are logged without terminating the background task. Added focused regressions proving that the loop continues after an ordinary cycle failure and still propagates `CancelledError` for clean shutdown. Queue, recipient, retry, sync, and Telegram delivery semantics were not changed. |

@@ -15,6 +15,11 @@ from api.routers.auth import (
     register_otp_request,
     register_otp_verify,
 )
+from core.registration_contracts import TelegramRegistrationOutcome
+from core.services.authoritative_registration_service import (
+    AuthoritativeRegistrationError,
+    AuthoritativeRegistrationResult,
+)
 from models.session import Platform
 from models.user import UserRole
 
@@ -239,51 +244,50 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
 
         redis = FakeRedis({"reg_verified:abc": "1"})
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth._load_valid_invitation_by_token",
-            new=AsyncMock(side_effect=HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")),
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(
+                side_effect=AuthoritativeRegistrationError(
+                    TelegramRegistrationOutcome.INVITATION_NOT_FOUND,
+                    public_detail="دعوت‌نامه نامعتبر است",
+                )
+            ),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(req, raw_request=make_request(), db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "دعوت‌نامه نامعتبر است")
 
-    async def test_register_complete_rolls_back_on_commit_error(self):
-        invitation = SimpleNamespace(
-            token="abc",
-            account_name="user1",
-            mobile_number="0912",
-            role="standard",
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-        )
+    async def test_register_complete_maps_authoritative_transaction_error_without_issuing_session(self):
         redis = FakeRedis({"reg_verified:abc": "1"})
-        db = FakeDB(commit_side_effect=RuntimeError("db down"))
+        db = FakeDB()
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth._load_valid_invitation_by_token",
-            new=AsyncMock(return_value=(invitation, None, None)),
-        ), patch(
-            "api.routers.auth._login_home_server",
-            return_value="foreign",
-        ), patch(
-            "api.routers.auth.ensure_mandatory_channel_membership",
-            new=AsyncMock(),
-        ):
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(side_effect=RuntimeError("db down")),
+        ), patch("api.routers.auth.handle_login_session", new=AsyncMock()) as session_mock:
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(RegisterComplete(token="abc", address="Tehran address"), raw_request=make_request(), db=db)
 
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "خطا در ثبت کاربر")
-        db.rollback.assert_awaited_once()
+        session_mock.assert_not_awaited()
 
     async def test_register_complete_creates_user_marks_invitation_and_issues_tokens(self):
-        invitation = SimpleNamespace(
-            token="abc",
+        new_user = SimpleNamespace(
+            id=77,
             account_name="user1",
             mobile_number="09120000000",
-            role="standard",
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
+            address="Tehran address",
+            home_server="iran",
+            has_bot_access=True,
+            telegram_id=None,
+        )
+        registration_result = AuthoritativeRegistrationResult(
+            outcome=TelegramRegistrationOutcome.CREATED,
+            authoritative_user_id=77,
+            user=new_user,
+            announce_project_user=True,
+            first_terminal_transition=True,
         )
         redis = FakeRedis({"reg_verified:abc": "1", "reg_otp:abc": "12345"})
         db = FakeDB()
@@ -294,15 +298,15 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(id="session-1")
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth._load_valid_invitation_by_token",
-            new=AsyncMock(return_value=(invitation, None, None)),
-        ), patch(
-            "api.routers.auth._login_home_server",
-            return_value="iran",
-        ), patch(
-            "api.routers.auth.ensure_mandatory_channel_membership",
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
+        ) as complete_mock, patch(
+            "api.routers.auth.publish_project_user_joined_web_notifications",
             new=AsyncMock(),
-        ) as mandatory_mock, patch(
+        ) as notification_mock, patch(
+            "api.routers.auth._login_home_server",
+            return_value="foreign",
+        ) as home_server_mock, patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ) as refresh_mock, patch(
@@ -318,22 +322,15 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-        self.assertEqual(len(db.added), 1)
-        new_user = db.added[0]
-        self.assertEqual(new_user.account_name, "user1")
-        self.assertEqual(new_user.mobile_number, "09120000000")
-        self.assertEqual(new_user.address, "Tehran address")
-        self.assertEqual(new_user.home_server, "iran")
-        self.assertTrue(new_user.has_bot_access)
-        self.assertIsNone(new_user.telegram_id)
-        self.assertTrue(invitation.is_used)
-        self.assertEqual(invitation.registered_user_id, 77)
-        self.assertIsNotNone(invitation.completed_at)
-        self.assertEqual(invitation.completed_via.value, "web")
-        db.flush.assert_awaited_once()
-        self.assertIs(mandatory_mock.await_args.kwargs["user"], new_user)
-        db.commit.assert_awaited_once()
-        db.refresh.assert_awaited_once_with(new_user)
+        complete_mock.assert_awaited_once()
+        self.assertIs(complete_mock.await_args.args[0], db)
+        service_request = complete_mock.await_args.args[1]
+        self.assertEqual(service_request.invitation_token, "abc")
+        self.assertEqual(service_request.address, "Tehran address")
+        self.assertEqual(service_request.source_surface.value, "webapp")
+        self.assertEqual(service_request.identity_proof_type.value, "web_otp")
+        home_server_mock.assert_not_called()
+        notification_mock.assert_awaited_once_with(db, new_user=new_user)
         self.assertEqual(redis.delete_calls, ["reg_otp:abc", "reg_verified:abc"])
         refresh_mock.assert_called_once_with(subject=77, expires_delta=timedelta(days=30))
         handle_session_mock.assert_awaited_once()
@@ -387,14 +384,17 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
 
         redis = FakeRedis({"registration_session:REG-123": "INV-123"})
         session = SimpleNamespace(id="session-1")
+        new_user = SimpleNamespace(id=77, home_server="iran")
+        registration_result = AuthoritativeRegistrationResult(
+            outcome=TelegramRegistrationOutcome.CREATED,
+            authoritative_user_id=77,
+            user=new_user,
+        )
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth._load_valid_invitation_by_token",
-            new=AsyncMock(return_value=(invitation, None, None)),
-        ), patch(
-            "api.routers.auth._login_home_server",
-            return_value="iran",
-        ), patch(
-            "api.routers.auth.ensure_mandatory_channel_membership",
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
+        ) as complete_mock, patch(
+            "api.routers.auth.publish_project_user_joined_web_notifications",
             new=AsyncMock(),
         ), patch(
             "api.routers.auth.create_refresh_token",
@@ -413,36 +413,30 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIn("registration_session:REG-123", redis.delete_calls)
+        self.assertEqual(complete_mock.await_args.args[1].invitation_token, "INV-123")
         self.assertEqual(result["access_token"], "access-token")
 
     async def test_register_complete_binds_pending_accountant_relation_and_disables_bot_access(self):
-        invitation = SimpleNamespace(
-            token="ACCT-token",
-            account_name="accountant1",
-            mobile_number="09120000000",
-            role="watch",
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-        )
         relation = SimpleNamespace(
-            accountant_user_id=None,
-            status="pending",
-            activated_at=None,
+            accountant_user_id=77,
+            status="active",
+            activated_at=datetime.now(),
             deleted_at=None,
         )
+        new_user = SimpleNamespace(id=77, home_server="iran", has_bot_access=False)
+        registration_result = AuthoritativeRegistrationResult(
+            outcome=TelegramRegistrationOutcome.CREATED,
+            authoritative_user_id=77,
+            user=new_user,
+            accountant_relation=relation,
+        )
         redis = FakeRedis({"reg_verified:ACCT-token": "1"})
-        db = FakeDB([FakeExecuteResult(invitation)])
+        db = FakeDB()
         session = SimpleNamespace(id="session-acc")
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=relation),
-        ), patch(
-            "api.routers.auth._login_home_server",
-            return_value="foreign",
-        ), patch(
-            "api.routers.auth.ensure_mandatory_channel_membership",
-            new=AsyncMock(),
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
         ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-acc",
@@ -459,7 +453,6 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-        new_user = db.added[0]
         self.assertFalse(new_user.has_bot_access)
         self.assertEqual(relation.accountant_user_id, 77)
         self.assertEqual(relation.status, "active")
@@ -467,58 +460,48 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["access_token"], "access-acc")
 
     async def test_register_complete_rejects_missing_accountant_relation(self):
-        invitation = SimpleNamespace(
-            token="ACCT-token",
-            account_name="accountant1",
-            mobile_number="09120000000",
-            role="watch",
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-        )
         redis = FakeRedis({"reg_verified:ACCT-token": "1"})
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(
+                side_effect=AuthoritativeRegistrationError(
+                    TelegramRegistrationOutcome.INVALID_RELATION,
+                    public_detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است",
+                )
+            ),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(
                     RegisterComplete(token="ACCT-token", address="Tehran address"),
                     raw_request=make_request(),
-                    db=FakeDB([FakeExecuteResult(invitation)]),
+                    db=FakeDB(),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
 
     async def test_register_complete_binds_pending_customer_relation_and_disables_bot_access(self):
-        invitation = SimpleNamespace(
-            token="CUST-token",
-            account_name="customer1",
-            mobile_number="09120000000",
-            role="standard",
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-        )
         relation = SimpleNamespace(
-            customer_user_id=None,
+            customer_user_id=77,
             management_name="mohsen",
-            status="pending",
-            activated_at=None,
+            status="active",
+            activated_at=datetime.now(),
             deleted_at=None,
         )
+        new_user = SimpleNamespace(id=77, home_server="iran", full_name="mohsen", has_bot_access=False)
+        registration_result = AuthoritativeRegistrationResult(
+            outcome=TelegramRegistrationOutcome.CREATED,
+            authoritative_user_id=77,
+            user=new_user,
+            customer_relation=relation,
+        )
         redis = FakeRedis({"reg_verified:CUST-token": "1"})
-        db = FakeDB([FakeExecuteResult(invitation)])
+        db = FakeDB()
         session = SimpleNamespace(id="session-cust")
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=relation),
-        ), patch(
-            "api.routers.auth._login_home_server",
-            return_value="foreign",
-        ), patch(
-            "api.routers.auth.ensure_mandatory_channel_membership",
-            new=AsyncMock(),
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
         ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-cust",
@@ -535,7 +518,6 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-        new_user = db.added[0]
         self.assertEqual(new_user.full_name, "mohsen")
         self.assertFalse(new_user.has_bot_access)
         self.assertEqual(relation.customer_user_id, 77)
@@ -544,25 +526,22 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["access_token"], "access-cust")
 
     async def test_register_complete_rejects_missing_customer_relation(self):
-        invitation = SimpleNamespace(
-            token="CUST-token",
-            account_name="customer1",
-            mobile_number="09120000000",
-            role="standard",
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-        )
         redis = FakeRedis({"reg_verified:CUST-token": "1"})
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(
+                side_effect=AuthoritativeRegistrationError(
+                    TelegramRegistrationOutcome.INVALID_RELATION,
+                    public_detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است",
+                )
+            ),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(
                     RegisterComplete(token="CUST-token", address="Tehran address"),
                     raw_request=make_request(),
-                    db=FakeDB([FakeExecuteResult(invitation)]),
+                    db=FakeDB(),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "دعوت‌نامه مشتری نامعتبر یا منقضی شده است")

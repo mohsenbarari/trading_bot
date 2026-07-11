@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import secrets
 import string
@@ -189,6 +190,35 @@ async def get_customer_relation_by_invitation_token(
         .where(CustomerRelation.invitation_token == invitation_token)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def lock_customer_relation_for_registration(
+    db: AsyncSession,
+    invitation_token: str,
+) -> CustomerRelation | None:
+    """Lock one relation without taking ownership of commit or rollback."""
+    stmt = (
+        select(CustomerRelation)
+        .where(CustomerRelation.invitation_token == invitation_token)
+        .with_for_update()
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+def activate_customer_relation_for_registration(
+    relation: CustomerRelation,
+    *,
+    user_id: int,
+    activated_at: datetime,
+) -> None:
+    if relation.status != CustomerRelationStatus.PENDING or relation.deleted_at is not None:
+        raise ValueError("customer_relation_not_pending")
+    if relation.customer_user_id is not None:
+        raise ValueError("customer_relation_already_bound")
+    relation.customer_user_id = int(user_id)
+    relation.status = CustomerRelationStatus.ACTIVE
+    relation.activated_at = activated_at
+    relation.deleted_at = None
 
 
 async def get_pending_customer_relation_by_invitation_token(

@@ -1313,6 +1313,25 @@ Exit criteria:
 - no Telegram path is enabled yet;
 - field-authority, relation-completeness, session, and side-effect invariants have regression tests.
 
+Execution record (2026-07-11): **Complete as a source-code milestone**. The existing Web
+`register-complete` adapter now delegates all registration product-state mutation to one
+Iran-guarded authoritative transaction. Invitation/User/Relation locks, deterministic natural-key
+and Telegram-ID serialization, command receipt replay, mandatory membership, transactional reuse
+of `telegram_notification_outbox`, literal Iran ownership, rollback checkpoints, and post-commit
+Web notification boundaries are implemented and recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE2_AUTHORITATIVE_SERVICE_20260711.md`. The complete backend
+suite passed `2700` tests; the opt-in real PostgreSQL race/rollback module passed `6` tests on a
+fresh scratch database. All scratch databases were removed and the active database remained at
+`f7c8d9e0a1b2`. No Telegram route, job, worker, feature flag, staging deploy, or production action
+was enabled.
+
+External review handoff (2026-07-11): the mandatory English prompt, exact Stage 2 patch/metadata,
+sanitized command logs, migration/runtime safety evidence, redaction report, and per-file hashes are
+packaged outside Git at
+`tmp/chatgpt/dual-platform-registration-stage2-review-20260711.zip`. The review target is the Stage
+2 range beginning at `00aab349`; a blocking ChatGPT finding reopens Stage 2 before Stage 3 may
+begin.
+
 ### Stage 3 - Canonical Invitation Creation And URL Repair
 
 - Route bot-admin invitation creation to signed Iran authority.

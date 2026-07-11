@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import logging
 from pydantic import BaseModel, field_validator
 from typing import Optional
-from urllib.parse import quote
 import random
 import secrets
 import hashlib
@@ -13,11 +12,9 @@ import hmac
 import time
 from jose import JWTError, jwt
 from core.db import get_db
-from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
-from models.accountant_relation import AccountantRelation, AccountantRelationStatus
-from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
-from models.invitation import Invitation, InvitationCompletionSurface, InvitationKind
-from core.enums import NotificationCategory, NotificationLevel
+from models.user import User, UserRole
+from models.customer_relation import CustomerTier
+from models.invitation import Invitation, InvitationKind
 from core.security import (
     constant_time_secret_equals,
     create_access_token,
@@ -54,14 +51,17 @@ from core.services.telegram_link_token_service import (
     build_telegram_start_parameter,
     create_telegram_link_token,
 )
-from core.services.telegram_notification_outbox_service import (
-    TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
-    TelegramNotificationRecipient,
-    enqueue_telegram_notifications,
+from core.services.authoritative_registration_service import (
+    AuthoritativeRegistrationError,
+    AuthoritativeRegistrationRequest,
+    complete_invitation_registration,
+)
+from core.services.registration_notification_service import (
+    publish_project_user_joined_web_notifications,
 )
 from models.session import Platform, UserSession
 import uuid
-from core.utils import create_user_notification, normalize_persian_numerals, utc_now, utc_now_naive
+from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.request_logging import client_ip_from_request
@@ -198,125 +198,6 @@ async def _clear_otp_verify_subject_failures(redis, *, subject: str) -> None:
     subject_key = _otp_verify_subject_key(subject)
     if await redis.get(subject_key):
         await redis.delete(subject_key)
-
-
-def _should_announce_project_user_registration(accountant_relation, customer_relation) -> bool:
-    return accountant_relation is None and customer_relation is None
-
-
-def _project_user_joined_message(user: User) -> str:
-    display_name = (getattr(user, "full_name", None) or getattr(user, "account_name", "") or "").strip()
-    return f"{display_name} به لیست همکاران اضافه شدند."
-
-
-def _project_user_profile_route(user: User) -> str:
-    account_name = (getattr(user, "account_name", "") or "").strip()
-    suffix = f"?account_name={quote(account_name)}" if account_name else ""
-    return f"/users/{user.id}{suffix}"
-
-
-async def _publish_project_user_joined_notifications(db: AsyncSession, new_user: User) -> None:
-    if not getattr(new_user, "id", None):
-        return
-
-    recipient_stmt = select(User.id).where(
-        User.is_deleted == False,
-        User.id != new_user.id,
-    )
-    try:
-        recipient_ids = list((await db.execute(recipient_stmt)).scalars().all())
-    except Exception as exc:
-        logger.warning("Project user joined notification recipient lookup failed: %s", exc)
-        return
-
-    customer_exists = (
-        select(CustomerRelation.id)
-        .where(
-            CustomerRelation.customer_user_id == User.id,
-            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
-            CustomerRelation.deleted_at.is_(None),
-        )
-        .exists()
-    )
-    accountant_exists = (
-        select(AccountantRelation.id)
-        .where(
-            AccountantRelation.accountant_user_id == User.id,
-            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
-            AccountantRelation.deleted_at.is_(None),
-        )
-        .exists()
-    )
-    telegram_recipient_stmt = select(User.id, User.telegram_id).where(
-        User.is_deleted == False,
-        User.id != new_user.id,
-        User.telegram_id.is_not(None),
-        ~customer_exists,
-        ~accountant_exists,
-    )
-    try:
-        telegram_recipient_rows = list((await db.execute(telegram_recipient_stmt)).all())
-    except Exception as exc:
-        telegram_recipient_rows = []
-        logger.warning("Project user joined Telegram recipient lookup failed: %s", exc)
-
-    message = _project_user_joined_message(new_user)
-    route = _project_user_profile_route(new_user)
-    for recipient_id in recipient_ids:
-        try:
-            await create_user_notification(
-                db,
-                int(recipient_id),
-                message,
-                NotificationLevel.INFO,
-                NotificationCategory.SYSTEM,
-                extra_payload={
-                    "title": "پیام مدیریت",
-                    "route": route,
-                },
-            )
-        except Exception as exc:
-            await db.rollback()
-            logger.warning(
-                "Project user joined notification failed",
-                extra={
-                    "recipient_id": recipient_id,
-                    "new_user_id": new_user.id,
-                    "error": str(exc),
-                },
-            )
-
-    telegram_recipients = [
-        TelegramNotificationRecipient(user_id=int(user_id), telegram_id=int(telegram_id))
-        for user_id, telegram_id in telegram_recipient_rows
-        if telegram_id is not None
-    ]
-    if telegram_recipients:
-        try:
-            await enqueue_telegram_notifications(
-                db,
-                recipients=telegram_recipients,
-                text=message,
-                source_type=TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
-                source_id=new_user.id,
-                parse_mode=None,
-                extra_payload={
-                    "title": "پیام مدیریت",
-                    "route": route,
-                    "exclude_customers": True,
-                },
-            )
-            await db.commit()
-        except Exception as exc:
-            await db.rollback()
-            logger.warning(
-                "Project user joined Telegram notification enqueue failed",
-                extra={
-                    "recipient_count": len(telegram_recipients),
-                    "new_user_id": new_user.id,
-                    "error": str(exc),
-                },
-            )
 
 
 def _raise_inactive_account_error() -> None:
@@ -540,10 +421,22 @@ async def _load_registration_session_invitation(
     *,
     registration_token: str,
 ) -> tuple[Invitation, object | None, object | None]:
-    invitation_token = await redis.get(_registration_session_key(registration_token))
+    invitation_token = await _load_registration_session_token(
+        redis,
+        registration_token=registration_token,
+    )
+    return await _load_valid_invitation_by_token(db, invitation_token, missing_detail="دعوت‌نامه نامعتبر است")
+
+
+async def _load_registration_session_token(
+    redis,
+    *,
+    registration_token: str,
+) -> str:
+    invitation_token = _redis_text(await redis.get(_registration_session_key(registration_token)))
     if not invitation_token:
         raise HTTPException(status_code=400, detail="جلسه تکمیل ثبت‌نام منقضی شده است")
-    return await _load_valid_invitation_by_token(db, invitation_token, missing_detail="دعوت‌نامه نامعتبر است")
+    return invitation_token
 
 def _serialize_current_user_response(
     current_user: User,
@@ -626,18 +519,6 @@ async def _load_current_user_relation_context(
         "telegram_link_denial_reason": None if bot_access.allowed else bot_access.reason,
     }
 
-
-def _registration_full_name(invitation: Invitation, accountant_relation, customer_relation) -> str:
-    candidate = None
-    if customer_relation is not None:
-        candidate = getattr(customer_relation, "management_name", None)
-    elif accountant_relation is not None:
-        candidate = getattr(accountant_relation, "relation_display_name", None)
-
-    normalized = str(candidate or "").strip()
-    if normalized:
-        return normalized
-    return invitation.account_name
 
 @router.get("/me", response_model=schemas.UserRead)
 async def read_users_me(
@@ -800,8 +681,7 @@ async def register_complete(
     registration_token = (req.registration_token or "").strip()
 
     if registration_token:
-        inv, accountant_relation, customer_relation = await _load_registration_session_invitation(
-            db,
+        invitation_token = await _load_registration_session_token(
             redis,
             registration_token=registration_token,
         )
@@ -812,67 +692,37 @@ async def register_complete(
         verify_key = f"reg_verified:{invitation_token}"
         if not await redis.get(verify_key):
             raise HTTPException(status_code=400, detail="لطفاً ابتدا کد تایید را وارد کنید")
-        inv, accountant_relation, customer_relation = await _load_valid_invitation_by_token(
-            db,
-            invitation_token,
-            missing_detail="دعوت‌نامه نامعتبر است",
-        )
 
-    new_user = User(
-        account_name=inv.account_name,
-        mobile_number=inv.mobile_number,
-        role=inv.role,
-        full_name=_registration_full_name(inv, accountant_relation, customer_relation),
-        address=req.address,
-        telegram_id=None, # Web only user
-        home_server=_login_home_server(raw_request),
-        max_sessions=1,
-    )
-    set_legacy_has_bot_access_compatibility(
-        new_user,
-        enabled=accountant_relation is None and customer_relation is None,
-    )
-    
-    db.add(new_user)
-    
-    if accountant_relation:
-        accountant_relation.accountant_user_id = new_user.id
-        accountant_relation.status = AccountantRelationStatus.ACTIVE
-        accountant_relation.activated_at = utc_now()
-        accountant_relation.deleted_at = None
-    if customer_relation:
-        customer_relation.customer_user_id = new_user.id
-        customer_relation.status = CustomerRelationStatus.ACTIVE
-        customer_relation.activated_at = utc_now()
-        customer_relation.deleted_at = None
-    
     try:
-        await db.flush()
-        from core.services.invitation_identity_reservation_service import release_invitation_identity
-        from core.services.invitation_lifecycle_service import complete_invitation
-
-        complete_invitation(
-            inv,
-            registered_user_id=new_user.id,
-            completed_via=InvitationCompletionSurface.WEB,
-            completed_at=utc_now(),
+        registration_result = await complete_invitation_registration(
+            db,
+            AuthoritativeRegistrationRequest.for_web(
+                invitation_token=invitation_token,
+                address=req.address,
+            ),
         )
-        if getattr(inv, "id", None) is not None:
-            await release_invitation_identity(db, invitation_id=inv.id)
-        if accountant_relation:
-            accountant_relation.accountant_user_id = new_user.id
-        if customer_relation:
-            customer_relation.customer_user_id = new_user.id
-        await ensure_mandatory_channel_membership(db, user=new_user)
-        await db.commit()
-        await db.refresh(new_user)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Registration error: {e}")
+    except AuthoritativeRegistrationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.public_detail) from None
+    except Exception as exc:
+        logger.error(
+            "Authoritative Web registration failed",
+            extra={
+                "event": "registration.web_transaction_failed",
+                "error_class": type(exc).__name__,
+            },
+        )
         raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
 
-    if _should_announce_project_user_registration(accountant_relation, customer_relation):
-        await _publish_project_user_joined_notifications(db, new_user)
+    new_user = registration_result.user
+    if new_user is None or registration_result.authoritative_user_id is None:
+        logger.error(
+            "Authoritative Web registration returned no user",
+            extra={"event": "registration.web_result_invariant_failed"},
+        )
+        raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
+
+    if registration_result.announce_project_user:
+        await publish_project_user_joined_web_notifications(db, new_user=new_user)
         
     if invitation_token:
         await redis.delete(f"reg_otp:{invitation_token}")
