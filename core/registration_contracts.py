@@ -11,12 +11,32 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
+from core.registration_identity import strip_canonical_identity_whitespace
 from core.utils import normalize_persian_numerals
 
 
 REGISTRATION_ADDRESS_MIN_LENGTH = 10
 REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE = "آدرس باید حداقل ۱۰ کاراکتر باشد."
 ExactRegistrationAddress = Annotated[str, StringConstraints(strip_whitespace=False)]
+
+
+def normalize_registration_mobile_number(value: object) -> str:
+    """Normalize Telegram/Iran representations into the canonical 09 form."""
+
+    normalized = normalize_persian_numerals(
+        strip_canonical_identity_whitespace(value)
+    )
+    if normalized.startswith("+98"):
+        normalized = "0" + normalized[3:]
+    elif normalized.startswith("0098"):
+        normalized = "0" + normalized[4:]
+    elif normalized.startswith("98") and len(normalized) == 12:
+        normalized = "0" + normalized[2:]
+    elif normalized.startswith("9") and len(normalized) == 10:
+        normalized = "0" + normalized
+    if len(normalized) != 11 or not normalized.startswith("09") or not normalized.isdigit():
+        raise ValueError("شماره موبایل نامعتبر است")
+    return normalized
 
 
 class RegistrationSourceSurface(str, Enum):
@@ -113,10 +133,7 @@ class TelegramRegistrationCommand(BaseModel):
     @field_validator("mobile_number")
     @classmethod
     def validate_mobile_number(cls, value: str) -> str:
-        normalized = normalize_persian_numerals(str(value or "")).strip()
-        if len(normalized) != 11 or not normalized.startswith("09") or not normalized.isdigit():
-            raise ValueError("شماره موبایل نامعتبر است")
-        return normalized
+        return normalize_registration_mobile_number(value)
 
     @field_validator("address")
     @classmethod

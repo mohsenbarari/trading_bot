@@ -83,7 +83,11 @@ async def main():
     setup_event_listeners()
 
     bot = Bot(token=settings.bot_token)
-    storage = RedisStorage.from_url(settings.redis_url)
+    storage = RedisStorage.from_url(
+        settings.redis_url,
+        state_ttl=2 * 24 * 60 * 60,
+        data_ttl=2 * 24 * 60 * 60,
+    )
     dp = Dispatcher(storage=storage)
 
     # Hot trade callbacks must fail fast before Auth opens a DB session.

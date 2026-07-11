@@ -85,6 +85,36 @@ def _intent_identity(
     return command_id, f"telegram-registration:{key_digest[:40]}"
 
 
+async def get_registration_intent_for_invitation(
+    db: AsyncSession,
+    *,
+    invitation_token: str,
+    telegram_id: int,
+) -> TelegramRegistrationIntent | None:
+    """Read the deterministic foreign-local intent without changing retry state."""
+
+    if current_server() != SERVER_FOREIGN:
+        raise TelegramRegistrationIntentError("foreign_authority_required")
+    command_id, idempotency_key = _intent_identity(
+        invitation_token=invitation_token,
+        telegram_id=telegram_id,
+    )
+    intent = (
+        await db.execute(
+            select(TelegramRegistrationIntent).where(
+                TelegramRegistrationIntent.id == command_id,
+                TelegramRegistrationIntent.idempotency_key == idempotency_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if intent is not None and (
+        intent.invitation_token != invitation_token
+        or int(intent.telegram_id) != int(telegram_id)
+    ):
+        raise TelegramRegistrationIntentError("intent_identity_conflict")
+    return intent
+
+
 def intent_to_command(intent: TelegramRegistrationIntent) -> TelegramRegistrationCommand:
     if (
         intent.address is None

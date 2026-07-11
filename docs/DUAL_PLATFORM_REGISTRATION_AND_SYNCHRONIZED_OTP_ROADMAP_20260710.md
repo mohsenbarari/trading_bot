@@ -1560,6 +1560,25 @@ Exit criteria:
 
 ### Stage 5 - Direct Telegram Registration FSM
 
+Execution record (2026-07-11): **Source implementation complete; independent review required**.
+The foreign bot now exposes the direct contact/address/confirmation FSM only when both direct
+registration and reconciliation flags are enabled. Collection remains in Redis with Invitation-
+bounded TTL; sender-owned contact and canonical mobile equality are required; and confirmation
+commits one Stage 4 intent before clearing FSM. The bot never creates a foreign User, never grants
+access from an Iran response alone, and shows an explicit pending-not-final result until the exact
+allowed User projection exists. Standard, police, middle-manager, super-admin, and Tier-1 customer
+eligibility uses the existing shared policy; Watch, accountant, and Tier-2 remain Web-only. Success
+hands the synced User to the existing linked-account panel, menu, channel-join, tutorial, and
+welcome path without changing those messages or callbacks. Redis startup storage now has a two-day
+defense TTL, while each active registration key is shortened to its Invitation expiry. Dedicated
+Stage 5 (`29`), relevant focused (`86`), real scratch PostgreSQL (`7`), full-backend, and
+unrestricted deployment-smoke evidence passed; the exact verification details are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE5_DIRECT_TELEGRAM_FSM_20260711.md`. The active database
+remained at `f7c8d9e0a1b2`, Stage 1 schema count and scratch database count are zero, and no migration,
+feature enablement, deploy, push, or production action occurred. The owner explicitly authorized
+Stage 5 source work while the combined Stage 3/4 external review remained pending; that review and
+an independent Stage 5 review are still rollout blockers.
+
 - Replace Web redirect for eligible normal invitations with contact/address/confirmation FSM.
 - Reuse sender-owned contact guards.
 - Enforce eligibility matrix.
