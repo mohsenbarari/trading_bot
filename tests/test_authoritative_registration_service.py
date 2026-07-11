@@ -140,65 +140,117 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         self._server_override.__exit__(None, None, None)
 
     def test_relation_contract_fails_closed_on_identity_owner_role_and_tier_drift(self):
-        accountant_invitation = _invitation(
-            token="ACCT-stage2-contract",
-            kind=InvitationKind.ACCOUNTANT,
-            role=UserRole.WATCH,
-        )
-        identity = registration.normalize_invitation_identity(
-            mobile_number=accountant_invitation.mobile_number,
-            account_name=accountant_invitation.account_name,
-        )
-        accountant = AccountantRelation(
-            owner_user_id=5,
-            created_by_user_id=5,
-            invitation_token=accountant_invitation.token,
-            global_account_name=accountant_invitation.account_name,
-            relation_display_name="Accountant",
-            mobile_number=accountant_invitation.mobile_number,
-            status=AccountantRelationStatus.PENDING,
-            expires_at=accountant_invitation.expires_at,
-        )
+        def accountant_projection():
+            invitation = _invitation(
+                token="ACCT-stage2-contract",
+                kind=InvitationKind.ACCOUNTANT,
+                role=UserRole.WATCH,
+            )
+            relation = AccountantRelation(
+                owner_user_id=5,
+                created_by_user_id=5,
+                invitation_token=invitation.token,
+                global_account_name=invitation.account_name,
+                relation_display_name="Accountant",
+                mobile_number=invitation.mobile_number,
+                status=AccountantRelationStatus.PENDING,
+                expires_at=invitation.expires_at,
+            )
+            identity = registration.normalize_invitation_identity(
+                mobile_number=invitation.mobile_number,
+                account_name=invitation.account_name,
+            )
+            return invitation, relation, identity
+
+        valid_invitation, valid_accountant, valid_identity = accountant_projection()
         registration._validate_relation_contract(
-            invitation=accountant_invitation,
-            identity=identity,
-            accountant_relation=accountant,
+            invitation=valid_invitation,
+            identity=valid_identity,
+            accountant_relation=valid_accountant,
             customer_relation=None,
         )
-        accountant.mobile_number = "09129999999"
-        with self.assertRaises(registration.AuthoritativeRegistrationError):
-            registration._validate_relation_contract(
-                invitation=accountant_invitation,
-                identity=identity,
-                accountant_relation=accountant,
-                customer_relation=None,
-            )
+        accountant_drift = (
+            ("mobile", "relation", "mobile_number", "09129999999"),
+            ("account", "relation", "global_account_name", "different_account"),
+            ("owner", "relation", "owner_user_id", 999),
+            ("creator", "relation", "created_by_user_id", 999),
+            ("token", "relation", "invitation_token", "ACCT-different-token"),
+            (
+                "expiry",
+                "relation",
+                "expires_at",
+                valid_invitation.expires_at + timedelta(seconds=1),
+            ),
+            ("kind", "invitation", "kind", InvitationKind.STANDARD),
+            ("role", "invitation", "role", UserRole.STANDARD),
+        )
+        for label, target_name, attribute, value in accountant_drift:
+            with self.subTest(relation="accountant", drift=label):
+                invitation, relation, identity = accountant_projection()
+                target = relation if target_name == "relation" else invitation
+                setattr(target, attribute, value)
+                with self.assertRaises(registration.AuthoritativeRegistrationError):
+                    registration._validate_relation_contract(
+                        invitation=invitation,
+                        identity=identity,
+                        accountant_relation=relation,
+                        customer_relation=None,
+                    )
 
-        customer_invitation = _invitation(
-            token="CUST-stage2-contract",
-            kind=InvitationKind.CUSTOMER,
-            role=UserRole.STANDARD,
-        )
-        customer_identity = registration.normalize_invitation_identity(
-            mobile_number=customer_invitation.mobile_number,
-            account_name=customer_invitation.account_name,
-        )
-        customer = CustomerRelation(
-            owner_user_id=999,
-            created_by_user_id=5,
-            invitation_token=customer_invitation.token,
-            management_name="Customer",
-            customer_tier=CustomerTier.TIER_1,
-            status=CustomerRelationStatus.PENDING,
-            expires_at=customer_invitation.expires_at,
-        )
-        with self.assertRaises(registration.AuthoritativeRegistrationError):
-            registration._validate_relation_contract(
-                invitation=customer_invitation,
-                identity=customer_identity,
-                accountant_relation=None,
-                customer_relation=customer,
+        def customer_projection():
+            invitation = _invitation(
+                token="CUST-stage2-contract",
+                kind=InvitationKind.CUSTOMER,
+                role=UserRole.STANDARD,
             )
+            relation = CustomerRelation(
+                owner_user_id=5,
+                created_by_user_id=5,
+                invitation_token=invitation.token,
+                management_name="Customer",
+                customer_tier=CustomerTier.TIER_1,
+                status=CustomerRelationStatus.PENDING,
+                expires_at=invitation.expires_at,
+            )
+            identity = registration.normalize_invitation_identity(
+                mobile_number=invitation.mobile_number,
+                account_name=invitation.account_name,
+            )
+            return invitation, relation, identity
+
+        valid_invitation, valid_customer, valid_identity = customer_projection()
+        registration._validate_relation_contract(
+            invitation=valid_invitation,
+            identity=valid_identity,
+            accountant_relation=None,
+            customer_relation=valid_customer,
+        )
+        customer_drift = (
+            ("owner", "relation", "owner_user_id", 999),
+            ("creator", "relation", "created_by_user_id", 999),
+            ("token", "relation", "invitation_token", "CUST-different-token"),
+            ("tier", "relation", "customer_tier", "tier3"),
+            (
+                "expiry",
+                "relation",
+                "expires_at",
+                valid_invitation.expires_at + timedelta(seconds=1),
+            ),
+            ("kind", "invitation", "kind", InvitationKind.STANDARD),
+            ("role", "invitation", "role", UserRole.WATCH),
+        )
+        for label, target_name, attribute, value in customer_drift:
+            with self.subTest(relation="customer", drift=label):
+                invitation, relation, identity = customer_projection()
+                target = relation if target_name == "relation" else invitation
+                setattr(target, attribute, value)
+                with self.assertRaises(registration.AuthoritativeRegistrationError):
+                    registration._validate_relation_contract(
+                        invitation=invitation,
+                        identity=identity,
+                        accountant_relation=None,
+                        customer_relation=relation,
+                    )
 
     async def test_relation_loader_rejects_cross_kind_token_projection(self):
         accountant = SimpleNamespace(id=1)

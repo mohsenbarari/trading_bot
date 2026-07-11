@@ -360,6 +360,98 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                     await session.flush()
 
+    async def test_canonical_identity_rejects_arabic_split_and_deleted_variants(self):
+        arabic_digits = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+        arabic_invitation = await self._seed_invitation("canonical_arabic")
+        async with self.session_factory() as session:
+            session.add(
+                User(
+                    account_name=f" {arabic_invitation.account_name.upper().translate(arabic_digits)} ",
+                    mobile_number=f" {arabic_invitation.mobile_number.translate(arabic_digits)} ",
+                    full_name="Arabic canonical user",
+                    address="Arabic canonical address",
+                    role=UserRole.STANDARD,
+                    home_server="iran",
+                    must_change_password=False,
+                )
+            )
+            await session.commit()
+        async with self.session_factory() as session:
+            with self.assertRaises(registration.AuthoritativeRegistrationError) as exc_info:
+                await registration.complete_invitation_registration(
+                    session,
+                    registration.AuthoritativeRegistrationRequest.for_web(
+                        invitation_token=arabic_invitation.token,
+                        address="Arabic collision attempt address",
+                    ),
+                )
+        self.assertEqual(exc_info.exception.outcome, TelegramRegistrationOutcome.MOBILE_CONFLICT)
+
+        split_invitation = await self._seed_invitation("canonical_split")
+        split_suffix = uuid4().hex
+        async with self.session_factory() as session:
+            session.add_all(
+                [
+                    User(
+                        account_name=f"split_mobile_{split_suffix[:10]}",
+                        mobile_number=split_invitation.mobile_number,
+                        full_name="Split mobile user",
+                        address="Split mobile address",
+                        role=UserRole.STANDARD,
+                        home_server="iran",
+                        must_change_password=False,
+                    ),
+                    User(
+                        account_name=f" {split_invitation.account_name.upper()} ",
+                        mobile_number=f"093{int(split_suffix[:8], 16) % 100000000:08d}",
+                        full_name="Split account user",
+                        address="Split account address",
+                        role=UserRole.STANDARD,
+                        home_server="iran",
+                        must_change_password=False,
+                    ),
+                ]
+            )
+            await session.commit()
+        async with self.session_factory() as session:
+            with self.assertRaises(registration.AuthoritativeRegistrationError) as exc_info:
+                await registration.complete_invitation_registration(
+                    session,
+                    registration.AuthoritativeRegistrationRequest.for_web(
+                        invitation_token=split_invitation.token,
+                        address="Split collision attempt address",
+                    ),
+                )
+        self.assertEqual(exc_info.exception.outcome, TelegramRegistrationOutcome.MOBILE_CONFLICT)
+
+        deleted_invitation = await self._seed_invitation("canonical_deleted")
+        async with self.session_factory() as session:
+            session.add(
+                User(
+                    account_name=deleted_invitation.account_name,
+                    mobile_number=deleted_invitation.mobile_number,
+                    full_name="Deleted canonical user",
+                    address="Deleted canonical address",
+                    role=UserRole.STANDARD,
+                    home_server="iran",
+                    must_change_password=False,
+                    is_deleted=True,
+                    deleted_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+            )
+            await session.commit()
+        async with self.session_factory() as session:
+            with self.assertRaises(registration.AuthoritativeRegistrationError) as exc_info:
+                await registration.complete_invitation_registration(
+                    session,
+                    registration.AuthoritativeRegistrationRequest.for_web(
+                        invitation_token=deleted_invitation.token,
+                        address="Deleted collision attempt address",
+                    ),
+                )
+        self.assertEqual(exc_info.exception.outcome, TelegramRegistrationOutcome.ACCOUNT_DELETED)
+
     async def test_unique_constraint_conflicts_persist_one_terminal_receipt_and_replay(self):
         cases = (
             ("mobile", TelegramRegistrationOutcome.MOBILE_CONFLICT),
@@ -1221,6 +1313,80 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 len({row.recipient_user_id for row in outbox_rows}),
             )
 
+    async def test_two_different_commands_for_one_invitation_have_one_stable_winner(self):
+        invitation = await self._seed_invitation("different_commands")
+        await self._seed_telegram_recipient("different_commands")
+        first_command = _telegram_command(
+            invitation,
+            telegram_id=2_240_000_000 + invitation.id,
+        )
+        second_command = _telegram_command(
+            invitation,
+            telegram_id=2_250_000_000 + invitation.id,
+        )
+        first_locked = asyncio.Event()
+        release_first = asyncio.Event()
+        second_started = asyncio.Event()
+        original_loader = registration._load_invitation_for_update
+
+        async def observed_loader(db, token):
+            if asyncio.current_task().get_name() == "stage2-different-command-second":
+                second_started.set()
+            return await original_loader(db, token)
+
+        async def first_checkpoint(name):
+            if name == "after_invitation_lock":
+                first_locked.set()
+                await release_first.wait()
+
+        async def run_command(command, checkpoint=None):
+            async with self.session_factory() as session:
+                return await registration.complete_invitation_registration(
+                    session,
+                    registration.AuthoritativeRegistrationRequest.for_telegram(
+                        command=command,
+                        source_server=SERVER_FOREIGN,
+                        received_at=command.local_completed_at,
+                    ),
+                    checkpoint=checkpoint,
+                )
+
+        with patch.object(registration, "_load_invitation_for_update", new=observed_loader):
+            first = asyncio.create_task(
+                run_command(first_command, first_checkpoint),
+                name="stage2-different-command-first",
+            )
+            await first_locked.wait()
+            second = asyncio.create_task(
+                run_command(second_command),
+                name="stage2-different-command-second",
+            )
+            await second_started.wait()
+            self.assertFalse(second.done())
+            release_first.set()
+            first_result, second_result = await asyncio.gather(first, second)
+
+        self.assertEqual(first_result.outcome, TelegramRegistrationOutcome.CREATED)
+        self.assertEqual(
+            second_result.outcome,
+            TelegramRegistrationOutcome.TELEGRAM_ACCOUNT_CONFLICT,
+        )
+        user = await self._assert_single_completed_user(invitation)
+        self.assertEqual(user.telegram_id, first_command.telegram_id)
+        async with self.session_factory() as session:
+            receipt_count = int(
+                (
+                    await session.execute(
+                        select(func.count(TelegramRegistrationCommandReceipt.id)).where(
+                            TelegramRegistrationCommandReceipt.command_id.in_(
+                                [first_command.command_id, second_command.command_id]
+                            )
+                        )
+                    )
+                ).scalar_one()
+            )
+            self.assertEqual(receipt_count, 2)
+
     async def test_telegram_winner_then_web_rejects_without_second_user(self):
         invitation = await self._seed_invitation("telegram_web")
         command = _telegram_command(invitation, telegram_id=2_000_000_000 + invitation.id)
@@ -1757,6 +1923,22 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 "ok",
             )
+            await session.commit()
+
+        async with self.session_factory() as session:
+            restart_replay = await _apply_user_counter_event(
+                session,
+                record_id=user.id,
+                data=payload(
+                    disconnected_post_reset_id,
+                    kind="increment",
+                    epoch=1,
+                    deltas={"trades_count": 4},
+                    occurred_at=reset_at + timedelta(minutes=2),
+                ),
+                source_server=SERVER_FOREIGN,
+            )
+            self.assertEqual(restart_replay, "ignored")
             await session.commit()
 
         async with self.session_factory() as session:

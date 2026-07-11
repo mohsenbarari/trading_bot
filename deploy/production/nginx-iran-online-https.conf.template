@@ -49,6 +49,7 @@ server {
         proxy_set_header Connection "";
         add_header Cache-Control "no-store, max-age=0" always;
         add_header Pragma "no-cache" always;
+        add_header Referrer-Policy "no-referrer" always;
     }
 
     location /api/ {

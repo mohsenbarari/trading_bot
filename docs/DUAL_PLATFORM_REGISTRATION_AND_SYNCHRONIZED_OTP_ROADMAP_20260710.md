@@ -1304,6 +1304,18 @@ deployment boundaries are recorded in
 pending independent review of the exact follow-up commit; no deployment or feature enablement
 occurred.
 
+Final combined-review audit (2026-07-11): every numbered finding in the stale report was reconciled
+again against the complete remediation chain. Direct tests were expanded for Arabic-digit,
+split-field, and soft-deleted canonical conflicts; two different commands racing on one Invitation;
+foreign local User-write rollback under Sync v2; the full accountant/customer Relation consistency
+matrix; post-restart counter replay; and Nginx lookup/validate path/query credential protection.
+Findings `M-4`, `M-8`, and `L-3` retain their approved boundaries: trusted receive time belongs to
+Stage 4, legacy-writer migration is a hard Stage 3/rollout gate, and broad legacy UTC warning cleanup
+is nonblocking maintenance. Full backend (`2756`), focused (`143`), real Stage 2 PostgreSQL (`20`),
+sender counter PostgreSQL (`3`), migration PostgreSQL (`3`), and Nginx (`3`) suites pass. This
+evidence does not self-approve Stage 3; the exact final-audit commit still requires independent
+`GO`, and no deploy, runtime migration, feature enablement, or push occurred.
+
 ### Stage 2 - Shared Authoritative Registration Service
 
 - Extract current Web registration mutation into a shared Iran service.
@@ -1381,6 +1393,12 @@ two-session receipt/outbox races. The implementation and evidence contract are r
 remain intentionally deferred under their existing disabled-runtime and migration/deployment gates.
 Stage 3 is still blocked until the mandatory combined independent review returns `GO`; no feature
 flag, staging deployment, production action, or runtime migration was performed.
+
+Final audit update (2026-07-11): the complete disposition and strengthened evidence are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_COMBINED_REVIEW_FOLLOWUP_20260711.md`. No open Stage 1/2 defect is
+being silently reclassified: `M-4`, `M-8`, and `L-3` remain visible later-stage/operational gates,
+and a reviewer finding that invalidates those boundaries reopens this stage. Stage 3 remains
+blocked pending review of the exact final-audit commit.
 
 ### Stage 3 - Canonical Invitation Creation And URL Repair
 

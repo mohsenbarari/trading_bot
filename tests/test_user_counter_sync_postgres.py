@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from api.routers.trades import _apply_trade_counter_increment
 from core import events
-from core.sync_outbox_guard import register_sync_outbox_guards
+from core.sync_outbox_guard import SyncOutboxError, register_sync_outbox_guards
 from core.user_counter_sync import increment_user_counters, reset_user_counters_in_memory
 from models.change_log import ChangeLog
 from models.commodity import Commodity
@@ -309,6 +309,33 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(all(row.occurred_at is not None for row in local_receipts))
             self.assertGreaterEqual(len(self.wakeup_redis.payloads), 4)
+
+            suffix = uuid4().hex
+            account_name = f"foreign_forbidden_{suffix[:12]}"
+            with patch("core.events.settings.server_mode", "foreign"):
+                async with self.session_factory() as session:
+                    session.add(
+                        User(
+                            account_name=account_name,
+                            mobile_number=f"090{int(suffix[:8], 16) % 100000000:08d}",
+                            full_name="Forbidden foreign User",
+                            address="Forbidden foreign User address",
+                            role=UserRole.STANDARD,
+                            home_server="iran",
+                            must_change_password=False,
+                        )
+                    )
+                    with self.assertRaises(SyncOutboxError):
+                        await session.commit()
+                    await session.rollback()
+
+            async with self.session_factory() as session:
+                stored = (
+                    await session.execute(
+                        select(User).where(User.normalized_account_name == account_name)
+                    )
+                ).scalar_one_or_none()
+                self.assertIsNone(stored)
 
 
 if __name__ == "__main__":

@@ -96,6 +96,17 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                     source,
                     r'location ~ \^/api/invitations/\(lookup\|validate\)/ \{\s+access_log off;',
                 )
+                api_block = re.search(
+                    r'location ~ \^/api/invitations/\(lookup\|validate\)/ '
+                    r'\{(?P<body>.*?)\n    \}',
+                    source,
+                    re.DOTALL,
+                )
+                self.assertIsNotNone(api_block)
+                self.assertIn(
+                    'add_header Referrer-Policy "no-referrer" always;',
+                    api_block.group('body'),
+                )
         foreign_setup = (REPO_ROOT / 'scripts/setup_foreign_nginx.sh').read_text(
             encoding='utf-8'
         )
@@ -148,6 +159,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                 f'    root {root};\n'
                 '    location ~ ^/register(?:/|$) { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
                 '    location ^~ /i/ { access_log off; add_header Referrer-Policy "no-referrer" always; try_files /index.html =404; }\n'
+                '    location ~ ^/api/invitations/(lookup|validate)/ { access_log off; add_header Referrer-Policy "no-referrer" always; return 204; }\n'
                 '    location / { try_files $uri /index.html; }\n'
                 '  }\n'
                 '}\n',
@@ -212,6 +224,16 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                 ) as response:
                     self.assertEqual(response.status, 200)
                     self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
+                for api_path in (
+                    '/api/invitations/lookup/INV-api-path-secret',
+                    '/api/invitations/validate/INV-api-query?token=INV-api-query-secret',
+                ):
+                    with urlopen(
+                        f'http://127.0.0.1:{port}{api_path}',
+                        timeout=1,
+                    ) as response:
+                        self.assertEqual(response.status, 204)
+                        self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
             finally:
                 process.terminate()
                 try:
@@ -231,6 +253,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             self.assertNotIn('INV-repeated-slash-secret', logged)
             self.assertNotIn('INV-encoded-slash-secret', logged)
             self.assertNotIn('runtime-short-secret', logged)
+            self.assertNotIn('INV-api-path-secret', logged)
+            self.assertNotIn('INV-api-query-secret', logged)
 
     def test_run_checked_applies_default_and_extra_environment(self):
         with patch(__name__ + '.subprocess.run') as run_mock:
