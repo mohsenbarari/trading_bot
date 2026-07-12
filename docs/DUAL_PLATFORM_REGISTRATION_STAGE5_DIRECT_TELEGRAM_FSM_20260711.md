@@ -40,7 +40,9 @@ still pending. That authorization does not waive the review or rollout gates.
 - Existing linked-account panel text, menu, channel join, two tutorials, acknowledgement callbacks,
   welcome message, channel link, and WebApp link are not reimplemented or reordered. Successful
   handoff activates the existing tutorial gate before panel exposure, independently of whether the
-  Telegram user is already a channel member, admin, or owner.
+  Telegram user is already a channel member, admin, or owner. The welcome panel is emitted only at
+  initial completion; later `/start` entry through plain, link-token, or invitation paths reuses the
+  approved active-account message with channel and WebApp links instead of repeating welcome copy.
 - Logs contain only bounded reason/error codes and opaque intent ids. Token, mobile, Telegram id,
   address, profile text, contact payload, and command body are not logged by the new path.
 - Post-commit polling failure returns the explicit pending-not-final state. It cannot roll back or

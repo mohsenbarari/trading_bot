@@ -82,7 +82,7 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         state.set_state.assert_not_awaited()
         set_anchor.assert_called_once_with(10, 55)
 
-    async def test_handle_start_without_token_shows_panel_for_registered_user(self):
+    async def test_handle_repeated_start_shows_links_without_welcome_for_registered_user(self):
         message = SimpleNamespace(
             bot=SimpleNamespace(),
             chat=SimpleNamespace(id=10),
@@ -93,15 +93,24 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
             "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
         ) as menu_mock, patch(
-            "bot.handlers.link_account.build_channel_join_request_text",
-            new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/+start_token"),
+            "bot.handlers.link_account.build_channel_access_text",
+            new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+start_token"),
+        ), patch(
+            "bot.handlers.link_account.build_webapp_plain_link_line",
+            return_value="🌐 ورود به وب اپ:\nhttps://app.example",
         ), patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_start_without_token(message, state=SimpleNamespace(), user=user)
 
         delete_anchor.assert_awaited_once()
         menu_mock.assert_called_once()
-        self.assertIn("سلام Ali", message.answer.await_args.args[0])
-        self.assertIn("https://t.me/+start_token", message.answer.await_args.args[0])
+        self.assertEqual(
+            message.answer.await_args.args[0],
+            "حساب شما فعال است. از لینک‌های زیر برای ورود استفاده کنید:\n\n"
+            "🔗 کانال معاملات:\nhttps://t.me/+start_token\n\n"
+            "🌐 ورود به وب اپ:\nhttps://app.example\n\n"
+            "برای دسترسی به سایر امکانات، از دکمه‌های منو استفاده کنید.",
+        )
+        self.assertNotIn("خوش آمدید", message.answer.await_args.args[0])
         self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
         set_anchor.assert_called_once_with(10, 55)
 
@@ -116,14 +125,51 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
             "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
         ), patch(
-            "bot.handlers.link_account.build_channel_join_request_text",
-            new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/+deep_token"),
+            "bot.handlers.link_account.build_channel_access_text",
+            new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+deep_token"),
+        ), patch(
+            "bot.handlers.link_account.build_webapp_plain_link_line",
+            return_value="🌐 ورود به وب اپ:\nhttps://app.example",
         ), patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_start_with_token(message, SimpleNamespace(args="link_raw-token"), state=SimpleNamespace(), user=user)
 
         self.assertIn("https://t.me/+deep_token", message.answer.await_args.args[0])
+        self.assertIn("https://app.example", message.answer.await_args.args[0])
+        self.assertNotIn("خوش آمدید", message.answer.await_args.args[0])
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
         self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
+        set_anchor.assert_called_once_with(10, 55)
+
+    async def test_handle_reopened_invitation_for_registered_user_uses_returning_links(self):
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=10, type="private"),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=55)),
+        )
+        user = SimpleNamespace(id=46, full_name="Sara", account_name="sara_46", role="standard")
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start._direct_registration_runtime_ready", return_value=False
+        ), patch(
+            "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+        ), patch(
+            "bot.handlers.link_account.build_channel_access_text",
+            new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+invite_again"),
+        ), patch(
+            "bot.handlers.link_account.build_webapp_plain_link_line",
+            return_value="🌐 ورود به وب اپ:\nhttps://app.example",
+        ), patch("bot.handlers.start.set_anchor") as set_anchor:
+            await handle_start_with_token(
+                message,
+                SimpleNamespace(args="INV-existing-token"),
+                state=SimpleNamespace(),
+                user=user,
+            )
+
+        self.assertIn("حساب شما فعال است", message.answer.await_args.args[0])
+        self.assertIn("https://t.me/+invite_again", message.answer.await_args.args[0])
+        self.assertIn("https://app.example", message.answer.await_args.args[0])
+        self.assertNotIn("خوش آمدید", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(10, 55)
 
     async def test_handle_start_without_token_returns_neutral_fallback_for_unknown_user(self):

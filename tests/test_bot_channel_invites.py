@@ -49,6 +49,17 @@ class BotChannelInvitesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(text, '🔗 درخواست عضویت در کانال معاملات:\nhttps://dynamic.example/invite_token')
 
+    async def test_build_channel_access_text_reuses_resolved_link_with_returning_copy(self):
+        bot = MagicMock()
+        with patch.object(
+            channel_invites,
+            'create_channel_join_request_link',
+            AsyncMock(return_value='https://dynamic.example/returning'),
+        ):
+            text = await channel_invites.build_channel_access_text(bot, user_id=22)
+
+        self.assertEqual(text, '🔗 کانال معاملات:\nhttps://dynamic.example/returning')
+
     async def test_create_channel_join_request_link_uses_trimmed_name_for_user_specific_links(self):
         bot = AsyncMock()
         bot.create_chat_invite_link = AsyncMock(return_value=SimpleNamespace(invite_link='https://dynamic.example/invite'))

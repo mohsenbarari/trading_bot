@@ -60,18 +60,26 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
             chat=SimpleNamespace(id=11),
             answer=AsyncMock(return_value=SimpleNamespace(message_id=88)),
         )
-        user = SimpleNamespace(role="standard")
+        user = SimpleNamespace(id=41, role="standard")
         state = FakeState()
         command = SimpleNamespace(args="invite-token")
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
             "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+        ), patch(
+            "bot.handlers.link_account.build_channel_access_text",
+            new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+returning"),
+        ), patch(
+            "bot.handlers.link_account.build_webapp_plain_link_line",
+            return_value="🌐 ورود به وب اپ:\nhttps://app.example",
         ), patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_start_with_token(message, command, state, user)
 
         delete_anchor.assert_awaited_once()
-        self.assertIn("قبلاً", message.answer.await_args.args[0])
-        self.assertIn("پنل", message.answer.await_args.args[0])
+        self.assertIn("حساب شما فعال است", message.answer.await_args.args[0])
+        self.assertIn("https://t.me/+returning", message.answer.await_args.args[0])
+        self.assertIn("https://app.example", message.answer.await_args.args[0])
+        self.assertNotIn("خوش آمدید", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(11, 88)
 
     async def test_handle_start_with_token_handles_invalid_and_valid_invitation(self):

@@ -43,10 +43,7 @@ async def build_channel_join_request_line(
     *,
     user_id: int | None = None,
 ) -> str | None:
-    if bot is None:
-        link = settings.channel_invite_link
-    else:
-        link = await create_channel_join_request_link(bot, user_id=user_id)
+    link = await resolve_channel_join_request_link(bot, user_id=user_id)
 
     if not link:
         return None
@@ -59,12 +56,32 @@ async def build_channel_join_request_text(
     *,
     user_id: int | None = None,
 ) -> str | None:
-    if bot is None:
-        link = settings.channel_invite_link
-    else:
-        link = await create_channel_join_request_link(bot, user_id=user_id)
+    link = await resolve_channel_join_request_link(bot, user_id=user_id)
 
     if not link:
         return None
 
     return f"🔗 درخواست عضویت در کانال معاملات:\n{link}"
+
+
+async def build_channel_access_text(
+    bot: Bot | None,
+    *,
+    user_id: int | None = None,
+) -> str | None:
+    link = await resolve_channel_join_request_link(bot, user_id=user_id)
+
+    if not link:
+        return None
+
+    return f"🔗 کانال معاملات:\n{link}"
+
+
+async def resolve_channel_join_request_link(
+    bot: Bot | None,
+    *,
+    user_id: int | None = None,
+) -> str | None:
+    if bot is None:
+        return settings.channel_invite_link
+    return await create_channel_join_request_link(bot, user_id=user_id)

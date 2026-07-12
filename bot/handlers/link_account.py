@@ -38,7 +38,10 @@ from core.services.telegram_link_token_service import (
     load_pending_telegram_link_token_user_for_update,
 )
 from bot.keyboards import get_persistent_menu_keyboard
-from bot.utils.channel_invites import build_channel_join_request_text
+from bot.utils.channel_invites import (
+    build_channel_access_text,
+    build_channel_join_request_text,
+)
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
 router = Router()
@@ -180,6 +183,24 @@ async def build_linked_account_panel_message(
         lines.append(webapp_link_line)
 
     lines.append("برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید.")
+    return "\n\n".join(lines)
+
+
+async def build_returning_account_panel_message(bot, user: User) -> str:
+    lines = ["حساب شما فعال است. از لینک‌های زیر برای ورود استفاده کنید:"]
+
+    channel_link_text = await build_channel_access_text(
+        bot,
+        user_id=getattr(user, "id", None),
+    )
+    if channel_link_text:
+        lines.append(channel_link_text)
+
+    webapp_link_line = build_webapp_plain_link_line()
+    if webapp_link_line:
+        lines.append(webapp_link_line)
+
+    lines.append("برای دسترسی به سایر امکانات، از دکمه‌های منو استفاده کنید.")
     return "\n\n".join(lines)
 
 

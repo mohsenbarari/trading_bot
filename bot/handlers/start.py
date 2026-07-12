@@ -76,6 +76,7 @@ from bot.handlers.link_account import (
     build_bot_account_access_denial_message,
     build_linked_account_panel_message,
     build_neutral_account_link_message,
+    build_returning_account_panel_message,
     prompt_contact_for_account_link,
 )
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
@@ -680,7 +681,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
         if user:
             anchor_msg = await message.answer(
-                await build_linked_account_panel_message(message.bot, user),
+                await build_returning_account_panel_message(message.bot, user),
                 reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url()),
             )
             set_anchor(message.chat.id, anchor_msg.message_id)
@@ -776,7 +777,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 )
                 return
         anchor_msg = await message.answer(
-            "شما قبلاً ثبت‌نام کرده‌اید. برای دسترسی به پنل از دکمه زیر استفاده کنید.",
+            await build_returning_account_panel_message(message.bot, user),
             reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url())
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
@@ -956,7 +957,7 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
         logger.warning("DEBUG: Building persistent menu keyboard")
         
         anchor_msg = await message.answer(
-            await build_linked_account_panel_message(message.bot, user),
+            await build_returning_account_panel_message(message.bot, user),
             reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url())
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
