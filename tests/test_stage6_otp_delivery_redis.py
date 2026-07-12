@@ -16,10 +16,12 @@ from core.services.otp_delivery_state_service import (
     consume_otp_code,
     create_otp_delivery_state,
     due_otp_request_ids,
+    isolate_invalid_otp_fallback_state,
     load_otp_delivery_state,
     mark_sms_provider_attempt_started,
     record_sms_delivery_result,
     schedule_sms_fallback,
+    select_due_otp_requests,
 )
 from core.registration_observability import summarize_otp_fallback_queue
 from core.utils import utc_now
@@ -308,6 +310,213 @@ class Stage6OTPDeliveryRedisTests(unittest.IsolatedAsyncioTestCase):
             1,
         )
 
+    async def test_partial_pending_prefix_is_isolated_without_starving_valid_due_work(self):
+        due_at = utc_now()
+        poison_ids = [uuid4() for _ in range(101)]
+        for request_id in poison_ids:
+            await self.redis.hset(
+                f"otp_delivery:request:{request_id}",
+                mapping={"status": OTPRequestStatus.PENDING.value},
+            )
+        await self.redis.zadd(
+            OTP_FALLBACK_DUE_KEY,
+            {str(request_id): due_at.timestamp() - 1 for request_id in poison_ids},
+        )
+        mobile = "0912" + str(uuid4().int)[-7:]
+        valid = build_otp_delivery_state(mobile=mobile, ttl_seconds=120)
+        self.assertTrue(await create_otp_delivery_state(
+            self.redis,
+            state=valid,
+            otp_code="12345",
+            ttl_seconds=120,
+        ))
+        self.assertTrue(await schedule_sms_fallback(
+            self.redis,
+            request_id=valid.otp_request_id,
+            telegram_sent_at=due_at - timedelta(seconds=40),
+            fallback_at=due_at,
+        ))
+
+        selection = await select_due_otp_requests(self.redis, now=due_at, limit=100)
+
+        self.assertEqual(selection.request_ids, (valid.otp_request_id,))
+        self.assertEqual(selection.isolated_counts, {"invalid_contract": 101})
+        self.assertEqual(await self.redis.zcard(OTP_FALLBACK_DUE_KEY), 1)
+        for request_id in poison_ids:
+            self.assertEqual(
+                await self.redis.hget(f"otp_delivery:request:{request_id}", "status"),
+                OTPRequestStatus.EXPIRED.value,
+            )
+
+    async def test_more_than_scan_budget_makes_bounded_progress_across_cycles(self):
+        due_at = utc_now()
+        poison_ids = [uuid4() for _ in range(501)]
+        pipe = self.redis.pipeline(transaction=False)
+        for request_id in poison_ids:
+            pipe.hset(
+                f"otp_delivery:request:{request_id}",
+                mapping={"status": OTPRequestStatus.PENDING.value},
+            )
+        await pipe.execute()
+        await self.redis.zadd(
+            OTP_FALLBACK_DUE_KEY,
+            {str(request_id): due_at.timestamp() - 1 for request_id in poison_ids},
+        )
+        mobile = "0912" + str(uuid4().int)[-7:]
+        valid = build_otp_delivery_state(mobile=mobile, ttl_seconds=120)
+        self.assertTrue(await create_otp_delivery_state(
+            self.redis,
+            state=valid,
+            otp_code="12345",
+            ttl_seconds=120,
+        ))
+        self.assertTrue(await schedule_sms_fallback(
+            self.redis,
+            request_id=valid.otp_request_id,
+            telegram_sent_at=due_at - timedelta(seconds=40),
+            fallback_at=due_at,
+        ))
+
+        first = await select_due_otp_requests(self.redis, now=due_at, limit=100)
+        second = await select_due_otp_requests(self.redis, now=due_at, limit=100)
+
+        self.assertEqual(first.request_ids, ())
+        self.assertEqual(first.isolated_counts, {"invalid_contract": 500})
+        self.assertEqual(second.request_ids, (valid.otp_request_id,))
+        self.assertEqual(second.isolated_counts, {"invalid_contract": 1})
+        self.assertEqual(await self.redis.zcard(OTP_FALLBACK_DUE_KEY), 1)
+
+    async def test_concurrent_invalid_state_cleanup_is_idempotent(self):
+        request_id = uuid4()
+        await self.redis.hset(
+            f"otp_delivery:request:{request_id}",
+            mapping={"status": OTPRequestStatus.PENDING.value},
+        )
+        await self.redis.zadd(
+            OTP_FALLBACK_DUE_KEY,
+            {str(request_id): utc_now().timestamp() - 1},
+        )
+
+        statuses = await asyncio.gather(*(
+            isolate_invalid_otp_fallback_state(
+                self.redis,
+                request_id=request_id,
+                reason="invalid_contract",
+            )
+            for _ in range(4)
+        ))
+
+        self.assertIn("pending", statuses)
+        self.assertEqual(await self.redis.zcard(OTP_FALLBACK_DUE_KEY), 0)
+        self.assertEqual(
+            await self.redis.hget(f"otp_delivery:request:{request_id}", "status"),
+            OTPRequestStatus.EXPIRED.value,
+        )
+        self.assertEqual(
+            await self.redis.hget(
+                f"otp_delivery:request:{request_id}",
+                "terminal_reason",
+            ),
+            "invalid_contract",
+        )
+
+    async def test_malformed_and_unverifiable_states_are_isolated_as_bounded_reasons(self):
+        due_at = utc_now()
+        states = []
+        for _ in range(4):
+            mobile = "0912" + str(uuid4().int)[-7:]
+            item = build_otp_delivery_state(mobile=mobile, ttl_seconds=120)
+            self.assertTrue(await create_otp_delivery_state(
+                self.redis,
+                state=item,
+                otp_code="12345",
+                ttl_seconds=120,
+            ))
+            self.assertTrue(await schedule_sms_fallback(
+                self.redis,
+                request_id=item.otp_request_id,
+                telegram_sent_at=due_at - timedelta(seconds=40),
+                fallback_at=due_at,
+            ))
+            states.append(item)
+        await self.redis.hset(
+            f"otp_delivery:request:{states[0].otp_request_id}",
+            "created_at",
+            "not-a-timestamp",
+        )
+        await self.redis.hset(
+            f"otp_delivery:request:{states[1].otp_request_id}",
+            "delivery_target_ciphertext",
+            "not-a-fernet-token",
+        )
+        await self.redis.hset(
+            f"otp_delivery:request:{states[2].otp_request_id}",
+            "identity_digest",
+            "0" * 64,
+        )
+
+        selection = await select_due_otp_requests(self.redis, now=due_at, limit=100)
+
+        self.assertEqual(selection.request_ids, (states[3].otp_request_id,))
+        self.assertEqual(selection.isolated_counts, {
+            "invalid_contract": 2,
+            "invalid_delivery_target": 1,
+        })
+        for index, item in enumerate(states[:3]):
+            self.assertEqual(
+                await self.redis.hget(
+                    f"otp_delivery:request:{item.otp_request_id}",
+                    "terminal_reason",
+                ),
+                (
+                    "invalid_delivery_target"
+                    if index == 2
+                    else "invalid_contract"
+                ),
+            )
+
+    async def test_secret_rotation_isolates_old_due_state_and_allows_new_work(self):
+        due_at = utc_now()
+        old_mobile = "0912" + str(uuid4().int)[-7:]
+        old_state = build_otp_delivery_state(mobile=old_mobile, ttl_seconds=120)
+        self.assertTrue(await create_otp_delivery_state(
+            self.redis,
+            state=old_state,
+            otp_code="12345",
+            ttl_seconds=120,
+        ))
+        self.assertTrue(await schedule_sms_fallback(
+            self.redis,
+            request_id=old_state.otp_request_id,
+            telegram_sent_at=due_at - timedelta(seconds=40),
+            fallback_at=due_at,
+        ))
+
+        settings.otp_delivery_state_secret = "rotated-stage6-secret-0123456789abcdef"
+        new_mobile = "0912" + str(uuid4().int)[-7:]
+        new_state = build_otp_delivery_state(mobile=new_mobile, ttl_seconds=120)
+        self.assertTrue(await create_otp_delivery_state(
+            self.redis,
+            state=new_state,
+            otp_code="54321",
+            ttl_seconds=120,
+        ))
+        self.assertTrue(await schedule_sms_fallback(
+            self.redis,
+            request_id=new_state.otp_request_id,
+            telegram_sent_at=due_at - timedelta(seconds=40),
+            fallback_at=due_at,
+        ))
+
+        selection = await select_due_otp_requests(self.redis, now=due_at, limit=100)
+
+        self.assertEqual(selection.request_ids, (new_state.otp_request_id,))
+        self.assertEqual(selection.isolated_counts, {"invalid_delivery_target": 1})
+        self.assertEqual(
+            await self.redis.zscore(OTP_FALLBACK_DUE_KEY, str(old_state.otp_request_id)),
+            None,
+        )
+
     async def test_pre_provider_claim_reclaims_but_started_provider_becomes_ambiguous(self):
         mobile = "0912" + str(uuid4().int)[-7:]
         state = build_otp_delivery_state(mobile=mobile, ttl_seconds=120)
@@ -462,4 +671,47 @@ class Stage6OTPDeliveryRedisTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(loaded.status, OTPRequestStatus.PENDING)
         self.assertEqual(loaded.sms_delivery_status, OTPDeliveryStatus.CANCELLED)
+        self.assertEqual(await self.redis.zcard(OTP_FALLBACK_DUE_KEY), 0)
+
+    async def test_provider_started_near_expiry_recovers_as_ambiguous_not_cancelled(self):
+        mobile = "0912" + str(uuid4().int)[-7:]
+        state = build_otp_delivery_state(mobile=mobile, ttl_seconds=120)
+        self.assertTrue(await create_otp_delivery_state(
+            self.redis,
+            state=state,
+            otp_code="12345",
+            ttl_seconds=120,
+        ))
+        due_at = utc_now()
+        self.assertTrue(await schedule_sms_fallback(
+            self.redis,
+            request_id=state.otp_request_id,
+            telegram_sent_at=due_at - timedelta(seconds=40),
+            fallback_at=due_at,
+        ))
+        claim = await claim_sms_delivery(
+            self.redis,
+            state=state,
+            require_due=True,
+            now=due_at,
+            lease_seconds=5,
+        )
+        self.assertTrue(await mark_sms_provider_attempt_started(self.redis, claim=claim))
+        await self.redis.expire(f"otp:{mobile}", 5)
+
+        self.assertIsNone(await claim_sms_delivery(
+            self.redis,
+            state=state,
+            require_due=True,
+            now=due_at + timedelta(seconds=6),
+            lease_seconds=5,
+        ))
+
+        recovered = await load_otp_delivery_state(
+            self.redis,
+            request_id=state.otp_request_id,
+        )
+        self.assertEqual(recovered.status, OTPRequestStatus.PENDING)
+        self.assertEqual(recovered.sms_delivery_status, OTPDeliveryStatus.AMBIGUOUS)
+        self.assertEqual(await self.redis.get(f"otp:{mobile}"), "12345")
         self.assertEqual(await self.redis.zcard(OTP_FALLBACK_DUE_KEY), 0)

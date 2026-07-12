@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+from collections import Counter
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -30,6 +31,11 @@ OTP_SMS_MINIMUM_SEND_TTL_SECONDS = 15
 _MIN_STATE_SECRET_LENGTH = 32
 _DUE_SCAN_MULTIPLIER = 5
 _DUE_MIN_SCAN_BUDGET = 500
+_SAFE_FALLBACK_ISOLATION_REASONS = frozenset({
+    "invalid_contract",
+    "invalid_delivery_target",
+    "worker_exception",
+})
 
 
 def validate_otp_delivery_runtime_settings(settings_obj=settings) -> None:
@@ -317,18 +323,6 @@ _CLAIM_SCRIPT = """
 local status = redis.call('hget', KEYS[1], 'status')
 if not status then redis.call('zrem', KEYS[2], ARGV[1]); return {0, 'missing'} end
 if status ~= 'pending' then redis.call('zrem', KEYS[2], ARGV[1]); return {0, status} end
-local code = redis.call('get', KEYS[3])
-if not code then
-    redis.call('hset', KEYS[1], 'status', 'expired')
-    redis.call('zrem', KEYS[2], ARGV[1])
-    return {0, 'expired'}
-end
-local code_ttl = redis.call('ttl', KEYS[3])
-if code_ttl >= 0 and code_ttl < tonumber(ARGV[8]) then
-    redis.call('hset', KEYS[1], 'sms_delivery_status', 'cancelled')
-    redis.call('zrem', KEYS[2], ARGV[1])
-    return {0, 'insufficient_ttl'}
-end
 local sms_status = redis.call('hget', KEYS[1], 'sms_delivery_status')
 if sms_status == 'pending' then
     local lease_epoch = redis.call('hget', KEYS[1], 'sms_claim_lease_until_epoch')
@@ -350,6 +344,18 @@ if sms_status == 'pending' then
 elseif sms_status ~= 'not_attempted' then
     redis.call('zrem', KEYS[2], ARGV[1])
     return {0, sms_status}
+end
+local code = redis.call('get', KEYS[3])
+if not code then
+    redis.call('hset', KEYS[1], 'status', 'expired')
+    redis.call('zrem', KEYS[2], ARGV[1])
+    return {0, 'expired'}
+end
+local code_ttl = redis.call('ttl', KEYS[3])
+if code_ttl >= 0 and code_ttl < tonumber(ARGV[8]) then
+    redis.call('hset', KEYS[1], 'sms_delivery_status', 'cancelled')
+    redis.call('zrem', KEYS[2], ARGV[1])
+    return {0, 'insufficient_ttl'}
 end
 if ARGV[3] == '1' then
     local score = redis.call('zscore', KEYS[2], ARGV[1])
@@ -466,12 +472,56 @@ async def record_sms_delivery_result(
     return int(recorded or 0) == 1
 
 
-async def due_otp_request_ids(redis, *, now: datetime, limit: int) -> list[UUID]:
-    """Return valid due IDs while removing missing/terminal/malformed prefix poison."""
+_ISOLATE_FALLBACK_STATE_SCRIPT = """
+local status = redis.call('hget', KEYS[1], 'status')
+if status == 'pending' then
+    redis.call('hset', KEYS[1],
+        'status', 'expired',
+        'terminal_reason', ARGV[2])
+end
+redis.call('zrem', KEYS[2], ARGV[1])
+return status or 'missing'
+"""
+
+
+async def isolate_invalid_otp_fallback_state(
+    redis,
+    *,
+    request_id: UUID,
+    reason: str,
+) -> str:
+    bounded_reason = (
+        reason if reason in _SAFE_FALLBACK_ISOLATION_REASONS else "worker_exception"
+    )
+    result = await redis.eval(
+        _ISOLATE_FALLBACK_STATE_SCRIPT,
+        2,
+        _state_key(request_id),
+        OTP_FALLBACK_DUE_KEY,
+        str(request_id),
+        bounded_reason,
+    )
+    return _text(result) or "missing"
+
+
+@dataclass(frozen=True, slots=True)
+class OTPDueSelection:
+    request_ids: tuple[UUID, ...]
+    isolated_counts: dict[str, int]
+
+
+async def select_due_otp_requests(
+    redis,
+    *,
+    now: datetime,
+    limit: int,
+) -> OTPDueSelection:
+    """Select valid due work while isolating corrupt state without exposing identity."""
 
     wanted = max(1, int(limit))
     scan_budget = max(_DUE_MIN_SCAN_BUDGET, wanted * _DUE_SCAN_MULTIPLIER)
     request_ids: list[UUID] = []
+    isolated: Counter[str] = Counter()
     retained_offset = 0
     scanned = 0
     now_score = _utc(now).timestamp()
@@ -495,10 +545,36 @@ async def due_otp_request_ids(redis, *, now: datetime, limit: int) -> list[UUID]
                 request_id = UUID(text_id)
             except ValueError:
                 await redis.zrem(OTP_FALLBACK_DUE_KEY, raw_id)
+                isolated["malformed_request_id"] += 1
                 continue
             status = _text(await redis.hget(_state_key(request_id), "status"))
             if status != OTPRequestStatus.PENDING.value:
                 await redis.zrem(OTP_FALLBACK_DUE_KEY, raw_id)
+                isolated["missing_or_terminal"] += 1
+                continue
+            try:
+                state = await load_otp_delivery_state(redis, request_id=request_id)
+            except (KeyError, TypeError, ValueError, UnicodeError):
+                await isolate_invalid_otp_fallback_state(
+                    redis,
+                    request_id=request_id,
+                    reason="invalid_contract",
+                )
+                isolated["invalid_contract"] += 1
+                continue
+            if state is None:
+                await redis.zrem(OTP_FALLBACK_DUE_KEY, raw_id)
+                isolated["missing_or_terminal"] += 1
+                continue
+            try:
+                mobile_for_delivery_state(state)
+            except (RuntimeError, ValueError):
+                await isolate_invalid_otp_fallback_state(
+                    redis,
+                    request_id=request_id,
+                    reason="invalid_delivery_target",
+                )
+                isolated["invalid_delivery_target"] += 1
                 continue
             request_ids.append(request_id)
             retained_this_round += 1
@@ -507,7 +583,16 @@ async def due_otp_request_ids(redis, *, now: datetime, limit: int) -> list[UUID]
         retained_offset += retained_this_round
         if len(raw_ids) < chunk_size:
             break
-    return request_ids
+    return OTPDueSelection(
+        request_ids=tuple(request_ids),
+        isolated_counts=dict(isolated),
+    )
+
+
+async def due_otp_request_ids(redis, *, now: datetime, limit: int) -> list[UUID]:
+    """Return valid due IDs while removing missing/terminal/malformed prefix poison."""
+    selection = await select_due_otp_requests(redis, now=now, limit=limit)
+    return list(selection.request_ids)
 
 
 _CONSUME_SCRIPT = """

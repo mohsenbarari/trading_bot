@@ -1450,6 +1450,29 @@ async def request_otp(
         )
 
     rate_limit_key = f"otp_limit:{mobile}"
+    otp_key = f"otp:{mobile}"
+
+    async def active_legacy_otp_response():
+        active_code = await redis.get(otp_key)
+        remaining = int(await redis.ttl(otp_key) or 0)
+        if active_code is None or remaining <= 0:
+            return None
+        expires_at = utc_now() + timedelta(seconds=remaining)
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": (
+                    "کد قبلی هنوز معتبر است. "
+                    f"لطفاً {remaining} ثانیه صبر کنید."
+                ),
+                "code": "otp_active",
+                "delivery_contract": "legacy",
+                "expires_in": remaining,
+                "expires_at": expires_at.isoformat(),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
     limit_val = await redis.get(rate_limit_key)
     logger.info(
         "OTP request rate-limit state checked",
@@ -1458,16 +1481,20 @@ async def request_otp(
     
     if limit_val:
         logger.info("OTP request rate limit hit", extra={"event": "otp.rate_limited"})
+        active_response = await active_legacy_otp_response()
+        if active_response is not None:
+            return active_response
         raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
 
     # تولید کد ۵ رقمی
     # First, check if valid OTP already exists (Strict "One Code per 120s" rule)
-    otp_key = f"otp:{mobile}"
     active_otp = await redis.get(otp_key)
     
     if active_otp:
         logger.info("Active OTP exists; blocking new generation", extra={"event": "otp.active_exists"})
-        # Raise 429 so frontend triggers timer
+        active_response = await active_legacy_otp_response()
+        if active_response is not None:
+            return active_response
         raise HTTPException(status_code=429, detail="کد قبلی هنوز معتبر است. لطفاً صبر کنید.")
 
     otp_code = _generate_otp_code()

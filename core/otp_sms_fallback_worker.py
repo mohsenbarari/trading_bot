@@ -21,8 +21,9 @@ from core.registration_observability import (
 )
 from core.services.otp_delivery_state_service import (
     claim_sms_delivery,
-    due_otp_request_ids,
+    isolate_invalid_otp_fallback_state,
     load_otp_delivery_state,
+    select_due_otp_requests,
 )
 from core.services.otp_sms_delivery_service import execute_claimed_otp_sms_delivery
 from core.utils import utc_now
@@ -49,21 +50,70 @@ async def run_otp_sms_fallback_cycle(*, limit: int = _BATCH_LIMIT) -> OTPFallbac
         raise RuntimeError("otp_sms_fallback_disabled")
 
     redis = get_redis_client()
-    request_ids = await due_otp_request_ids(redis, now=utc_now(), limit=limit)
+    selection = await select_due_otp_requests(redis, now=utc_now(), limit=limit)
+    request_ids = selection.request_ids
+    if selection.isolated_counts:
+        for reason, count in selection.isolated_counts.items():
+            record_otp_event(event="fallback_state_isolated", outcome=reason, count=count)
+        audit_log(
+            "otp.fallback_state_isolated",
+            target_type="otp_fallback_queue",
+            result="success",
+            extra={"reason_counts": selection.isolated_counts},
+        )
+        logger.warning(
+            "Invalid OTP fallback state isolated",
+            extra={
+                "event": "otp.fallback_state_isolated",
+                "reason_counts": selection.isolated_counts,
+            },
+        )
     semaphore = asyncio.Semaphore(
         min(20, max(1, int(settings.otp_sms_fallback_job_concurrency)))
     )
 
     async def deliver(request_id):
         async with semaphore:
-            state = await load_otp_delivery_state(redis, request_id=request_id)
-            if state is None:
+            try:
+                state = await load_otp_delivery_state(redis, request_id=request_id)
+            except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+                state = None
+                state_error = exc
+            else:
+                state_error = None
+            if state is None and state_error is None:
                 return "missing"
-            claim = await claim_sms_delivery(
-                redis,
-                state=state,
-                require_due=True,
-            )
+            try:
+                if state_error is not None:
+                    raise state_error
+                claim = await claim_sms_delivery(
+                    redis,
+                    state=state,
+                    require_due=True,
+                )
+            except asyncio.CancelledError:
+                raise
+            except (KeyError, TypeError, ValueError, UnicodeError, RuntimeError) as exc:
+                try:
+                    await isolate_invalid_otp_fallback_state(
+                        redis,
+                        request_id=request_id,
+                        reason="worker_exception",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not isolate invalid OTP fallback state",
+                        extra={"event": "otp.fallback_state_isolation_failed"},
+                    )
+                record_otp_event(event="fallback_state_isolated", outcome="worker_exception")
+                logger.error(
+                    "OTP fallback item failed before provider claim",
+                    extra={
+                        "event": "otp.fallback_item_isolated",
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                return "worker_exception"
             if claim is None:
                 return "not_claimed"
             audit_log(

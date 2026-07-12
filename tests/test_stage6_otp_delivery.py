@@ -2,11 +2,13 @@ import asyncio
 import json
 import unittest
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import HTTPException, Response
+import yaml
 
 from api.routers import auth
 from core.enums import UserAccountStatus
@@ -18,7 +20,7 @@ from core.registration_contracts import (
     TelegramOTPDeliveryResponse,
 )
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, override_current_server
-from core.services.otp_delivery_state_service import OTPDeliveryClaim
+from core.services.otp_delivery_state_service import OTPDeliveryClaim, OTPDueSelection
 from core.services.otp_delivery_state_service import (
     build_otp_delivery_state,
     validate_otp_delivery_runtime_settings,
@@ -763,8 +765,11 @@ class Stage6WorkerTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.otp_sms_fallback_worker.get_redis_client", return_value=object()
         ), patch(
-            "core.otp_sms_fallback_worker.due_otp_request_ids",
-            new=AsyncMock(return_value=[otp_state.otp_request_id]),
+            "core.otp_sms_fallback_worker.select_due_otp_requests",
+            new=AsyncMock(return_value=OTPDueSelection(
+                request_ids=(otp_state.otp_request_id,),
+                isolated_counts={},
+            )),
         ), patch(
             "core.otp_sms_fallback_worker.load_otp_delivery_state",
             new=AsyncMock(return_value=otp_state),
@@ -789,6 +794,83 @@ class Stage6WorkerTests(unittest.IsolatedAsyncioTestCase):
         with override_current_server(SERVER_FOREIGN), self.assertRaises(Exception):
             await run_otp_sms_fallback_cycle()
 
+    async def test_worker_isolates_one_invalid_item_and_continues_valid_delivery(self):
+        invalid_id = uuid4()
+        otp_state = state()
+        claim = OTPDeliveryClaim(
+            claim_id=uuid4(),
+            request_id=otp_state.otp_request_id,
+            mobile_number=TEST_MOBILE,
+            otp_code="12345",
+            lease_until=utc_now() + timedelta(seconds=30),
+        )
+        load = AsyncMock(side_effect=[ValueError("corrupt state"), otp_state])
+        isolate = AsyncMock(return_value="pending")
+        with override_current_server(SERVER_IRAN), patch(
+            "core.otp_sms_fallback_worker.settings.telegram_login_otp_enabled", True
+        ), patch(
+            "core.otp_sms_fallback_worker.settings.otp_sms_auto_fallback_enabled", True
+        ), patch(
+            "core.otp_sms_fallback_worker.get_redis_client", return_value=object()
+        ), patch(
+            "core.otp_sms_fallback_worker.select_due_otp_requests",
+            new=AsyncMock(return_value=OTPDueSelection(
+                request_ids=(invalid_id, otp_state.otp_request_id),
+                isolated_counts={},
+            )),
+        ), patch(
+            "core.otp_sms_fallback_worker.load_otp_delivery_state", new=load
+        ), patch(
+            "core.otp_sms_fallback_worker.isolate_invalid_otp_fallback_state",
+            new=isolate,
+        ), patch(
+            "core.otp_sms_fallback_worker.claim_sms_delivery",
+            new=AsyncMock(return_value=claim),
+        ), patch(
+            "core.otp_sms_fallback_worker.execute_claimed_otp_sms_delivery",
+            new=AsyncMock(return_value=OTPSMSAttemptResult(
+                outcome=SMSDeliveryOutcome.ACCEPTED,
+                provider_attempted=True,
+                result_recorded=True,
+            )),
+        ):
+            report = await run_otp_sms_fallback_cycle()
+
+        self.assertEqual(report.due_count, 2)
+        self.assertEqual(report.outcome_counts, {"worker_exception": 1, "accepted": 1})
+        isolate.assert_awaited_once_with(
+            ANY,
+            request_id=invalid_id,
+            reason="worker_exception",
+        )
+
+    async def test_worker_does_not_terminally_isolate_transient_redis_failure(self):
+        request_id = uuid4()
+        isolate = AsyncMock()
+        with override_current_server(SERVER_IRAN), patch(
+            "core.otp_sms_fallback_worker.settings.telegram_login_otp_enabled", True
+        ), patch(
+            "core.otp_sms_fallback_worker.settings.otp_sms_auto_fallback_enabled", True
+        ), patch(
+            "core.otp_sms_fallback_worker.get_redis_client", return_value=object()
+        ), patch(
+            "core.otp_sms_fallback_worker.select_due_otp_requests",
+            new=AsyncMock(return_value=OTPDueSelection(
+                request_ids=(request_id,),
+                isolated_counts={},
+            )),
+        ), patch(
+            "core.otp_sms_fallback_worker.load_otp_delivery_state",
+            new=AsyncMock(side_effect=ConnectionError("redis unavailable")),
+        ), patch(
+            "core.otp_sms_fallback_worker.isolate_invalid_otp_fallback_state",
+            new=isolate,
+        ):
+            with self.assertRaises(ConnectionError):
+                await run_otp_sms_fallback_cycle()
+
+        isolate.assert_not_awaited()
+
     def test_background_factory_places_fallback_only_on_iran(self):
         import main
 
@@ -807,3 +889,28 @@ class Stage6StaticSafetyTests(unittest.TestCase):
         self.assertNotIn("STAGING_LOG_OTP_CODES=true", script)
         self.assertNotIn("set_env_value STAGING_LOG_OTP_CODES true", script)
         self.assertIn("set_env_value STAGING_LOG_OTP_CODES false", script)
+
+    def test_staging_compose_maps_otp_state_secret_only_to_iran_app(self):
+        compose = yaml.safe_load(
+            Path("deploy/staging/docker-compose.staging.yml").read_text(encoding="utf-8")
+        )
+        services = compose["services"]
+        self.assertEqual(
+            services["app"]["environment"]["OTP_DELIVERY_STATE_SECRET"],
+            "${IRAN_OTP_DELIVERY_STATE_SECRET:-}",
+        )
+        self.assertEqual(
+            services["app"]["environment"]["IRAN_OTP_DELIVERY_STATE_SECRET"],
+            "",
+        )
+        for name, service in services.items():
+            if name == "app" or not service.get("env_file"):
+                continue
+            with self.subTest(service=name):
+                environment = service.get("environment") or {}
+                self.assertEqual(environment.get("OTP_DELIVERY_STATE_SECRET"), "")
+                self.assertEqual(environment.get("IRAN_OTP_DELIVERY_STATE_SECRET"), "")
+
+        example = Path("deploy/staging/env.staging.example").read_text(encoding="utf-8")
+        self.assertIn("\nIRAN_OTP_DELIVERY_STATE_SECRET=\n", example)
+        self.assertNotIn("\nOTP_DELIVERY_STATE_SECRET=", example)

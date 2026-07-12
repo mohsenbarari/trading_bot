@@ -75,10 +75,16 @@ for (const viewport of viewports) {
   test(`Telegram-first OTP status fits ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport)
     await page.route('**/api/auth/request-otp', async (route) => {
+      const now = Date.now()
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ method: 'telegram', sms_fallback_in: 40 }),
+        body: JSON.stringify({
+          otp_request_id: '8fb2c572-6f12-40bb-a0f8-02bd9d2366ef',
+          method: 'telegram',
+          expires_at: new Date(now + 120_000).toISOString(),
+          sms_fallback_at: new Date(now + 40_000).toISOString(),
+        }),
       })
     })
 
@@ -90,6 +96,28 @@ for (const viewport of viewports) {
     await expectNoHorizontalOverflow(page)
     await page.screenshot({
       path: `../tmp/stage7-responsive/otp-${viewport.name}-${testInfo.project.name}.png`,
+      fullPage: true,
+    })
+  })
+
+  test(`legacy Telegram OTP keeps manual-recovery status ${viewport.name}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport)
+    await page.route('**/api/auth/request-otp', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ method: 'telegram', expires_in: 120 }),
+      })
+    })
+
+    await page.goto('/login')
+    await page.getByLabel('شماره موبایل').fill('09123456789')
+    await page.getByRole('button', { name: 'دریافت کد تایید' }).click()
+    await expect(page.getByText(/00:(29|30) تا ارسال مجدد/)).toBeVisible()
+    await expect(page.getByText(/ارسال خودکار پیامک/)).toHaveCount(0)
+    await expectNoHorizontalOverflow(page)
+    await page.screenshot({
+      path: `../tmp/stage8-remediation/legacy-otp-${viewport.name}-${testInfo.project.name}.png`,
       fullPage: true,
     })
   })

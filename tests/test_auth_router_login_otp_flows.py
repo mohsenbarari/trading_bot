@@ -1,9 +1,11 @@
+import json
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from api.routers.auth import (
     OTPRequest,
@@ -148,6 +150,31 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 429)
         self.assertEqual(exc_info.exception.detail, "کد قبلی هنوز معتبر است. لطفاً صبر کنید.")
+
+    async def test_flags_off_active_otp_returns_structured_recovery_without_code(self):
+        user = SimpleNamespace(is_deleted=False, telegram_id=123)
+        redis = FakeRedis(
+            {
+                "otp_limit:09120000000": "1",
+                "otp:09120000000": "12345",
+            },
+            ttl_map={"otp:09120000000": 73},
+        )
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+            response = await request_otp(
+                OTPRequest(mobile_number="09120000000"),
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+
+        self.assertIsInstance(response, JSONResponse)
+        self.assertEqual(response.status_code, 429)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["code"], "otp_active")
+        self.assertEqual(payload["delivery_contract"], "legacy")
+        self.assertEqual(payload["expires_in"], 73)
+        self.assertNotIn("12345", response.body.decode())
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
 
     async def test_otp_request_and_resend_logs_do_not_include_code_digits(self):
         user = SimpleNamespace(is_deleted=False, telegram_id=123)

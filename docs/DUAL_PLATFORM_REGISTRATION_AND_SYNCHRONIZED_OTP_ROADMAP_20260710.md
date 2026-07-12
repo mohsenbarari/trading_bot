@@ -2506,3 +2506,20 @@ false expiration solely to satisfy an event name. The exact implementation, evid
 and independent-review requirement are recorded in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE8_OBSERVABILITY_AUDIT_20260712.md`. No feature flag,
 migration, deployment, push, staging action, production action, or later-stage waiver is authorized.
+
+## Stage 6/7 Final Post-Review Remediation Record (2026-07-12)
+
+The independent review of the final Stage 6 remediation and Stage 7 integration identified one High
+and three Medium current-source defects. Each finding was verified against current source after the
+independent Stage 8 commit. Corrupt/undecryptable pending OTP state is now atomically isolated with
+per-item forward progress; provider-started near-expiry recovery is conservatively ambiguous;
+staging exposes the state secret only to the Iran app; and flags-off legacy Telegram OTP retains
+truthful manual SMS recovery plus structured active-code recovery.
+
+Active-request secret rotation remains an explicit Stage 10 drain gate rather than introducing a
+second key owner into the 120-second state. Low recommendations were accepted, modified, or rejected
+according to their actual authority and availability impact. Exact disposition and required evidence
+are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE6_STAGE7_POSTREVIEW_REMEDIATION_20260712.md`. This record does
+not enable a flag, migrate, deploy, push, approve staging/production, close Stage 8's explicit open
+review questions, or waive Stages 9-12.

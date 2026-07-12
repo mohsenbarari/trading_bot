@@ -126,7 +126,7 @@ describe('LoginView.vue', () => {
     )
     expect(pushBackStateMock).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
-    expect(wrapper.text()).toContain('00:40')
+    expect(wrapper.text()).toContain('00:30')
     wrapper.unmount()
   }, 10000)
 
@@ -274,7 +274,14 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock
-      .mockResolvedValueOnce(makeJsonResponse({ method: 'telegram' }) as any)
+      .mockResolvedValueOnce(makeJsonResponse({
+        otp_request_id: '6afdb938-2061-43a6-a35f-37d5db9d9e2c',
+        method: 'telegram',
+        expires_in: 120,
+        expires_at: new Date(Date.now() + 120_000).toISOString(),
+        sms_fallback_in: 40,
+        sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
+      }) as any)
       .mockResolvedValueOnce(
         makeJsonResponse({
           status: 'approval_required',
@@ -306,6 +313,43 @@ describe('LoginView.vue', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-2/status')
     expect(wrapper.text()).toContain('درخواست ورود شما رد شد.')
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps legacy Telegram delivery truthful and preserves manual SMS resend', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({
+        method: 'telegram',
+        expires_in: 120,
+      }) as any)
+      .mockResolvedValueOnce(makeJsonResponse({
+        method: 'sms',
+        expires_in: 85,
+      }) as any)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+
+    expect(wrapper.text()).toContain('00:30 تا ارسال مجدد')
+    expect(wrapper.text()).not.toContain('ارسال خودکار پیامک')
+
+    vi.advanceTimersByTime(30_000)
+    await flushPromises()
+    const resend = findButtonByText(wrapper, 'ارسال مجدد کد')
+    expect(resend.exists()).toBe(true)
+    await resend.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/resend-otp-sms',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(wrapper.text()).toContain('01:25 تا ارسال مجدد')
     wrapper.unmount()
   })
 
@@ -386,6 +430,29 @@ describe('LoginView.vue', () => {
     expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('لطفاً ۴۵ ثانیه صبر کنید')
+    wrapper.unmount()
+  })
+
+  it('restores OTP entry from a structured flags-off active-code response', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({
+        detail: 'کد قبلی هنوز معتبر است.',
+        code: 'otp_active',
+        delivery_contract: 'legacy',
+        expires_in: 73,
+        expires_at: new Date(Date.now() + 73_000).toISOString(),
+      }, false, 429) as any,
+    )
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('01:13 تا ارسال مجدد')
+    expect(wrapper.text()).not.toContain('ارسال خودکار پیامک')
     wrapper.unmount()
   })
 

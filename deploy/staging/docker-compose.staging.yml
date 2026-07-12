@@ -27,6 +27,8 @@ services:
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ${IRAN_OTP_DELIVERY_STATE_SECRET:-}
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     ports:
@@ -74,6 +76,8 @@ services:
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     extra_hosts:
@@ -118,6 +122,8 @@ services:
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     volumes:
@@ -153,6 +159,8 @@ services:
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     extra_hosts:
@@ -184,6 +192,8 @@ services:
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     depends_on:
@@ -203,6 +213,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     volumes:
@@ -257,6 +269,8 @@ services:
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     extra_hosts:
@@ -293,6 +307,8 @@ services:
       DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     extra_hosts:
@@ -323,6 +339,8 @@ services:
       DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+      OTP_DELIVERY_STATE_SECRET: ""
+      IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
     extra_hosts:

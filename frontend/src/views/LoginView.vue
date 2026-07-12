@@ -57,6 +57,7 @@ let countdownDeadlineMs: number | null = null
 const otpRequestId = ref<string | null>(null)
 const otpExpiresAt = ref<string | null>(null)
 const smsFallbackAt = ref<string | null>(null)
+const legacySmsResendAt = ref<string | null>(null)
 const OTP_ATTEMPT_SESSION_KEY = 'login_otp_attempt_v1'
 
 const form = reactive({
@@ -143,6 +144,7 @@ function clearOtpAttempt() {
   otpRequestId.value = null
   otpExpiresAt.value = null
   smsFallbackAt.value = null
+  legacySmsResendAt.value = null
   countdownDeadlineMs = null
   if (timerInterval) clearInterval(timerInterval)
   timerInterval = null
@@ -162,12 +164,15 @@ function applyOtpTiming(data: any) {
     : new Date(Date.now() + Math.max(0, Number(data?.expires_in) || 0) * 1000).toISOString()
   smsFallbackAt.value = typeof data?.sms_fallback_at === 'string'
     ? data.sms_fallback_at
-    : (lastMethod.value === 'telegram'
-        ? new Date(Date.now() + Math.max(0, Number(data?.sms_fallback_in) || 40) * 1000).toISOString()
-        : null)
+    : null
+  legacySmsResendAt.value = (
+    lastMethod.value === 'telegram' && !smsFallbackAt.value
+      ? new Date(Date.now() + 30_000).toISOString()
+      : null
+  )
   const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
     ? smsFallbackAt.value
-    : otpExpiresAt.value
+    : (legacySmsResendAt.value || otpExpiresAt.value)
   startTimerUntil(displayDeadline)
   persistOtpAttempt()
 }
@@ -185,6 +190,7 @@ function restoreOtpAttempt() {
     otpRequestId.value = saved.requestId
     otpExpiresAt.value = saved.expiresAt
     smsFallbackAt.value = typeof saved.smsFallbackAt === 'string' ? saved.smsFallbackAt : null
+    legacySmsResendAt.value = null
     lastMethod.value = saved.method === 'telegram' || saved.method === 'sms' ? saved.method : null
     step.value = 'otp'
     const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
@@ -232,8 +238,11 @@ const canOfferAppRecovery = computed(() => {
 })
 
 const lastMethod = ref<'telegram' | 'sms' | null>(null)
+const automaticSmsFallback = computed(() => (
+  lastMethod.value === 'telegram' && Boolean(smsFallbackAt.value)
+))
 const otpDeliveryStatus = computed(() => {
-  if (lastMethod.value !== 'telegram') {
+  if (!automaticSmsFallback.value) {
     return countdown.value > 0 ? `${formattedTimer.value} تا ارسال مجدد` : ''
   }
   if (countdown.value > 0) {
@@ -330,9 +339,12 @@ async function resendOtpSms() {
 }
 
 function handleResend() {
-    if (lastMethod.value !== 'telegram') {
-        requestOtp()
+    if (automaticSmsFallback.value) return
+    if (lastMethod.value === 'telegram') {
+        resendOtpSms()
+        return
     }
+    requestOtp()
 }
 
 
@@ -995,11 +1007,11 @@ function goBackToMobile() {
             <AppButton block :loading="loading" @click="verifyOtp">ورود به بازار</AppButton>
 
             <div class="login-inline-actions">
-              <div v-if="countdown > 0 || lastMethod === 'telegram'" class="login-timer" role="status" aria-live="polite">
+              <div v-if="countdown > 0 || automaticSmsFallback" class="login-timer" role="status" aria-live="polite">
                 <Clock :size="14" />
                 <span>{{ otpDeliveryStatus }}</span>
               </div>
-              <button v-else-if="lastMethod !== 'telegram'" type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
+              <button v-else-if="!automaticSmsFallback" type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
             </div>
           </div>
 
