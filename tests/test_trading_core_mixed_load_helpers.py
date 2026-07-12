@@ -1213,6 +1213,31 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertTrue(first.startswith("load:telegram-for:123456789:9999:"))
 
+    def test_negative_guard_idempotency_key_stays_within_trade_column_limit(self):
+        prefix = "FMX_STAGE_S10_NG_01_stale_telegram_button_" * 3
+        first = worker.build_negative_guard_idempotency_key(
+            prefix=prefix,
+            case_id="stale_telegram_button",
+            action="complete",
+        )
+        second = worker.build_negative_guard_idempotency_key(
+            prefix=prefix,
+            case_id="stale_telegram_button",
+            action="reject",
+        )
+
+        self.assertLessEqual(len(first), 64)
+        self.assertLessEqual(len(second), 64)
+        self.assertNotEqual(first, second)
+        self.assertEqual(
+            first,
+            worker.build_negative_guard_idempotency_key(
+                prefix=prefix,
+                case_id="stale_telegram_button",
+                action="complete",
+            ),
+        )
+
     def test_hot_offer_scenario_specs_cover_step_11b3_matrix(self):
         scenarios = worker.build_hot_offer_scenario_specs(
             total_requests=1000,

@@ -718,6 +718,19 @@ def build_role_attempt_idempotency_key(
     return f"load:{role_token}:{int(offer_id)}:{int(attempt_index)}:{digest}"
 
 
+def build_negative_guard_idempotency_key(
+    *,
+    prefix: str,
+    case_id: str,
+    action: str,
+) -> str:
+    raw = f"{prefix}|{case_id}|{action}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    case_token = "".join(ch if ch.isalnum() else "-" for ch in case_id.lower())[:20] or "case"
+    action_token = "".join(ch if ch.isalnum() else "-" for ch in action.lower())[:8] or "action"
+    return f"guard:{case_token}:{action_token}:{digest}"[:64]
+
+
 def _validate_role_result_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
     payload = _require_mapping(raw, "role result")
     if payload.get("schema_version") != DUAL_ROLE_RESULT_SCHEMA_VERSION:
@@ -4180,6 +4193,13 @@ async def run_negative_guard_case(
     phase_details: list[dict[str, Any]] = []
     extra_evidence: dict[str, Any] = {}
 
+    def guard_key(action: str) -> str:
+        return build_negative_guard_idempotency_key(
+            prefix=prefix,
+            case_id=normalized_case_id,
+            action=action,
+        )
+
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=4)
         owner = users[0]
@@ -4204,7 +4224,7 @@ async def run_negative_guard_case(
                     user_id=responder_a.user_id,
                     offer_id=offer_id,
                     quantity=3,
-                    idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                    idempotency_key=guard_key("reject"),
                     phase_details=details,
                 )
             )
@@ -4226,7 +4246,7 @@ async def run_negative_guard_case(
                         user_id=owner.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4238,7 +4258,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=999,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4269,7 +4289,7 @@ async def run_negative_guard_case(
                         user_id=responder_b.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=second_details,
                     )
                 )
@@ -4282,7 +4302,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4295,7 +4315,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4310,7 +4330,7 @@ async def run_negative_guard_case(
                             user_id=responder_a.user_id,
                             offer_id=offer_id,
                             quantity=5,
-                            idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                            idempotency_key=guard_key("reject"),
                             phase_details=details,
                         )
                     )
@@ -4328,7 +4348,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4344,7 +4364,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4360,7 +4380,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4376,7 +4396,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4389,7 +4409,7 @@ async def run_negative_guard_case(
                         actor_user_id=responder_b.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4475,7 +4495,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                 )
@@ -4543,7 +4563,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        idempotency_key=guard_key("reject"),
                         phase_details=details,
                     )
                     if status_value == "error" and int(details.get("json_response_status_code") or 0) >= 500:
@@ -4607,7 +4627,7 @@ async def run_negative_guard_case(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-complete",
+                        idempotency_key=guard_key("complete"),
                         phase_details=first_details,
                     )
                 )
