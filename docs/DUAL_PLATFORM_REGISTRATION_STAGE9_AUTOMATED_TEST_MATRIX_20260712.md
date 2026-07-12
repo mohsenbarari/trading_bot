@@ -41,6 +41,10 @@ so.
 
 - Backend changed-code coverage uses the branch point from `main`, the repository's coverage parser,
   and the repository's existing coverage exclusions.
+- A clean final-evidence coverage run rejected previously accumulated coverage for the runtime
+  evidence builder and diff checker. Dedicated failure-path, direct-script fallback, CLI, and
+  non-overlapping frontend-function tests now reproduce 100% statement and branch coverage for
+  both tools without relying on historical coverage data.
 - Changed shell files are not parsed as Python, while every changed Python script remains in scope.
 - Missing coverage files, missing executable-line mappings, uncovered lines, and partially covered
   branches fail closed, including a zero-denominator case.
@@ -72,7 +76,7 @@ so.
 
 ## Verified Worktree Results Before Final Commit
 
-- Stage 9 infrastructure gate: 141 tests passed; isolation preflight passed.
+- Stage 9 infrastructure gate: 147 tests passed; isolation preflight passed.
 - Parallel Stage 9 matrix:
   - registration lane: 392 declared and 392 observed tests, zero skips;
   - market lane: 483 declared and 483 observed tests, zero skips;

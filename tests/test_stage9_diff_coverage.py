@@ -91,11 +91,19 @@ class Stage9DiffCoverageTests(unittest.TestCase):
                 "s": {"0": 1},
                 "branchMap": {"0": {"locations": [{"start": {"line": 2}, "end": {"line": 2}}]}},
                 "b": {"0": [1]},
-                "fnMap": {"0": {"decl": {"start": {"line": 2}, "end": {"line": 2}}}},
-                "f": {"0": 1},
+                "fnMap": {
+                    "0": {"decl": {"start": {"line": 2}, "end": {"line": 2}}},
+                    "1": {"loc": {"start": {"line": 8}, "end": {"line": 9}}},
+                },
+                "f": {"0": 1, "1": 0},
             }
         }
-        self.assertTrue(check_frontend(changed, coverage)["passed"])
+        report = check_frontend(changed, coverage)
+        self.assertTrue(report["passed"])
+        self.assertEqual(
+            report["files"]["frontend/src/sample.ts"]["functions"]["total"],
+            1,
+        )
 
     def test_frontend_gate_fails_when_changed_line_has_no_coverage_map_entry(self):
         changed = {"frontend/src/sample.ts": {99}}
