@@ -2615,3 +2615,19 @@ decisions, corrections, and residual gates are recorded in
 NO-GO until an independent review of the exact remediation commit returns GO. No flag, migration,
 deployment, provider action, secret rotation, push, merge, or production action is authorized by
 this record.
+
+## Stage 8 Three-Agent Review Remediation Record (2026-07-12)
+
+Gemini and Claude returned source GO for `71a48083`, while ChatGPT returned Stage 8 and Stage 9
+NO-GO. The reports were checked against source rather than combined by vote. Audit partial-tail
+corruption and Redis-outage false-green health were reproduced and fixed; metrics hydration was
+hardened; and the four Stage 8 alert rules no longer add a one-minute hold beyond their evaluated
+threshold state. Actual sampler/Grafana/Loki timing remains a Stage 10 measurement.
+
+Exact accepted, modified, rejected, operational, evidence, and merge-integration dispositions are
+recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE8_THREE_AGENT_REVIEW_REMEDIATION_20260712.md`. The current-main
+WebApp-link conflict remains a separate merge NO-GO pending an owner-visible policy decision. Stage 9
+remains NO-GO until an independent review of the exact remediation commit returns GO. No migration,
+deploy, flag enablement, provider action, secret rotation, push, merge, or production action is
+authorized by this record.

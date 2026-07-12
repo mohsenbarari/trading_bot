@@ -160,6 +160,55 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         record_sync_health.assert_called_once()
         record_publication_health.assert_called_once()
 
+    async def test_sync_health_marks_expected_registration_job_unavailable_when_redis_fails(self):
+        db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
+        redis_client = SimpleNamespace(llen=AsyncMock(side_effect=RuntimeError("redis down")))
+        request = SimpleNamespace(
+            headers={"X-Observability-Api-Key": "obs-key"},
+            url=SimpleNamespace(path="/api/sync/health"),
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch(
+            "api.routers.sync.settings.telegram_registration_reconciliation_enabled", True
+        ), patch(
+            "api.routers.sync.settings.registration_sync_v2_enabled", True
+        ), patch(
+            "api.routers.sync.settings.telegram_login_otp_enabled", True
+        ), patch(
+            "api.routers.sync.settings.otp_sms_auto_fallback_enabled", True
+        ), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://iran.example"
+        ), patch(
+            "api.routers.sync.get_redis_client", return_value=redis_client
+        ), patch("api.routers.sync.record_sync_health"), patch(
+            "api.routers.sync.record_offer_publication_health"
+        ), patch(
+            "api.routers.sync.publication_observability_summary",
+            new=AsyncMock(return_value=PUBLICATION_SUMMARY),
+        ), patch("api.routers.sync.logger.info") as info:
+            payload = await get_sync_health(request=request, db=db)
+
+        jobs = payload["registration_jobs"]
+        self.assertFalse(payload["redis_ok"])
+        self.assertEqual(jobs["status"], "redis_unavailable")
+        self.assertEqual(
+            jobs["jobs"]["telegram_registration_reconciliation"]["status"],
+            "unavailable",
+        )
+        self.assertEqual(jobs["jobs"]["otp_sms_fallback"]["status"], "not_expected")
+        health_log = next(
+            call for call in info.call_args_list if call.args == ("Sync health sampled",)
+        )
+        self.assertEqual(health_log.kwargs["extra"]["registration_observability_unavailable"], 1)
+        self.assertEqual(health_log.kwargs["extra"]["registration_job_heartbeat_unhealthy"], 1)
+        self.assertEqual(
+            health_log.kwargs["extra"]["login_sms_fallback_job_heartbeat_unhealthy"],
+            0,
+        )
+
     async def test_sync_health_reports_fresh_stored_parity_status(self):
         db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
         parity_summary = {

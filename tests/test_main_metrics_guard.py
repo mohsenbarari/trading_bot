@@ -48,6 +48,18 @@ class MainMetricsGuardTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("trading_bot_process_uptime_seconds", response.body.decode())
 
+    async def test_metrics_remains_available_when_snapshot_hydration_raises(self):
+        with patch.object(main.settings, "observability_api_key", None), patch.object(
+            main, "get_redis_client", return_value=object()
+        ), patch.object(
+            main,
+            "refresh_registration_job_metrics",
+            new=AsyncMock(side_effect=RuntimeError("metrics hydration failed")),
+        ):
+            response = await main.get_metrics(make_request("127.0.0.1"))
+
+        self.assertIn("trading_bot_process_uptime_seconds", response.body.decode())
+
     async def test_metrics_does_not_accept_dev_api_key_header(self):
         request = SimpleNamespace(client=SimpleNamespace(host="203.0.113.10"), headers={"X-DEV-API-KEY": "dev-key"})
 

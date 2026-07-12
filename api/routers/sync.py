@@ -26,6 +26,7 @@ from core.registration_sync_policy import (
 from core.registration_observability import (
     dual_platform_registration_health,
     registration_health_log_fields,
+    unavailable_registration_health,
 )
 from core.user_counter_sync import (
     USER_COUNTER_FIELDS,
@@ -4486,11 +4487,7 @@ async def get_sync_health(
             settings_obj=settings,
         )
     else:
-        registration_jobs = {
-            "status": "redis_unavailable",
-            "thresholds": {},
-            "jobs": {},
-        }
+        registration_jobs = unavailable_registration_health(settings_obj=settings)
 
     payload = {
         "status": "ok",

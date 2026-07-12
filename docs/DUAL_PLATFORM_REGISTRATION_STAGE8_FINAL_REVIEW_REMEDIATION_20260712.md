@@ -51,13 +51,27 @@ worker records connectivity from transport responses in the current reconciliati
 the previous observation only when no transport attempt occurs. A successful peer response therefore
 clears prior outage suppression immediately.
 
+When Redis is unavailable, health preserves feature and role expectation: an enabled job on its
+owning server is `unavailable` and emits heartbeat-unhealthy `1`, while disabled and not-expected
+jobs remain non-alerting. Redis loss is never flattened into a healthy zero sample.
+
 Real Loki/Grafana provisioning and temporal evaluation remain mandatory Stage 10 staging evidence.
 
 ### M-4: multi-process audit chain
 
 Accepted. The existing audit sink now uses an OS file lock around read-last-hash, record construction,
-append, and flush, while retaining its existing in-process lock and fail-safe fallback. A four-process
-test writes 80 events and verifies one complete linear chain with unique hashes.
+append, and durability synchronization, while retaining its existing in-process lock and fail-safe
+fallback. The supported deployment is Linux/POSIX because this uses `flock`. Before extending the
+chain, the sink requires a newline-terminated, parseable final record whose event hash verifies. A
+partial, invalid, or tampered tail fails closed without appending or silently restarting the chain.
+Successful append requires complete writes plus file `fsync`; initial file creation also synchronizes
+the parent directory. Failed append/fsync attempts return non-durable evidence and roll back their
+new bytes where the filesystem permits. A four-process test writes 80 events and verifies one complete
+linear chain with unique hashes; corruption and fsync-failure tests verify the fail-closed boundary.
+
+The sink does not automatically truncate or quarantine pre-existing corruption because that could
+hide tampering. Operators must preserve the damaged artifact and restore or rotate it under the
+existing incident process before durable appends can resume.
 
 ### L-2: evidence mobile identity
 

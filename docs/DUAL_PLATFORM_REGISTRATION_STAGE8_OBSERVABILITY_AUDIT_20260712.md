@@ -64,16 +64,24 @@ difference between the current UTC time and the oldest due score.
 ### Health contract and thresholds
 
 `/api/sync/health` now includes `registration_jobs` with role-aware `disabled`, `not_expected`,
-`missing`, `stale`, or `healthy` status and these locked thresholds:
+`unavailable`, `missing`, `stale`, or `healthy` status and these locked thresholds:
 
 - job heartbeat age: at most 60 seconds;
 - registration oldest pending age: at most 300 seconds while connectivity is healthy;
 - automatic SMS fallback lag: at most 2 seconds.
 
+If Redis is unavailable, enabled jobs on their expected server are rendered `unavailable` and their
+heartbeat-unhealthy log input is `1`; disabled or role-inapplicable jobs remain non-alerting. This
+prevents the shared-state outage from being flattened into a healthy heartbeat sample.
+
 The existing production alert report consumes this contract. Four new Grafana/Loki rules consume
 the existing redacted `sync.health` log: both heartbeat alerts, healthy-connectivity registration
 pending age, and SMS fallback lag. The rules use the existing contact policy and do not create a new
-dashboard or alert system. The existing market p95 alert remains unchanged.
+dashboard or alert system. These four rules have no additional `for` hold and therefore enter firing
+on the first evaluated unhealthy sample. The one-minute sampler and Grafana evaluation cadence are
+transport delays beyond the age/lag threshold itself; their actual worst-case detection time remains
+a mandatory Stage 10 Loki/Grafana temporal measurement rather than a source-only claim. The existing
+market p95 alert remains unchanged.
 
 ### Metrics
 
@@ -98,6 +106,13 @@ registration completion remains guarded by `first_terminal_transition`, so repla
 the terminal success/rejection event. OTP provider outcomes are converted to the audit sink's strict
 `success`, `failure`, or `denied` vocabulary. `otp.sms_fallback_scheduled` records `result=success`
 and keeps `scheduled` only as a bounded lifecycle field, preventing a false audit-failure alert.
+
+The durable sink is supported on the deployed Linux/POSIX runtime and serializes writers with
+`flock`. It validates the final record and hash before every append, refuses to extend a partial,
+invalid, or tampered tail, and reports that event as non-durable rather than restarting the chain.
+A successful append is reported durable only after a complete write and file `fsync`; first-file
+creation also synchronizes the parent directory. Existing corruption is preserved for incident
+handling rather than automatically truncated or quarantined.
 
 `otp.expired` is not fabricated in this source change. Natural expiration is an atomic passive Redis
 TTL event: the OTP code, pointer, and short-lived state expire together, so there is no reliable

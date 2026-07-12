@@ -538,7 +538,7 @@ async def get_metrics(request: Request):
                 refresh_registration_job_metrics(redis_client),
                 timeout=0.25,
             )
-        except TimeoutError:
+        except Exception:
             pass
     return Response(content=metrics_response_body(), media_type="text/plain; version=0.0.4; charset=utf-8")
 

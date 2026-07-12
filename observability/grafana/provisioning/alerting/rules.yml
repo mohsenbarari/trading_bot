@@ -823,7 +823,7 @@ groups:
                     type: and
         noDataState: Alerting
         execErrState: Error
-        for: 1m
+        for: 0s
         labels:
           severity: critical
           component: registration_jobs
@@ -876,7 +876,7 @@ groups:
                     type: and
         noDataState: OK
         execErrState: Error
-        for: 1m
+        for: 0s
         labels:
           severity: warning
           component: registration_jobs
@@ -929,7 +929,7 @@ groups:
                     type: and
         noDataState: Alerting
         execErrState: Error
-        for: 1m
+        for: 0s
         labels:
           severity: critical
           component: registration_jobs
@@ -982,7 +982,7 @@ groups:
                     type: and
         noDataState: OK
         execErrState: Error
-        for: 1m
+        for: 0s
         labels:
           severity: warning
           component: registration_jobs

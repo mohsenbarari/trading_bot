@@ -23,6 +23,7 @@ from core.registration_observability import (
     registration_health_log_fields,
     summarize_otp_fallback_queue,
     summarize_registration_intent_queue,
+    unavailable_registration_health,
 )
 from scripts import report_production_alerts
 
@@ -333,6 +334,41 @@ class Stage8SnapshotTests(unittest.IsolatedAsyncioTestCase):
             "stale",
         )
 
+    async def test_redis_unavailable_is_unhealthy_only_for_enabled_job_on_expected_role(self):
+        foreign = unavailable_registration_health(settings_obj=settings_for("foreign"), now=NOW)
+        foreign_fields = registration_health_log_fields(foreign)
+        self.assertEqual(foreign["status"], "redis_unavailable")
+        self.assertEqual(
+            foreign["jobs"][JOB_TELEGRAM_REGISTRATION_RECONCILIATION]["status"],
+            "unavailable",
+        )
+        self.assertEqual(foreign["jobs"][JOB_OTP_SMS_FALLBACK]["status"], "not_expected")
+        self.assertEqual(foreign_fields["registration_observability_unavailable"], 1)
+        self.assertEqual(foreign_fields["registration_job_heartbeat_unhealthy"], 1)
+        self.assertEqual(foreign_fields["login_sms_fallback_job_heartbeat_unhealthy"], 0)
+
+        iran = unavailable_registration_health(settings_obj=settings_for("iran"), now=NOW)
+        iran_fields = registration_health_log_fields(iran)
+        self.assertEqual(
+            iran["jobs"][JOB_TELEGRAM_REGISTRATION_RECONCILIATION]["status"],
+            "not_expected",
+        )
+        self.assertEqual(iran["jobs"][JOB_OTP_SMS_FALLBACK]["status"], "unavailable")
+        self.assertEqual(iran_fields["registration_job_heartbeat_unhealthy"], 0)
+        self.assertEqual(iran_fields["login_sms_fallback_job_heartbeat_unhealthy"], 1)
+
+        disabled_settings = settings_for("foreign")
+        disabled_settings.telegram_registration_reconciliation_enabled = False
+        disabled_settings.telegram_login_otp_enabled = False
+        disabled = unavailable_registration_health(settings_obj=disabled_settings, now=NOW)
+        disabled_fields = registration_health_log_fields(disabled)
+        self.assertEqual(
+            disabled["jobs"][JOB_TELEGRAM_REGISTRATION_RECONCILIATION]["status"],
+            "disabled",
+        )
+        self.assertEqual(disabled_fields["registration_job_heartbeat_unhealthy"], 0)
+        self.assertEqual(disabled_fields["login_sms_fallback_job_heartbeat_unhealthy"], 0)
+
     async def test_metrics_have_only_bounded_job_and_server_labels(self):
         redis = FakeRedis()
         await record_registration_job_snapshot(
@@ -401,6 +437,7 @@ class Stage8SnapshotTests(unittest.IsolatedAsyncioTestCase):
         fields = registration_health_log_fields(health)
         redacted = redact(fields)
 
+        self.assertEqual(fields["registration_observability_unavailable"], 0)
         self.assertEqual(fields["registration_job_heartbeat_unhealthy"], 0)
         self.assertEqual(fields["registration_job_pending_healthy_age_seconds"], 0)
         self.assertEqual(fields["login_sms_fallback_job_heartbeat_unhealthy"], 1)
@@ -500,17 +537,21 @@ class Stage8AlertTests(unittest.TestCase):
         self.assertIn('| server_mode="foreign"', registration_heartbeat)
         self.assertIn("registration_job_heartbeat_unhealthy", registration_heartbeat)
         self.assertIn("noDataState: Alerting", registration_heartbeat)
+        self.assertIn("for: 0s", registration_heartbeat)
         self.assertIn("last_over_time", registration_pending)
         self.assertIn('| server_mode="foreign"', registration_pending)
         self.assertIn("registration_job_pending_healthy_age_seconds", registration_pending)
         self.assertNotIn("max_over_time", registration_pending)
+        self.assertIn("for: 0s", registration_pending)
         self.assertIn("last_over_time", otp_heartbeat)
         self.assertIn('| server_mode="iran"', otp_heartbeat)
         self.assertIn("login_sms_fallback_job_heartbeat_unhealthy", otp_heartbeat)
         self.assertIn("noDataState: Alerting", otp_heartbeat)
+        self.assertIn("for: 0s", otp_heartbeat)
         self.assertIn("last_over_time", otp_lag)
         self.assertIn('| server_mode="iran"', otp_lag)
         self.assertNotIn("max_over_time", otp_lag)
+        self.assertIn("for: 0s", otp_lag)
 
 
 class Stage8AuditVocabularyTests(unittest.TestCase):

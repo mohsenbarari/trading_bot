@@ -272,6 +272,7 @@ def _render_job_health(
     expected_server: str,
     current_server: str,
     enabled: bool,
+    observability_available: bool,
     now: datetime,
 ) -> dict[str, Any]:
     expected_here = current_server == expected_server
@@ -288,6 +289,8 @@ def _render_job_health(
         status = "disabled"
     elif not expected_here:
         status = "not_expected"
+    elif not observability_available:
+        status = "unavailable"
     elif heartbeat_age is None:
         status = "missing"
     elif (
@@ -302,6 +305,7 @@ def _render_job_health(
         "enabled": bool(enabled),
         "expected_server": expected_server,
         "expected_on_this_server": expected_here,
+        "observability_available": bool(observability_available),
         "status": status,
         "heartbeat_age_seconds": round(heartbeat_age, 3) if heartbeat_age is not None else None,
         "last_success_age_seconds": (
@@ -318,15 +322,23 @@ def _render_job_health(
         ),
         "batch_size": _nonnegative_int((snapshot or {}).get("batch_size")),
         "batch_duration_ms": _nonnegative_float((snapshot or {}).get("batch_duration_ms")),
-        "connectivity_healthy": _bool_value(
-            (snapshot or {}).get("connectivity_healthy"),
-            default=True,
+        "connectivity_healthy": (
+            _bool_value((snapshot or {}).get("connectivity_healthy"), default=True)
+            if observability_available
+            else False
         ),
         "lag_seconds": _nonnegative_float((snapshot or {}).get("lag_seconds")),
     }
 
 
-async def dual_platform_registration_health(redis, *, settings_obj, now: datetime | None = None) -> dict[str, Any]:
+def _build_registration_health(
+    *,
+    settings_obj,
+    registration_snapshot: dict[str, Any] | None,
+    otp_snapshot: dict[str, Any] | None,
+    observability_available: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     sampled_at = _utc(now or utc_now())
     current_server = normalize_server(getattr(settings_obj, "server_mode", None), default="unknown")
     registration_enabled = registration_reconciliation_runtime_ready(settings_obj)
@@ -334,11 +346,8 @@ async def dual_platform_registration_health(redis, *, settings_obj, now: datetim
         getattr(settings_obj, "telegram_login_otp_enabled", False)
         and getattr(settings_obj, "otp_sms_auto_fallback_enabled", False)
     )
-    registration_snapshot = await load_registration_job_snapshot(
-        redis, job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION
-    )
-    otp_snapshot = await load_registration_job_snapshot(redis, job_name=JOB_OTP_SMS_FALLBACK)
     return {
+        "status": "ok" if observability_available else "redis_unavailable",
         "thresholds": {
             "heartbeat_max_age_seconds": JOB_HEARTBEAT_MAX_AGE_SECONDS,
             "registration_pending_max_age_seconds": REGISTRATION_PENDING_MAX_AGE_SECONDS,
@@ -351,6 +360,7 @@ async def dual_platform_registration_health(redis, *, settings_obj, now: datetim
                 expected_server=SERVER_FOREIGN,
                 current_server=current_server,
                 enabled=registration_enabled,
+                observability_available=observability_available,
                 now=sampled_at,
             ),
             JOB_OTP_SMS_FALLBACK: _render_job_health(
@@ -359,10 +369,35 @@ async def dual_platform_registration_health(redis, *, settings_obj, now: datetim
                 expected_server=SERVER_IRAN,
                 current_server=current_server,
                 enabled=otp_enabled,
+                observability_available=observability_available,
                 now=sampled_at,
             ),
         },
     }
+
+
+async def dual_platform_registration_health(redis, *, settings_obj, now: datetime | None = None) -> dict[str, Any]:
+    registration_snapshot = await load_registration_job_snapshot(
+        redis, job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION
+    )
+    otp_snapshot = await load_registration_job_snapshot(redis, job_name=JOB_OTP_SMS_FALLBACK)
+    return _build_registration_health(
+        settings_obj=settings_obj,
+        registration_snapshot=registration_snapshot,
+        otp_snapshot=otp_snapshot,
+        observability_available=True,
+        now=now,
+    )
+
+
+def unavailable_registration_health(*, settings_obj, now: datetime | None = None) -> dict[str, Any]:
+    return _build_registration_health(
+        settings_obj=settings_obj,
+        registration_snapshot=None,
+        otp_snapshot=None,
+        observability_available=False,
+        now=now,
+    )
 
 
 def registration_health_log_fields(health: dict[str, Any]) -> dict[str, Any]:
@@ -374,10 +409,11 @@ def registration_health_log_fields(health: dict[str, Any]) -> dict[str, Any]:
     )
     otp_expected = bool(otp.get("enabled") and otp.get("expected_on_this_server"))
     registration_heartbeat_unhealthy = int(
-        registration_expected and registration.get("status") in {"missing", "stale"}
+        registration_expected
+        and registration.get("status") in {"missing", "stale", "unavailable"}
     )
     otp_heartbeat_unhealthy = int(
-        otp_expected and otp.get("status") in {"missing", "stale"}
+        otp_expected and otp.get("status") in {"missing", "stale", "unavailable"}
     )
     registration_pending_healthy_age = (
         _nonnegative_float(registration.get("oldest_pending_age_seconds"))
@@ -385,6 +421,9 @@ def registration_health_log_fields(health: dict[str, Any]) -> dict[str, Any]:
         else 0.0
     )
     return {
+        "registration_observability_unavailable": int(
+            health.get("status") == "redis_unavailable"
+        ),
         "registration_job_enabled": registration.get("enabled"),
         "registration_job_status": registration.get("status"),
         "registration_job_heartbeat_age_seconds": registration.get("heartbeat_age_seconds"),
