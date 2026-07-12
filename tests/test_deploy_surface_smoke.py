@@ -342,6 +342,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         vite_config = (REPO_ROOT / 'frontend/vite.config.ts').read_text(encoding='utf-8')
         staging_nginx = (REPO_ROOT / 'deploy/staging/nginx-staging.conf.template').read_text(encoding='utf-8')
         staging_compose = (REPO_ROOT / 'deploy/staging/docker-compose.staging.yml').read_text(encoding='utf-8')
+        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
         dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
         gitignore = (REPO_ROOT / '.gitignore').read_text(encoding='utf-8')
 
@@ -402,6 +403,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('python scripts/align_trade_number_sequence.py', staging_compose)
         self.assertIn('compose up -d --build sync_worker', staging_script)
         self.assertIn('set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
+        self.assertIn('set_env_value AUDIT_TRAIL_PATH /app/audit_trail/audit.jsonl', staging_script)
+        self.assertIn('AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl', staging_example)
         self.assertIn('ensure_runtime_env_values\n        compose up -d --build "$@"', staging_script)
         self.assertIn('realpath -m "$STAGING_FRONTEND_DIST_DIR"', staging_script)
         self.assertIn('staging frontend dist must not share production mini_app_dist', staging_script)
@@ -412,6 +415,14 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('location = /foreign-sync/api/config', staging_nginx)
         self.assertIn('location = /foreign-sync/api/sync/receive', staging_nginx)
         self.assertIn('auth_basic off;', staging_nginx)
+        self.assertIn(
+            'offers/internal|auth/internal|invitations/internal|customers/internal',
+            staging_nginx,
+        )
+        self.assertIn(
+            '^/foreign-sync/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)',
+            staging_nginx,
+        )
         self.assertIn('proxy_pass http://127.0.0.1:__FOREIGN_APP_PORT__/api/sync/receive;', staging_nginx)
         self.assertNotIn('root __APP_ROOT__/mini_app_dist;', staging_nginx)
         self.assertIn('FRONTEND_DIST_DIR:', staging_compose)

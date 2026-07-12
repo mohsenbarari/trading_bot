@@ -1237,6 +1237,22 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
                 args.iran_base_url.rstrip("/") + "/api/sessions/internal/authority-check",
             ),
             check_internal_ingress_without_basic_auth(
+                "iran_registration_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/auth/internal/telegram-registration/reconcile",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "iran_account_link_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/auth/internal/telegram-link/complete",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "iran_invitation_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/invitations/internal/create",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "iran_customer_relation_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/customers/internal/owner-relations",
+            ),
+            check_internal_ingress_without_basic_auth(
                 "foreign_sync_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/receive",
             ),
@@ -1251,6 +1267,10 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
             check_internal_ingress_without_basic_auth(
                 "foreign_session_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sessions/internal/authority-check",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "foreign_telegram_otp_internal_ingress_without_basic_auth",
+                args.foreign_base_url.rstrip("/") + "/foreign-sync/api/auth/internal/telegram-otp/deliver",
             ),
             check_container_runtime_identity(
                 "iran_runtime_identity",

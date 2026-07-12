@@ -358,6 +358,7 @@ SYNC_CA_BUNDLE=
 DEV_API_KEY=$dev_key
 OBSERVABILITY_API_KEY=$observability_key
 OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$hash_salt
+AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl
 STAGING_BASIC_AUTH_USER=staging
 STAGING_BASIC_AUTH_PASSWORD=$(secret_hex 8)
 STAGING_ENABLE_DEV_LOGIN=true
@@ -387,6 +388,7 @@ ensure_runtime_env_values() {
     set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
     set_env_value EXTRA_CORS_ORIGINS "$STAGING_FRONTEND_URL"
     set_env_value TRUSTED_PROXY_CIDRS "$STAGING_TRUSTED_PROXY_CIDRS"
+    set_env_value AUDIT_TRAIL_PATH /app/audit_trail/audit.jsonl
     set_env_value STAGING_LOG_OTP_CODES false
     ensure_web_push_env
 }

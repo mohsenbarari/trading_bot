@@ -69,7 +69,7 @@ server {
         proxy_set_header Connection "";
     }
 
-    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal)(/|$) {
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
         auth_basic off;
 
         proxy_pass http://127.0.0.1:__APP_PORT__;
@@ -93,7 +93,7 @@ server {
         proxy_set_header Connection "";
     }
 
-    location ~ ^/foreign-sync/api/(sync|sessions/internal|trades/internal|offers/internal)(/|$) {
+    location ~ ^/foreign-sync/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
         auth_basic off;
 
         rewrite ^/foreign-sync(/.*)$ $1 break;
