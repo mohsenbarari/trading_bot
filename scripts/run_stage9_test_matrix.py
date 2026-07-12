@@ -20,6 +20,9 @@ DEFAULT_MANIFEST = REPO_ROOT / "config/stage9_test_matrix.json"
 DEFAULT_ISOLATION = REPO_ROOT / "config/stage9_test_matrix_isolation.json"
 RAN_TESTS_RE = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 SKIPPED_RE = re.compile(r"skipped=(\d+)")
+TEST_START_RE = re.compile(
+    r"^(?P<method>(?:test_[^( ]+|runTest)) \((?P<case>[^)]+)\) \.\.\.(?P<tail>.*)$"
+)
 
 
 class MatrixConfigurationError(ValueError):
@@ -59,6 +62,8 @@ def validate_manifest(manifest: dict[str, object], repo_root: Path = REPO_ROOT) 
     for lane_name, lane in lanes.items():
         if not isinstance(lane, dict) or not lane.get("test_modules"):
             raise MatrixConfigurationError(f"lane_tests_required:{lane_name}")
+        if int(lane.get("minimum_test_count", 0) or 0) <= 0:
+            raise MatrixConfigurationError(f"lane_minimum_test_count_required:{lane_name}")
         for module in lane["test_modules"]:
             module_path = repo_root / (str(module).replace(".", "/") + ".py")
             if not module_path.exists():
@@ -85,6 +90,43 @@ def validate_manifest(manifest: dict[str, object], repo_root: Path = REPO_ROOT) 
         for reference in row.get("test_references", []):
             if not (repo_root / str(reference)).exists():
                 raise MatrixConfigurationError(f"nonexistent_test_reference:{reference}")
+        scenarios = row.get("scenarios")
+        if not isinstance(scenarios, list) or not scenarios:
+            raise MatrixConfigurationError(f"market_scenarios_required:{row['id']}")
+        covered_dimensions: set[str] = set()
+        scenario_ids: set[str] = set()
+        for scenario in scenarios:
+            if not isinstance(scenario, dict):
+                raise MatrixConfigurationError(f"invalid_market_scenario:{row['id']}")
+            scenario_id = str(scenario.get("id", "")).strip()
+            evidence_stage = str(scenario.get("evidence_stage", "stage9")).strip()
+            test_id = str(scenario.get("test_id", "")).strip()
+            dimensions = scenario.get("dimensions")
+            if not scenario_id or scenario_id in scenario_ids:
+                raise MatrixConfigurationError(f"invalid_market_scenario_id:{row['id']}:{scenario_id}")
+            if evidence_stage not in {"stage9", "stage10"}:
+                raise MatrixConfigurationError(
+                    f"invalid_market_scenario_stage:{row['id']}:{scenario_id}:{evidence_stage}"
+                )
+            if evidence_stage == "stage9" and not test_id:
+                raise MatrixConfigurationError(
+                    f"stage9_market_scenario_test_required:{row['id']}:{scenario_id}"
+                )
+            if evidence_stage == "stage10" and not str(scenario.get("blocker", "")).strip():
+                raise MatrixConfigurationError(
+                    f"stage10_market_scenario_blocker_required:{row['id']}:{scenario_id}"
+                )
+            if not isinstance(dimensions, list) or not dimensions:
+                raise MatrixConfigurationError(f"incomplete_market_scenario:{row['id']}:{scenario_id}")
+            scenario_ids.add(scenario_id)
+            covered_dimensions.update(str(value) for value in dimensions)
+        required_dimensions = {str(value) for value in row["dimensions"]}
+        if covered_dimensions != required_dimensions:
+            raise MatrixConfigurationError(
+                f"market_dimension_mapping_mismatch:{row['id']}:"
+                f"missing={sorted(required_dimensions-covered_dimensions)}:"
+                f"extra={sorted(covered_dimensions-required_dimensions)}"
+            )
 
     expected_special_cases = {
         "MKT-SPECIAL-WARNING-ACK",
@@ -121,6 +163,8 @@ def validate_manifest(manifest: dict[str, object], repo_root: Path = REPO_ROOT) 
                 raise MatrixConfigurationError(
                     f"market_special_case_not_executed:{case['id']}:{reference}"
                 )
+        if not str(case.get("test_id", "")).strip():
+            raise MatrixConfigurationError(f"market_special_case_test_id_required:{case['id']}")
 
 
 def validate_parallel_isolation(
@@ -128,6 +172,10 @@ def validate_parallel_isolation(
 ) -> tuple[bool, list[str]]:
     if isolation is None:
         return False, ["isolation_contract_missing"]
+    if isolation.get("schema_version") != 2:
+        return False, ["isolation_schema_version_2_required"]
+    if isolation.get("resource_mode") != "process_local_no_external_mutable_io":
+        return False, ["unsupported_isolation_resource_mode"]
     lanes = [isolation.get("registration"), isolation.get("market")]
     if not all(isinstance(lane, dict) for lane in lanes):
         return False, ["both_lane_isolation_records_required"]
@@ -138,7 +186,46 @@ def validate_parallel_isolation(
             failures.append(f"isolation_value_missing:{key}")
         elif values[0] == values[1]:
             failures.append(f"isolation_value_shared:{key}")
+    for lane_name, lane_config in manifest.get("lanes", {}).items():
+        if (
+            not isinstance(lane_config, dict)
+            or lane_config.get("external_mutable_service_io") is not False
+        ):
+            failures.append(f"lane_external_mutable_io_not_forbidden:{lane_name}")
     return not failures, failures
+
+
+def _observed_test_results(output: str) -> dict[str, str]:
+    observed: dict[str, str] = {}
+    pending: str | None = None
+    for line in output.splitlines():
+        match = TEST_START_RE.match(line)
+        if match:
+            case = match.group("case")
+            method = match.group("method")
+            pending = case if case.endswith(f".{method}") else f"{case}.{method}"
+            status = match.group("tail").strip()
+            if status in {"ok", "FAIL", "ERROR"} or status.startswith("skipped "):
+                observed[pending] = (
+                    "passed"
+                    if status == "ok"
+                    else ("skipped" if status.startswith("skipped ") else "failed")
+                )
+                pending = None
+            continue
+        stripped = line.strip()
+        if pending and (
+            stripped == "ok"
+            or stripped in {"FAIL", "ERROR"}
+            or stripped.startswith("skipped ")
+        ):
+            observed[pending] = (
+                "passed"
+                if stripped == "ok"
+                else ("skipped" if stripped.startswith("skipped ") else "failed")
+            )
+            pending = None
+    return observed
 
 
 def _run_lane(
@@ -155,6 +242,8 @@ def _run_lane(
     stage9_packages = str(REPO_ROOT / "tmp/stage9-site-packages")
     env["PYTHONPATH"] = stage9_packages + os.pathsep + env.get("PYTHONPATH", "")
     if resources:
+        lane_tmp = resolve_artifact_dir(Path(str(resources["tmp_dir"])))
+        lane_tmp.mkdir(parents=True, exist_ok=True)
         env.update(
             {
                 "STAGE9_LANE": name,
@@ -164,6 +253,10 @@ def _run_lane(
                 "STAGE9_LANE_PORT": str(resources["port"]),
                 "STAGE9_ARTIFACT_DIR": str(resources["artifact_dir"]),
                 "STAGE9_CLEANUP_OWNER": str(resources["cleanup_owner"]),
+                "DATABASE_URL": str(resources["database_url"]),
+                "SYNC_DATABASE_URL": str(resources["sync_database_url"]),
+                "REDIS_URL": str(resources["redis_url"]),
+                "TMPDIR": str(lane_tmp),
             }
         )
     result = subprocess.run(
@@ -178,12 +271,25 @@ def _run_lane(
     log_path.write_text(result.stdout, encoding="utf-8")
     test_count_match = RAN_TESTS_RE.search(result.stdout)
     skipped = sum(int(value) for value in SKIPPED_RE.findall(result.stdout))
-    status = "passed" if result.returncode == 0 and skipped == 0 else "failed"
+    test_count = int(test_count_match.group(1)) if test_count_match else None
+    observed_tests = _observed_test_results(result.stdout)
+    minimum_test_count = int(resources.get("minimum_test_count", 1)) if resources else 1
+    status = (
+        "passed"
+        if result.returncode == 0
+        and skipped == 0
+        and test_count is not None
+        and test_count >= minimum_test_count
+        and len(observed_tests) == test_count
+        else "failed"
+    )
     return {
         "lane": name,
         "status": status,
         "exit_code": result.returncode,
-        "test_count": int(test_count_match.group(1)) if test_count_match else None,
+        "test_count": test_count,
+        "minimum_test_count": minimum_test_count,
+        "observed_tests": observed_tests,
         "skipped": skipped,
         "duration_seconds": round(time.monotonic() - started, 3),
         "command": command,
@@ -209,7 +315,9 @@ def run_matrix(
 
     def lane_resources(name: str) -> dict[str, object] | None:
         if isolation and isinstance(isolation.get(name), dict):
-            return isolation[name]  # type: ignore[return-value]
+            resources = dict(isolation[name])  # type: ignore[arg-type]
+            resources["minimum_test_count"] = lanes[name]["minimum_test_count"]
+            return resources
         return None
 
     if parallel:
@@ -235,30 +343,77 @@ def run_matrix(
             )
             for name, lane in lanes.items()
         }
-    passed = all(result["status"] == "passed" for result in lane_results.values())
+    market_observed = lane_results["market"].get("observed_tests", {})
+    assert isinstance(market_observed, dict)
+
+    def scenario_result(scenario: dict[str, object]) -> dict[str, object]:
+        evidence_stage = str(scenario.get("evidence_stage", "stage9"))
+        if evidence_stage == "stage10":
+            return {
+                "status": "deferred_stage10_real_topology",
+                "test_id": None,
+                "dimensions": scenario["dimensions"],
+                "blocker": scenario["blocker"],
+            }
+        test_id = str(scenario["test_id"])
+        observed_status = market_observed.get(test_id, "missing")
+        return {
+            "status": observed_status,
+            "test_id": test_id,
+            "dimensions": scenario["dimensions"],
+        }
+
+    market_rows: dict[str, object] = {}
+    for row in manifest["market_rows"]:
+        scenarios = {
+            str(scenario["id"]): scenario_result(scenario)
+            for scenario in row["scenarios"]
+        }
+        scenario_statuses = {result["status"] for result in scenarios.values()}
+        row_status = (
+            "failed"
+            if scenario_statuses - {"passed", "deferred_stage10_real_topology"}
+            else (
+                "deferred_stage10_real_topology"
+                if "deferred_stage10_real_topology" in scenario_statuses
+                else "passed"
+            )
+        )
+        market_rows[str(row["id"])] = {
+            "status": row_status,
+            "scenarios": scenarios,
+            "test_references": row["test_references"],
+        }
+
+    special_cases: dict[str, object] = {}
+    for case in manifest["market_special_cases"]:
+        test_id = str(case["test_id"])
+        observed_status = market_observed.get(test_id, "missing")
+        special_cases[str(case["id"])] = {
+            "status": observed_status,
+            "test_id": test_id,
+            "test_references": case["test_references"],
+        }
+
+    stage9_passed = (
+        all(result["status"] == "passed" for result in lane_results.values())
+        and all(row["status"] in {"passed", "deferred_stage10_real_topology"} for row in market_rows.values())  # type: ignore[index]
+        and all(case["status"] == "passed" for case in special_cases.values())  # type: ignore[index]
+    )
+    complete = stage9_passed and all(
+        row["status"] == "passed" for row in market_rows.values()  # type: ignore[index]
+    )
     return {
         "schema_version": 1,
         "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
         "evidence_scope": "local_composed_reference_modules",
         "execution_mode": "parallel" if parallel else "sequential",
         "lanes": lane_results,
-        "market_rows": {
-            row["id"]: {
-                "status": "passed" if lane_results["market"]["status"] == "passed" else "failed",
-                "evidence": "all_composed_reference_modules_passed_without_skip",
-                "test_references": row["test_references"],
-            }
-            for row in manifest["market_rows"]
-        },
-        "market_special_cases": {
-            case["id"]: {
-                "status": "passed" if lane_results["market"]["status"] == "passed" else "failed",
-                "evidence": "all_composed_reference_modules_passed_without_skip",
-                "test_references": case["test_references"],
-            }
-            for case in manifest["market_special_cases"]
-        },
-        "passed": passed,
+        "market_rows": market_rows,
+        "market_special_cases": special_cases,
+        "stage9_passed": stage9_passed,
+        "complete": complete,
+        "passed": stage9_passed,
     }
 
 

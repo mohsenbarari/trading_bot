@@ -15,7 +15,7 @@ class MutationEvidenceError(ValueError):
 
 
 def validate_mutation_evidence(manifest: dict[str, object], evidence: dict[str, object]) -> None:
-    if manifest.get("schema_version") != 1 or evidence.get("schema_version") != 1:
+    if manifest.get("schema_version") != 2 or evidence.get("schema_version") != 1:
         raise MutationEvidenceError("unsupported_schema_version")
     targets = manifest.get("targets")
     if not isinstance(targets, list) or not targets:
@@ -43,6 +43,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     try:
         manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
         evidence = json.loads(Path(args.evidence).read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or not isinstance(evidence, dict):
+            raise MutationEvidenceError("mutation_evidence_objects_required")
         validate_mutation_evidence(manifest, evidence)
         report = {"schema_version": 1, "passed": True, "target_count": len(manifest["targets"])}
         output = Path(args.output)

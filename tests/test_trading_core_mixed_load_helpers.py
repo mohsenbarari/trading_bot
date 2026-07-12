@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.methods import AnswerCallbackQuery
 
@@ -53,6 +53,369 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                     expected_prefix="FMX_STAGE_UNIT_",
                     expected_count=3,
                 )
+
+    def test_dual_role_users_artifact_rejects_short_or_malformed_inventories(self):
+        users = [
+            worker.LoadUserRef(user_id=10, telegram_id=9010),
+            worker.LoadUserRef(user_id=12, telegram_id=9012),
+            worker.LoadUserRef(user_id=14, telegram_id=9014),
+        ]
+        with self.assertRaisesRegex(worker.TradingProbeError, "at least three"):
+            worker.build_dual_role_users_artifact("FMX_STAGE_UNIT_", users[:2])
+
+        base = worker.build_dual_role_users_artifact("FMX_STAGE_UNIT_", users)
+        cases = []
+
+        def broken(message, mutate):
+            payload = json.loads(json.dumps(base))
+            mutate(payload)
+            cases.append((payload, message))
+
+        broken("schema_version", lambda value: value.__setitem__("schema_version", 99))
+        broken("not successful", lambda value: value.__setitem__("status", "failed"))
+        broken("prefix mismatch", lambda value: value.__setitem__("prefix", "OTHER_"))
+        broken("must be an array", lambda value: value.__setitem__("users", {}))
+        broken("count mismatch", lambda value: value["users"].__setitem__(0, "invalid"))
+        broken("invalid dual-role", lambda value: value["users"][0].pop("user_id"))
+        broken("expected 4 users", lambda value: None)
+        broken("non-positive", lambda value: value["users"][0].__setitem__("user_id", 0))
+        broken("duplicate user ids", lambda value: value["users"][1].__setitem__("user_id", 10))
+        broken("duplicate telegram ids", lambda value: value["users"][1].__setitem__("telegram_id", 9010))
+
+        for payload, message in cases:
+            expected_count = 4 if message == "expected 4 users" else 3
+            with self.subTest(message=message), patch.object(
+                worker,
+                "read_json_artifact",
+                return_value=payload,
+            ), self.assertRaisesRegex(worker.TradingProbeError, message):
+                worker.load_dual_role_users_artifact(
+                    Path("ignored.json"),
+                    expected_prefix="FMX_STAGE_UNIT_",
+                    expected_count=expected_count,
+                )
+
+    def test_seeded_user_visibility_requires_exact_id_and_telegram_mapping(self):
+        users = [
+            worker.LoadUserRef(user_id=10, telegram_id=9010),
+            worker.LoadUserRef(user_id=12, telegram_id=9012),
+            worker.LoadUserRef(user_id=14, telegram_id=9014),
+        ]
+
+        class SessionContext:
+            def __init__(self, rows):
+                self.rows = rows
+
+            async def __aenter__(self):
+                result = MagicMock()
+                result.all.return_value = self.rows
+                self.session = MagicMock()
+                self.session.execute = AsyncMock(return_value=result)
+                return self.session
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+        async def run_case(rows):
+            with patch.object(worker, "AsyncSessionLocal", return_value=SessionContext(rows)):
+                await worker.assert_seeded_load_users_visible(users)
+
+        asyncio.run(
+            run_case(
+                [
+                    SimpleNamespace(id=10, telegram_id=9010),
+                    SimpleNamespace(id=12, telegram_id=9012),
+                    SimpleNamespace(id=14, telegram_id=9014),
+                ]
+            )
+        )
+        with self.assertRaisesRegex(worker.TradingProbeError, "not converged locally"):
+            asyncio.run(
+                run_case(
+                    [
+                        SimpleNamespace(id=10, telegram_id=9999),
+                        SimpleNamespace(id=12, telegram_id=None),
+                    ]
+                )
+            )
+
+    def test_seed_and_verify_commands_enforce_cleanup_and_emit_artifacts(self):
+        users = [
+            worker.LoadUserRef(user_id=10, telegram_id=9010),
+            worker.LoadUserRef(user_id=12, telegram_id=9012),
+            worker.LoadUserRef(user_id=14, telegram_id=9014),
+        ]
+        seed_args = SimpleNamespace(
+            prefix="FMX_STAGE_UNIT_",
+            allow_production_execution=True,
+            skip_initial_cleanup=False,
+            allow_production_cleanup=True,
+            user_count=3,
+            output="users.json",
+        )
+
+        async def seed():
+            with patch.object(worker, "setup_event_listeners"), patch.object(
+                worker, "assert_load_runner_runtime_surface"
+            ), patch.object(worker, "is_production_runtime", return_value=True), patch.object(
+                worker, "allow_production_cleanup_hard_delete"
+            ) as allow_cleanup, patch.object(
+                worker, "cleanup_prefix", new=AsyncMock()
+            ) as cleanup, patch.object(
+                worker, "create_load_fixture_users", new=AsyncMock(return_value=users)
+            ), patch.object(worker, "write_json_artifact") as write, patch.object(
+                worker, "print_json"
+            ):
+                result = await worker.seed_dual_role_users_command(seed_args)
+            return result, allow_cleanup, cleanup, write
+
+        result, allow_cleanup, cleanup, write = asyncio.run(seed())
+        self.assertEqual(result, 0)
+        allow_cleanup.assert_called_once()
+        cleanup.assert_awaited_once_with("FMX_STAGE_UNIT_")
+        self.assertEqual(write.call_args.args[1]["source_server"], worker.SERVER_IRAN)
+
+        verify_args = SimpleNamespace(
+            prefix="FMX_STAGE_UNIT_",
+            allow_production_execution=True,
+            users_artifact="users.json",
+            user_count=3,
+            output="verified.json",
+        )
+
+        async def verify():
+            with patch.object(worker, "assert_production_full_matrix_allowed"), patch.object(
+                worker, "load_dual_role_users_artifact", return_value=users
+            ), patch.object(
+                worker, "assert_seeded_load_users_visible", new=AsyncMock()
+            ) as visible, patch.object(worker, "write_json_artifact") as write_result, patch.object(
+                worker, "print_json"
+            ):
+                result = await worker.verify_dual_role_users_command(verify_args)
+            return result, visible, write_result
+
+        result, visible, write_result = asyncio.run(verify())
+        self.assertEqual(result, 0)
+        visible.assert_awaited_once_with(users)
+        self.assertEqual(write_result.call_args.args[1]["user_count"], 3)
+
+    def test_seed_cleanup_branches_and_verify_without_output(self):
+        users = [
+            worker.LoadUserRef(user_id=10, telegram_id=9010),
+            worker.LoadUserRef(user_id=12, telegram_id=9012),
+            worker.LoadUserRef(user_id=14, telegram_id=9014),
+        ]
+
+        async def run_seed(skip_cleanup):
+            args = SimpleNamespace(
+                prefix="FMX_STAGE_UNIT_",
+                allow_production_execution=True,
+                skip_initial_cleanup=skip_cleanup,
+                allow_production_cleanup=False,
+                user_count=3,
+                output="users.json",
+            )
+            with patch.object(worker, "setup_event_listeners"), patch.object(
+                worker, "assert_load_runner_runtime_surface"
+            ), patch.object(worker, "is_production_runtime", return_value=False), patch.object(
+                worker, "allow_production_cleanup_hard_delete"
+            ) as allow_cleanup, patch.object(
+                worker, "cleanup_prefix", new=AsyncMock()
+            ) as cleanup, patch.object(
+                worker, "create_load_fixture_users", new=AsyncMock(return_value=users)
+            ), patch.object(worker, "write_json_artifact"), patch.object(worker, "print_json"):
+                result = await worker.seed_dual_role_users_command(args)
+            return result, allow_cleanup, cleanup
+
+        result, allow_cleanup, cleanup = asyncio.run(run_seed(False))
+        self.assertEqual(result, 0)
+        allow_cleanup.assert_not_called()
+        cleanup.assert_awaited_once()
+        result, allow_cleanup, cleanup = asyncio.run(run_seed(True))
+        self.assertEqual(result, 0)
+        allow_cleanup.assert_not_called()
+        cleanup.assert_not_awaited()
+
+        async def verify_without_output():
+            args = SimpleNamespace(
+                prefix="FMX_STAGE_UNIT_",
+                allow_production_execution=True,
+                users_artifact="users.json",
+                user_count=3,
+                output=None,
+            )
+            with patch.object(worker, "assert_production_full_matrix_allowed"), patch.object(
+                worker, "load_dual_role_users_artifact", return_value=users
+            ), patch.object(
+                worker, "assert_seeded_load_users_visible", new=AsyncMock()
+            ), patch.object(worker, "write_json_artifact") as write, patch.object(
+                worker, "print_json"
+            ):
+                result = await worker.verify_dual_role_users_command(args)
+            return result, write
+
+        result, write = asyncio.run(verify_without_output())
+        self.assertEqual(result, 0)
+        write.assert_not_called()
+
+    def test_prepare_reused_users_requires_cleanup_skip_and_uses_converged_artifact(self):
+        parser = worker.build_parser()
+        with tempfile.TemporaryDirectory() as directory:
+            args = parser.parse_args(
+                [
+                    "prepare-dual-role-run",
+                    "--output-dir",
+                    directory,
+                    "--prefix",
+                    "FMX_STAGE_UNIT_",
+                    "--users-artifact",
+                    "users.json",
+                    "--user-count",
+                    "3",
+                ]
+            )
+            with patch.object(worker, "setup_event_listeners"), patch.object(
+                worker, "assert_dual_role_prepare_runtime"
+            ), self.assertRaisesRegex(
+                worker.TradingProbeError, "requires --skip-initial-cleanup"
+            ):
+                asyncio.run(worker.prepare_dual_role_run_command(args))
+
+            args.skip_initial_cleanup = True
+            users = [
+                worker.LoadUserRef(user_id=10, telegram_id=9010),
+                worker.LoadUserRef(user_id=12, telegram_id=9012),
+                worker.LoadUserRef(user_id=14, telegram_id=9014),
+            ]
+
+            class NoopAsyncContext:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    return False
+
+            prepare_payload = {
+                "plan_paths": {},
+                "offer": {"id": 55},
+                "scenario": {"name": "unit"},
+            }
+
+            async def run_prepare():
+                with patch.object(worker, "setup_event_listeners"), patch.object(
+                    worker, "assert_dual_role_prepare_runtime"
+                ), patch.object(
+                    worker, "resolve_commodity", new=AsyncMock(return_value=(1, "gold"))
+                ), patch.object(
+                    worker, "patched_trading_boundaries", return_value=NoopAsyncContext()
+                ), patch.object(
+                    worker, "load_dual_role_users_artifact", return_value=users
+                ) as load_users, patch.object(
+                    worker, "assert_seeded_load_users_visible", new=AsyncMock()
+                ) as visible, patch.object(
+                    worker, "create_offer_for_user", new=AsyncMock(return_value=55)
+                ), patch.object(
+                    worker, "load_offer_snapshot", new=AsyncMock(return_value=SimpleNamespace(id=55))
+                ), patch.object(worker, "offer_public_identity", return_value="ofr-unit"), patch.object(
+                    worker, "build_dual_role_worker_plans", return_value={}
+                ), patch.object(
+                    worker,
+                    "_write_dual_role_plan_files",
+                    return_value={"manifest_path": "manifest.json"},
+                ), patch.object(
+                    worker,
+                    "build_dual_role_prepare_artifact",
+                    return_value=prepare_payload,
+                ), patch.object(worker, "write_json_artifact") as write, patch.object(
+                    worker, "print_json"
+                ):
+                    result = await worker.prepare_dual_role_run_command(args)
+                return result, load_users, visible, write
+
+            result, load_users, visible, write = asyncio.run(run_prepare())
+        self.assertEqual(result, 0)
+        load_users.assert_called_once()
+        visible.assert_awaited_once_with(users)
+        self.assertEqual(write.call_args.args[1], prepare_payload)
+
+    def test_prepare_without_users_artifact_creates_local_fixture_users(self):
+        parser = worker.build_parser()
+        with tempfile.TemporaryDirectory() as directory:
+            args = parser.parse_args(
+                [
+                    "prepare-dual-role-run",
+                    "--output-dir",
+                    directory,
+                    "--prefix",
+                    "FMX_STAGE_UNIT_",
+                    "--user-count",
+                    "3",
+                    "--skip-initial-cleanup",
+                ]
+            )
+            users = [
+                worker.LoadUserRef(user_id=10, telegram_id=9010),
+                worker.LoadUserRef(user_id=12, telegram_id=9012),
+                worker.LoadUserRef(user_id=14, telegram_id=9014),
+            ]
+
+            class NoopAsyncContext:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    return False
+
+            async def run_prepare():
+                with patch.object(worker, "setup_event_listeners"), patch.object(
+                    worker, "assert_dual_role_prepare_runtime"
+                ), patch.object(
+                    worker, "resolve_commodity", new=AsyncMock(return_value=(1, "gold"))
+                ), patch.object(
+                    worker, "patched_trading_boundaries", return_value=NoopAsyncContext()
+                ), patch.object(
+                    worker, "create_load_fixture_users", new=AsyncMock(return_value=users)
+                ) as create_users, patch.object(
+                    worker, "create_offer_for_user", new=AsyncMock(return_value=55)
+                ), patch.object(
+                    worker, "load_offer_snapshot", new=AsyncMock(return_value=SimpleNamespace(id=55))
+                ), patch.object(worker, "offer_public_identity", return_value="ofr-unit"), patch.object(
+                    worker, "build_dual_role_worker_plans", return_value={}
+                ), patch.object(
+                    worker,
+                    "_write_dual_role_plan_files",
+                    return_value={"manifest_path": "manifest.json"},
+                ), patch.object(
+                    worker,
+                    "build_dual_role_prepare_artifact",
+                    return_value={"plan_paths": {}, "offer": {}, "scenario": {}},
+                ), patch.object(worker, "write_json_artifact"), patch.object(worker, "print_json"):
+                    result = await worker.prepare_dual_role_run_command(args)
+                return result, create_users
+
+            result, create_users = asyncio.run(run_prepare())
+        self.assertEqual(result, 0)
+        create_users.assert_awaited_once_with("FMX_STAGE_UNIT_", user_count=3)
+
+    def test_dispatch_routes_seed_and_verify_commands(self):
+        async def run():
+            with patch.object(
+                worker, "seed_dual_role_users_command", new=AsyncMock(return_value=3)
+            ) as seed, patch.object(
+                worker, "verify_dual_role_users_command", new=AsyncMock(return_value=4)
+            ) as verify, patch.object(
+                worker, "prepare_dual_role_run_command", new=AsyncMock(return_value=5)
+            ) as prepare:
+                seed_result = await worker.dispatch(SimpleNamespace(command="seed-dual-role-users"))
+                verify_result = await worker.dispatch(SimpleNamespace(command="verify-dual-role-users"))
+                prepare_result = await worker.dispatch(SimpleNamespace(command="prepare-dual-role-run"))
+            return seed_result, verify_result, prepare_result, seed, verify, prepare
+
+        seed_result, verify_result, prepare_result, seed, verify, prepare = asyncio.run(run())
+        self.assertEqual((seed_result, verify_result, prepare_result), (3, 4, 5))
+        seed.assert_awaited_once()
+        verify.assert_awaited_once()
+        prepare.assert_awaited_once()
 
     def test_read_during_write_webapp_detail_uses_owner_visibility(self):
         class NoopAsyncContext:

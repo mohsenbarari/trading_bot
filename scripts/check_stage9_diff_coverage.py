@@ -13,8 +13,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
+from coverage import Coverage
+from coverage.parser import PythonParser
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_EXCLUSIONS = REPO_ROOT / "config/stage9_coverage_exclusions.json"
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
@@ -84,8 +88,41 @@ def _location_lines(location: object) -> set[int]:
     return set(range(first, last + 1))
 
 
+def _python_executable_lines(path: Path) -> set[int]:
+    coverage_config = Coverage(config_file=str(REPO_ROOT / ".coveragerc"))
+    exclude = "|".join(
+        f"(?:{pattern})" for pattern in coverage_config.get_exclude_list("exclude")
+    )
+    parser = PythonParser(filename=str(path), exclude=exclude)
+    parser.parse_source()
+    return set(parser.statements)
+
+
+def _validated_exclusions(payload: dict[str, object]) -> dict[str, dict[int, str]]:
+    if payload.get("schema_version") != 1:
+        raise ValueError("unsupported_coverage_exclusion_schema")
+    result: dict[str, dict[int, str]] = {}
+    for entry in payload.get("exclusions", []):
+        if not isinstance(entry, dict):
+            raise ValueError("invalid_coverage_exclusion")
+        path = str(entry.get("path", "")).strip()
+        reason = str(entry.get("reason", "")).strip()
+        lines = entry.get("lines")
+        if not path or not reason or not isinstance(lines, list) or not lines:
+            raise ValueError("incomplete_coverage_exclusion")
+        normalized = {int(line): reason for line in lines}
+        if any(line <= 0 for line in normalized):
+            raise ValueError(f"invalid_coverage_exclusion_line:{path}")
+        if path in result:
+            raise ValueError(f"duplicate_coverage_exclusion_path:{path}")
+        result[path] = normalized
+    return result
+
+
 def check_frontend(
-    changed: dict[str, set[int]], coverage_payload: dict[str, object]
+    changed: dict[str, set[int]],
+    coverage_payload: dict[str, object],
+    exclusions: dict[str, dict[int, str]] | None = None,
 ) -> dict[str, object]:
     files = {
         _normalized_coverage_path(path): data
@@ -94,6 +131,7 @@ def check_frontend(
     }
     report: dict[str, object] = {"kind": "frontend-v8", "files": {}, "failures": []}
     failures: list[str] = report["failures"]  # type: ignore[assignment]
+    exclusions = exclusions or {}
 
     for path, lines in sorted(changed.items()):
         if not path.startswith("frontend/src/"):
@@ -105,6 +143,8 @@ def check_frontend(
             failures.append(f"coverage_file_missing:{path}")
             continue
         file_report = {metric: {"total": 0, "covered": 0, "uncovered": []} for metric in ("lines", "statements", "branches", "functions")}
+        file_report["excluded"] = []
+        mapped_lines: set[int] = set()
 
         statements = data.get("statementMap", {})
         statement_counts = data.get("s", {})
@@ -114,6 +154,7 @@ def check_frontend(
                 location_lines = _location_lines(location)
                 if not lines.intersection(location_lines):
                     continue
+                mapped_lines.update(lines.intersection(location_lines))
                 count = int(statement_counts.get(key, 0) or 0)
                 item = file_report["statements"]
                 item["total"] += 1
@@ -121,9 +162,8 @@ def check_frontend(
                     item["covered"] += 1
                 else:
                     item["uncovered"].append(str(key))
-                if isinstance(location, dict) and isinstance(location.get("start"), dict):
-                    start_line = int(location["start"].get("line", 0) or 0)
-                    line_counts[start_line] += count
+                for mapped_line in lines.intersection(location_lines):
+                    line_counts[mapped_line] = max(line_counts[mapped_line], count)
 
         for line in sorted(lines.intersection(line_counts)):
             item = file_report["lines"]
@@ -146,6 +186,7 @@ def check_frontend(
                 for index, location in enumerate(locations):
                     if not lines.intersection(_location_lines(location)):
                         continue
+                    mapped_lines.update(lines.intersection(_location_lines(location)))
                     count = int(counts[index] if index < len(counts) else 0)
                     item = file_report["branches"]
                     item["total"] += 1
@@ -160,7 +201,7 @@ def check_frontend(
             for key, function in functions.items():
                 if not isinstance(function, dict):
                     continue
-                location = function.get("decl") or function.get("loc")
+                location = function.get("loc") or function.get("decl")
                 if not lines.intersection(_location_lines(location)):
                     continue
                 count = int(function_counts.get(key, 0) or 0)
@@ -171,7 +212,20 @@ def check_frontend(
                 else:
                     item["uncovered"].append(str(key))
 
+        unmapped = lines - mapped_lines
+        allowed = exclusions.get(path, {})
+        unexplained = sorted(line for line in unmapped if line not in allowed)
+        stale_exclusions = sorted(line for line in allowed if line not in unmapped)
+        file_report["excluded"] = [
+            {"line": line, "reason": allowed[line]} for line in sorted(unmapped & set(allowed))
+        ]
+        if unexplained:
+            failures.append(f"coverage_map_missing:{path}:{','.join(map(str, unexplained))}")
+        if stale_exclusions:
+            failures.append(f"stale_coverage_exclusion:{path}:{','.join(map(str, stale_exclusions))}")
         for metric, item in file_report.items():
+            if metric == "excluded":
+                continue
             if item["uncovered"]:
                 failures.append(f"uncovered_{metric}:{path}:{','.join(map(str, item['uncovered']))}")
         report["files"][path] = file_report  # type: ignore[index]
@@ -179,28 +233,46 @@ def check_frontend(
     return report
 
 
-def check_backend(changed: dict[str, set[int]], xml_path: Path) -> dict[str, object]:
+def check_backend(
+    changed: dict[str, set[int]],
+    xml_path: Path,
+    exclusions: dict[str, dict[int, str]] | None = None,
+) -> dict[str, object]:
     report: dict[str, object] = {"kind": "backend-coverage-py", "files": {}, "failures": []}
     failures: list[str] = report["failures"]  # type: ignore[assignment]
+    exclusions = exclusions or {}
     coverage_files: dict[str, ET.Element] = {}
     root = ET.parse(xml_path).getroot()
     for class_node in root.findall(".//class"):
         filename = str(class_node.attrib.get("filename", "")).lstrip("./")
         coverage_files[filename] = class_node
 
-    backend_prefixes = ("api/", "bot/", "core/", "models/")
+    backend_prefixes = ("api/", "bot/", "core/", "models/", "scripts/")
     for path, lines in sorted(changed.items()):
-        if not (path.startswith(backend_prefixes) or path in {"main.py", "manage.py", "run_bot.py", "schemas.py"}):
+        if not path.endswith(".py") or not (
+            path.startswith(backend_prefixes)
+            or path in {"main.py", "manage.py", "run_bot.py", "schemas.py"}
+        ):
             continue
+        source_path = REPO_ROOT / path
+        executable_changed = lines.intersection(_python_executable_lines(source_path))
+        allowed = exclusions.get(path, {})
+        non_executable_changed = lines - executable_changed
+        stale_exclusions = sorted(line for line in allowed if line not in non_executable_changed)
+        if stale_exclusions:
+            failures.append(f"stale_coverage_exclusion:{path}:{','.join(map(str, stale_exclusions))}")
         class_node = coverage_files.get(path)
         if class_node is None:
-            failures.append(f"coverage_file_missing:{path}")
+            if executable_changed:
+                failures.append(f"coverage_file_missing:{path}")
             continue
         changed_nodes = [
             node
             for node in class_node.findall("./lines/line")
-            if int(node.attrib.get("number", "0")) in lines
+            if int(node.attrib.get("number", "0")) in executable_changed
         ]
+        mapped_lines = {int(node.attrib["number"]) for node in changed_nodes}
+        unmapped_lines = sorted(executable_changed - mapped_lines)
         uncovered_lines: list[int] = []
         uncovered_branches: list[int] = []
         for node in changed_nodes:
@@ -215,8 +287,16 @@ def check_backend(changed: dict[str, set[int]], xml_path: Path) -> dict[str, obj
             failures.append(f"uncovered_lines:{path}:{','.join(map(str, uncovered_lines))}")
         if uncovered_branches:
             failures.append(f"uncovered_branches:{path}:{','.join(map(str, uncovered_branches))}")
+        if unmapped_lines:
+            failures.append(f"coverage_map_missing:{path}:{','.join(map(str, unmapped_lines))}")
         report["files"][path] = {  # type: ignore[index]
             "changed_executable_lines": len(changed_nodes),
+            "expected_executable_lines": len(executable_changed),
+            "unmapped_lines": unmapped_lines,
+            "excluded": [
+                {"line": line, "reason": allowed[line]}
+                for line in sorted(non_executable_changed & set(allowed))
+            ],
             "uncovered_lines": uncovered_lines,
             "uncovered_branches": uncovered_branches,
         }
@@ -238,16 +318,23 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--diff-file")
     parser.add_argument("--coverage", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--exclusions", default=str(DEFAULT_EXCLUSIONS))
     args = parser.parse_args(argv)
 
+    exclusions = _validated_exclusions(
+        json.loads(Path(args.exclusions).read_text(encoding="utf-8"))
+    )
     if args.kind == "frontend":
         changed = _load_diff(args, "frontend/src")
         payload = json.loads(Path(args.coverage).read_text(encoding="utf-8"))
-        report = check_frontend(changed, payload)
+        report = check_frontend(changed, payload, exclusions)
     else:
         changed = _load_diff(args, ".")
-        report = check_backend(changed, Path(args.coverage))
+        report = check_backend(changed, Path(args.coverage), exclusions)
     report.update({"base_ref": args.base_ref, "head_ref": args.head_ref})
+    report["commit"] = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
+    ).strip()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

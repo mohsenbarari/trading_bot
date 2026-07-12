@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import secrets
+import signal
 import subprocess
 import sys
 
@@ -33,6 +34,10 @@ SUITES = (
 
 class RegistrationScratchSuiteError(RuntimeError):
     pass
+
+
+def _raise_termination(signum, _frame) -> None:
+    raise RegistrationScratchSuiteError(f"terminated_by_signal:{signum}")
 
 
 def _sync_url(raw_url: str):
@@ -96,7 +101,7 @@ def _run(command: list[str], *, env: dict[str, str]) -> None:
 
 def _test_command(module: str, *, coverage_file: str) -> list[str]:
     if not coverage_file:
-        return [sys.executable, "-m", "unittest", module]
+        return [sys.executable, "-m", "unittest", "-v", module]
     return [
         sys.executable,
         "-m",
@@ -106,8 +111,17 @@ def _test_command(module: str, *, coverage_file: str) -> list[str]:
         "--parallel-mode",
         "-m",
         "unittest",
+        "-v",
         module,
     ]
+
+
+def _migration_command(target: str, *, coverage_file: str) -> list[str]:
+    command = [sys.executable]
+    if coverage_file:
+        command.extend(["-m", "coverage", "run", "--branch", "--parallel-mode"])
+    command.extend(["scripts/run_guarded_scratch_alembic.py", "upgrade", target])
+    return command
 
 
 def main() -> int:
@@ -115,6 +129,16 @@ def main() -> int:
     expected_checkout = str(os.getenv("TRADING_BOT_EXPECTED_CHECKOUT", "")).strip()
     if not runtime_url:
         print("registration scratch suite refused: DATABASE_URL is required", file=sys.stderr)
+        return 2
+    if str(os.getenv("STAGE9_SCRATCH_DATABASES_ALLOWED", "")).strip().lower() != "true":
+        print("registration scratch suite refused: explicit scratch opt-in is required", file=sys.stderr)
+        return 2
+    environment = str(os.getenv("ENVIRONMENT", "")).strip().lower()
+    if environment not in {"test", "testing", "ci"}:
+        print(
+            f"registration scratch suite refused: unsafe environment={environment or 'unset'}",
+            file=sys.stderr,
+        )
         return 2
     if Path(expected_checkout).resolve() != REPO_ROOT:
         print("registration scratch suite refused: checkout mismatch", file=sys.stderr)
@@ -130,6 +154,11 @@ def main() -> int:
     runtime = _sync_url(runtime_url)
     scratch_names = [f"{prefix}_{suffix}" for prefix, _env_name, _module in SUITES]
     admin = _admin_engine(runtime_url)
+    previous_handlers = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    for signum in previous_handlers:
+        signal.signal(signum, _raise_termination)
     try:
         with admin.connect() as connection:
             existing = set(
@@ -160,12 +189,7 @@ def main() -> int:
                 env["COVERAGE_FILE"] = coverage_file
             migration_target = "f7c8d9e0a1b2" if prefix == "stage1_migration" else "head"
             _run(
-                [
-                    sys.executable,
-                    "scripts/run_guarded_scratch_alembic.py",
-                    "upgrade",
-                    migration_target,
-                ],
+                _migration_command(migration_target, coverage_file=coverage_file),
                 env=env,
             )
             _run(_test_command(module, coverage_file=coverage_file), env=env)
@@ -186,6 +210,8 @@ def main() -> int:
                 )
                 connection.exec_driver_sql(f'DROP DATABASE IF EXISTS "{database_name}"')
         admin.dispose()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
     after = _database_snapshot(runtime_url)
     if after != before:

@@ -19,10 +19,16 @@ class Stage9RedisRunnerStaticTests(unittest.TestCase):
         self.assertNotIn("STAGE6_TEST_REDIS_URL=redis://redis", self.wrapper)
 
     def test_cleanup_is_scoped_to_the_disposable_container(self):
-        self.assertIn('docker rm -f "$container_name"', self.wrapper)
+        self.assertIn('docker rm -fv "$container_name"', self.wrapper)
         self.assertNotIn("docker compose down", self.wrapper)
         self.assertNotIn("docker compose stop", self.wrapper)
         self.assertNotIn("docker volume", self.wrapper)
+
+    def test_data_mount_is_anonymous_and_runtime_named_volume_is_rejected(self):
+        self.assertIn("-v /data", self.wrapper)
+        self.assertIn("docker inspect --format", self.wrapper)
+        self.assertIn('"$data_mount_name" == *redis_data', self.wrapper)
+        self.assertIn("Stage 9 Redis disposable resource", self.wrapper)
 
     def test_coverage_is_written_only_to_mounted_tmp(self):
         self.assertIn("COVERAGE_FILE=/app/tmp/stage9-redis-coverage/.coverage", self.wrapper)

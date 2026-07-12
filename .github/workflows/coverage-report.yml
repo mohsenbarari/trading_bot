@@ -130,6 +130,7 @@ jobs:
             status=$command_status
           fi
           (
+            printf 'stage9_evidence_commit=%s\n' "$(git rev-parse HEAD)"
             export DATABASE_URL='postgresql+asyncpg://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
             export SYNC_DATABASE_URL='postgresql+psycopg2://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
             export TRADING_BOT_EXPECTED_CHECKOUT="$PWD"
@@ -138,9 +139,10 @@ jobs:
           ) > tmp/backend-postgres-opt-in.log 2>&1 &
           postgres_pid=$!
           (
+            printf 'stage9_evidence_commit=%s\n' "$(git rev-parse HEAD)"
             export STAGE5_TEST_REDIS_URL='redis://127.0.0.1:6379/0'
             export STAGE6_TEST_REDIS_URL='redis://127.0.0.1:6379/0'
-            python3 -m coverage run --branch --parallel-mode -m unittest \
+            python3 -m coverage run --branch --parallel-mode -m unittest -v \
               tests.test_stage5_event_isolation_redis \
               tests.test_stage6_otp_delivery_redis
           ) > tmp/backend-redis-opt-in.log 2>&1 &
@@ -160,7 +162,7 @@ jobs:
           python3 -m coverage combine --append || status=$?
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml \
-            --include='api/*,bot/*,core/*,models/*,main.py,manage.py,run_bot.py,schemas.py' \
+            --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' \
             -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
           printf '%s\n' "$status" > tmp/backend-coverage.exitcode
@@ -246,6 +248,27 @@ jobs:
             --output tmp/frontend-stage9-diff-coverage.json || status=$?
           exit "$status"
 
+      - name: Build Stage 9 runtime, mutation, and traceability evidence
+        if: always()
+        shell: bash
+        run: |
+          status=0
+          make stage9-infrastructure-gate || status=$?
+          make stage9-test-matrix || status=$?
+          make stage9-mutation-gate || status=$?
+          python3 scripts/build_stage9_runtime_evidence.py \
+            --matrix tmp/stage9-matrix/results.json \
+            --postgres-log tmp/backend-postgres-opt-in.log \
+            --redis-log tmp/backend-redis-opt-in.log \
+            --output tmp/stage9-runtime-evidence.json || status=$?
+          RESULTS=tmp/stage9-runtime-evidence.json \
+          BACKEND_COVERAGE=tmp/backend-stage9-diff-coverage.json \
+          FRONTEND_COVERAGE=tmp/frontend-stage9-diff-coverage.json \
+          MUTATION=tmp/stage9-mutation-evidence.json \
+          OUTPUT=tmp/stage9-traceability.json \
+            make stage9-evidence-gate || status=$?
+          exit "$status"
+
       - name: Upload coverage artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -267,6 +290,12 @@ jobs:
             tmp/frontend-unit-coverage.log
             tmp/repo-coverage-summary.md
             tmp/repo-coverage-summary.json
+            tmp/stage9-matrix
+            tmp/stage9-mutation-evidence.json
+            tmp/stage9-mutation-verification.json
+            tmp/stage9-mutation.log
+            tmp/stage9-runtime-evidence.json
+            tmp/stage9-traceability.json
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed

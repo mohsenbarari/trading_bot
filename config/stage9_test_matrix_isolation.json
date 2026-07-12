@@ -1,19 +1,28 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "resource_mode": "process_local_no_external_mutable_io",
   "registration": {
     "database": "stage9_registration_lane_db",
+    "database_url": "postgresql+asyncpg://stage9:stage9@127.0.0.1:4191/stage9_registration_lane_db",
+    "sync_database_url": "postgresql+psycopg2://stage9:stage9@127.0.0.1:4191/stage9_registration_lane_db",
+    "redis_url": "redis://127.0.0.1:4291/0",
     "redis_namespace": "stage9-registration-lane",
     "fixture_prefix": "stage9_reg_",
     "port": "4191",
     "artifact_dir": "tmp/stage9-matrix/registration",
+    "tmp_dir": "tmp/stage9-matrix/registration/tmp",
     "cleanup_owner": "stage9-registration-lane"
   },
   "market": {
     "database": "stage9_market_lane_db",
+    "database_url": "postgresql+asyncpg://stage9:stage9@127.0.0.1:4192/stage9_market_lane_db",
+    "sync_database_url": "postgresql+psycopg2://stage9:stage9@127.0.0.1:4192/stage9_market_lane_db",
+    "redis_url": "redis://127.0.0.1:4292/0",
     "redis_namespace": "stage9-market-lane",
     "fixture_prefix": "stage9_mkt_",
     "port": "4192",
     "artifact_dir": "tmp/stage9-matrix/market",
+    "tmp_dir": "tmp/stage9-matrix/market/tmp",
     "cleanup_owner": "stage9-market-lane"
   }
 }

@@ -781,6 +781,104 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("--skip-initial-cleanup", prepare_args)
         self.assertEqual(runner.scenario_user_count(scenario), 8)
 
+    def test_seed_and_converge_runs_iran_seed_sync_copy_and_foreign_verify(self):
+        def result(name):
+            return runner.CommandResult(
+                name=name,
+                command=[name],
+                status="passed",
+                returncode=0,
+                elapsed_seconds=0.1,
+                stdout_path=f"{name}.stdout",
+                stderr_path=f"{name}.stderr",
+            )
+
+        scenario = {
+            "offer_origin": "webapp",
+            "hot_offer_requests": 2,
+            "telegram_ratio": 0.5,
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            runner,
+            "run_remote_worker",
+            side_effect=[result("seed_users_on_iran"), result("sync_seeded_users_iran_to_foreign")],
+        ) as remote, patch.object(
+            runner,
+            "run_logged_command",
+            return_value=result("copy_seeded_users_iran_to_foreign"),
+        ) as copy, patch.object(
+            runner,
+            "run_local_worker",
+            return_value=result("verify_seeded_users_on_foreign"),
+        ) as local, patch.object(runner, "scp_from_iran", return_value=["scp"]):
+            results = runner.seed_and_converge_dual_role_users(
+                args=SimpleNamespace(),
+                scenario=scenario,
+                prefix="FMX_STAGE_UNIT_",
+                local_dir=Path(directory),
+                remote_dir="/remote/unit",
+                log_dir=Path(directory) / "logs",
+            )
+
+        self.assertEqual([item.name for item in results], [
+            "seed_users_on_iran",
+            "sync_seeded_users_iran_to_foreign",
+            "copy_seeded_users_iran_to_foreign",
+            "verify_seeded_users_on_foreign",
+        ])
+        self.assertIn("sync-prefix-catchup", remote.call_args_list[1].kwargs["worker_args"])
+        self.assertIn("verify-dual-role-users", local.call_args.kwargs["worker_args"])
+        copy.assert_called_once()
+
+    def test_driver_invokes_seed_convergence_before_prepare_and_records_failure(self):
+        scenario = {
+            "id": "DRIVER-STAGE9-SEED-UNIT",
+            "offer_origin": "webapp",
+            "request_surface": "mixed",
+            "idempotency_mode": "unique",
+            "coverage": ["seed_convergence"],
+            "hot_offer_requests": 2,
+            "telegram_ratio": 0.5,
+            "target_rps": 1,
+            "hot_offer_quantity": 5,
+            "request_amount": 5,
+            "expected_winner_count": 1,
+            "expected_remaining_quantity": 0,
+            "offer_type": "sell",
+            "retail": False,
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            runner,
+            "run_cleanup_on_both_sides",
+            return_value=[],
+        ), patch.object(
+            runner,
+            "assert_cleanup_dry_run_zero",
+            return_value={"status": "ok"},
+        ), patch.object(runner, "run_observability_snapshots", return_value=[]), patch.object(
+            runner,
+            "seed_and_converge_dual_role_users",
+            return_value=[],
+        ) as seed, patch.object(
+            runner,
+            "run_remote_worker",
+            side_effect=RuntimeError("stop after seed"),
+        ), patch.object(runner, "read_json_file", return_value={}), patch.object(
+            runner,
+            "write_json",
+        ):
+            args = SimpleNamespace(prefix="FMX_STAGE_UNIT_", run_id="S2FM-UNIT")
+            result = runner.execute_driver_scenario(
+                args,
+                scenario,
+                suite_dir=Path(directory),
+                remote_root="/remote/unit",
+            )
+
+        seed.assert_called_once()
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("stop after seed", result["error"])
+
     def test_driver_suite_can_filter_to_one_driver_scenario(self):
         calls = []
 

@@ -4,25 +4,36 @@
   "forbidden_profiles": ["pressure", "saturation", "high_rps", "burst", "soak"],
   "isolation_keys": [
     "database",
+    "database_url",
+    "sync_database_url",
+    "redis_url",
     "redis_namespace",
     "fixture_prefix",
     "port",
     "artifact_dir",
+    "tmp_dir",
     "cleanup_owner"
   ],
   "lanes": {
     "registration": {
+      "external_mutable_service_io": false,
+      "minimum_test_count": 1,
       "scenario_prefixes": ["INV", "BOT", "REG", "SYN", "OTP", "SEC"],
       "test_modules": [
         "tests.test_registration_identity_property",
+        "tests.test_registration_stateful_fuzz",
         "tests.test_stage9_async_checkpoints",
         "tests.test_stage9_diff_coverage",
         "tests.test_registration_stage1_contracts",
+        "tests.test_registration_stage1_persistence",
+        "tests.test_guarded_scratch_alembic",
         "tests.test_stage3_invitation_creation",
+        "tests.test_stage3_review_remediation",
         "tests.test_stage4_registration_reconciliation",
         "tests.test_stage5_direct_telegram_registration",
         "tests.test_stage6_otp_delivery",
         "tests.test_stage9_registration_transport",
+        "tests.test_sync_router_signature",
         "tests.test_invitation_public_access",
         "tests.test_authoritative_registration_service",
         "tests.test_registration_sync_apply",
@@ -34,12 +45,19 @@
         "tests.test_auth_router_login_otp_flows",
         "tests.test_core_sms",
         "tests.test_telegram_link_token_service",
-        "tests.test_user_counter_sync"
+        "tests.test_user_counter_sync",
+        "tests.test_background_job_authority",
+        "tests.test_registration_feature_policy",
+        "tests.test_stage9_changed_branch_closure"
       ]
     },
     "market": {
+      "external_mutable_service_io": false,
+      "minimum_test_count": 1,
       "scenario_prefixes": ["MKT"],
       "test_modules": [
+        "tests.test_bot_webapp_comprehensive_load_matrix",
+        "tests.test_offer_source_surface",
         "tests.test_trading_production_contract_matrix",
         "tests.test_trades_router_authoritative_success",
         "tests.test_trades_router_authoritative_guards",
@@ -60,7 +78,16 @@
         "tests.test_sync_parity_followup_f0",
         "tests.test_sync_router_receive_basic",
         "tests.test_offers_router_helpers",
-        "tests.test_stage8_registration_observability"
+        "tests.test_offers_router_expire",
+        "tests.test_offers_public_routes",
+        "tests.test_trades_router_reads",
+        "tests.test_trades_router_execution_wrappers",
+        "tests.test_server_routing_and_trade_forwarding",
+        "tests.test_offers_router_create_guards",
+        "tests.test_accountant_relation_service",
+        "tests.test_stage8_registration_observability",
+        "tests.test_staging_two_server_full_matrix",
+        "tests.test_trading_core_mixed_load_helpers"
       ]
     }
   },
@@ -68,83 +95,303 @@
     {
       "id": "MKT-001",
       "dimensions": ["buy", "sell", "webapp", "telegram", "wholesale_full", "retail_two_lot", "retail_three_lot", "iran_home", "foreign_home"],
-      "test_references": ["tests/test_trading_production_contract_matrix.py", "tests/test_trades_router_authoritative_success.py"]
+      "test_references": ["tests/test_bot_webapp_comprehensive_load_matrix.py", "tests/test_offer_source_surface.py"],
+      "scenarios": [
+        {
+          "id": "MKT-001-SHAPE-SURFACE",
+          "test_id": "tests.test_bot_webapp_comprehensive_load_matrix.BotWebAppComprehensiveLoadMatrixTests.test_matrix_preserves_offer_origin_type_shape_and_surface_coverage",
+          "dimensions": ["buy", "sell", "webapp", "telegram", "wholesale_full", "retail_two_lot", "retail_three_lot"]
+        },
+        {
+          "id": "MKT-001-HOME-AUTHORITY",
+          "test_id": "tests.test_offer_source_surface.OfferSourceSurfaceTests.test_offer_home_server_is_decided_by_source_surface",
+          "dimensions": ["iran_home", "foreign_home"]
+        }
+      ]
     },
     {
       "id": "MKT-002",
       "dimensions": ["webapp_webapp", "webapp_telegram", "telegram_webapp", "telegram_telegram", "local_authority", "forwarded_authority", "duplicate_replay"],
-      "test_references": ["tests/test_trades_router_authoritative_success.py", "tests/test_offer_request_ledger_service.py"]
+      "test_references": ["tests/test_trade_notification_delivery_matrix.py", "tests/test_trading_production_contract_matrix.py"],
+      "scenarios": [
+        {
+          "id": "MKT-002-SURFACE-QUADRANTS",
+          "test_id": "tests.test_trade_notification_delivery_matrix.TradeNotificationDeliveryMatrixTests.test_delivery_scenario_catalog_covers_actor_surface_outage_product",
+          "dimensions": ["webapp_webapp", "webapp_telegram", "telegram_webapp", "telegram_telegram"]
+        },
+        {
+          "id": "MKT-002-AUTHORITY",
+          "test_id": "tests.test_trading_production_contract_matrix.TradingProductionContractMatrixTests.test_remote_home_forward_payload_preserves_delegated_actor_context",
+          "dimensions": ["forwarded_authority"]
+        },
+        {
+          "id": "MKT-002-LOCAL-AUTHORITY",
+          "test_id": "tests.test_trades_router_execution_wrappers.TradesRouterExecutionWrapperTests.test_create_trade_delegates_to_authoritative_execution_when_local",
+          "dimensions": ["local_authority"]
+        },
+        {
+          "id": "MKT-002-REPLAY",
+          "test_id": "tests.test_trading_production_contract_matrix.TradingProductionContractMatrixTests.test_idempotent_replay_returns_existing_trade_without_offer_mutation",
+          "dimensions": ["duplicate_replay"]
+        }
+      ]
     },
     {
       "id": "MKT-003",
       "dimensions": ["active", "partially_filled", "completed", "manual_expiry", "time_expiry", "market_close"],
-      "test_references": ["tests/test_trades_router_authoritative_guards.py", "tests/test_sync_router_stale_events.py", "tests/test_market_transition_service.py"]
+      "test_references": ["tests/test_trades_router_authoritative_success.py", "tests/test_trades_router_authoritative_guards.py", "tests/test_market_transition_service.py"],
+      "scenarios": [
+        {
+          "id": "MKT-003-ACTIVE-PARTIAL-COMPLETE",
+          "test_id": "tests.test_trades_router_authoritative_success.TradesRouterAuthoritativeSuccessTests.test_execute_trade_authoritatively_updates_retail_lots_and_tolerates_side_effect_failures",
+          "dimensions": ["active", "partially_filled", "completed"]
+        },
+        {
+          "id": "MKT-003-MANUAL-EXPIRY",
+          "test_id": "tests.test_trades_router_authoritative_guards.TradesRouterAuthoritativeGuardTests.test_execute_trade_authoritatively_rejects_manual_expired_offer_even_inside_edge_grace",
+          "dimensions": ["manual_expiry"]
+        },
+        {
+          "id": "MKT-003-TIME-EXPIRY",
+          "test_id": "tests.test_trades_router_authoritative_success.TradesRouterAuthoritativeSuccessTests.test_execute_trade_authoritatively_allows_time_limit_expired_offer_inside_edge_grace",
+          "dimensions": ["time_expiry"]
+        },
+        {
+          "id": "MKT-003-MARKET-CLOSE",
+          "test_id": "tests.test_market_transition_service.MarketTransitionServiceTests.test_apply_market_closed_transition_expires_local_offers_and_publishes_notice",
+          "dimensions": ["market_close"]
+        }
+      ]
     },
     {
       "id": "MKT-004",
       "dimensions": ["same_offer_contention", "trade_manual_expiry", "trade_time_expiry", "duplicate_replay", "ambiguous_remote_retry"],
       "max_contenders": 2,
-      "test_references": ["tests/test_offer_request_ledger_service.py", "tests/test_trades_router_authoritative_success.py", "tests/test_trades_router_authoritative_guards.py"]
+      "test_references": ["tests/test_offer_request_ledger_service.py", "tests/test_trades_router_authoritative_success.py", "tests/test_trades_router_authoritative_guards.py"],
+      "scenarios": [
+        {
+          "id": "MKT-004-CONTENTION",
+          "test_id": "tests.test_trades_router_authoritative_guards.TradesRouterAuthoritativeGuardTests.test_execute_trade_authoritatively_rejects_hot_offer_contention_with_ledger",
+          "dimensions": ["same_offer_contention"]
+        },
+        {
+          "id": "MKT-004-DUPLICATE",
+          "test_id": "tests.test_offer_request_ledger_service.OfferRequestLedgerServiceTests.test_duplicate_idempotency_replay_returns_existing_row_without_insert",
+          "dimensions": ["duplicate_replay"]
+        },
+        {
+          "id": "MKT-004-REAL-RACES",
+          "evidence_stage": "stage10",
+          "blocker": "Requires bounded real-topology trade-versus-expiry and ambiguous-response retry drivers.",
+          "dimensions": ["trade_manual_expiry", "trade_time_expiry", "ambiguous_remote_retry"]
+        }
+      ]
     },
     {
       "id": "MKT-005",
       "dimensions": ["standard", "tier_1", "tier_2", "same_owner", "other_owner", "accountant", "watch_context"],
-      "test_references": ["tests/test_trades_router_helpers.py", "tests/test_trading_production_contract_matrix.py"]
+      "test_references": ["tests/test_trades_router_authoritative_success.py", "tests/test_trades_router_authoritative_guards.py", "tests/test_accountant_relation_service.py"],
+      "scenarios": [
+        {
+          "id": "MKT-005-STANDARD-WATCH",
+          "test_id": "tests.test_trades_router_authoritative_guards.TradesRouterAuthoritativeGuardTests.test_execute_trade_authoritatively_rejects_watch_restricted_and_limit_failures",
+          "dimensions": ["standard", "watch_context"]
+        },
+        {
+          "id": "MKT-005-CUSTOMER-RELATIONS",
+          "test_id": "tests.test_trades_router_authoritative_success.TradesRouterAuthoritativeSuccessTests.test_execute_trade_authoritatively_creates_three_legs_for_tier1_source_and_other_owner_tier2_sell_offer",
+          "dimensions": ["tier_1", "tier_2", "other_owner"]
+        },
+        {
+          "id": "MKT-005-SAME-OWNER",
+          "test_id": "tests.test_trades_router_authoritative_success.TradesRouterAuthoritativeSuccessTests.test_execute_trade_authoritatively_keeps_owner_to_own_tier1_as_single_direct_leg",
+          "dimensions": ["same_owner"]
+        },
+        {
+          "id": "MKT-005-ACCOUNTANT",
+          "test_id": "tests.test_accountant_relation_service.AccountantRelationServiceTests.test_build_trade_notification_audience_user_ids_includes_owners_and_active_accountants",
+          "dimensions": ["accountant"]
+        }
+      ]
     },
     {
       "id": "MKT-006",
       "dimensions": ["webapp_recipient", "telegram_recipient", "accountant_recipient", "stable_delivery", "short_outage", "medium_outage", "replay", "restart"],
-      "test_references": ["tests/test_trade_notification_delivery_matrix.py"]
+      "test_references": ["tests/test_trade_notification_delivery_matrix.py", "tests/test_trade_delivery_receipt_service.py"],
+      "scenarios": [
+        {
+          "id": "MKT-006-RECIPIENTS",
+          "test_id": "tests.test_trade_notification_delivery_matrix.TradeNotificationDeliveryMatrixTests.test_trade_notification_delivery_matrix_runs_all_actor_surface_pairs_against_audience_builder",
+          "dimensions": ["webapp_recipient", "telegram_recipient", "accountant_recipient", "stable_delivery"]
+        },
+        {
+          "id": "MKT-006-OUTAGES",
+          "test_id": "tests.test_trade_delivery_receipt_service.TradeDeliveryReceiptServiceTests.test_outage_classification_skips_only_medium_or_long_opposite_server_delivery",
+          "dimensions": ["short_outage", "medium_outage"]
+        },
+        {
+          "id": "MKT-006-REPLAY-RESTART",
+          "test_id": "tests.test_trade_delivery_receipt_service.TradeDeliveryReceiptServiceTests.test_state_machine_allows_expected_transitions_and_blocks_terminal_reopen",
+          "dimensions": ["replay"]
+        },
+        {
+          "id": "MKT-006-RESTART-LEASE",
+          "test_id": "tests.test_trade_delivery_receipt_service.TradeDeliveryReceiptServiceTests.test_lease_recovery_only_targets_expired_local_processing_rows",
+          "dimensions": ["restart"]
+        }
+      ]
     },
     {
       "id": "MKT-007",
       "dimensions": ["healthy_sync", "short_disconnect", "medium_outage", "out_of_order", "stale", "duplicate", "remote_unavailable", "bad_signature", "wrong_authority"],
-      "test_references": ["tests/test_sync_guarantee_matrix.py", "tests/test_sync_router_stale_events.py"]
+      "test_references": ["tests/test_sync_guarantee_matrix.py", "tests/test_sync_router_stale_events.py", "tests/test_server_routing_and_trade_forwarding.py"],
+      "scenarios": [
+        {
+          "id": "MKT-007-SYNC-ORDER",
+          "test_id": "tests.test_sync_guarantee_matrix.SyncGuaranteeMatrixTests.test_deferred_failed_and_duplicate_delivery_matrix_is_safe",
+          "dimensions": ["healthy_sync", "short_disconnect", "medium_outage", "out_of_order", "duplicate"]
+        },
+        {
+          "id": "MKT-007-STALE",
+          "test_id": "tests.test_sync_router_stale_events.SyncRouterStaleOfferEventTests.test_out_of_order_offer_update_after_expiry_does_not_reactivate",
+          "dimensions": ["stale"]
+        },
+        {
+          "id": "MKT-007-REMOTE-UNAVAILABLE",
+          "test_id": "tests.test_server_routing_and_trade_forwarding.ForwardTradeToHomeServerTests.test_forward_trade_maps_timeout_and_request_errors",
+          "dimensions": ["remote_unavailable"]
+        },
+        {
+          "id": "MKT-007-BAD-SIGNATURE",
+          "test_id": "tests.test_trades_router_execution_wrappers.TradesRouterExecutionWrapperTests.test_execute_trade_internal_rejects_invalid_signature",
+          "dimensions": ["bad_signature"]
+        },
+        {
+          "id": "MKT-007-WRONG-AUTHORITY",
+          "test_id": "tests.test_trades_router_execution_wrappers.TradesRouterExecutionWrapperTests.test_execute_trade_internal_rejects_wrong_offer_server_or_missing_responder",
+          "dimensions": ["wrong_authority"]
+        }
+      ]
     },
     {
       "id": "MKT-008",
       "dimensions": ["active_list", "public_detail", "market_history", "expired_offers", "my_offers", "my_trades", "customer_history", "accountant_history", "realtime", "terminal_publication"],
-      "test_references": ["tests/test_trades_router_helpers.py", "tests/test_trade_notification_delivery_matrix.py"]
+      "test_references": ["tests/test_offers_router_helpers.py", "tests/test_offers_public_routes.py", "tests/test_trades_router_reads.py", "tests/test_sync_router_receive_basic.py"],
+      "scenarios": [
+        {
+          "id": "MKT-008-OFFER-VIEWS",
+          "test_id": "tests.test_offers_router_helpers.OffersRouterHelperTests.test_active_and_my_offer_queries_cover_filter_branches",
+          "dimensions": ["active_list", "expired_offers", "my_offers"]
+        },
+        {
+          "id": "MKT-008-PUBLIC-HISTORY",
+          "test_id": "tests.test_offers_router_helpers.OffersRouterHelperTests.test_market_offer_history_query_covers_all_visible_terminal_offers",
+          "dimensions": ["market_history", "terminal_publication"]
+        },
+        {
+          "id": "MKT-008-PUBLIC-DETAIL",
+          "test_id": "tests.test_offers_public_routes.OffersPublicRoutesTests.test_public_route_returns_safe_fields_for_synced_iran_and_foreign_offers",
+          "dimensions": ["public_detail"]
+        },
+        {
+          "id": "MKT-008-TRADE-HISTORY",
+          "test_id": "tests.test_trades_router_reads.TradesRouterReadTests.test_get_trades_with_user_switches_to_target_customer_history_for_owner_viewer",
+          "dimensions": ["my_trades", "customer_history"]
+        },
+        {
+          "id": "MKT-008-ACCOUNTANT-HISTORY",
+          "test_id": "tests.test_trades_router_reads.TradesRouterReadTests.test_get_trade_allows_effective_owner_when_actor_differs",
+          "dimensions": ["accountant_history"]
+        },
+        {
+          "id": "MKT-008-REALTIME",
+          "test_id": "tests.test_sync_router_receive_basic.SyncRouterReceiveBasicTests.test_receive_sync_data_publishes_active_update_when_partial_trade_sync_arrives",
+          "dimensions": ["realtime"]
+        }
+      ]
     },
     {
       "id": "MKT-009",
       "dimensions": ["own_offer", "invalid_quantity", "invalid_lot", "completed", "expired", "market_closed", "restricted_actor", "role_restriction", "limit", "stale_action", "missing_public_id", "remote_security", "cleanup_scope"],
-      "test_references": ["tests/test_trades_router_authoritative_guards.py", "tests/test_trade_service_validation_and_payloads.py"]
+      "test_references": ["tests/test_trades_router_authoritative_guards.py", "tests/test_trade_service_validation_and_payloads.py", "tests/test_offers_router_expire.py"],
+      "scenarios": [
+        {
+          "id": "MKT-009-ACTOR-TERMINAL-GUARDS",
+          "test_id": "tests.test_trades_router_authoritative_guards.TradesRouterAuthoritativeGuardTests.test_execute_trade_authoritatively_rejects_missing_inactive_self_and_blocked_offers",
+          "dimensions": ["own_offer", "completed", "expired", "restricted_actor", "role_restriction", "missing_public_id"]
+        },
+        {
+          "id": "MKT-009-QUANTITY-LOT",
+          "test_id": "tests.test_trade_service_validation_and_payloads.TradeServiceValidationAndPayloadTests.test_validate_offer_trade_amount_covers_error_paths_and_success",
+          "dimensions": ["invalid_quantity", "invalid_lot"]
+        },
+        {
+          "id": "MKT-009-MARKET-LIMIT",
+          "test_id": "tests.test_offers_router_expire.OffersRouterExpireTests.test_expire_offer_rejects_rate_limited_or_daily_limit_requests",
+          "dimensions": ["limit", "stale_action"]
+        },
+        {
+          "id": "MKT-009-MARKET-CLOSED",
+          "test_id": "tests.test_offers_router_create_guards.OffersRouterCreateGuardTests.test_create_offer_rejects_when_market_is_closed",
+          "dimensions": ["market_closed"]
+        },
+        {
+          "id": "MKT-009-STAGE10-SECURITY-CLEANUP",
+          "evidence_stage": "stage10",
+          "blocker": "Requires real signed-route rejection and cleanup-scope proof on isolated staging.",
+          "dimensions": ["remote_security", "cleanup_scope"]
+        }
+      ]
     },
     {
       "id": "MKT-010",
       "dimensions": ["bounded_registration_job", "bounded_otp_job", "normal_market_activity", "p50", "p95", "event_loop_lag", "queue_age", "sync_backlog"],
-      "test_references": ["tests/test_stage8_registration_observability.py", "tests/test_sync_guarantee_matrix.py"]
+      "test_references": ["tests/test_stage8_registration_observability.py", "tests/test_sync_guarantee_matrix.py"],
+      "scenarios": [
+        {
+          "id": "MKT-010-REAL-COEXISTENCE",
+          "evidence_stage": "stage10",
+          "blocker": "Requires bounded baseline/coexistence measurements on the real two-server staging topology.",
+          "dimensions": ["bounded_registration_job", "bounded_otp_job", "normal_market_activity", "p50", "p95", "event_loop_lag", "queue_age", "sync_backlog"]
+        }
+      ]
     }
   ],
   "market_special_cases": [
     {
       "id": "MKT-SPECIAL-WARNING-ACK",
-      "test_references": ["tests/test_bot_trade_create_remaining_guards.py", "tests/test_offers_router_create_success.py"]
+      "test_references": ["tests/test_bot_trade_create_remaining_guards.py", "tests/test_offers_router_create_success.py"],
+      "test_id": "tests.test_offers_router_create_success.OffersRouterCreateSuccessTests.test_create_offer_flags_acknowledged_warning_offers_for_competitive_exclusion"
     },
     {
       "id": "MKT-SPECIAL-REPUBLISH-LINEAGE",
-      "test_references": ["tests/test_offers_router_create_success.py"]
+      "test_references": ["tests/test_offers_router_create_success.py"],
+      "test_id": "tests.test_offers_router_create_success.OffersRouterCreateSuccessTests.test_create_offer_stamps_home_server_and_links_republished_offer"
     },
     {
       "id": "MKT-SPECIAL-TELEGRAM-PUBLICATION-REPAIR",
-      "test_references": ["tests/test_offer_publication_reconciliation_service.py"]
+      "test_references": ["tests/test_offer_publication_reconciliation_service.py"],
+      "test_id": "tests.test_offer_publication_reconciliation_service.OfferPublicationReconciliationServiceTests.test_foreign_repair_retries_failed_telegram_publication"
     },
     {
       "id": "MKT-SPECIAL-CHANNEL-NOTICE-RECONCILIATION",
-      "test_references": ["tests/test_market_transition_service.py", "tests/test_sync_router_receive_basic.py"]
+      "test_references": ["tests/test_market_transition_service.py", "tests/test_sync_router_receive_basic.py"],
+      "test_id": "tests.test_market_transition_service.MarketTransitionServiceTests.test_reconcile_due_market_channel_notice_receipts_retries_failed_due_receipt"
     },
     {
       "id": "MKT-SPECIAL-DELIVERY-RECEIPTS",
-      "test_references": ["tests/test_trade_delivery_receipt_service.py", "tests/test_trade_delivery_reconciliation_service.py"]
+      "test_references": ["tests/test_trade_delivery_receipt_service.py", "tests/test_trade_delivery_reconciliation_service.py"],
+      "test_id": "tests.test_trade_delivery_receipt_service.TradeDeliveryReceiptServiceTests.test_state_machine_allows_expected_transitions_and_blocks_terminal_reopen"
     },
     {
       "id": "MKT-SPECIAL-LOCAL-ONLY-FIELDS",
-      "test_references": ["tests/test_offer_sync_payload.py", "tests/test_sync_parity_followup_f0.py"]
+      "test_references": ["tests/test_offer_sync_payload.py", "tests/test_sync_parity_followup_f0.py"],
+      "test_id": "tests.test_offer_sync_payload.OfferSyncPayloadTests.test_payload_preserves_competitive_warning_fields"
     },
     {
       "id": "MKT-SPECIAL-TIMED-EXPIRY-METADATA",
-      "test_references": ["tests/test_offers_router_helpers.py", "tests/test_sync_router_stale_events.py"]
+      "test_references": ["tests/test_offers_router_helpers.py", "tests/test_sync_router_stale_events.py"],
+      "test_id": "tests.test_offers_router_helpers.OffersRouterHelperTests.test_market_offer_history_serializes_traded_and_partial_expired_metadata"
     }
   ],
   "sequential_barriers": [

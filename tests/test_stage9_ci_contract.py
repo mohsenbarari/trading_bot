@@ -38,6 +38,16 @@ class Stage9CIContractTests(unittest.TestCase):
         self.assertIn("tmp/backend-postgres-opt-in.log", self.source)
         self.assertIn("tmp/backend-redis-opt-in.log", self.source)
 
+    def test_stage9_traceability_static_generation_is_not_a_maintained_gate(self):
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("build_stage9_traceability.py --validate-only", makefile)
+        self.assertIn("stage9-evidence-gate:", makefile)
+        self.assertIn("--require-runtime-evidence", makefile)
+        self.assertIn("build_stage9_runtime_evidence.py", self.source)
+        self.assertIn("make stage9-evidence-gate", self.source)
+        self.assertIn("stage9_evidence_commit=", self.source)
+        self.assertIn("-m unittest -v", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

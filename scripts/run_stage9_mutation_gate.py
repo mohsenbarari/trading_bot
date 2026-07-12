@@ -21,6 +21,29 @@ RUN_RESULT_RE = re.compile(r"^([🎉🙁⏰🤔])\s+(\S+)\s*$")
 RUN_STATUS = {"🎉": "killed", "🙁": "survived", "⏰": "timeout", "🤔": "suspicious"}
 
 
+def validate_manifest(manifest: dict[str, object]) -> None:
+    if manifest.get("schema_version") != 2:
+        raise ValueError("unsupported_mutation_manifest_schema")
+    required = {str(value) for value in manifest.get("required_invariant_classes", [])}
+    targets = manifest.get("targets")
+    if not required or not isinstance(targets, list) or not targets:
+        raise ValueError("mutation_invariant_inventory_required")
+    observed = {
+        str(target.get("invariant_class"))
+        for target in targets
+        if isinstance(target, dict)
+    }
+    if observed != required:
+        raise ValueError(
+            f"mutation_invariant_set_mismatch:missing={sorted(required-observed)}:"
+            f"extra={sorted(observed-required)}"
+        )
+    ids = [str(target.get("id", "")) for target in targets if isinstance(target, dict)]
+    matchers = [str(target.get("matcher", "")) for target in targets if isinstance(target, dict)]
+    if len(set(ids)) != len(targets) or len(set(matchers)) != len(targets):
+        raise ValueError("mutation_target_ids_and_matchers_must_be_unique")
+
+
 def _test_environment() -> dict[str, str]:
     env = os.environ.copy()
     env.update(
@@ -62,6 +85,7 @@ def parse_mutmut_run_results(output: str) -> dict[str, str]:
 
 
 def grouped_evidence(manifest: dict[str, object], raw_results: dict[str, str]) -> dict[str, object]:
+    validate_manifest(manifest)
     equivalent_entries = manifest.get("equivalent_mutants", [])
     if not isinstance(equivalent_entries, list):
         raise ValueError("equivalent_mutants_must_be_a_list")
@@ -109,6 +133,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    validate_manifest(manifest)
     if args.fresh:
         mutants_dir = (REPO_ROOT / "mutants").resolve()
         if mutants_dir != (REPO_ROOT / "mutants"):
