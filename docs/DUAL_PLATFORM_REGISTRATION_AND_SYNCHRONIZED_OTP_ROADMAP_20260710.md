@@ -2488,3 +2488,21 @@ Stage 8 observability ownership; `L-3` was hardened with a minimum provider-send
 remains an immutable historical migration rule. Exact reasoning and evidence requirements are in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE6_POSTREVIEW_REMEDIATION_20260712.md`. No feature flag,
 migration, deployment, push, staging action, production action, or later-stage waiver is authorized.
+
+## Stage 8 Source Implementation Record (2026-07-12)
+
+The owner authorized Stage 8 source work while independent analysis of the earlier stages remained
+in progress. The implementation reuses the current metrics registry, sync health contract,
+structured/durable audit path, production alert evaluator, background leader, Redis, Loki, and
+Grafana provisioning. It adds role-aware heartbeats, last success/error, pending/oldest age, batch
+size/duration, healthy-connectivity classification, projection latency, OTP lifecycle/fallback
+signals, and the approved 60-second, 5-minute, and 2-second thresholds without adding a dashboard,
+worker service, table, migration, admin action, or frontend behavior.
+
+Natural `otp.expired` remains an explicit review question because the current 120-second Redis code,
+pointer, and state expire together with no reliable first-terminal application hook. This source
+does not extend sensitive-state retention, create a competing expiry owner, or emit a client-driven
+false expiration solely to satisfy an event name. The exact implementation, evidence, residual risk,
+and independent-review requirement are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE8_OBSERVABILITY_AUDIT_20260712.md`. No feature flag,
+migration, deployment, push, staging action, production action, or later-stage waiver is authorized.

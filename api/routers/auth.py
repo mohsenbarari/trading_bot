@@ -72,6 +72,7 @@ from core.registration_contracts import (
 from core.telegram_account_link_contracts import TelegramAccountLinkCommand
 from core.trade_forwarding import verify_internal_signature
 from core.audit_logger import audit_log
+from core.metrics import record_otp_event, record_registration_completion
 from core.services.registration_notification_service import (
     publish_project_user_joined_web_notifications,
 )
@@ -169,6 +170,15 @@ def _registration_outcome_event(outcome: TelegramRegistrationOutcome) -> str:
     return "telegram_registration.rejected"
 
 
+def _otp_audit_result(outcome: object) -> str:
+    value = str(getattr(outcome, "value", outcome) or "").strip().lower()
+    if value in {"sent", "duplicate_sent", "accepted"}:
+        return "success"
+    if value in {"feature_disabled", "not_linked", "blocked"}:
+        return "denied"
+    return "failure"
+
+
 @router.post(
     "/internal/telegram-registration/reconcile",
     response_model=TelegramRegistrationCommandResponse,
@@ -202,6 +212,10 @@ async def reconcile_telegram_registration_internal(
         ),
     )
     if result.first_terminal_transition:
+        record_registration_completion(
+            surface="telegram",
+            outcome=result.outcome.value,
+        )
         audit_log(
             _registration_outcome_event(result.outcome),
             target_type="telegram_registration_command",
@@ -297,8 +311,10 @@ async def deliver_telegram_otp_internal(
         "otp.telegram_delivery_result",
         target_type="otp_request",
         target_id=str(command.otp_request_id),
-        result=result.outcome.value,
+        result=_otp_audit_result(result.outcome),
+        extra={"outcome": result.outcome.value},
     )
+    record_otp_event(event="telegram_delivery_result", outcome=result.outcome.value)
     return result
 
 
@@ -939,6 +955,12 @@ async def register_complete(
         )
         raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
 
+    if registration_result.first_terminal_transition:
+        record_registration_completion(
+            surface="webapp",
+            outcome=registration_result.outcome.value,
+        )
+
     if registration_result.announce_project_user:
         await publish_project_user_joined_web_notifications(
             new_user_id=int(new_user.id),
@@ -1177,12 +1199,14 @@ async def _deliver_stage6_sms(redis, *, state) -> SMSDeliveryOutcome:
         "otp.sms_delivery_result",
         target_type="otp_request",
         target_id=str(claim.request_id),
-        result=attempt.outcome.value,
+        result=_otp_audit_result(attempt.outcome),
         extra={
+            "outcome": attempt.outcome.value,
             "provider_attempted": attempt.provider_attempted,
             "result_recorded": attempt.result_recorded,
         },
     )
+    record_otp_event(event="sms_delivery_result", outcome=attempt.outcome.value)
     return attempt.outcome
 
 
@@ -1289,8 +1313,9 @@ async def _request_stage6_login_otp(
         "otp.requested",
         target_type="otp_request",
         target_id=str(state.otp_request_id),
-        result="accepted",
+        result="success",
     )
+    record_otp_event(event="requested")
 
     telegram_id = int(user.telegram_id) if user and user.telegram_id else None
     use_telegram = bool(
@@ -1354,9 +1379,13 @@ async def _request_stage6_login_otp(
                     "otp.sms_fallback_scheduled",
                     target_type="otp_request",
                     target_id=str(state.otp_request_id),
-                    result="scheduled",
-                    extra={"fallback_seconds": fallback_seconds},
+                    result="success",
+                    extra={
+                        "fallback_seconds": fallback_seconds,
+                        "lifecycle_state": "scheduled",
+                    },
                 )
+                record_otp_event(event="sms_fallback_scheduled")
                 return {
                     "detail": "کد تایید ارسال شد",
                     **_otp_timing_payload(state.model_copy(update={
@@ -1650,6 +1679,15 @@ async def verify_otp(
                 target_type="otp_request",
                 target_id=str(delivery_state.otp_request_id),
                 result="success",
+            )
+            record_otp_event(
+                event="verified",
+                outcome=(
+                    "after_sms_fallback"
+                    if delivery_state.sms_delivery_status
+                    != OTPDeliveryStatus.NOT_ATTEMPTED
+                    else "before_sms_fallback"
+                ),
             )
         
     # کد درست است

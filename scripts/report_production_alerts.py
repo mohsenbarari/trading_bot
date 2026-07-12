@@ -451,6 +451,61 @@ def evaluate_host_report(host: dict[str, Any]) -> list[dict[str, Any]]:
         if outbound > 1000:
             add_alert(alerts, role=role, component="sync", severity="critical", metric="sync:outbound", value=outbound, threshold="> 1000", summary="Sync outbound queue is critically high")
 
+        registration_health = sync.get("registration_jobs") or {}
+        jobs = registration_health.get("jobs") or {}
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict) or not job.get("enabled") or not job.get("expected_on_this_server"):
+                continue
+            heartbeat_age = job.get("heartbeat_age_seconds")
+            if heartbeat_age is None or float(heartbeat_age) > 60:
+                add_alert(
+                    alerts,
+                    role=role,
+                    component="registration_jobs",
+                    severity="critical",
+                    metric=f"{job_name}:heartbeat_age_seconds",
+                    value=heartbeat_age,
+                    threshold="<= 60 seconds",
+                    summary=f"{job_name} heartbeat is missing or stale",
+                )
+
+        registration = jobs.get("telegram_registration_reconciliation") or {}
+        registration_oldest = float(registration.get("oldest_pending_age_seconds") or 0)
+        if (
+            registration.get("enabled")
+            and registration.get("expected_on_this_server")
+            and registration.get("connectivity_healthy")
+            and registration_oldest > 300
+        ):
+            add_alert(
+                alerts,
+                role=role,
+                component="registration_jobs",
+                severity="warning",
+                metric="telegram_registration_reconciliation:oldest_pending_age_seconds",
+                value=round(registration_oldest, 2),
+                threshold="<= 300 seconds while connectivity is healthy",
+                summary="Telegram registration intent has remained pending while connectivity is healthy",
+            )
+
+        otp = jobs.get("otp_sms_fallback") or {}
+        otp_lag = float(otp.get("lag_seconds") or 0)
+        if (
+            otp.get("enabled")
+            and otp.get("expected_on_this_server")
+            and otp_lag > 2
+        ):
+            add_alert(
+                alerts,
+                role=role,
+                component="registration_jobs",
+                severity="warning",
+                metric="otp_sms_fallback:lag_seconds",
+                value=round(otp_lag, 2),
+                threshold="<= 2 seconds",
+                summary="OTP SMS fallback processing is behind its scheduled deadline",
+            )
+
     disk = host.get("disk") or {}
     if not alert_if_collector_failed(alerts, role, "disk", disk):
         for item in disk.get("filesystems") or []:

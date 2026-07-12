@@ -776,3 +776,215 @@ groups:
         annotations:
           summary: Cross-server sync retry queue is not empty.
           runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-retry-queue-non-empty
+
+      - uid: trading-bot-registration-job-heartbeat-stale
+        title: Telegram registration reconciliation heartbeat stale
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({log_class="integration", event="sync.health"} | json | registration_job_enabled="true" | registration_job_status=~"missing|stale" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: critical
+          component: registration_jobs
+        annotations:
+          summary: Telegram registration reconciliation heartbeat is missing or older than 60 seconds.
+
+      - uid: trading-bot-registration-pending-healthy
+        title: Telegram registration pending with healthy connectivity
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | registration_job_enabled="true" | registration_job_connectivity_healthy="true" | unwrap registration_job_oldest_pending_age_seconds [5m])'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [300]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: warning
+          component: registration_jobs
+        annotations:
+          summary: A Telegram registration intent has remained pending for more than 5 minutes while connectivity is healthy.
+
+      - uid: trading-bot-login-sms-fallback-heartbeat-stale
+        title: Login SMS fallback heartbeat stale
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({log_class="integration", event="sync.health"} | json | login_sms_fallback_job_enabled="true" | login_sms_fallback_job_status=~"missing|stale" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: critical
+          component: registration_jobs
+        annotations:
+          summary: Login SMS fallback heartbeat is missing or older than 60 seconds.
+
+      - uid: trading-bot-login-sms-fallback-lag-high
+        title: Login SMS fallback lag high
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | login_sms_fallback_job_enabled="true" | unwrap login_sms_fallback_job_lag_seconds [5m])'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: warning
+          component: registration_jobs
+        annotations:
+          summary: Login SMS fallback processing is more than 2 seconds behind its deadline.

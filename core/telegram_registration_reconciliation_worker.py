@@ -17,6 +17,16 @@ from core.background_job_authority import (
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
+from core.metrics import (
+    observe_registration_projection_latency,
+    record_registration_reconciliation,
+)
+from core.redis import get_redis_client
+from core.registration_observability import (
+    load_registration_job_snapshot,
+    record_registration_job_snapshot,
+    summarize_registration_intent_queue,
+)
 from core.registration_contracts import (
     TelegramRegistrationCommandResponse,
     TelegramRegistrationOutcome,
@@ -197,6 +207,16 @@ async def _process_attempt(
         result=("success" if response.authoritative_user_id is not None else "denied"),
         extra={"outcome": response.outcome.value},
     )
+    if response.outcome in SUCCESS_OUTCOME_TO_STATUS:
+        observe_registration_projection_latency(
+            (
+                utc_now()
+                - (
+                    projection.authoritative_completed_at
+                    or attempt.command.local_completed_at
+                )
+            ).total_seconds()
+        )
     return response.outcome.value
 
 
@@ -270,6 +290,23 @@ async def telegram_registration_reconciliation_loop() -> None:
         with job_context(JOB_TELEGRAM_REGISTRATION_RECONCILIATION, iteration=iteration) as run_id:
             try:
                 report = await run_telegram_registration_reconciliation_cycle()
+                duration_ms = duration_ms_since(started)
+                async with AsyncSessionLocal() as db:
+                    queue = await summarize_registration_intent_queue(db)
+                redis = get_redis_client()
+                await record_registration_job_snapshot(
+                    redis,
+                    job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+                    server_mode=settings.server_mode,
+                    result="success",
+                    pending_count=queue.pending_count,
+                    oldest_pending_age_seconds=queue.oldest_pending_age_seconds,
+                    batch_size=report.claimed_count,
+                    batch_duration_ms=duration_ms,
+                    connectivity_healthy=queue.connectivity_healthy,
+                )
+                for status, count in report.status_counts.items():
+                    record_registration_reconciliation(status=status, count=count)
                 if report.claimed_count:
                     logger.info(
                         "Telegram registration reconciliation cycle completed",
@@ -280,12 +317,42 @@ async def telegram_registration_reconciliation_loop() -> None:
                             "iteration": iteration,
                             "claimed_count": report.claimed_count,
                             "status_counts": report.status_counts,
-                            "duration_ms": duration_ms_since(started),
+                            "duration_ms": duration_ms,
                         },
                     )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                try:
+                    redis = get_redis_client()
+                    previous = await load_registration_job_snapshot(
+                        redis,
+                        job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+                    ) or {}
+                    await record_registration_job_snapshot(
+                        redis,
+                        job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+                        server_mode=settings.server_mode,
+                        result="error",
+                        pending_count=int(previous.get("pending_count") or 0),
+                        oldest_pending_age_seconds=float(
+                            previous.get("oldest_pending_age_seconds") or 0
+                        ),
+                        batch_size=0,
+                        batch_duration_ms=duration_ms_since(started),
+                        connectivity_healthy=bool(
+                            previous.get("connectivity_healthy", True)
+                        ),
+                        error_code=type(exc).__name__.lower(),
+                    )
+                except Exception as health_exc:
+                    logger.warning(
+                        "Could not record Telegram registration job health",
+                        extra={
+                            "event": "telegram_registration.job_health_failed",
+                            "error_type": type(health_exc).__name__,
+                        },
+                    )
                 _loop_errors.log(
                     logger,
                     "Error in Telegram registration reconciliation loop: %s",

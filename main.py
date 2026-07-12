@@ -19,7 +19,7 @@ from api.routers import accountants
 from api.routers import customers
 from core.config import settings
 from core.deployment_surface import allowed_cors_origins
-from core.redis import init_redis, close_redis
+from core.redis import init_redis, close_redis, get_redis_client
 from core.db import AsyncSessionLocal, init_db
 from core.events import setup_event_listeners
 from core.server_routing import SERVER_FOREIGN, normalize_server
@@ -38,6 +38,7 @@ from core.telegram_registration_reconciliation_worker import (
 from core.otp_sms_fallback_worker import otp_sms_fallback_loop
 from core.services.otp_delivery_state_service import validate_otp_delivery_runtime_settings
 from core.registration_feature_policy import registration_reconciliation_runtime_ready
+from core.registration_observability import refresh_registration_job_metrics
 from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 from core.production_test_isolation import (
@@ -527,6 +528,18 @@ async def get_metrics(request: Request):
         "Process uptime in seconds.",
         uptime_seconds(_PROCESS_STARTED_AT),
     )
+    try:
+        redis_client = get_redis_client()
+    except RuntimeError:
+        redis_client = None
+    if redis_client is not None:
+        try:
+            await asyncio.wait_for(
+                refresh_registration_job_metrics(redis_client),
+                timeout=0.25,
+            )
+        except TimeoutError:
+            pass
     return Response(content=metrics_response_body(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 # -------------------------------------------------------

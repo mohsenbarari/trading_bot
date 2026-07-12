@@ -65,6 +65,7 @@ class TelegramRegistrationIntentAttempt:
 @dataclass(frozen=True, slots=True)
 class RegistrationProjectionResolution:
     local_user_id: int
+    authoritative_completed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,7 +568,14 @@ async def registration_projection_is_ready(
             customer_relation_present=False,
             customer_tier=None,
         )
-        return RegistrationProjectionResolution(int(user.id)) if decision.allowed else None
+        return (
+            RegistrationProjectionResolution(
+                int(user.id),
+                authoritative_completed_at=_utc(invitation.completed_at),
+            )
+            if decision.allowed
+            else None
+        )
     if kind == InvitationKind.CUSTOMER:
         if accountant_relations or len(customer_relations) != 1:
             return None
@@ -580,5 +588,12 @@ async def registration_projection_is_ready(
             customer_relation_present=True,
             customer_tier=relation.customer_tier,
         )
-        return RegistrationProjectionResolution(int(user.id)) if decision.allowed else None
+        return (
+            RegistrationProjectionResolution(
+                int(user.id),
+                authoritative_completed_at=_utc(invitation.completed_at),
+            )
+            if decision.allowed
+            else None
+        )
     return None

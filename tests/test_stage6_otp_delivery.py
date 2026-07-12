@@ -308,7 +308,7 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             auth, "schedule_sms_fallback", new=AsyncMock(return_value=True)
         ) as schedule, patch.object(
             auth, "_deliver_stage6_sms", new=AsyncMock()
-        ) as sms, patch.object(auth, "audit_log"):
+        ) as sms, patch.object(auth, "audit_log") as audit:
             result = await auth._request_stage6_login_otp(
                 RequestRedis(), mobile=TEST_MOBILE, user=user
             )
@@ -319,6 +319,13 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         arm.assert_awaited_once()
         schedule.assert_awaited_once()
         sms.assert_not_awaited()
+        audit.assert_any_call(
+            "otp.sms_fallback_scheduled",
+            target_type="otp_request",
+            target_id=str(otp_state.otp_request_id),
+            result="success",
+            extra={"fallback_seconds": 40, "lifecycle_state": "scheduled"},
+        )
 
     async def test_active_request_returns_structured_absolute_timing_without_new_code(self):
         otp_state = state(

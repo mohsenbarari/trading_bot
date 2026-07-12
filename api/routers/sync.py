@@ -23,6 +23,10 @@ from core.registration_sync_policy import (
     sanitize_registration_sync_payload,
     registration_sync_capabilities,
 )
+from core.registration_observability import (
+    dual_platform_registration_health,
+    registration_health_log_fields,
+)
 from core.user_counter_sync import (
     USER_COUNTER_FIELDS,
     USER_COUNTER_EVENT_DELTAS_FIELD,
@@ -4476,6 +4480,18 @@ async def get_sync_health(
                 **_summarize_exception(exc),
             },
         )
+    if redis_ok:
+        registration_jobs = await dual_platform_registration_health(
+            redis_client,
+            settings_obj=settings,
+        )
+    else:
+        registration_jobs = {
+            "status": "redis_unavailable",
+            "thresholds": {},
+            "jobs": {},
+        }
+
     payload = {
         "status": "ok",
         "server_mode": settings.server_mode,
@@ -4492,6 +4508,7 @@ async def get_sync_health(
         "publication_reconciliation": publication_reconciliation,
         "parity_status": _parity_status_payload(latest_parity_summary),
         "registration_sync": registration_sync_capabilities(settings),
+        "registration_jobs": registration_jobs,
     }
     latest_parity = payload["parity_status"].get("latest_comparison") if isinstance(payload.get("parity_status"), dict) else None
     if isinstance(latest_parity, dict):
@@ -4517,6 +4534,7 @@ async def get_sync_health(
             "active_publication_gate_enabled": active_publication_gate.get("enabled"),
             "publication_reconciliation_status": publication_reconciliation.get("status"),
             "publication_reconciliation_findings": publication_reconciliation.get("finding_counts"),
+            **registration_health_log_fields(registration_jobs),
         },
     )
     return payload

@@ -46,8 +46,19 @@ class ObservabilityConfigTests(unittest.TestCase):
             "unsynced_change_log_count",
             "oldest_unsynced_age_seconds",
             "sync_retry_queue_length",
+            "registration_job_status",
+            "registration_job_oldest_pending_age_seconds",
+            "login_sms_fallback_job_status",
+            "login_sms_fallback_job_lag_seconds",
         ):
             self.assertIn(expected_field, rules)
+
+        for expected_threshold in (
+            "older than 60 seconds",
+            "params: [300]",
+            "params: [2]",
+        ):
+            self.assertIn(expected_threshold, rules)
 
         promtail = (ROOT / "observability/promtail/promtail-config.yml").read_text(encoding="utf-8")
         self.assertIsNone(re.search(r"(?m)^\s*source:\s*message\s*$", promtail))

@@ -383,7 +383,9 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(start, "get_registration_intent_for_invitation", new=AsyncMock(return_value=None)), patch.object(
             start, "_bound_registration_fsm_ttl", new=AsyncMock()
-        ) as bind_ttl, patch.object(start, "set_anchor"):
+        ) as bind_ttl, patch.object(start, "set_anchor"), patch.object(
+            start, "audit_log"
+        ) as audit:
             await start._begin_direct_registration(
                 msg,
                 state,
@@ -396,6 +398,13 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.data[start._REGISTRATION_STATE_TELEGRAM_ID], 7001)
         self.assertEqual(state.states, [Registration.awaiting_contact])
         bind_ttl.assert_awaited_once()
+        audit.assert_called_once_with(
+            "telegram_registration.invitation_opened",
+            target_type="invitation",
+            target_id=inv.id,
+            result="success",
+            extra={"surface": "telegram"},
+        )
         self.assertTrue(msg.answer.await_args.kwargs["reply_markup"].keyboard[0][0].request_contact)
 
     async def test_existing_intent_resumes_without_overwriting_fsm(self):
@@ -411,7 +420,9 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
             start, "get_registration_intent_for_invitation", new=AsyncMock(return_value=existing)
         ), patch.object(
             start, "_load_registration_handoff_resolution", new=AsyncMock(return_value=resolution)
-        ), patch.object(start, "_send_registration_handoff", new=AsyncMock()) as send:
+        ), patch.object(start, "_send_registration_handoff", new=AsyncMock()) as send, patch.object(
+            start, "audit_log"
+        ) as audit:
             await start._begin_direct_registration(
                 msg,
                 state,
@@ -421,6 +432,7 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state.data, {"old": "preserved"})
         send.assert_awaited_once_with(msg, resolution)
+        audit.assert_not_called()
 
     async def test_existing_intent_clears_only_registration_owned_fsm(self):
         inv = invitation()
@@ -546,12 +558,18 @@ class Stage5ContactAndAddressTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
             start, "_bound_registration_fsm_ttl", new=AsyncMock()
-        ), patch.object(start, "set_anchor"):
+        ), patch.object(start, "set_anchor"), patch.object(start, "audit_log") as audit:
             await start.handle_contact(msg, state)
 
         self.assertIn(start._REGISTRATION_STATE_CONTACT_VERIFIED_AT, state.data)
         self.assertEqual(state.states, [Registration.awaiting_address])
         self.assertIn("شماره تماس تایید شد", msg.answer.await_args.args[0])
+        audit.assert_called_once_with(
+            "telegram_registration.contact_verified",
+            target_type="telegram_registration_step",
+            result="success",
+            extra={"surface": "telegram"},
+        )
 
     async def test_typed_contact_instruction_does_not_mutate_state(self):
         state = FakeState({"binding": "unchanged"})

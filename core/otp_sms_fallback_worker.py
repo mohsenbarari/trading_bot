@@ -6,10 +6,19 @@ import asyncio
 from collections import Counter
 from dataclasses import dataclass
 import logging
+import time
 
+from core.audit_logger import audit_log
 from core.background_job_authority import JOB_OTP_SMS_FALLBACK, assert_background_job_authority
 from core.config import settings
+from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
+from core.metrics import observe_otp_fallback_delay, record_otp_event
 from core.redis import get_redis_client
+from core.registration_observability import (
+    load_registration_job_snapshot,
+    record_registration_job_snapshot,
+    summarize_otp_fallback_queue,
+)
 from core.services.otp_delivery_state_service import (
     claim_sms_delivery,
     due_otp_request_ids,
@@ -20,6 +29,7 @@ from core.utils import utc_now
 
 
 logger = logging.getLogger(__name__)
+_loop_errors = RepeatedErrorLogger(every=10)
 _INTERVAL_SECONDS = 1.0
 _BATCH_LIMIT = 100
 
@@ -56,7 +66,30 @@ async def run_otp_sms_fallback_cycle(*, limit: int = _BATCH_LIMIT) -> OTPFallbac
             )
             if claim is None:
                 return "not_claimed"
+            audit_log(
+                "otp.sms_fallback_claimed",
+                target_type="otp_request",
+                target_id=str(claim.request_id),
+                result="success",
+            )
+            record_otp_event(event="sms_fallback_claimed")
+            if state.sms_fallback_at is not None:
+                observe_otp_fallback_delay(
+                    (utc_now() - state.sms_fallback_at).total_seconds()
+                )
             attempt = await execute_claimed_otp_sms_delivery(redis, claim=claim)
+            audit_log(
+                "otp.sms_delivery_result",
+                target_type="otp_request",
+                target_id=str(claim.request_id),
+                result=("success" if attempt.outcome.value == "accepted" else "failure"),
+                extra={
+                    "outcome": attempt.outcome.value,
+                    "provider_attempted": attempt.provider_attempted,
+                    "result_recorded": attempt.result_recorded,
+                },
+            )
+            record_otp_event(event="sms_delivery_result", outcome=attempt.outcome.value)
             logger.info(
                 "OTP SMS fallback delivery completed",
                 extra={
@@ -80,17 +113,76 @@ async def run_otp_sms_fallback_cycle(*, limit: int = _BATCH_LIMIT) -> OTPFallbac
 
 async def otp_sms_fallback_loop() -> None:
     assert_background_job_authority(JOB_OTP_SMS_FALLBACK)
+    iteration = 0
     while True:
-        try:
-            await run_otp_sms_fallback_cycle()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.error(
-                "OTP SMS fallback cycle failed",
-                extra={
-                    "event": "otp.sms_fallback_cycle_failed",
-                    "error_type": type(exc).__name__,
-                },
-            )
+        iteration += 1
+        started = time.perf_counter()
+        with job_context(JOB_OTP_SMS_FALLBACK, iteration=iteration) as run_id:
+            try:
+                report = await run_otp_sms_fallback_cycle()
+                redis = get_redis_client()
+                queue = await summarize_otp_fallback_queue(redis)
+                duration_ms = duration_ms_since(started)
+                await record_registration_job_snapshot(
+                    redis,
+                    job_name=JOB_OTP_SMS_FALLBACK,
+                    server_mode=settings.server_mode,
+                    result="success",
+                    pending_count=queue.pending_count,
+                    oldest_pending_age_seconds=queue.oldest_pending_age_seconds,
+                    batch_size=report.due_count,
+                    batch_duration_ms=duration_ms,
+                    lag_seconds=queue.lag_seconds,
+                )
+                if report.due_count:
+                    logger.info(
+                        "OTP SMS fallback cycle completed",
+                        extra={
+                            "event": "job.cycle.completed",
+                            "job_name": JOB_OTP_SMS_FALLBACK,
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "claimed_count": report.due_count,
+                            "status_counts": report.outcome_counts,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                try:
+                    redis = get_redis_client()
+                    previous = await load_registration_job_snapshot(
+                        redis,
+                        job_name=JOB_OTP_SMS_FALLBACK,
+                    ) or {}
+                    await record_registration_job_snapshot(
+                        redis,
+                        job_name=JOB_OTP_SMS_FALLBACK,
+                        server_mode=settings.server_mode,
+                        result="error",
+                        pending_count=int(previous.get("pending_count") or 0),
+                        oldest_pending_age_seconds=float(
+                            previous.get("oldest_pending_age_seconds") or 0
+                        ),
+                        batch_size=0,
+                        batch_duration_ms=duration_ms_since(started),
+                        lag_seconds=float(previous.get("lag_seconds") or 0),
+                        error_code=type(exc).__name__.lower(),
+                    )
+                except Exception as health_exc:
+                    logger.warning(
+                        "Could not record OTP fallback job health",
+                        extra={
+                            "event": "otp.job_health_failed",
+                            "error_type": type(health_exc).__name__,
+                        },
+                    )
+                _loop_errors.log(
+                    logger,
+                    "OTP SMS fallback cycle failed: %s",
+                    exc,
+                    job_name=JOB_OTP_SMS_FALLBACK,
+                    run_id=run_id,
+                )
         await asyncio.sleep(_INTERVAL_SECONDS)

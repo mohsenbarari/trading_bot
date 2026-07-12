@@ -21,6 +21,7 @@ from core.services.otp_delivery_state_service import (
     record_sms_delivery_result,
     schedule_sms_fallback,
 )
+from core.registration_observability import summarize_otp_fallback_queue
 from core.utils import utc_now
 
 
@@ -40,6 +41,19 @@ class Stage6OTPDeliveryRedisTests(unittest.IsolatedAsyncioTestCase):
         await self.redis.flushdb()
         await self.redis.aclose()
         settings.otp_delivery_state_secret = self.original_state_secret
+
+    async def test_stage8_queue_summary_uses_real_redis_without_loading_sensitive_state(self):
+        request_id = uuid4()
+        now = utc_now()
+        await self.redis.zadd(
+            OTP_FALLBACK_DUE_KEY,
+            {str(request_id): now.timestamp() - 2.5},
+        )
+
+        summary = await summarize_otp_fallback_queue(self.redis, now=now)
+
+        self.assertEqual(summary.pending_count, 1)
+        self.assertAlmostEqual(summary.lag_seconds, 2.5, places=1)
 
     async def test_one_code_schedule_claim_record_and_consume_lifecycle(self):
         mobile = "0912" + str(uuid4().int)[-7:]

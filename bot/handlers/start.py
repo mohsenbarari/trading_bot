@@ -547,6 +547,13 @@ async def _begin_direct_registration(
     except Exception:
         await state.clear()
         raise
+    audit_log(
+        "telegram_registration.invitation_opened",
+        target_type="invitation",
+        target_id=getattr(invitation, "id", None),
+        result="success",
+        extra={"surface": "telegram"},
+    )
     anchor_msg = await message.answer(
         "✅ لینک دعوت معتبر است.\n\nبرای تایید هویت، شماره موبایل همین حساب تلگرام را از دکمه زیر ارسال کنید.",
         reply_markup=types.ReplyKeyboardMarkup(
@@ -998,6 +1005,12 @@ async def handle_contact(message: types.Message, state: FSMContext):
             reply_markup=types.ReplyKeyboardRemove(),
         )
         return
+    audit_log(
+        "telegram_registration.contact_verified",
+        target_type="telegram_registration_step",
+        result="success",
+        extra={"surface": "telegram"},
+    )
     anchor_msg = await message.answer(
         "✅ شماره تماس تایید شد!\n\n📍 برای تکمیل ثبت‌نام، آدرس خود را جهت جابجایی سکه وارد نمایید:",
         reply_markup=types.ReplyKeyboardRemove(),

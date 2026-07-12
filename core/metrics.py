@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import re
 import json
+import math
 import os
 import sqlite3
 import threading
 import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any
 
 from core.log_redaction import redact_string
@@ -333,6 +335,108 @@ def record_job_run(*, job_name: str, result: str, duration_ms: float) -> None:
     labels = {"job_name": _sanitize_label_value(job_name, max_length=64), "result": normalize_result(result)}
     registry.counter("trading_bot_job_runs_total", "Background job iterations by job and result.", **labels)
     registry.observe("trading_bot_job_duration_ms", "Background job iteration duration in milliseconds.", duration_ms, **labels)
+
+
+def record_registration_job_health(
+    snapshot: Mapping[str, Any],
+    *,
+    count_cycle: bool = True,
+) -> None:
+    def nonnegative_float(value: Any) -> float:
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return max(0.0, number) if math.isfinite(number) else 0.0
+
+    labels = {
+        "job_name": _sanitize_label_value(snapshot.get("job_name"), max_length=64),
+        "server_mode": _sanitize_label_value(snapshot.get("server_mode"), max_length=16),
+    }
+    for metric_name, help_text, field in (
+        ("trading_bot_registration_job_heartbeat_timestamp_seconds", "Unix timestamp of the latest registration job heartbeat.", "heartbeat_at"),
+        ("trading_bot_registration_job_last_success_timestamp_seconds", "Unix timestamp of the latest successful registration job cycle.", "last_success_at"),
+        ("trading_bot_registration_job_last_error_timestamp_seconds", "Unix timestamp of the latest failed registration job cycle.", "last_error_at"),
+    ):
+        raw = snapshot.get(field)
+        if raw:
+            try:
+                timestamp = datetime.fromisoformat(str(raw)).timestamp()
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
+            if not math.isfinite(timestamp):
+                continue
+            registry.gauge(metric_name, help_text, max(0.0, timestamp), **labels)
+    for metric_name, help_text, field in (
+        ("trading_bot_registration_job_pending_items", "Pending items owned by the registration or OTP job.", "pending_count"),
+        ("trading_bot_registration_job_oldest_pending_age_seconds", "Age of the oldest pending registration or OTP item.", "oldest_pending_age_seconds"),
+        ("trading_bot_registration_job_last_batch_size", "Items claimed by the latest registration or OTP job cycle.", "batch_size"),
+        ("trading_bot_registration_job_last_batch_duration_ms", "Duration of the latest registration or OTP job cycle.", "batch_duration_ms"),
+        ("trading_bot_registration_job_lag_seconds", "Current processing lag for the registration or OTP job.", "lag_seconds"),
+    ):
+        registry.gauge(metric_name, help_text, nonnegative_float(snapshot.get(field)), **labels)
+    registry.gauge(
+        "trading_bot_registration_job_connectivity_healthy",
+        "Whether the job queue has no current transport-outage classification.",
+        (
+            1
+            if snapshot.get("connectivity_healthy", True) is True
+            or str(snapshot.get("connectivity_healthy", "")).strip().lower() == "true"
+            else 0
+        ),
+        **labels,
+    )
+    if count_cycle:
+        registry.counter(
+            "trading_bot_registration_job_cycles_total",
+            "Registration and OTP background job cycles by bounded result.",
+            result=_sanitize_label_value(snapshot.get("last_result"), max_length=16),
+            **labels,
+        )
+
+
+def record_registration_completion(*, surface: str, outcome: str) -> None:
+    registry.counter(
+        "trading_bot_registration_completions_total",
+        "First terminal registration transitions by surface and outcome.",
+        surface=_sanitize_label_value(surface, max_length=24),
+        outcome=_sanitize_label_value(outcome, max_length=64),
+    )
+
+
+def record_registration_reconciliation(*, status: str, count: int = 1) -> None:
+    registry.counter(
+        "trading_bot_registration_reconciliation_results_total",
+        "Foreign reconciliation results, including retry and terminal outcomes.",
+        amount=max(0, int(count)),
+        status=_sanitize_label_value(status, max_length=64),
+    )
+
+
+def observe_registration_projection_latency(seconds: float) -> None:
+    registry.observe(
+        "trading_bot_registration_projection_latency_seconds",
+        "Seconds from authoritative invitation completion to foreign projection visibility.",
+        max(0.0, float(seconds)),
+    )
+
+
+def record_otp_event(*, event: str, outcome: str = "success", count: int = 1) -> None:
+    registry.counter(
+        "trading_bot_otp_events_total",
+        "OTP lifecycle events by bounded event and outcome.",
+        amount=max(0, int(count)),
+        event=_sanitize_label_value(event, max_length=48),
+        outcome=_sanitize_label_value(outcome, max_length=32),
+    )
+
+
+def observe_otp_fallback_delay(seconds: float) -> None:
+    registry.observe(
+        "trading_bot_otp_fallback_delay_seconds",
+        "OTP SMS fallback processing delay after its scheduled deadline.",
+        max(0.0, float(seconds)),
+    )
 
 
 def record_sync_health(*, server_mode: str, unsynced_count: int, oldest_unsynced_age_seconds: float, outbound_queue: int, retry_queue: int) -> None:

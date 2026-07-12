@@ -145,6 +145,18 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["publication_reconciliation"]["status"], "action_required")
         self.assertEqual(payload["parity_status"]["snapshot_endpoint"], "/api/sync/parity/snapshot")
         self.assertEqual(payload["parity_status"]["comparison_status"], "missing")
+        self.assertEqual(
+            payload["registration_jobs"]["thresholds"],
+            {
+                "heartbeat_max_age_seconds": 60,
+                "registration_pending_max_age_seconds": 300,
+                "otp_fallback_max_lag_seconds": 2,
+            },
+        )
+        self.assertEqual(
+            set(payload["registration_jobs"]["jobs"]),
+            {"telegram_registration_reconciliation", "otp_sms_fallback"},
+        )
         record_sync_health.assert_called_once()
         record_publication_health.assert_called_once()
 
