@@ -157,6 +157,21 @@ def ready_state_data(inv=None, *, telegram_id=7001, address="Tehran exact addres
 
 
 class Stage5MobileContractTests(unittest.TestCase):
+    def test_user_facing_webapp_url_switches_to_canonical_iran_origin_with_new_flow(self):
+        with patch.object(start.settings, "frontend_url", "https://legacy.example"), patch.object(
+            start.settings, "invitation_contract_v2_enabled", False
+        ), patch.object(start.settings, "registration_sync_v2_enabled", False), patch.object(
+            start.settings, "telegram_direct_registration_enabled", False
+        ), patch.object(
+            start.settings, "telegram_registration_reconciliation_enabled", False
+        ):
+            self.assertEqual(start._user_facing_webapp_url(), "https://legacy.example")
+
+        with patch.object(start.settings, "invitation_contract_v2_enabled", True), patch.object(
+            start, "user_facing_webapp_url", return_value="https://iran.example"
+        ):
+            self.assertEqual(start._user_facing_webapp_url(), "https://iran.example")
+
     def test_normalizes_supported_iran_mobile_representations(self):
         for raw in (
             "09121112233",

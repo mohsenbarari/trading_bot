@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Smartphone, Lock, Loader2, Download, Clock, CheckCircle2, XCircle, ShieldCheck } from 'lucide-vue-next'
 import { apiFetch, setupExpiryTimer } from '../utils/auth'
 import { primeCurrentUserSummary } from '../utils/currentUser'
@@ -8,6 +8,8 @@ import { pushBackState, popBackState, clearBackStack } from '../composables/useB
 import { AppButton, AppFormField, AppInput, AppPage, AppSectionCard, AppStatusBadge, AppTextarea } from '../components/ui'
 
 const router = useRouter()
+const route = useRoute()
+const completedRegistrationNotice = computed(() => route.query.registration === 'complete')
 type LoginStep =
   | 'mobile'
   | 'otp'
@@ -142,6 +144,15 @@ const canOfferAppRecovery = computed(() => {
 })
 
 const lastMethod = ref<'telegram' | 'sms' | null>(null)
+const otpDeliveryStatus = computed(() => {
+  if (lastMethod.value !== 'telegram') {
+    return countdown.value > 0 ? `${formattedTimer.value} تا ارسال مجدد` : ''
+  }
+  if (countdown.value > 0) {
+    return `کد ابتدا در تلگرام ارسال شد؛ ${formattedTimer.value} تا ارسال خودکار پیامک`
+  }
+  return 'ارسال خودکار همان کد از طریق پیامک فعال شد.'
+})
 
 function startAppRecovery() {
   const nextUrl = new URL(window.location.href)
@@ -807,6 +818,10 @@ function goBackToMobile() {
 
         <transition name="slide-up" mode="out-in">
           <div v-if="step === 'mobile'" key="mobile" class="login-step">
+            <div v-if="completedRegistrationNotice" class="login-note-card" role="status">
+              <p class="login-note-title">ثبت‌نام قبلاً تکمیل شده است</p>
+              <p>برای ورود به وب‌اپ، کد تایید دریافت کنید.</p>
+            </div>
             <AppFormField label="شماره موبایل">
               <template #default="{ id }">
                 <div class="login-field-shell">
@@ -889,9 +904,9 @@ function goBackToMobile() {
             <AppButton block :loading="loading" @click="verifyOtp">ورود به بازار</AppButton>
 
             <div class="login-inline-actions">
-              <div v-if="countdown > 0" class="login-timer">
+              <div v-if="countdown > 0 || lastMethod === 'telegram'" class="login-timer" role="status" aria-live="polite">
                 <Clock :size="14" />
-                <span>{{ formattedTimer }} تا ارسال مجدد</span>
+                <span>{{ otpDeliveryStatus }}</span>
               </div>
               <button v-else-if="lastMethod !== 'telegram'" type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
             </div>

@@ -21,6 +21,10 @@ export interface CustomerRelation {
   status: RelationStatus
   invitation_token: string
   registration_link: string | null
+  bot_registration_link?: string | null
+  web_registration_link?: string | null
+  web_short_link?: string | null
+  sms_status?: string | null
   expires_at: string | null
   activated_at: string | null
   deleted_at: string | null

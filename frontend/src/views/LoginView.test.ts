@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const routerPushMock = vi.fn()
+const routeMock = { query: {} as Record<string, string> }
 const setupExpiryTimerMock = vi.fn()
 const apiFetchMock = vi.fn()
 const pushBackStateMock = vi.fn()
@@ -16,6 +17,7 @@ const originalNavigatorUserAgent = window.navigator.userAgent
 const originalWindowLocation = window.location
 
 vi.mock('vue-router', () => ({
+  useRoute: () => routeMock,
   useRouter: () => ({
     push: routerPushMock,
   }),
@@ -57,6 +59,7 @@ describe('LoginView.vue', () => {
   beforeEach(() => {
     vi.resetModules()
     routerPushMock.mockReset()
+    routeMock.query = {}
     setupExpiryTimerMock.mockReset()
     apiFetchMock.mockReset()
     pushBackStateMock.mockReset()
@@ -277,9 +280,12 @@ describe('LoginView.vue', () => {
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
 
+    expect(wrapper.text()).toContain('کد ابتدا در تلگرام ارسال شد؛ 00:40 تا ارسال خودکار پیامک')
+
     vi.advanceTimersByTime(40000)
     await flushPromises()
     expect(wrapper.text()).not.toContain('ارسال مجدد کد')
+    expect(wrapper.text()).toContain('ارسال خودکار همان کد از طریق پیامک فعال شد.')
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
@@ -290,6 +296,18 @@ describe('LoginView.vue', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-2/status')
     expect(wrapper.text()).toContain('درخواست ورود شما رد شد.')
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('explains completed registration on the existing OTP login surface', async () => {
+    routeMock.query = { registration: 'complete' }
+    const LoginView = (await import('./LoginView.vue')).default
+
+    const wrapper = mount(LoginView)
+
+    expect(wrapper.text()).toContain('ثبت‌نام قبلاً تکمیل شده است')
+    expect(wrapper.text()).toContain('برای ورود به وب‌اپ، کد تایید دریافت کنید.')
+    expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

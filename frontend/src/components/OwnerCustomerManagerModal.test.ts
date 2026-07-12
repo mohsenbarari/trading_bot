@@ -485,7 +485,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await vi.advanceTimersByTimeAsync(1800)
     await flushPromises()
 
-    expect(wrapper.get('.copy-link').text()).toBe('کپی لینک')
+    expect(wrapper.get('.copy-link').text()).toBe('کپی لینک وب')
 
     wrapper.unmount()
   })

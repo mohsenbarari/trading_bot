@@ -20,6 +20,33 @@ from models.invitation_sms_delivery import InvitationSMSDelivery
 _CLAIM_LEASE_SECONDS = 30
 
 
+async def load_invitation_sms_status_map(
+    db: AsyncSession,
+    invitation_ids: list[int] | tuple[int, ...],
+) -> dict[int, InvitationSMSStatus]:
+    normalized_ids = sorted({int(value) for value in invitation_ids if value is not None})
+    if not normalized_ids:
+        return {}
+    deliveries = list(
+        (
+            await db.execute(
+                select(InvitationSMSDelivery).where(
+                    InvitationSMSDelivery.invitation_id.in_(normalized_ids)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    result: dict[int, InvitationSMSStatus] = {}
+    for delivery in deliveries:
+        try:
+            result[int(delivery.invitation_id)] = InvitationSMSStatus(delivery.status)
+        except (TypeError, ValueError):
+            result[int(delivery.invitation_id)] = InvitationSMSStatus.AMBIGUOUS
+    return result
+
+
 async def prepare_invitation_sms_delivery(
     db: AsyncSession,
     *,

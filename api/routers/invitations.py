@@ -20,7 +20,10 @@ from models.user import User, UserRole
 from core.config import settings
 from api.deps import verify_admin_user
 from core.sms import send_invitation_sms_result
-from core.invitation_contract_service import build_invitation_contract_v2
+from core.invitation_contract_service import (
+    build_invitation_contract_v2,
+    build_public_invitation_contract_v2,
+)
 from core.public_webapp_url import public_webapp_url_for_links
 from core.invitation_creation_contracts import (
     InternalInvitationCreateRequest,
@@ -41,11 +44,13 @@ from core.services.invitation_requester_service import (
 )
 from core.services.invitation_sms_delivery_service import (
     deliver_invitation_sms_once,
+    load_invitation_sms_status_map,
     prepare_invitation_sms_delivery,
 )
 from core.trade_forwarding import verify_internal_signature
 from core.services.invitation_identity_reservation_service import release_invitation_identity
 from core.services.invitation_lifecycle_service import (
+    derive_invitation_state,
     get_new_invitation_expiry,
     soft_revoke_invitation,
 )
@@ -90,7 +95,13 @@ class PendingInvitationResponse(BaseModel):
     short_code: str | None
     bot_link: str | None
     web_link: str
+    web_short_link: str | None
     short_link: str | None
+    bot_available: bool
+    web_available: bool
+    state: InvitationDerivedState
+    kind: str
+    sms_status: InvitationSMSStatus
     expires_at: datetime
     created_at: datetime | None
     created_by_id: int | None
@@ -204,8 +215,16 @@ async def _create_standard_invitation(
     return {**contract.model_dump(), "created": creation.created}
 
 
-def serialize_pending_invitation(invitation: Invitation) -> dict:
-    bot_link, web_link, short_link = build_invitation_links(invitation)
+def serialize_pending_invitation(
+    invitation: Invitation,
+    *,
+    sms_status: InvitationSMSStatus = InvitationSMSStatus.AMBIGUOUS,
+) -> dict:
+    contract = build_invitation_contract_v2(
+        invitation,
+        bot_username=settings.bot_username,
+        sms_status=sms_status,
+    )
     return {
         "id": invitation.id,
         "account_name": invitation.account_name,
@@ -213,9 +232,15 @@ def serialize_pending_invitation(invitation: Invitation) -> dict:
         "role": invitation.role,
         "token": invitation.token,
         "short_code": invitation.short_code,
-        "bot_link": bot_link or None,
-        "web_link": web_link,
-        "short_link": short_link,
+        "bot_link": contract.bot_link,
+        "web_link": contract.web_link,
+        "web_short_link": contract.web_short_link,
+        "short_link": contract.web_short_link,
+        "bot_available": contract.bot_available,
+        "web_available": contract.web_available,
+        "state": contract.state,
+        "kind": contract.kind,
+        "sms_status": contract.sms_status,
         "expires_at": invitation.expires_at,
         "created_at": invitation.created_at,
         "created_by_id": invitation.created_by_id,
@@ -253,7 +278,17 @@ async def list_pending_invitations(
         stmt = stmt.where(Invitation.created_by_id == admin.id)
 
     invitations = list((await db.execute(stmt)).scalars().all())
-    return [serialize_pending_invitation(invitation) for invitation in invitations]
+    sms_statuses = await load_invitation_sms_status_map(
+        db,
+        [invitation.id for invitation in invitations],
+    )
+    return [
+        serialize_pending_invitation(
+            invitation,
+            sms_status=sms_statuses.get(invitation.id, InvitationSMSStatus.AMBIGUOUS),
+        )
+        for invitation in invitations
+    ]
 
 
 @router.delete("/pending/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -361,23 +396,26 @@ async def lookup_invitation(
     if not inv:
         raise public_invitation_http_exception(status_code=404, detail="Invalid short code")
         
-    if inv.is_used:
+    if inv.is_used and not settings.invitation_contract_v2_enabled:
         raise public_invitation_http_exception(status_code=400, detail="Invitation already used")
-    if getattr(inv, "revoked_at", None) is not None:
+    if getattr(inv, "revoked_at", None) is not None and not settings.invitation_contract_v2_enabled:
         raise public_invitation_http_exception(status_code=400, detail="Invitation revoked")
     if getattr(inv, "kind", None) == InvitationKind.LEGACY_UNKNOWN:
         raise public_invitation_http_exception(status_code=400, detail="Invitation state is ambiguous")
 
-    if is_accountant_invitation_token(inv.token):
+    customer_tier = None
+    state = derive_invitation_state(inv)
+    if state == InvitationDerivedState.PENDING and is_accountant_invitation_token(inv.token):
         relation = await get_pending_accountant_relation_by_invitation_token(db, inv.token)
         if not relation:
             raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-    elif is_customer_invitation_token(inv.token):
+    elif state == InvitationDerivedState.PENDING and is_customer_invitation_token(inv.token):
         relation = await get_pending_customer_relation_by_invitation_token(db, inv.token)
         if not relation:
             raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
+        customer_tier = getattr(relation, "customer_tier", None)
         
-    if inv.expires_at < utc_now_naive():
+    if inv.expires_at < utc_now_naive() and not settings.invitation_contract_v2_enabled:
         raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
 
     audit_log(
@@ -386,6 +424,11 @@ async def lookup_invitation(
         target_id=getattr(inv, "id", None),
         extra={"surface": "web", "entry": "short_link"},
     )
+    if settings.invitation_contract_v2_enabled:
+        return build_public_invitation_contract_v2(
+            inv,
+            customer_tier=customer_tier,
+        ).model_dump()
     return {"token": inv.token}
 
 @router.get(
@@ -405,23 +448,26 @@ async def validate_invitation(
     if not inv:
         raise public_invitation_http_exception(status_code=404, detail="Invalid token")
         
-    if inv.is_used:
+    if inv.is_used and not settings.invitation_contract_v2_enabled:
         raise public_invitation_http_exception(status_code=400, detail="Invitation already used")
-    if getattr(inv, "revoked_at", None) is not None:
+    if getattr(inv, "revoked_at", None) is not None and not settings.invitation_contract_v2_enabled:
         raise public_invitation_http_exception(status_code=400, detail="Invitation revoked")
     if getattr(inv, "kind", None) == InvitationKind.LEGACY_UNKNOWN:
         raise public_invitation_http_exception(status_code=400, detail="Invitation state is ambiguous")
 
-    if is_accountant_invitation_token(token):
+    customer_tier = None
+    state = derive_invitation_state(inv)
+    if state == InvitationDerivedState.PENDING and is_accountant_invitation_token(token):
         relation = await get_pending_accountant_relation_by_invitation_token(db, token)
         if not relation:
             raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
-    elif is_customer_invitation_token(token):
+    elif state == InvitationDerivedState.PENDING and is_customer_invitation_token(token):
         relation = await get_pending_customer_relation_by_invitation_token(db, token)
         if not relation:
             raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
+        customer_tier = getattr(relation, "customer_tier", None)
         
-    if inv.expires_at < utc_now_naive():
+    if inv.expires_at < utc_now_naive() and not settings.invitation_contract_v2_enabled:
         raise public_invitation_http_exception(status_code=400, detail="Invitation expired")
 
     audit_log(
@@ -430,6 +476,11 @@ async def validate_invitation(
         target_id=getattr(inv, "id", None),
         extra={"surface": "web", "entry": "token"},
     )
+    if settings.invitation_contract_v2_enabled:
+        return build_public_invitation_contract_v2(
+            inv,
+            customer_tier=customer_tier,
+        ).model_dump()
     return {
         "valid": True,
         "account_name": inv.account_name,

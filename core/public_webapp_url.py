@@ -98,3 +98,20 @@ def public_webapp_url_for_links(*, settings_obj=settings) -> str:
         getattr(settings_obj, "public_webapp_url", None),
         settings_obj=settings_obj,
     )
+
+
+def user_facing_webapp_url(*, settings_obj=settings) -> str | None:
+    new_registration_flow_enabled = any(
+        bool(getattr(settings_obj, flag, False))
+        for flag in (
+            "invitation_contract_v2_enabled",
+            "registration_sync_v2_enabled",
+            "telegram_direct_registration_enabled",
+            "telegram_registration_reconciliation_enabled",
+            "telegram_login_otp_enabled",
+            "otp_sms_auto_fallback_enabled",
+        )
+    )
+    if new_registration_flow_enabled:
+        return public_webapp_url_for_links(settings_obj=settings_obj)
+    return str(getattr(settings_obj, "frontend_url", "") or "").strip() or None

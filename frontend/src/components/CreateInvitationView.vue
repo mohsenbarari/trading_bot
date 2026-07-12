@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue';
 import { apiFetch } from '../utils/auth';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
+import { invitationSmsStatusMessage, normalizeInvitationContract, type InvitationSmsStatus } from '../utils/invitationContract';
 import { AppButton, AppEmptyState, AppErrorState, AppFormField, AppInput, AppLoadingState, AppSelect } from './ui';
 
 const props = defineProps<{
@@ -15,8 +16,14 @@ interface PendingInvitation {
   account_name: string;
   mobile_number: string;
   role: string;
+  bot_link?: string | null;
   web_link: string;
+  web_short_link?: string | null;
   short_link?: string | null;
+  bot_available?: boolean;
+  web_available?: boolean;
+  state?: string;
+  sms_status?: InvitationSmsStatus | null;
   expires_at: string;
   created_at?: string | null;
 }
@@ -37,13 +44,15 @@ const resultMessage = ref('');
 const isLoading = ref(false);
 const inviteLink = ref('');
 const webLink = ref('');
+const createdContract = ref(false);
+const smsStatusMessage = ref('');
 const copyMessage = ref('');
 const webCopyMessage = ref('');
 const pendingInvitations = ref<PendingInvitation[]>([]);
 const pendingLoading = ref(false);
 const pendingError = ref('');
 const pendingDeleteId = ref<number | null>(null);
-const pendingCopyState = reactive<Record<number, string>>({});
+const pendingCopyState = reactive<Record<string, string>>({});
 
 onMounted(() => {
   if (props.jwtToken) {
@@ -58,6 +67,8 @@ function resetForm() {
   resultMessage.value = '';
   inviteLink.value = '';
   webLink.value = '';
+  createdContract.value = false;
+  smsStatusMessage.value = '';
   copyMessage.value = '';
   webCopyMessage.value = '';
 }
@@ -128,16 +139,6 @@ function copyWebLink() {
   });
 }
 
-function toLocalDisplayLink(link: string | null | undefined): string {
-  if (!link) return '';
-  try {
-    const url = new URL(link);
-    return `${window.location.origin}${url.pathname}${url.search}`;
-  } catch {
-    return link;
-  }
-}
-
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return 'نامشخص';
   return formatIranDateTime(value, {
@@ -180,7 +181,11 @@ async function loadPendingInvitations() {
   }
 }
 
-function fallbackCopyPendingLink(text: string, invitationId: number) {
+function pendingCopyKey(invitationId: number, surface: 'bot' | 'web') {
+  return `${invitationId}:${surface}`;
+}
+
+function fallbackCopyPendingLink(text: string, copyKey: string) {
   const textArea = document.createElement('textarea');
   textArea.value = text;
   textArea.style.top = '0';
@@ -191,29 +196,31 @@ function fallbackCopyPendingLink(text: string, invitationId: number) {
   textArea.select();
 
   try {
-    pendingCopyState[invitationId] = document.execCommand('copy') ? 'کپی شد!' : 'خطا';
+    pendingCopyState[copyKey] = document.execCommand('copy') ? 'کپی شد!' : 'خطا';
   } catch {
-    pendingCopyState[invitationId] = 'خطا';
+    pendingCopyState[copyKey] = 'خطا';
   }
 
   document.body.removeChild(textArea);
-  setTimeout(() => { pendingCopyState[invitationId] = ''; }, 2000);
+  setTimeout(() => { pendingCopyState[copyKey] = ''; }, 2000);
 }
 
-function copyPendingWebLink(invitation: PendingInvitation) {
-  const link = toLocalDisplayLink(invitation.web_link);
+function copyPendingLink(invitation: PendingInvitation, surface: 'bot' | 'web') {
+  const contract = normalizeInvitationContract(invitation);
+  const link = surface === 'bot' ? contract.botLink : contract.webLink;
   if (!link) return;
+  const copyKey = pendingCopyKey(invitation.id, surface);
   if (!navigator.clipboard) {
-    fallbackCopyPendingLink(link, invitation.id);
+    fallbackCopyPendingLink(link, copyKey);
     return;
   }
 
   navigator.clipboard.writeText(link).then(() => {
-    pendingCopyState[invitation.id] = 'کپی شد!';
-    setTimeout(() => { pendingCopyState[invitation.id] = ''; }, 2000);
+    pendingCopyState[copyKey] = 'کپی شد!';
+    setTimeout(() => { pendingCopyState[copyKey] = ''; }, 2000);
   }, () => {
-    pendingCopyState[invitation.id] = 'خطا';
-    setTimeout(() => { pendingCopyState[invitation.id] = ''; }, 2000);
+    pendingCopyState[copyKey] = 'خطا';
+    setTimeout(() => { pendingCopyState[copyKey] = ''; }, 2000);
   });
 }
 
@@ -250,6 +257,9 @@ async function createInvite() {
   isLoading.value = true;
   resultMessage.value = '';
   inviteLink.value = '';
+  webLink.value = '';
+  createdContract.value = false;
+  smsStatusMessage.value = '';
   copyMessage.value = '';
 
   try {
@@ -265,19 +275,14 @@ async function createInvite() {
       throw new Error(detail);
     }
 
-    // Use links directly from API response (no need for /api/config)
-    inviteLink.value = data.link;
-
-    if (data.short_link) {
-      try {
-        const url = new URL(data.short_link);
-        webLink.value = `${window.location.origin}${url.pathname}${url.search}`;
-      } catch {
-        webLink.value = data.short_link;
-      }
-    } else {
-      webLink.value = '';
+    const contract = normalizeInvitationContract(data);
+    if (contract.state !== 'pending' || (!contract.botLink && !contract.webLink)) {
+      throw new Error('لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.');
     }
+    inviteLink.value = contract.botLink;
+    webLink.value = contract.webLink;
+    smsStatusMessage.value = invitationSmsStatusMessage(contract.smsStatus);
+    createdContract.value = true;
     
     resultMessage.value = '✅ لینک دعوت با موفقیت ایجاد شد.';
     await loadPendingInvitations();
@@ -327,13 +332,13 @@ function normalizeMobile(mobile: string): string {
       </div>
     </form>
 
-    <div v-if="resultMessage && !inviteLink" class="result-box error" v-html="resultMessage">
+    <div v-if="resultMessage && !createdContract" class="result-box error" v-html="resultMessage">
     </div>
 
-    <div v-if="inviteLink" class="success-box">
+    <div v-if="createdContract" class="success-box">
       <div class="result-message">✅ لینک دعوت با موفقیت ایجاد شد:</div>
-      <div class="link-label">🔵 لینک تلگرام:</div>
-      <div class="copy-container">
+      <div v-if="inviteLink" class="link-label">🔵 لینک تلگرام:</div>
+      <div v-if="inviteLink" class="copy-container">
         <AppInput type="text" :model-value="inviteLink" @click="copyToClipboard" readonly />
         <AppButton type="button" @click="copyToClipboard" class="copy-btn">
           {{ copyMessage ? copyMessage : 'کپی' }}
@@ -346,6 +351,7 @@ function normalizeMobile(mobile: string): string {
           {{ webCopyMessage ? webCopyMessage : 'کپی' }}
         </AppButton>
       </div>
+      <p v-if="smsStatusMessage" class="sms-status" role="status">{{ smsStatusMessage }}</p>
     </div>
 
     <section class="pending-section" aria-labelledby="pending-invitations-title">
@@ -384,12 +390,19 @@ function normalizeMobile(mobile: string): string {
               <span>{{ pending.role }}</span>
               <span>انقضا: {{ formatDateTime(pending.expires_at) }}</span>
             </div>
-            <div class="pending-link-row">
-              <AppInput type="text" :model-value="toLocalDisplayLink(pending.web_link)" readonly @click="copyPendingWebLink(pending)" />
-              <AppButton type="button" class="pending-copy-btn" @click="copyPendingWebLink(pending)">
-                {{ pendingCopyState[pending.id] || 'کپی لینک' }}
+            <div v-if="normalizeInvitationContract(pending).botLink" class="pending-link-row">
+              <AppInput type="text" :model-value="normalizeInvitationContract(pending).botLink" readonly @click="copyPendingLink(pending, 'bot')" />
+              <AppButton type="button" class="pending-copy-btn" @click="copyPendingLink(pending, 'bot')">
+                {{ pendingCopyState[pendingCopyKey(pending.id, 'bot')] || 'کپی لینک تلگرام' }}
               </AppButton>
             </div>
+            <div v-if="normalizeInvitationContract(pending).webLink" class="pending-link-row">
+              <AppInput type="text" :model-value="normalizeInvitationContract(pending).webLink" readonly @click="copyPendingLink(pending, 'web')" />
+              <AppButton type="button" class="pending-copy-btn" @click="copyPendingLink(pending, 'web')">
+                {{ pendingCopyState[pendingCopyKey(pending.id, 'web')] || 'کپی لینک وب' }}
+              </AppButton>
+            </div>
+            <p v-if="invitationSmsStatusMessage(pending.sms_status)" class="sms-status" role="status">{{ invitationSmsStatusMessage(pending.sms_status) }}</p>
           </div>
           <AppButton
             type="button"
@@ -485,6 +498,12 @@ input:focus, select:focus {
 .link-label {
   font-size: 0.78rem; font-weight: 700; color: #374151;
   margin-bottom: 0.375rem;
+}
+.sms-status {
+  margin: 0.75rem 0 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.8;
 }
 
 .pending-section {

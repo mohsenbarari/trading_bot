@@ -30,6 +30,7 @@ from typing import Optional
 from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
 from core.enums import UserAccountStatus, UserRole
 from core.config import settings
+from core.public_webapp_url import user_facing_webapp_url
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import is_user_global_web_locked
 from core.services.trade_history_export_service import (
@@ -1208,6 +1209,9 @@ async def handle_back_to_main_menu(message: types.Message, state: FSMContext, us
     
     anchor_msg = await message.answer(
         "به منوی اصلی بازگشتید.",
-        reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
+        reply_markup=get_persistent_menu_keyboard(
+            user.role,
+            user_facing_webapp_url(settings_obj=settings),
+        )
     )
     set_anchor(message.chat.id, anchor_msg.message_id)

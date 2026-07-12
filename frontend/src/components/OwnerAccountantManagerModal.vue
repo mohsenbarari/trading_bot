@@ -16,6 +16,7 @@ import {
 } from '../composables/useOwnerAccountants'
 import type { RelationStatus } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
+import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 import HelpPopover from './HelpPopover.vue'
 
 const props = withDefaults(defineProps<{
@@ -361,7 +362,7 @@ async function createRelation() {
     })
     relations.value = [created, ...relations.value.filter((item) => item.id !== created.id)]
     resetCreateForm()
-    notice.value = 'دعوت حسابدار ثبت شد.'
+    notice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت حسابدار ثبت شد.'
     openSections.relations = true
   } catch (err: any) {
     error.value = err?.message || 'ایجاد حسابدار ناموفق بود.'
@@ -424,9 +425,10 @@ async function unlinkRelation(relation: AccountantRelation) {
 }
 
 async function copyRegistrationLink(relation: AccountantRelation) {
-  if (!relation.registration_link) return
+  const link = invitationRelationLink(relation, 'web')
+  if (!link) return
   try {
-    await navigator.clipboard.writeText(relation.registration_link)
+    await navigator.clipboard.writeText(link)
     copiedRelationId.value = relation.id
     window.setTimeout(() => {
       if (copiedRelationId.value === relation.id) {
@@ -758,10 +760,11 @@ onBeforeUnmount(() => {
                       <strong>{{ relation.relation_display_name }}</strong>
                       <span>@{{ relation.global_account_name }}</span>
                       <p>{{ getRelationStateText(relation) }}</p>
+                      <p v-if="invitationSmsStatusMessage(relation.sms_status)">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
                     </div>
                     <div class="pending-invitation-actions">
-                      <button v-if="relation.registration_link" type="button" class="accountant-secondary-control copy-link" @click="copyRegistrationLink(relation)">
-                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                      <button v-if="invitationRelationLink(relation, 'web')" type="button" class="accountant-secondary-control copy-link" @click="copyRegistrationLink(relation)">
+                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک وب' }}
                       </button>
                       <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
                         منقضی کردن دعوت

@@ -7,10 +7,12 @@ from pydantic import ValidationError
 
 from core.invitation_contract_service import (
     build_invitation_contract_v2,
+    build_public_invitation_contract_v2,
     invitation_surface_availability,
 )
 from core.public_webapp_url import (
     PublicWebAppURLConfigurationError,
+    user_facing_webapp_url,
     validate_public_webapp_url,
 )
 from core.registration_contracts import (
@@ -48,6 +50,7 @@ def _url_settings(**overrides):
         "germany_server_url": None,
         "peer_server_url": None,
         "public_webapp_url": "https://staging.gold-trade.ir",
+        "frontend_url": "https://legacy.example",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -75,6 +78,24 @@ def _command_payload(**overrides):
 
 
 class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_user_facing_webapp_url_preserves_legacy_mode_and_requires_iran_for_new_flow(self):
+        legacy = _url_settings(invitation_contract_v2_enabled=False)
+        self.assertEqual(user_facing_webapp_url(settings_obj=legacy), "https://legacy.example")
+
+        enabled = _url_settings(invitation_contract_v2_enabled=True)
+        self.assertEqual(
+            user_facing_webapp_url(settings_obj=enabled),
+            "https://staging.gold-trade.ir",
+        )
+        otp_only = _url_settings(
+            invitation_contract_v2_enabled=False,
+            telegram_login_otp_enabled=True,
+        )
+        self.assertEqual(
+            user_facing_webapp_url(settings_obj=otp_only),
+            "https://staging.gold-trade.ir",
+        )
+
     def test_address_validator_matches_existing_minimum_without_normalizing(self):
         with self.assertRaisesRegex(ValueError, REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE):
             validate_registration_address("123456789")
@@ -357,6 +378,28 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contract.link, contract.bot_link)
         self.assertEqual(contract.short_link, contract.web_short_link)
         self.assertEqual(contract.state.value, "pending")
+
+        invitation.is_used = True
+        invitation.registered_user_id = 7
+        invitation.completed_at = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
+        invitation.completed_via = "telegram"
+        completed_contract = build_invitation_contract_v2(
+            invitation,
+            bot_username="@test_bot",
+            sms_status=InvitationSMSStatus.DISABLED,
+            settings_obj=_url_settings(),
+        )
+        self.assertEqual(completed_contract.state.value, "completed")
+        self.assertFalse(completed_contract.bot_available)
+        self.assertFalse(completed_contract.web_available)
+        self.assertIsNone(completed_contract.bot_link)
+        self.assertEqual(completed_contract.web_link, "")
+        self.assertIsNone(completed_contract.web_short_link)
+
+        public_contract = build_public_invitation_contract_v2(invitation)
+        self.assertFalse(public_contract.valid)
+        self.assertIsNone(public_contract.token)
+        self.assertIsNone(public_contract.mobile_number)
 
     def test_public_webapp_peer_classification_depends_on_local_server_role(self):
         foreign_settings = _url_settings(

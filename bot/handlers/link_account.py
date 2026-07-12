@@ -12,7 +12,7 @@ from core.config import settings
 from core.db import AsyncSessionLocal, get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
-from core.public_webapp_url import public_webapp_url_for_links
+from core.public_webapp_url import public_webapp_url_for_links, user_facing_webapp_url
 from core.registration_contracts import (
     TelegramRegistrationCommandResponse,
     TelegramRegistrationOutcome,
@@ -127,16 +127,7 @@ class LinkState(StatesGroup):
 
 
 def _account_link_webapp_url() -> str | None:
-    if any(
-        bool(getattr(settings, flag, False))
-        for flag in (
-            "invitation_contract_v2_enabled",
-            "registration_sync_v2_enabled",
-            "telegram_registration_reconciliation_enabled",
-        )
-    ):
-        return public_webapp_url_for_links()
-    return str(getattr(settings, "frontend_url", "") or "").strip() or None
+    return user_facing_webapp_url(settings_obj=settings)
 
 
 def build_webapp_link_line() -> str | None:

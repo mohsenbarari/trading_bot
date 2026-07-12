@@ -91,6 +91,33 @@ class LazyCustomerRelation(SimpleNamespace):
 
 
 class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
+    def test_active_customer_relation_does_not_expose_a_dead_registration_link(self):
+        relation = SimpleNamespace(
+            id=1,
+            owner_user_id=7,
+            customer_user_id=8,
+            customer_user=None,
+            management_name="فعال",
+            customer_tier=CustomerTier.TIER_1,
+            commission_rate=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+            status=CustomerRelationStatus.ACTIVE,
+            invitation_token="CUST-completed",
+            expires_at=None,
+            activated_at=None,
+            deleted_at=None,
+            created_at=None,
+        )
+
+        result = serialize_customer_relation(relation)
+
+        self.assertIsNone(result["registration_link"])
+        self.assertIsNone(result["bot_registration_link"])
+        self.assertIsNone(result["web_registration_link"])
+
     async def test_owner_routes_reject_accountant_context(self):
         context = SimpleNamespace(is_accountant_context=True, owner_user=SimpleNamespace(id=7))
         payload = schemas.CustomerRelationCreate(
@@ -199,6 +226,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.customers.load_customer_relation_invitation_map",
             new=AsyncMock(return_value={"CUST-token": invitation}),
         ), patch(
+            "api.routers.customers.load_invitation_sms_status_map",
+            new=AsyncMock(return_value={21: InvitationSMSStatus.ACCEPTED}),
+        ), patch(
             "api.routers.customers.public_webapp_url_for_links",
             return_value="https://app.example",
         ), patch(
@@ -210,6 +240,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=CUST-token")
         self.assertEqual(listed[0]["mobile_number"], "09120000000")
+        self.assertEqual(listed[0]["sms_status"], InvitationSMSStatus.ACCEPTED)
 
     async def test_internal_bot_customer_invite_rejects_bad_signature(self):
         payload = schemas.InternalCustomerInviteRequest(
@@ -430,7 +461,8 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             result = await unlink_my_customer(9, context=context, db=FakeDB())
 
         self.assertEqual(result["id"], 9)
-        self.assertEqual(result["registration_link"], "https://app.example/register?token=CUST-token")
+        self.assertIsNone(result["registration_link"])
+        self.assertIsNone(result["web_registration_link"])
 
     async def test_update_owner_customer_returns_serialized_relation(self):
         stale_relation = SimpleNamespace(

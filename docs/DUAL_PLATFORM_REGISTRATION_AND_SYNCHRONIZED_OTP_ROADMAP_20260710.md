@@ -2456,3 +2456,18 @@ recorded in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE5_POSTREVIEW_REMEDIATION_20260711.md`. This update does not
 declare independent `GO`, enable a flag, alter Stage 6 OTP authority, migrate/deploy/push, or waive
 mixed-version, two-server, Web-session response-loss, staging, and production gates.
+
+## Stage 7 Source Implementation Record (2026-07-12)
+
+The owner authorized Stage 7 source work while independent analysis of earlier stages remained in
+progress. The implementation adds a PII-bounded public invitation-state contract, role-aware Web
+and Telegram actions, terminal invitation routing to the existing Iran OTP login, canonical Iran
+WebApp URL selection, explicit admin links, durable invitation SMS outcome copy, and truthful
+Telegram-first automatic-SMS countdown text. Legacy aliases and flags-off behavior remain
+compatible, and existing bot onboarding/linking plus Stage 6 OTP authority are reused rather than
+duplicated.
+
+The exact implementation and verification record is
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE7_UX_COMPLETION_20260712.md`. This source record does not
+accept any pending independent review, enable a feature flag, migrate, deploy, push, authorize
+production, or waive Stages 8-12.

@@ -45,6 +45,7 @@ import {
   type CustomerTradeStats,
   type CustomerTradeSummary,
 } from '../composables/useOwnerCustomers'
+import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 
 const route = useRoute()
 const router = useRouter()
@@ -62,6 +63,7 @@ const isSavingLimits = ref(false)
 const limitsError = ref('')
 const limitsNotice = ref('')
 const copiedRelationId = ref<number | null>(null)
+const copiedInvitationSurface = ref<'bot' | 'web' | null>(null)
 const isConfirmDialogOpen = ref(false)
 const confirmTitle = ref('')
 const confirmMessage = ref('')
@@ -406,7 +408,7 @@ async function createRelation() {
       ...buildCustomerPayload(customerState.createForm),
     })
     customerState.relations.value = [created, ...customerState.relations.value.filter((item) => item.id !== created.id)]
-    createNotice.value = 'دعوت مشتری با موفقیت ثبت شد.'
+    createNotice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت مشتری با موفقیت ثبت شد.'
     resetCreateForm()
     closeCreatePanel()
   } catch (err: any) {
@@ -439,14 +441,19 @@ async function saveDetailLimits() {
   }
 }
 
-async function copyRegistrationLink(relation: CustomerRelation) {
-  if (!relation.registration_link) return
+async function copyRegistrationLink(relation: CustomerRelation, surface: 'bot' | 'web' = 'web') {
+  const link = invitationRelationLink(relation, surface)
+  if (!link) return
   try {
-    await navigator.clipboard.writeText(relation.registration_link)
+    await navigator.clipboard.writeText(link)
     copiedRelationId.value = relation.id
+    copiedInvitationSurface.value = surface
     if (typeof window !== 'undefined') {
       window.setTimeout(() => {
-        if (copiedRelationId.value === relation.id) copiedRelationId.value = null
+        if (copiedRelationId.value === relation.id && copiedInvitationSurface.value === surface) {
+          copiedRelationId.value = null
+          copiedInvitationSurface.value = null
+        }
       }, 1800)
     }
   } catch {
@@ -998,20 +1005,32 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="customer-inline-actions">
                       <AppButton
-                        v-if="relation.registration_link"
+                        v-if="invitationRelationLink(relation, 'bot')"
                         size="sm"
                         variant="secondary"
-                        @click="copyRegistrationLink(relation)"
+                        @click="copyRegistrationLink(relation, 'bot')"
                       >
                         <template #icon>
                           <Copy :size="16" />
                         </template>
-                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                        {{ copiedRelationId === relation.id && copiedInvitationSurface === 'bot' ? 'کپی شد' : 'کپی لینک تلگرام' }}
+                      </AppButton>
+                      <AppButton
+                        v-if="invitationRelationLink(relation, 'web')"
+                        size="sm"
+                        variant="secondary"
+                        @click="copyRegistrationLink(relation, 'web')"
+                      >
+                        <template #icon>
+                          <Copy :size="16" />
+                        </template>
+                        {{ copiedRelationId === relation.id && copiedInvitationSurface === 'web' ? 'کپی شد' : 'کپی لینک وب' }}
                       </AppButton>
                       <AppButton size="sm" variant="danger" @click="openConfirmDialog('cancel-invitation', relation)">
                         لغو دعوت
                       </AppButton>
                     </div>
+                    <p v-if="invitationSmsStatusMessage(relation.sms_status)" class="customer-pending-sms-status">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
                   </AppCard>
                 </div>
 
@@ -1066,7 +1085,7 @@ onBeforeUnmount(() => {
                     variant="secondary"
                     @click="copyRegistrationLink(activeRelation)"
                   >
-                    {{ copiedRelationId === activeRelation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
+                    {{ copiedRelationId === activeRelation.id && copiedInvitationSurface === 'web' ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
                   </AppButton>
                 </div>
               </AppCard>
@@ -1431,6 +1450,13 @@ onBeforeUnmount(() => {
   margin: 0.2rem 0 0;
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
+  line-height: 1.8;
+}
+
+.customer-pending-sms-status {
+  margin: 0.65rem 0 0;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
   line-height: 1.8;
 }
 

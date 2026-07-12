@@ -5,18 +5,20 @@ import InviteLanding from './InviteLanding.vue'
 const inviteLandingMocks = vi.hoisted(() => ({
   route: { params: { code: 'abc123' } },
   push: vi.fn(),
+  replace: vi.fn(),
   fetch: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => inviteLandingMocks.route,
-  useRouter: () => ({ push: inviteLandingMocks.push }),
+  useRouter: () => ({ push: inviteLandingMocks.push, replace: inviteLandingMocks.replace }),
 }))
 
 describe('InviteLanding.vue', () => {
   beforeEach(() => {
     inviteLandingMocks.route.params.code = 'abc123'
     inviteLandingMocks.push.mockReset()
+    inviteLandingMocks.replace.mockReset()
     inviteLandingMocks.fetch.mockReset()
     vi.stubGlobal('fetch', inviteLandingMocks.fetch)
   })
@@ -40,6 +42,73 @@ describe('InviteLanding.vue', () => {
 
   it('shows a friendly error when invitation lookup fails', async () => {
     inviteLandingMocks.fetch.mockResolvedValueOnce(new Response(null, { status: 404 }))
+
+    const wrapper = mount(InviteLanding)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دعوت‌نامه نامعتبر یا منقضی شده است.')
+    expect(wrapper.find('.actions').exists()).toBe(false)
+  })
+
+  it('renders only the Web path when the v2 contract marks Telegram unavailable', async () => {
+    inviteLandingMocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      token: 'accountant-token',
+      valid: true,
+      state: 'pending',
+      bot_available: false,
+      web_available: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const wrapper = mount(InviteLanding)
+    await flushPromises()
+
+    expect(inviteLandingMocks.fetch).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('a.telegram-btn').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ثبت‌نام از طریق وب')
+  })
+
+  it('routes a completed invitation to OTP login without showing registration actions', async () => {
+    inviteLandingMocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      valid: false,
+      state: 'completed',
+      bot_available: false,
+      web_available: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const wrapper = mount(InviteLanding)
+    await flushPromises()
+
+    expect(inviteLandingMocks.replace).toHaveBeenCalledWith({ name: 'login', query: { registration: 'complete' } })
+    expect(wrapper.find('.actions').exists()).toBe(false)
+    expect(inviteLandingMocks.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Web registration available when Telegram config cannot be loaded', async () => {
+    inviteLandingMocks.fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'token-123',
+        valid: true,
+        state: 'pending',
+        bot_available: true,
+        web_available: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+
+    const wrapper = mount(InviteLanding)
+    await flushPromises()
+
+    expect(wrapper.find('a.telegram-btn').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ثبت‌نام از طریق وب')
+    expect(wrapper.text()).not.toContain('دعوت‌نامه قابل استفاده نیست')
+  })
+
+  it('fails closed when a pending response omits its token', async () => {
+    inviteLandingMocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      valid: true,
+      state: 'pending',
+      bot_available: false,
+      web_available: true,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
     const wrapper = mount(InviteLanding)
     await flushPromises()

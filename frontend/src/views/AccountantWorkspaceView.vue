@@ -36,6 +36,7 @@ import {
   type AccountantRelation,
   type AccountantSessionSummary,
 } from '../composables/useOwnerAccountants'
+import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 
 const route = useRoute()
 const router = useRouter()
@@ -269,7 +270,7 @@ async function createRelation() {
       duty_description: normalizeDutyDescription(accountantState.createForm.duty_description),
     })
     accountantState.relations.value = [created, ...accountantState.relations.value.filter((item) => item.id !== created.id)]
-    createNotice.value = 'دعوت حسابدار با موفقیت ثبت شد.'
+    createNotice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت حسابدار با موفقیت ثبت شد.'
     resetCreateForm()
     closeCreatePanel()
   } catch (err: any) {
@@ -306,9 +307,10 @@ async function saveDuty() {
 }
 
 async function copyRegistrationLink(relation: AccountantRelation) {
-  if (!relation.registration_link) return
+  const link = invitationRelationLink(relation, 'web')
+  if (!link) return
   try {
-    await navigator.clipboard.writeText(relation.registration_link)
+    await navigator.clipboard.writeText(link)
     copiedRelationId.value = relation.id
     if (typeof window !== 'undefined') {
       window.setTimeout(() => {
@@ -723,7 +725,7 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="accountant-inline-actions">
                       <AppButton
-                        v-if="relation.registration_link"
+                        v-if="invitationRelationLink(relation, 'web')"
                         size="sm"
                         variant="secondary"
                         @click="copyRegistrationLink(relation)"
@@ -731,12 +733,13 @@ onBeforeUnmount(() => {
                         <template #icon>
                           <Copy :size="16" />
                         </template>
-                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک وب' }}
                       </AppButton>
                       <AppButton size="sm" variant="danger" @click="openConfirmDialog('cancel-invitation', relation)">
                         لغو دعوت
                       </AppButton>
                     </div>
+                    <p v-if="invitationSmsStatusMessage(relation.sms_status)" class="accountant-pending-sms-status">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
                   </AppCard>
                 </div>
 
@@ -1060,6 +1063,13 @@ onBeforeUnmount(() => {
   margin: 0.2rem 0 0;
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
+  line-height: 1.8;
+}
+
+.accountant-pending-sms-status {
+  margin: 0.65rem 0 0;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
   line-height: 1.8;
 }
 

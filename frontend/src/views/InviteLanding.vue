@@ -3,15 +3,21 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Globe2, Send } from 'lucide-vue-next'
 import { AppButton, AppCard, AppErrorState, AppLoadingState, AppPage, AppPageHeader, AppStatusBadge } from '../components/ui'
+import { invitationTerminalMessage, normalizeInvitationContract } from '../utils/invitationContract'
+import { formatIranDateTime } from '../utils/iranTime'
 
 const route = useRoute()
 const router = useRouter()
 const shortCode = route.params.code as string
 
 const loading = ref(true)
+const redirecting = ref(false)
 const error = ref('')
 const token = ref('')
 const botLink = ref('')
+const botAvailable = ref(false)
+const webAvailable = ref(false)
+const expiresAt = ref('')
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
 
 onMounted(async () => {
@@ -20,12 +26,35 @@ onMounted(async () => {
     if (!res.ok) throw new Error('دعوت‌نامه نامعتبر یا منقضی شده است.')
 
     const data = await res.json()
-    token.value = data.token
+    const contract = normalizeInvitationContract(data)
+    if (contract.state === 'completed') {
+      redirecting.value = true
+      await router.replace({ name: 'login', query: { registration: 'complete' } })
+      return
+    }
+    if (contract.state !== 'pending' || data.valid === false) {
+      throw new Error(invitationTerminalMessage(contract.state))
+    }
+    if (!contract.token) throw new Error('دعوت‌نامه نامعتبر یا منقضی شده است.')
 
-    const configRes = await fetch(`${apiBaseUrl}/api/config`)
-    const config = await configRes.json()
-    botLink.value = `https://t.me/${config.bot_username}?start=${token.value}`
+    token.value = contract.token
+    botAvailable.value = contract.botAvailable
+    webAvailable.value = contract.webAvailable
+    expiresAt.value = contract.expiresAt
+
+    if (botAvailable.value) {
+      try {
+        const configRes = await fetch(`${apiBaseUrl}/api/config`)
+        if (!configRes.ok) throw new Error('bot_config_unavailable')
+        const config = await configRes.json()
+        if (!config.bot_username) throw new Error('bot_config_unavailable')
+        botLink.value = `https://t.me/${config.bot_username}?start=${token.value}`
+      } catch {
+        botAvailable.value = false
+      }
+    }
   } catch (e: any) {
+    redirecting.value = false
     error.value = e.message
   } finally {
     loading.value = false
@@ -47,7 +76,7 @@ function goToWebRegister() {
       />
 
       <AppCard class="invite-card">
-        <AppLoadingState v-if="loading" label="در حال بررسی دعوت‌نامه" />
+        <AppLoadingState v-if="loading || redirecting" :label="redirecting ? 'در حال انتقال به ورود' : 'در حال بررسی دعوت‌نامه'" />
 
         <AppErrorState v-else-if="error" title="دعوت‌نامه قابل استفاده نیست" :message="error" />
 
@@ -55,20 +84,21 @@ function goToWebRegister() {
           <div class="invite-intro">
             <AppStatusBadge tone="success">دعوت‌نامه معتبر</AppStatusBadge>
             <p class="welcome-text">شما به سامانه معاملاتی دعوت شده‌اید.</p>
-            <p class="instruction">مسیر ثبت‌نام دلخواه را انتخاب کنید. ثبت‌نام با تلگرام سریع‌تر و روان‌تر است.</p>
+            <p class="instruction">یکی از مسیرهای فعال ثبت‌نام را انتخاب کنید.</p>
+            <p v-if="expiresAt" class="invitation-expiry">مهلت ثبت‌نام: {{ formatIranDateTime(expiresAt) }}</p>
           </div>
 
-          <a :href="botLink" class="invite-action telegram-btn">
+          <a v-if="botAvailable && botLink" :href="botLink" class="invite-action telegram-btn">
             <span class="invite-action-icon" aria-hidden="true">
               <Send :size="18" />
             </span>
             <span class="invite-action-copy">
               <strong>ثبت‌نام با تلگرام</strong>
-              <small>پیشنهاد شده برای شروع سریع</small>
+              <small>ورود مستقیم به ربات</small>
             </span>
           </a>
 
-          <AppButton variant="secondary" block @click="goToWebRegister">
+          <AppButton v-if="webAvailable" variant="secondary" block @click="goToWebRegister">
             <template #icon>
               <Globe2 :size="18" />
             </template>
@@ -114,6 +144,13 @@ function goToWebRegister() {
   margin: 0;
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-sm);
+  line-height: 1.8;
+}
+
+.invitation-expiry {
+  margin: 0;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
   line-height: 1.8;
 }
 

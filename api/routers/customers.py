@@ -32,7 +32,10 @@ from core.services.customer_relation_service import (
     unlink_owner_customer_relation,
     update_owner_customer_relation,
 )
-from core.services.invitation_sms_delivery_service import deliver_invitation_sms_once
+from core.services.invitation_sms_delivery_service import (
+    deliver_invitation_sms_once,
+    load_invitation_sms_status_map,
+)
 from core.invitation_contract_service import build_invitation_contract_v2
 from core.registration_contracts import InvitationSMSStatus
 from models.invitation import InvitationKind
@@ -64,19 +67,30 @@ def get_loaded_relation_customer_user(relation):
     return getattr(relation, "customer_user", None)
 
 
-def serialize_customer_relation(relation, invitation=None) -> dict:
+def serialize_customer_relation(
+    relation,
+    invitation=None,
+    *,
+    sms_status: InvitationSMSStatus | None = None,
+) -> dict:
     customer_user = get_loaded_relation_customer_user(relation)
+    relation_status = str(getattr(relation.status, "value", relation.status))
+    is_pending = relation_status == CustomerRelationStatus.PENDING.value
     contract = (
         build_invitation_contract_v2(
             invitation,
             bot_username=getattr(settings, "bot_username", None),
-            sms_status=InvitationSMSStatus.DISABLED,
+            sms_status=sms_status or InvitationSMSStatus.AMBIGUOUS,
             customer_tier=relation.customer_tier,
         )
         if invitation is not None
         else None
     )
-    web_link = contract.web_link if contract else build_customer_registration_link(relation.invitation_token)
+    web_link = (
+        (contract.web_link or None)
+        if contract is not None
+        else build_customer_registration_link(relation.invitation_token)
+    ) if is_pending else None
     return {
         "id": relation.id,
         "owner_user_id": relation.owner_user_id,
@@ -94,9 +108,10 @@ def serialize_customer_relation(relation, invitation=None) -> dict:
         "status": relation.status,
         "invitation_token": relation.invitation_token,
         "registration_link": web_link,
-        "bot_registration_link": contract.bot_link if contract else None,
+        "bot_registration_link": contract.bot_link if contract and is_pending else None,
         "web_registration_link": web_link,
-        "web_short_link": contract.web_short_link if contract else None,
+        "web_short_link": contract.web_short_link if contract and is_pending else None,
+        "sms_status": sms_status,
         "expires_at": relation.expires_at,
         "activated_at": relation.activated_at,
         "deleted_at": relation.deleted_at,
@@ -363,8 +378,20 @@ async def list_my_customers(
         db,
         [relation.invitation_token for relation in relations],
     )
+    sms_statuses = await load_invitation_sms_status_map(
+        db,
+        [invitation.id for invitation in invitation_map.values()],
+    )
     return [
-        serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
+        serialize_customer_relation(
+            relation,
+            invitation=invitation_map.get(relation.invitation_token),
+            sms_status=(
+                sms_statuses.get(invitation_map[relation.invitation_token].id)
+                if relation.invitation_token in invitation_map
+                else None
+            ),
+        )
         for relation in relations
     ]
 
@@ -418,8 +445,11 @@ async def create_my_customer(
         **audit_actor_context(context),
     )
 
-    response = serialize_customer_relation(relation, invitation=invitation)
-    response["sms_status"] = sms_status
+    response = serialize_customer_relation(
+        relation,
+        invitation=invitation,
+        sms_status=sms_status,
+    )
     return response
 
 

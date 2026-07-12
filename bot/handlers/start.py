@@ -18,7 +18,7 @@ import re
 from core.db import AsyncSessionLocal
 from core.config import settings
 from core.audit_logger import audit_log
-from core.public_webapp_url import public_webapp_url_for_links
+from core.public_webapp_url import public_webapp_url_for_links, user_facing_webapp_url
 from core.registration_contracts import (
     REGISTRATION_ADDRESS_MIN_LENGTH,
     REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE,
@@ -610,6 +610,10 @@ def build_webapp_link_line() -> str | None:
     return f"🌐 [ورود به وب اپ]({public_webapp_url_for_links()})"
 
 
+def _user_facing_webapp_url() -> str | None:
+    return user_facing_webapp_url(settings_obj=settings)
+
+
 def build_register_link_line(token: str) -> str | None:
     return f"🌐 [تکمیل ثبت‌نام در وب اپ]({public_webapp_url_for_links()}/register?token={token})"
 
@@ -632,7 +636,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         if user:
             anchor_msg = await message.answer(
                 await build_linked_account_panel_message(message.bot, user),
-                reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+                reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url()),
             )
             set_anchor(message.chat.id, anchor_msg.message_id)
             return
@@ -728,7 +732,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 return
         anchor_msg = await message.answer(
             "شما قبلاً ثبت‌نام کرده‌اید. برای دسترسی به پنل از دکمه زیر استفاده کنید.",
-            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
+            reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url())
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
@@ -904,11 +908,11 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
                 )
                 set_anchor(message.chat.id, anchor_msg.message_id)
                 return
-        logger.warning(f"DEBUG: Building keyboard with URL: '{settings.frontend_url}'")
+        logger.warning("DEBUG: Building persistent menu keyboard")
         
         anchor_msg = await message.answer(
             await build_linked_account_panel_message(message.bot, user),
-            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
+            reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url())
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
     else:

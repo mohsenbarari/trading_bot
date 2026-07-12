@@ -15,10 +15,11 @@ from api.routers.invitations import (
     lookup_invitation,
     validate_invitation,
 )
-from models.invitation import InvitationKind
+from models.invitation import InvitationCompletionSurface, InvitationKind
+from models.customer_relation import CustomerTier
 from models.user import UserRole
 from core.services.canonical_invitation_creation_service import CanonicalInvitationCreationError
-from core.registration_contracts import InvitationSMSStatus
+from core.registration_contracts import InvitationDerivedState, InvitationSMSStatus
 
 
 class FakeExecuteResult:
@@ -243,7 +244,14 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             completed_via=None,
             revoked_at=None,
         )
-        db = FakeDB([FakeExecuteResult([invitation])])
+        sms_delivery = SimpleNamespace(
+            invitation_id=7,
+            status=InvitationSMSStatus.DISABLED.value,
+        )
+        db = FakeDB([
+            FakeExecuteResult([invitation]),
+            FakeExecuteResult([sms_delivery]),
+        ])
 
         with patch.object(
             __import__("api.routers.invitations", fromlist=["settings"]).settings,
@@ -260,6 +268,11 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["account_name"], "user1")
         self.assertEqual(result[0]["web_link"], "https://frontend.test/register?token=INV-PENDING")
         self.assertEqual(result[0]["short_link"], "https://frontend.test/i/SHORT7")
+        self.assertIsNone(result[0]["bot_link"])
+        self.assertFalse(result[0]["bot_available"])
+        self.assertTrue(result[0]["web_available"])
+        self.assertEqual(result[0]["state"], InvitationDerivedState.PENDING)
+        self.assertEqual(result[0]["sms_status"], InvitationSMSStatus.DISABLED)
 
     async def test_delete_pending_invitation_soft_revokes_only_manageable_pending_general_invites(self):
         admin = SimpleNamespace(id=9, role=UserRole.MIDDLE_MANAGER)
@@ -443,6 +456,106 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
                 "role": UserRole.WATCH,
             },
         )
+
+    async def test_v2_public_contract_is_role_aware_and_masks_pending_identity(self):
+        pending = SimpleNamespace(
+            token="CUST-TIER1",
+            account_name="customer-one",
+            mobile_number="09121112233",
+            role=UserRole.STANDARD,
+            kind=InvitationKind.CUSTOMER,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+        )
+        relation = SimpleNamespace(customer_tier=CustomerTier.TIER_1)
+        with patch.object(
+            __import__("api.routers.invitations", fromlist=["settings"]).settings,
+            "invitation_contract_v2_enabled",
+            True,
+        ), patch(
+            "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=relation),
+        ):
+            result = await validate_invitation(
+                pending.token,
+                db=FakeDB([FakeExecuteResult(pending)]),
+            )
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["state"], "pending")
+        self.assertTrue(result["bot_available"])
+        self.assertTrue(result["web_available"])
+        self.assertEqual(result["mobile_number"], "0912****233")
+        self.assertNotIn("09121112233", str(result))
+
+    async def test_v2_completed_invitation_routes_without_identity_or_registration_surface(self):
+        completed = SimpleNamespace(
+            token="INV-COMPLETED",
+            account_name="completed-user",
+            mobile_number="09121112233",
+            role=UserRole.STANDARD,
+            kind=InvitationKind.STANDARD,
+            is_used=True,
+            registered_user_id=41,
+            completed_at=datetime.utcnow(),
+            completed_via=InvitationCompletionSurface.TELEGRAM,
+            revoked_at=None,
+            expires_at=datetime.utcnow() - timedelta(minutes=5),
+        )
+        with patch.object(
+            __import__("api.routers.invitations", fromlist=["settings"]).settings,
+            "invitation_contract_v2_enabled",
+            True,
+        ):
+            lookup = await lookup_invitation(
+                "SHORT-COMPLETED",
+                db=FakeDB([FakeExecuteResult(completed)]),
+            )
+            validation = await validate_invitation(
+                completed.token,
+                db=FakeDB([FakeExecuteResult(completed)]),
+            )
+
+        for result in (lookup, validation):
+            self.assertFalse(result["valid"])
+            self.assertEqual(result["state"], "completed")
+            self.assertFalse(result["bot_available"])
+            self.assertFalse(result["web_available"])
+            self.assertIsNone(result["token"])
+            self.assertIsNone(result["account_name"])
+            self.assertIsNone(result["mobile_number"])
+
+    async def test_v2_expired_invitation_returns_safe_terminal_state(self):
+        expired = SimpleNamespace(
+            token="INV-EXPIRED",
+            account_name="expired-user",
+            mobile_number="09121112233",
+            role=UserRole.STANDARD,
+            kind=InvitationKind.STANDARD,
+            is_used=False,
+            registered_user_id=None,
+            completed_at=None,
+            completed_via=None,
+            revoked_at=None,
+            expires_at=datetime.utcnow() - timedelta(minutes=1),
+        )
+        with patch.object(
+            __import__("api.routers.invitations", fromlist=["settings"]).settings,
+            "invitation_contract_v2_enabled",
+            True,
+        ):
+            result = await lookup_invitation(
+                "SHORT-EXPIRED",
+                db=FakeDB([FakeExecuteResult(expired)]),
+            )
+
+        self.assertEqual(result["state"], "expired")
+        self.assertFalse(result["valid"])
+        self.assertIsNone(result["token"])
 
 
 if __name__ == "__main__":

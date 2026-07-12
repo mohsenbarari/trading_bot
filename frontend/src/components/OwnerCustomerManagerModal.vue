@@ -24,6 +24,7 @@ import {
   type RelationStatus,
 } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
+import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import HelpPopover from './HelpPopover.vue'
 
@@ -62,6 +63,7 @@ const notice = ref('')
 const detailSaveNotice = ref('')
 const viewportToast = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 const copiedRelationId = ref<number | null>(null)
+const copiedInvitationSurface = ref<'bot' | 'web' | null>(null)
 const openSessionsRelationId = ref<number | null>(null)
 const sessionsByRelationId = ref<Record<number, CustomerSessionSummary[]>>({})
 const tradesByRelationId = ref<Record<number, CustomerTradeSummary[]>>({})
@@ -536,7 +538,7 @@ async function createRelation() {
     })
     relations.value = [created, ...relations.value.filter((item) => item.id !== created.id)]
     resetCreateForm()
-    notice.value = 'دعوت مشتری ثبت شد.'
+    notice.value = invitationSmsStatusMessage(created.sms_status) || 'دعوت مشتری ثبت شد.'
     openSections.relations = true
   } catch (err: any) {
     error.value = err?.message || 'ایجاد مشتری ناموفق بود.'
@@ -630,14 +632,17 @@ async function unlinkRelation(relation: CustomerRelation) {
   }
 }
 
-async function copyRegistrationLink(relation: CustomerRelation) {
-  if (!relation.registration_link) return
+async function copyRegistrationLink(relation: CustomerRelation, surface: 'bot' | 'web' = 'web') {
+  const link = invitationRelationLink(relation, surface)
+  if (!link) return
   try {
-    await navigator.clipboard.writeText(relation.registration_link)
+    await navigator.clipboard.writeText(link)
     copiedRelationId.value = relation.id
+    copiedInvitationSurface.value = surface
     window.setTimeout(() => {
-      if (copiedRelationId.value === relation.id) {
+      if (copiedRelationId.value === relation.id && copiedInvitationSurface.value === surface) {
         copiedRelationId.value = null
+        copiedInvitationSurface.value = null
       }
     }, 1800)
   } catch {
@@ -1214,10 +1219,14 @@ onBeforeUnmount(() => {
                     <div class="pending-invitation-main">
                       <strong><CustomerNameWithBadge :name="relation.management_name" compact /></strong>
                       <p>{{ getRelationStateText(relation) }}</p>
+                      <p v-if="invitationSmsStatusMessage(relation.sms_status)">{{ invitationSmsStatusMessage(relation.sms_status) }}</p>
                     </div>
                     <div class="pending-invitation-actions">
-                      <button v-if="relation.registration_link" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation)">
-                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                      <button v-if="invitationRelationLink(relation, 'bot')" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation, 'bot')">
+                        {{ copiedRelationId === relation.id && copiedInvitationSurface === 'bot' ? 'کپی شد' : 'کپی لینک تلگرام' }}
+                      </button>
+                      <button v-if="invitationRelationLink(relation, 'web')" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation, 'web')">
+                        {{ copiedRelationId === relation.id && copiedInvitationSurface === 'web' ? 'کپی شد' : 'کپی لینک وب' }}
                       </button>
                       <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
                         منقضی کردن دعوت

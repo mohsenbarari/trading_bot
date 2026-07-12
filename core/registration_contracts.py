@@ -195,6 +195,23 @@ class InvitationContractV2(BaseModel):
     short_link: str | None = None
 
 
+class PublicInvitationContractV2(BaseModel):
+    """PII-bounded invitation state for public Web entry surfaces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str | None = None
+    valid: bool
+    account_name: str | None = None
+    mobile_number: str | None = None
+    role: str | None = None
+    bot_available: bool
+    web_available: bool
+    state: InvitationDerivedState
+    kind: str
+    expires_at: datetime
+
+
 class OTPDeliveryStateContract(BaseModel):
     """Structured state referencing, but never duplicating, `otp:{mobile}`."""
 

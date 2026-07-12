@@ -132,4 +132,36 @@ describe('WebRegister.vue', () => {
     expect(localStorage.getItem('auth_token')).toBe('access-2')
     expect(localStorage.getItem('refresh_token')).toBe('refresh-2')
   })
+
+  it('routes a Telegram-completed invitation to OTP login before rendering a duplicate form', async () => {
+    webRegisterMocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      valid: false,
+      state: 'completed',
+      bot_available: false,
+      web_available: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const wrapper = mount(WebRegister)
+    await flushPromises()
+
+    expect(webRegisterMocks.replace).toHaveBeenCalledWith({ name: 'login', query: { registration: 'complete' } })
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.find('textarea.address-input').exists()).toBe(false)
+  })
+
+  it('rejects a pending contract when Web registration is unavailable', async () => {
+    webRegisterMocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      token: 'telegram-only',
+      valid: true,
+      state: 'pending',
+      bot_available: true,
+      web_available: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const wrapper = mount(WebRegister)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دعوت‌نامه نامعتبر یا منقضی شده است.')
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
 })

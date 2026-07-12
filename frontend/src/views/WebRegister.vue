@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import { AppButton, AppCard, AppErrorState, AppFormField, AppInput, AppLoadingState, AppPage, AppPageHeader, AppTextarea } from '../components/ui'
+import { invitationTerminalMessage, normalizeInvitationContract } from '../utils/invitationContract'
+import { formatIranDateTime } from '../utils/iranTime'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +13,7 @@ const registrationToken = route.query.registration_token as string | undefined
 
 const step = ref(1)
 const loading = ref(true)
+const redirecting = ref(false)
 const error = ref('')
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -20,6 +23,10 @@ const address = ref('')
 const canConnectTelegram = ref(false)
 const telegramLinkBusy = ref(false)
 const telegramLinkError = ref('')
+const inviteExpiry = computed(() => {
+  const value = inviteInfo.value?.expires_at
+  return value ? formatIranDateTime(value) : ''
+})
 
 const stepTitle = computed(() => {
   if (step.value === 1) return 'بررسی دعوت‌نامه'
@@ -45,8 +52,19 @@ onMounted(async () => {
 
     const res = await fetch(`${apiBaseUrl}/api/invitations/validate/${token}`)
     if (!res.ok) throw new Error('دعوت‌نامه نامعتبر است.')
-    inviteInfo.value = await res.json()
+    const data = await res.json()
+    const contract = normalizeInvitationContract(data)
+    if (contract.state === 'completed') {
+      redirecting.value = true
+      await router.replace({ name: 'login', query: { registration: 'complete' } })
+      return
+    }
+    if (contract.state !== 'pending' || data.valid === false || !contract.webAvailable) {
+      throw new Error(invitationTerminalMessage(contract.state))
+    }
+    inviteInfo.value = data
   } catch (e: any) {
+    redirecting.value = false
     error.value = e.message
   } finally {
     loading.value = false
@@ -166,7 +184,7 @@ function skipTelegramConnect() {
       />
 
       <AppCard class="register-card">
-        <AppLoadingState v-if="loading && !inviteInfo" label="در حال بررسی دعوت‌نامه" />
+        <AppLoadingState v-if="redirecting || (loading && !inviteInfo)" :label="redirecting ? 'در حال انتقال به ورود' : 'در حال بررسی دعوت‌نامه'" />
 
         <AppErrorState v-else-if="error" title="ثبت‌نام ادامه پیدا نکرد" :message="error">
           <template v-if="step > 1" #actions>
@@ -179,6 +197,7 @@ function skipTelegramConnect() {
             <p class="info-row"><span>نام کاربری:</span> <strong>{{ inviteInfo.account_name }}</strong></p>
             <p class="info-row"><span>موبایل:</span> <strong>{{ inviteInfo.mobile_number }}</strong></p>
             <p class="info-row"><span>نقش:</span> <strong>{{ inviteInfo.role }}</strong></p>
+            <p v-if="inviteExpiry" class="info-row"><span>مهلت ثبت‌نام:</span> <strong>{{ inviteExpiry }}</strong></p>
           </div>
 
           <p class="hint">برای احراز هویت، یک کد تایید به شماره موبایل شما ارسال می‌شود.</p>
@@ -209,6 +228,7 @@ function skipTelegramConnect() {
             <p class="info-row"><span>نام کاربری:</span> <strong>{{ inviteInfo.account_name }}</strong></p>
             <p class="info-row"><span>موبایل:</span> <strong>{{ inviteInfo.mobile_number }}</strong></p>
             <p class="info-row"><span>نقش:</span> <strong>{{ inviteInfo.role }}</strong></p>
+            <p v-if="inviteExpiry" class="info-row"><span>مهلت ثبت‌نام:</span> <strong>{{ inviteExpiry }}</strong></p>
           </div>
 
           <AppFormField label="آدرس دقیق پستی:" hint="استان، شهر، خیابان، پلاک و هر توضیح لازم را کامل وارد کنید.">

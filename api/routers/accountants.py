@@ -18,11 +18,15 @@ from core.services.accountant_relation_service import (
     unlink_owner_accountant_relation,
     update_owner_accountant_relation,
 )
-from core.services.invitation_sms_delivery_service import deliver_invitation_sms_once
+from core.services.invitation_sms_delivery_service import (
+    deliver_invitation_sms_once,
+    load_invitation_sms_status_map,
+)
 from core.services.customer_relation_service import is_user_customer
 from core.services.session_service import get_active_sessions, logout_session
 from core.sms import send_accountant_invitation_sms_result
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.invitation import Invitation
 from models.session import UserSession
 from models.user import User
 
@@ -34,7 +38,17 @@ def build_accountant_registration_link(invitation_token: str) -> str | None:
     return f"{public_webapp_url_for_links()}/register?token={invitation_token}"
 
 
-def serialize_accountant_relation(relation) -> dict:
+def serialize_accountant_relation(
+    relation,
+    *,
+    sms_status=None,
+) -> dict:
+    relation_status = str(getattr(relation.status, "value", relation.status))
+    web_link = (
+        build_accountant_registration_link(relation.invitation_token)
+        if relation_status == AccountantRelationStatus.PENDING.value
+        else None
+    )
     return {
         "id": relation.id,
         "owner_user_id": relation.owner_user_id,
@@ -46,9 +60,10 @@ def serialize_accountant_relation(relation) -> dict:
         "mobile_number": relation.mobile_number,
         "status": relation.status,
         "invitation_token": relation.invitation_token,
-        "registration_link": build_accountant_registration_link(relation.invitation_token),
+        "registration_link": web_link,
         "bot_registration_link": None,
-        "web_registration_link": build_accountant_registration_link(relation.invitation_token),
+        "web_registration_link": web_link,
+        "sms_status": sms_status,
         "expires_at": relation.expires_at,
         "activated_at": relation.activated_at,
         "deleted_at": relation.deleted_at,
@@ -139,7 +154,28 @@ async def list_my_accountants(
 ):
     await ensure_owner_context(context, db)
     relations = await list_owner_accountant_relations(db, owner_user_id=context.owner_user.id)
-    return [serialize_accountant_relation(relation) for relation in relations]
+    tokens = [relation.invitation_token for relation in relations if relation.invitation_token]
+    invitations = list(
+        (
+            await db.execute(select(Invitation).where(Invitation.token.in_(tokens)))
+        ).scalars().all()
+    ) if tokens else []
+    invitation_map = {invitation.token: invitation for invitation in invitations}
+    sms_statuses = await load_invitation_sms_status_map(
+        db,
+        [invitation.id for invitation in invitations],
+    )
+    return [
+        serialize_accountant_relation(
+            relation,
+            sms_status=(
+                sms_statuses.get(invitation_map[relation.invitation_token].id)
+                if relation.invitation_token in invitation_map
+                else None
+            ),
+        )
+        for relation in relations
+    ]
 
 
 @router.post("/owner-relations", response_model=schemas.AccountantRelationRead)
@@ -185,8 +221,10 @@ async def create_my_accountant(
         **audit_actor_context(context),
     )
 
-    response = serialize_accountant_relation(relation)
-    response["sms_status"] = sms_status
+    response = serialize_accountant_relation(
+        relation,
+        sms_status=sms_status,
+    )
     return response
 
 

@@ -12,6 +12,7 @@ from api.routers.accountants import (
     create_my_accountant,
     list_my_accountant_sessions,
     list_my_accountants,
+    serialize_accountant_relation,
     terminate_my_accountant_session,
     update_my_accountant,
 )
@@ -35,8 +36,37 @@ class FakeExecuteResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._value
+
 
 class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
+    def test_active_accountant_relation_does_not_expose_a_dead_registration_link(self):
+        relation = SimpleNamespace(
+            id=1,
+            owner_user_id=7,
+            accountant_user_id=8,
+            accountant_user=None,
+            global_account_name="accountant",
+            relation_display_name="حسابدار",
+            duty_description=None,
+            mobile_number="09120000000",
+            status=AccountantRelationStatus.ACTIVE,
+            invitation_token="ACCT-completed",
+            expires_at=None,
+            activated_at=None,
+            deleted_at=None,
+            created_at=None,
+        )
+
+        result = serialize_accountant_relation(relation)
+
+        self.assertIsNone(result["registration_link"])
+        self.assertIsNone(result["web_registration_link"])
+
     async def test_owner_routes_reject_accountant_context(self):
         context = SimpleNamespace(is_accountant_context=True, owner_user=SimpleNamespace(id=7))
         payload = schemas.AccountantRelationCreate(
@@ -87,10 +117,11 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             mobile_number="09120000000",
             duty_description="پیگیری",
         )
+        invitation = SimpleNamespace(id=99, token="ACCT-token")
 
         with patch(
             "api.routers.accountants.create_or_reuse_owner_accountant_relation",
-            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=SimpleNamespace(id=99), created=True)),
+            new=AsyncMock(return_value=SimpleNamespace(relation=relation, invitation=invitation, created=True)),
         ) as create_mock, patch(
             "api.routers.accountants.send_accountant_invitation_sms_result"
         ) as sms_mock, patch(
@@ -116,11 +147,18 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.accountants.public_webapp_url_for_links",
             return_value="https://app.example",
+        ), patch(
+            "api.routers.accountants.load_invitation_sms_status_map",
+            new=AsyncMock(return_value={99: InvitationSMSStatus.ACCEPTED}),
         ):
-            listed = await list_my_accountants(context=context, db=FakeDB())
+            listed = await list_my_accountants(
+                context=context,
+                db=FakeDB([FakeExecuteResult([invitation])]),
+            )
 
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=ACCT-token")
+        self.assertEqual(listed[0]["sms_status"], InvitationSMSStatus.ACCEPTED)
 
     async def test_create_owner_accountant_fails_closed_when_public_webapp_url_is_invalid(self):
         relation = SimpleNamespace(
@@ -189,7 +227,8 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             result = await cancel_my_pending_accountant(9, context=context, db=FakeDB())
 
         self.assertEqual(result["id"], 9)
-        self.assertEqual(result["registration_link"], "https://app.example/register?token=ACCT-token")
+        self.assertIsNone(result["registration_link"])
+        self.assertIsNone(result["web_registration_link"])
 
     async def test_cancel_owner_active_accountant_uses_unlink_service(self):
         relation = SimpleNamespace(

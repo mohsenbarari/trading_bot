@@ -104,7 +104,7 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.text()).toContain('❌ شماره موبایل نامعتبر است.')
   })
 
-  it('normalizes Persian digits, creates the invite, and derives a local web link from short_link', async () => {
+  it('normalizes Persian digits and preserves the canonical Web link from the contract', async () => {
     createInvitationMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         link: 'https://t.me/mbmtrading1_bot?start=invite-token',
@@ -137,7 +137,54 @@ describe('CreateInvitationView.vue', () => {
     expect(textInputs[0]!.classes()).toContain('ui-input')
     expect(textInputs[1]!.classes()).toContain('ui-input')
     expect((textInputs[0]!.element as HTMLInputElement).value).toBe('https://t.me/mbmtrading1_bot?start=invite-token')
-    expect((textInputs[1]!.element as HTMLInputElement).value).toBe(`${window.location.origin}/invite/abc?foo=1`)
+    expect((textInputs[1]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/invite/abc?foo=1')
+  })
+
+  it('prefers explicit v2 links, accepts a Web-only success, and renders the SMS outcome', async () => {
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        bot_link: null,
+        web_short_link: 'https://coin.gold-trade.ir/i/V2-CODE',
+        bot_available: false,
+        web_available: true,
+        state: 'pending',
+        sms_status: 'disabled',
+        link: 'https://t.me/legacy_bot?start=must-not-render',
+        short_link: 'https://foreign.example/i/must-not-render',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.find('.success-box').exists()).toBe(true)
+    expect(wrapper.find('.telegram-btn').exists()).toBe(false)
+    expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد؛ لینک را دستی ارسال کنید.')
+    const inputs = wrapper.findAll('.success-box input[readonly]')
+    expect(inputs).toHaveLength(1)
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('https://coin.gold-trade.ir/i/V2-CODE')
+    expect(wrapper.text()).not.toContain('foreign.example')
+  })
+
+  it('fails closed when a successful response contains no usable registration link', async () => {
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        state: 'pending',
+        bot_available: false,
+        web_available: false,
+        sms_status: 'disabled',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.find('.success-box').exists()).toBe(false)
+    expect(wrapper.text()).toContain('لینک قابل استفاده‌ای برای این دعوت‌نامه آماده نشد.')
   })
 
   it('renders backend error details with strong markup when invite creation is rejected', async () => {
@@ -242,7 +289,7 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('.copy-btn.web').trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/invite/route-token`)
+    expect(writeText).toHaveBeenNthCalledWith(1, 'https://coin.gold-trade.ir/invite/route-token')
     expect(wrapper.get('.copy-btn.web').text()).toBe('کپی شد!')
 
     await vi.advanceTimersByTimeAsync(2000)
@@ -251,7 +298,7 @@ describe('CreateInvitationView.vue', () => {
     await wrapper.get('.copy-btn.web').trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/invite/route-token`)
+    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/invite/route-token')
     expect(wrapper.get('.copy-btn.web').text()).toBe('خطا')
 
     await vi.advanceTimersByTimeAsync(2000)
@@ -315,7 +362,7 @@ describe('CreateInvitationView.vue', () => {
     const pendingInputWrapper = wrapper.get('.pending-link-row input[readonly]')
     expect(pendingInputWrapper.classes()).toContain('ui-input')
     const pendingInput = pendingInputWrapper.element as HTMLInputElement
-    expect(pendingInput.value).toBe(`${window.location.origin}/register?token=INV-PENDING`)
+    expect(pendingInput.value).toBe('https://coin.gold-trade.ir/i/SHORT12')
   })
 
   it('deletes a pending invitation after confirmation and removes it from the list', async () => {
