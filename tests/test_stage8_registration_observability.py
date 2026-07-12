@@ -1,6 +1,7 @@
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -12,9 +13,11 @@ from core.log_redaction import REDACTED, redact
 from core.metrics import metrics_response_body, record_registration_job_health, registry
 from core.registration_observability import (
     JOB_HEARTBEAT_MAX_AGE_SECONDS,
+    JOB_HEARTBEAT_MAX_FUTURE_SKEW_SECONDS,
     OTP_FALLBACK_MAX_LAG_SECONDS,
     REGISTRATION_PENDING_MAX_AGE_SECONDS,
     dual_platform_registration_health,
+    load_registration_job_snapshot,
     record_registration_job_snapshot,
     refresh_registration_job_metrics,
     registration_health_log_fields,
@@ -76,21 +79,15 @@ def settings_for(server_mode):
 
 
 class Stage8QueueSummaryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_registration_summary_is_bounded_and_outage_aware(self):
+    async def test_registration_summary_is_bounded_and_identity_free(self):
         oldest = NOW - timedelta(minutes=7)
-        healthy = await summarize_registration_intent_queue(
-            FakeDB((3, oldest, 0)),
-            now=NOW,
-        )
-        outage = await summarize_registration_intent_queue(
-            FakeDB((2, oldest, 1)),
+        summary = await summarize_registration_intent_queue(
+            FakeDB((3, oldest)),
             now=NOW,
         )
 
-        self.assertEqual(healthy.pending_count, 3)
-        self.assertEqual(healthy.oldest_pending_age_seconds, 420)
-        self.assertTrue(healthy.connectivity_healthy)
-        self.assertFalse(outage.connectivity_healthy)
+        self.assertEqual(summary.pending_count, 3)
+        self.assertEqual(summary.oldest_pending_age_seconds, 420)
 
     async def test_otp_summary_uses_only_sorted_set_count_and_oldest_score(self):
         redis = FakeRedis()
@@ -261,6 +258,81 @@ class Stage8SnapshotTests(unittest.IsolatedAsyncioTestCase):
             "missing",
         )
 
+    async def test_nested_snapshot_values_cannot_break_health_metrics_or_self_heal(self):
+        redis = FakeRedis()
+        key = "observability:registration_job:telegram_registration_reconciliation"
+        for malformed in ([], {}, ["success"], {"result": "success"}, True):
+            with self.subTest(malformed=malformed):
+                redis.values[key] = json.dumps({
+                    "job_name": JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+                    "server_mode": "foreign",
+                    "heartbeat_at": NOW.isoformat(),
+                    "last_result": malformed,
+                    "last_error_code": malformed,
+                    "pending_count": malformed,
+                    "oldest_pending_age_seconds": malformed,
+                    "batch_size": malformed,
+                    "batch_duration_ms": malformed,
+                    "connectivity_healthy": malformed,
+                    "lag_seconds": malformed,
+                })
+
+                snapshot = await load_registration_job_snapshot(
+                    redis,
+                    job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+                )
+                self.assertIsNotNone(snapshot)
+                self.assertIsNone(snapshot["last_result"])
+                health = await dual_platform_registration_health(
+                    redis,
+                    settings_obj=settings_for("foreign"),
+                    now=NOW,
+                )
+                self.assertEqual(
+                    health["jobs"][JOB_TELEGRAM_REGISTRATION_RECONCILIATION]["status"],
+                    "healthy",
+                )
+                await refresh_registration_job_metrics(redis)
+
+        healed = await record_registration_job_snapshot(
+            redis,
+            job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+            server_mode="foreign",
+            result="success",
+            pending_count=0,
+            oldest_pending_age_seconds=0,
+            batch_size=0,
+            batch_duration_ms=1,
+            observed_at=NOW,
+        )
+        self.assertEqual(healed["last_result"], "success")
+        self.assertEqual(json.loads(redis.values[key])["last_result"], "success")
+
+    async def test_future_heartbeat_beyond_clock_tolerance_is_stale(self):
+        redis = FakeRedis()
+        await record_registration_job_snapshot(
+            redis,
+            job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+            server_mode="foreign",
+            result="success",
+            pending_count=0,
+            oldest_pending_age_seconds=0,
+            batch_size=0,
+            batch_duration_ms=1,
+            observed_at=NOW + timedelta(seconds=JOB_HEARTBEAT_MAX_FUTURE_SKEW_SECONDS + 1),
+        )
+
+        health = await dual_platform_registration_health(
+            redis,
+            settings_obj=settings_for("foreign"),
+            now=NOW,
+        )
+
+        self.assertEqual(
+            health["jobs"][JOB_TELEGRAM_REGISTRATION_RECONCILIATION]["status"],
+            "stale",
+        )
+
     async def test_metrics_have_only_bounded_job_and_server_labels(self):
         redis = FakeRedis()
         await record_registration_job_snapshot(
@@ -328,6 +400,10 @@ class Stage8SnapshotTests(unittest.IsolatedAsyncioTestCase):
 
         fields = registration_health_log_fields(health)
         redacted = redact(fields)
+
+        self.assertEqual(fields["registration_job_heartbeat_unhealthy"], 0)
+        self.assertEqual(fields["registration_job_pending_healthy_age_seconds"], 0)
+        self.assertEqual(fields["login_sms_fallback_job_heartbeat_unhealthy"], 1)
 
         self.assertNotIn("otp", " ".join(fields).lower())
         self.assertEqual(redacted, fields)
@@ -398,6 +474,43 @@ class Stage8AlertTests(unittest.TestCase):
             "telegram_registration_reconciliation:oldest_pending_age_seconds",
             {item["metric"] for item in alerts},
         )
+
+    def test_loki_registration_rules_use_latest_sample_and_fail_closed_heartbeats(self):
+        rules = Path(
+            "observability/grafana/provisioning/alerting/rules.yml"
+        ).read_text(encoding="utf-8")
+        registration_heartbeat = rules.split(
+            "uid: trading-bot-registration-job-heartbeat-stale",
+            1,
+        )[1].split("uid: trading-bot-registration-pending-healthy", 1)[0]
+        registration_pending = rules.split(
+            "uid: trading-bot-registration-pending-healthy",
+            1,
+        )[1].split("uid: trading-bot-login-sms-fallback-heartbeat-stale", 1)[0]
+        otp_heartbeat = rules.split(
+            "uid: trading-bot-login-sms-fallback-heartbeat-stale",
+            1,
+        )[1].split("uid: trading-bot-login-sms-fallback-lag-high", 1)[0]
+        otp_lag = rules.split(
+            "uid: trading-bot-login-sms-fallback-lag-high",
+            1,
+        )[1]
+
+        self.assertIn("last_over_time", registration_heartbeat)
+        self.assertIn('| server_mode="foreign"', registration_heartbeat)
+        self.assertIn("registration_job_heartbeat_unhealthy", registration_heartbeat)
+        self.assertIn("noDataState: Alerting", registration_heartbeat)
+        self.assertIn("last_over_time", registration_pending)
+        self.assertIn('| server_mode="foreign"', registration_pending)
+        self.assertIn("registration_job_pending_healthy_age_seconds", registration_pending)
+        self.assertNotIn("max_over_time", registration_pending)
+        self.assertIn("last_over_time", otp_heartbeat)
+        self.assertIn('| server_mode="iran"', otp_heartbeat)
+        self.assertIn("login_sms_fallback_job_heartbeat_unhealthy", otp_heartbeat)
+        self.assertIn("noDataState: Alerting", otp_heartbeat)
+        self.assertIn("last_over_time", otp_lag)
+        self.assertIn('| server_mode="iran"', otp_lag)
+        self.assertNotIn("max_over_time", otp_lag)
 
 
 class Stage8AuditVocabularyTests(unittest.TestCase):

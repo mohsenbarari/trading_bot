@@ -52,9 +52,10 @@ is intentionally outside this registration stage and is called out for independe
 ### Queue summaries
 
 The foreign reconciliation summary performs one aggregate PostgreSQL query over nonterminal intent
-statuses. It returns count, minimum `created_at`, and whether any current item carries the existing
-bounded `transport_or_server_outage` classification. It never loads command payloads or identity
-fields.
+statuses. It returns count and minimum `created_at`; it never loads command payloads or identity
+fields. Connectivity health comes from the current reconciliation cycle's transport responses and
+retains the previous observation only when no transport attempt occurs. Historical row error codes
+therefore cannot suppress the healthy-connectivity pending alert after a successful peer response.
 
 The Iran OTP summary reads only `ZCARD` and the oldest score from the existing fallback due sorted
 set. It does not load OTP state, mobile ciphertext, Telegram identity, or code. Lag is the positive

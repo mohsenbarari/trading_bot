@@ -82,6 +82,7 @@ from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
 from core.services.otp_delivery_state_service import (
     OTP_CODE_TTL_SECONDS,
+    OTP_DELIVERY_STATE_DECODE_ERRORS,
     OTP_SMS_FALLBACK_SECONDS,
     arm_sms_fallback,
     build_otp_delivery_state,
@@ -125,6 +126,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 OTP_TTL_SECONDS = OTP_CODE_TTL_SECONDS
+LEGACY_OTP_MANUAL_SMS_RESEND_SECONDS = 30
 OTP_VERIFY_FAILURE_TTL_SECONDS = OTP_TTL_SECONDS
 OTP_VERIFY_LOCK_SECONDS = 300
 OTP_VERIFY_SUBJECT_MAX_FAILURES = 5
@@ -1239,6 +1241,52 @@ def _otp_timing_payload(state, *, method: str | None) -> dict:
     return payload
 
 
+def _legacy_otp_timing_payload(*, remaining_seconds: int) -> dict:
+    now = utc_now()
+    remaining = max(0, int(remaining_seconds))
+    expires_at = now + timedelta(seconds=remaining)
+    elapsed = max(0, OTP_TTL_SECONDS - remaining)
+    resend_in = max(0, LEGACY_OTP_MANUAL_SMS_RESEND_SECONDS - elapsed)
+    return {
+        "delivery_contract": "legacy",
+        "manual_sms_resend": True,
+        "legacy_sms_resend_at": (now + timedelta(seconds=resend_in)).isoformat(),
+        "expires_in": remaining,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+async def _load_otp_delivery_state_for_verification(
+    redis,
+    *,
+    request_id: uuid.UUID | None = None,
+    mobile: str | None = None,
+):
+    try:
+        return await load_otp_delivery_state(
+            redis,
+            request_id=request_id,
+            mobile=mobile,
+        )
+    except OTP_DELIVERY_STATE_DECODE_ERRORS:
+        target_id = str(request_id) if request_id is not None else None
+        logger.warning(
+            "Malformed OTP delivery state rejected during verification",
+            extra={
+                "event": "otp.delivery_state_invalid",
+                "otp_request_id": target_id,
+            },
+        )
+        audit_log(
+            "otp.delivery_state_invalid",
+            target_type="otp_request",
+            target_id=target_id,
+            result="denied",
+            reason="invalid_delivery_state",
+        )
+        return None
+
+
 async def _request_stage6_login_otp(
     redis,
     *,
@@ -1457,7 +1505,6 @@ async def request_otp(
         remaining = int(await redis.ttl(otp_key) or 0)
         if active_code is None or remaining <= 0:
             return None
-        expires_at = utc_now() + timedelta(seconds=remaining)
         return JSONResponse(
             status_code=429,
             content={
@@ -1466,9 +1513,7 @@ async def request_otp(
                     f"لطفاً {remaining} ثانیه صبر کنید."
                 ),
                 "code": "otp_active",
-                "delivery_contract": "legacy",
-                "expires_in": remaining,
-                "expires_at": expires_at.isoformat(),
+                **_legacy_otp_timing_payload(remaining_seconds=remaining),
             },
             headers={"Cache-Control": "no-store"},
         )
@@ -1650,7 +1695,7 @@ async def verify_otp(
     redis = await get_redis()
     delivery_state = None
     if settings.telegram_login_otp_enabled and request.otp_request_id is not None:
-        delivery_state = await load_otp_delivery_state(
+        delivery_state = await _load_otp_delivery_state_for_verification(
             redis,
             request_id=request.otp_request_id,
         )
@@ -1693,7 +1738,10 @@ async def verify_otp(
 
     if settings.telegram_login_otp_enabled:
         if delivery_state is None:
-            delivery_state = await load_otp_delivery_state(redis, mobile=mobile)
+            delivery_state = await _load_otp_delivery_state_for_verification(
+                redis,
+                mobile=mobile,
+            )
         if not await consume_otp_code(
             redis,
             mobile=mobile,

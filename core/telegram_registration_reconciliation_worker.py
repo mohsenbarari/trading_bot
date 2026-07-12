@@ -68,6 +68,7 @@ _PERSISTENT_RETRY_ERRORS = frozenset(
 class TelegramRegistrationReconciliationCycleReport:
     claimed_count: int
     status_counts: dict[str, int]
+    transport_connectivity_healthy: bool | None
 
 
 def _batch_size(limit: int | None = None) -> int:
@@ -142,8 +143,11 @@ async def _process_attempt(
     *,
     sync_wait_seconds: float,
     sync_poll_seconds: float,
+    transport_observations: list[bool] | None = None,
 ) -> str:
     status_code, body = await forward_telegram_registration_command(attempt.command)
+    if transport_observations is not None:
+        transport_observations.append(status_code < 500)
     try:
         response = TelegramRegistrationCommandResponse.model_validate(body)
     except (TypeError, ValueError):
@@ -238,6 +242,7 @@ async def run_telegram_registration_reconciliation_cycle(
         await db.commit()
 
     semaphore = asyncio.Semaphore(_concurrency())
+    transport_observations: list[bool] = []
 
     async def process(attempt: TelegramRegistrationIntentAttempt) -> str:
         async with semaphore:
@@ -246,6 +251,7 @@ async def run_telegram_registration_reconciliation_cycle(
                     attempt,
                     sync_wait_seconds=sync_wait_seconds,
                     sync_poll_seconds=sync_poll_seconds,
+                    transport_observations=transport_observations,
                 )
             except asyncio.CancelledError:
                 raise
@@ -268,7 +274,19 @@ async def run_telegram_registration_reconciliation_cycle(
     return TelegramRegistrationReconciliationCycleReport(
         claimed_count=len(attempts),
         status_counts=status_counts,
+        transport_connectivity_healthy=(
+            any(transport_observations) if transport_observations else None
+        ),
     )
+
+
+def _snapshot_connectivity_health(
+    report: TelegramRegistrationReconciliationCycleReport,
+    previous: dict[str, object],
+) -> bool:
+    if report.transport_connectivity_healthy is not None:
+        return report.transport_connectivity_healthy
+    return bool(previous.get("connectivity_healthy", True))
 
 
 async def telegram_registration_reconciliation_loop() -> None:
@@ -294,6 +312,10 @@ async def telegram_registration_reconciliation_loop() -> None:
                 async with AsyncSessionLocal() as db:
                     queue = await summarize_registration_intent_queue(db)
                 redis = get_redis_client()
+                previous = await load_registration_job_snapshot(
+                    redis,
+                    job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+                ) or {}
                 await record_registration_job_snapshot(
                     redis,
                     job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
@@ -303,7 +325,7 @@ async def telegram_registration_reconciliation_loop() -> None:
                     oldest_pending_age_seconds=queue.oldest_pending_age_seconds,
                     batch_size=report.claimed_count,
                     batch_duration_ms=duration_ms,
-                    connectivity_healthy=queue.connectivity_healthy,
+                    connectivity_healthy=_snapshot_connectivity_health(report, previous),
                 )
                 for status, count in report.status_counts.items():
                     record_registration_reconciliation(status=status, count=count)

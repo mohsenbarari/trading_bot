@@ -173,8 +173,38 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["code"], "otp_active")
         self.assertEqual(payload["delivery_contract"], "legacy")
         self.assertEqual(payload["expires_in"], 73)
+        self.assertTrue(payload["manual_sms_resend"])
+        self.assertLessEqual(
+            datetime.fromisoformat(payload["legacy_sms_resend_at"]),
+            datetime.fromisoformat(payload["expires_at"]),
+        )
         self.assertNotIn("12345", response.body.decode())
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    async def test_flags_off_active_otp_preserves_original_thirty_second_resend_deadline(self):
+        user = SimpleNamespace(is_deleted=False, telegram_id=123)
+        for remaining, expected_wait in ((110, 20), (73, 0)):
+            with self.subTest(remaining=remaining):
+                redis = FakeRedis(
+                    {
+                        "otp_limit:09120000000": "1",
+                        "otp:09120000000": "12345",
+                    },
+                    ttl_map={"otp:09120000000": remaining},
+                )
+                with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+                    before = datetime.now().astimezone()
+                    response = await request_otp(
+                        OTPRequest(mobile_number="09120000000"),
+                        raw_request=make_request(),
+                        db=FakeDB([FakeExecuteResult(user)]),
+                    )
+                    after = datetime.now().astimezone()
+
+                payload = json.loads(response.body)
+                resend_at = datetime.fromisoformat(payload["legacy_sms_resend_at"])
+                self.assertGreaterEqual(resend_at, before + timedelta(seconds=expected_wait - 1))
+                self.assertLessEqual(resend_at, after + timedelta(seconds=expected_wait + 1))
 
     async def test_otp_request_and_resend_logs_do_not_include_code_digits(self):
         user = SimpleNamespace(is_deleted=False, telegram_id=123)

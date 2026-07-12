@@ -1,15 +1,27 @@
 import io
 import json
 import logging
+import multiprocessing
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from core.audit_logger import audit_log
+from core.audit_sink import write_audit_record
 from core.log_redaction import REDACTED
 from core.logging_config import configure_logging
 from core.request_context import clear_request_context, set_request_context
+
+
+def _write_concurrent_audit_batch(path: str, worker_id: int, count: int) -> None:
+    with patch("core.audit_sink._audit_trail_path", return_value=path):
+        for index in range(count):
+            write_audit_record({
+                "action": "test.concurrent",
+                "worker_id": worker_id,
+                "index": index,
+            })
 
 
 class AuditLoggerTests(unittest.TestCase):
@@ -140,6 +152,34 @@ class AuditLoggerTests(unittest.TestCase):
         self.assertFalse(payload["audit_durable"])
         self.assertEqual(payload["audit_durable_reason"], "audit_trail_write_failed")
         self.assertEqual(payload["audit_durable_error_type"], "IsADirectoryError")
+
+    def test_durable_hash_chain_is_linear_across_multiple_processes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = str(Path(tmpdir) / "audit.jsonl")
+            context = multiprocessing.get_context("fork")
+            processes = [
+                context.Process(
+                    target=_write_concurrent_audit_batch,
+                    args=(audit_path, worker_id, 20),
+                )
+                for worker_id in range(4)
+            ]
+            for process in processes:
+                process.start()
+            for process in processes:
+                process.join(timeout=15)
+                self.assertEqual(process.exitcode, 0)
+
+            records = [
+                json.loads(line)
+                for line in Path(audit_path).read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(len(records), 80)
+        self.assertIsNone(records[0]["previous_hash"])
+        for previous, current in zip(records, records[1:]):
+            self.assertEqual(current["previous_hash"], previous["event_hash"])
+        self.assertEqual(len({record["event_hash"] for record in records}), 80)
 
 
 if __name__ == "__main__":

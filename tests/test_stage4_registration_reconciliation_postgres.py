@@ -114,7 +114,7 @@ class Stage4RegistrationReconciliationPostgresTests(unittest.IsolatedAsyncioTest
                 await session.commit()
                 return result.created, result.intent.id
 
-    async def test_stage8_queue_summary_uses_real_postgres_and_marks_transport_outage(self):
+    async def test_stage8_queue_summary_uses_real_postgres_without_row_error_suppression(self):
         _, first_id = await self._persist_intent(self._intent_values("stage8-summary-a"))
         await self._persist_intent(self._intent_values("stage8-summary-b"))
         async with self.session_factory() as session:
@@ -126,7 +126,6 @@ class Stage4RegistrationReconciliationPostgresTests(unittest.IsolatedAsyncioTest
 
         self.assertEqual(summary.pending_count, 2)
         self.assertGreaterEqual(summary.oldest_pending_age_seconds, 0)
-        self.assertFalse(summary.connectivity_healthy)
 
     async def test_concurrent_ready_intent_retry_is_one_row_and_changed_payload_fails(self):
         values = self._intent_values("retry")

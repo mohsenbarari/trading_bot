@@ -91,12 +91,14 @@ Correction:
   `/api/auth/resend-otp-sms` endpoint;
 - flags-off active OTP returns a no-store structured 429 with `code=otp_active`, legacy capability,
   remaining TTL, and absolute expiry, but never the OTP value;
-- the new client enters OTP without parsing localized text; the numeric detail also preserves the
-  bounded old-client recovery behavior;
+- a new client receiving an old unstructured 429 enters a bounded 30-second manual-resend recovery
+  without parsing localized text; verification and resend remain server-authoritative;
+- the numeric detail also preserves the bounded old-client recovery behavior;
 - refresh/lost-response recovery keeps verification on the existing mobile-owned legacy path.
 
 Frontend tests cover truthful legacy copy, manual resend, structured automatic fallback, zero-state
-behavior, structured flags-off 429 recovery, and refusal to derive authority from localized copy.
+behavior, structured and unstructured flags-off 429 recovery, and refusal to derive timing from
+localized copy.
 
 ## Accepted As Operational Gate
 

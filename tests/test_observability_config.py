@@ -46,9 +46,9 @@ class ObservabilityConfigTests(unittest.TestCase):
             "unsynced_change_log_count",
             "oldest_unsynced_age_seconds",
             "sync_retry_queue_length",
-            "registration_job_status",
-            "registration_job_oldest_pending_age_seconds",
-            "login_sms_fallback_job_status",
+            "registration_job_heartbeat_unhealthy",
+            "registration_job_pending_healthy_age_seconds",
+            "login_sms_fallback_job_heartbeat_unhealthy",
             "login_sms_fallback_job_lag_seconds",
         ):
             self.assertIn(expected_field, rules)

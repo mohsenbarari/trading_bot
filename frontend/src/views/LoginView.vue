@@ -58,6 +58,7 @@ const otpRequestId = ref<string | null>(null)
 const otpExpiresAt = ref<string | null>(null)
 const smsFallbackAt = ref<string | null>(null)
 const legacySmsResendAt = ref<string | null>(null)
+const legacyManualSmsResend = ref(false)
 const OTP_ATTEMPT_SESSION_KEY = 'login_otp_attempt_v1'
 
 const form = reactive({
@@ -145,6 +146,7 @@ function clearOtpAttempt() {
   otpExpiresAt.value = null
   smsFallbackAt.value = null
   legacySmsResendAt.value = null
+  legacyManualSmsResend.value = false
   countdownDeadlineMs = null
   if (timerInterval) clearInterval(timerInterval)
   timerInterval = null
@@ -165,9 +167,16 @@ function applyOtpTiming(data: any) {
   smsFallbackAt.value = typeof data?.sms_fallback_at === 'string'
     ? data.sms_fallback_at
     : null
-  legacySmsResendAt.value = (
+  legacyManualSmsResend.value = data?.manual_sms_resend === true || (
     lastMethod.value === 'telegram' && !smsFallbackAt.value
-      ? new Date(Date.now() + 30_000).toISOString()
+  )
+  legacySmsResendAt.value = (
+    legacyManualSmsResend.value
+      ? (
+          typeof data?.legacy_sms_resend_at === 'string'
+            ? data.legacy_sms_resend_at
+            : new Date(Date.now() + 30_000).toISOString()
+        )
       : null
   )
   const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
@@ -191,6 +200,7 @@ function restoreOtpAttempt() {
     otpExpiresAt.value = saved.expiresAt
     smsFallbackAt.value = typeof saved.smsFallbackAt === 'string' ? saved.smsFallbackAt : null
     legacySmsResendAt.value = null
+    legacyManualSmsResend.value = false
     lastMethod.value = saved.method === 'telegram' || saved.method === 'sms' ? saved.method : null
     step.value = 'otp'
     const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
@@ -294,6 +304,15 @@ async function requestOtp() {
         goToOtpStep()
         return
       }
+      if (res.status === 429 && !err?.code) {
+        applyOtpTiming({
+          delivery_contract: 'legacy',
+          manual_sms_resend: true,
+          legacy_sms_resend_at: new Date(Date.now() + 30_000).toISOString(),
+        })
+        goToOtpStep()
+        return
+      }
       const detail = typeof err?.detail === 'string' ? err.detail : err?.detail?.message
       throw new Error(detail || 'خطا در ارسال کد')
     }
@@ -340,7 +359,7 @@ async function resendOtpSms() {
 
 function handleResend() {
     if (automaticSmsFallback.value) return
-    if (lastMethod.value === 'telegram') {
+    if (legacyManualSmsResend.value || lastMethod.value === 'telegram') {
         resendOtpSms()
         return
     }

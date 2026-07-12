@@ -581,6 +581,66 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc.exception.status_code, 400)
         consume.assert_awaited_once()
 
+    async def test_malformed_request_state_is_bounded_and_audited_without_verification_500(self):
+        request_id = uuid4()
+        with patch.object(auth.settings, "telegram_login_otp_enabled", True), patch.object(
+            auth, "get_redis", new=AsyncMock(return_value=DedupeRedis())
+        ), patch.object(
+            auth, "load_otp_delivery_state", new=AsyncMock(side_effect=ValueError("bad state"))
+        ), patch.object(auth, "audit_log") as audit:
+            with self.assertRaises(HTTPException) as exc:
+                await auth.verify_otp(
+                    auth.OTPVerify(otp_request_id=request_id, code="12345"),
+                    raw_request=SimpleNamespace(
+                        headers={},
+                        client=SimpleNamespace(host="127.0.0.1"),
+                    ),
+                    db=FakeDB(None),
+                )
+
+        self.assertEqual(exc.exception.status_code, 400)
+        self.assertEqual(exc.exception.detail, "کد تایید نامعتبر یا منقضی شده است")
+        audit.assert_called_once_with(
+            "otp.delivery_state_invalid",
+            target_type="otp_request",
+            target_id=str(request_id),
+            result="denied",
+            reason="invalid_delivery_state",
+        )
+
+    async def test_malformed_mobile_state_does_not_override_a_valid_code_or_raise_500(self):
+        redis = DedupeRedis()
+        redis.values[f"otp:{TEST_MOBILE}"] = "12345"
+        with patch.object(auth.settings, "telegram_login_otp_enabled", True), patch.object(
+            auth, "get_redis", new=AsyncMock(return_value=redis)
+        ), patch.object(
+            auth, "load_otp_delivery_state", new=AsyncMock(side_effect=KeyError("created_at"))
+        ), patch.object(
+            auth, "consume_otp_code", new=AsyncMock(return_value=True)
+        ), patch.object(
+            auth, "_ensure_otp_verify_not_locked", new=AsyncMock()
+        ), patch.object(
+            auth, "_find_pending_invitation_for_mobile", new=AsyncMock(return_value=None)
+        ), patch.object(auth, "audit_log") as audit:
+            with self.assertRaises(HTTPException) as exc:
+                await auth.verify_otp(
+                    auth.OTPVerify(mobile_number=TEST_MOBILE, code="12345"),
+                    raw_request=SimpleNamespace(
+                        headers={},
+                        client=SimpleNamespace(host="127.0.0.1"),
+                    ),
+                    db=FakeDB(None),
+                )
+
+        self.assertEqual(exc.exception.status_code, 404)
+        audit.assert_any_call(
+            "otp.delivery_state_invalid",
+            target_type="otp_request",
+            target_id=None,
+            result="denied",
+            reason="invalid_delivery_state",
+        )
+
     async def test_successful_atomic_consume_keeps_request_id_for_verification_audit(self):
         redis = DedupeRedis()
         redis.values[f"otp:{TEST_MOBILE}"] = "12345"

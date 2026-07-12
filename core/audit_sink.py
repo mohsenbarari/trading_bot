@@ -1,6 +1,7 @@
 """Durable append-only audit sink with hash-chain integrity metadata."""
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -101,15 +102,22 @@ def write_audit_record(payload: dict[str, Any]) -> dict[str, Any]:
     with _write_lock:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            record = build_audit_record(
-                payload,
-                previous_hash=_last_event_hash(path),
-                durable_written=True,
-                durable_reason=None,
-                durable_path=str(path),
-            )
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(_canonical_json(record) + "\n")
+            lock_path = path.with_name(f"{path.name}.lock")
+            with lock_path.open("a", encoding="utf-8") as process_lock:
+                fcntl.flock(process_lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    record = build_audit_record(
+                        payload,
+                        previous_hash=_last_event_hash(path),
+                        durable_written=True,
+                        durable_reason=None,
+                        durable_path=str(path),
+                    )
+                    with path.open("a", encoding="utf-8") as handle:
+                        handle.write(_canonical_json(record) + "\n")
+                        handle.flush()
+                finally:
+                    fcntl.flock(process_lock.fileno(), fcntl.LOCK_UN)
             return record
         except Exception as exc:
             _logger.warning(

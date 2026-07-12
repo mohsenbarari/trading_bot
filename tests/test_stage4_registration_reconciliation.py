@@ -32,6 +32,8 @@ from core.telegram_account_link_contracts import (
 from core.telegram_registration_reconciliation_worker import (
     _process_attempt,
     _retry_delay_seconds,
+    _snapshot_connectivity_health,
+    TelegramRegistrationReconciliationCycleReport,
 )
 from core.services.telegram_registration_intent_service import RegistrationProjectionResolution
 from core.trade_forwarding import _json_body
@@ -365,6 +367,7 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_transport_failure_schedules_retry(self):
+        observations = []
         with patch(
             "core.telegram_registration_reconciliation_worker.forward_telegram_registration_command",
             new=AsyncMock(return_value=(503, {"detail": "down"})),
@@ -376,9 +379,32 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
                 self.attempt,
                 sync_wait_seconds=0,
                 sync_poll_seconds=0.01,
+                transport_observations=observations,
             )
         self.assertEqual(result, "retry_wait")
+        self.assertEqual(observations, [False])
         schedule.assert_awaited_once()
+
+    def test_snapshot_connectivity_uses_current_observation_not_historical_row_state(self):
+        healthy = TelegramRegistrationReconciliationCycleReport(
+            claimed_count=1,
+            status_counts={"created": 1},
+            transport_connectivity_healthy=True,
+        )
+        outage = TelegramRegistrationReconciliationCycleReport(
+            claimed_count=1,
+            status_counts={"retry_wait": 1},
+            transport_connectivity_healthy=False,
+        )
+        idle = TelegramRegistrationReconciliationCycleReport(
+            claimed_count=0,
+            status_counts={},
+            transport_connectivity_healthy=None,
+        )
+
+        self.assertTrue(_snapshot_connectivity_health(healthy, {"connectivity_healthy": False}))
+        self.assertFalse(_snapshot_connectivity_health(outage, {"connectivity_healthy": True}))
+        self.assertFalse(_snapshot_connectivity_health(idle, {"connectivity_healthy": False}))
 
     async def test_repeated_feature_disabled_response_emits_persistent_error(self):
         from core import telegram_registration_reconciliation_worker as worker
@@ -425,6 +451,7 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(schedule.await_args.kwargs["error_code"], expected)
 
     async def test_valid_terminal_domain_rejection_does_not_retry_forever(self):
+        observations = []
         response = TelegramRegistrationCommandResponse(
             command_id=self.attempt.command.command_id,
             outcome=TelegramRegistrationOutcome.IDENTITY_CONFLICT,
@@ -449,9 +476,11 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
                 self.attempt,
                 sync_wait_seconds=0,
                 sync_poll_seconds=0.01,
+                transport_observations=observations,
             )
 
         self.assertEqual(result, TelegramRegistrationOutcome.IDENTITY_CONFLICT.value)
+        self.assertEqual(observations, [True])
         finalize.assert_awaited_once()
         schedule.assert_not_awaited()
 

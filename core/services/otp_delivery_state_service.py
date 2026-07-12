@@ -24,6 +24,7 @@ from core.utils import utc_now
 
 
 OTP_FALLBACK_DUE_KEY = "otp_delivery:sms_fallback_due"
+OTP_DELIVERY_STATE_DECODE_ERRORS = (KeyError, TypeError, ValueError, UnicodeError)
 OTP_CODE_TTL_SECONDS = 120
 OTP_SMS_FALLBACK_SECONDS = 40
 OTP_SMS_CLAIM_LEASE_SECONDS = 30
@@ -554,7 +555,7 @@ async def select_due_otp_requests(
                 continue
             try:
                 state = await load_otp_delivery_state(redis, request_id=request_id)
-            except (KeyError, TypeError, ValueError, UnicodeError):
+            except OTP_DELIVERY_STATE_DECODE_ERRORS:
                 await isolate_invalid_otp_fallback_state(
                     redis,
                     request_id=request_id,

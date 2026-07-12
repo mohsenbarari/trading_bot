@@ -417,7 +417,8 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('does not derive retry authority from localized 429 copy', async () => {
+  it('uses bounded legacy recovery without deriving timing from localized 429 copy', async () => {
+    vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(
       makeJsonResponse({ detail: 'لطفاً ۴۵ ثانیه صبر کنید' }, false, 429) as any,
@@ -427,9 +428,12 @@ describe('LoginView.vue', () => {
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
 
-    expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
-    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('لطفاً ۴۵ ثانیه صبر کنید')
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('00:30 تا ارسال مجدد')
+    expect(wrapper.text()).not.toContain('00:45')
+    vi.advanceTimersByTime(30_000)
+    await flushPromises()
+    expect(findButtonByText(wrapper, 'ارسال مجدد کد').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -441,6 +445,8 @@ describe('LoginView.vue', () => {
         detail: 'کد قبلی هنوز معتبر است.',
         code: 'otp_active',
         delivery_contract: 'legacy',
+        manual_sms_resend: true,
+        legacy_sms_resend_at: new Date(Date.now() + 20_000).toISOString(),
         expires_in: 73,
         expires_at: new Date(Date.now() + 73_000).toISOString(),
       }, false, 429) as any,
@@ -451,8 +457,11 @@ describe('LoginView.vue', () => {
     await requestOtpFromMobileStep(wrapper)
 
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('01:13 تا ارسال مجدد')
+    expect(wrapper.text()).toContain('00:20 تا ارسال مجدد')
     expect(wrapper.text()).not.toContain('ارسال خودکار پیامک')
+    vi.advanceTimersByTime(20_000)
+    await flushPromises()
+    expect(findButtonByText(wrapper, 'ارسال مجدد کد').exists()).toBe(true)
     wrapper.unmount()
   })
 

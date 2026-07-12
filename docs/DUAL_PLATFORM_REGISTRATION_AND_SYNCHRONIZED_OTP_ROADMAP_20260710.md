@@ -211,8 +211,10 @@ implementation.
     are verified for new local tables.
 67. The two new background-leader jobs use existing process/pools with fully async I/O and no DB
     transaction held across HTTP. Registration defaults to batch 10/concurrency 1; OTP fallback to
-    concurrency 4; values are configurable, jobs are independently flag-disabled, and staging fails
-    if market p95 degrades over 10 percent or market backlog grows persistently.
+    concurrency 4; values are configurable and jobs are independently flag-disabled. Staging checks
+    their coexistence with bounded normal market activity and fails if market p95 degrades over 10
+    percent or market backlog grows persistently. High-volume pressure, saturation, and soak testing
+    are outside this roadmap's Stage 9/10 gate.
 68. Registration outage handling reuses the project's existing health, backoff, queue, recovery,
     and alert mechanisms without a new incident workflow, runbook, escalation, or admin tool. Intent
     stays foreign-local, no temporary access is granted, reconnect reconciles automatically, and
@@ -236,8 +238,9 @@ implementation.
 73. Staging rollout uses existing deployment with all flags initially off, then validates schema/
     sync/background leader, contract/invitation policy, online Telegram registration, existing
     outage/recovery, automatic Web-login OTP Telegram-to-SMS behavior, four-category invitation SMS,
-    combined market load, and owner acceptance in that order. Each feature rolls back by its own
-    flag, no role-specific rollout restriction is added, and production remains separately gated.
+    the controlled market-correctness matrix under bounded normal activity, and owner acceptance in
+    that order. Each feature rolls back by its own flag, no role-specific rollout restriction is
+    added, and production remains separately gated.
 74. Production behavior remains unchanged until all staging gates and owner-led manual scenarios
     pass and the owner explicitly requests `production deploy`.
 
@@ -1072,7 +1075,7 @@ exist.
 | IT-12 | The required 100% changed-code, state/transition, property/fuzz, deterministic-race, mutation, and traceability gates exceed the repository's current coverage tooling. Without an explicit workstream they are not executable release gates. | Closed by owner decision: Stage 9 first adds and proves the missing test infrastructure using the current coverage/CI foundation; production-safe injectable checkpoints have no runtime/public control path, and no required test may be waived because tooling is absent. | One end-to-end proof for each new tool, CI gate failure fixtures, mutation kill report, deterministic race proof, and traceability completeness test. |
 | IT-13 | PWA/browser cache and legacy-client compatibility were evaluated as a possible indirect scope. | Closed as no-change by owner decision: do not add a compatibility window, deprecation telemetry/header, forced upgrade behavior, or service-worker redesign. Existing PWA, endpoint, and cache behavior remains unchanged; contract-v2 aliases already approved under `DT-11` remain part of that API change only. | Existing PWA/API regression suite. |
 | IT-14 | Sync batches can reorder User/Relation/Invitation changes and stale events can overwrite newer state. | Closed by owner decision: monotonic `sync_version` on authoritative rows/events, newer-only receiver apply, temporary unversioned mixed-deploy compatibility, and kind/tier-derived projection gate without cross-table order assumptions. | Reorder, duplicate/stale-version, mixed-version, per-kind gate, and recovery tests. |
-| IT-15 | New reconciliation and OTP background jobs share process/DB/Redis/HTTP resources with latency-sensitive market updates. | Closed by owner decision: no new process/pool; fully async I/O; no DB transaction across HTTP; registration batch 10/concurrency 1, OTP concurrency 4, configurable and independently disabled; fail staging above 10% market p95 degradation or persistent market backlog growth. | Combined-load event-loop/DB/Redis/HTTP benchmark and recovery-to-baseline report. |
+| IT-15 | New reconciliation and OTP background jobs share process/DB/Redis/HTTP resources with latency-sensitive market updates. | Closed by owner decision: no new process/pool; fully async I/O; no DB transaction across HTTP; registration batch 10/concurrency 1, OTP concurrency 4, configurable and independently disabled. Measure coexistence under bounded normal market activity and fail staging above 10% market p95 degradation or persistent market backlog growth; do not run high-volume pressure, saturation, or soak tests in Stage 9/10. | Controlled-coexistence event-loop/DB/Redis/HTTP baseline and recovery report. |
 | IT-16 | SMS.ir IP allowlists, template approval, Telegram gateway health, clock sync, and Redis persistence are external runtime dependencies. | Locked fail-closed/fallback semantics; operational readiness remains open per environment. | Dependency readiness checklist and failure drills. |
 
 ### Indirect non-technical challenges
@@ -1084,7 +1087,7 @@ exist.
 | IN-03 | New background jobs can fail while API health still appears normal. | Closed by owner decision: extend existing health/metric/alert path only, no new dashboard/system; PII-free job heartbeat/error/success/pending/oldest/batch metrics with 60s, healthy 5m, OTP 2s, and market 10% thresholds. | Health/metric assertions, alert-routing tests, outage suppression, and no-PII label scan. |
 | IN-04 | Additional provider/vendor/finance alerts and operating thresholds were considered. | Closed as no-change by owner decision: add no abstraction, vendor change, accounting, cost metric, provider-specific alert/threshold, or escalation workflow; retain existing operations and verify only functional readiness in staging. | Existing provider/template/rate-limit regressions plus staging send checks. |
 | IN-05 | New flows could have triggered broad rewrites of existing Persian copy. | Closed by owner decisions: reuse current LoginView/contact/address/welcome/channel/tutorial/ack/completion copy and flow; no new first-wins screen; keep approved safe rejection and connectivity-pending text only where current behavior has no equivalent; Telegram-method timer changes behavior, not copy. | Existing-copy snapshot regressions plus pending/rejection and cross-path acceptance. |
-| IN-06 | Cross-server features need a deterministic staging enable/rollback order. | Closed by owner decision: existing deploy, flags initially off, then schema/sync/leader, contract/invitation, online registration, outage/recovery, OTP auto-fallback, invitation-SMS matrix, combined market load, and owner acceptance; per-feature flag rollback, no role restriction, and explicit production gate. | Staging rollout checklist, evidence bundle, and per-flag rollback drill. |
+| IN-06 | Cross-server features need a deterministic staging enable/rollback order. | Closed by owner decision: existing deploy, flags initially off, then schema/sync/leader, contract/invitation, online registration, outage/recovery, OTP auto-fallback, invitation-SMS matrix, controlled market-correctness/coexistence validation, and owner acceptance; per-feature flag rollback, no role restriction, and explicit production gate. | Staging rollout checklist, evidence bundle, and per-flag rollback drill. |
 
 ### Required decision record for every open challenge
 
@@ -1758,6 +1761,35 @@ work for this roadmap and cannot be deferred or replaced by a coverage waiver:
   registry IDs, scenario tuples, tests, results, coverage, and mutation evidence for set equality;
 - add negative self-tests proving CI fails for a missing tuple, missing transition, surviving
   critical mutant, uncovered changed branch, skipped required test, or nonexistent test reference.
+- Add a controlled market-correctness full matrix by composing the existing market-behavior,
+  two-server driver, trade-delivery, role/customer/accountant, notification, sync/parity, and browser
+  test helpers. Do not fork or duplicate their domain setup, execution, assertion, or cleanup logic.
+  The controlled matrix must cover every applicable market state and transition across offer origin,
+  request surface, home/authority route, buy/sell, wholesale/retail shape, actor/relation policy,
+  completion/expiry/market-close outcome, notification channel/recipient, sync/outage/replay class,
+  read view, and negative business guard. Coverage is state/transition complete, not an unnecessary
+  Cartesian repetition of equivalent tuples.
+- Keep market concurrency correctness-focused and bounded. Same-offer trade contention,
+  trade-versus-expiry races, and duplicate replay use only the minimum deterministic contenders
+  needed to prove winner count, atomic quantity, terminal state, idempotency, and exactly-once
+  delivery. This is not a server pressure test: no high RPS target, large user pool, saturation,
+  burst, or soak profile is part of Stage 9 or Stage 10.
+
+Test execution is split into two independent lanes to reduce wall-clock time:
+
+1. The registration lane runs invitation, Telegram FSM, registration/reconciliation, OTP, auth,
+   migration, sync-field-policy, onboarding, and related frontend tests.
+2. The market lane runs the controlled market-correctness matrix and its focused market UI and
+   delivery checks.
+
+The two lanes may run concurrently only with separate database/schema or container state, Redis
+namespace, fixture prefixes, ports, artifact directories, and cleanup ownership. They must not share
+synthetic users, invitations, offers, clocks/failpoints, feature-flag mutation, or topology controls.
+Tests that deploy/restart a node, alter connectivity or clock state, exercise a shared background
+leader/provider, measure registration/market coexistence, inspect final sync parity, or perform final
+cleanup remain sequential barriers. A same-offer race stays inside one scenario and is never sharded
+between workers. If isolation cannot be proven at preflight, the lanes run sequentially rather than
+risk false failures or hidden interference.
 
 Challenges and engineering decisions in this stage:
 
@@ -1769,6 +1801,9 @@ Challenges and engineering decisions in this stage:
 - `IT-12`: prove one end-to-end property example, fuzz rejection, deterministic two-party race,
   killed critical mutant, backend/frontend diff-coverage failure, and traceability failure before
   accepting the infrastructure as ready for the full matrix.
+- `IT-03`, `IT-07`, `IT-14`, `IT-15`: map the controlled market matrix to relation-sensitive market
+  behavior, exactly-once notifications, sync reorder/replay, and bounded normal-activity
+  coexistence. High-volume load is not accepted as a substitute for missing correctness states.
 - `DN-01` through `DN-08` and `IN-01` through `IN-06`: identify which items require owner approval,
   policy, operational evidence, or external dependency rather than falsely marking them closed by
   an automated test.
@@ -1780,6 +1815,10 @@ Exit criteria:
 - all matrix rows pass;
 - existing auth, invitation, session, bot-access, sync, and onboarding regressions pass;
 - migration, compile, frontend unit, and relevant E2E gates pass;
+- every `MKT-*` row and every generated applicable state/transition tuple passes, with no omitted
+  market state hidden by scenario filtering or a broad coverage tag;
+- parallel-lane preflight proves resource isolation, both lane manifests/results are complete, and
+  sequential post-lane parity and cleanup pass;
 - all test-infrastructure self-tests pass and each required artifact is generated from the current
   commit rather than hand-authored;
 - every registry ID has evidence or an explicit unresolved blocker assigned to a later gate.
@@ -1800,6 +1839,14 @@ Exit criteria:
   separate dev-login mechanism for unrelated E2E setup.
 - Assert the deployed effective invitation lifetime comes from `core.trading_settings`, is two days,
   and is copied exactly to each applicable pending Relation.
+- Run the controlled market-correctness full matrix on the real two-server staging topology. It must
+  execute all `MKT-*` state/transition coverage without expanding every equivalent dimension into
+  the existing 5,611-row full manifest and without large concurrent request volume. Preserve only
+  bounded semantic contention where the behavior being tested is itself concurrent.
+- Run the isolated registration lane and isolated market lane concurrently where the Stage 9
+  preflight proves separate mutable resources. Keep deploy/restart, connectivity/clock faults,
+  shared-provider/background-leader checks, coexistence measurement, final parity, and cleanup as
+  ordered sequential gates before accepting the combined evidence.
 
 Challenges and engineering decisions in this stage:
 
@@ -1817,7 +1864,8 @@ Challenges and engineering decisions in this stage:
   handling, migrations/parity, test-evidence tooling, backup/restore tooling, unchanged PWA
   behavior, sync reordering, and runtime dependencies.
 - `IT-15`: validate approved batch/concurrency defaults, async yielding, no transaction across HTTP,
-  independent job flags, market p50/p95, queue age, saturation, and recovery to baseline.
+  independent job flags, market p50/p95, queue age, bounded normal-activity coexistence, and recovery
+  to baseline. Do not perform saturation, high-RPS, burst, or soak testing in this stage.
 - `IN-02`: perform an Iran/foreign disconnect exercise against the existing recovery mechanism and
   validate pending/terminal user messages without a new incident workflow.
 - Prove the foreign Iran-owned-field writer inventory is empty before enabling
@@ -1834,6 +1882,11 @@ Exit criteria:
 - OTP fallback timing and one-code behavior pass;
 - sync backlog returns to zero;
 - market latency/backlog remains within the accepted baseline;
+- every controlled market state/transition and bounded correctness race passes without duplicate
+  trade, negative quantity, terminal-state regression, missing/duplicate required delivery, or
+  cross-server parity drift;
+- parallel registration/market lanes have complete isolated evidence and the sequential final
+  parity/cleanup gate passes;
 - the current configured two-server path passes exact signed-transport validation;
 - both staging deploy paths leave OTP logging disabled and real OTP delivery observable only through
   redacted state/outcomes;
@@ -2105,7 +2158,27 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `SEC-007` | Rate limits and authorization cover anonymous, user, inviter, manager, super-admin, cross-owner, inactive, and deleted principals without introducing a force-create/link/review path. |
 | `SEC-008` | Empty, malformed, HTTP outside local test, Iran-host, and each configured foreign Web/API hostname value for `PUBLIC_WEBAPP_URL` are tested; only the canonical valid Iran HTTPS URL may generate user-facing links, and every invalid value fails closed without emitting a link. |
 
-#### UI, regression, load, and real staging
+#### Controlled market-correctness full matrix
+
+These rows reuse the repository's existing market and delivery test machinery. They require complete
+business-state and transition coverage, but explicitly exclude pressure, saturation, high-RPS, and
+soak profiles. Parallel requests are bounded to the deterministic minimum required by the business
+race under test.
+
+| ID | Required test and assertions |
+|---|---|
+| `MKT-001` | Create buy and sell offers from WebApp and Telegram for wholesale-full, retail-two-lot, and retail-three-lot shapes. Verify authoritative home server, public ID, canonical commodity, publication state, active views, and initial/remaining quantity on both servers. |
+| `MKT-002` | Execute WebApp-to-WebApp, WebApp-to-Telegram, Telegram-to-WebApp, and Telegram-to-Telegram request quadrants against Iran-home and foreign-home offers. Verify local versus forwarded authority, actor/source/idempotency preservation, exactly one authoritative mutation, and expected winner/remaining quantity for every shape. |
+| `MKT-003` | Cover active, partially filled where applicable, completed, manually expired, time expired, and market-close terminal states. Validate allowed transitions, reject request after every terminal state, preserve expiry reason/source, and prove terminal publication/history/detail views cannot reactivate or regress. |
+| `MKT-004` | Run bounded deterministic same-offer trade contention, trade-versus-manual-expiry, trade-versus-time-expiry, duplicate command/replay, and ambiguous remote-response retry. Assert exact winner count, no overfill/negative quantity, no second trade, one terminal request ledger outcome, and idempotent publication state. |
+| `MKT-005` | Cover Standard user, Tier-1 and Tier-2 customer, same-owner and other-owner relations, and accountant/watch contexts across every applicable action. Verify customer direct/mediated legs, pricing/visibility/privacy, limits, and every policy-supported or policy-rejected action without bypass. |
+| `MKT-006` | For every completed supported trade, assert the exact required WebApp and Telegram recipients, customer/owner counterpart privacy, and accountant notifications. Stable and short-outage delivery must converge exactly once; medium-outage suppression must follow current policy; repair/replay/restart must create no duplicate visible notification. |
+| `MKT-007` | Exercise healthy sync, short disconnect/reconnect, medium-outage delivery policy, out-of-order/stale/duplicate replay, remote authority unavailable, bad signature, and wrong-authority routing. Verify no partial mutation, eventual supported convergence, zero terminal parity drift, and drained sync backlog. |
+| `MKT-008` | Verify active list, public detail, market history, expired/my offers, my trades, mutual/customer/accountant history, realtime updates, and terminal publication state after each applicable lifecycle outcome on both user-facing surfaces. |
+| `MKT-009` | Execute every existing negative business guard, including own-offer request, invalid quantity/lot, completed/expired/closed market, inactive or restricted actor, role/tier restriction, daily/commodity limits, stale Telegram action, missing public ID, remote authority/security failures, and cleanup-scope violation. Every rejection must be atomic and non-enumerating. |
+| `MKT-010` | Run registration reconciliation and OTP fallback jobs at approved bounded defaults alongside normal low-volume market activity. Compare p50/p95, event-loop lag, queue age, and sync backlog with the same controlled baseline; over 10% market-p95 degradation or persistent backlog growth fails the gate. This row is coexistence correctness/capacity protection, not a pressure test. |
+
+#### UI, regression, controlled operations, and real staging
 
 | ID | Required test and assertions |
 |---|---|
@@ -2114,8 +2187,8 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `E2E-003` | Existing pending-invitation Web UI, PWA/service worker behavior, session reset/login, deletion/recovery/reinvite, channel gating, and all unchanged onboarding snapshots remain unchanged. |
 | `OPS-001` | Feature flags independently enable/disable bot registration, reconciliation, OTP fallback, and each SMS category; startup defaults are fail-closed and rollback does not strand or delete state. |
 | `OPS-002` | Registration and OTP jobs use the approved existing background leader with bounded batch/concurrency, async yielding, no transaction across HTTP, heartbeat, lag, and oldest-age signals. |
-| `OPS-003` | Idle, expected, burst, backlog, provider-slow, sync-slow, and recovery loads measure market/sync p50/p95 and event-loop lag; over 10% market p95 degradation fails the gate. |
-| `OPS-004` | Long soak with duplicate traffic, leader churn, API/bot/Redis/PostgreSQL restart, network partition, and reconnect ends with zero duplicate users/invitations, zero stuck claims, and drained backlog. |
+| `OPS-003` | Idle and bounded expected activity, provider-slow, sync-slow, and recovery conditions measure market/sync p50/p95 and event-loop lag; over 10% market p95 degradation fails the gate. High-volume burst and saturation profiles are excluded from Stage 9/10. |
+| `OPS-004` | A bounded deterministic recovery sequence with duplicate commands, leader handoff, API/bot/Redis/PostgreSQL restart, network partition, and reconnect ends with zero duplicate users/invitations, zero stuck claims, and drained backlog. It is not a long soak or pressure run. |
 | `STG-001` | Real two-server staging executes each disconnect and response-loss point, validates signed transport, clock boundaries, actual Telegram/SMS provider outcomes, and records redacted evidence. |
 | `STG-002` | Mixed-version deploy, migration, flags-off validation, narrow enablement, rollback, backup/restore, and redeploy execute in the exact supported operational order. |
 
@@ -2134,9 +2207,11 @@ machine-readable parameter output proves that every tuple ran and passed.
 - Mutation testing must delete/invert each critical guard, lock, state predicate, expiry comparison,
   source-field allowlist, server guard, dedupe key, OTP timing predicate, and transaction boundary.
   At least one required test must kill each mutant; surviving critical mutants block release.
-- Existing full backend, frontend, bot, sync, auth/session, invitation, relation/customer, market,
-  onboarding, PWA, migration, and two-server suites remain required. New focused tests supplement
-  them and may not replace, skip, or weaken them.
+- Existing backend, frontend, bot, sync, auth/session, invitation, relation/customer, market,
+  onboarding, PWA, migration, and two-server correctness suites remain required. The controlled
+  `MKT-*` matrix composes their applicable assertions for Stage 9/10 and replaces only exhaustive
+  repetition of equivalent dimensions from the 5,611-row full manifest, not any market state,
+  transition, negative guard, delivery, parity, or user-facing correctness assertion.
 - Flake verification reruns concurrency, timing, restart, and E2E suites under randomized execution
   order and the project's supported parallelism. Any nondeterministic result blocks the gate until
   the race is made deterministic; retries cannot convert failure to acceptance.
@@ -2293,8 +2368,8 @@ machine-readable parameter output proves that every tuple ran and passed.
 | New PWA with old API during mixed deploy | Feature remains disabled/safe until compatible peer is ready |
 | Backup and restore with pending intents/receipts | State and idempotency outcomes survive as designed |
 | Generic sync registry sees registration intent | Table is explicitly `no-sync`; accepted User/Invitation/Relation still sync normally |
-| Registration/OTP load during market activity | Market sync latency/backlog stays within accepted baseline |
-| Combined load exceeds 10% market p95 degradation | Staging gate fails and new jobs remain disabled |
+| Registration/OTP bounded work during normal market activity | Market sync latency/backlog stays within accepted baseline |
+| Controlled coexistence exceeds 10% market p95 degradation | Staging gate fails and new jobs remain disabled |
 | Registration backlog grows | Batch remains bounded; market job is not starved |
 
 ## Staging Performance And Timing Targets
@@ -2523,3 +2598,20 @@ are recorded in
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE6_STAGE7_POSTREVIEW_REMEDIATION_20260712.md`. This record does
 not enable a flag, migrate, deploy, push, approve staging/production, close Stage 8's explicit open
 review questions, or waive Stages 9-12.
+
+## Stage 8 Final Independent-Review Remediation Record (2026-07-12)
+
+The independent review of commit `4983bef8` returned NO-GO for retaining Stage 6/7 remediation,
+retaining Stage 8, and beginning Stage 9. The current-source findings were verified rather than
+accepted mechanically. Corrections cover fail-safe observability snapshot normalization and future
+clock skew, original flags-off 30-second resend recovery including old unstructured 429 responses,
+bounded shared state decoding during OTP verification, current transport-derived connectivity,
+latest-sample/no-data alert semantics, and a process-safe linear audit hash chain.
+
+The missing repository-owned OTP state-secret drain remains an accepted Stage 10 operational and
+production rollout blocker; it does not justify a second current source key owner. Exact findings,
+decisions, corrections, and residual gates are recorded in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE8_FINAL_REVIEW_REMEDIATION_20260712.md`. Stage 9 remains
+NO-GO until an independent review of the exact remediation commit returns GO. No flag, migration,
+deployment, provider action, secret rotation, push, merge, or production action is authorized by
+this record.

@@ -784,17 +784,17 @@ groups:
           - refId: A
             queryType: range
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             datasourceUid: trading-bot-loki
             model:
               refId: A
               queryType: range
-              expr: 'sum(count_over_time({log_class="integration", event="sync.health"} | json | registration_job_enabled="true" | registration_job_status=~"missing|stale" [5m]))'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" | unwrap registration_job_heartbeat_unhealthy [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: B
@@ -804,7 +804,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: C
@@ -821,7 +821,7 @@ groups:
                     params: [0]
                   operator:
                     type: and
-        noDataState: OK
+        noDataState: Alerting
         execErrState: Error
         for: 1m
         labels:
@@ -837,17 +837,17 @@ groups:
           - refId: A
             queryType: range
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             datasourceUid: trading-bot-loki
             model:
               refId: A
               queryType: range
-              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | registration_job_enabled="true" | registration_job_connectivity_healthy="true" | unwrap registration_job_oldest_pending_age_seconds [5m])'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" | unwrap registration_job_pending_healthy_age_seconds [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: B
@@ -857,7 +857,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: C
@@ -890,17 +890,17 @@ groups:
           - refId: A
             queryType: range
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             datasourceUid: trading-bot-loki
             model:
               refId: A
               queryType: range
-              expr: 'sum(count_over_time({log_class="integration", event="sync.health"} | json | login_sms_fallback_job_enabled="true" | login_sms_fallback_job_status=~"missing|stale" [5m]))'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" | unwrap login_sms_fallback_job_heartbeat_unhealthy [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: B
@@ -910,7 +910,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: C
@@ -927,7 +927,7 @@ groups:
                     params: [0]
                   operator:
                     type: and
-        noDataState: OK
+        noDataState: Alerting
         execErrState: Error
         for: 1m
         labels:
@@ -943,17 +943,17 @@ groups:
           - refId: A
             queryType: range
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             datasourceUid: trading-bot-loki
             model:
               refId: A
               queryType: range
-              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | login_sms_fallback_job_enabled="true" | unwrap login_sms_fallback_job_lag_seconds [5m])'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" | unwrap login_sms_fallback_job_lag_seconds [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: B
@@ -963,7 +963,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 300
+              from: 120
               to: 0
             model:
               refId: C
