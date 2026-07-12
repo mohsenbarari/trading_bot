@@ -781,6 +781,26 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("--skip-initial-cleanup", prepare_args)
         self.assertEqual(runner.scenario_user_count(scenario), 8)
 
+    def test_race_scenarios_use_specialized_worker_and_finalize_artifacts(self):
+        manual = next(item for item in runner.DRIVER_SCENARIOS if item.get("race_kind") == "manual_expiry")
+        timed = next(item for item in runner.DRIVER_SCENARIOS if item.get("race_kind") == "time_expiry")
+
+        manual_prepare = runner.prepare_worker_args(manual, "FMX_STAGE_UNIT_")
+        timed_prepare = runner.prepare_worker_args(timed, "FMX_STAGE_UNIT_")
+
+        self.assertIn("manual_expire_trade_race", manual_prepare)
+        self.assertIn("time_expire_trade_race", timed_prepare)
+        self.assertIn("--allow-nonterminal-offer", manual_prepare)
+        self.assertIn("--offer-time-limit-buffer-minutes", timed_prepare)
+        self.assertEqual(
+            runner.finalize_race_worker_args(manual),
+            ["--manual-expiry-result", "/artifacts/manual-expiry.result.json"],
+        )
+        self.assertEqual(
+            runner.finalize_race_worker_args(timed),
+            ["--time-expiry-result", "/artifacts/time-expiry.result.json"],
+        )
+
     def test_seed_and_converge_runs_iran_seed_sync_copy_and_foreign_verify(self):
         def result(name):
             return runner.CommandResult(

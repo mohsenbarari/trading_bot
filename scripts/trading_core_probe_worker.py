@@ -7448,6 +7448,39 @@ async def set_role_plan_barrier_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def set_prepare_barrier_command(args: argparse.Namespace) -> int:
+    prepare = dict(read_json_artifact(Path(args.prepare)))
+    if prepare.get("schema_version") != DUAL_ROLE_PREPARE_SCHEMA_VERSION:
+        raise TradingProbeError("prepare barrier update requires a valid dual-role prepare artifact")
+    scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
+    barrier_epoch = float(args.barrier_epoch)
+    if not math.isfinite(barrier_epoch):
+        raise TradingProbeError("prepare barrier_epoch must be finite")
+    old_barrier_epoch = float(prepare.get("barrier_epoch") or 0.0)
+    prepare["barrier_epoch"] = round(barrier_epoch, 6)
+    if str(scenario.get("name") or "") == "time_expire_trade_race":
+        expiry_epoch = barrier_epoch + TIME_EXPIRY_RACE_DELAY_SECONDS
+        prepare["time_expiry_epoch"] = round(expiry_epoch, 6)
+        prepare["time_expiry_stale_epoch"] = round(
+            expiry_epoch - TIME_EXPIRY_RACE_STALE_SKEW_SECONDS,
+            6,
+        )
+    output_path = Path(args.output or args.prepare)
+    write_json_artifact(output_path, prepare)
+    print_json(
+        {
+            "status": "ok",
+            "prepare": args.prepare,
+            "output": str(output_path),
+            "old_barrier_epoch": round(old_barrier_epoch, 6),
+            "new_barrier_epoch": round(barrier_epoch, 6),
+            "time_expiry_epoch": prepare.get("time_expiry_epoch"),
+            "time_expiry_stale_epoch": prepare.get("time_expiry_stale_epoch"),
+        }
+    )
+    return 0
+
+
 async def merge_role_results_command(args: argparse.Namespace) -> int:
     results = [read_json_artifact(Path(path)) for path in args.results]
     merged = merge_role_result_artifacts(results)
@@ -7656,6 +7689,11 @@ def build_parser() -> argparse.ArgumentParser:
     barrier_plan_parser.add_argument("--output")
     barrier_plan_parser.add_argument("--barrier-epoch", type=float, required=True)
 
+    prepare_barrier_parser = subparsers.add_parser("set-prepare-barrier")
+    prepare_barrier_parser.add_argument("--prepare", required=True)
+    prepare_barrier_parser.add_argument("--output")
+    prepare_barrier_parser.add_argument("--barrier-epoch", type=float, required=True)
+
     manual_expiry_parser = subparsers.add_parser("run-manual-expiry-race")
     manual_expiry_parser.add_argument("--prepare", required=True)
     manual_expiry_parser.add_argument("--output")
@@ -7772,6 +7810,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await rebase_role_plan_command(args)
     if args.command == "set-role-plan-barrier":
         return await set_role_plan_barrier_command(args)
+    if args.command == "set-prepare-barrier":
+        return await set_prepare_barrier_command(args)
     if args.command == "run-manual-expiry-race":
         return await run_manual_expiry_race_command(args)
     if args.command == "run-time-expiry-race":

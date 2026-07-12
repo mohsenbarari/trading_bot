@@ -131,6 +131,46 @@ DRIVER_SCENARIOS = [
         "idempotency_mode": "duplicate_replay",
         "coverage": ["idempotency_no_duplicate_trade", "foreign_home_offer", "telegram_only_replay"],
     },
+    {
+        "id": "DRIVER-WEBAPP-MANUAL-EXPIRY-RACE-SELL",
+        "scenario_name": "manual_expire_trade_race",
+        "offer_origin": "webapp",
+        "offer_type": "sell",
+        "retail": False,
+        "lot_sizes": "",
+        "hot_offer_quantity": 5,
+        "request_amount": 5,
+        "expected_winner_count": 1,
+        "expected_remaining_quantity": 0,
+        "request_surface": "webapp",
+        "telegram_ratio": 0.0,
+        "hot_offer_requests": 3,
+        "target_rps": 3.0,
+        "idempotency_mode": "unique",
+        "require_terminal_completed": False,
+        "race_kind": "manual_expiry",
+        "coverage": ["trade_vs_manual_expiry", "bounded_contention", "iran_home_offer"],
+    },
+    {
+        "id": "DRIVER-BOT-TIME-EXPIRY-RACE-BUY",
+        "scenario_name": "time_expire_trade_race",
+        "offer_origin": "bot",
+        "offer_type": "buy",
+        "retail": False,
+        "lot_sizes": "",
+        "hot_offer_quantity": 5,
+        "request_amount": 5,
+        "expected_winner_count": 1,
+        "expected_remaining_quantity": 0,
+        "request_surface": "telegram",
+        "telegram_ratio": 1.0,
+        "hot_offer_requests": 3,
+        "target_rps": 3.0,
+        "idempotency_mode": "unique",
+        "require_terminal_completed": False,
+        "race_kind": "time_expiry",
+        "coverage": ["trade_vs_time_expiry", "bounded_contention", "foreign_home_offer"],
+    },
 ]
 
 FORBIDDEN_PRODUCTION_HOSTS = {
@@ -1919,7 +1959,7 @@ def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
         "--offer-origin",
         scenario["offer_origin"],
         "--scenario-name",
-        scenario["id"],
+        str(scenario.get("scenario_name") or scenario["id"]),
         "--request-surface",
         scenario["request_surface"],
         "--idempotency-mode",
@@ -1950,6 +1990,10 @@ def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
         "--barrier-delay-seconds",
         "45",
     ]
+    if scenario.get("race_kind") == "time_expiry":
+        worker_args.extend(["--offer-time-limit-buffer-minutes", "60"])
+    if not scenario.get("require_terminal_completed", True):
+        worker_args.append("--allow-nonterminal-offer")
     if scenario.get("retail"):
         worker_args.append("--retail")
         worker_args.extend(["--lot-sizes", str(scenario.get("lot_sizes") or "")])
@@ -2130,6 +2174,7 @@ def refresh_role_plan_barriers_on_both_sides(
     local_dir: Path,
     remote_dir: str,
     log_dir: Path,
+    scenario: Mapping[str, Any] | None = None,
 ) -> list[CommandResult]:
     barrier_epoch = time.time() + ROLE_START_BARRIER_DELAY_SECONDS
     barrier_arg = f"{barrier_epoch:.6f}"
@@ -2168,6 +2213,39 @@ def refresh_role_plan_barriers_on_both_sides(
             timeout_seconds=180,
         ),
     ]
+    if scenario and scenario.get("race_kind"):
+        prepare_worker_args = [
+            "set-prepare-barrier",
+            "--prepare",
+            "/artifacts/prepare.json",
+            "--output",
+            "/artifacts/prepare.json",
+            "--barrier-epoch",
+            barrier_arg,
+        ]
+        if scenario["offer_origin"] == "webapp":
+            results.append(
+                run_remote_worker(
+                    "refresh_prepare_barrier_on_iran",
+                    args=args,
+                    service="load_webapp_iran",
+                    remote_artifact_dir=remote_dir,
+                    worker_args=prepare_worker_args,
+                    log_dir=log_dir,
+                    timeout_seconds=180,
+                )
+            )
+        else:
+            results.append(
+                run_local_worker(
+                    "refresh_prepare_barrier_on_foreign",
+                    service="load_telegram_foreign",
+                    artifact_dir=local_dir,
+                    worker_args=prepare_worker_args,
+                    log_dir=log_dir,
+                    timeout_seconds=180,
+                )
+            )
     for result in results:
         require_command_success(result)
     return results
@@ -2203,7 +2281,7 @@ def finalize_on_home(
                 "--output",
                 "/artifacts/final.json",
                 "--check",
-            ],
+            ] + finalize_race_worker_args(scenario),
             log_dir=log_dir,
             timeout_seconds=240,
         )
@@ -2229,12 +2307,54 @@ def finalize_on_home(
             "--output",
             "/artifacts/final.json",
             "--check",
-        ],
+        ] + finalize_race_worker_args(scenario),
         log_dir=log_dir,
         timeout_seconds=240,
     )
     require_command_success(result)
     return result
+
+
+def finalize_race_worker_args(scenario: Mapping[str, Any]) -> list[str]:
+    race_kind = scenario.get("race_kind")
+    if race_kind == "manual_expiry":
+        return ["--manual-expiry-result", "/artifacts/manual-expiry.result.json"]
+    if race_kind == "time_expiry":
+        return ["--time-expiry-result", "/artifacts/time-expiry.result.json"]
+    return []
+
+
+def race_role_command(
+    *,
+    args: argparse.Namespace,
+    scenario: Mapping[str, Any],
+    local_dir: Path,
+    remote_dir: str,
+) -> tuple[str, list[str]] | None:
+    race_kind = scenario.get("race_kind")
+    if race_kind == "manual_expiry":
+        name = "run_manual_expiry_race_on_home"
+        worker_args = [
+            "run-manual-expiry-race",
+            "--prepare",
+            "/artifacts/prepare.json",
+            "--output",
+            "/artifacts/manual-expiry.result.json",
+        ]
+    elif race_kind == "time_expiry":
+        name = "run_time_expiry_race_on_home"
+        worker_args = [
+            "run-time-expiry-race",
+            "--prepare",
+            "/artifacts/prepare.json",
+            "--output",
+            "/artifacts/time-expiry.result.json",
+        ]
+    else:
+        return None
+    if scenario["offer_origin"] == "webapp":
+        return name, remote_load_runner_command(args, "load_webapp_iran", remote_dir, worker_args)
+    return name, local_load_runner_command("load_telegram_foreign", local_dir, worker_args, args=args)
 
 
 def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, suite_dir: Path, remote_root: str) -> dict[str, Any]:
@@ -2401,6 +2521,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 local_dir=local_dir,
                 remote_dir=remote_dir,
                 log_dir=log_dir,
+                scenario=scenario,
             )
         )
 
@@ -2438,6 +2559,14 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 ),
             ),
         ]
+        special_race_command = race_role_command(
+            args=args,
+            scenario=scenario,
+            local_dir=local_dir,
+            remote_dir=remote_dir,
+        )
+        if special_race_command is not None:
+            role_commands.append(special_race_command)
         role_results = run_logged_commands_parallel(role_commands, log_dir=log_dir, timeout_seconds=360)
         for result in role_results:
             require_command_success(result)

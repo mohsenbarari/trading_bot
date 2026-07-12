@@ -1,4 +1,7 @@
 import asyncio
+import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -7,6 +10,7 @@ from scripts.trading_core_probe_worker import (
     TradingProbeError,
     assert_race_acceptance,
     run_manual_expiry_race_command,
+    set_prepare_barrier_command,
     run_time_expiry_race_command,
     summarize_samples,
 )
@@ -66,6 +70,32 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
                 asyncio.run(run_time_expiry_race_command(args))
 
         setup.assert_called_once_with()
+
+    def test_prepare_barrier_refresh_keeps_time_expiry_relative_to_new_barrier(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "prepare.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "bot_webapp_mixed_load_prepare_v1",
+                        "barrier_epoch": 10.0,
+                        "scenario": {"name": "time_expire_trade_race"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = asyncio.run(
+                set_prepare_barrier_command(
+                    SimpleNamespace(prepare=str(path), output=None, barrier_epoch=100.0)
+                )
+            )
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(payload["barrier_epoch"], 100.0)
+        self.assertEqual(payload["time_expiry_epoch"], 100.3)
+        self.assertEqual(payload["time_expiry_stale_epoch"], 100.25)
 
 
 if __name__ == "__main__":
