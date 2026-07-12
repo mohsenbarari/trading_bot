@@ -66,6 +66,38 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
 
         self.assertEqual(args.expected_branch, "candidate/sync-parity-hardening")
 
+    def test_preflight_fails_when_release_label_is_not_current_commit(self):
+        args = runner.parse_args(["--expected-release-sha", "wrong-release"])
+        with patch.object(runner, "run_git_value") as git_value, patch.object(
+            runner, "check_tls", return_value=runner.CheckResult("tls", "passed", "ok")
+        ), patch.object(
+            runner, "check_http_json", return_value=runner.CheckResult("http", "passed", "ok")
+        ), patch.object(
+            runner, "check_foreign_public_surface_guard", return_value=runner.CheckResult("guard", "passed", "ok")
+        ), patch.object(
+            runner, "check_internal_ingress_without_basic_auth", return_value=runner.CheckResult("ingress", "passed", "ok")
+        ), patch.object(
+            runner, "check_container_runtime_identity", return_value=runner.CheckResult("runtime", "passed", "ok")
+        ), patch.object(
+            runner, "check_storage_identity_separation", return_value=runner.CheckResult("storage", "passed", "ok")
+        ), patch.object(
+            runner, "capture_parity", return_value={"status": "passed"}
+        ), patch.object(
+            runner, "capture_sync_health", return_value={"status": "passed"}
+        ):
+            git_value.side_effect = lambda command: {
+                ("branch", "--show-current"): args.expected_branch,
+                ("rev-parse", "HEAD"): "current-commit",
+                ("status", "--short", "--branch"): "",
+            }.get(tuple(command), "")
+            checks = runner.preflight_checks(
+                args,
+                manifest_builder.build_manifest(prefix="FMX_STAGE_UNIT_RELEASE_BINDING_"),
+            )
+
+        binding = next(check for check in checks if check.name == "release_commit_binding")
+        self.assertEqual(binding.status, "failed")
+
     def test_plan_writes_equivalent_agent_log_directories(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

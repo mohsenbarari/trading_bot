@@ -1253,6 +1253,18 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
             payload={"status": git_status},
         )
     )
+    checks.append(
+        CheckResult(
+            "release_commit_binding",
+            "passed" if expected_release and expected_release == current_commit else "failed",
+            (
+                "expected staging release is bound to the current immutable commit"
+                if expected_release and expected_release == current_commit
+                else "expected staging release SHA is missing or differs from current commit"
+            ),
+            payload={"expected_release_sha": expected_release, "current_commit": current_commit},
+        )
+    )
     checks.extend(
         [
             validate_staging_url("iran_url_identity", args.iran_base_url, expected_host=host_of(DEFAULT_IRAN_BASE_URL)),
