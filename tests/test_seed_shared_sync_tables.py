@@ -7,6 +7,7 @@ from models.user import User
 from scripts.seed_shared_sync_tables import (
     DEFAULT_TABLES,
     SeedReferenceIndex,
+    build_seed_sync_item,
     enrich_seed_payload,
     row_payload,
     seed_table,
@@ -20,6 +21,10 @@ class SeedSharedSyncTablesTests(unittest.TestCase):
             offer_public_ids_by_id={30: "ofr_source_30", 31: "ofr_source_31"},
             trade_numbers_by_id={88: 10088},
             customer_relation_tokens_by_id={17: "customer-relation-token-17"},
+            user_identities_by_id={
+                7: {"account_name": "source-user", "mobile_number": "09120000000"},
+                9: {"account_name": "creator-user", "telegram_id": 7009},
+            },
         )
 
     def test_snapshot_payload_applies_shared_field_policy(self):
@@ -94,6 +99,28 @@ class SeedSharedSyncTablesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "trades.commodity_id"):
             enrich_seed_payload("trades", row, {"commodity_id": 999}, self.references)
 
+    def test_registration_snapshot_carries_v2_identity_and_user_references(self):
+        user = User(id=7, account_name="source-user", mobile_number="09120000000")
+        user_data = enrich_seed_payload("users", user, row_payload("users", user), self.references)
+        invitation = SimpleNamespace(created_by_id=9, registered_user_id=7)
+        invitation_data = enrich_seed_payload("invitations", invitation, {}, self.references)
+
+        self.assertEqual(user_data["_sync_identity"]["current"]["account_name"], "source-user")
+        self.assertEqual(
+            invitation_data["_registration_user_references"]["created_by_id"]["current"]["telegram_id"],
+            7009,
+        )
+
+    @patch("scripts.seed_shared_sync_tables.current_server", return_value="iran")
+    def test_seed_item_uses_insert_and_source_aware_sync_metadata(self, _server):
+        item = build_seed_sync_item("invitations", SimpleNamespace(id=31), {"token": "token-31"})
+
+        self.assertEqual(item["operation"], "INSERT")
+        self.assertEqual(item["sync_meta"]["source_server"], "iran")
+        self.assertEqual(item["sync_meta"]["aggregate_table"], "invitations")
+        self.assertIn("sync_protocol", item)
+        self.assertEqual(item["public_identity"]["value"], "token-31")
+
 
 class SeedSharedSyncDryRunTests(unittest.IsolatedAsyncioTestCase):
     async def test_dry_run_validates_references_without_network_delivery(self):
@@ -102,6 +129,7 @@ class SeedSharedSyncDryRunTests(unittest.IsolatedAsyncioTestCase):
             offer_public_ids_by_id={},
             trade_numbers_by_id={},
             customer_relation_tokens_by_id={},
+            user_identities_by_id={},
         )
         row = SimpleNamespace(
             __table__=SimpleNamespace(columns=[]),

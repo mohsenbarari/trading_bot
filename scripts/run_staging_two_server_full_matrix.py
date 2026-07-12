@@ -61,6 +61,7 @@ REMOTE_STAGING_PROJECT_NAME = "trading_bot_staging_iran"
 REMOTE_STAGING_COMPOSE_FILE = "deploy/staging/docker-compose.staging.yml"
 REMOTE_STAGING_ENV_FILE = ".env.staging"
 ROLE_START_BARRIER_DELAY_SECONDS = 30.0
+RACE_START_BARRIER_DELAY_SECONDS = 90.0
 
 DRIVER_SCENARIOS = [
     {
@@ -2176,7 +2177,8 @@ def refresh_role_plan_barriers_on_both_sides(
     log_dir: Path,
     scenario: Mapping[str, Any] | None = None,
 ) -> list[CommandResult]:
-    barrier_epoch = time.time() + ROLE_START_BARRIER_DELAY_SECONDS
+    barrier_delay = RACE_START_BARRIER_DELAY_SECONDS if scenario and scenario.get("race_kind") else ROLE_START_BARRIER_DELAY_SECONDS
+    barrier_epoch = time.time() + barrier_delay
     barrier_arg = f"{barrier_epoch:.6f}"
     results = [
         run_remote_worker(

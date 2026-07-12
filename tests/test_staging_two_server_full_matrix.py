@@ -801,6 +801,13 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             ["--time-expiry-result", "/artifacts/time-expiry.result.json"],
         )
 
+    def test_race_barrier_has_container_startup_headroom(self):
+        self.assertGreaterEqual(runner.RACE_START_BARRIER_DELAY_SECONDS, 3 * 20)
+        self.assertGreater(
+            runner.RACE_START_BARRIER_DELAY_SECONDS,
+            runner.ROLE_START_BARRIER_DELAY_SECONDS,
+        )
+
     def test_seed_and_converge_runs_iran_seed_sync_copy_and_foreign_verify(self):
         def result(name):
             return runner.CommandResult(

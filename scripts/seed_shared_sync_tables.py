@@ -33,10 +33,17 @@ if str(REPO_ROOT) not in sys.path:
 from api.routers.sync import TABLE_ORDER, get_model_class
 from core.config import settings
 from core.db import AsyncSessionLocal
-from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.registration_sync_policy import (
+    REGISTRATION_USER_REFERENCE_FIELDS,
+    REGISTRATION_USER_REFERENCES_FIELD,
+)
+from core.server_routing import current_server, default_peer_server_url, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
+from core.sync_metadata import build_sync_metadata, build_sync_public_identity
+from core.sync_protocol import build_sync_protocol_metadata
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
+from core.user_counter_sync import USER_SYNC_IDENTITY_FIELD, build_user_sync_identity
 
 
 SEED_TABLE_ORDER = {
@@ -70,6 +77,7 @@ class SeedReferenceIndex:
     offer_public_ids_by_id: Mapping[int, str]
     trade_numbers_by_id: Mapping[int, int]
     customer_relation_tokens_by_id: Mapping[int, str]
+    user_identities_by_id: Mapping[int, Mapping[str, Any]]
 
 
 def parse_args() -> argparse.Namespace:
@@ -139,6 +147,25 @@ def enrich_seed_payload(
     required source identity cannot be resolved.
     """
     enriched = dict(payload)
+
+    if table_name == "users":
+        enriched[USER_SYNC_IDENTITY_FIELD] = build_user_sync_identity(row, include_previous=False)
+
+    user_reference_fields = REGISTRATION_USER_REFERENCE_FIELDS.get(table_name, ())
+    user_references: dict[str, Mapping[str, Any]] = {}
+    for field_name in user_reference_fields:
+        user_id = getattr(row, field_name, None)
+        if user_id is None:
+            continue
+        identity = _required_reference(
+            references.user_identities_by_id,
+            user_id,
+            table_name=table_name,
+            field_name=field_name,
+        )
+        user_references[field_name] = {"current": dict(identity), "previous": {}}
+    if user_references:
+        enriched[REGISTRATION_USER_REFERENCES_FIELD] = user_references
 
     if table_name in {"commodity_aliases", "offers", "trades"}:
         commodity_id = getattr(row, "commodity_id", None)
@@ -232,9 +259,10 @@ async def load_seed_reference_index() -> SeedReferenceIndex:
     offer_model = get_model_class("offers")
     trade_model = get_model_class("trades")
     customer_relation_model = get_model_class("customer_relations")
+    user_model = get_model_class("users")
     if any(
         model is None
-        for model in (commodity_model, offer_model, trade_model, customer_relation_model)
+        for model in (commodity_model, offer_model, trade_model, customer_relation_model, user_model)
     ):
         raise ValueError("Seed reference models are not fully registered")
 
@@ -253,6 +281,16 @@ async def load_seed_reference_index() -> SeedReferenceIndex:
                 select(customer_relation_model.id, customer_relation_model.invitation_token)
             )
         ).all()
+        user_rows = (
+            await db.execute(
+                select(
+                    user_model.id,
+                    user_model.account_name,
+                    user_model.mobile_number,
+                    user_model.telegram_id,
+                )
+            )
+        ).all()
 
     return SeedReferenceIndex(
         commodity_names_by_id={int(row_id): str(value) for row_id, value in commodity_rows if value},
@@ -261,7 +299,45 @@ async def load_seed_reference_index() -> SeedReferenceIndex:
         customer_relation_tokens_by_id={
             int(row_id): str(value) for row_id, value in customer_relation_rows if value
         },
+        user_identities_by_id={
+            int(row_id): {
+                key: value
+                for key, value in {
+                    "account_name": account_name,
+                    "mobile_number": mobile_number,
+                    "telegram_id": telegram_id,
+                }.items()
+                if value not in (None, "")
+            }
+            for row_id, account_name, mobile_number, telegram_id in user_rows
+        },
     )
+
+
+def build_seed_sync_item(table_name: str, row: Any, data: dict[str, Any]) -> dict[str, Any]:
+    record_id = record_id_for(row)
+    operation = "INSERT"
+    item = {
+        "type": "db_change",
+        "operation": operation,
+        "table": table_name,
+        "id": record_id,
+        "data": data,
+        "hash": "",
+        "timestamp": time.time(),
+        "sync_protocol": build_sync_protocol_metadata(),
+        "sync_meta": build_sync_metadata(
+            table_name,
+            record_id,
+            operation,
+            data,
+            source_server=current_server(),
+        ),
+    }
+    public_identity = build_sync_public_identity(table_name, record_id, data)
+    if public_identity is not None:
+        item["public_identity"] = public_identity
+    return item
 
 
 async def load_chat_sync_flags() -> dict[int, dict[str, Any]]:
@@ -335,17 +411,7 @@ async def seed_table(
             if table_name == "chat_members":
                 data.update(chat_sync_flags.get(int(data.get("chat_id") or 0), {}))
             data = enrich_seed_payload(table_name, row, data, references)
-            items.append(
-                {
-                    "type": "db_change",
-                    "operation": "UPDATE",
-                    "table": table_name,
-                    "id": record_id_for(row),
-                    "data": data,
-                    "hash": "",
-                    "timestamp": time.time(),
-                }
-            )
+            items.append(build_seed_sync_item(table_name, row, data))
         if not items:
             continue
         await send_items(target_url, api_key, items)

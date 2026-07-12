@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from scripts.trading_core_probe_worker import (
     TradingProbeError,
+    assert_race_barrier_lateness,
     assert_race_acceptance,
     run_manual_expiry_race_command,
     set_prepare_barrier_command,
@@ -52,6 +53,11 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
                 status="completed",
                 error_count=1,
             )
+
+    def test_race_barrier_rejects_late_container_start(self) -> None:
+        assert_race_barrier_lateness(label="race", scheduled_epoch=10.0, started_epoch=10.5)
+        with self.assertRaisesRegex(TradingProbeError, "missed its execution barrier"):
+            assert_race_barrier_lateness(label="race", scheduled_epoch=10.0, started_epoch=11.01)
 
     def test_standalone_manual_expiry_registers_model_event_listeners(self) -> None:
         args = SimpleNamespace(prepare="/missing/manual-expiry-prepare.json")

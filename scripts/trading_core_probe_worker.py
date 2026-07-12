@@ -113,6 +113,7 @@ NEGATIVE_GUARD_RESULT_SCHEMA_VERSION = "production_negative_guard_result_v1"
 UNSUPPORTED_POLICY_RESULT_SCHEMA_VERSION = "production_unsupported_policy_result_v1"
 TIME_EXPIRY_RACE_DELAY_SECONDS = 0.3
 TIME_EXPIRY_RACE_STALE_SKEW_SECONDS = 0.05
+RACE_START_MAX_LATE_SECONDS = 1.0
 MIN_CLEANUP_PREFIX_LENGTH = 5
 PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
 PRODUCTION_CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
@@ -6537,6 +6538,12 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def assert_race_barrier_lateness(*, label: str, scheduled_epoch: float, started_epoch: float) -> None:
+    lateness = started_epoch - scheduled_epoch
+    if lateness > RACE_START_MAX_LATE_SECONDS:
+        raise TradingProbeError(f"{label} missed its execution barrier by {lateness:.3f}s")
+
+
 async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
     # This command is commonly launched as its own short-lived container
     # process. Register model listeners here so the terminal offer mutation
@@ -6566,6 +6573,11 @@ async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
         await asyncio.sleep(start_delay)
 
     started_epoch = time.time()
+    assert_race_barrier_lateness(
+        label="manual-expiry race",
+        scheduled_epoch=barrier_epoch,
+        started_epoch=started_epoch,
+    )
     started_monotonic = time.perf_counter()
     status = "error"
     detail = ""
@@ -6657,6 +6669,11 @@ async def run_time_expiry_race_command(args: argparse.Namespace) -> int:
         await asyncio.sleep(start_delay)
 
     started_epoch = time.time()
+    assert_race_barrier_lateness(
+        label="time-expiry race",
+        scheduled_epoch=expiry_epoch,
+        started_epoch=started_epoch,
+    )
     started_monotonic = time.perf_counter()
     status = "error"
     detail = ""
