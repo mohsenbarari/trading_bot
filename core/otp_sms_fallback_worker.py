@@ -10,14 +10,12 @@ import logging
 from core.background_job_authority import JOB_OTP_SMS_FALLBACK, assert_background_job_authority
 from core.config import settings
 from core.redis import get_redis_client
-from core.registration_contracts import OTPDeliveryStatus
 from core.services.otp_delivery_state_service import (
     claim_sms_delivery,
     due_otp_request_ids,
     load_otp_delivery_state,
-    record_sms_delivery_result,
 )
-from core.sms import SMSDeliveryOutcome, send_otp_sms_result_async
+from core.services.otp_sms_delivery_service import execute_claimed_otp_sms_delivery
 from core.utils import utc_now
 
 
@@ -30,14 +28,6 @@ _BATCH_LIMIT = 100
 class OTPFallbackCycleReport:
     due_count: int
     outcome_counts: dict[str, int]
-
-
-def _delivery_status(outcome: SMSDeliveryOutcome) -> OTPDeliveryStatus:
-    if outcome == SMSDeliveryOutcome.ACCEPTED:
-        return OTPDeliveryStatus.ACCEPTED
-    if outcome == SMSDeliveryOutcome.AMBIGUOUS:
-        return OTPDeliveryStatus.AMBIGUOUS
-    return OTPDeliveryStatus.FAILED
 
 
 async def run_otp_sms_fallback_cycle(*, limit: int = _BATCH_LIMIT) -> OTPFallbackCycleReport:
@@ -66,27 +56,20 @@ async def run_otp_sms_fallback_cycle(*, limit: int = _BATCH_LIMIT) -> OTPFallbac
             )
             if claim is None:
                 return "not_claimed"
-            try:
-                outcome = await send_otp_sms_result_async(
-                    claim.mobile_number,
-                    claim.otp_code,
-                )
-            except Exception:
-                outcome = SMSDeliveryOutcome.AMBIGUOUS
-            await record_sms_delivery_result(
-                redis,
-                request_id=claim.request_id,
-                outcome=_delivery_status(outcome),
-            )
+            attempt = await execute_claimed_otp_sms_delivery(redis, claim=claim)
             logger.info(
                 "OTP SMS fallback delivery completed",
                 extra={
                     "event": "otp.sms_delivery_result",
                     "otp_request_id": str(claim.request_id),
-                    "outcome": outcome.value,
+                    "outcome": attempt.outcome.value,
+                    "provider_attempted": attempt.provider_attempted,
+                    "result_recorded": attempt.result_recorded,
                 },
             )
-            return outcome.value
+            if not attempt.result_recorded:
+                return "ambiguous_unrecorded"
+            return attempt.outcome.value
 
     outcomes = await asyncio.gather(*(deliver(request_id) for request_id in request_ids))
     return OTPFallbackCycleReport(

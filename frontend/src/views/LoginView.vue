@@ -53,6 +53,11 @@ let installButtonDelayTimer: number | null = null
 // OTP Timer State
 const countdown = ref(0)
 let timerInterval: any = null
+let countdownDeadlineMs: number | null = null
+const otpRequestId = ref<string | null>(null)
+const otpExpiresAt = ref<string | null>(null)
+const smsFallbackAt = ref<string | null>(null)
+const OTP_ATTEMPT_SESSION_KEY = 'login_otp_attempt_v1'
 
 const form = reactive({
   mobile: '',
@@ -96,16 +101,99 @@ async function completeAuthenticatedLogin(data: { access_token: string; refresh_
   router.push('/')
 }
 
-function startTimer(seconds: number) {
+function syncCountdown() {
+  if (countdownDeadlineMs === null) {
+    countdown.value = 0
+    return
+  }
+  countdown.value = Math.max(0, Math.ceil((countdownDeadlineMs - Date.now()) / 1000))
+  if (countdown.value === 0 && timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
+  }
+}
+
+function startTimerUntil(deadline: string | number) {
   if (timerInterval) clearInterval(timerInterval)
-  countdown.value = seconds
-  timerInterval = setInterval(() => {
-    countdown.value--
-    if (countdown.value <= 0) {
-      clearInterval(timerInterval)
-      countdown.value = 0
+  const deadlineMs = typeof deadline === 'number' ? deadline : new Date(deadline).getTime()
+  countdownDeadlineMs = Number.isFinite(deadlineMs) ? deadlineMs : null
+  syncCountdown()
+  if (countdown.value > 0) timerInterval = setInterval(syncCountdown, 1000)
+}
+
+function startTimer(seconds: number) {
+  startTimerUntil(Date.now() + Math.max(0, Number(seconds) || 0) * 1000)
+}
+
+function persistOtpAttempt() {
+  if (!otpRequestId.value || !otpExpiresAt.value) return
+  try {
+    sessionStorage.setItem(OTP_ATTEMPT_SESSION_KEY, JSON.stringify({
+      requestId: otpRequestId.value,
+      method: lastMethod.value,
+      expiresAt: otpExpiresAt.value,
+      smsFallbackAt: smsFallbackAt.value,
+    }))
+  } catch {
+    // Browser storage is best-effort; backend timing remains authoritative.
+  }
+}
+
+function clearOtpAttempt() {
+  otpRequestId.value = null
+  otpExpiresAt.value = null
+  smsFallbackAt.value = null
+  countdownDeadlineMs = null
+  if (timerInterval) clearInterval(timerInterval)
+  timerInterval = null
+  countdown.value = 0
+  try {
+    sessionStorage.removeItem(OTP_ATTEMPT_SESSION_KEY)
+  } catch {
+    // Ignore unavailable browser storage.
+  }
+}
+
+function applyOtpTiming(data: any) {
+  otpRequestId.value = typeof data?.otp_request_id === 'string' ? data.otp_request_id : null
+  lastMethod.value = data?.method === 'telegram' || data?.method === 'sms' ? data.method : null
+  otpExpiresAt.value = typeof data?.expires_at === 'string'
+    ? data.expires_at
+    : new Date(Date.now() + Math.max(0, Number(data?.expires_in) || 0) * 1000).toISOString()
+  smsFallbackAt.value = typeof data?.sms_fallback_at === 'string'
+    ? data.sms_fallback_at
+    : (lastMethod.value === 'telegram'
+        ? new Date(Date.now() + Math.max(0, Number(data?.sms_fallback_in) || 40) * 1000).toISOString()
+        : null)
+  const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
+    ? smsFallbackAt.value
+    : otpExpiresAt.value
+  startTimerUntil(displayDeadline)
+  persistOtpAttempt()
+}
+
+function restoreOtpAttempt() {
+  try {
+    const raw = sessionStorage.getItem(OTP_ATTEMPT_SESSION_KEY)
+    if (!raw) return
+    const saved = JSON.parse(raw)
+    const expiresAtMs = new Date(saved?.expiresAt).getTime()
+    if (!saved?.requestId || !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      clearOtpAttempt()
+      return
     }
-  }, 1000)
+    otpRequestId.value = saved.requestId
+    otpExpiresAt.value = saved.expiresAt
+    smsFallbackAt.value = typeof saved.smsFallbackAt === 'string' ? saved.smsFallbackAt : null
+    lastMethod.value = saved.method === 'telegram' || saved.method === 'sms' ? saved.method : null
+    step.value = 'otp'
+    const displayDeadline = lastMethod.value === 'telegram' && smsFallbackAt.value
+      ? smsFallbackAt.value
+      : otpExpiresAt.value
+    startTimerUntil(displayDeadline)
+  } catch {
+    clearOtpAttempt()
+  }
 }
 
 
@@ -192,24 +280,17 @@ async function requestOtp() {
     
     if (!res.ok) {
       const err = await res.json()
-      if (res.status === 429) {
-        const match = err.detail && typeof err.detail === 'string' ? err.detail.match(/(\d+)/) : null
-        if (match) {
-          const seconds = parseInt(match[1])
-          startTimer(seconds)
-          goToOtpStep()
-          return
-        }
+      if (res.status === 429 && err?.code === 'otp_active' && err?.expires_at) {
+        applyOtpTiming(err)
+        goToOtpStep()
+        return
       }
-      throw new Error(err.detail || 'خطا در ارسال کد')
+      const detail = typeof err?.detail === 'string' ? err.detail : err?.detail?.message
+      throw new Error(detail || 'خطا در ارسال کد')
     }
     
     const data = await res.json()
-    lastMethod.value = data.method
-    
-    // Telegram countdown represents the automatic SMS fallback, not OTP expiry.
-    const timerSeconds = data.method === 'telegram' ? (data.sms_fallback_in || 40) : 120
-    startTimer(timerSeconds)
+    applyOtpTiming(data)
     goToOtpStep()
     
   } catch (e: any) {
@@ -238,11 +319,7 @@ async function resendOtpSms() {
     const data = await res.json()
     
     // SMS Sent successfully
-    lastMethod.value = 'sms'
-    
-    // Use remaining TTL from backend if available
-    const ttl = data.expires_in || 60
-    startTimer(ttl)
+    applyOtpTiming({ ...data, method: 'sms', otp_request_id: data.otp_request_id || otpRequestId.value })
 
     
   } catch (e: any) {
@@ -271,9 +348,14 @@ async function verifyOtp() {
 
   try {
     const res = await apiFetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mobile_number: form.mobile, code: form.code, suspended_refresh_token: localStorage.getItem("suspended_refresh_token") || undefined })
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        mobile_number: form.mobile || undefined,
+        otp_request_id: otpRequestId.value || undefined,
+        code: form.code,
+        suspended_refresh_token: localStorage.getItem("suspended_refresh_token") || undefined,
+      })
     })
 
     
@@ -283,6 +365,7 @@ async function verifyOtp() {
     }
     
     const data = await res.json()
+    clearOtpAttempt()
     localStorage.removeItem('suspended_refresh_token')
 
     // Session management: check if approval is required
@@ -617,6 +700,7 @@ function restartLoginFlow() {
   stopApprovalPolling()
   stopRecoveryPolling()
   clearRecoveryDraft()
+  clearOtpAttempt()
   form.code = ''
   error.value = ''
   step.value = 'mobile'
@@ -689,8 +773,13 @@ async function startDevLogin() {
 let beforeInstallPromptHandler: ((event: Event) => void) | null = null
 let pwaInstallReadyHandler: (() => void) | null = null
 let appInstalledHandler: (() => void) | null = null
+let otpVisibilityHandler: (() => void) | null = null
 
 onMounted(() => {
+  restoreOtpAttempt()
+  otpVisibilityHandler = () => syncCountdown()
+  document.addEventListener('visibilitychange', otpVisibilityHandler)
+
   const isStandaloneDisplay = typeof window.matchMedia === 'function'
     && window.matchMedia('(display-mode: standalone)').matches
   if (isStandaloneDisplay || (window.navigator as any).standalone === true) {
@@ -783,6 +872,7 @@ onUnmounted(() => {
   if (beforeInstallPromptHandler) window.removeEventListener('beforeinstallprompt', beforeInstallPromptHandler)
   if (pwaInstallReadyHandler) window.removeEventListener('pwa-install-ready', pwaInstallReadyHandler)
   if (appInstalledHandler) window.removeEventListener('appinstalled', appInstalledHandler)
+  if (otpVisibilityHandler) document.removeEventListener('visibilitychange', otpVisibilityHandler)
   stopApprovalPolling()
   stopRecoveryPolling()
   clearBackStack()
@@ -793,6 +883,7 @@ function goBackToMobile() {
   stopApprovalPolling()
   stopRecoveryPolling()
   clearRecoveryDraft()
+  clearOtpAttempt()
   form.code = ''
   step.value = 'mobile'
   error.value = ''
@@ -875,7 +966,7 @@ function goBackToMobile() {
 
           <div v-else-if="step === 'otp'" key="otp" class="login-step">
             <div class="login-step-meta">
-              <span>کد ارسال شده به {{ form.mobile }}</span>
+              <span v-if="form.mobile">کد ارسال شده به {{ form.mobile }}</span>
               <button type="button" class="login-link-btn" @click="goBackToMobile()">ویرایش شماره</button>
             </div>
 

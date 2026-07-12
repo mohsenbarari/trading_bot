@@ -51,6 +51,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "PUBLIC_WEBAPP_URL": "https://app.gold-trade.ir",
             "FOREIGN_SERVER_ALIASES": "sync-foreign.example.com,foreign-app",
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
+            "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -148,6 +149,13 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["REDIS_MAXMEMORY_POLICY"], "noeviction")
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
+        self.assertEqual(foreign["OTP_DELIVERY_STATE_SECRET"], "")
+        self.assertEqual(
+            iran["OTP_DELIVERY_STATE_SECRET"],
+            "iran-only-otp-state-secret-0123456789abcdef",
+        )
+        self.assertNotIn("IRAN_OTP_DELIVERY_STATE_SECRET", foreign)
+        self.assertNotIn("IRAN_OTP_DELIVERY_STATE_SECRET", iran)
 
     def test_build_runtime_env_uses_iran_frontend_as_public_webapp_fallback(self):
         values = self.sample_values()
@@ -242,6 +250,15 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("WEB_PUSH_VAPID_SUBJECT=mailto:ops@example.com", iran_lines)
             self.assertIn("WEB_PUSH_TTL_SECONDS=7200", iran_lines)
             self.assertIn("WEB_PUSH_TIMEOUT_SECONDS=7.5", iran_lines)
+            self.assertIn("OTP_DELIVERY_STATE_SECRET=", foreign_lines)
+            self.assertIn(
+                "OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
+                iran_lines,
+            )
+            self.assertNotIn(
+                "IRAN_OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
+                foreign_lines,
+            )
 
     def test_collect_runtime_values_reads_non_shell_safe_source_env_and_allows_overrides(self):
         values = self.sample_values()

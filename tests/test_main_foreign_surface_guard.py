@@ -22,6 +22,18 @@ async def _call_app(path: str, *, client_host: str = "198.51.100.10") -> httpx.R
         return await client.get(path)
 
 
+async def _post_app(
+    path: str,
+    *,
+    client_host: str = "198.51.100.10",
+    headers: dict[str, str] | None = None,
+    content: bytes = b"{}",
+) -> httpx.Response:
+    transport = ASGITransport(app=main.app, client=(client_host, 123))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.post(path, headers=headers, content=content)
+
+
 class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
     def test_foreign_mode_blocks_frontend_static_and_spa_paths(self):
         with patch.object(main.settings, "server_mode", "foreign"):
@@ -57,6 +69,7 @@ class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
                 "/api/sessions/internal/reset-user-sessions",
                 "/api/trades/internal/execute",
                 "/api/offers/internal/expire",
+                "/api/auth/internal/telegram-otp/deliver",
                 "/metrics",
             ):
                 with self.subTest(path=path):
@@ -150,6 +163,30 @@ class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
             response.json(),
             {"bot_username": "bot_user", "frontend_url": "https://iran.example"},
         )
+
+    async def test_app_routes_signed_telegram_otp_surface_only_to_foreign_endpoint(self):
+        headers = {"X-Source-Server": "iran"}
+        with patch.object(main.settings, "server_mode", "foreign"), patch(
+            "api.routers.auth.verify_internal_signature",
+            return_value=True,
+        ):
+            foreign_response = await _post_app(
+                "/api/auth/internal/telegram-otp/deliver",
+                headers=headers,
+            )
+        self.assertEqual(foreign_response.status_code, 422)
+        self.assertEqual(foreign_response.json(), {"detail": "Invalid internal OTP delivery command"})
+
+        with patch.object(main.settings, "server_mode", "iran"), patch(
+            "api.routers.auth.verify_internal_signature",
+            return_value=True,
+        ):
+            iran_response = await _post_app(
+                "/api/auth/internal/telegram-otp/deliver",
+                headers=headers,
+            )
+        self.assertEqual(iran_response.status_code, 403)
+        self.assertEqual(iran_response.json(), {"detail": "Telegram OTP delivery is foreign-only"})
 
 
 if __name__ == "__main__":

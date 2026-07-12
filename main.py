@@ -36,6 +36,7 @@ from core.telegram_registration_reconciliation_worker import (
     telegram_registration_reconciliation_loop,
 )
 from core.otp_sms_fallback_worker import otp_sms_fallback_loop
+from core.services.otp_delivery_state_service import validate_otp_delivery_runtime_settings
 from core.registration_feature_policy import registration_reconciliation_runtime_ready
 from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
@@ -67,6 +68,7 @@ FOREIGN_INTERNAL_API_PREFIXES = (
     "/api/sessions/internal",
     "/api/trades/internal",
     "/api/offers/internal",
+    "/api/auth/internal/telegram-otp",
 )
 FOREIGN_LOOPBACK_INTERNAL_PATHS = {"/api/config"}
 PRODUCTION_TEST_ISOLATION_PUBLIC_EXACT_PATHS = {
@@ -349,6 +351,7 @@ def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting up...")
+    validate_otp_delivery_runtime_settings(settings)
     if settings.invitation_contract_v2_enabled:
         public_webapp_url_for_links()
     await init_db()

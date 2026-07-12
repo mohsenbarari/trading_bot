@@ -985,6 +985,7 @@ TELEGRAM_LOGIN_OTP_ENABLED=0
 OTP_SMS_AUTO_FALLBACK_ENABLED=0
 OTP_SMS_AUTO_FALLBACK_SECONDS=40
 OTP_TTL_SECONDS=120
+OTP_DELIVERY_STATE_SECRET=<dedicated Iran-only secret, minimum 32 characters>
 TELEGRAM_REGISTRATION_POST_EXPIRY_GRACE_SECONDS=86400
 TELEGRAM_REGISTRATION_JOB_BATCH_SIZE=10
 TELEGRAM_REGISTRATION_JOB_CONCURRENCY=1
@@ -2471,3 +2472,19 @@ The exact implementation and verification record is
 `docs/DUAL_PLATFORM_REGISTRATION_STAGE7_UX_COMPLETION_20260712.md`. This source record does not
 accept any pending independent review, enable a feature flag, migrate, deploy, push, authorize
 production, or waive Stages 8-12.
+
+## Stage 6 Post-Review Remediation Record (2026-07-12)
+
+The independent Stage 5/6 review accepted the final Stage 5 corrections and identified three High,
+five Medium, and four Low Stage 6 observations. Each finding was checked against current source.
+The confirmed Stage 6 defects were corrected without rewriting the already-completed Stage 7
+history: foreign endpoint reachability, leased/generation-bound SMS claims, post-provider ambiguity,
+stale due-prefix cleanup, protected Redis identity state, exact 120/40 fail-closed configuration,
+absolute refresh-safe frontend timing, verification audit identity, and path-specific SMS rejection
+semantics.
+
+`L-1` remains an inherited flags-off staging harness that Stage 6 refuses to use; `L-2` remains
+Stage 8 observability ownership; `L-3` was hardened with a minimum provider-send TTL; and `L-4`
+remains an immutable historical migration rule. Exact reasoning and evidence requirements are in
+`docs/DUAL_PLATFORM_REGISTRATION_STAGE6_POSTREVIEW_REMEDIATION_20260712.md`. No feature flag,
+migration, deployment, push, staging action, production action, or later-stage waiver is authorized.

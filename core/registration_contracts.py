@@ -213,15 +213,14 @@ class PublicInvitationContractV2(BaseModel):
 
 
 class OTPDeliveryStateContract(BaseModel):
-    """Structured state referencing, but never duplicating, `otp:{mobile}`."""
+    """PII-free Redis metadata for one authoritative OTP request."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     otp_request_id: UUID
     purpose: str = Field(default="web_login", pattern=r"^web_login$")
-    mobile_number: str
-    code_key: str
-    telegram_id: int | None = Field(default=None, gt=0)
+    identity_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    delivery_target_ciphertext: str = Field(min_length=32, max_length=1024)
     status: OTPRequestStatus = OTPRequestStatus.PENDING
     created_at: datetime
     expires_at: datetime
@@ -230,35 +229,46 @@ class OTPDeliveryStateContract(BaseModel):
     sms_fallback_at: datetime | None = None
     sms_delivery_status: OTPDeliveryStatus = OTPDeliveryStatus.NOT_ATTEMPTED
     sms_sent_at: datetime | None = None
+    sms_claim_id: UUID | None = None
+    sms_claimed_at: datetime | None = None
+    sms_claim_lease_until: datetime | None = None
+    sms_provider_started_at: datetime | None = None
 
-    @field_validator("mobile_number")
-    @classmethod
-    def normalize_mobile_number(cls, value: str) -> str:
-        normalized = normalize_persian_numerals(str(value or "")).strip()
-        if len(normalized) != 11 or not normalized.startswith("09") or not normalized.isdigit():
-            raise ValueError("شماره موبایل نامعتبر است")
-        return normalized
-
-    @field_validator("created_at", "expires_at", "telegram_sent_at", "sms_fallback_at", "sms_sent_at")
+    @field_validator(
+        "created_at",
+        "expires_at",
+        "telegram_sent_at",
+        "sms_fallback_at",
+        "sms_sent_at",
+        "sms_claimed_at",
+        "sms_claim_lease_until",
+        "sms_provider_started_at",
+    )
     @classmethod
     def validate_optional_timezone(cls, value: datetime | None) -> datetime | None:
         if value is not None and (value.tzinfo is None or value.utcoffset() is None):
             raise ValueError("OTP state timestamps must include a timezone")
         return value
 
-    @field_validator("code_key")
-    @classmethod
-    def validate_code_key_shape(cls, value: str) -> str:
-        if not value.startswith("otp:") or len(value) <= 4:
-            raise ValueError("OTP state must reference the canonical otp:{mobile} key")
-        return value
-
     @model_validator(mode="after")
-    def validate_code_key_mobile(self):
-        if self.code_key != f"otp:{self.mobile_number}":
-            raise ValueError("OTP state must reference the matching canonical code key")
+    def validate_timeline(self):
         if self.expires_at <= self.created_at:
             raise ValueError("OTP expiry must be after creation")
+        claim_values = (
+            self.sms_claim_id,
+            self.sms_claimed_at,
+            self.sms_claim_lease_until,
+        )
+        if any(value is not None for value in claim_values) and not all(
+            value is not None for value in claim_values
+        ):
+            raise ValueError("OTP SMS claim metadata must be complete")
+        if (
+            self.sms_claimed_at is not None
+            and self.sms_claim_lease_until is not None
+            and self.sms_claim_lease_until <= self.sms_claimed_at
+        ):
+            raise ValueError("OTP SMS claim lease must end after claim time")
         return self
 
 

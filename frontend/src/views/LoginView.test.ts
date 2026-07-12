@@ -66,6 +66,7 @@ describe('LoginView.vue', () => {
     popBackStateMock.mockReset()
     clearBackStackMock.mockReset()
     localStorage.clear()
+    sessionStorage.clear()
     vi.stubGlobal('fetch', vi.fn())
     apiFetchMock.mockImplementation((...args: Parameters<typeof fetch>) => fetch(...args) as any)
     window.matchMedia = vi.fn().mockReturnValue({
@@ -229,9 +230,18 @@ describe('LoginView.vue', () => {
 
   it('shows validation errors, enters the OTP step on rate limiting, and lets the user go back to the mobile step', async () => {
     vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T02:00:00.000Z'))
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(
-      makeJsonResponse({ detail: 'ارسال مجدد پس از 45 ثانیه' }, false, 429) as any,
+      makeJsonResponse({
+        detail: 'کد قبلی هنوز معتبر است. لطفاً صبر کنید.',
+        code: 'otp_active',
+        otp_request_id: '23bc1f50-c3ed-49f7-8dc0-c736a968448c',
+        method: 'sms',
+        retry_after: 45,
+        expires_in: 45,
+        expires_at: '2026-07-12T02:00:45.000Z',
+      }, false, 429) as any,
     )
 
     const LoginView = (await import('./LoginView.vue')).default
@@ -296,6 +306,86 @@ describe('LoginView.vue', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-2/status')
     expect(wrapper.text()).toContain('درخواست ورود شما رد شد.')
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('uses absolute fallback deadlines after browser clock jumps and visibility changes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T03:00:00.000Z'))
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      otp_request_id: '53a42ed0-4165-41db-a98f-4e18b205bca1',
+      method: 'telegram',
+      expires_in: 120,
+      expires_at: '2026-07-12T03:02:00.000Z',
+      sms_fallback_in: 40,
+      sms_fallback_at: '2026-07-12T03:00:40.000Z',
+    }) as any)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+    expect(wrapper.text()).toContain('00:40 تا ارسال خودکار پیامک')
+
+    vi.setSystemTime(new Date('2026-07-12T03:00:31.000Z'))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('00:09 تا ارسال خودکار پیامک')
+
+    vi.setSystemTime(new Date('2026-07-12T03:00:41.000Z'))
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('ارسال خودکار همان کد از طریق پیامک فعال شد.')
+    expect(wrapper.text()).not.toContain('ارسال مجدد کد')
+    wrapper.unmount()
+  })
+
+  it('restores an opaque active OTP request after refresh without persisting mobile PII', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T04:00:00.000Z'))
+    sessionStorage.setItem('login_otp_attempt_v1', JSON.stringify({
+      requestId: '0d5c80cb-f5a6-40e5-b3cb-f71636d94625',
+      method: 'telegram',
+      expiresAt: '2026-07-12T04:02:00.000Z',
+      smsFallbackAt: '2026-07-12T04:00:40.000Z',
+    }))
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ access_token: 'restored-access' }) as any)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await flushPromises()
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('0912')
+    expect(sessionStorage.getItem('login_otp_attempt_v1')).not.toContain('0912')
+
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    const verifyCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/verify-otp')
+    expect(verifyCall).toBeTruthy()
+    expect(JSON.parse(String(verifyCall?.[1]?.body))).toMatchObject({
+      otp_request_id: '0d5c80cb-f5a6-40e5-b3cb-f71636d94625',
+      code: '12345',
+    })
+    expect(JSON.parse(String(verifyCall?.[1]?.body))).not.toHaveProperty('mobile_number')
+    expect(sessionStorage.getItem('login_otp_attempt_v1')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('does not derive retry authority from localized 429 copy', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse({ detail: 'لطفاً ۴۵ ثانیه صبر کنید' }, false, 429) as any,
+    )
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+
+    expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('لطفاً ۴۵ ثانیه صبر کنید')
     wrapper.unmount()
   })
 

@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     otp_sms_auto_fallback_enabled: bool = False
     otp_sms_auto_fallback_seconds: int = 40
     otp_ttl_seconds: int = 120
+    otp_delivery_state_secret: str | None = None
     telegram_registration_post_expiry_grace_seconds: int = 86400
     telegram_registration_job_batch_size: int = 10
     telegram_registration_job_concurrency: int = 1

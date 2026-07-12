@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from datetime import timedelta
@@ -11,7 +12,6 @@ from api.routers import auth
 from core.enums import UserAccountStatus
 from core.otp_sms_fallback_worker import run_otp_sms_fallback_cycle
 from core.registration_contracts import (
-    OTPDeliveryStateContract,
     OTPDeliveryStatus,
     TelegramOTPDeliveryCommand,
     TelegramOTPDeliveryOutcome,
@@ -19,10 +19,31 @@ from core.registration_contracts import (
 )
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, override_current_server
 from core.services.otp_delivery_state_service import OTPDeliveryClaim
+from core.services.otp_delivery_state_service import (
+    build_otp_delivery_state,
+    validate_otp_delivery_runtime_settings,
+)
+from core.services.otp_sms_delivery_service import (
+    OTPSMSAttemptResult,
+    execute_claimed_otp_sms_delivery,
+)
 from core.services.telegram_otp_delivery_service import deliver_telegram_otp_once
 from core.sms import SMSDeliveryOutcome, send_otp_sms_result_async
 from core.telegram_otp_transport import forward_telegram_otp_delivery
 from core.utils import utc_now
+
+TEST_MOBILE = "09121112233"
+TEST_TELEGRAM_ID = 8_700_001
+TEST_STATE_SECRET = "stage6-test-state-secret-0123456789abcdef"
+_ORIGINAL_STATE_SECRET = auth.settings.otp_delivery_state_secret
+
+
+def setUpModule():
+    auth.settings.otp_delivery_state_secret = TEST_STATE_SECRET
+
+
+def tearDownModule():
+    auth.settings.otp_delivery_state_secret = _ORIGINAL_STATE_SECRET
 
 
 def command(**overrides):
@@ -38,16 +59,21 @@ def command(**overrides):
 
 def state(**overrides):
     request_id = overrides.pop("otp_request_id", uuid4())
-    values = {
-        "otp_request_id": request_id,
-        "mobile_number": "09121112233",
-        "code_key": "otp:09121112233",
-        "telegram_id": 8_700_001,
-        "created_at": utc_now(),
-        "expires_at": utc_now() + timedelta(seconds=120),
-    }
-    values.update(overrides)
-    return OTPDeliveryStateContract(**values)
+    overrides.pop("telegram_id", None)
+    created_at = overrides.pop("created_at", utc_now())
+    expires_at = overrides.pop("expires_at", created_at + timedelta(seconds=120))
+    built = build_otp_delivery_state(
+        mobile=TEST_MOBILE,
+        ttl_seconds=120,
+        now=created_at,
+    )
+    return built.model_copy(
+        update={
+            "otp_request_id": request_id,
+            "expires_at": expires_at,
+            **overrides,
+        }
+    )
 
 
 class DedupeRedis:
@@ -259,7 +285,7 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             otp_request_id=otp_state.otp_request_id,
             outcome=TelegramOTPDeliveryOutcome.SENT,
         )
-        user = SimpleNamespace(telegram_id=otp_state.telegram_id)
+        user = SimpleNamespace(telegram_id=TEST_TELEGRAM_ID)
         with override_current_server(SERVER_IRAN), patch.object(
             auth.settings, "telegram_login_otp_enabled", True
         ), patch.object(
@@ -284,7 +310,7 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             auth, "_deliver_stage6_sms", new=AsyncMock()
         ) as sms, patch.object(auth, "audit_log"):
             result = await auth._request_stage6_login_otp(
-                RequestRedis(), mobile=otp_state.mobile_number, user=user
+                RequestRedis(), mobile=TEST_MOBILE, user=user
             )
 
         self.assertEqual(result["method"], "telegram")
@@ -293,6 +319,39 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         arm.assert_awaited_once()
         schedule.assert_awaited_once()
         sms.assert_not_awaited()
+
+    async def test_active_request_returns_structured_absolute_timing_without_new_code(self):
+        otp_state = state(
+            telegram_delivery_status=OTPDeliveryStatus.ACCEPTED,
+            sms_fallback_at=utc_now() + timedelta(seconds=40),
+        )
+        redis = SimpleNamespace(ttl=AsyncMock(return_value=119))
+        with override_current_server(SERVER_IRAN), patch.object(
+            auth.settings, "telegram_login_otp_enabled", True
+        ), patch.object(
+            auth.settings, "otp_sms_auto_fallback_enabled", True
+        ), patch.object(
+            auth.settings, "server_mode", SERVER_IRAN
+        ), patch.object(
+            auth, "create_otp_delivery_state", new=AsyncMock(return_value=False)
+        ), patch.object(
+            auth, "load_otp_delivery_state", new=AsyncMock(return_value=otp_state)
+        ), patch.object(
+            auth, "_generate_otp_code", return_value="12345"
+        ):
+            response = await auth._request_stage6_login_otp(
+                redis,
+                mobile=TEST_MOBILE,
+                user=SimpleNamespace(telegram_id=TEST_TELEGRAM_ID),
+            )
+
+        self.assertEqual(response.status_code, 429)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["code"], "otp_active")
+        self.assertEqual(payload["method"], "telegram")
+        self.assertEqual(payload["otp_request_id"], str(otp_state.otp_request_id))
+        self.assertIn("expires_at", payload)
+        self.assertIn("sms_fallback_at", payload)
 
     async def test_telegram_timeout_and_missing_telegram_use_same_code_immediate_sms(self):
         for telegram_id, forward_result in (
@@ -327,7 +386,7 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                     new=AsyncMock(return_value=SMSDeliveryOutcome.ACCEPTED),
                 ) as sms, patch.object(auth, "audit_log"):
                     result = await auth._request_stage6_login_otp(
-                        redis, mobile=otp_state.mobile_number, user=user
+                        redis, mobile=TEST_MOBILE, user=user
                     )
 
                 self.assertEqual(result["method"], "sms")
@@ -376,8 +435,8 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             auth, "_deliver_stage6_sms", new=AsyncMock(side_effect=send_sms)
         ), patch.object(auth, "audit_log"):
             result = await auth._request_stage6_login_otp(
-                RequestRedis(), mobile=otp_state.mobile_number, user=SimpleNamespace(
-                    telegram_id=otp_state.telegram_id
+                RequestRedis(), mobile=TEST_MOBILE, user=SimpleNamespace(
+                    telegram_id=TEST_TELEGRAM_ID
                 )
             )
 
@@ -409,8 +468,8 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         ) as sms, patch.object(auth, "audit_log"):
             result = await auth._request_stage6_login_otp(
                 RequestRedis(),
-                mobile=otp_state.mobile_number,
-                user=SimpleNamespace(telegram_id=otp_state.telegram_id),
+                mobile=TEST_MOBILE,
+                user=SimpleNamespace(telegram_id=TEST_TELEGRAM_ID),
             )
 
         self.assertEqual(result["method"], "sms")
@@ -443,7 +502,7 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                 ) as cancel, patch.object(auth, "audit_log"):
                     with self.assertRaises(HTTPException) as exc:
                         await auth._request_stage6_login_otp(
-                            RequestRedis(), mobile=otp_state.mobile_number, user=None
+                            RequestRedis(), mobile=TEST_MOBILE, user=None
                         )
 
                 self.assertEqual(exc.exception.status_code, 500)
@@ -485,11 +544,12 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=SMSDeliveryOutcome.ACCEPTED),
         ) as deliver:
             result = await auth.resend_otp_sms(
-                auth.OTPRequest(mobile_number=otp_state.mobile_number),
+                auth.OTPRequest(mobile_number=TEST_MOBILE),
                 raw_request=SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1")),
                 db=FakeDB(user),
             )
-        self.assertEqual(result["expires_in"], 80)
+        self.assertGreaterEqual(result["expires_in"], 119)
+        self.assertIn("expires_at", result)
         deliver.assert_awaited_once_with(redis, state=otp_state)
 
     async def test_verify_replay_loses_atomic_consume_race_before_session_creation(self):
@@ -511,6 +571,128 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc.exception.status_code, 400)
         consume.assert_awaited_once()
+
+    async def test_successful_atomic_consume_keeps_request_id_for_verification_audit(self):
+        redis = DedupeRedis()
+        redis.values[f"otp:{TEST_MOBILE}"] = "12345"
+        otp_state = state()
+        with patch.object(auth.settings, "telegram_login_otp_enabled", True), patch.object(
+            auth, "get_redis", new=AsyncMock(return_value=redis)
+        ), patch.object(
+            auth, "load_otp_delivery_state", new=AsyncMock(return_value=otp_state)
+        ), patch.object(
+            auth, "consume_otp_code", new=AsyncMock(return_value=True)
+        ), patch.object(
+            auth, "_ensure_otp_verify_not_locked", new=AsyncMock()
+        ), patch.object(
+            auth, "_find_pending_invitation_for_mobile", new=AsyncMock(return_value=None)
+        ), patch.object(auth, "audit_log") as audit:
+            with self.assertRaises(HTTPException) as exc:
+                await auth.verify_otp(
+                    auth.OTPVerify(mobile_number=TEST_MOBILE, code="12345"),
+                    raw_request=SimpleNamespace(
+                        headers={},
+                        client=SimpleNamespace(host="127.0.0.1"),
+                    ),
+                    db=FakeDB(None),
+                )
+
+        self.assertEqual(exc.exception.status_code, 404)
+        audit.assert_any_call(
+            "otp.verified",
+            target_type="otp_request",
+            target_id=str(otp_state.otp_request_id),
+            result="success",
+        )
+
+
+class Stage6ConfigurationTests(unittest.TestCase):
+    def test_exact_timing_and_iran_state_secret_are_fail_closed(self):
+        valid = SimpleNamespace(
+            telegram_login_otp_enabled=True,
+            otp_sms_auto_fallback_enabled=True,
+            otp_ttl_seconds=120,
+            otp_sms_auto_fallback_seconds=40,
+            otp_delivery_state_secret=TEST_STATE_SECRET,
+            server_mode=SERVER_IRAN,
+        )
+        validate_otp_delivery_runtime_settings(valid)
+
+        for changed in (
+            {"otp_ttl_seconds": 119},
+            {"otp_ttl_seconds": 121},
+            {"otp_sms_auto_fallback_seconds": 39},
+            {"otp_sms_auto_fallback_seconds": 41},
+            {"otp_delivery_state_secret": "too-short"},
+        ):
+            with self.subTest(changed=changed), self.assertRaises(RuntimeError):
+                validate_otp_delivery_runtime_settings(
+                    SimpleNamespace(**{**vars(valid), **changed})
+                )
+
+        validate_otp_delivery_runtime_settings(
+            SimpleNamespace(**{**vars(valid), "telegram_login_otp_enabled": False})
+        )
+
+
+class Stage6ClaimedSMSProtocolTests(unittest.IsolatedAsyncioTestCase):
+    def _claim(self):
+        return OTPDeliveryClaim(
+            claim_id=uuid4(),
+            request_id=uuid4(),
+            mobile_number=TEST_MOBILE,
+            otp_code="12345",
+            lease_until=utc_now() + timedelta(seconds=30),
+        )
+
+    async def test_provider_is_not_called_when_durable_start_marker_fails(self):
+        claim = self._claim()
+        with patch(
+            "core.services.otp_sms_delivery_service.mark_sms_provider_attempt_started",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "core.services.otp_sms_delivery_service.send_otp_sms_result_async",
+            new=AsyncMock(),
+        ) as send:
+            result = await execute_claimed_otp_sms_delivery(object(), claim=claim)
+        self.assertFalse(result.provider_attempted)
+        self.assertFalse(result.result_recorded)
+        self.assertEqual(result.outcome, SMSDeliveryOutcome.AMBIGUOUS)
+        send.assert_not_awaited()
+
+    async def test_result_write_loss_is_ambiguous_and_never_retries_provider(self):
+        claim = self._claim()
+        with patch(
+            "core.services.otp_sms_delivery_service.mark_sms_provider_attempt_started",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.services.otp_sms_delivery_service.send_otp_sms_result_async",
+            new=AsyncMock(return_value=SMSDeliveryOutcome.ACCEPTED),
+        ) as send, patch(
+            "core.services.otp_sms_delivery_service.record_sms_delivery_result",
+            new=AsyncMock(return_value=False),
+        ):
+            result = await execute_claimed_otp_sms_delivery(object(), claim=claim)
+        self.assertTrue(result.provider_attempted)
+        self.assertFalse(result.result_recorded)
+        self.assertEqual(result.outcome, SMSDeliveryOutcome.AMBIGUOUS)
+        send.assert_awaited_once()
+
+    async def test_cancellation_after_provider_start_is_propagated_for_lease_recovery(self):
+        claim = self._claim()
+        with patch(
+            "core.services.otp_sms_delivery_service.mark_sms_provider_attempt_started",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.services.otp_sms_delivery_service.send_otp_sms_result_async",
+            new=AsyncMock(side_effect=asyncio.CancelledError),
+        ), patch(
+            "core.services.otp_sms_delivery_service.record_sms_delivery_result",
+            new=AsyncMock(),
+        ) as record:
+            with self.assertRaises(asyncio.CancelledError):
+                await execute_claimed_otp_sms_delivery(object(), claim=claim)
+        record.assert_not_awaited()
 
 
 class Stage6AsyncSMSAdapterTests(unittest.IsolatedAsyncioTestCase):
@@ -561,9 +743,11 @@ class Stage6WorkerTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_is_iran_only_claims_once_and_records_provider_outcome(self):
         otp_state = state()
         claim = OTPDeliveryClaim(
+            claim_id=uuid4(),
             request_id=otp_state.otp_request_id,
-            mobile_number=otp_state.mobile_number,
+            mobile_number=TEST_MOBILE,
             otp_code="12345",
+            lease_until=utc_now() + timedelta(seconds=30),
         )
         with override_current_server(SERVER_IRAN), patch(
             "core.otp_sms_fallback_worker.settings.telegram_login_otp_enabled", True
@@ -581,18 +765,19 @@ class Stage6WorkerTests(unittest.IsolatedAsyncioTestCase):
             "core.otp_sms_fallback_worker.claim_sms_delivery",
             new=AsyncMock(return_value=claim),
         ) as claim_mock, patch(
-            "core.otp_sms_fallback_worker.send_otp_sms_result_async",
-            new=AsyncMock(return_value=SMSDeliveryOutcome.AMBIGUOUS),
-        ), patch(
-            "core.otp_sms_fallback_worker.record_sms_delivery_result",
-            new=AsyncMock(return_value=True),
-        ) as record:
+            "core.otp_sms_fallback_worker.execute_claimed_otp_sms_delivery",
+            new=AsyncMock(return_value=OTPSMSAttemptResult(
+                outcome=SMSDeliveryOutcome.AMBIGUOUS,
+                provider_attempted=True,
+                result_recorded=True,
+            )),
+        ) as execute:
             report = await run_otp_sms_fallback_cycle()
 
         self.assertEqual(report.outcome_counts, {"ambiguous": 1})
         claim_mock.assert_awaited_once()
         self.assertTrue(claim_mock.await_args.kwargs["require_due"])
-        self.assertEqual(record.await_args.kwargs["outcome"], OTPDeliveryStatus.AMBIGUOUS)
+        execute.assert_awaited_once_with(ANY, claim=claim)
 
         with override_current_server(SERVER_FOREIGN), self.assertRaises(Exception):
             await run_otp_sms_fallback_cycle()
