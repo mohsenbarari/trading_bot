@@ -98,7 +98,7 @@
     "SYN-004": {"evidence_stage": "stage9", "test_ids": ["tests.test_registration_sync_apply.RegistrationSyncApplyTests.test_registration_reference_policy_boundary_matrix"]},
     "SYN-005": {"evidence_stage": "stage9", "test_ids": ["tests.test_registration_sync_policy.RegistrationSyncPolicyTests.test_counter_fields_are_never_in_either_source_contract"]},
     "SYN-006": {"evidence_stage": "stage9", "test_ids": ["tests.test_sync_guarantee_matrix.SyncGuaranteeMatrixTests.test_deferred_failed_and_duplicate_delivery_matrix_is_safe"]},
-    "SYN-007": {"evidence_stage": "stage9", "test_ids": ["tests.test_sync_guarantee_matrix.SyncGuaranteeMatrixTests.test_every_synced_table_has_receiver_payload_parity_repair_and_rule_coverage", "tests.test_registration_sync_policy.RegistrationSyncPolicyTests.test_missing_invalid_and_unversioned_events_fail_closed_as_configured"]},
+    "SYN-007": {"evidence_stage": "stage9_postgres", "test_ids": ["tests.test_sync_guarantee_matrix.SyncGuaranteeMatrixTests.test_every_synced_table_has_receiver_payload_parity_repair_and_rule_coverage", "tests.test_registration_sync_policy.RegistrationSyncPolicyTests.test_missing_invalid_and_unversioned_events_fail_closed_as_configured", "tests.test_user_counter_sync_postgres.UserCounterPostgresTests.test_counter_only_and_trade_transactions_have_durable_outbox"]},
 
     "OTP-001": {"evidence_stage": "stage9", "test_ids": ["tests.test_stage6_otp_delivery.Stage6RequestAndCompatibilityTests.test_telegram_timeout_and_missing_telegram_use_same_code_immediate_sms"]},
     "OTP-002": {"evidence_stage": "stage9_redis", "test_ids": ["tests.test_stage6_otp_delivery_redis.Stage6OTPDeliveryRedisTests.test_one_code_schedule_claim_record_and_consume_lifecycle"]},

@@ -26,6 +26,7 @@ RUNTIME_DATABASE_DENYLIST = {
 }
 SUITES = (
     ("stage1_migration", "STAGE1_MIGRATION_TEST_DATABASE_URL", "tests.test_registration_stage1_migration_postgres"),
+    ("stage1_counter", "STAGE1_COUNTER_TEST_DATABASE_URL", "tests.test_user_counter_sync_postgres"),
     ("stage2_registration", "STAGE2_TEST_DATABASE_URL", "tests.test_authoritative_registration_postgres"),
     ("stage3_registration", "STAGE3_TEST_DATABASE_URL", "tests.test_stage3_invitation_creation_postgres"),
     ("stage4_registration", "STAGE4_TEST_DATABASE_URL", "tests.test_stage4_registration_reconciliation_postgres"),

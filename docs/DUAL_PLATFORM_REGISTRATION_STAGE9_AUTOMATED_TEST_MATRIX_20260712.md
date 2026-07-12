@@ -35,6 +35,9 @@ so.
   only static/guard test bindings. A real scratch-PostgreSQL test now proves deterministic
   `base -> head -> head -> base -> head` migration behavior and exact schema restoration, and the
   registry binding requires that observed integration result.
+- Final skip adjudication found the branch-changed sender counter/outbox PostgreSQL test outside the
+  disposable runner. It is now a dedicated `stage1_counter_*` scratch suite, and `SYN-007` requires
+  its exact observed result instead of accepting the generic full-suite skip.
 - Test references are validated to the exact module, class, and method by AST.
 - Runtime evidence requires exact commit equality across matrix, backend coverage, frontend
   coverage, and mutation evidence.
@@ -92,7 +95,8 @@ so.
   explicit non-executable mapping inventory.
 - Mutation intermediate gate: 547 generated mutants, 521 evaluated/killed, 26 exact documented
   equivalents, and zero survivors.
-- Disposable PostgreSQL suite: all migration and Stage 1-4 integration groups passed.
+- Disposable PostgreSQL suite: all migration, sender-counter/outbox, and Stage 1-4 integration
+  groups passed.
 - Disposable Redis suite: 16 tests passed with an anonymous data volume.
 - Python compilation and shell syntax checks passed.
 

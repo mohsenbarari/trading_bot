@@ -56,6 +56,7 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
             {prefix for prefix, _env_name, _module in SUITES},
             {
                 "stage1_migration",
+                "stage1_counter",
                 "stage2_registration",
                 "stage3_registration",
                 "stage4_registration",
