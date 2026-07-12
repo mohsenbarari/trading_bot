@@ -31,6 +31,10 @@ so.
 
 - Every automated registry ID has an exact binding to a test ID, integration source, matrix row, or
   explicit later-stage blocker.
+- Final runtime-evidence construction rejected `MIG-002` because its PostgreSQL classification had
+  only static/guard test bindings. A real scratch-PostgreSQL test now proves deterministic
+  `base -> head -> head -> base -> head` migration behavior and exact schema restoration, and the
+  registry binding requires that observed integration result.
 - Test references are validated to the exact module, class, and method by AST.
 - Runtime evidence requires exact commit equality across matrix, backend coverage, frontend
   coverage, and mutation evidence.

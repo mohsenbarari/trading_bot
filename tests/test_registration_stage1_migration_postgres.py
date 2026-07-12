@@ -80,6 +80,118 @@ class Stage1MigrationDatabaseSafetyTests(unittest.TestCase):
     "set STAGE1_MIGRATION_TEST_DATABASE_URL for the real migration matrix",
 )
 class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upgrade_replay_and_mixed_revision_sequence_are_deterministic(self):
+        sync_url, async_url = MIGRATION_DATABASE_URLS
+        base_revision = "f7c8d9e0a1b2"
+        head_revision = "a8d9e0f1b2c3"
+        local_tables = (
+            "invitation_identity_reservations",
+            "invitation_sms_deliveries",
+            "telegram_registration_intents",
+            "telegram_registration_command_receipts",
+            "user_counter_event_receipts",
+        )
+        versioned_tables = (
+            "users",
+            "invitations",
+            "customer_relations",
+            "accountant_relations",
+        )
+        inspected_tables = local_tables + versioned_tables
+
+        async def schema_snapshot():
+            engine = create_async_engine(async_url, pool_pre_ping=True)
+            try:
+                async with engine.connect() as connection:
+                    revision = (
+                        await connection.execute(
+                            text("SELECT version_num FROM alembic_version")
+                        )
+                    ).scalar_one()
+                    columns = tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(
+                                    """
+                                    SELECT table_name, column_name, udt_name, is_nullable,
+                                           COALESCE(column_default, ''),
+                                           COALESCE(generation_expression, '')
+                                    FROM information_schema.columns
+                                    WHERE table_schema = current_schema()
+                                      AND table_name = ANY(:tables)
+                                    ORDER BY table_name, ordinal_position
+                                    """
+                                ),
+                                {"tables": list(inspected_tables)},
+                            )
+                        ).all()
+                    )
+                    indexes = tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(
+                                    """
+                                    SELECT tablename, indexname, indexdef
+                                    FROM pg_indexes
+                                    WHERE schemaname = current_schema()
+                                      AND tablename = ANY(:tables)
+                                    ORDER BY tablename, indexname
+                                    """
+                                ),
+                                {"tables": list(inspected_tables)},
+                            )
+                        ).all()
+                    )
+                return revision, columns, indexes
+            finally:
+                await engine.dispose()
+
+        _run_alembic(sync_url, "upgrade", base_revision)
+        try:
+            _run_alembic(sync_url, "upgrade", head_revision)
+            first = await schema_snapshot()
+            self.assertEqual(first[0], head_revision)
+            self.assertEqual(
+                {row[0] for row in first[1]}.intersection(local_tables),
+                set(local_tables),
+            )
+
+            _run_alembic(sync_url, "upgrade", "head")
+            replay = await schema_snapshot()
+            self.assertEqual(replay, first)
+
+            _run_alembic(sync_url, "downgrade", base_revision)
+            base = await schema_snapshot()
+            self.assertEqual(base[0], base_revision)
+            self.assertFalse({row[0] for row in base[1]}.intersection(local_tables))
+            self.assertFalse(
+                {
+                    row[1]
+                    for row in base[1]
+                    if row[0] in versioned_tables
+                }.intersection(
+                    {
+                        "sync_version",
+                        "counter_epoch",
+                        "normalized_account_name",
+                        "normalized_mobile_number",
+                        "kind",
+                        "registered_user_id",
+                        "completed_at",
+                        "completed_via",
+                        "revoked_at",
+                    }
+                )
+            )
+
+            _run_alembic(sync_url, "upgrade", "head")
+            restored = await schema_snapshot()
+            self.assertEqual(restored, first)
+        finally:
+            _run_alembic(sync_url, "downgrade", base_revision)
+
     async def test_backfill_requires_relation_and_temporal_completion_evidence(self):
         sync_url, async_url = MIGRATION_DATABASE_URLS
         _run_alembic(sync_url, "upgrade", "f7c8d9e0a1b2")
