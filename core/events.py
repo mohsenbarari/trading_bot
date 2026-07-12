@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 # ─── Persistent Redis connection for sync pushes ───
 _sync_redis = None
+_event_listeners_initialized = False
 
 
 def _changed_column_fields(target) -> set[str]:
@@ -1980,6 +1981,11 @@ def setup_admin_message_events():
 
 def setup_all_events():
     """Setup all event listeners"""
+    global _event_listeners_initialized
+    if _event_listeners_initialized:
+        logger.debug("SQLAlchemy event listeners already initialized")
+        return
+
     register_sync_outbox_guards()
     setup_user_events()
     setup_accountant_relation_events()
@@ -2004,6 +2010,7 @@ def setup_all_events():
     setup_notification_events()
     setup_user_notification_preference_events()
     setup_admin_message_events()
+    _event_listeners_initialized = True
     logger.info("🎯 All event listeners initialized")
 
 

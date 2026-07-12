@@ -104,6 +104,7 @@ DUAL_ROLE_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_role_result_v1"
 DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1"
 DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
 DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
+DUAL_ROLE_USERS_SCHEMA_VERSION = "bot_webapp_mixed_load_users_v1"
 DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
 MANUAL_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "manual_expiry_trade_race_result_v1"
 TIME_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "time_expiry_trade_race_result_v1"
@@ -2134,7 +2135,6 @@ async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[Loa
     if user_count < 3:
         raise TradingProbeError("mixed load requires at least 3 synthetic users")
 
-    setup_event_listeners()
     last_error: IntegrityError | None = None
     for salt in range(LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS):
         users = build_load_fixture_users(prefix, user_count=user_count, salt=salt)
@@ -2155,6 +2155,88 @@ async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[Loa
         f"could not allocate unique synthetic load user identities after "
         f"{LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS} attempts"
     ) from last_error
+
+
+def build_dual_role_users_artifact(prefix: str, users: list[LoadUserRef]) -> dict[str, Any]:
+    normalized_prefix = validate_cleanup_prefix(prefix)
+    if len(users) < 3:
+        raise TradingProbeError("dual-role user seed requires at least three synthetic users")
+    return {
+        "schema_version": DUAL_ROLE_USERS_SCHEMA_VERSION,
+        "status": "ok",
+        "prefix": normalized_prefix,
+        "source_server": SERVER_IRAN,
+        "user_count": len(users),
+        "users": [
+            {"user_id": int(user.user_id), "telegram_id": int(user.telegram_id)}
+            for user in users
+        ],
+        "created_epoch": round(time.time(), 6),
+    }
+
+
+def load_dual_role_users_artifact(
+    path: Path,
+    *,
+    expected_prefix: str,
+    expected_count: int,
+) -> list[LoadUserRef]:
+    payload = read_json_artifact(path)
+    if payload.get("schema_version") != DUAL_ROLE_USERS_SCHEMA_VERSION:
+        raise TradingProbeError("unsupported dual-role users schema_version")
+    if payload.get("status") != "ok":
+        raise TradingProbeError("dual-role users artifact is not successful")
+    if str(payload.get("prefix") or "") != expected_prefix:
+        raise TradingProbeError("dual-role users artifact prefix mismatch")
+    if str(payload.get("source_server") or "") != SERVER_IRAN:
+        raise TradingProbeError("dual-role users must be seeded by Iran authority")
+
+    raw_users = payload.get("users")
+    if not isinstance(raw_users, list):
+        raise TradingProbeError("dual-role users artifact users must be an array")
+    try:
+        users = [
+            LoadUserRef(user_id=int(item["user_id"]), telegram_id=int(item["telegram_id"]))
+            for item in raw_users
+            if isinstance(item, Mapping)
+        ]
+        declared_count = int(payload.get("user_count"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TradingProbeError(f"invalid dual-role users artifact: {exc}") from exc
+    if len(users) != len(raw_users) or declared_count != len(users):
+        raise TradingProbeError("dual-role users artifact count mismatch")
+    if len(users) != int(expected_count):
+        raise TradingProbeError(
+            f"dual-role users artifact expected {expected_count} users, got {len(users)}"
+        )
+    if any(user.user_id <= 0 or user.telegram_id <= 0 for user in users):
+        raise TradingProbeError("dual-role users artifact contains non-positive identifiers")
+    if len({user.user_id for user in users}) != len(users):
+        raise TradingProbeError("dual-role users artifact contains duplicate user ids")
+    if len({user.telegram_id for user in users}) != len(users):
+        raise TradingProbeError("dual-role users artifact contains duplicate telegram ids")
+    return users
+
+
+async def assert_seeded_load_users_visible(users: list[LoadUserRef]) -> None:
+    expected = {user.user_id: user.telegram_id for user in users}
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(User.id, User.telegram_id).where(User.id.in_(expected))
+            )
+        ).all()
+    actual = {int(row.id): int(row.telegram_id) for row in rows if row.telegram_id is not None}
+    if actual != expected:
+        missing = sorted(set(expected) - set(actual))
+        mismatched = sorted(
+            user_id
+            for user_id in set(expected) & set(actual)
+            if expected[user_id] != actual[user_id]
+        )
+        raise TradingProbeError(
+            f"seeded dual-role users are not converged locally; missing={missing}, mismatched={mismatched}"
+        )
 
 
 async def fake_market_open(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
@@ -6241,6 +6323,60 @@ async def run_unsupported_policy_case_command(args: argparse.Namespace) -> int:
     return 0 if payload["status"] == "passed" else 1
 
 
+async def seed_dual_role_users_command(args: argparse.Namespace) -> int:
+    setup_event_listeners()
+    prefix = str(args.prefix)
+    assert_load_runner_runtime_surface(
+        "webapp_iran",
+        allow_production=bool(args.allow_production_execution),
+        prefix=prefix,
+    )
+    if not bool(args.skip_initial_cleanup):
+        if is_production_runtime():
+            allow_production_cleanup_hard_delete(
+                prefix,
+                allow_flag=bool(args.allow_production_cleanup),
+            )
+        await cleanup_prefix(prefix)
+    users = await create_load_fixture_users(prefix, user_count=int(args.user_count))
+    artifact = build_dual_role_users_artifact(prefix, users)
+    output_path = Path(args.output)
+    write_json_artifact(output_path, artifact)
+    print_json(
+        {
+            "status": "ok",
+            "output": str(output_path),
+            "source_server": artifact["source_server"],
+            "user_count": artifact["user_count"],
+        }
+    )
+    return 0
+
+
+async def verify_dual_role_users_command(args: argparse.Namespace) -> int:
+    prefix = str(args.prefix)
+    assert_production_full_matrix_allowed(
+        prefix,
+        allow_flag=bool(args.allow_production_execution),
+    )
+    users = load_dual_role_users_artifact(
+        Path(args.users_artifact),
+        expected_prefix=prefix,
+        expected_count=int(args.user_count),
+    )
+    await assert_seeded_load_users_visible(users)
+    payload = {
+        "status": "ok",
+        "server_mode": settings.server_mode,
+        "source_server": SERVER_IRAN,
+        "user_count": len(users),
+    }
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0
+
+
 async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     setup_event_listeners()
     prefix = args.prefix
@@ -6249,6 +6385,11 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         allow_production=bool(args.allow_production_execution),
         prefix=prefix,
     )
+    users_artifact_path = Path(args.users_artifact) if args.users_artifact else None
+    if users_artifact_path is not None and not bool(args.skip_initial_cleanup):
+        raise TradingProbeError(
+            "--users-artifact requires --skip-initial-cleanup so authoritative seeded users are preserved"
+        )
     if not bool(args.skip_initial_cleanup):
         if is_production_runtime():
             allow_production_cleanup_hard_delete(
@@ -6284,7 +6425,15 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     )
 
     async with patched_trading_boundaries():
-        users = await create_load_fixture_users(prefix, user_count=args.user_count)
+        if users_artifact_path is None:
+            users = await create_load_fixture_users(prefix, user_count=args.user_count)
+        else:
+            users = load_dual_role_users_artifact(
+                users_artifact_path,
+                expected_prefix=prefix,
+                expected_count=int(args.user_count),
+            )
+            await assert_seeded_load_users_visible(users)
         owner = users[1] if offer_origin == "bot" else users[0]
         if offer_origin == "bot":
             harness = AiogramDispatcherHarness()
@@ -7389,6 +7538,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow initial cleanup in production only with the cleanup confirmation env.",
     )
 
+    seed_users_parser = subparsers.add_parser("seed-dual-role-users")
+    seed_users_parser.add_argument("--output", required=True)
+    seed_users_parser.add_argument("--prefix", required=True)
+    seed_users_parser.add_argument("--user-count", type=int, default=1000)
+    seed_users_parser.add_argument("--skip-initial-cleanup", action="store_true")
+    seed_users_parser.add_argument("--allow-production-execution", action="store_true")
+    seed_users_parser.add_argument("--allow-production-cleanup", action="store_true")
+
+    verify_users_parser = subparsers.add_parser("verify-dual-role-users")
+    verify_users_parser.add_argument("--users-artifact", required=True)
+    verify_users_parser.add_argument("--prefix", required=True)
+    verify_users_parser.add_argument("--user-count", type=int, required=True)
+    verify_users_parser.add_argument("--output")
+    verify_users_parser.add_argument("--allow-production-execution", action="store_true")
+
     prepare_parser = subparsers.add_parser("prepare-dual-role-run")
     prepare_parser.add_argument("--output-dir", required=True)
     prepare_parser.add_argument("--prefix", required=True)
@@ -7398,6 +7562,10 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--request-surface", choices=("mixed", "webapp", "telegram"), default="mixed")
     prepare_parser.add_argument("--idempotency-mode", choices=("unique", "duplicate_replay"), default="unique")
     prepare_parser.add_argument("--user-count", type=int, default=1000)
+    prepare_parser.add_argument(
+        "--users-artifact",
+        help="Reuse Iran-authoritative synthetic users already converged to this server.",
+    )
     prepare_parser.add_argument("--hot-offer-requests", type=int, default=1000)
     prepare_parser.add_argument("--telegram-ratio", type=float, default=0.6)
     prepare_parser.add_argument("--target-rps", type=float, default=600.0)
@@ -7584,6 +7752,10 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_negative_guard_case_command(args)
     if args.command == "run-unsupported-policy-case":
         return await run_unsupported_policy_case_command(args)
+    if args.command == "seed-dual-role-users":
+        return await seed_dual_role_users_command(args)
+    if args.command == "verify-dual-role-users":
+        return await verify_dual_role_users_command(args)
     if args.command == "prepare-dual-role-run":
         return await prepare_dual_role_run_command(args)
     if args.command == "write-dual-role-plan":

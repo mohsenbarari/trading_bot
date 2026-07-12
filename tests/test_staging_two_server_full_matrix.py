@@ -754,6 +754,33 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         for _kind, _name, worker_args in calls:
             self.assertIn("--include-synced", worker_args)
 
+    def test_driver_seeds_users_on_iran_and_reuses_them_during_prepare(self):
+        scenario = {
+            "id": "DRIVER-BOT-UNIT",
+            "offer_origin": "bot",
+            "request_surface": "mixed",
+            "idempotency_mode": "unique",
+            "hot_offer_requests": 6,
+            "telegram_ratio": 0.5,
+            "target_rps": 4,
+            "hot_offer_quantity": 5,
+            "request_amount": 5,
+            "expected_winner_count": 1,
+            "expected_remaining_quantity": 0,
+            "offer_type": "sell",
+            "retail": False,
+        }
+
+        seed_args = runner.seed_users_worker_args(scenario, "FMX_STAGE_UNIT_")
+        prepare_args = runner.prepare_worker_args(scenario, "FMX_STAGE_UNIT_")
+
+        self.assertEqual(seed_args[0], "seed-dual-role-users")
+        self.assertIn("--skip-initial-cleanup", seed_args)
+        self.assertIn("--users-artifact", prepare_args)
+        self.assertIn("/artifacts/users.seed.json", prepare_args)
+        self.assertIn("--skip-initial-cleanup", prepare_args)
+        self.assertEqual(runner.scenario_user_count(scenario), 8)
+
     def test_driver_suite_can_filter_to_one_driver_scenario(self):
         calls = []
 

@@ -69,6 +69,47 @@ def _capture_listeners(registry):
 class CoreEventsTests(unittest.TestCase):
     def setUp(self):
         events._sync_redis = None
+        events._event_listeners_initialized = False
+
+    def test_setup_all_events_is_idempotent(self):
+        setup_names = (
+            "register_sync_outbox_guards",
+            "setup_user_events",
+            "setup_accountant_relation_events",
+            "setup_customer_relation_events",
+            "setup_chat_events",
+            "setup_chat_member_events",
+            "setup_invitation_events",
+            "setup_offer_events",
+            "setup_offer_request_events",
+            "setup_offer_publication_state_events",
+            "setup_trade_events",
+            "setup_trade_delivery_receipt_events",
+            "setup_telegram_admin_broadcast_events",
+            "setup_telegram_notification_outbox_events",
+            "setup_commodity_events",
+            "setup_commodity_alias_events",
+            "setup_trading_settings_events",
+            "setup_market_schedule_override_events",
+            "setup_market_runtime_state_events",
+            "setup_user_block_events",
+            "setup_telegram_link_token_events",
+            "setup_notification_events",
+            "setup_user_notification_preference_events",
+            "setup_admin_message_events",
+        )
+        with ExitStack() as stack:
+            patched = {
+                name: stack.enter_context(patch(f"core.events.{name}"))
+                for name in setup_names
+            }
+            logger = stack.enter_context(patch.object(events, "logger"))
+            events.setup_all_events()
+            events.setup_all_events()
+
+        for mocked in patched.values():
+            mocked.assert_called_once()
+        logger.debug.assert_called_once_with("SQLAlchemy event listeners already initialized")
 
     def test_registration_user_reference_metadata_uses_natural_identity(self):
         connection = _FakeConnection()

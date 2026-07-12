@@ -3,6 +3,7 @@ import inspect
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -12,6 +13,47 @@ from scripts import trading_core_probe_worker as worker
 
 
 class TradingCoreMixedLoadHelperTests(unittest.TestCase):
+    def test_dual_role_users_artifact_round_trip_is_iran_authoritative(self):
+        users = [
+            worker.LoadUserRef(user_id=10, telegram_id=9010),
+            worker.LoadUserRef(user_id=12, telegram_id=9012),
+            worker.LoadUserRef(user_id=14, telegram_id=9014),
+        ]
+        payload = worker.build_dual_role_users_artifact("FMX_STAGE_UNIT_", users)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "users.seed.json"
+            worker.write_json_artifact(path, payload)
+            loaded = worker.load_dual_role_users_artifact(
+                path,
+                expected_prefix="FMX_STAGE_UNIT_",
+                expected_count=3,
+            )
+
+        self.assertEqual(loaded, users)
+        self.assertEqual(payload["source_server"], worker.SERVER_IRAN)
+
+    def test_dual_role_users_artifact_rejects_wrong_authority(self):
+        payload = worker.build_dual_role_users_artifact(
+            "FMX_STAGE_UNIT_",
+            [
+                worker.LoadUserRef(user_id=10, telegram_id=9010),
+                worker.LoadUserRef(user_id=12, telegram_id=9012),
+                worker.LoadUserRef(user_id=14, telegram_id=9014),
+            ],
+        )
+        payload["source_server"] = worker.SERVER_FOREIGN
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "users.seed.json"
+            worker.write_json_artifact(path, payload)
+            with self.assertRaisesRegex(worker.TradingProbeError, "seeded by Iran authority"):
+                worker.load_dual_role_users_artifact(
+                    path,
+                    expected_prefix="FMX_STAGE_UNIT_",
+                    expected_count=3,
+                )
+
     def test_read_during_write_webapp_detail_uses_owner_visibility(self):
         class NoopAsyncContext:
             async def __aenter__(self):

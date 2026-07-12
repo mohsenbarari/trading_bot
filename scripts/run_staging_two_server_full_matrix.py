@@ -28,7 +28,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -1890,6 +1890,23 @@ def run_sync_catchup_until_clean(
     return command_results, last_report
 
 
+def scenario_user_count(scenario: Mapping[str, Any]) -> int:
+    return max(8, int(scenario["hot_offer_requests"]) + 2)
+
+
+def seed_users_worker_args(scenario: Mapping[str, Any], prefix: str) -> list[str]:
+    return [
+        "seed-dual-role-users",
+        "--output",
+        "/artifacts/users.seed.json",
+        "--prefix",
+        prefix,
+        "--user-count",
+        str(scenario_user_count(scenario)),
+        "--skip-initial-cleanup",
+    ]
+
+
 def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
     worker_args = [
         "prepare-dual-role-run",
@@ -1908,7 +1925,10 @@ def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
         "--idempotency-mode",
         scenario["idempotency_mode"],
         "--user-count",
-        str(max(8, int(scenario["hot_offer_requests"]) + 2)),
+        str(scenario_user_count(scenario)),
+        "--users-artifact",
+        "/artifacts/users.seed.json",
+        "--skip-initial-cleanup",
         "--hot-offer-requests",
         str(scenario["hot_offer_requests"]),
         "--telegram-ratio",
@@ -1934,6 +1954,81 @@ def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
         worker_args.append("--retail")
         worker_args.extend(["--lot-sizes", str(scenario.get("lot_sizes") or "")])
     return worker_args
+
+
+def seed_and_converge_dual_role_users(
+    *,
+    args: argparse.Namespace,
+    scenario: Mapping[str, Any],
+    prefix: str,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> list[CommandResult]:
+    results: list[CommandResult] = []
+    seed = run_remote_worker(
+        "seed_users_on_iran",
+        args=args,
+        service="load_webapp_iran",
+        remote_artifact_dir=remote_dir,
+        worker_args=seed_users_worker_args(scenario, prefix),
+        log_dir=log_dir,
+        timeout_seconds=300,
+    )
+    require_command_success(seed)
+    results.append(seed)
+
+    sync_users = run_remote_worker(
+        "sync_seeded_users_iran_to_foreign",
+        args=args,
+        service="load_webapp_iran",
+        remote_artifact_dir=remote_dir,
+        worker_args=[
+            "sync-prefix-catchup",
+            "--prefix",
+            prefix,
+            "--include-synced",
+            "--table",
+            "users",
+            "--output",
+            "/artifacts/users-sync-catchup.json",
+        ],
+        log_dir=log_dir,
+        timeout_seconds=300,
+    )
+    require_command_success(sync_users)
+    results.append(sync_users)
+
+    copy_users = run_logged_command(
+        "copy_seeded_users_iran_to_foreign",
+        scp_from_iran(args, f"{remote_dir}/users.seed.json", local_dir / "users.seed.json"),
+        log_dir=log_dir,
+        timeout_seconds=120,
+    )
+    require_command_success(copy_users)
+    results.append(copy_users)
+
+    verify_users = run_local_worker(
+        "verify_seeded_users_on_foreign",
+        service="load_telegram_foreign",
+        artifact_dir=local_dir,
+        worker_args=[
+            "verify-dual-role-users",
+            "--users-artifact",
+            "/artifacts/users.seed.json",
+            "--prefix",
+            prefix,
+            "--user-count",
+            str(scenario_user_count(scenario)),
+            "--output",
+            "/artifacts/users-foreign-verification.json",
+        ],
+        log_dir=log_dir,
+        timeout_seconds=120,
+    )
+    require_command_success(verify_users)
+    results.append(verify_users)
+    return results
 
 
 def copy_prepare_artifacts_to_peer(
@@ -2199,6 +2294,17 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 remote_dir=remote_dir,
                 log_dir=log_dir,
                 label="before",
+            )
+        )
+        command_results.extend(
+            result.asdict()
+            for result in seed_and_converge_dual_role_users(
+                args=args,
+                scenario=scenario,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
             )
         )
         if scenario["offer_origin"] == "webapp":
