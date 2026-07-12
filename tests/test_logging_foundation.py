@@ -32,6 +32,10 @@ class LoggingFoundationTests(unittest.TestCase):
     def tearDown(self):
         clear_request_context()
         logging.getLogger().handlers.clear()
+        for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+            logger = logging.getLogger(logger_name)
+            logger.handlers.clear()
+            logger.propagate = True
 
     def test_redact_masks_nested_secrets_and_common_token_patterns(self):
         payload = {
@@ -252,6 +256,28 @@ class LoggingFoundationTests(unittest.TestCase):
         logging.getLogger("tests.logging").info("hello")
         payload = json.loads(second_stream.getvalue().strip())
         self.assertEqual(payload["service"], "api-test-2")
+
+    def test_uvicorn_framework_handlers_cannot_bypass_central_redaction(self):
+        raw_stream = io.StringIO()
+        raw_handler = logging.StreamHandler(raw_stream)
+        uvicorn_error = logging.getLogger("uvicorn.error")
+        uvicorn_error.handlers = [raw_handler]
+        uvicorn_error.propagate = False
+        uvicorn_error.setLevel(logging.INFO)
+
+        managed_stream = io.StringIO()
+        with patch("sys.stdout", managed_stream):
+            configure_logging("api-test")
+
+        token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456789"
+        uvicorn_error.info("WebSocket /api/realtime/ws?token=%s [accepted]", token)
+
+        self.assertEqual(raw_stream.getvalue(), "")
+        self.assertEqual(uvicorn_error.handlers, [])
+        self.assertTrue(uvicorn_error.propagate)
+        rendered = managed_stream.getvalue().strip()
+        self.assertNotIn(token, rendered)
+        self.assertIn(f"token={REDACTED}", rendered)
 
     def test_configure_logging_initializes_sentry_from_settings_without_raw_env_gate(self):
         sentry_init_calls = []

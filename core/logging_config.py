@@ -153,6 +153,16 @@ def _remove_managed_handlers(logger: logging.Logger) -> None:
                 pass
 
 
+def _remove_all_handlers(logger: logging.Logger) -> None:
+    """Route framework logs through the redacting root handler only."""
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+
+
 def configure_logging(service_name: str) -> None:
     """Configure root logging for one service process."""
     global SERVICE_NAME
@@ -172,10 +182,13 @@ def configure_logging(service_name: str) -> None:
     root_logger.addHandler(_build_managed_handler(log_level=log_level, log_format=log_format))
     root_logger.setLevel(log_level)
 
-    for noisy_logger in ("uvicorn.access",):
-        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+    for inherited_logger in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        inherited = logging.getLogger(inherited_logger)
+        _remove_all_handlers(inherited)
+        inherited.propagate = True
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
-    for inherited_logger in ("uvicorn", "uvicorn.error", "aiogram"):
+    for inherited_logger in ("aiogram",):
         inherited = logging.getLogger(inherited_logger)
         _remove_managed_handlers(inherited)
         inherited.propagate = True
