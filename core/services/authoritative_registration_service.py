@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -12,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from core.async_checkpoints import AsyncCheckpointCallback
 from core.enums import UserAccountStatus
 from core.registration_contracts import (
     RegistrationIdentityProofType,
@@ -67,7 +67,7 @@ from models.telegram_registration_command_receipt import TelegramRegistrationCom
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 
 
-RegistrationCheckpoint = Callable[[str], Awaitable[None]]
+RegistrationCheckpoint = AsyncCheckpointCallback
 
 
 @dataclass(frozen=True, slots=True)

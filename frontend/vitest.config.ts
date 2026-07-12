@@ -12,7 +12,7 @@ export default mergeConfig(
       coverage: {
         provider: 'v8',
         reportsDirectory: fileURLToPath(new URL('./coverage', import.meta.url)),
-        reporter: ['text-summary', 'json-summary', 'html', 'lcov'],
+        reporter: ['text-summary', 'json-summary', 'json', 'html', 'lcov'],
         include: ['src/**/*.{ts,vue}'],
       },
     },

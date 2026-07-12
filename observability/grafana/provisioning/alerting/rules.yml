@@ -240,7 +240,7 @@ groups:
             model:
               refId: A
               queryType: range
-              expr: 'sum(count_over_time({log_class="audit"} | json | result=~"failure|denied" [5m]))'
+              expr: 'sum(count_over_time({log_class="audit"} | json | result=~"failure|denied" [5m])) + sum(count_over_time({log_class="audit"} | json | event=~"audit\\.sink\\.(write|integrity)_failed" [5m]))'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
@@ -821,7 +821,7 @@ groups:
                     params: [0]
                   operator:
                     type: and
-        noDataState: Alerting
+        noDataState: OK
         execErrState: Error
         for: 0s
         labels:
@@ -927,7 +927,7 @@ groups:
                     params: [0]
                   operator:
                     type: and
-        noDataState: Alerting
+        noDataState: OK
         execErrState: Error
         for: 0s
         labels:

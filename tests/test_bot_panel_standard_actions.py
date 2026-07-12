@@ -313,6 +313,15 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("customer_relations.deleted_at", compiled)
         self.assertNotIn("accountant_relations.deleted_at", compiled)
 
+    def test_customer_invite_result_without_both_links_uses_bounded_success_copy(self):
+        self.assertEqual(
+            panel._customer_invite_result_message(
+                200,
+                {"bot_link": "https://t.me/test_bot?start=token"},
+            ),
+            "درخواست دعوت مشتری پردازش شد.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

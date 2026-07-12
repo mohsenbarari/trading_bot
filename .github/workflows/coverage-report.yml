@@ -26,6 +26,29 @@ jobs:
     name: repository-coverage
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: trading_bot_db
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: strongpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d trading_bot_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
 
     steps:
       - name: Checkout repository
@@ -68,8 +91,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libmagic1 file make nginx
           python3 -m pip install --upgrade pip
-          python3 -m pip install coverage
           python3 -m pip install -r requirements.txt
+          python3 -m pip install -r requirements-test.txt
+
+      - name: Resolve diff coverage base
+        id: coverage_base
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$PR_BASE_SHA" ]]; then
+            base="$PR_BASE_SHA"
+          else
+            base="$(git rev-parse HEAD~1)"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -93,8 +129,39 @@ jobs:
           if [[ "$command_status" -ne 0 ]]; then
             status=$command_status
           fi
+          (
+            export DATABASE_URL='postgresql+asyncpg://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
+            export SYNC_DATABASE_URL='postgresql+psycopg2://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
+            export TRADING_BOT_EXPECTED_CHECKOUT="$PWD"
+            export STAGE9_COVERAGE_FILE="$PWD/.coverage"
+            python3 scripts/run_registration_scratch_suite.py
+          ) > tmp/backend-postgres-opt-in.log 2>&1 &
+          postgres_pid=$!
+          (
+            export STAGE5_TEST_REDIS_URL='redis://127.0.0.1:6379/0'
+            export STAGE6_TEST_REDIS_URL='redis://127.0.0.1:6379/0'
+            python3 -m coverage run --branch --parallel-mode -m unittest \
+              tests.test_stage5_event_isolation_redis \
+              tests.test_stage6_otp_delivery_redis
+          ) > tmp/backend-redis-opt-in.log 2>&1 &
+          redis_pid=$!
+          postgres_status=0
+          redis_status=0
+          wait "$postgres_pid" || postgres_status=$?
+          wait "$redis_pid" || redis_status=$?
+          cat tmp/backend-postgres-opt-in.log
+          cat tmp/backend-redis-opt-in.log
+          if [[ "$postgres_status" -ne 0 ]]; then
+            status=$postgres_status
+          fi
+          if [[ "$redis_status" -ne 0 ]]; then
+            status=$redis_status
+          fi
+          python3 -m coverage combine --append || status=$?
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
-          python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
+          python3 -m coverage xml \
+            --include='api/*,bot/*,core/*,models/*,main.py,manage.py,run_bot.py,schemas.py' \
+            -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
           printf '%s\n' "$status" > tmp/backend-coverage.exitcode
           exit "$status"
@@ -158,6 +225,27 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Enforce Stage 9 changed-code coverage
+        if: always()
+        shell: bash
+        run: |
+          status=0
+          diff-cover tmp/backend-coverage.xml \
+            --compare-branch=${{ steps.coverage_base.outputs.base }} \
+            --fail-under=100 \
+            --format json:tmp/backend-diff-cover.json || status=$?
+          python3 scripts/check_stage9_diff_coverage.py backend \
+            --base-ref ${{ steps.coverage_base.outputs.base }} \
+            --head-ref HEAD \
+            --coverage tmp/backend-coverage.xml \
+            --output tmp/backend-stage9-diff-coverage.json || status=$?
+          python3 scripts/check_stage9_diff_coverage.py frontend \
+            --base-ref ${{ steps.coverage_base.outputs.base }} \
+            --head-ref HEAD \
+            --coverage frontend/coverage/coverage-final.json \
+            --output tmp/frontend-stage9-diff-coverage.json || status=$?
+          exit "$status"
+
       - name: Upload coverage artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -167,9 +255,14 @@ jobs:
             tmp/backend-coverage-html
             tmp/backend-coverage.exitcode
             tmp/backend-coverage.log
+            tmp/backend-postgres-opt-in.log
+            tmp/backend-redis-opt-in.log
             tmp/backend-coverage.json
             tmp/backend-coverage.xml
+            tmp/backend-diff-cover.json
+            tmp/backend-stage9-diff-coverage.json
             frontend/coverage
+            tmp/frontend-stage9-diff-coverage.json
             tmp/frontend-unit-coverage.exitcode
             tmp/frontend-unit-coverage.log
             tmp/repo-coverage-summary.md

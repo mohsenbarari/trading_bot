@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import re
 import unittest
@@ -616,10 +617,10 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         release_winner = asyncio.Event()
         loser_loader_started = asyncio.Event()
 
-        async def loader(db, token):
+        async def loader(db, token, **kwargs):
             if asyncio.current_task().get_name() == "stage2-web-loser":
                 loser_loader_started.set()
-            return await original_loader(db, token)
+            return await original_loader(db, token, **kwargs)
 
         async def winner_checkpoint(name):
             if name == "after_invitation_lock":
@@ -642,7 +643,7 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 run_web("stage2-web-winner", winner_checkpoint),
                 name="stage2-web-winner",
             )
-            await winner_locked.wait()
+            await self._await_checkpoint(winner_locked, winner)
             loser = asyncio.create_task(run_web("stage2-web-loser"), name="stage2-web-loser")
             await loser_loader_started.wait()
             self.assertFalse(loser.done())
@@ -1075,6 +1076,26 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         if name == target:
             event.set()
 
+    async def _await_checkpoint(self, event: asyncio.Event, task: asyncio.Task) -> None:
+        event_waiter = asyncio.create_task(event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {event_waiter, task},
+                timeout=10,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if event_waiter in done:
+                return
+            if task in done:
+                await task
+                self.fail("race task completed before reaching its checkpoint")
+            self.fail("race task did not reach its checkpoint within 10 seconds")
+        finally:
+            if not event_waiter.done():
+                event_waiter.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await event_waiter
+
     async def test_web_winner_then_telegram_links_same_user_and_replay_is_stable(self):
         invitation = await self._seed_invitation("web_telegram")
         command = _telegram_command(invitation, telegram_id=2_000_000_000 + invitation.id)
@@ -1083,10 +1104,10 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         release_web = asyncio.Event()
         telegram_loader_started = asyncio.Event()
 
-        async def loader(db, token):
+        async def loader(db, token, **kwargs):
             if asyncio.current_task().get_name() == "stage2-telegram-loser":
                 telegram_loader_started.set()
-            return await original_loader(db, token)
+            return await original_loader(db, token, **kwargs)
 
         async def web_checkpoint(name):
             if name == "after_invitation_lock":
@@ -1117,7 +1138,7 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(registration, "_load_invitation_for_update", new=loader):
             web_task = asyncio.create_task(run_web(), name="stage2-web-winner")
-            await web_locked.wait()
+            await self._await_checkpoint(web_locked, web_task)
             telegram_task = asyncio.create_task(run_telegram(), name="stage2-telegram-loser")
             await telegram_loader_started.wait()
             self.assertFalse(telegram_task.done())
@@ -1358,10 +1379,10 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         second_started = asyncio.Event()
         original_loader = registration._load_invitation_for_update
 
-        async def observed_loader(db, token):
+        async def observed_loader(db, token, **kwargs):
             if asyncio.current_task().get_name() == "stage2-different-command-second":
                 second_started.set()
-            return await original_loader(db, token)
+            return await original_loader(db, token, **kwargs)
 
         async def first_checkpoint(name):
             if name == "after_invitation_lock":
@@ -1385,7 +1406,7 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 run_command(first_command, first_checkpoint),
                 name="stage2-different-command-first",
             )
-            await first_locked.wait()
+            await self._await_checkpoint(first_locked, first)
             second = asyncio.create_task(
                 run_command(second_command),
                 name="stage2-different-command-second",
@@ -1424,10 +1445,10 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
         release_telegram = asyncio.Event()
         web_loader_started = asyncio.Event()
 
-        async def loader(db, token):
+        async def loader(db, token, **kwargs):
             if asyncio.current_task().get_name() == "stage2-web-loser":
                 web_loader_started.set()
-            return await original_loader(db, token)
+            return await original_loader(db, token, **kwargs)
 
         async def telegram_checkpoint(name):
             if name == "after_invitation_lock":
@@ -1458,7 +1479,7 @@ class AuthoritativeRegistrationPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(registration, "_load_invitation_for_update", new=loader):
             telegram_task = asyncio.create_task(run_telegram(), name="stage2-telegram-winner")
-            await telegram_locked.wait()
+            await self._await_checkpoint(telegram_locked, telegram_task)
             web_task = asyncio.create_task(run_web(), name="stage2-web-loser")
             await web_loader_started.wait()
             self.assertFalse(web_task.done())

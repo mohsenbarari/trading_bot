@@ -169,6 +169,615 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
             accountant_relation=valid_accountant,
             customer_relation=None,
         )
+
+    def test_stage9_validation_boundaries_fail_closed_without_database_mutation(self):
+        self.assertFalse(registration._same_utc_instant(None, datetime.now(timezone.utc)))
+
+        for inv in (
+            _invitation(token="INV-invalid-kind"),
+            _invitation(token="CUST-kind-mismatch", kind=InvitationKind.STANDARD),
+            _invitation(token="INV-legacy", kind=InvitationKind.LEGACY_UNKNOWN),
+        ):
+            if inv.token == "INV-invalid-kind":
+                inv.kind = "future-kind"
+            with self.subTest(token=inv.token), self.assertRaises(
+                registration.AuthoritativeRegistrationError
+            ):
+                registration._validate_invitation_kind(inv)
+
+        inv = _invitation()
+        command = _telegram_command(inv)
+        request = registration.AuthoritativeRegistrationRequest.for_telegram(
+            command=command,
+            source_server=SERVER_FOREIGN,
+        )
+        inv.expires_at = inv.expires_at + timedelta(seconds=1)
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_invitation_time(request, inv)
+
+        inv = _invitation()
+        command = _telegram_command(inv)
+        command = command.model_copy(
+            update={"local_completed_at": command.invitation_expires_at_snapshot + timedelta(seconds=1)}
+        )
+        request = registration.AuthoritativeRegistrationRequest.for_telegram(
+            command=command,
+            source_server=SERVER_FOREIGN,
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_invitation_time(request, inv)
+
+        identity = registration.normalize_invitation_identity(
+            mobile_number="09120000001",
+            account_name="stage2_user",
+        )
+        invalid_accountant = SimpleNamespace(
+            mobile_number="invalid",
+            global_account_name="",
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_relation_contract(
+                invitation=_invitation(
+                    token="ACCT-invalid-relation",
+                    kind=InvitationKind.ACCOUNTANT,
+                    role=UserRole.WATCH,
+                ),
+                identity=identity,
+                accountant_relation=invalid_accountant,
+                customer_relation=None,
+            )
+
+        pending_accountant_invitation = _invitation(
+            token="ACCT-pending-invalid",
+            kind=InvitationKind.ACCOUNTANT,
+            role=UserRole.WATCH,
+        )
+        pending_accountant = AccountantRelation(
+            owner_user_id=5,
+            created_by_user_id=5,
+            invitation_token=pending_accountant_invitation.token,
+            global_account_name=pending_accountant_invitation.account_name,
+            relation_display_name="Accountant",
+            mobile_number=pending_accountant_invitation.mobile_number,
+            status=AccountantRelationStatus.ACTIVE,
+            expires_at=pending_accountant_invitation.expires_at,
+        )
+        web_request = registration.AuthoritativeRegistrationRequest.for_web(
+            invitation_token=pending_accountant_invitation.token,
+            address="Tehran valid address",
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_pending_relation(
+                request=web_request,
+                invitation=pending_accountant_invitation,
+                identity=identity,
+                accountant_relation=pending_accountant,
+                customer_relation=None,
+            )
+
+        with patch.object(
+            registration,
+            "evaluate_invitation_bot_access",
+            return_value=SimpleNamespace(allowed=False),
+        ), self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._validate_telegram_projection_eligibility(
+                invitation=_invitation(),
+                accountant_relation=None,
+                customer_relation=None,
+            )
+
+    async def test_stage9_relation_loading_and_current_projection_cardinality(self):
+        cases = (
+            (InvitationKind.ACCOUNTANT, None, None),
+            (InvitationKind.ACCOUNTANT, object(), object()),
+            (InvitationKind.CUSTOMER, None, None),
+            (InvitationKind.CUSTOMER, object(), object()),
+        )
+        for kind, accountant, customer in cases:
+            with self.subTest(kind=kind, accountant=accountant), patch.object(
+                registration,
+                "lock_accountant_relation_for_registration",
+                new=AsyncMock(return_value=accountant),
+            ), patch.object(
+                registration,
+                "lock_customer_relation_for_registration",
+                new=AsyncMock(return_value=customer),
+            ), self.assertRaises(registration.AuthoritativeRegistrationError):
+                await registration._load_relation_for_registration(
+                    _FakeDB(),
+                    invitation=_invitation(kind=kind),
+                    kind=kind,
+                )
+
+        class Rows:
+            def __init__(self, values):
+                self.values = values
+
+            def scalars(self):
+                return SimpleNamespace(all=lambda: self.values)
+
+        user = _existing_user()
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[Rows([object(), object()]), Rows([])])
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            await registration._validate_current_telegram_eligibility(db, user=user)
+
+        accountant = object()
+        with patch.object(
+            registration,
+            "lock_accountant_relation_for_registration",
+            new=AsyncMock(return_value=accountant),
+        ), patch.object(
+            registration,
+            "lock_customer_relation_for_registration",
+            new=AsyncMock(return_value=None),
+        ):
+            loaded = await registration._load_relation_for_registration(
+                _FakeDB(),
+                invitation=_invitation(kind=InvitationKind.ACCOUNTANT),
+                kind=InvitationKind.ACCOUNTANT,
+            )
+        self.assertEqual(loaded, (accountant, None))
+
+    async def test_integrity_conflict_receipt_recovery_is_deterministic(self):
+        inv = _invitation()
+        command = _telegram_command(inv)
+        request = registration.AuthoritativeRegistrationRequest.for_telegram(
+            command=command,
+            source_server=SERVER_FOREIGN,
+        )
+        conflict = registration._error(
+            TelegramRegistrationOutcome.MOBILE_CONFLICT,
+            "conflict",
+        )
+
+        web_request = registration.AuthoritativeRegistrationRequest.for_web(
+            invitation_token=inv.token,
+            address="Tehran valid address",
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            await registration._persist_integrity_conflict_receipt(
+                _FakeDB(),
+                request=web_request,
+                conflict=conflict,
+                checkpoint=None,
+            )
+
+        replay_receipt = SimpleNamespace(
+            completed_at=datetime.now(timezone.utc),
+            outcome_code=TelegramRegistrationOutcome.MOBILE_CONFLICT.value,
+            authoritative_user_id=None,
+        )
+        replay_db = _FakeDB()
+        with patch.object(
+            registration,
+            "prepare_registration_command_receipt",
+            new=AsyncMock(return_value=(replay_receipt, True)),
+        ):
+            replay = await registration._persist_integrity_conflict_receipt(
+                replay_db,
+                request=request,
+                conflict=conflict,
+                checkpoint=None,
+            )
+        self.assertTrue(replay.replayed)
+        replay_db.commit.assert_awaited_once()
+
+        for invitation_value, expected in (
+            (None, TelegramRegistrationOutcome.INVITATION_NOT_FOUND),
+            (
+                _invitation(revoked_at=datetime.now(timezone.utc).replace(tzinfo=None)),
+                TelegramRegistrationOutcome.INVITATION_REVOKED,
+            ),
+        ):
+            receipt = SimpleNamespace(completed_at=None, outcome_code=None)
+            db = _FakeDB()
+            with self.subTest(expected=expected), patch.object(
+                registration,
+                "prepare_registration_command_receipt",
+                new=AsyncMock(return_value=(receipt, False)),
+            ), patch.object(
+                registration,
+                "_load_invitation_for_update",
+                new=AsyncMock(return_value=invitation_value),
+            ), patch.object(
+                registration, "finalize_registration_command_receipt"
+            ) as finalize:
+                result = await registration._persist_integrity_conflict_receipt(
+                    db,
+                    request=request,
+                    conflict=conflict,
+                    checkpoint=None,
+                )
+            self.assertEqual(result.outcome, expected)
+            finalize.assert_called_once()
+
+        completed = _invitation(
+            is_used=True,
+            registered_user_id=55,
+            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            completed_via=InvitationCompletionSurface.WEB,
+        )
+        for telegram_id, expected, expected_user_id in (
+            (command.telegram_id, TelegramRegistrationOutcome.ALREADY_LINKED, 55),
+            (999, TelegramRegistrationOutcome.TELEGRAM_ACCOUNT_CONFLICT, None),
+            (None, TelegramRegistrationOutcome.MOBILE_CONFLICT, None),
+        ):
+            user = _existing_user(telegram_id=telegram_id)
+            receipt = SimpleNamespace(completed_at=None, outcome_code=None)
+            with self.subTest(expected=expected), patch.object(
+                registration,
+                "prepare_registration_command_receipt",
+                new=AsyncMock(return_value=(receipt, False)),
+            ), patch.object(
+                registration,
+                "_load_invitation_for_update",
+                new=AsyncMock(return_value=completed),
+            ), patch.object(
+                registration, "_acquire_registration_identity_locks", new=AsyncMock()
+            ), patch.object(
+                registration,
+                "_load_matching_users_for_update",
+                new=AsyncMock(return_value=[user]),
+            ), patch.object(registration, "finalize_registration_command_receipt"):
+                result = await registration._persist_integrity_conflict_receipt(
+                    _FakeDB(),
+                    request=request,
+                    conflict=conflict,
+                    checkpoint=None,
+                )
+            self.assertEqual(result.outcome, expected)
+            self.assertEqual(result.authoritative_user_id, expected_user_id)
+
+        deleted_user = _existing_user(telegram_id=command.telegram_id)
+        deleted_user.is_deleted = True
+        with patch.object(
+            registration,
+            "prepare_registration_command_receipt",
+            new=AsyncMock(return_value=(SimpleNamespace(completed_at=None, outcome_code=None), False)),
+        ), patch.object(
+            registration,
+            "_load_invitation_for_update",
+            new=AsyncMock(return_value=completed),
+        ), patch.object(
+            registration, "_acquire_registration_identity_locks", new=AsyncMock()
+        ), patch.object(
+            registration,
+            "_load_matching_users_for_update",
+            new=AsyncMock(return_value=[deleted_user]),
+        ), patch.object(registration, "finalize_registration_command_receipt"):
+            deleted_result = await registration._persist_integrity_conflict_receipt(
+                _FakeDB(),
+                request=request,
+                conflict=conflict,
+                checkpoint=None,
+            )
+        self.assertEqual(deleted_result.outcome, TelegramRegistrationOutcome.ACCOUNT_DELETED)
+        self.assertIsNone(deleted_result.authoritative_user_id)
+
+        pending = _invitation()
+        receipt = SimpleNamespace(completed_at=None, outcome_code=None)
+        current_conflict = registration._error(
+            TelegramRegistrationOutcome.ACCOUNT_NAME_CONFLICT,
+            "conflict",
+        )
+        with patch.object(
+            registration,
+            "prepare_registration_command_receipt",
+            new=AsyncMock(return_value=(receipt, False)),
+        ), patch.object(
+            registration,
+            "_load_invitation_for_update",
+            new=AsyncMock(return_value=pending),
+        ), patch.object(
+            registration, "_acquire_registration_identity_locks", new=AsyncMock()
+        ), patch.object(
+            registration, "_load_matching_users_for_update", new=AsyncMock(return_value=[])
+        ), patch.object(
+            registration,
+            "_validate_pending_natural_keys",
+            side_effect=current_conflict,
+        ), patch.object(registration, "finalize_registration_command_receipt"):
+            result = await registration._persist_integrity_conflict_receipt(
+                _FakeDB(),
+                request=request,
+                conflict=conflict,
+                checkpoint=None,
+            )
+        self.assertEqual(result.outcome, TelegramRegistrationOutcome.ACCOUNT_NAME_CONFLICT)
+
+        with patch.object(
+            registration,
+            "prepare_registration_command_receipt",
+            new=AsyncMock(return_value=(receipt, False)),
+        ), patch.object(
+            registration,
+            "_load_invitation_for_update",
+            new=AsyncMock(return_value=pending),
+        ), patch.object(
+            registration,
+            "normalize_invitation_identity",
+            side_effect=ValueError("bad"),
+        ), patch.object(registration, "finalize_registration_command_receipt"):
+            result = await registration._persist_integrity_conflict_receipt(
+                _FakeDB(),
+                request=request,
+                conflict=conflict,
+                checkpoint=None,
+            )
+        self.assertEqual(result.outcome, TelegramRegistrationOutcome.LEGACY_STATE_AMBIGUOUS)
+
+    async def test_complete_registration_terminal_guards_and_integrity_recovery(self):
+        missing_db = _FakeDB()
+        web_request = registration.AuthoritativeRegistrationRequest.for_web(
+            invitation_token="INV-missing",
+            address="Tehran valid address",
+        )
+        with patch.object(
+            registration, "_load_invitation_for_update", new=AsyncMock(return_value=None)
+        ), self.assertRaises(registration.AuthoritativeRegistrationError) as exc:
+            await registration.complete_invitation_registration(missing_db, web_request)
+        self.assertEqual(exc.exception.outcome, TelegramRegistrationOutcome.INVITATION_NOT_FOUND)
+        missing_db.rollback.assert_awaited_once()
+
+        inv = _invitation()
+        command = _telegram_command(inv).model_copy(update={"mobile_number": "09129999999"})
+        telegram_request = registration.AuthoritativeRegistrationRequest.for_telegram(
+            command=command,
+            source_server=SERVER_FOREIGN,
+        )
+        receipt = SimpleNamespace(completed_at=None, outcome_code=None)
+        mismatch_db = _FakeDB()
+        with patch.object(
+            registration,
+            "prepare_registration_command_receipt",
+            new=AsyncMock(return_value=(receipt, False)),
+        ), patch.object(
+            registration, "_load_invitation_for_update", new=AsyncMock(return_value=inv)
+        ), patch.object(registration, "finalize_registration_command_receipt"):
+            mismatch = await registration.complete_invitation_registration(
+                mismatch_db,
+                telegram_request,
+            )
+        self.assertEqual(mismatch.outcome, TelegramRegistrationOutcome.CONTACT_MOBILE_MISMATCH)
+
+        completed = _invitation(
+            is_used=True,
+            registered_user_id=55,
+            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            completed_via=InvitationCompletionSurface.WEB,
+        )
+        completed_command = _telegram_command(completed)
+        completed_request = registration.AuthoritativeRegistrationRequest.for_telegram(
+            command=completed_command,
+            source_server=SERVER_FOREIGN,
+        )
+        for duplicate, expected in (
+            (False, TelegramRegistrationOutcome.ALREADY_LINKED),
+            (True, TelegramRegistrationOutcome.TELEGRAM_ID_ALREADY_USED),
+        ):
+            registered = _existing_user(telegram_id=completed_command.telegram_id)
+            users = [registered]
+            if duplicate:
+                users.append(_existing_user(user_id=56, telegram_id=completed_command.telegram_id))
+            db = _FakeDB()
+            receipt = SimpleNamespace(completed_at=None, outcome_code=None)
+            with self.subTest(duplicate=duplicate), patch.object(
+                registration,
+                "prepare_registration_command_receipt",
+                new=AsyncMock(return_value=(receipt, False)),
+            ), patch.object(
+                registration,
+                "_load_invitation_for_update",
+                new=AsyncMock(return_value=completed),
+            ), patch.object(
+                registration, "_acquire_registration_identity_locks", new=AsyncMock()
+            ), patch.object(
+                registration,
+                "_load_matching_users_for_update",
+                new=AsyncMock(return_value=users),
+            ), patch.object(
+                registration,
+                "_load_relation_for_registration",
+                new=AsyncMock(return_value=(None, None)),
+            ), patch.object(registration, "_validate_completed_relation"), patch.object(
+                registration, "_validate_telegram_projection_eligibility"
+            ), patch.object(
+                registration, "validate_current_telegram_eligibility", new=AsyncMock()
+            ), patch.object(registration, "finalize_registration_command_receipt"):
+                result = await registration.complete_invitation_registration(
+                    db,
+                    completed_request,
+                )
+            self.assertEqual(result.outcome, expected)
+
+        failing_db = _FakeDB()
+        failing_db.flush = AsyncMock(side_effect=RuntimeError("outbox failed"))
+        with patch.object(
+            registration,
+            "prepare_registration_command_receipt",
+            new=AsyncMock(return_value=(SimpleNamespace(completed_at=None, outcome_code=None), False)),
+        ), patch.object(
+            registration, "_load_invitation_for_update", new=AsyncMock(return_value=inv)
+        ), patch.object(registration, "finalize_registration_command_receipt"):
+            with self.assertRaisesRegex(RuntimeError, "outbox failed"):
+                await registration.complete_invitation_registration(
+                    failing_db,
+                    telegram_request,
+                )
+        self.assertGreaterEqual(failing_db.rollback.await_count, 1)
+
+        integrity_error = registration.IntegrityError("insert", {}, RuntimeError("constraint"))
+        conflict = registration._error(
+            TelegramRegistrationOutcome.MOBILE_CONFLICT,
+            "conflict",
+        )
+        for request, detected_conflict, persist_error, expected_exception in (
+            (web_request, conflict, None, registration.AuthoritativeRegistrationError),
+            (web_request, None, None, registration.IntegrityError),
+            (completed_request, conflict, RuntimeError("recovery failed"), RuntimeError),
+        ):
+            db = _FakeDB()
+            with self.subTest(request=request.source_surface), patch.object(
+                registration,
+                "prepare_registration_command_receipt",
+                new=AsyncMock(return_value=(SimpleNamespace(completed_at=None, outcome_code=None), False)),
+            ), patch.object(
+                registration,
+                "_load_invitation_for_update",
+                new=AsyncMock(side_effect=integrity_error),
+            ), patch.object(
+                registration, "_integrity_conflict", return_value=detected_conflict
+            ), patch.object(
+                registration,
+                "_persist_integrity_conflict_receipt",
+                new=AsyncMock(side_effect=persist_error),
+            ):
+                with self.assertRaises(expected_exception):
+                    await registration.complete_invitation_registration(db, request)
+            self.assertGreaterEqual(db.rollback.await_count, 1)
+
+    def test_stage9_identity_completion_receipt_and_constraint_boundaries(self):
+        identity = registration.normalize_invitation_identity(
+            mobile_number="09120000001",
+            account_name="stage2_user",
+        )
+        unrelated = _existing_user()
+        unrelated.account_name = "different"
+        unrelated.mobile_number = "09129999999"
+        with self.assertRaises(registration.AuthoritativeRegistrationError) as exc:
+            registration._validate_pending_natural_keys(
+                [unrelated],
+                identity=identity,
+                telegram_id=999,
+            )
+        self.assertEqual(exc.exception.outcome, TelegramRegistrationOutcome.IDENTITY_CONFLICT)
+
+        incomplete = _invitation(is_used=True)
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._registered_user_for_completed_invitation(
+                incomplete,
+                [],
+                identity=identity,
+            )
+
+        completed = _invitation(
+            is_used=True,
+            registered_user_id=55,
+            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            completed_via=InvitationCompletionSurface.WEB,
+        )
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._registered_user_for_completed_invitation(
+                completed,
+                [],
+                identity=identity,
+            )
+        malformed_user = _existing_user()
+        malformed_user.mobile_number = "invalid"
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._registered_user_for_completed_invitation(
+                completed,
+                [malformed_user],
+                identity=identity,
+            )
+        drifted_user = _existing_user()
+        drifted_user.account_name = "different"
+        with self.assertRaises(registration.AuthoritativeRegistrationError):
+            registration._registered_user_for_completed_invitation(
+                completed,
+                [drifted_user],
+                identity=identity,
+            )
+
+        for relation_name in ("accountant", "customer"):
+            inv = _invitation(
+                token="ACCT-completed" if relation_name == "accountant" else "CUST-completed",
+                kind=InvitationKind.ACCOUNTANT if relation_name == "accountant" else InvitationKind.CUSTOMER,
+                role=UserRole.WATCH if relation_name == "accountant" else UserRole.STANDARD,
+            )
+            user = _existing_user()
+            if relation_name == "accountant":
+                relation = AccountantRelation(
+                    owner_user_id=5,
+                    created_by_user_id=5,
+                    invitation_token=inv.token,
+                    global_account_name=inv.account_name,
+                    relation_display_name="Accountant",
+                    mobile_number=inv.mobile_number,
+                    status=AccountantRelationStatus.PENDING,
+                    expires_at=inv.expires_at,
+                )
+                kwargs = {"accountant_relation": relation, "customer_relation": None}
+            else:
+                relation = CustomerRelation(
+                    owner_user_id=5,
+                    created_by_user_id=5,
+                    invitation_token=inv.token,
+                    management_name="Customer",
+                    customer_tier=CustomerTier.TIER_1,
+                    status=CustomerRelationStatus.PENDING,
+                    expires_at=inv.expires_at,
+                )
+                kwargs = {"accountant_relation": None, "customer_relation": relation}
+            with self.subTest(relation=relation_name), self.assertRaises(
+                registration.AuthoritativeRegistrationError
+            ):
+                registration._validate_completed_relation(
+                    invitation=inv,
+                    identity=identity,
+                    user=user,
+                    **kwargs,
+                )
+
+        diagnostic = SimpleNamespace(constraint_name="ux_users_normalized_mobile_number")
+        orig = SimpleNamespace(diag=diagnostic, constraint_name=None)
+        error = registration.IntegrityError("insert", {}, orig)
+        self.assertEqual(registration._constraint_name(error), diagnostic.constraint_name)
+        self.assertEqual(
+            registration._integrity_conflict(error).outcome,
+            TelegramRegistrationOutcome.MOBILE_CONFLICT,
+        )
+        unknown = registration.IntegrityError("insert", {}, SimpleNamespace())
+        self.assertIsNone(registration._constraint_name(unknown))
+        self.assertIsNone(registration._integrity_conflict(unknown))
+
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            registration._receipt_replay_result(
+                SimpleNamespace(outcome_code=None, completed_at=None)
+            )
+        with self.assertRaisesRegex(RuntimeError, "outcome_invalid"):
+            registration._receipt_replay_result(
+                SimpleNamespace(
+                    outcome_code="future",
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+
+        def accountant_projection():
+            invitation = _invitation(
+                token="ACCT-stage2-contract",
+                kind=InvitationKind.ACCOUNTANT,
+                role=UserRole.WATCH,
+            )
+            relation = AccountantRelation(
+                owner_user_id=5,
+                created_by_user_id=5,
+                invitation_token=invitation.token,
+                global_account_name=invitation.account_name,
+                relation_display_name="Accountant",
+                mobile_number=invitation.mobile_number,
+                status=AccountantRelationStatus.PENDING,
+                expires_at=invitation.expires_at,
+            )
+            identity = registration.normalize_invitation_identity(
+                mobile_number=invitation.mobile_number,
+                account_name=invitation.account_name,
+            )
+            return invitation, relation, identity
+
+        valid_invitation, _, _ = accountant_projection()
         accountant_drift = (
             ("mobile", "relation", "mobile_number", "09129999999"),
             ("account", "relation", "global_account_name", "different_account"),

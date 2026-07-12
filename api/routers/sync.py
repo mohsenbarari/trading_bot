@@ -2248,7 +2248,7 @@ async def _apply_versioned_user_patch(
         # SQLAlchemy Column.onupdate would otherwise advance this shared row
         # clock for a foreign-only onboarding patch.
         values["updated_at"] = User.updated_at
-    elif source == SERVER_IRAN:
+    else:
         values = {
             key: value
             for key, value in data.items()
@@ -2263,8 +2263,6 @@ async def _apply_versioned_user_patch(
         incoming_version = data.get("sync_version")
         if incoming_version is not None:
             where_clause = where_clause & (User.sync_version < int(incoming_version))
-    if not values:
-        return 'ignored'
 
     stmt = update(User).where(where_clause).values(**values)
     async with db.begin_nested():

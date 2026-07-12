@@ -32,6 +32,65 @@ class FakeDB:
 
 
 class SyncRouterFailClosedPolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registration_policy_rejection_and_dropped_fields_are_reported(self):
+        item = {
+            "table": "users",
+            "operation": "UPDATE",
+            "id": 10,
+            "data": {"address": "unauthorized"},
+        }
+        rejected = SimpleNamespace(
+            accepted=False,
+            reason=None,
+            dropped_fields=(),
+            data={},
+        )
+        db = FakeDB()
+        with patch(
+            "api.routers.sync.sanitize_registration_sync_payload",
+            return_value=rejected,
+        ), patch("api.routers.sync._apply_item", new=AsyncMock()) as apply_mock, patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ):
+            result = await receive_sync_data(
+                items=[item], request=SimpleNamespace(), db=db, _=None
+            )
+        apply_mock.assert_not_awaited()
+        self.assertEqual(
+            result["error_items"][0]["reason"],
+            "registration_sync_policy_rejected",
+        )
+
+        accepted = SimpleNamespace(
+            accepted=True,
+            reason=None,
+            dropped_fields=("address",),
+            data={"bot_onboarding_completed_step": 1},
+        )
+        db = FakeDB()
+        with patch(
+            "api.routers.sync.sanitize_registration_sync_payload",
+            return_value=accepted,
+        ), patch(
+            "api.routers.sync._apply_item", new=AsyncMock(return_value="ok")
+        ) as apply_mock, patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch(
+            "api.routers.sync.logger.warning"
+        ) as warning:
+            result = await receive_sync_data(
+                items=[item], request=SimpleNamespace(), db=db, _=None
+            )
+        apply_mock.assert_awaited_once()
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        self.assertTrue(
+            any(
+                call.kwargs.get("extra", {}).get("event")
+                == "sync.registration_fields_dropped"
+                for call in warning.call_args_list
+            )
+        )
+
     async def test_unsupported_protocol_version_returns_partial_failure_without_apply(self):
         db = FakeDB()
         future_protocol = build_sync_protocol_metadata()

@@ -480,13 +480,60 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
 
     expect(writeText).toHaveBeenCalledWith('https://example.com/register/token-2')
-    expect(wrapper.get('.copy-link').text()).toBe('کپی شد')
+    expect(wrapper.get('.copy-link .copy-state--copied').attributes('style') ?? '').not.toContain('display: none')
 
     await vi.advanceTimersByTimeAsync(1800)
     await flushPromises()
 
-    expect(wrapper.get('.copy-link').text()).toBe('کپی لینک وب')
+    expect(wrapper.get('.copy-link .copy-state--idle').attributes('style') ?? '').not.toContain('display: none')
 
+    wrapper.unmount()
+  })
+
+  it('renders disabled-SMS guidance and copies both pending invitation surfaces', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    apiFetchMock.mockResolvedValue(makeResponse([{
+      ...pendingRelation,
+      sms_status: 'disabled',
+      bot_registration_link: 'https://t.me/bot?start=customer-12',
+      web_registration_link: 'https://example.com/register/customer-12',
+    }]))
+
+    const wrapper = mountModal()
+    await flushPromises()
+    await openRelationsPanel(wrapper)
+
+    expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد')
+    const copyButtons = wrapper.findAll('.pending-invitations-panel .copy-link')
+    expect(copyButtons).toHaveLength(2)
+    await copyButtons[0]!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=customer-12')
+    await copyButtons[1]!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenNthCalledWith(2, 'https://example.com/register/customer-12')
+
+    await (wrapper.vm as any).copyRegistrationLink({ id: 99 }, 'web')
+    expect(writeText).toHaveBeenCalledTimes(2)
+
+    apiFetchMock.mockRejectedValueOnce({})
+    await wrapper.get('.pending-invitations-panel .expire-pending-invitation').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('لغو دعوت مشتری ناموفق بود.')
+
+    apiFetchMock.mockRejectedValueOnce({})
+    await (wrapper.vm as any).unlinkRelation({
+      id: 98,
+      status: 'active',
+      management_name: 'مشتری فعال',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('قطع ارتباط مشتری ناموفق بود.')
     wrapper.unmount()
   })
 

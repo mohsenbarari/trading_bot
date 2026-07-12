@@ -1,8 +1,19 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
-from bot.handlers.link_account import LinkState, handle_address_completion, handle_contact
+from bot.handlers import link_account
+from bot.handlers.link_account import (
+    BotAccountLinkDenied,
+    BotAccountLinkPending,
+    LinkState,
+    complete_account_link_via_iran,
+    finalize_account_link,
+    handle_address_completion,
+    handle_contact,
+)
+from core.registration_contracts import TelegramRegistrationOutcome
 from core.enums import UserAccountStatus, UserRole
 
 
@@ -449,6 +460,399 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             address="  تهران خیابان آزادی پلاک ۱۰  ",
         )
         self.assertEqual(state.cleared, 1)
+
+    async def test_finalize_account_link_rejects_policy_denials(self):
+        message = make_message()
+        user = make_user()
+        db = FakeDB(user)
+        with patch.object(
+            link_account.settings, "registration_sync_v2_enabled", False
+        ), patch.object(
+            link_account,
+            "bot_account_access_denial_reason",
+            return_value="account_inactive",
+        ), self.assertRaises(BotAccountLinkDenied):
+            await finalize_account_link(db, user, message)
+
+        for reason, expected in (
+            ("accountant", "ACCOUNTANT_BOT_ACCESS_FORBIDDEN"),
+            ("customer", "CUSTOMER_BOT_ACCESS_FORBIDDEN"),
+        ):
+            with self.subTest(reason=reason), patch.object(
+                link_account.settings, "registration_sync_v2_enabled", False
+            ), patch.object(
+                link_account, "bot_account_access_denial_reason", return_value=None
+            ), patch.object(
+                link_account,
+                "get_web_only_bot_access_reason",
+                new=AsyncMock(return_value=reason),
+            ), self.assertRaisesRegex(PermissionError, expected):
+                await finalize_account_link(db, user, message)
+
+        successful = make_user(full_name="Display Name", account_name="account")
+        with patch.object(
+            link_account.settings, "registration_sync_v2_enabled", False
+        ), patch.object(
+            link_account, "bot_account_access_denial_reason", return_value=None
+        ), patch.object(
+            link_account,
+            "get_web_only_bot_access_reason",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            link_account,
+            "consume_telegram_link_token",
+            new=AsyncMock(),
+        ) as consume, patch.object(
+            link_account,
+            "ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ):
+            await finalize_account_link(
+                db,
+                successful,
+                message,
+                token_record=SimpleNamespace(),
+                send_success_message=False,
+            )
+        consume.assert_awaited_once()
+
+        no_token = make_user(full_name="Existing Name", account_name="account")
+        with patch.object(
+            link_account.settings, "registration_sync_v2_enabled", False
+        ), patch.object(
+            link_account, "bot_account_access_denial_reason", return_value=None
+        ), patch.object(
+            link_account,
+            "get_web_only_bot_access_reason",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            link_account,
+            "ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ):
+            await finalize_account_link(
+                db, no_token, message, send_success_message=False
+            )
+
+    async def test_projection_wait_success_and_timeout(self):
+        user = make_user(telegram_id=10)
+        db = FakeDB(user)
+
+        class SessionContext:
+            async def __aenter__(self):
+                return db
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(link_account, "AsyncSessionLocal", return_value=SessionContext()), patch.object(
+            link_account,
+            "evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True)),
+        ):
+            self.assertIs(
+                await link_account._wait_for_linked_account_projection(
+                    mobile_number=user.mobile_number,
+                    telegram_id=10,
+                    timeout_seconds=0,
+                ),
+                user,
+            )
+
+        db.user = None
+        with patch.object(link_account, "AsyncSessionLocal", return_value=SessionContext()):
+            self.assertIsNone(
+                await link_account._wait_for_linked_account_projection(
+                    mobile_number=user.mobile_number,
+                    telegram_id=10,
+                    timeout_seconds=0,
+                )
+            )
+
+        loop = SimpleNamespace(time=MagicMock(side_effect=[0.0, 0.0, 2.0]))
+        with patch.object(link_account, "AsyncSessionLocal", return_value=SessionContext()), patch.object(
+            link_account.asyncio, "get_running_loop", return_value=loop
+        ), patch.object(link_account.asyncio, "sleep", new=AsyncMock()) as sleep:
+            self.assertIsNone(
+                await link_account._wait_for_linked_account_projection(
+                    mobile_number=user.mobile_number,
+                    telegram_id=10,
+                    timeout_seconds=1,
+                )
+            )
+        sleep.assert_awaited_once()
+
+    async def test_complete_via_iran_response_failure_matrix(self):
+        message = make_message()
+        command_id = uuid4()
+        command = SimpleNamespace(
+            command_id=command_id,
+            mobile_number="09121111111",
+            telegram_id=10,
+        )
+        cases = (
+            ({"invalid": True}, 200, BotAccountLinkPending, "invalid_response"),
+            (
+                {
+                    "command_id": str(command_id),
+                    "outcome": TelegramRegistrationOutcome.LINKED_EXISTING.value,
+                    "terminal": False,
+                },
+                200,
+                BotAccountLinkPending,
+                TelegramRegistrationOutcome.LINKED_EXISTING.value,
+            ),
+            (
+                {
+                    "command_id": str(uuid4()),
+                    "outcome": TelegramRegistrationOutcome.LINKED_EXISTING.value,
+                    "terminal": True,
+                },
+                200,
+                BotAccountLinkPending,
+                "response_command_mismatch",
+            ),
+            (
+                {
+                    "command_id": str(command_id),
+                    "outcome": TelegramRegistrationOutcome.IDENTITY_CONFLICT.value,
+                    "terminal": True,
+                },
+                400,
+                BotAccountLinkDenied,
+                TelegramRegistrationOutcome.IDENTITY_CONFLICT.value,
+            ),
+        )
+        for body, status_code, error_type, detail in cases:
+            with self.subTest(detail=detail), patch.object(
+                link_account,
+                "build_telegram_account_link_command",
+                return_value=command,
+            ), patch.object(
+                link_account,
+                "forward_telegram_account_link_command",
+                new=AsyncMock(return_value=(status_code, body)),
+            ), self.assertRaisesRegex(error_type, detail):
+                await complete_account_link_via_iran(
+                    message=message,
+                    mobile_number="09121111111",
+                    link_token="token",
+                    address=None,
+                )
+
+        success_body = {
+            "command_id": str(command_id),
+            "outcome": TelegramRegistrationOutcome.LINKED_EXISTING.value,
+            "terminal": True,
+        }
+        with patch.object(
+            link_account,
+            "build_telegram_account_link_command",
+            return_value=command,
+        ), patch.object(
+            link_account,
+            "forward_telegram_account_link_command",
+            new=AsyncMock(return_value=(200, success_body)),
+        ), patch.object(
+            link_account,
+            "_wait_for_linked_account_projection",
+            new=AsyncMock(return_value=None),
+        ), self.assertRaisesRegex(BotAccountLinkPending, "projection_pending"):
+            await complete_account_link_via_iran(
+                message=message,
+                mobile_number="09121111111",
+                link_token="token",
+                address=None,
+            )
+
+    async def test_sync_v2_contact_and_address_forwarding_errors_are_user_safe(self):
+        user = make_user()
+        for failure in (
+            BotAccountLinkPending("pending"),
+            BotAccountLinkDenied("identity_conflict"),
+            RuntimeError("unexpected"),
+        ):
+            db = FakeDB(user)
+            state = FakeState()
+            message = make_message()
+            with self.subTest(surface="contact", failure=type(failure).__name__), patch(
+                "bot.handlers.link_account.get_db", new=db_factory(db)
+            ), patch(
+                "bot.handlers.link_account.settings",
+                SimpleNamespace(registration_sync_v2_enabled=True),
+            ), patch.object(
+                link_account,
+                "complete_account_link_via_iran",
+                new=AsyncMock(side_effect=failure),
+            ), patch.object(
+                link_account, "bot_account_access_denial_reason", return_value=None
+            ), patch.object(
+                link_account,
+                "get_web_only_bot_access_reason",
+                new=AsyncMock(return_value=None),
+            ):
+                await handle_contact(message, state)
+            self.assertEqual(state.cleared, 1)
+
+        for failure in (
+            BotAccountLinkPending("pending"),
+            BotAccountLinkDenied("identity_conflict"),
+            RuntimeError("unexpected"),
+        ):
+            db = FakeDB(make_user(address="System Default"))
+            state = FakeState()
+            await state.update_data(
+                link_user_id=99,
+                telegram_link_mobile="09121111111",
+            )
+            message = SimpleNamespace(
+                bot=SimpleNamespace(),
+                text="تهران خیابان آزادی پلاک ۱۰",
+                from_user=SimpleNamespace(id=10, username="u", full_name="User"),
+                answer=AsyncMock(),
+            )
+            with self.subTest(surface="address", failure=type(failure).__name__), patch(
+                "bot.handlers.link_account.get_db", new=db_factory(db)
+            ), patch(
+                "bot.handlers.link_account.settings",
+                SimpleNamespace(registration_sync_v2_enabled=True),
+            ), patch.object(
+                link_account,
+                "complete_account_link_via_iran",
+                new=AsyncMock(side_effect=failure),
+            ), patch.object(
+                link_account, "bot_account_access_denial_reason", return_value=None
+            ), patch.object(
+                link_account,
+                "get_web_only_bot_access_reason",
+                new=AsyncMock(return_value=None),
+            ):
+                await handle_address_completion(message, state)
+            self.assertEqual(state.cleared, 1)
+
+    async def test_address_identity_guards_cover_falsy_and_absent_links(self):
+        message = SimpleNamespace(
+            text="تهران خیابان آزادی پلاک ۱۰",
+            from_user=SimpleNamespace(id=10),
+            answer=AsyncMock(),
+        )
+        for telegram_id, token in ((0, "unit-token"), (None, None)):
+            user = make_user(telegram_id=telegram_id, address="System Default")
+            db = FakeDB(user)
+            state = FakeState()
+            state.data = {"link_user_id": user.id}
+            if token:
+                state.data["telegram_link_token"] = token
+            with self.subTest(telegram_id=telegram_id, token=token), patch(
+                "bot.handlers.link_account.get_db", new=db_factory(db)
+            ), patch.object(
+                link_account.settings, "registration_sync_v2_enabled", True
+            ), patch.object(
+                link_account, "bot_account_access_denial_reason", return_value=None
+            ), patch.object(
+                link_account,
+                "get_web_only_bot_access_reason",
+                new=AsyncMock(return_value=None),
+            ):
+                await handle_address_completion(message, state)
+            self.assertEqual(state.cleared, 1)
+
+    async def test_legacy_contact_and_address_policy_errors_are_isolated(self):
+        incomplete = make_user(address="System Default")
+        failures = (
+            BotAccountLinkDenied("account_inactive"),
+            PermissionError("ACCOUNTANT_BOT_ACCESS_FORBIDDEN"),
+            RuntimeError("unexpected"),
+        )
+        for failure in failures:
+            db = FakeDB(incomplete)
+            state = FakeState()
+            message = make_message()
+            with self.subTest(path="before_address", failure=type(failure).__name__), patch(
+                "bot.handlers.link_account.get_db", new=db_factory(db)
+            ), patch(
+                "bot.handlers.link_account.settings",
+                SimpleNamespace(registration_sync_v2_enabled=False),
+            ), patch.object(
+                link_account, "finalize_account_link", new=AsyncMock(side_effect=failure)
+            ), patch.object(
+                link_account, "bot_account_access_denial_reason", return_value=None
+            ), patch.object(
+                link_account,
+                "get_web_only_bot_access_reason",
+                new=AsyncMock(return_value=None),
+            ):
+                await handle_contact(message, state)
+            self.assertEqual(state.cleared, 1)
+            self.assertEqual(db.rollbacks, 1)
+
+        complete = make_user(address="تهران خیابان آزادی پلاک ۱۰")
+        db = FakeDB(complete)
+        state = FakeState()
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(registration_sync_v2_enabled=False),
+        ), patch.object(
+            link_account,
+            "finalize_account_link",
+            new=AsyncMock(side_effect=BotAccountLinkDenied("account_inactive")),
+        ), patch.object(
+            link_account, "bot_account_access_denial_reason", return_value=None
+        ), patch.object(
+            link_account,
+            "get_web_only_bot_access_reason",
+            new=AsyncMock(return_value=None),
+        ):
+            await handle_contact(make_message(), state)
+        self.assertEqual(db.rollbacks, 1)
+
+        for failure in (
+            BotAccountLinkDenied("account_inactive"),
+            PermissionError("CUSTOMER_BOT_ACCESS_FORBIDDEN"),
+        ):
+            user = make_user(telegram_id=10, address="System Default")
+            db = FakeDB(user)
+            state = FakeState()
+            state.data = {"link_user_id": user.id}
+            message = SimpleNamespace(
+                text="تهران خیابان آزادی پلاک ۱۰",
+                from_user=SimpleNamespace(id=10),
+                answer=AsyncMock(),
+            )
+            with self.subTest(path="address", failure=type(failure).__name__), patch(
+                "bot.handlers.link_account.get_db", new=db_factory(db)
+            ), patch(
+                "bot.handlers.link_account.settings",
+                SimpleNamespace(registration_sync_v2_enabled=False),
+            ), patch.object(
+                link_account, "finalize_account_link", new=AsyncMock(side_effect=failure)
+            ), patch.object(
+                link_account, "bot_account_access_denial_reason", return_value=None
+            ), patch.object(
+                link_account,
+                "get_web_only_bot_access_reason",
+                new=AsyncMock(return_value=None),
+            ):
+                await handle_address_completion(message, state)
+            self.assertEqual(db.rollbacks, 1)
+
+    async def test_contact_same_linked_user_with_incomplete_address_prompts(self):
+        user = make_user(telegram_id=10, address="System Default")
+        db = FakeDB(user)
+        state = FakeState()
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch.object(
+            link_account, "bot_account_access_denial_reason", return_value=None
+        ), patch.object(
+            link_account,
+            "get_web_only_bot_access_reason",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            link_account,
+            "prompt_address_completion",
+            new=AsyncMock(),
+        ) as prompt:
+            await handle_contact(make_message(), state)
+        prompt.assert_awaited_once()
 
 
 if __name__ == "__main__":

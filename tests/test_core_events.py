@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from contextlib import ExitStack
 import json
 from types import SimpleNamespace
@@ -1396,6 +1396,246 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(log_change.call_count, 6)
         logger.info.assert_any_call('✅ MarketScheduleOverride event listeners registered')
         logger.info.assert_any_call('✅ MarketRuntimeState event listeners registered')
+
+    def test_registration_helpers_fail_closed_on_inspection_reference_and_counter_history(self):
+        with patch("core.events.sa_inspect", side_effect=RuntimeError("detached")):
+            self.assertEqual(events._changed_column_fields(object()), set())
+        target = SimpleNamespace(sync_version="invalid")
+        events._bump_sync_version(target)
+        self.assertEqual(target.sync_version, 2)
+
+        connection = _FakeConnection()
+        with patch("core.events.settings.registration_sync_v2_enabled", True):
+            self.assertEqual(
+                events._registration_user_references(
+                    connection, {"owner_user_id": None}
+                ),
+                {},
+            )
+        connection.execute.assert_not_called()
+
+        for row, error in (
+            (None, "reference_missing"),
+            ({"account_name": "", "mobile_number": None, "telegram_id": None}, "identity_missing"),
+        ):
+            failing = _FakeConnection()
+            failing.execute.return_value = _MappingResult([] if row is None else [row])
+            with patch(
+                "core.events.settings.registration_sync_v2_enabled", True
+            ), self.assertRaisesRegex(RuntimeError, error):
+                events._registration_user_references(
+                    failing, {"owner_user_id": 8}
+                )
+
+        now = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+        target = SimpleNamespace(id=8)
+
+        def counter(epoch, occurred_at):
+            return SimpleNamespace(
+                event_id="evt-stage9",
+                kind="reset",
+                epoch=epoch,
+                deltas={},
+                occurred_at=occurred_at,
+            )
+
+        first_conflict = _FakeConnection()
+        first_conflict.execute.return_value = SimpleNamespace(first=lambda: (1, now))
+        with self.assertRaises(events.InvalidUserCounterMutation):
+            events._record_local_user_counter_event(
+                first_conflict, target, counter(2, now + timedelta(seconds=1)), "iran"
+            )
+
+        missing_history = _FakeConnection()
+        missing_history.execute.return_value = SimpleNamespace(first=lambda: None)
+        with self.assertRaises(events.InvalidUserCounterMutation):
+            events._record_local_user_counter_event(
+                missing_history, target, counter(3, now + timedelta(seconds=1)), "iran"
+            )
+
+        stale_boundary = _FakeConnection()
+        stale_boundary.execute.return_value = SimpleNamespace(first=lambda: (2, now))
+        with self.assertRaises(events.InvalidUserCounterMutation):
+            events._record_local_user_counter_event(
+                stale_boundary, target, counter(3, now), "iran"
+            )
+
+        valid_boundary = _FakeConnection()
+        valid_boundary.execute.side_effect = [
+            SimpleNamespace(first=lambda: (2, now)),
+            SimpleNamespace(),
+        ]
+        events._record_local_user_counter_event(
+            valid_boundary,
+            target,
+            counter(3, now + timedelta(seconds=1)),
+            "iran",
+        )
+        self.assertEqual(valid_boundary.execute.call_count, 2)
+
+        first_valid = _FakeConnection()
+        first_valid.execute.side_effect = [
+            SimpleNamespace(first=lambda: None),
+            SimpleNamespace(),
+        ]
+        events._record_local_user_counter_event(
+            first_valid,
+            target,
+            counter(2, now + timedelta(seconds=1)),
+            "iran",
+        )
+        self.assertEqual(first_valid.execute.call_count, 2)
+
+    def test_registration_listener_payload_references_versions_and_v2_errors(self):
+        registry = {}
+        with patch(
+            "core.events.event.listens_for",
+            side_effect=_capture_listeners(registry),
+        ):
+            events.setup_accountant_relation_events()
+            events.setup_customer_relation_events()
+            events.setup_telegram_link_token_events()
+            events.setup_invitation_events()
+
+        now = datetime(2026, 7, 12, 12, 0)
+        targets = self._build_listener_targets(now)
+        link_token = SimpleNamespace(
+            id=7,
+            user_id=8,
+            token_hash="hash",
+            status=SimpleNamespace(value="pending"),
+            issued_by_server="iran",
+            expires_at=now,
+            used_at=None,
+            used_telegram_id=None,
+            revoked_at=None,
+            created_at=now,
+            updated_at=now,
+            sync_version=1,
+        )
+        target_by_model = {
+            "AccountantRelation": targets[("AccountantRelation", "after_insert")],
+            "CustomerRelation": targets[("CustomerRelation", "after_insert")],
+            "TelegramLinkToken": link_token,
+            "Invitation": targets[("Invitation", "after_insert")],
+        }
+        connection = _FakeConnection()
+        references = {"owner_user_id": {"current": {"account_name": "owner"}, "previous": {}}}
+        with patch(
+            "core.events.settings.registration_sync_v2_enabled", True
+        ), patch("core.events.settings.server_mode", "iran"), patch(
+            "core.events._registration_user_references", return_value=references
+        ), patch("core.events._changed_column_fields", return_value={"status"}), patch(
+            "core.events.log_change"
+        ) as log_change:
+            for model, target in target_by_model.items():
+                registry[(model, "before_update")](None, connection, target) if (model, "before_update") in registry else None
+                registry[(model, "after_insert")](None, connection, target)
+
+        self.assertEqual(log_change.call_count, 4)
+        for call in log_change.call_args_list:
+            self.assertIn(events.REGISTRATION_USER_REFERENCES_FIELD, call.args[4])
+        self.assertEqual(target_by_model["AccountantRelation"].sync_version, 2)
+        self.assertEqual(target_by_model["CustomerRelation"].sync_version, 2)
+        self.assertEqual(target_by_model["Invitation"].sync_version, 2)
+
+        with patch(
+            "core.events.settings.registration_sync_v2_enabled", False
+        ), patch("core.events._changed_column_fields", return_value={"status"}):
+            registry[("AccountantRelation", "before_update")](
+                None, connection, target_by_model["AccountantRelation"]
+            )
+            registry[("CustomerRelation", "before_update")](
+                None, connection, target_by_model["CustomerRelation"]
+            )
+            registry[("Invitation", "before_update")](
+                None, connection, target_by_model["Invitation"]
+            )
+
+        with patch(
+            "core.events.settings.registration_sync_v2_enabled", True
+        ), patch("core.events.log_change", side_effect=RuntimeError("outbox failed")):
+            for model, target in target_by_model.items():
+                for event_name in ("after_insert", "after_update"):
+                    with self.subTest(model=model, event=event_name), self.assertRaisesRegex(
+                        RuntimeError, "outbox failed"
+                    ):
+                        registry[(model, event_name)](None, connection, target)
+
+        with patch(
+            "core.events.settings.registration_sync_v2_enabled", False
+        ), patch("core.events.log_change", side_effect=RuntimeError("legacy failure")):
+            registry[("TelegramLinkToken", "after_insert")](
+                None, connection, link_token
+            )
+            registry[("TelegramLinkToken", "after_update")](
+                None, connection, link_token
+            )
+
+    def test_user_listener_authority_and_error_boundaries(self):
+        registry = {}
+        with patch(
+            "core.events.event.listens_for", side_effect=_capture_listeners(registry)
+        ):
+            events.setup_user_events()
+        user = self._build_listener_targets(datetime(2026, 7, 12, 12, 0))[
+            ("User", "after_insert")
+        ]
+        user.sync_version = getattr(user, "sync_version", 1)
+        connection = _FakeConnection()
+
+        with patch("core.events.settings.registration_sync_v2_enabled", False), patch(
+            "core.events._changed_column_fields", return_value={"address"}
+        ):
+            registry[("User", "before_update")](None, connection, user)
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "foreign"
+        ), patch("core.events._changed_column_fields", return_value={"updated_at"}):
+            registry[("User", "before_update")](None, connection, user)
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "other"
+        ), patch("core.events._changed_column_fields", return_value={"address"}):
+            registry[("User", "before_update")](None, connection, user)
+
+        old_version = user.sync_version
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "iran"
+        ), patch("core.events._changed_column_fields", return_value={"address"}):
+            registry[("User", "before_update")](None, connection, user)
+        self.assertEqual(user.sync_version, old_version + 1)
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "iran"
+        ), patch(
+            "core.events._changed_column_fields",
+            return_value={"sync_version", "updated_at"},
+        ):
+            registry[("User", "before_update")](None, connection, user)
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "foreign"
+        ), patch("core.events.log_change") as log_change:
+            registry[("User", "after_insert")](None, connection, user)
+        log_change.assert_not_called()
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "iran"
+        ), patch("core.events._changed_column_fields", return_value={"future_field"}), patch(
+            "core.events.build_user_counter_event", return_value=None
+        ), patch.object(events.logger, "warning") as warning, patch(
+            "core.events.log_change"
+        ):
+            registry[("User", "after_update")](None, connection, user)
+        warning.assert_called_once()
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode", "iran"
+        ), patch("core.events._changed_column_fields", return_value={"trades_count"}), patch(
+            "core.events.build_user_counter_event",
+            side_effect=events.InvalidUserCounterMutation("invalid counter mutation"),
+        ), self.assertRaises(events.InvalidUserCounterMutation):
+            registry[("User", "after_update")](None, connection, user)
 
 
 if __name__ == '__main__':

@@ -355,6 +355,43 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(wrapper.emitted('close')).toEqual([[]])
   })
 
+  it('shows disabled-SMS guidance and ignores missing registration links', async () => {
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    })
+    apiFetchMock.mockResolvedValueOnce(makeResponse([
+      makeRelation({ sms_status: 'disabled' }),
+    ]))
+
+    const wrapper = await mountModal()
+    await openRelationsPanel(wrapper)
+
+    expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد')
+    const copyButton = wrapper.get('.pending-invitations-panel .copy-link')
+    await copyButton.trigger('click')
+    await flushPromises()
+    expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
+    expect(wrapper.get('.pending-invitations-panel .copy-state--copied').attributes('style') ?? '').not.toContain('display: none')
+    await (wrapper.vm as any).copyRegistrationLink({ id: 99, registration_link: null })
+    expect(clipboardWrite).toHaveBeenCalledTimes(1)
+
+    apiFetchMock.mockRejectedValueOnce({})
+    await wrapper.get('.pending-invitations-panel .expire-pending-invitation').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('لغو دعوت حسابدار ناموفق بود.')
+
+    apiFetchMock.mockRejectedValueOnce({})
+    await (wrapper.vm as any).unlinkRelation({
+      id: 98,
+      status: 'active',
+      relation_display_name: 'حسابدار فعال',
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('قطع ارتباط حسابدار ناموفق بود.')
+  })
+
   it('renders lifecycle copy inside accountant detail pages', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([
       makeRelation({

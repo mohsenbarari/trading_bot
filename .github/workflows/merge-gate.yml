@@ -75,6 +75,31 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt
+          python3 -m pip install -r requirements-test.txt
+
+      - name: Run Stage 9 infrastructure self-tests
+        run: make stage9-infrastructure-gate
+
+      - name: Run Stage 9 critical mutation gate
+        run: make stage9-mutation-gate
+
+      - name: Run Stage 9 isolated registration and market matrix
+        run: make stage9-test-matrix
+
+      - name: Upload Stage 9 infrastructure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage9-infrastructure-${{ github.run_number }}
+          path: |
+            tmp/stage9-mutation-evidence.json
+            tmp/stage9-mutation-verification.json
+            tmp/stage9-mutation.log
+            tmp/stage9-traceability.json
+            tmp/stage9-matrix/results.json
+            tmp/stage9-matrix/registration/registration.log
+            tmp/stage9-matrix/market/market.log
+          if-no-files-found: warn
 
       - name: Run focused observability gate
         shell: bash

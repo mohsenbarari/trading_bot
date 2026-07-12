@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
@@ -10,6 +10,11 @@ from core.invitation_contract_service import (
     build_public_invitation_contract_v2,
     invitation_surface_availability,
 )
+from core.invitation_creation_contracts import (
+    InternalInvitationCreateRequest,
+    InvitationRequesterIdentity,
+)
+from core.invitation_sms_policy import invitation_sms_enabled
 from core.public_webapp_url import (
     PublicWebAppURLConfigurationError,
     user_facing_webapp_url,
@@ -18,9 +23,11 @@ from core.public_webapp_url import (
 from core.registration_contracts import (
     REGISTRATION_ADDRESS_MIN_LENGTH_MESSAGE,
     InvitationSMSStatus,
+    OTPDeliveryStateContract,
     RegistrationIdentityProofType,
     RegistrationSourceSurface,
     TelegramRegistrationCommand,
+    TelegramOTPDeliveryCommand,
     canonical_registration_command_bytes,
     invitation_token_hash,
     registration_command_hash,
@@ -78,6 +85,63 @@ def _command_payload(**overrides):
 
 
 class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_invitation_request_contracts_reject_empty_canonical_identity(self):
+        with self.assertRaisesRegex(ValueError, "هویت نام کاربری نامعتبر است"):
+            InvitationRequesterIdentity.normalize_account("")
+        with self.assertRaisesRegex(ValueError, "هویت شماره موبایل نامعتبر است"):
+            InvitationRequesterIdentity.normalize_mobile("123")
+        with self.assertRaisesRegex(ValueError, "نام کاربری نامعتبر است"):
+            InternalInvitationCreateRequest.normalize_account("ab")
+        with self.assertRaisesRegex(ValueError, "شماره موبایل نامعتبر است"):
+            InternalInvitationCreateRequest.normalize_mobile("123")
+
+        requester = InvitationRequesterIdentity(
+            account_name="requester",
+            mobile_number="09120000000",
+            telegram_id=1,
+        )
+        base = {
+            "requester_identity": requester,
+            "account_name": "valid-account",
+            "mobile_number": "09121112233",
+            "source_server": "foreign",
+            "idempotency_key": "standard-invitation:" + "a" * 40,
+        }
+        for changes in ({"account_name": "ab"}, {"mobile_number": "123"}):
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                InternalInvitationCreateRequest.model_validate({**base, **changes})
+
+    def test_otp_contract_rejects_naive_invalid_or_partial_timeline(self):
+        now = datetime(2026, 7, 12, 8, 0, tzinfo=timezone.utc)
+        base = {
+            "otp_request_id": uuid4(),
+            "identity_digest": "a" * 64,
+            "delivery_target_ciphertext": "ciphertext-" + "b" * 32,
+            "created_at": now,
+            "expires_at": now + timedelta(seconds=120),
+        }
+        invalid = (
+            {"created_at": now.replace(tzinfo=None)},
+            {"expires_at": now},
+            {"sms_claim_id": uuid4()},
+            {
+                "sms_claim_id": uuid4(),
+                "sms_claimed_at": now + timedelta(seconds=1),
+                "sms_claim_lease_until": now + timedelta(seconds=1),
+            },
+        )
+        for changes in invalid:
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                OTPDeliveryStateContract.model_validate({**base, **changes})
+
+        with self.assertRaises(ValidationError):
+            TelegramOTPDeliveryCommand(
+                otp_request_id=uuid4(),
+                telegram_id=1,
+                otp_code="12345",
+                expires_at=now.replace(tzinfo=None),
+            )
+
     def test_user_facing_webapp_url_preserves_legacy_mode_and_requires_iran_for_new_flow(self):
         legacy = _url_settings(invitation_contract_v2_enabled=False)
         self.assertEqual(user_facing_webapp_url(settings_obj=legacy), "https://legacy.example")
@@ -237,6 +301,12 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             derive_invitation_state(expired, now=now + timedelta(microseconds=1)).value,
             "expired",
         )
+        with self.assertRaisesRegex(ValueError, "registered_user_id must be positive"):
+            complete_invitation(
+                expired,
+                registered_user_id=0,
+                completed_via=InvitationCompletionSurface.WEB,
+            )
 
     def test_post_expiry_reconciliation_boundary_is_inclusive_and_revocation_wins(self):
         expiry = datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc)
@@ -287,6 +357,7 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             "https://staging.gold-trade.ir:bad",
             "https://staging.gold-trade.ir:0",
             "https://[invalid",
+            "https://unconfigured-iran.example",
         ):
             with self.subTest(value=value):
                 with self.assertRaises(PublicWebAppURLConfigurationError):
@@ -330,6 +401,12 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_invitation_contract_v2_reports_surface_availability_and_aliases(self):
+        legacy = invitation_surface_availability(
+            InvitationKind.LEGACY_UNKNOWN,
+            role=UserRole.STANDARD,
+        )
+        self.assertFalse(legacy.bot)
+        self.assertFalse(legacy.web)
         self.assertTrue(
             invitation_surface_availability(
                 InvitationKind.STANDARD,
@@ -341,6 +418,13 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
                 InvitationKind.ACCOUNTANT,
                 role=UserRole.STANDARD,
             ).bot
+        )
+
+        from core.services.invitation_lifecycle_service import invitation_kind_from_token
+
+        self.assertEqual(
+            invitation_kind_from_token("unknown-token"),
+            InvitationKind.LEGACY_UNKNOWN,
         )
         self.assertFalse(
             invitation_surface_availability(
@@ -400,6 +484,17 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(public_contract.valid)
         self.assertIsNone(public_contract.token)
         self.assertIsNone(public_contract.mobile_number)
+
+    def test_unknown_invitation_sms_category_fails_closed(self):
+        settings_obj = SimpleNamespace(
+            invitation_sms_standard_enabled=True,
+            invitation_sms_accountant_enabled=True,
+            invitation_sms_customer_tier1_enabled=True,
+            invitation_sms_customer_tier2_enabled=True,
+        )
+        self.assertFalse(
+            invitation_sms_enabled("unknown", settings_obj=settings_obj)
+        )
 
     def test_public_webapp_peer_classification_depends_on_local_server_role(self):
         foreign_settings = _url_settings(

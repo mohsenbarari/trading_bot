@@ -1,3 +1,11 @@
+[run]
+relative_files = true
+
+[paths]
+source =
+    .
+    /app
+
 [report]
 exclude_lines =
     pragma: no cover

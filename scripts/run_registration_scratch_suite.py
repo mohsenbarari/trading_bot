@@ -25,6 +25,7 @@ RUNTIME_DATABASE_DENYLIST = {
 }
 SUITES = (
     ("stage1_migration", "STAGE1_MIGRATION_TEST_DATABASE_URL", "tests.test_registration_stage1_migration_postgres"),
+    ("stage2_registration", "STAGE2_TEST_DATABASE_URL", "tests.test_authoritative_registration_postgres"),
     ("stage3_registration", "STAGE3_TEST_DATABASE_URL", "tests.test_stage3_invitation_creation_postgres"),
     ("stage4_registration", "STAGE4_TEST_DATABASE_URL", "tests.test_stage4_registration_reconciliation_postgres"),
 )
@@ -49,12 +50,18 @@ def _database_snapshot(raw_runtime_url: str) -> tuple[str, str | None, int]:
             database_name = str(
                 connection.execute(text("SELECT current_database()")).scalar_one()
             ).strip()
-            revision = connection.execute(
-                text(
-                    "SELECT version_num FROM alembic_version "
-                    "WHERE to_regclass('public.alembic_version') IS NOT NULL LIMIT 1"
-                )
-            ).scalar_one_or_none()
+            has_alembic_version = bool(
+                connection.execute(
+                    text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+                ).scalar_one()
+            )
+            revision = (
+                connection.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                ).scalar_one_or_none()
+                if has_alembic_version
+                else None
+            )
             stage1_objects = int(
                 connection.execute(
                     text(
@@ -87,6 +94,22 @@ def _run(command: list[str], *, env: dict[str, str]) -> None:
         )
 
 
+def _test_command(module: str, *, coverage_file: str) -> list[str]:
+    if not coverage_file:
+        return [sys.executable, "-m", "unittest", module]
+    return [
+        sys.executable,
+        "-m",
+        "coverage",
+        "run",
+        "--branch",
+        "--parallel-mode",
+        "-m",
+        "unittest",
+        module,
+    ]
+
+
 def main() -> int:
     runtime_url = str(os.getenv("DATABASE_URL", "")).strip()
     expected_checkout = str(os.getenv("TRADING_BOT_EXPECTED_CHECKOUT", "")).strip()
@@ -101,9 +124,7 @@ def main() -> int:
     if before[0].lower() in RUNTIME_DATABASE_DENYLIST - {"trading_bot_db"}:
         print("registration scratch suite refused: unexpected runtime database", file=sys.stderr)
         return 2
-    if before[2] != 0:
-        print("registration scratch suite refused: active database already has Stage 1 objects", file=sys.stderr)
-        return 2
+    coverage_file = str(os.getenv("STAGE9_COVERAGE_FILE", "")).strip()
 
     suffix = secrets.token_hex(6)
     runtime = _sync_url(runtime_url)
@@ -135,6 +156,8 @@ def main() -> int:
                     env_name: _render(scratch_async),
                 }
             )
+            if coverage_file:
+                env["COVERAGE_FILE"] = coverage_file
             migration_target = "f7c8d9e0a1b2" if prefix == "stage1_migration" else "head"
             _run(
                 [
@@ -145,7 +168,7 @@ def main() -> int:
                 ],
                 env=env,
             )
-            _run([sys.executable, "-m", "unittest", module], env=env)
+            _run(_test_command(module, coverage_file=coverage_file), env=env)
     except Exception as exc:
         print(f"registration scratch suite failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return_code = 1

@@ -764,7 +764,8 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="pending-invitation-actions">
                       <button v-if="invitationRelationLink(relation, 'web')" type="button" class="accountant-secondary-control copy-link" @click="copyRegistrationLink(relation)">
-                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک وب' }}
+                        <span v-show="copiedRelationId !== relation.id" class="copy-state--idle">کپی لینک وب</span>
+                        <span v-show="copiedRelationId === relation.id" class="copy-state--copied">کپی شد</span>
                       </button>
                       <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
                         منقضی کردن دعوت

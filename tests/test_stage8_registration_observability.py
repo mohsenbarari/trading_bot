@@ -10,12 +10,21 @@ from core.background_job_authority import (
     JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
 )
 from core.log_redaction import REDACTED, redact
-from core.metrics import metrics_response_body, record_registration_job_health, registry
+from core.metrics import (
+    metrics_response_body,
+    observe_otp_fallback_delay,
+    record_registration_job_health,
+    record_registration_reconciliation,
+    registry,
+)
 from core.registration_observability import (
     JOB_HEARTBEAT_MAX_AGE_SECONDS,
     JOB_HEARTBEAT_MAX_FUTURE_SKEW_SECONDS,
     OTP_FALLBACK_MAX_LAG_SECONDS,
     REGISTRATION_PENDING_MAX_AGE_SECONDS,
+    _age_seconds,
+    _bool_value,
+    _utc,
     dual_platform_registration_health,
     load_registration_job_snapshot,
     record_registration_job_snapshot,
@@ -80,6 +89,13 @@ def settings_for(server_mode):
 
 
 class Stage8QueueSummaryTests(unittest.IsolatedAsyncioTestCase):
+    def test_time_and_boolean_normalizers_cover_absent_and_legacy_values(self):
+        naive = NOW.replace(tzinfo=None)
+        self.assertEqual(_utc(naive), NOW)
+        self.assertEqual(_age_seconds(None, now=NOW), 0)
+        self.assertTrue(_bool_value("1", default=False))
+        self.assertTrue(_bool_value("unknown", default=True))
+
     async def test_registration_summary_is_bounded_and_identity_free(self):
         oldest = NOW - timedelta(minutes=7)
         summary = await summarize_registration_intent_queue(
@@ -100,6 +116,20 @@ class Stage8QueueSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary.pending_count, 4)
         self.assertAlmostEqual(summary.lag_seconds, 2.75)
         self.assertEqual(summary.oldest_pending_age_seconds, summary.lag_seconds)
+
+    async def test_otp_summary_tolerates_count_without_a_visible_oldest_member(self):
+        redis = FakeRedis()
+        redis.zcard_value = 1
+        redis.zrange_value = []
+
+        summary = await summarize_otp_fallback_queue(redis, now=NOW)
+
+        self.assertEqual(summary.pending_count, 1)
+        self.assertEqual(summary.oldest_pending_age_seconds, 0)
+
+        empty = await summarize_otp_fallback_queue(FakeRedis(), now=NOW)
+        self.assertEqual(empty.pending_count, 0)
+        self.assertEqual(empty.oldest_pending_age_seconds, 0)
 
 
 class Stage8SnapshotTests(unittest.IsolatedAsyncioTestCase):
@@ -401,11 +431,31 @@ class Stage8SnapshotTests(unittest.IsolatedAsyncioTestCase):
             "lag_seconds": float("-inf"),
             "last_result": "success",
         })
-
+        record_registration_job_health({
+            "job_name": JOB_OTP_SMS_FALLBACK,
+            "server_mode": "iran",
+            "pending_count": "not-a-number",
+            "last_result": "error",
+        })
+        with patch(
+            "core.metrics.datetime",
+            SimpleNamespace(
+                fromisoformat=lambda _value: SimpleNamespace(
+                    timestamp=lambda: float("inf")
+                )
+            ),
+        ):
+            record_registration_job_health({
+                "job_name": JOB_OTP_SMS_FALLBACK,
+                "server_mode": "iran",
+                "heartbeat_at": NOW.isoformat(),
+            })
         body = metrics_response_body()
         self.assertNotIn("+Inf", body)
         self.assertNotIn("-Inf", body)
         self.assertNotIn("NaN", body)
+        record_registration_reconciliation(status="retry", count=-1)
+        observe_otp_fallback_delay(-1)
 
     async def test_metrics_scrape_can_hydrate_snapshot_in_another_api_worker(self):
         redis = FakeRedis()
@@ -512,7 +562,7 @@ class Stage8AlertTests(unittest.TestCase):
             {item["metric"] for item in alerts},
         )
 
-    def test_loki_registration_rules_use_latest_sample_and_fail_closed_heartbeats(self):
+    def test_loki_registration_rules_use_latest_sample_and_role_aware_no_data(self):
         rules = Path(
             "observability/grafana/provisioning/alerting/rules.yml"
         ).read_text(encoding="utf-8")
@@ -536,7 +586,7 @@ class Stage8AlertTests(unittest.TestCase):
         self.assertIn("last_over_time", registration_heartbeat)
         self.assertIn('| server_mode="foreign"', registration_heartbeat)
         self.assertIn("registration_job_heartbeat_unhealthy", registration_heartbeat)
-        self.assertIn("noDataState: Alerting", registration_heartbeat)
+        self.assertIn("noDataState: OK", registration_heartbeat)
         self.assertIn("for: 0s", registration_heartbeat)
         self.assertIn("last_over_time", registration_pending)
         self.assertIn('| server_mode="foreign"', registration_pending)
@@ -546,12 +596,36 @@ class Stage8AlertTests(unittest.TestCase):
         self.assertIn("last_over_time", otp_heartbeat)
         self.assertIn('| server_mode="iran"', otp_heartbeat)
         self.assertIn("login_sms_fallback_job_heartbeat_unhealthy", otp_heartbeat)
-        self.assertIn("noDataState: Alerting", otp_heartbeat)
+        self.assertIn("noDataState: OK", otp_heartbeat)
         self.assertIn("for: 0s", otp_heartbeat)
         self.assertIn("last_over_time", otp_lag)
         self.assertIn('| server_mode="iran"', otp_lag)
         self.assertNotIn("max_over_time", otp_lag)
         self.assertIn("for: 0s", otp_lag)
+
+        foreign_sample_missing = rules.split(
+            "uid: trading-bot-sync-health-foreign-missing",
+            1,
+        )[1].split("uid: trading-bot-sync-health-iran-missing", 1)[0]
+        iran_sample_missing = rules.split(
+            "uid: trading-bot-sync-health-iran-missing",
+            1,
+        )[1].split("uid: trading-bot-sync-retry-queue", 1)[0]
+        self.assertIn("noDataState: Alerting", foreign_sample_missing)
+        self.assertIn("noDataState: Alerting", iran_sample_missing)
+
+    def test_audit_alert_includes_durable_sink_failures(self):
+        rules = Path(
+            "observability/grafana/provisioning/alerting/rules.yml"
+        ).read_text(encoding="utf-8")
+        audit_rule = rules.split(
+            "uid: trading-bot-audit-failure",
+            1,
+        )[1].split("name: Trading Bot Runtime Alerts", 1)[0]
+
+        self.assertIn('result=~"failure|denied"', audit_rule)
+        self.assertIn('event=~"audit\\\\.sink\\\\.(write|integrity)_failed"', audit_rule)
+        self.assertIn("noDataState: OK", audit_rule)
 
 
 class Stage8AuditVocabularyTests(unittest.TestCase):

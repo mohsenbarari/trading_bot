@@ -35,7 +35,12 @@ describe('WebRegister.vue', () => {
 
   it('completes the full invite validation, OTP, and registration flow', async () => {
     webRegisterMocks.fetch
-      .mockResolvedValueOnce(new Response(JSON.stringify({ account_name: 'test_user', mobile_number: '09120000000', role: 'عادی' }), {
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        account_name: 'test_user',
+        mobile_number: '09120000000',
+        role: 'عادی',
+        expires_at: '2026-07-14T10:00:00Z',
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
@@ -54,6 +59,7 @@ describe('WebRegister.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('نام کاربری:')
+    expect(wrapper.text()).toContain('مهلت ثبت‌نام:')
     await wrapper.get('button').trigger('click')
     await flushPromises()
 
@@ -63,6 +69,7 @@ describe('WebRegister.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('آدرس دقیق پستی:')
+    expect(wrapper.text()).toContain('مهلت ثبت‌نام:')
     await wrapper.get('textarea.address-input').setValue('تهران، خیابان مثال، پلاک ۱۲۳')
     await wrapper.findAll('button').find((button) => button.text().includes('تکمیل ثبت‌نام'))!.trigger('click')
     await flushPromises()

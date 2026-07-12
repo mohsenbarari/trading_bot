@@ -6,10 +6,13 @@ from sqlalchemy.orm.attributes import set_committed_value
 from core import events
 from core.user_counter_sync import (
     InvalidUserCounterMutation,
+    USER_COUNTER_FIELDS,
     USER_COUNTER_MAX_EPOCH,
     USER_COUNTER_MAX_VALUE,
     build_user_counter_event,
+    build_user_sync_identity,
     increment_user_counters,
+    normalize_counter_event_occurred_at,
     reset_user_counters_in_memory,
     user_counter_event_payload,
 )
@@ -68,6 +71,25 @@ class _Connection:
 
 
 class UserCounterSyncTests(unittest.TestCase):
+    def test_counter_time_and_increment_inputs_fail_closed(self):
+        with self.assertRaisesRegex(ValueError, "occurred_at is required"):
+            normalize_counter_event_occurred_at(None)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            increment_user_counters(_persisted_user(), trades=-1)
+
+    def test_identity_snapshot_preserves_previous_value_and_handles_unmapped_objects(self):
+        user = _persisted_user()
+        user.account_name = "counter_user_changed"
+        identity = build_user_sync_identity(user, include_previous=True)
+        self.assertEqual(identity["previous"]["account_name"], "counter_user")
+        self.assertEqual(identity["current"]["account_name"], "counter_user_changed")
+
+        fallback = build_user_sync_identity(
+            type("Unmapped", (), {"account_name": "plain", "mobile_number": None, "telegram_id": None})(),
+            include_previous=True,
+        )
+        self.assertEqual(fallback, {"current": {"account_name": "plain"}, "previous": {}})
+
     def test_increment_builds_positive_delta_event_without_identity_snapshot_fields(self):
         user = _persisted_user()
         increment_user_counters(user, trades=1, commodities=4)
@@ -112,6 +134,66 @@ class UserCounterSyncTests(unittest.TestCase):
         user.trades_count = 1
         with self.assertRaisesRegex(InvalidUserCounterMutation, "requires an epoch reset"):
             build_user_counter_event(user, {"trades_count"})
+
+    def test_event_builder_rejects_inconsistent_or_invalid_histories(self):
+        transient = User(
+            account_name="transient_counter",
+            mobile_number="09120000001",
+            full_name="Transient",
+            address="Tehran transient address",
+            role=UserRole.STANDARD,
+            home_server="iran",
+        )
+        transient.trades_count = 1
+        with self.assertRaisesRegex(InvalidUserCounterMutation, "missing previous value"):
+            build_user_counter_event(transient, {"trades_count"})
+
+        self.assertIsNone(build_user_counter_event(_persisted_user(), {"address"}))
+
+        inconsistent = _persisted_user()
+        inconsistent.counter_epoch = 5
+        inconsistent.trades_count = 3
+        with self.assertRaisesRegex(InvalidUserCounterMutation, "epoch history is inconsistent"):
+            build_user_counter_event(inconsistent, {"trades_count"})
+
+    def test_reset_event_requires_exact_epoch_and_zero_counters(self):
+        wrong_epoch = _persisted_user()
+        wrong_epoch.counter_epoch = 6
+        for field in ("trades_count", "commodities_traded_count", "channel_messages_count"):
+            wrong_epoch.__setattr__(field, 0)
+        with self.assertRaisesRegex(InvalidUserCounterMutation, "increment epoch exactly once"):
+            build_user_counter_event(wrong_epoch, {"counter_epoch", *USER_COUNTER_FIELDS})
+
+        too_high = _persisted_user()
+        set_committed_value(too_high, "counter_epoch", USER_COUNTER_MAX_EPOCH)
+        too_high.counter_epoch = USER_COUNTER_MAX_EPOCH + 1
+        for field in ("trades_count", "commodities_traded_count", "channel_messages_count"):
+            too_high.__setattr__(field, 0)
+        with self.assertRaisesRegex(InvalidUserCounterMutation, "epoch exceeds"):
+            build_user_counter_event(too_high, {"counter_epoch", *USER_COUNTER_FIELDS})
+
+        nonzero = _persisted_user()
+        nonzero.counter_epoch = 5
+        with self.assertRaisesRegex(InvalidUserCounterMutation, "zero every counter"):
+            build_user_counter_event(nonzero, {"counter_epoch"})
+
+    def test_increment_event_rejects_oversized_delta_and_ignores_zero_delta(self):
+        oversized = _persisted_user()
+        set_committed_value(oversized, "trades_count", 0)
+        oversized.trades_count = USER_COUNTER_MAX_VALUE + 1
+        with self.assertRaisesRegex(InvalidUserCounterMutation, "supported range"):
+            build_user_counter_event(oversized, {"trades_count"})
+
+        with patch(
+            "core.user_counter_sync._history_values",
+            side_effect=(
+                (1, 1, False),
+                (2, 2, True),
+                (0, 0, False),
+                (0, 0, False),
+            ),
+        ):
+            self.assertIsNone(build_user_counter_event(object(), {"trades_count"}))
 
     def test_counter_and_epoch_bounds_fail_before_mutation(self):
         user = _persisted_user()

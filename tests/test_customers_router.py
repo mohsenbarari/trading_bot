@@ -27,6 +27,7 @@ from core.server_routing import SERVER_FOREIGN
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.invitation import InvitationKind
 from core.enums import UserAccountStatus, UserRole
+from core.services.invitation_requester_service import InvitationRequesterResolutionError
 
 
 class FakeDB:
@@ -91,6 +92,45 @@ class LazyCustomerRelation(SimpleNamespace):
 
 
 class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_internal_bot_customer_invite_maps_requester_resolution_failures(self):
+        payload = schemas.InternalCustomerInviteRequest(
+            owner_identity={
+                "account_name": "owner7",
+                "mobile_number": "09120000007",
+                "telegram_id": 700,
+            },
+            account_name="customer_09123456789",
+            management_name="مشتری",
+            mobile_number="09123456789",
+            customer_tier=CustomerTier.TIER_1,
+            idempotency_key=build_customer_invite_idempotency_key(
+                source_server=SERVER_FOREIGN,
+                owner_identity={
+                    "account_name": "owner7",
+                    "mobile_number": "09120000007",
+                    "telegram_id": 700,
+                },
+                mobile_number="09123456789",
+            ),
+            source_server=SERVER_FOREIGN,
+        )
+        for code, expected_status in (("requester_missing", 404), ("requester_inactive", 403)):
+            with self.subTest(code=code), patch(
+                "api.routers.customers.verify_internal_signature", return_value=True
+            ), patch("api.routers.customers.current_server", return_value="iran"), patch(
+                "api.routers.customers.public_webapp_url_for_links",
+                return_value="https://app.example",
+            ), patch(
+                "api.routers.customers.resolve_current_invitation_requester",
+                new=AsyncMock(side_effect=InvitationRequesterResolutionError(code)),
+            ):
+                with self.assertRaises(HTTPException) as exc:
+                    await create_owner_customer_internal_from_bot(
+                        payload,
+                        FakeRequest(),
+                        db=InternalInviteDB(None),
+                    )
+            self.assertEqual(exc.exception.status_code, expected_status)
     def test_active_customer_relation_does_not_expose_a_dead_registration_link(self):
         relation = SimpleNamespace(
             id=1,

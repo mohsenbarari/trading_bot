@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,7 @@ from core.services.telegram_registration_intent_service import (
 )
 from core.telegram_account_link_contracts import (
     TelegramAccountLinkCommand,
+    account_link_credential_hash,
     account_link_command_hash,
     build_telegram_account_link_command,
 )
@@ -70,6 +72,37 @@ class _SessionContext:
 
 
 class Stage4ContractTests(unittest.TestCase):
+    def test_account_link_contract_rejects_each_invalid_mode_boundary(self):
+        proof = datetime.now(timezone.utc)
+        base = {
+            "command_id": uuid4(),
+            "idempotency_key": "telegram-account-link:" + "a" * 40,
+            "mode": "link_token",
+            "link_token": "x" * 40,
+            "mobile_number": "09121112233",
+            "telegram_id": 77,
+            "address": "valid address",
+            "contact_verified_at": proof,
+        }
+        invalid = (
+            {"mobile_number": "123"},
+            {"address": "short"},
+            {"contact_verified_at": proof.replace(tzinfo=None)},
+            {"link_token": None},
+            {"contact_verified_at": None},
+        )
+        for changes in invalid:
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                TelegramAccountLinkCommand.model_validate({**base, **changes})
+
+        existing = TelegramAccountLinkCommand.model_validate({
+            **base,
+            "mode": "existing_linked_user",
+            "link_token": None,
+            "contact_verified_at": None,
+        })
+        self.assertEqual(len(account_link_credential_hash(existing)), 64)
+
     def test_account_link_command_is_deterministic_strict_and_preserves_exact_address(self):
         proof = datetime.now(timezone.utc)
         first = build_telegram_account_link_command(
@@ -217,6 +250,21 @@ class Stage4InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc.exception.status_code, 403)
 
+        with patch.object(auth, "verify_internal_signature", return_value=True), patch.object(
+            auth, "current_server", return_value=SERVER_IRAN
+        ):
+            bad_source = SimpleNamespace(
+                body=AsyncMock(return_value=body),
+                headers={"x-source-server": SERVER_IRAN},
+            )
+            with self.assertRaises(HTTPException) as exc:
+                await auth.reconcile_telegram_registration_internal(
+                    bad_source,
+                    Response(),
+                    db=AsyncMock(),
+                )
+        self.assertEqual(exc.exception.status_code, 401)
+
     async def test_registration_endpoint_feature_off_is_retryable_without_db_mutation(self):
         command = _registration_command()
         body = _json_body(command.model_dump(mode="json")).encode()
@@ -283,6 +331,47 @@ class Stage4InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["request"].source_server, SERVER_FOREIGN)
         self.assertGreaterEqual(captured["request"].received_at, before)
         self.assertLessEqual(captured["request"].received_at, after)
+
+    async def test_first_terminal_registration_outcomes_emit_bounded_audit(self):
+        command = _registration_command()
+        body = _json_body(command.model_dump(mode="json")).encode()
+        request = SimpleNamespace(
+            body=AsyncMock(return_value=body),
+            headers={"x-source-server": SERVER_FOREIGN},
+        )
+        for outcome, user_id in (
+            (TelegramRegistrationOutcome.CREATED, 9),
+            (TelegramRegistrationOutcome.LINKED_EXISTING, 10),
+            (TelegramRegistrationOutcome.ALREADY_LINKED, 11),
+            (TelegramRegistrationOutcome.IDENTITY_CONFLICT, None),
+        ):
+            result = AuthoritativeRegistrationResult(
+                outcome=outcome,
+                authoritative_user_id=user_id,
+                first_terminal_transition=True,
+            )
+            with self.subTest(outcome=outcome), patch.object(
+                auth, "verify_internal_signature", return_value=True
+            ), patch.object(auth, "current_server", return_value=SERVER_IRAN), patch.object(
+                auth.settings, "telegram_registration_reconciliation_enabled", True
+            ), patch.object(auth.settings, "telegram_direct_registration_enabled", True), patch.object(
+                auth.settings, "registration_sync_v2_enabled", True
+            ), patch.object(
+                auth,
+                "complete_invitation_registration",
+                new=AsyncMock(return_value=result),
+            ), patch.object(auth, "record_registration_completion"), patch.object(
+                auth, "audit_log"
+            ) as audit:
+                response = await auth.reconcile_telegram_registration_internal(
+                    request,
+                    Response(),
+                    db=AsyncMock(),
+                )
+            self.assertEqual(response.outcome, outcome)
+            self.assertTrue(audit.called)
+            if outcome == TelegramRegistrationOutcome.LINKED_EXISTING:
+                self.assertEqual(audit.call_count, 2)
 
     async def test_unknown_command_field_is_rejected_before_service(self):
         command = _registration_command().model_dump(mode="json")
@@ -355,6 +444,39 @@ class Stage4InternalEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(linked.outcome, TelegramRegistrationOutcome.LINKED_EXISTING)
         self.assertEqual(linked.authoritative_user_id, 44)
         complete.assert_awaited_once()
+
+        invalid_request = SimpleNamespace(
+            body=AsyncMock(return_value=b"not-json"),
+            headers={"x-source-server": SERVER_FOREIGN},
+        )
+        with patch.object(auth, "verify_internal_signature", return_value=True), patch.object(
+            auth, "current_server", return_value=SERVER_IRAN
+        ), self.assertRaises(HTTPException) as exc:
+            await auth.complete_telegram_account_link_internal(
+                invalid_request,
+                Response(),
+                db=AsyncMock(),
+            )
+        self.assertEqual(exc.exception.status_code, 422)
+
+        terminal_result = AuthoritativeTelegramAccountLinkResult(
+            outcome=TelegramRegistrationOutcome.LINKED_EXISTING,
+            authoritative_user_id=44,
+            first_terminal_transition=True,
+        )
+        with patch.object(auth, "verify_internal_signature", return_value=True), patch.object(
+            auth, "current_server", return_value=SERVER_IRAN
+        ), patch.object(auth.settings, "registration_sync_v2_enabled", True), patch.object(
+            auth,
+            "complete_authoritative_telegram_account_link",
+            new=AsyncMock(return_value=terminal_result),
+        ), patch.object(auth, "audit_log") as audit:
+            await auth.complete_telegram_account_link_internal(
+                request,
+                Response(),
+                db=AsyncMock(),
+            )
+        audit.assert_called_once()
 
 
 class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
@@ -540,6 +662,286 @@ class Stage4WorkerTests(unittest.IsolatedAsyncioTestCase):
         finalize.assert_awaited_once()
         self.assertEqual(finalize.await_args.kwargs["projected_user_id"], 42)
         session_context.session.commit.assert_awaited_once()
+
+    def test_worker_batch_and_concurrency_are_bounded(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        with patch.object(worker.settings, "telegram_registration_job_batch_size", 0):
+            self.assertEqual(worker._batch_size(), 1)
+        self.assertEqual(worker._batch_size(500), 100)
+        with patch.object(worker.settings, "telegram_registration_job_concurrency", 50):
+            self.assertEqual(worker._concurrency(), 10)
+
+    async def test_projection_wait_returns_ready_or_times_out(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        ready = RegistrationProjectionResolution(local_user_id=42)
+        with patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker,
+            "registration_projection_is_ready",
+            new=AsyncMock(return_value=ready),
+        ):
+            self.assertIs(
+                await worker._wait_for_projection(
+                    self.attempt,
+                    timeout_seconds=1,
+                    poll_seconds=0.01,
+                ),
+                ready,
+            )
+
+        with patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker,
+            "registration_projection_is_ready",
+            new=AsyncMock(return_value=None),
+        ):
+            self.assertIsNone(
+                await worker._wait_for_projection(
+                    self.attempt,
+                    timeout_seconds=0,
+                    poll_seconds=0.01,
+                )
+            )
+
+        with patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker,
+            "registration_projection_is_ready",
+            new=AsyncMock(side_effect=[None, ready]),
+        ), patch.object(worker.asyncio, "sleep", new=AsyncMock()) as sleep:
+            self.assertIs(
+                await worker._wait_for_projection(
+                    self.attempt,
+                    timeout_seconds=1,
+                    poll_seconds=0.01,
+                ),
+                ready,
+            )
+        sleep.assert_awaited_once()
+
+    async def test_retry_can_lose_lease_without_persistent_alert(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        attempt = TelegramRegistrationIntentAttempt(
+            intent_id=self.attempt.intent_id,
+            attempt=1,
+            command=self.attempt.command,
+        )
+        with patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker,
+            "schedule_registration_intent_retry",
+            new=AsyncMock(return_value=False),
+        ), patch.object(worker, "logger") as logger:
+            result = await worker._schedule_retry(attempt, error_code="processing_error")
+        self.assertEqual(result, "stale_attempt")
+        logger.error.assert_not_called()
+
+    async def test_valid_protocol_retry_boundaries_and_stale_finalize(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        cases = (
+            (201, TelegramRegistrationOutcome.CREATED, 9, True, uuid4(), "protocol_command_mismatch"),
+            (503, TelegramRegistrationOutcome.CREATED, 9, True, self.attempt.command.command_id, "transport_or_server_outage"),
+            (503, TelegramRegistrationOutcome.FEATURE_DISABLED, None, False, self.attempt.command.command_id, "transport_or_server_outage"),
+            (200, TelegramRegistrationOutcome.FEATURE_DISABLED, None, False, self.attempt.command.command_id, "mixed_version_or_feature_disabled"),
+            (200, TelegramRegistrationOutcome.INVALID_COMMAND, None, False, self.attempt.command.command_id, "remote_nonterminal"),
+            (401, TelegramRegistrationOutcome.IDENTITY_CONFLICT, None, True, self.attempt.command.command_id, "authentication_configuration"),
+            (404, TelegramRegistrationOutcome.IDENTITY_CONFLICT, None, True, self.attempt.command.command_id, "mixed_version_or_route"),
+            (200, TelegramRegistrationOutcome.CREATED, None, True, self.attempt.command.command_id, "success_user_missing"),
+        )
+        for status_code, outcome, user_id, terminal, command_id, expected in cases:
+            response = TelegramRegistrationCommandResponse(
+                command_id=command_id,
+                outcome=outcome,
+                authoritative_user_id=user_id,
+                terminal=terminal,
+            )
+            with self.subTest(expected=expected), patch.object(
+                worker,
+                "forward_telegram_registration_command",
+                new=AsyncMock(return_value=(status_code, response.model_dump(mode="json"))),
+            ), patch.object(
+                worker, "_schedule_retry", new=AsyncMock(return_value="retry_wait")
+            ) as schedule:
+                result = await worker._process_attempt(
+                    self.attempt,
+                    sync_wait_seconds=0,
+                    sync_poll_seconds=0.01,
+                )
+            self.assertEqual(result, "retry_wait")
+            self.assertEqual(schedule.await_args.kwargs["error_code"], expected)
+
+        rejection = TelegramRegistrationCommandResponse(
+            command_id=self.attempt.command.command_id,
+            outcome=TelegramRegistrationOutcome.IDENTITY_CONFLICT,
+        )
+        with patch.object(
+            worker,
+            "forward_telegram_registration_command",
+            new=AsyncMock(return_value=(422, rejection.model_dump(mode="json"))),
+        ), patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker, "finalize_registration_intent", new=AsyncMock(return_value=False)
+        ), patch.object(worker, "audit_log") as audit:
+            result = await worker._process_attempt(
+                self.attempt,
+                sync_wait_seconds=0,
+                sync_poll_seconds=0.01,
+            )
+        self.assertEqual(result, "stale_attempt")
+        audit.assert_not_called()
+
+    async def test_cycle_aggregates_results_and_isolates_processing_error(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        attempts = [self.attempt, self.attempt]
+        with patch.object(worker, "assert_background_job_authority"), patch.object(
+            worker, "registration_reconciliation_runtime_ready", return_value=True
+        ), patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker, "claim_due_registration_intents", new=AsyncMock(return_value=attempts)
+        ), patch.object(
+            worker,
+            "_process_attempt",
+            new=AsyncMock(side_effect=["created", RuntimeError("boom")]),
+        ), patch.object(
+            worker, "_schedule_retry", new=AsyncMock(return_value="retry_wait")
+        ):
+            report = await worker.run_telegram_registration_reconciliation_cycle(limit=2)
+        self.assertEqual(report.claimed_count, 2)
+        self.assertEqual(report.status_counts, {"created": 1, "retry_wait": 1})
+
+        with patch.object(worker, "registration_reconciliation_runtime_ready", return_value=False), patch.object(
+            worker, "assert_background_job_authority"
+        ), self.assertRaisesRegex(RuntimeError, "disabled"):
+            await worker.run_telegram_registration_reconciliation_cycle()
+
+        with patch.object(worker, "assert_background_job_authority"), patch.object(
+            worker, "registration_reconciliation_runtime_ready", return_value=True
+        ), patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker, "claim_due_registration_intents", new=AsyncMock(return_value=[self.attempt])
+        ), patch.object(
+            worker,
+            "_process_attempt",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.run_telegram_registration_reconciliation_cycle()
+
+    async def test_worker_loop_records_success_snapshot_before_controlled_shutdown(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        report = TelegramRegistrationReconciliationCycleReport(
+            claimed_count=1,
+            status_counts={"created": 1},
+            transport_connectivity_healthy=True,
+        )
+        queue = SimpleNamespace(pending_count=2, oldest_pending_age_seconds=3.5)
+        context = MagicMock()
+        context.__enter__.return_value = "run-id"
+        context.__exit__.return_value = False
+        with patch.object(worker, "assert_background_job_authority"), patch.object(
+            worker, "registration_reconciliation_runtime_ready", return_value=True
+        ), patch.object(worker, "job_context", return_value=context), patch.object(
+            worker,
+            "run_telegram_registration_reconciliation_cycle",
+            new=AsyncMock(return_value=report),
+        ), patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker, "summarize_registration_intent_queue", new=AsyncMock(return_value=queue)
+        ), patch.object(worker, "get_redis_client", return_value=object()), patch.object(
+            worker, "load_registration_job_snapshot", new=AsyncMock(return_value={})
+        ), patch.object(
+            worker, "record_registration_job_snapshot", new=AsyncMock()
+        ) as record, patch.object(worker, "record_registration_reconciliation") as metric, patch.object(
+            worker.asyncio,
+            "sleep",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.telegram_registration_reconciliation_loop()
+
+        record.assert_awaited_once()
+        metric.assert_called_once_with(status="created", count=1)
+
+        idle_report = TelegramRegistrationReconciliationCycleReport(
+            claimed_count=0,
+            status_counts={},
+            transport_connectivity_healthy=None,
+        )
+        with patch.object(worker, "assert_background_job_authority"), patch.object(
+            worker, "registration_reconciliation_runtime_ready", return_value=True
+        ), patch.object(worker, "job_context", return_value=context), patch.object(
+            worker,
+            "run_telegram_registration_reconciliation_cycle",
+            new=AsyncMock(return_value=idle_report),
+        ), patch.object(worker, "AsyncSessionLocal", return_value=_SessionContext()), patch.object(
+            worker, "summarize_registration_intent_queue", new=AsyncMock(return_value=queue)
+        ), patch.object(worker, "get_redis_client", return_value=object()), patch.object(
+            worker, "load_registration_job_snapshot", new=AsyncMock(return_value={})
+        ), patch.object(worker, "record_registration_job_snapshot", new=AsyncMock()), patch.object(
+            worker.asyncio,
+            "sleep",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.telegram_registration_reconciliation_loop()
+
+    async def test_worker_loop_rejects_disabled_runtime_and_propagates_cancellation(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        with patch.object(worker, "assert_background_job_authority"), patch.object(
+            worker, "registration_reconciliation_runtime_ready", return_value=False
+        ), self.assertRaisesRegex(RuntimeError, "disabled"):
+            await worker.telegram_registration_reconciliation_loop()
+
+        context = MagicMock()
+        context.__enter__.return_value = "run-id"
+        context.__exit__.return_value = False
+        with patch.object(worker, "assert_background_job_authority"), patch.object(
+            worker, "registration_reconciliation_runtime_ready", return_value=True
+        ), patch.object(worker, "job_context", return_value=context), patch.object(
+            worker,
+            "run_telegram_registration_reconciliation_cycle",
+            new=AsyncMock(side_effect=asyncio.CancelledError()),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.telegram_registration_reconciliation_loop()
+
+    async def test_worker_loop_records_error_and_isolates_health_sink_failure(self):
+        from core import telegram_registration_reconciliation_worker as worker
+
+        for health_failure in (False, True):
+            context = MagicMock()
+            context.__enter__.return_value = "run-id"
+            context.__exit__.return_value = False
+            health_side_effect = RuntimeError("redis down") if health_failure else None
+            with self.subTest(health_failure=health_failure), patch.object(
+                worker, "assert_background_job_authority"
+            ), patch.object(
+                worker, "registration_reconciliation_runtime_ready", return_value=True
+            ), patch.object(worker, "job_context", return_value=context), patch.object(
+                worker,
+                "run_telegram_registration_reconciliation_cycle",
+                new=AsyncMock(side_effect=RuntimeError("cycle failed")),
+            ), patch.object(worker, "get_redis_client", return_value=object()), patch.object(
+                worker,
+                "load_registration_job_snapshot",
+                new=AsyncMock(
+                    return_value={
+                        "pending_count": 4,
+                        "oldest_pending_age_seconds": 5,
+                        "connectivity_healthy": False,
+                    }
+                ),
+            ), patch.object(
+                worker,
+                "record_registration_job_snapshot",
+                new=AsyncMock(side_effect=health_side_effect),
+            ), patch.object(worker, "_loop_errors") as loop_errors, patch.object(
+                worker.asyncio,
+                "sleep",
+                new=AsyncMock(side_effect=asyncio.CancelledError()),
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await worker.telegram_registration_reconciliation_loop()
+            loop_errors.log.assert_called_once()
 
 
 class Stage4BackgroundPlacementTests(unittest.TestCase):

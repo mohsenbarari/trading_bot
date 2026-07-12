@@ -8,6 +8,7 @@ from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import HTTPException, Response
+import httpx
 import yaml
 
 from api.routers import auth
@@ -27,9 +28,10 @@ from core.services.otp_delivery_state_service import (
 )
 from core.services.otp_sms_delivery_service import (
     OTPSMSAttemptResult,
+    delivery_status,
     execute_claimed_otp_sms_delivery,
 )
-from core.services.telegram_otp_delivery_service import deliver_telegram_otp_once
+from core.services.telegram_otp_delivery_service import _text, deliver_telegram_otp_once
 from core.sms import SMSDeliveryOutcome, send_otp_sms_result_async
 from core.telegram_otp_transport import forward_telegram_otp_delivery
 from core.utils import utc_now
@@ -115,6 +117,11 @@ class FakeDB:
 
 
 class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    def test_delivery_text_normalization_handles_absent_bytes_and_objects(self):
+        self.assertIsNone(_text(None))
+        self.assertEqual(_text(b"sent"), "sent")
+        self.assertEqual(_text(123), "123")
+
     def test_contract_is_strict_and_never_accepts_non_five_digit_code(self):
         with self.assertRaises(ValueError):
             command(otp_code="1234")
@@ -157,6 +164,34 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "requires_foreign"):
                 await deliver_telegram_otp_once(DedupeRedis(), command=command())
 
+    async def test_foreign_delivery_classifies_expiry_provider_error_and_unreachable(self):
+        with override_current_server(SERVER_FOREIGN):
+            expired = await deliver_telegram_otp_once(
+                DedupeRedis(),
+                command=command(expires_at=utc_now() - timedelta(seconds=1)),
+            )
+        self.assertEqual(expired.outcome, TelegramOTPDeliveryOutcome.INVALID)
+
+        cases = (
+            (RuntimeError("gateway failed"), TelegramOTPDeliveryOutcome.PROVIDER_ERROR),
+            (SimpleNamespace(ok=False, status_code=400), TelegramOTPDeliveryOutcome.UNREACHABLE),
+            (SimpleNamespace(ok=False, status_code=500), TelegramOTPDeliveryOutcome.PROVIDER_ERROR),
+        )
+        for gateway_result, expected in cases:
+            side_effect = gateway_result if isinstance(gateway_result, Exception) else None
+            return_value = None if side_effect else gateway_result
+            with self.subTest(expected=expected), override_current_server(
+                SERVER_FOREIGN
+            ), patch(
+                "core.services.telegram_otp_delivery_service.telegram_gateway.send_message",
+                new=AsyncMock(side_effect=side_effect, return_value=return_value),
+            ):
+                result = await deliver_telegram_otp_once(
+                    DedupeRedis(),
+                    command=command(),
+                )
+            self.assertEqual(result.outcome, expected)
+
     async def test_internal_endpoint_rejects_wrong_surface_and_unknown_fields(self):
         cmd = command()
         request = SimpleNamespace(
@@ -185,6 +220,41 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as exc:
                 await auth.deliver_telegram_otp_internal(invalid_request, Response())
         self.assertEqual(exc.exception.status_code, 422)
+
+        with override_current_server(SERVER_FOREIGN), patch.object(
+            auth, "verify_internal_signature", return_value=False
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                await auth.deliver_telegram_otp_internal(request, Response())
+        self.assertEqual(exc.exception.status_code, 401)
+
+        wrong_source = SimpleNamespace(
+            body=AsyncMock(return_value=json.dumps(cmd.model_dump(mode="json")).encode()),
+            headers={"x-source-server": SERVER_FOREIGN},
+        )
+        with override_current_server(SERVER_FOREIGN), patch.object(
+            auth, "verify_internal_signature", return_value=True
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                await auth.deliver_telegram_otp_internal(wrong_source, Response())
+        self.assertEqual(exc.exception.status_code, 401)
+
+    async def test_internal_endpoint_feature_off_is_retryable(self):
+        cmd = command()
+        request = SimpleNamespace(
+            body=AsyncMock(return_value=json.dumps(cmd.model_dump(mode="json")).encode()),
+            headers={"x-source-server": SERVER_IRAN},
+        )
+        response = Response()
+        with override_current_server(SERVER_FOREIGN), patch.object(
+            auth, "verify_internal_signature", return_value=True
+        ), patch.object(auth.settings, "telegram_login_otp_enabled", False), patch.object(
+            auth, "deliver_telegram_otp_once", new=AsyncMock()
+        ) as deliver:
+            result = await auth.deliver_telegram_otp_internal(request, response)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(result.outcome, TelegramOTPDeliveryOutcome.FEATURE_DISABLED)
+        deliver.assert_not_awaited()
 
     async def test_internal_endpoint_returns_explicit_deduped_result_without_cache(self):
         cmd = command()
@@ -255,8 +325,191 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.kwargs["headers"]["X-Signature"], "signature")
         self.assertIn('"otp_code":"12345"', call.kwargs["content"])
 
+    async def test_iran_transport_classifies_wrong_role_peer_and_network_failures(self):
+        cmd = command()
+        with override_current_server(SERVER_FOREIGN):
+            status, _body = await forward_telegram_otp_delivery(cmd)
+        self.assertEqual(status, 403)
+
+        with override_current_server(SERVER_IRAN), patch(
+            "core.telegram_otp_transport.peer_server_url_for",
+            return_value=None,
+        ):
+            status, _body = await forward_telegram_otp_delivery(cmd)
+        self.assertEqual(status, 503)
+
+        class ClientContext:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, *_args, **_kwargs):
+                if isinstance(self.outcome, BaseException):
+                    raise self.outcome
+                return self.outcome
+
+        request = httpx.Request("POST", "https://foreign.example")
+        outcomes = (
+            (httpx.ReadTimeout("timeout", request=request), 504),
+            (httpx.ConnectError("offline", request=request), 503),
+            (
+                SimpleNamespace(
+                    status_code=502,
+                    text="invalid",
+                    json=lambda: (_ for _ in ()).throw(ValueError("bad json")),
+                ),
+                502,
+            ),
+        )
+        for outcome, expected in outcomes:
+            with self.subTest(outcome=type(outcome).__name__), override_current_server(
+                SERVER_IRAN
+            ), patch(
+                "core.telegram_otp_transport.peer_server_url_for",
+                return_value="https://foreign.example",
+            ), patch(
+                "core.telegram_otp_transport.httpx.AsyncClient",
+                return_value=ClientContext(outcome),
+            ):
+                status, body = await forward_telegram_otp_delivery(
+                    cmd,
+                    timeout_seconds=0.25,
+                )
+            self.assertEqual(status, expected)
+            self.assertIn("detail", body)
+
 
 class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
+    def test_auth_otp_helpers_cover_all_bounded_outcomes(self):
+        for outcome, expected in (
+            (auth.TelegramRegistrationOutcome.CREATED, "telegram_registration.reconciled_created"),
+            (auth.TelegramRegistrationOutcome.LINKED_EXISTING, "telegram_registration.reconciled_linked_existing"),
+            (auth.TelegramRegistrationOutcome.ALREADY_LINKED, "telegram_registration.reconciled_already_linked"),
+            (auth.TelegramRegistrationOutcome.IDENTITY_CONFLICT, "telegram_registration.rejected"),
+        ):
+            self.assertEqual(auth._registration_outcome_event(outcome), expected)
+
+        with patch.object(auth.secrets, "randbelow", return_value=0):
+            self.assertEqual(auth._generate_otp_code(), "10000")
+
+        telegram_state = state(telegram_delivery_status=OTPDeliveryStatus.PENDING)
+        self.assertEqual(auth._otp_delivery_method(telegram_state), "telegram")
+        sms_state = state(
+            telegram_delivery_status=OTPDeliveryStatus.FAILED,
+            sms_delivery_status=OTPDeliveryStatus.ACCEPTED,
+        )
+        self.assertEqual(auth._otp_delivery_method(sms_state), "sms")
+        untouched = state(
+            telegram_delivery_status=OTPDeliveryStatus.FAILED,
+            sms_delivery_status=OTPDeliveryStatus.NOT_ATTEMPTED,
+        )
+        self.assertIsNone(auth._otp_delivery_method(untouched))
+
+        with self.assertRaises(Exception):
+            auth.OTPVerify(code="12345")
+
+    async def test_stage6_sms_claim_paths_are_explicit_and_audited(self):
+        otp_state = state()
+        for refreshed, expected in (
+            (otp_state.model_copy(update={"sms_delivery_status": OTPDeliveryStatus.ACCEPTED}), SMSDeliveryOutcome.ACCEPTED),
+            (otp_state, SMSDeliveryOutcome.AMBIGUOUS),
+            (None, SMSDeliveryOutcome.AMBIGUOUS),
+        ):
+            with self.subTest(refreshed=refreshed), patch.object(
+                auth, "claim_sms_delivery", new=AsyncMock(return_value=None)
+            ), patch.object(
+                auth, "load_otp_delivery_state", new=AsyncMock(return_value=refreshed)
+            ):
+                self.assertEqual(
+                    await auth._deliver_stage6_sms(object(), state=otp_state),
+                    expected,
+                )
+
+        claim = SimpleNamespace(request_id=otp_state.otp_request_id)
+        attempt = OTPSMSAttemptResult(
+            outcome=SMSDeliveryOutcome.ACCEPTED,
+            provider_attempted=True,
+            result_recorded=True,
+        )
+        with patch.object(
+            auth, "claim_sms_delivery", new=AsyncMock(return_value=claim)
+        ), patch.object(
+            auth, "execute_claimed_otp_sms_delivery", new=AsyncMock(return_value=attempt)
+        ), patch.object(auth, "audit_log") as audit, patch.object(auth, "record_otp_event"):
+            outcome = await auth._deliver_stage6_sms(object(), state=otp_state)
+        self.assertEqual(outcome, SMSDeliveryOutcome.ACCEPTED)
+        audit.assert_called_once()
+
+    async def test_stage6_request_rejects_wrong_owner_invalid_runtime_and_orphan_active_code(self):
+        with override_current_server(SERVER_FOREIGN), self.assertRaises(HTTPException) as exc:
+            await auth._request_stage6_login_otp(
+                RequestRedis(), mobile=TEST_MOBILE, user=None
+            )
+        self.assertEqual(exc.exception.status_code, 503)
+
+        with override_current_server(SERVER_IRAN), patch.object(
+            auth.settings, "staging_log_otp_codes", False
+        ), patch.object(
+            auth, "validate_otp_delivery_runtime_settings", side_effect=RuntimeError("bad")
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                await auth._request_stage6_login_otp(
+                    RequestRedis(), mobile=TEST_MOBILE, user=None
+                )
+        self.assertEqual(exc.exception.status_code, 503)
+
+        redis = SimpleNamespace(ttl=AsyncMock(return_value=37))
+        with override_current_server(SERVER_IRAN), patch.object(
+            auth.settings, "staging_log_otp_codes", False
+        ), patch.object(auth, "_generate_otp_code", return_value="12345"), patch.object(
+            auth, "create_otp_delivery_state", new=AsyncMock(return_value=False)
+        ), patch.object(
+            auth, "load_otp_delivery_state", new=AsyncMock(return_value=None)
+        ):
+            response = await auth._request_stage6_login_otp(
+                redis, mobile=TEST_MOBILE, user=None
+            )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(json.loads(response.body)["retry_after"], 37)
+
+    async def test_stage6_transport_and_scheduler_exceptions_use_immediate_same_code_sms(self):
+        for failure_point in ("arm", "forward", "schedule"):
+            otp_state = state()
+            delivery = TelegramOTPDeliveryResponse(
+                otp_request_id=otp_state.otp_request_id,
+                outcome=TelegramOTPDeliveryOutcome.SENT,
+            )
+            arm = AsyncMock(return_value=True)
+            forward = AsyncMock(return_value=(200, delivery.model_dump(mode="json")))
+            schedule = AsyncMock(return_value=True)
+            {"arm": arm, "forward": forward, "schedule": schedule}[failure_point].side_effect = RuntimeError("down")
+            with self.subTest(failure_point=failure_point), override_current_server(SERVER_IRAN), patch.object(
+                auth.settings, "telegram_login_otp_enabled", True
+            ), patch.object(auth.settings, "otp_sms_auto_fallback_enabled", True), patch.object(
+                auth.settings, "staging_log_otp_codes", False
+            ), patch.object(auth, "_generate_otp_code", return_value="12345"), patch.object(
+                auth, "build_otp_delivery_state", return_value=otp_state
+            ), patch.object(
+                auth, "create_otp_delivery_state", new=AsyncMock(return_value=True)
+            ), patch.object(auth, "arm_sms_fallback", new=arm), patch.object(
+                auth, "forward_telegram_otp_delivery", new=forward
+            ), patch.object(auth, "schedule_sms_fallback", new=schedule), patch.object(
+                auth,
+                "_deliver_stage6_sms",
+                new=AsyncMock(return_value=SMSDeliveryOutcome.ACCEPTED),
+            ) as sms, patch.object(auth, "audit_log"):
+                result = await auth._request_stage6_login_otp(
+                    RequestRedis(),
+                    mobile=TEST_MOBILE,
+                    user=SimpleNamespace(telegram_id=TEST_TELEGRAM_ID),
+                )
+            self.assertEqual(result["method"], "sms")
+            sms.assert_awaited_once_with(ANY, state=otp_state)
     async def test_request_endpoint_selects_stage6_owner_when_flag_is_enabled(self):
         redis = DedupeRedis()
         user = SimpleNamespace(
@@ -590,7 +843,11 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(auth, "audit_log") as audit:
             with self.assertRaises(HTTPException) as exc:
                 await auth.verify_otp(
-                    auth.OTPVerify(otp_request_id=request_id, code="12345"),
+                    auth.OTPVerify(
+                        otp_request_id=request_id,
+                        mobile_number=TEST_MOBILE,
+                        code="12345",
+                    ),
                     raw_request=SimpleNamespace(
                         headers={},
                         client=SimpleNamespace(host="127.0.0.1"),
@@ -674,6 +931,118 @@ class Stage6RequestAndCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             result="success",
         )
 
+    async def test_request_id_verification_rejects_unresolvable_or_mismatched_mobile(self):
+        request_id = uuid4()
+        otp_state = state(otp_request_id=request_id)
+        redis = DedupeRedis()
+        for mobile_result, supplied_mobile in (
+            (RuntimeError("invalid state"), None),
+            (TEST_MOBILE, "09129999999"),
+        ):
+            with self.subTest(mobile_result=mobile_result), patch.object(
+                auth.settings, "telegram_login_otp_enabled", True
+            ), patch.object(auth, "get_redis", new=AsyncMock(return_value=redis)), patch.object(
+                auth,
+                "_load_otp_delivery_state_for_verification",
+                new=AsyncMock(return_value=otp_state),
+            ), patch.object(
+                auth,
+                "mobile_for_delivery_state",
+                side_effect=mobile_result if isinstance(mobile_result, Exception) else None,
+                return_value=None if isinstance(mobile_result, Exception) else mobile_result,
+            ):
+                with self.assertRaises(HTTPException) as exc:
+                    await auth.verify_otp(
+                        auth.OTPVerify(
+                            otp_request_id=request_id,
+                            mobile_number=supplied_mobile,
+                            code="12345",
+                        ),
+                        raw_request=SimpleNamespace(
+                            headers={}, client=SimpleNamespace(host="127.0.0.1")
+                        ),
+                        db=FakeDB(None),
+                    )
+            self.assertEqual(exc.exception.status_code, 400)
+
+    async def test_request_id_happy_identity_reaches_atomic_consume_without_reload(self):
+        request_id = uuid4()
+        otp_state = state(otp_request_id=request_id)
+        redis = DedupeRedis()
+        redis.values[f"otp:{TEST_MOBILE}"] = "12345"
+        load = AsyncMock(return_value=otp_state)
+        with patch.object(auth.settings, "telegram_login_otp_enabled", True), patch.object(
+            auth, "get_redis", new=AsyncMock(return_value=redis)
+        ), patch.object(
+            auth, "_load_otp_delivery_state_for_verification", new=load
+        ), patch.object(auth, "mobile_for_delivery_state", return_value=TEST_MOBILE), patch.object(
+            auth, "_ensure_otp_verify_not_locked", new=AsyncMock()
+        ), patch.object(auth, "consume_otp_code", new=AsyncMock(return_value=False)):
+            with self.assertRaises(HTTPException) as exc:
+                await auth.verify_otp(
+                    auth.OTPVerify(
+                        otp_request_id=request_id,
+                        mobile_number=TEST_MOBILE,
+                        code="12345",
+                    ),
+                    raw_request=SimpleNamespace(
+                        headers={}, client=SimpleNamespace(host="127.0.0.1")
+                    ),
+                    db=FakeDB(None),
+                )
+        self.assertEqual(exc.exception.status_code, 400)
+        load.assert_awaited_once_with(redis, request_id=request_id)
+
+    async def test_request_id_verification_does_not_require_repeating_the_mobile(self):
+        request_id = uuid4()
+        otp_state = state(otp_request_id=request_id)
+        redis = DedupeRedis()
+        redis.values[f"otp:{TEST_MOBILE}"] = "12345"
+        with patch.object(auth.settings, "telegram_login_otp_enabled", True), patch.object(
+            auth, "get_redis", new=AsyncMock(return_value=redis)
+        ), patch.object(
+            auth,
+            "_load_otp_delivery_state_for_verification",
+            new=AsyncMock(return_value=otp_state),
+        ), patch.object(
+            auth, "mobile_for_delivery_state", return_value=TEST_MOBILE
+        ), patch.object(
+            auth, "_ensure_otp_verify_not_locked", new=AsyncMock()
+        ), patch.object(auth, "consume_otp_code", new=AsyncMock(return_value=False)):
+            with self.assertRaises(HTTPException) as exc:
+                await auth.verify_otp(
+                    auth.OTPVerify(
+                        otp_request_id=request_id,
+                        code="12345",
+                    ),
+                    raw_request=SimpleNamespace(
+                        headers={}, client=SimpleNamespace(host="127.0.0.1")
+                    ),
+                    db=FakeDB(None),
+                )
+
+        self.assertEqual(exc.exception.status_code, 400)
+
+
+    async def test_unvalidated_verify_request_without_identity_is_rejected(self):
+        invalid = auth.OTPVerify.model_construct(
+            mobile_number=None,
+            otp_request_id=None,
+            code="12345",
+        )
+        with patch.object(auth.settings, "telegram_login_otp_enabled", True), patch.object(
+            auth, "get_redis", new=AsyncMock(return_value=DedupeRedis())
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                await auth.verify_otp(
+                    invalid,
+                    raw_request=SimpleNamespace(
+                        headers={}, client=SimpleNamespace(host="127.0.0.1")
+                    ),
+                    db=FakeDB(None),
+                )
+        self.assertEqual(exc.exception.status_code, 400)
+
 
 class Stage6ConfigurationTests(unittest.TestCase):
     def test_exact_timing_and_iran_state_secret_are_fail_closed(self):
@@ -705,6 +1074,20 @@ class Stage6ConfigurationTests(unittest.TestCase):
 
 
 class Stage6ClaimedSMSProtocolTests(unittest.IsolatedAsyncioTestCase):
+    def test_delivery_status_maps_all_provider_outcomes(self):
+        self.assertEqual(
+            delivery_status(SMSDeliveryOutcome.ACCEPTED),
+            OTPDeliveryStatus.ACCEPTED,
+        )
+        self.assertEqual(
+            delivery_status(SMSDeliveryOutcome.AMBIGUOUS),
+            OTPDeliveryStatus.AMBIGUOUS,
+        )
+        self.assertEqual(
+            delivery_status(SMSDeliveryOutcome.FAILED),
+            OTPDeliveryStatus.FAILED,
+        )
+
     def _claim(self):
         return OTPDeliveryClaim(
             claim_id=uuid4(),
@@ -762,6 +1145,41 @@ class Stage6ClaimedSMSProtocolTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await execute_claimed_otp_sms_delivery(object(), claim=claim)
         record.assert_not_awaited()
+
+    async def test_provider_marker_send_and_result_exceptions_fail_closed(self):
+        claim = self._claim()
+        with patch(
+            "core.services.otp_sms_delivery_service.mark_sms_provider_attempt_started",
+            new=AsyncMock(side_effect=RuntimeError("redis unavailable")),
+        ):
+            marker = await execute_claimed_otp_sms_delivery(object(), claim=claim)
+        self.assertFalse(marker.provider_attempted)
+
+        cases = (
+            (RuntimeError("provider"), None),
+            (None, RuntimeError("redis")),
+        )
+        for send_error, record_error in cases:
+            send = AsyncMock(
+                side_effect=send_error,
+                return_value=SMSDeliveryOutcome.FAILED,
+            )
+            record = AsyncMock(
+                side_effect=record_error,
+                return_value=True,
+            )
+            with self.subTest(send_error=send_error, record_error=record_error), patch(
+                "core.services.otp_sms_delivery_service.mark_sms_provider_attempt_started",
+                new=AsyncMock(return_value=True),
+            ), patch(
+                "core.services.otp_sms_delivery_service.send_otp_sms_result_async",
+                new=send,
+            ), patch(
+                "core.services.otp_sms_delivery_service.record_sms_delivery_result",
+                new=record,
+            ):
+                result = await execute_claimed_otp_sms_delivery(object(), claim=claim)
+            self.assertEqual(result.outcome, SMSDeliveryOutcome.AMBIGUOUS)
 
 
 class Stage6AsyncSMSAdapterTests(unittest.IsolatedAsyncioTestCase):

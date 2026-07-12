@@ -417,6 +417,93 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
+  it('fails closed for malformed or expired persisted OTP attempts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T04:00:00.000Z'))
+    const LoginView = (await import('./LoginView.vue')).default
+
+    sessionStorage.setItem('login_otp_attempt_v1', '{malformed-json')
+    const malformedWrapper = mount(LoginView)
+    await flushPromises()
+    expect(sessionStorage.getItem('login_otp_attempt_v1')).toBeNull()
+    expect(malformedWrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
+    malformedWrapper.unmount()
+
+    sessionStorage.setItem('login_otp_attempt_v1', JSON.stringify({
+      requestId: '',
+      method: 'sms',
+      expiresAt: '2026-07-12T03:59:59.000Z',
+    }))
+    const expiredWrapper = mount(LoginView)
+    await flushPromises()
+    expect(sessionStorage.getItem('login_otp_attempt_v1')).toBeNull()
+    expect(expiredWrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
+    expiredWrapper.unmount()
+  })
+
+  it('keeps OTP timer and browser-storage failures bounded to client state', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T05:00:00.000Z'))
+    sessionStorage.setItem('login_otp_attempt_v1', JSON.stringify({
+      requestId: 'restored-request',
+      method: 'unknown',
+      expiresAt: '2026-07-12T05:02:00.000Z',
+    }))
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.lastMethod).toBeNull()
+    expect(vm.smsFallbackAt).toBeNull()
+    vm.startTimerUntil('not-a-date')
+    expect(vm.countdown).toBe(0)
+    vm.startTimer('not-a-number')
+    expect(vm.countdown).toBe(0)
+    expect(vm.otpDeliveryStatus).toBe('')
+    vm.startTimerUntil(Date.now() + 10_000)
+    vm.startTimerUntil(Date.now() + 20_000)
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage denied')
+    })
+    vm.otpRequestId = 'opaque-request'
+    vm.otpExpiresAt = '2026-07-12T05:02:00.000Z'
+    expect(() => vm.persistOtpAttempt()).not.toThrow()
+    setItem.mockRestore()
+
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('storage denied')
+    })
+    expect(() => vm.clearOtpAttempt()).not.toThrow()
+    removeItem.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('uses nested OTP errors and keeps automatic Telegram fallback non-resendable', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ detail: { message: 'خطای ساخت‌یافته' } }, false, 400) as any)
+      .mockResolvedValueOnce(makeJsonResponse({
+        otp_request_id: 'automatic-request',
+        method: 'telegram',
+        expires_at: new Date(Date.now() + 120_000).toISOString(),
+        sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
+      }) as any)
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await requestOtpFromMobileStep(wrapper)
+    expect(wrapper.text()).toContain('خطای ساخت‌یافته')
+
+    await requestOtpFromMobileStep(wrapper)
+    const callsBeforeResend = fetchMock.mock.calls.length
+    await (wrapper.vm as any).handleResend()
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeResend)
+    wrapper.unmount()
+  })
+
   it('uses bounded legacy recovery without deriving timing from localized 429 copy', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)

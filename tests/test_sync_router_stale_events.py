@@ -674,6 +674,41 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         rendered_log = repr(logger_mock.warning.call_args)
         self.assertIn("protected_business_field_mismatch", rendered_log)
 
+    async def test_trade_natural_key_fallback_applies_atomic_guard_and_ignores_noop(self):
+        duplicate_error = IntegrityError(
+            "stmt", {}, Exception("duplicate key value violates unique constraint")
+        )
+        data = completed_trade_payload(price=121)
+        existing_trade = make_completed_trade(price=121)
+        db = ApplyDB(
+            [
+                FakeTradeExecuteResult(None),
+                FakeTradeExecuteResult(None),
+                duplicate_error,
+                FakeTradeExecuteResult(existing_trade),
+                SimpleNamespace(rowcount=0),
+            ]
+        )
+
+        with patch(
+            "api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT"
+        ), patch("api.routers.sync.update") as update_mock, patch(
+            "api.routers.sync.logger"
+        ) as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "INSERT",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        update_mock.assert_called_once_with(Trade)
+        self.assertIn("atomic_upsert_guard_noop", repr(logger_mock.warning.call_args))
+
     async def test_out_of_order_offer_update_after_expiry_does_not_reactivate(self):
         existing_offer = make_offer("expired", 3)
         db = ApplyDB([FakeOfferExecuteResult(existing_offer)])

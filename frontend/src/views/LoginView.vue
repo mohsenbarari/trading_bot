@@ -1030,7 +1030,7 @@ function goBackToMobile() {
                 <Clock :size="14" />
                 <span>{{ otpDeliveryStatus }}</span>
               </div>
-              <button v-else-if="!automaticSmsFallback" type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
+              <button v-else type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
             </div>
           </div>
 

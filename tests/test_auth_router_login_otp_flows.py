@@ -81,6 +81,90 @@ def make_request(headers=None, host="127.0.0.1"):
 
 
 class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_active_legacy_code_returns_structured_retry_from_code_check(self):
+        mobile = "09121112233"
+        redis = FakeRedis(
+            values={f"otp:{mobile}": "12345"},
+            ttl_map={f"otp:{mobile}": 75},
+        )
+        user = SimpleNamespace(
+            id=7,
+            is_deleted=False,
+            account_status=UserAccountStatus.ACTIVE,
+            home_server="iran",
+            telegram_id=None,
+        )
+        with patch.object(request_otp.__globals__["settings"], "telegram_login_otp_enabled", False), patch(
+            "api.routers.auth.get_redis", new=AsyncMock(return_value=redis)
+        ), patch(
+            "api.routers.auth.assert_login_allowed_for_server", new=AsyncMock()
+        ):
+            response = await request_otp(
+                OTPRequest(mobile_number=mobile),
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(json.loads(response.body)["expires_in"], 75)
+
+    async def test_stage6_resend_nonaccepted_outcome_is_terminal_error(self):
+        mobile = "09121112233"
+        redis = FakeRedis(
+            values={f"otp:{mobile}": "12345"},
+            ttl_map={f"otp:{mobile}": 80},
+        )
+        user = SimpleNamespace(
+            id=7,
+            is_deleted=False,
+            account_status=UserAccountStatus.ACTIVE,
+            home_server="iran",
+        )
+        delivery_state = SimpleNamespace(otp_request_id="request")
+        with patch.object(resend_otp_sms.__globals__["settings"], "telegram_login_otp_enabled", True), patch(
+            "api.routers.auth.get_redis", new=AsyncMock(return_value=redis)
+        ), patch(
+            "api.routers.auth.assert_login_allowed_for_server", new=AsyncMock()
+        ), patch(
+            "api.routers.auth.load_otp_delivery_state",
+            new=AsyncMock(return_value=delivery_state),
+        ), patch(
+            "api.routers.auth._deliver_stage6_sms",
+            new=AsyncMock(return_value=resend_otp_sms.__globals__["SMSDeliveryOutcome"].FAILED),
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                await resend_otp_sms(
+                    OTPRequest(mobile_number=mobile),
+                    raw_request=make_request(),
+                    db=FakeDB([FakeExecuteResult(user)]),
+                )
+        self.assertEqual(exc.exception.status_code, 500)
+
+    async def test_stage6_resend_without_structured_state_uses_legacy_compatibility(self):
+        mobile = "09121112233"
+        redis = FakeRedis(
+            values={f"otp:{mobile}": "12345"},
+            ttl_map={f"otp:{mobile}": 80},
+        )
+        user = SimpleNamespace(
+            id=7,
+            is_deleted=False,
+            account_status=UserAccountStatus.ACTIVE,
+            home_server="iran",
+        )
+        with patch.object(resend_otp_sms.__globals__["settings"], "telegram_login_otp_enabled", True), patch(
+            "api.routers.auth.get_redis", new=AsyncMock(return_value=redis)
+        ), patch(
+            "api.routers.auth.assert_login_allowed_for_server", new=AsyncMock()
+        ), patch(
+            "api.routers.auth.load_otp_delivery_state", new=AsyncMock(return_value=None)
+        ), patch("api.routers.auth.send_otp_sms", return_value=True):
+            result = await resend_otp_sms(
+                OTPRequest(mobile_number=mobile),
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+        self.assertEqual(result["expires_in"], 80)
+
     def test_extract_device_info_and_login_home_server_cover_mobile_invalid_platform_and_wrapper(self):
         request = make_request(headers={"user-agent": "Mobile Safari", "x-platform": "unknown"}, host="10.1.2.3")
         info = _extract_device_info(request)

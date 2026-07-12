@@ -1,0 +1,15 @@
+[tool.mutmut]
+source_paths = ["core", "api", "bot", "models"]
+also_copy = ["schemas.py", "main.py"]
+only_mutate = [
+  "core/registration_identity.py",
+  "core/services/authoritative_registration_service.py",
+  "core/services/canonical_invitation_creation_service.py",
+  "core/services/telegram_registration_intent_service.py",
+  "core/services/otp_delivery_state_service.py",
+]
+pytest_add_cli_args_test_selection = [
+  "tests/test_stage9_mutation_contracts.py",
+]
+pytest_add_cli_args = ["--import-mode=prepend", "--override-ini=pythonpath=."]
+mutate_only_covered_lines = false

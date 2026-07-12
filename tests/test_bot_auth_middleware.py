@@ -165,6 +165,37 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("همگام", message.answer.await_args.args[0])
         handler.assert_not_awaited()
 
+    async def test_middleware_shows_alert_for_pending_registration_callback(self):
+        session = AsyncMock()
+        user = MagicMock(id=42, telegram_id=10)
+        session.execute = AsyncMock(return_value=_ExecuteResult(user))
+        middleware = auth_middleware.AuthMiddleware(
+            session_pool=MagicMock(return_value=_AsyncSessionContext(session))
+        )
+        handler = AsyncMock()
+
+        original_callback = auth_middleware.CallbackQuery
+        try:
+            auth_middleware.CallbackQuery = FakeCallbackQuery
+            callback = FakeCallbackQuery(10)
+            with patch.object(
+                auth_middleware,
+                "direct_registration_runtime_ready",
+                return_value=True,
+            ), patch.object(
+                auth_middleware,
+                "registration_activation_block_for_user",
+                new=AsyncMock(return_value=SimpleNamespace(reason="pending_sync")),
+            ):
+                result = await middleware(handler, callback, {})
+        finally:
+            auth_middleware.CallbackQuery = original_callback
+
+        self.assertIsNone(result)
+        callback.answer.assert_awaited_once()
+        self.assertTrue(callback.answer.await_args.kwargs["show_alert"])
+        handler.assert_not_awaited()
+
     async def test_middleware_applies_current_bot_policy_before_onboarding(self):
         session = AsyncMock()
         user = MagicMock(
@@ -204,6 +235,161 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
         self.assertIn("حسابدار", message.answer.await_args.args[0])
+        handler.assert_not_awaited()
+
+    async def test_middleware_shows_alert_for_bot_policy_denial_callback(self):
+        session = AsyncMock()
+        user = MagicMock(id=42, telegram_id=10)
+        session.execute = AsyncMock(return_value=_ExecuteResult(user))
+        middleware = auth_middleware.AuthMiddleware(
+            session_pool=MagicMock(return_value=_AsyncSessionContext(session))
+        )
+        handler = AsyncMock()
+
+        original_callback = auth_middleware.CallbackQuery
+        try:
+            auth_middleware.CallbackQuery = FakeCallbackQuery
+            callback = FakeCallbackQuery(10)
+            with patch.object(
+                auth_middleware,
+                "direct_registration_runtime_ready",
+                return_value=True,
+            ), patch.object(
+                auth_middleware,
+                "registration_activation_block_for_user",
+                new=AsyncMock(return_value=None),
+            ), patch.object(
+                auth_middleware,
+                "evaluate_bot_access",
+                new=AsyncMock(return_value=SimpleNamespace(allowed=False, reason="accountant")),
+            ):
+                result = await middleware(handler, callback, {})
+        finally:
+            auth_middleware.CallbackQuery = original_callback
+
+        self.assertIsNone(result)
+        callback.answer.assert_awaited_once()
+        self.assertTrue(callback.answer.await_args.kwargs["show_alert"])
+        handler.assert_not_awaited()
+
+    async def test_middleware_fails_safe_for_unexpected_inner_telegram_object(self):
+        session = AsyncMock()
+        user = MagicMock(
+            id=42,
+            telegram_id=10,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+            bot_onboarding_required_step=0,
+            bot_onboarding_completed_step=0,
+        )
+        session.execute = AsyncMock(return_value=_ExecuteResult(user))
+        middleware = auth_middleware.AuthMiddleware(
+            session_pool=MagicMock(return_value=_AsyncSessionContext(session))
+        )
+        handler = AsyncMock(return_value="allowed")
+        unexpected = object()
+        telegram_user = SimpleNamespace(id=10)
+
+        with patch.object(
+            auth_middleware,
+            "_get_event_and_from_user",
+            return_value=(unexpected, telegram_user),
+        ), patch.object(
+            auth_middleware,
+            "direct_registration_runtime_ready",
+            return_value=True,
+        ), patch.object(
+            auth_middleware,
+            "registration_activation_block_for_user",
+            new=AsyncMock(return_value=SimpleNamespace(reason="pending")),
+        ):
+            self.assertIsNone(await middleware(handler, unexpected, {}))
+
+        with patch.object(
+            auth_middleware,
+            "_get_event_and_from_user",
+            return_value=(None, telegram_user),
+        ), patch.object(
+            auth_middleware,
+            "direct_registration_runtime_ready",
+            return_value=False,
+        ), patch.object(
+            auth_middleware,
+            "is_user_global_web_locked",
+            return_value=True,
+        ):
+            self.assertIsNone(await middleware(handler, unexpected, {}))
+
+        with patch.object(
+            auth_middleware,
+            "_get_event_and_from_user",
+            return_value=(unexpected, telegram_user),
+        ), patch.object(
+            auth_middleware,
+            "direct_registration_runtime_ready",
+            return_value=True,
+        ), patch.object(
+            auth_middleware,
+            "registration_activation_block_for_user",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            auth_middleware,
+            "evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=False, reason="inactive")),
+        ):
+            self.assertIsNone(await middleware(handler, unexpected, {}))
+
+        with patch.object(
+            auth_middleware,
+            "_get_event_and_from_user",
+            return_value=(unexpected, telegram_user),
+        ), patch.object(
+            auth_middleware,
+            "direct_registration_runtime_ready",
+            return_value=True,
+        ), patch.object(
+            auth_middleware,
+            "registration_activation_block_for_user",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            auth_middleware,
+            "evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+        ), patch.object(
+            auth_middleware,
+            "is_user_global_web_locked",
+            return_value=True,
+        ):
+            self.assertIsNone(await middleware(handler, unexpected, {}))
+
+        with patch.object(
+            auth_middleware,
+            "_get_event_and_from_user",
+            return_value=(unexpected, telegram_user),
+        ), patch.object(
+            auth_middleware,
+            "direct_registration_runtime_ready",
+            return_value=True,
+        ), patch.object(
+            auth_middleware,
+            "registration_activation_block_for_user",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            auth_middleware,
+            "evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+        ), patch.object(
+            auth_middleware,
+            "is_user_global_web_locked",
+            return_value=False,
+        ), patch.object(
+            auth_middleware,
+            "user_requires_bot_onboarding",
+            return_value=True,
+        ):
+            self.assertIsNone(await middleware(handler, unexpected, {}))
+
         handler.assert_not_awaited()
 
     async def test_middleware_ignores_legacy_bot_access_flag(self):

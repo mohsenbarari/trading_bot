@@ -25,7 +25,10 @@ describe('InviteLanding.vue', () => {
 
   it('loads the invitation and config, renders both registration actions, and routes web registration', async () => {
     inviteLandingMocks.fetch
-      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'token-123' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'token-123',
+        expires_at: '2026-07-14T10:00:00Z',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ bot_username: 'mbmtrading1_bot' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
     const wrapper = mount(InviteLanding)
@@ -34,6 +37,7 @@ describe('InviteLanding.vue', () => {
     expect(inviteLandingMocks.fetch).toHaveBeenNthCalledWith(1, '/api/invitations/lookup/abc123')
     expect(inviteLandingMocks.fetch).toHaveBeenNthCalledWith(2, '/api/config')
     expect(wrapper.text()).toContain('شما به سامانه معاملاتی دعوت شده‌اید.')
+    expect(wrapper.text()).toContain('مهلت ثبت‌نام:')
     expect(wrapper.get('a.telegram-btn').attributes('href')).toBe('https://t.me/mbmtrading1_bot?start=token-123')
 
     await wrapper.findAll('button').find((button) => button.text().includes('ثبت‌نام از طریق وب'))!.trigger('click')
@@ -100,6 +104,42 @@ describe('InviteLanding.vue', () => {
     expect(wrapper.find('a.telegram-btn').exists()).toBe(false)
     expect(wrapper.text()).toContain('ثبت‌نام از طریق وب')
     expect(wrapper.text()).not.toContain('دعوت‌نامه قابل استفاده نیست')
+  })
+
+  it('disables only Telegram when config has no bot username', async () => {
+    inviteLandingMocks.fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'token-123',
+        valid: true,
+        state: 'pending',
+        bot_available: true,
+        web_available: true,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const wrapper = mount(InviteLanding)
+    await flushPromises()
+
+    expect(wrapper.find('a.telegram-btn').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ثبت‌نام از طریق وب')
+  })
+
+  it('renders the bounded terminal message for an expired invitation', async () => {
+    inviteLandingMocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      valid: false,
+      state: 'expired',
+      bot_available: false,
+      web_available: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const wrapper = mount(InviteLanding)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('مهلت ثبت‌نام پایان یافته است. لطفاً دعوت‌نامه جدید دریافت کنید.')
+    expect(wrapper.find('.actions').exists()).toBe(false)
   })
 
   it('fails closed when a pending response omits its token', async () => {

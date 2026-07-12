@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+import httpx
 from pydantic import ValidationError
 
 from api.routers.invitations import create_invitation_internal_from_bot
@@ -100,6 +101,8 @@ class _Client:
 
     async def post(self, url, *, content, headers):
         self.calls.append((url, content, headers))
+        if isinstance(self.response, BaseException):
+            raise self.response
         return self.response
 
 
@@ -281,6 +284,13 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
                 settings_obj=flags,
             )
         )
+        self.assertFalse(
+            invitation_sms_enabled(
+                InvitationKind.CUSTOMER,
+                customer_tier=None,
+                settings_obj=flags,
+            )
+        )
         self.assertEqual(
             invitation_sms_status(enabled=False, accepted=None),
             InvitationSMSStatus.DISABLED,
@@ -369,6 +379,49 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0][0], "https://iran.example/api/invitations/internal/create")
         self.assertEqual(calls[0][2]["X-Signature"], "signed")
         self.assertNotIn("mobile_number", calls[0][2])
+
+    async def test_forwarder_classifies_peer_timeout_transport_and_invalid_json(self):
+        payload = {"requester_user_id": 7, "idempotency_key": "key"}
+        with override_current_server(SERVER_FOREIGN), patch(
+            "core.invitation_creation_forwarding.peer_server_url_for",
+            return_value=None,
+        ):
+            status, body = await forward_standard_invitation_to_iran(payload)
+        self.assertEqual(status, 503)
+        self.assertIn("سرور ایران", body["detail"])
+
+        request = httpx.Request("POST", "https://iran.example")
+        for error, expected_status in (
+            (httpx.ReadTimeout("timeout", request=request), 504),
+            (httpx.ConnectError("offline", request=request), 503),
+        ):
+            with self.subTest(error=type(error).__name__), override_current_server(
+                SERVER_FOREIGN
+            ), patch(
+                "core.invitation_creation_forwarding.peer_server_url_for",
+                return_value="https://iran.example",
+            ), patch(
+                "core.invitation_creation_forwarding.httpx.AsyncClient",
+                return_value=_Client(error, []),
+            ):
+                status, _body = await forward_standard_invitation_to_iran(
+                    payload,
+                    timeout_seconds=0.25,
+                )
+            self.assertEqual(status, expected_status)
+
+        invalid = _Response(status_code=502, text="not-json")
+        invalid.json = lambda: (_ for _ in ()).throw(ValueError("invalid json"))
+        with override_current_server(SERVER_FOREIGN), patch(
+            "core.invitation_creation_forwarding.peer_server_url_for",
+            return_value="https://iran.example",
+        ), patch(
+            "core.invitation_creation_forwarding.httpx.AsyncClient",
+            return_value=_Client(invalid, []),
+        ):
+            status, body = await forward_standard_invitation_to_iran(payload)
+        self.assertEqual(status, 502)
+        self.assertEqual(body, {"detail": "پاسخ نامعتبر از سرور ایران"})
 
 
 if __name__ == "__main__":

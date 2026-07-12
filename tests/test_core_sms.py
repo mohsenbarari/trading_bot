@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
@@ -99,6 +99,25 @@ class CoreSmsTests(unittest.TestCase):
             "core.sms.httpx.post", side_effect=httpx.ConnectError("down")
         ):
             self.assertFalse(sms.send_sms("09120000000", "hello"))
+
+    def test_sync_provider_classifies_configuration_and_non_json_failures(self):
+        with patch.object(sms.settings, "smsir_api_key", None):
+            outcome, data = sms._post_smsir_result("v1/send/bulk", {})
+        self.assertEqual(outcome, sms.SMSDeliveryOutcome.FAILED)
+        self.assertIsNone(data)
+
+        response = httpx.Response(
+            502,
+            text="not-json",
+            request=httpx.Request("POST", "https://api.sms.ir/v1/send/bulk"),
+        )
+        patches = self.configured_smsir()
+        with patches[0], patches[1], patches[2], patches[3], patch(
+            "core.sms.httpx.post", return_value=response
+        ):
+            outcome, data = sms._post_smsir_result("v1/send/bulk", {})
+        self.assertEqual(outcome, sms.SMSDeliveryOutcome.AMBIGUOUS)
+        self.assertIsNone(data)
 
     def test_send_otp_sms_uses_verify_template_when_configured(self):
         response = smsir_response(
@@ -296,6 +315,85 @@ class CoreSmsTests(unittest.TestCase):
                 ),
                 sms.SMSDeliveryOutcome.AMBIGUOUS,
             )
+
+    def test_invitation_category_templates_fail_closed_when_missing_or_invalid(self):
+        cases = (
+            (sms.send_invitation_sms_result, "smsir_invitation_template_id", ("name", "bot", "web")),
+            (sms.send_accountant_invitation_sms_result, "smsir_accountant_invitation_template_id", ("name", "web")),
+            (sms.send_customer_invitation_sms_result, "smsir_customer_invitation_template_id", ("name", "web")),
+        )
+        for function, setting_name, extra_args in cases:
+            for value in (None, "invalid"):
+                with self.subTest(function=function.__name__, value=value), patch.object(
+                    sms.settings, setting_name, value
+                ), patch("core.sms.httpx.post") as post:
+                    outcome = function("09120000000", *extra_args)
+                self.assertEqual(outcome, sms.SMSDeliveryOutcome.FAILED)
+                post.assert_not_called()
+
+
+class CoreSmsAsyncTests(unittest.IsolatedAsyncioTestCase):
+    class _Client:
+        def __init__(self, outcome):
+            self.outcome = outcome
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            if isinstance(self.outcome, BaseException):
+                raise self.outcome
+            return self.outcome
+
+    async def test_async_provider_classifies_configuration_json_http_and_rejection(self):
+        with patch.object(sms.settings, "smsir_api_key", None):
+            outcome, data = await sms._post_smsir_result_async("v1/send/verify", {})
+        self.assertEqual(outcome, sms.SMSDeliveryOutcome.FAILED)
+        self.assertIsNone(data)
+
+        cases = (
+            (
+                httpx.Response(
+                    502,
+                    text="not-json",
+                    request=httpx.Request("POST", "https://api.sms.ir/v1/send/verify"),
+                ),
+                sms.SMSDeliveryOutcome.AMBIGUOUS,
+            ),
+            (smsir_response(400, {"status": 0}), sms.SMSDeliveryOutcome.FAILED),
+            (smsir_response(429, {"status": 0}), sms.SMSDeliveryOutcome.AMBIGUOUS),
+            (smsir_response(200, {"status": 0}), sms.SMSDeliveryOutcome.FAILED),
+        )
+        for response, expected in cases:
+            with self.subTest(status=response.status_code, expected=expected), patch.object(
+                sms.settings, "smsir_api_key", "api-key"
+            ), patch(
+                "core.sms.httpx.AsyncClient",
+                return_value=self._Client(response),
+            ):
+                outcome, data = await sms._post_smsir_result_async("v1/send/verify", {})
+            self.assertEqual(outcome, expected)
+            self.assertIsNone(data)
+
+    async def test_async_otp_rejects_invalid_missing_and_unverifiable_acceptance(self):
+        for template_id in ("invalid", None):
+            with self.subTest(template_id=template_id), patch.object(
+                sms.settings, "smsir_otp_template_id", template_id
+            ):
+                outcome = await sms.send_otp_sms_result_async("09120000000", "12345")
+            self.assertEqual(outcome, sms.SMSDeliveryOutcome.FAILED)
+
+        with patch.object(sms.settings, "smsir_otp_template_id", "123"), patch(
+            "core.sms._post_smsir_result_async",
+            new=AsyncMock(
+                return_value=(sms.SMSDeliveryOutcome.ACCEPTED, {"data": {}})
+            ),
+        ):
+            outcome = await sms.send_otp_sms_result_async("09120000000", "12345")
+        self.assertEqual(outcome, sms.SMSDeliveryOutcome.AMBIGUOUS)
 
 
 if __name__ == "__main__":

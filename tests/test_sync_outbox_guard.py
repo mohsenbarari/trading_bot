@@ -90,6 +90,11 @@ class FakeRedis:
             raise self.rpush_error
 
 
+class GetOnlyRecordedCounts:
+    def get(self, _key):
+        return 0
+
+
 class SyncOutboxGuardTests(unittest.TestCase):
     def test_synced_write_requires_recorded_change_log_marker(self):
         offer = FakeOffer(7)
@@ -114,6 +119,26 @@ class SyncOutboxGuardTests(unittest.TestCase):
 
         self.assertNotIn(SYNC_OUTBOX_PENDING_KEY, session.info)
         self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 1)
+
+    def test_non_dict_recorded_counts_are_not_mutated_during_cleanup(self):
+        offer = FakeOffer(801)
+        connection = FakeConnection()
+        session = FakeSession(new=[offer], connection=connection)
+        flush_context = object()
+
+        collect_pending_sync_writes(session, flush_context, None)
+        token = session.info[sync_outbox_guard.SYNC_OUTBOX_TOKEN_KEY]
+        mark_sync_outbox_recorded(connection, "offers", "INSERT", 801, {"id": 801})
+        connection.info[sync_outbox_guard.SYNC_OUTBOX_RECORDED_COUNT_KEY] = GetOnlyRecordedCounts()
+
+        verify_pending_sync_outbox(session, flush_context)
+
+        self.assertNotIn(sync_outbox_guard.SYNC_OUTBOX_CURRENT_TOKEN_KEY, connection.info)
+        self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 0)
+        self.assertIsInstance(
+            connection.info[sync_outbox_guard.SYNC_OUTBOX_RECORDED_COUNT_KEY],
+            GetOnlyRecordedCounts,
+        )
 
     def test_after_commit_wakes_sync_worker_only_after_verified_outbox(self):
         offer = FakeOffer(81)

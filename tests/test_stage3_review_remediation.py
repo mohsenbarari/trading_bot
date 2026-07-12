@@ -126,6 +126,11 @@ class Stage3ReviewRemediationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(InvitationRequesterResolutionError, "inactive"):
             await resolve_current_invitation_requester(db, identity=identity)
 
+        current.account_status = "active"
+        current.is_deleted = True
+        with self.assertRaisesRegex(InvitationRequesterResolutionError, "deleted"):
+            await resolve_current_invitation_requester(db, identity=identity)
+
     def test_relation_and_invitation_sync_authority_is_iran_only(self):
         self.assertTrue(
             {"invitations", "accountant_relations", "customer_relations"}

@@ -365,6 +365,104 @@ describe('CreateInvitationView.vue', () => {
     expect(pendingInput.value).toBe('https://coin.gold-trade.ir/i/SHORT12')
   })
 
+  it('copies both pending invitation surfaces and tracks each status independently', async () => {
+    const writeText = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('clipboard denied'))
+    installClipboard(writeText)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([
+      {
+        id: 14,
+        account_name: 'dual-surface-user',
+        mobile_number: '09120000014',
+        role: 'عادی',
+        bot_link: 'https://t.me/bot?start=INV-14',
+        web_short_link: 'https://coin.gold-trade.ir/i/INV14',
+        bot_available: true,
+        web_available: true,
+        state: 'pending',
+        sms_status: 'disabled',
+        expires_at: '2026-07-14T10:00:00Z',
+      },
+    ]))
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    const buttons = wrapper.findAll('.pending-copy-btn')
+    expect(buttons).toHaveLength(2)
+
+    await buttons[0]!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=INV-14')
+    expect(buttons[0]!.text()).toBe('کپی شد!')
+    expect(buttons[1]!.text()).toBe('کپی لینک وب')
+
+    await buttons[1]!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenNthCalledWith(2, 'https://coin.gold-trade.ir/i/INV14')
+    expect(buttons[1]!.text()).toBe('خطا')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(buttons[0]!.text()).toBe('کپی لینک تلگرام')
+    expect(buttons[1]!.text()).toBe('کپی لینک وب')
+  })
+
+  it('uses the fallback copy path for a pending invitation surface', async () => {
+    installClipboard(undefined)
+    const execCommand = installExecCommand(true)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([
+      {
+        id: 15,
+        account_name: 'fallback-user',
+        mobile_number: '09120000015',
+        role: 'عادی',
+        web_short_link: 'https://coin.gold-trade.ir/i/INV15',
+        web_available: true,
+        state: 'pending',
+        expires_at: '2026-07-14T10:00:00Z',
+      },
+    ]))
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    await wrapper.get('.pending-copy-btn').trigger('click')
+    await flushPromises()
+
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(wrapper.get('.pending-copy-btn').text()).toBe('کپی شد!')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.pending-copy-btn').text()).toBe('کپی لینک وب')
+  })
+
+  it('reports both bounded fallback-copy failures for pending invitation links', async () => {
+    installClipboard(undefined)
+    const execCommand = installExecCommand(false)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([{
+      id: 16,
+      account_name: 'fallback-error-user',
+      mobile_number: '09120000016',
+      role: 'عادی',
+      bot_link: 'https://t.me/bot?start=INV-16',
+      web_short_link: 'https://coin.gold-trade.ir/i/INV16',
+      bot_available: true,
+      web_available: true,
+      state: 'pending',
+      expires_at: '2026-07-14T10:00:00Z',
+    }]))
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+    const inputs = wrapper.findAll('.pending-link-row input[readonly]')
+    await inputs[0]!.trigger('click')
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(wrapper.findAll('.pending-copy-btn')[0]!.text()).toBe('خطا')
+
+    execCommand.mockImplementation(() => { throw new Error('copy unavailable') })
+    await inputs[1]!.trigger('click')
+    expect(wrapper.findAll('.pending-copy-btn')[1]!.text()).toBe('خطا')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.findAll('.pending-copy-btn')[0]!.text()).toBe('کپی لینک تلگرام')
+    expect(wrapper.findAll('.pending-copy-btn')[1]!.text()).toBe('کپی لینک وب')
+  })
+
   it('deletes a pending invitation after confirmation and removes it from the list', async () => {
     createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/invitations/pending') {

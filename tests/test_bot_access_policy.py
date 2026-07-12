@@ -131,6 +131,31 @@ class BotAccessPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.customer_tier, CustomerTier.TIER_1.value)
         await db.close()
 
+    async def test_deleted_customer_relation_fails_closed(self):
+        db = AsyncSession()
+        user = SimpleNamespace(
+            id=9,
+            role=UserRole.STANDARD,
+            account_status=UserAccountStatus.ACTIVE,
+            is_deleted=False,
+        )
+        deleted_relation = SimpleNamespace(
+            customer_tier=CustomerTier.TIER_1,
+            deleted_at="2026-07-12T00:00:00Z",
+        )
+        with patch(
+            "core.services.bot_access_policy.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "core.services.bot_access_policy.get_active_customer_relation_for_user",
+            new=AsyncMock(return_value=deleted_relation),
+        ):
+            decision = await evaluate_bot_access(db, user)
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "customer_unavailable")
+        await db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

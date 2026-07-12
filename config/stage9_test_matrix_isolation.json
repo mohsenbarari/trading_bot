@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "registration": {
+    "database": "stage9_registration_lane_db",
+    "redis_namespace": "stage9-registration-lane",
+    "fixture_prefix": "stage9_reg_",
+    "port": "4191",
+    "artifact_dir": "tmp/stage9-matrix/registration",
+    "cleanup_owner": "stage9-registration-lane"
+  },
+  "market": {
+    "database": "stage9_market_lane_db",
+    "redis_namespace": "stage9-market-lane",
+    "fixture_prefix": "stage9_mkt_",
+    "port": "4192",
+    "artifact_dir": "tmp/stage9-matrix/market",
+    "cleanup_owner": "stage9-market-lane"
+  }
+}

@@ -22,6 +22,8 @@ from core.services.invitation_identity_reservation_service import (
 from core.services.registration_command_receipt_service import (
     RegistrationCommandReplayConflict,
     finalize_registration_command_receipt,
+    load_registration_command_receipt,
+    prepare_internal_registration_command_receipt,
     prepare_registration_command_receipt,
     registration_command_lock_keys,
 )
@@ -383,6 +385,40 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(str(exc_info.exception), "source_server_forbidden")
         self.assertEqual(db.execute_calls, [])
+
+    async def test_command_receipt_rejects_split_identity_and_invalid_hashes(self):
+        command = _command()
+        mismatched = TelegramRegistrationCommandReceipt(
+            command_id=command.command_id,
+            idempotency_key="other-idempotency-key",
+            request_hash="a" * 64,
+            invitation_token_hash="b" * 64,
+            source_server="foreign",
+        )
+        conflict_db = _FakeDB(results=[_Result([mismatched])])
+        with self.assertRaisesRegex(
+            RegistrationCommandReplayConflict,
+            "command_identity_conflict",
+        ):
+            await load_registration_command_receipt(
+                conflict_db,
+                command_id=command.command_id,
+                idempotency_key=command.idempotency_key,
+            )
+
+        invalid_hash_db = _FakeDB()
+        with self.assertRaisesRegex(
+            RegistrationCommandReplayConflict,
+            "invalid_command_hash",
+        ):
+            await prepare_internal_registration_command_receipt(
+                invalid_hash_db,
+                command_id=command.command_id,
+                idempotency_key=command.idempotency_key,
+                request_hash="short",
+                credential_hash="b" * 64,
+                source_server="foreign",
+            )
 
     def test_finalize_receipt_sets_bounded_terminal_result_without_commit(self):
         receipt = SimpleNamespace(outcome_code=None, authoritative_user_id=None, completed_at=None)

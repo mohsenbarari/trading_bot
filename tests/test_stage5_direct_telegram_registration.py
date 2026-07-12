@@ -501,6 +501,174 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.states, [])
         self.assertIn("دعوت‌کننده", msg.answer.await_args.args[0])
 
+    async def test_begin_rejects_non_pending_or_invalid_expiry_before_fsm_write(self):
+        for inv, derived_state, expected in (
+            (invitation(revoked_at=datetime.now(timezone.utc)), "revoked", "دیگر معتبر"),
+            (invitation(expires_at="not-a-time"), "pending", "پایان یافته"),
+        ):
+            state = FakeState()
+            msg = message()
+            with self.subTest(derived_state=derived_state), patch.object(
+                start,
+                "get_registration_intent_for_invitation",
+                new=AsyncMock(return_value=None),
+            ), patch.object(start, "derive_invitation_state", return_value=derived_state), patch.object(
+                start, "_write_registration_fsm", new=AsyncMock()
+            ) as write_fsm:
+                await start._begin_direct_registration(
+                    msg,
+                    state,
+                    session=FakeSession(inv),
+                    invitation=inv,
+                )
+            write_fsm.assert_not_awaited()
+            self.assertIn(expected, msg.answer.await_args.args[0])
+
+    async def test_start_entry_failure_is_contained_for_standard_and_customer_invites(self):
+        cases = (
+            (
+                invitation(),
+                None,
+            ),
+            (
+                invitation(token="CUST-stage5-failure", kind=InvitationKind.CUSTOMER),
+                SimpleNamespace(
+                    invitation_token="CUST-stage5-failure",
+                    customer_tier="tier1",
+                    status="pending",
+                    customer_user_id=None,
+                    deleted_at=None,
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                ),
+            ),
+        )
+        for inv, relation in cases:
+            msg = message()
+            state = FakeState({"partial": "value"})
+            with self.subTest(kind=inv.kind), patch.object(
+                start, "_direct_registration_runtime_ready", return_value=True
+            ), patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+                start,
+                "AsyncSessionLocal",
+                return_value=FakeSessionContext(FakeSession(inv)),
+            ), patch.object(start, "audit_log"), patch.object(
+                start,
+                "get_customer_relation_by_invitation_token",
+                new=AsyncMock(return_value=relation),
+            ), patch.object(
+                start,
+                "evaluate_invitation_bot_access",
+                return_value=SimpleNamespace(allowed=True),
+            ), patch.object(
+                start,
+                "_begin_direct_registration",
+                new=AsyncMock(side_effect=RuntimeError("redis down")),
+            ):
+                await start.handle_start_with_token(
+                    msg,
+                    SimpleNamespace(args=inv.token),
+                    state,
+                    user=None,
+                )
+
+            self.assertEqual(state.data, {})
+            self.assertIn("موقتاً", msg.answer.await_args.args[0])
+
+    async def test_existing_user_start_is_pending_or_denied_before_panel(self):
+        user = SimpleNamespace(id=19, role=UserRole.STANDARD)
+        for handler, command in (
+            (start.handle_start_with_token, SimpleNamespace(args="INV-existing")),
+            (start.handle_start_without_token, None),
+        ):
+            for activation, allowed, expected in (
+                (SimpleNamespace(reason="pending"), True, "هنوز نهایی"),
+                (None, False, None),
+            ):
+                msg = message()
+                state = FakeState()
+                with self.subTest(handler=handler.__name__, activation=activation), patch.object(
+                    start, "_direct_registration_runtime_ready", return_value=True
+                ), patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+                    start,
+                    "AsyncSessionLocal",
+                    return_value=FakeSessionContext(FakeSession()),
+                ), patch.object(
+                    start,
+                    "registration_activation_block_for_user",
+                    new=AsyncMock(return_value=activation),
+                ), patch.object(
+                    start,
+                    "evaluate_bot_access",
+                    new=AsyncMock(return_value=SimpleNamespace(allowed=allowed, reason="inactive")),
+                ), patch.object(start, "set_anchor"):
+                    if command is None:
+                        await handler(msg, state, user)
+                    else:
+                        await handler(msg, command, state, user)
+
+                response = msg.answer.await_args.args[0]
+                if expected:
+                    self.assertIn(expected, response)
+                else:
+                    self.assertTrue(response)
+
+    async def test_existing_allowed_user_reaches_panel_with_or_without_token(self):
+        user = SimpleNamespace(id=19, role=UserRole.STANDARD)
+        for handler, command in (
+            (start.handle_start_with_token, SimpleNamespace(args="INV-existing")),
+            (start.handle_start_without_token, None),
+        ):
+            msg = message()
+            with self.subTest(handler=handler.__name__), patch.object(
+                start, "_direct_registration_runtime_ready", return_value=True
+            ), patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+                start,
+                "AsyncSessionLocal",
+                return_value=FakeSessionContext(FakeSession()),
+            ), patch.object(
+                start,
+                "registration_activation_block_for_user",
+                new=AsyncMock(return_value=None),
+            ), patch.object(
+                start,
+                "evaluate_bot_access",
+                new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
+            ), patch.object(
+                start, "build_linked_account_panel_message", new=AsyncMock(return_value="panel")
+            ), patch.object(start, "get_persistent_menu_keyboard", return_value="menu"), patch.object(
+                start, "_user_facing_webapp_url", return_value="https://app.example"
+            ), patch.object(start, "set_anchor"):
+                if command is None:
+                    await handler(msg, FakeState(), user)
+                else:
+                    await handler(msg, command, FakeState(), user)
+            self.assertTrue(msg.answer.await_args.args[0])
+
+    async def test_runtime_ready_bot_denial_falls_back_to_web_invitation(self):
+        inv = invitation()
+        msg = message()
+        with patch.object(start, "_direct_registration_runtime_ready", return_value=True), patch.object(
+            start, "delete_previous_anchor", new=AsyncMock()
+        ), patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(inv)),
+        ), patch.object(start, "audit_log"), patch.object(
+            start,
+            "evaluate_invitation_bot_access",
+            return_value=SimpleNamespace(allowed=False),
+        ), patch.object(start, "build_register_link_line", return_value="web-link"), patch.object(
+            start, "_begin_direct_registration", new=AsyncMock()
+        ) as begin, patch.object(start, "set_anchor"):
+            await start.handle_start_with_token(
+                msg,
+                SimpleNamespace(args=inv.token),
+                FakeState(),
+                user=None,
+            )
+        begin.assert_not_awaited()
+        self.assertIn("web-link", msg.answer.await_args.args[0])
+
 
 class Stage5ContactAndAddressTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -522,6 +690,91 @@ class Stage5ContactAndAddressTests(unittest.IsolatedAsyncioTestCase):
         response = msg.answer.await_args.args[0]
         self.assertIn("خصوصی", response)
         self.assertNotIn("sensitive", response)
+
+    async def test_contact_and_address_read_or_write_failures_are_user_safe(self):
+        contact_message = message()
+        with patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+            start, "_read_registration_fsm", new=AsyncMock(return_value=None)
+        ):
+            await start.handle_contact(contact_message, FakeState())
+        self.assertIn("موقتاً", contact_message.answer.await_args.args[0])
+
+        inv = invitation()
+        contact_data = ready_state_data(inv)
+        contact_data.pop(start._REGISTRATION_STATE_CONTACT_VERIFIED_AT)
+        contact_data.pop(start._REGISTRATION_STATE_ADDRESS)
+        contact_state = FakeState(contact_data)
+        contact_message = message()
+        with patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+            start,
+            "_write_registration_fsm",
+            new=AsyncMock(side_effect=RuntimeError("redis down")),
+        ):
+            await start.handle_contact(contact_message, contact_state)
+        self.assertEqual(contact_state.events, ["clear"])
+        self.assertIn("موقتاً", contact_message.answer.await_args.args[0])
+
+        address_message = message(text="Tehran exact address")
+        with patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+            start, "_read_registration_fsm", new=AsyncMock(return_value=None)
+        ):
+            await start.handle_address(address_message, FakeState())
+        self.assertIn("موقتاً", address_message.answer.await_args.args[0])
+
+        address_state = FakeState(ready_state_data(inv))
+        address_message = message(text="Tehran exact address")
+        with patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+            start,
+            "_write_registration_fsm",
+            new=AsyncMock(side_effect=RuntimeError("redis down")),
+        ):
+            await start.handle_address(address_message, address_state)
+        self.assertEqual(address_state.events, ["clear"])
+        self.assertIn("موقتاً", address_message.answer.await_args.args[0])
+
+    async def test_group_contact_and_non_contact_handlers_stop_before_mutation(self):
+        group_message = message()
+        group_message.chat.type = "group"
+        state = FakeState(current_state=Registration.awaiting_contact.state)
+        with patch.object(start, "delete_previous_anchor", new=AsyncMock()) as delete_anchor:
+            await start.handle_contact(group_message, state)
+        delete_anchor.assert_not_awaited()
+        self.assertEqual(state.events, ["clear"])
+
+        typed = message(text="09121112233")
+        typed.chat.type = "group"
+        state = FakeState(current_state=Registration.awaiting_contact.state)
+        await start.handle_contact_non_contact(typed, state)
+        self.assertEqual(state.events, ["clear"])
+
+        typed = message(text="09121112233")
+        with patch.object(start, "_direct_registration_runtime_ready", return_value=False), patch.object(
+            start, "handle_contact", new=AsyncMock()
+        ) as legacy:
+            await start.handle_contact_non_contact(typed, FakeState())
+        legacy.assert_awaited_once()
+
+    async def test_legacy_contact_and_address_redirect_without_optional_link(self):
+        for handler, msg, data in (
+            (start.handle_contact, message(), {}),
+            (
+                start.handle_contact,
+                message(),
+                {start._REGISTRATION_STATE_TOKEN: "INV-no-link"},
+            ),
+            (
+                start.handle_address,
+                message(text="Tehran exact address"),
+                {start._REGISTRATION_STATE_TOKEN: "INV-no-link"},
+            ),
+        ):
+            with self.subTest(handler=handler.__name__, data=data), patch.object(
+                start, "_direct_registration_runtime_ready", return_value=False
+            ), patch.object(start, "delete_previous_anchor", new=AsyncMock()), patch.object(
+                start, "build_register_link_line", return_value=None
+            ), patch.object(start, "set_anchor"):
+                await handler(msg, FakeState(data))
+            self.assertIn("وب‌اپ", msg.answer.await_args.args[0])
 
     async def test_contact_requires_sender_ownership_and_exact_invited_mobile(self):
         base = ready_state_data()
@@ -663,6 +916,181 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_intent.await_args.kwargs["address"], "Tehran exact address")
         wait.assert_awaited_once_with(intent_id=intent_id, telegram_id=7001)
         send.assert_awaited_once_with(cb.message, resolution)
+
+    async def test_edit_address_rejects_group_missing_state_and_supports_retry(self):
+        group_callback = callback()
+        group_callback.message.chat.type = "group"
+        group_state = FakeState(current_state=Registration.awaiting_confirmation.state)
+        await start.handle_registration_edit_address(group_callback, group_state)
+        self.assertEqual(group_state.events, ["clear"])
+
+        missing_callback = callback()
+        with patch.object(
+            start, "_read_registration_fsm", new=AsyncMock(return_value=None)
+        ):
+            await start.handle_registration_edit_address(missing_callback, FakeState())
+        self.assertTrue(missing_callback.answer.await_args.kwargs["show_alert"])
+
+        inv = invitation()
+        retry_callback = callback()
+        retry_state = FakeState(ready_state_data(inv))
+        with patch.object(start, "_write_registration_fsm", new=AsyncMock()) as write:
+            await start.handle_registration_edit_address(retry_callback, retry_state)
+        write.assert_awaited_once()
+        self.assertIn("دوباره", retry_callback.answer.await_args.args[0])
+        self.assertIn("آدرس", retry_callback.message.answer.await_args.args[0])
+
+    async def test_confirmation_rejects_non_private_missing_message_or_missing_state(self):
+        group_callback = callback()
+        group_callback.message.chat.type = "group"
+        group_state = FakeState(current_state=Registration.awaiting_confirmation.state)
+        await start.handle_registration_confirm(group_callback, group_state)
+        self.assertEqual(group_state.events, ["clear"])
+
+        no_message = callback()
+        no_message.message = None
+        with patch.object(
+            start, "_reject_non_private_registration", new=AsyncMock(return_value=False)
+        ):
+            await start.handle_registration_confirm(no_message, FakeState())
+        self.assertTrue(no_message.answer.await_args.kwargs["show_alert"])
+
+        missing_state = callback()
+        with patch.object(
+            start, "_read_registration_fsm", new=AsyncMock(return_value=None)
+        ):
+            await start.handle_registration_confirm(missing_state, FakeState())
+        self.assertTrue(missing_state.answer.await_args.kwargs["show_alert"])
+
+    async def test_confirmation_rejects_malformed_mobile_and_invalid_customer_relation(self):
+        malformed = invitation(mobile_number="not-a-mobile")
+        malformed_state = FakeState(ready_state_data(invitation(token=malformed.token)))
+        malformed_callback = callback()
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(malformed)),
+        ), patch.object(
+            start, "create_or_reuse_ready_registration_intent", new=AsyncMock()
+        ) as create:
+            await start.handle_registration_confirm(malformed_callback, malformed_state)
+        create.assert_not_awaited()
+        self.assertIn("قابل تایید", malformed_callback.answer.await_args.args[0])
+
+        customer = invitation(token="CUST-invalid-relation", kind=InvitationKind.CUSTOMER)
+        customer_state = FakeState(ready_state_data(customer))
+        customer_callback = callback()
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(customer)),
+        ), patch.object(
+            start,
+            "get_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            start, "create_or_reuse_ready_registration_intent", new=AsyncMock()
+        ) as create:
+            await start.handle_registration_confirm(customer_callback, customer_state)
+        create.assert_not_awaited()
+        self.assertIn("مشتری معتبر نیست", customer_callback.answer.await_args.args[0])
+
+    async def test_duplicate_handoff_claim_stops_after_durable_intent_ack(self):
+        inv = invitation()
+        state = FakeState(ready_state_data(inv))
+        cb = callback()
+        creation = SimpleNamespace(intent=SimpleNamespace(id=uuid4()), created=True)
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(inv)),
+        ), patch.object(
+            start,
+            "create_or_reuse_ready_registration_intent",
+            new=AsyncMock(return_value=creation),
+        ), patch.object(
+            start,
+            "_claim_registration_handoff_message",
+            new=AsyncMock(return_value=False),
+        ), patch.object(
+            start, "_wait_for_registration_handoff", new=AsyncMock()
+        ) as wait, patch.object(start, "audit_log"):
+            await start.handle_registration_confirm(cb, state)
+
+        wait.assert_not_awaited()
+        self.assertIn("در حال بررسی", cb.message.answer.await_args.args[0])
+
+    async def test_confirmation_message_rejects_group_and_guides_private_user(self):
+        group = message(text="confirm")
+        group.chat.type = "group"
+        group_state = FakeState(current_state=Registration.awaiting_confirmation.state)
+        await start.handle_registration_confirmation_message(group, group_state)
+        self.assertEqual(group_state.events, ["clear"])
+
+        private = message(text="confirm")
+        await start.handle_registration_confirmation_message(private, FakeState())
+        self.assertIn("دکمه", private.answer.await_args.args[0])
+
+    async def test_edit_address_without_callback_message_remains_safe(self):
+        inv = invitation()
+        for write_error in (None, RuntimeError("redis down")):
+            cb = callback()
+            cb.message = None
+            state = FakeState(ready_state_data(inv))
+            write = AsyncMock(side_effect=write_error)
+            with self.subTest(write_error=write_error), patch.object(
+                start, "_reject_non_private_registration", new=AsyncMock(return_value=False)
+            ), patch.object(start, "_write_registration_fsm", new=write):
+                await start.handle_registration_edit_address(cb, state)
+            self.assertTrue(cb.answer.await_count)
+
+    async def test_invalid_confirmation_state_is_cleared_before_database_access(self):
+        state = FakeState(ready_state_data())
+        cb = callback()
+        with patch.object(start, "_direct_registration_runtime_ready", return_value=False), patch.object(
+            start, "AsyncSessionLocal"
+        ) as session_factory:
+            await start.handle_registration_confirm(cb, state)
+        session_factory.assert_not_called()
+        self.assertEqual(state.data, {})
+        self.assertIn("منقضی", cb.answer.await_args.args[0])
+
+    async def test_tier1_customer_confirmation_reaches_intent_creation(self):
+        inv = invitation(token="CUST-valid-confirm", kind=InvitationKind.CUSTOMER)
+        relation = SimpleNamespace(
+            invitation_token=inv.token,
+            customer_tier="tier1",
+            status="pending",
+            customer_user_id=None,
+            deleted_at=None,
+            expires_at=inv.expires_at,
+        )
+        state = FakeState(ready_state_data(inv))
+        cb = callback()
+        creation = SimpleNamespace(intent=SimpleNamespace(id=uuid4()), created=True)
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(inv)),
+        ), patch.object(
+            start,
+            "get_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=relation),
+        ), patch.object(
+            start,
+            "evaluate_invitation_bot_access",
+            return_value=SimpleNamespace(allowed=True),
+        ), patch.object(
+            start,
+            "create_or_reuse_ready_registration_intent",
+            new=AsyncMock(return_value=creation),
+        ) as create, patch.object(
+            start,
+            "_claim_registration_handoff_message",
+            new=AsyncMock(return_value=False),
+        ), patch.object(start, "audit_log"):
+            await start.handle_registration_confirm(cb, state)
+        create.assert_awaited_once()
 
     async def test_commit_failure_retains_confirmation_state_for_retry(self):
         inv = invitation()
@@ -940,6 +1368,169 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class Stage5RedisTTLTests(unittest.IsolatedAsyncioTestCase):
+    def test_datetime_relation_and_rejection_helpers_fail_closed(self):
+        self.assertIsNone(start._utc_datetime(None))
+        self.assertIsNone(start._utc_datetime("not-a-time"))
+        naive = datetime(2026, 7, 12, 10, 0)
+        self.assertEqual(start._utc_datetime(naive).tzinfo, timezone.utc)
+        with patch.object(start.settings, "telegram_direct_registration_enabled", False):
+            self.assertFalse(start._direct_registration_enabled())
+
+        inv = invitation(kind=InvitationKind.CUSTOMER)
+        base = {
+            "invitation_token": inv.token,
+            "customer_tier": "tier1",
+            "status": "pending",
+            "customer_user_id": None,
+            "deleted_at": None,
+            "expires_at": inv.expires_at,
+        }
+        self.assertFalse(start._customer_relation_allows_direct_registration(inv, None))
+        for override in (
+            {"invitation_token": "CUST-other"},
+            {"customer_tier": "tier2"},
+            {"deleted_at": datetime.now(timezone.utc)},
+        ):
+            relation = SimpleNamespace(**{**base, **override})
+            self.assertFalse(start._customer_relation_allows_direct_registration(inv, relation))
+        self.assertIn("دعوت‌نامه جدید", start._registration_rejection_message("unknown"))
+
+    async def test_non_private_callback_is_rejected_with_alert(self):
+        cb = callback()
+        cb.message.chat.type = "group"
+        state = FakeState(current_state=Registration.awaiting_confirmation.state)
+
+        rejected = await start._reject_non_private_registration(cb, state)
+
+        self.assertTrue(rejected)
+        cb.answer.assert_awaited_once()
+        self.assertTrue(cb.answer.await_args.kwargs["show_alert"])
+        self.assertEqual(state.events, ["clear"])
+
+    async def test_non_private_unknown_event_without_answer_method_is_still_rejected(self):
+        event = SimpleNamespace(chat=None, message=None)
+        self.assertTrue(await start._reject_non_private_registration(event, FakeState()))
+
+    async def test_ttl_helpers_reject_invalid_expired_and_unsupported_storage(self):
+        state = FakeState()
+        for expires_at, reason in (
+            ("invalid", "expiry_invalid"),
+            (datetime.now(timezone.utc) - timedelta(seconds=1), "expired"),
+        ):
+            with self.subTest(helper="bound", reason=reason), self.assertRaisesRegex(
+                RuntimeError,
+                reason,
+            ):
+                await start._bound_registration_fsm_ttl(state, expires_at=expires_at)
+            with self.subTest(helper="write", reason=reason), self.assertRaisesRegex(
+                RuntimeError,
+                reason,
+            ):
+                await start._write_registration_fsm(
+                    state,
+                    data={},
+                    next_state=Registration.awaiting_contact,
+                    expires_at=expires_at,
+                )
+
+        real_state = FSMContext(
+            storage=SimpleNamespace(),
+            key=StorageKey(bot_id=1, chat_id=2, user_id=3),
+        )
+        future = datetime.now(timezone.utc) + timedelta(minutes=1)
+        with self.assertRaisesRegex(RuntimeError, "storage_unsupported"):
+            await start._bound_registration_fsm_ttl(real_state, expires_at=future)
+        with self.assertRaisesRegex(RuntimeError, "storage_unsupported"):
+            await start._write_registration_fsm(
+                real_state,
+                data={},
+                next_state=Registration.awaiting_contact,
+                expires_at=future,
+            )
+
+        await start._bound_registration_fsm_ttl(FakeState(), expires_at=future)
+
+    async def test_atomic_fsm_write_rejects_partial_pipeline_result(self):
+        class Pipeline:
+            def set(self, *_args, **_kwargs):
+                return self
+
+            async def execute(self):
+                return [True, False]
+
+        redis = SimpleNamespace(pipeline=MagicMock(return_value=Pipeline()))
+        storage = RedisStorage(redis=redis)
+        state = FSMContext(
+            storage=storage,
+            key=StorageKey(bot_id=1, chat_id=2, user_id=3),
+        )
+        with self.assertRaisesRegex(RuntimeError, "atomic_write_failed"):
+            await start._write_registration_fsm(
+                state,
+                data={"key": "value"},
+                next_state=Registration.awaiting_contact,
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+            )
+
+    async def test_fsm_read_clear_and_handoff_claim_failures_are_isolated(self):
+        state = FakeState()
+        state.get_data = AsyncMock(side_effect=RuntimeError("redis down"))
+        self.assertIsNone(await start._read_registration_fsm(state))
+
+        no_probe = SimpleNamespace()
+        await start._clear_registration_owned_fsm(no_probe)
+
+        probe_failure = FakeState()
+        probe_failure.get_state = AsyncMock(side_effect=RuntimeError("redis down"))
+        await start._clear_registration_owned_fsm(probe_failure)
+
+        clear_failure = ClearFailingState(
+            current_state=Registration.awaiting_contact.state
+        )
+        await start._clear_registration_owned_fsm(clear_failure)
+        self.assertEqual(clear_failure.events, ["clear_failed"])
+
+        self.assertTrue(
+            await start._claim_registration_handoff_message(
+                FakeState(),
+                intent_id=uuid4(),
+            )
+        )
+        failing_redis_state = FakeState(
+            storage=SimpleNamespace(redis=SimpleNamespace(set=AsyncMock(side_effect=RuntimeError("down"))))
+        )
+        self.assertFalse(
+            await start._claim_registration_handoff_message(
+                failing_redis_state,
+                intent_id=uuid4(),
+            )
+        )
+
+    async def test_handoff_success_requires_both_authoritative_and_projected_ids(self):
+        for intent in (
+            SimpleNamespace(
+                status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+                authoritative_user_id=None,
+                projected_user_id=19,
+            ),
+            SimpleNamespace(
+                status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+                authoritative_user_id=19,
+                projected_user_id=None,
+            ),
+        ):
+            with self.subTest(intent=intent), patch.object(
+                start,
+                "AsyncSessionLocal",
+                return_value=FakeSessionContext(FakeLookupSession(intent)),
+            ):
+                self.assertIsNone(
+                    await start._load_registration_handoff_resolution(
+                        intent_id=uuid4(),
+                        telegram_id=7001,
+                    )
+                )
+
     async def test_real_fsm_context_writes_state_data_and_expiry_in_one_pipeline(self):
         class Pipeline:
             def __init__(self):

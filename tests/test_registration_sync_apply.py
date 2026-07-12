@@ -14,6 +14,7 @@ from api.routers.sync import (
     _build_upsert_stmt,
     _localize_registration_user_reference,
 )
+from api.routers import sync as sync_router
 from core.registration_sync_policy import REGISTRATION_USER_REFERENCES_FIELD
 from core.user_counter_sync import user_counter_event_content_hash
 from models.accountant_relation import AccountantRelation
@@ -68,6 +69,622 @@ class _QueryResult:
 
 
 class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
+    def test_result_helpers_and_identity_condition_boundaries(self):
+        self.assertEqual(sync_router._result_scalars_all(object()), [])
+        self.assertEqual(sync_router._result_first(object()), None)
+        self.assertEqual(sync_router._result_scalar_one_or_none(object()), None)
+        self.assertEqual(sync_router._user_sync_identity_conditions(None), [])
+        self.assertEqual(
+            sync_router._user_sync_identity_conditions(
+                {"current": "invalid", "previous": {}}
+            ),
+            [],
+        )
+
+    async def test_registration_reference_policy_boundary_matrix(self):
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", False):
+            self.assertTrue(
+                await _localize_registration_user_reference(
+                    _ApplyDB(), "invitations", {}
+                )
+            )
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            self.assertTrue(
+                await _localize_registration_user_reference(
+                    _ApplyDB(), "unmanaged_table", {}
+                )
+            )
+            self.assertFalse(
+                await _localize_registration_user_reference(
+                    _ApplyDB(), "invitations", {"created_by_id": 8}
+                )
+            )
+            payload = {
+                "created_by_id": None,
+                "registered_user_id": 8,
+                REGISTRATION_USER_REFERENCES_FIELD: {
+                    "registered_user_id": "invalid"
+                },
+            }
+            self.assertFalse(
+                await _localize_registration_user_reference(
+                    _ApplyDB(), "invitations", payload
+                )
+            )
+
+    async def test_user_patch_resolution_and_noop_boundaries(self):
+        for resolution, user_id, expected in (
+            ("missing", None, "deferred"),
+            ("identity", None, "error"),
+        ):
+            with self.subTest(resolution=resolution), patch.object(
+                sync_router,
+                "_resolve_user_sync_target",
+                new=AsyncMock(return_value=(resolution, user_id)),
+            ):
+                self.assertEqual(
+                    await _apply_versioned_user_patch(
+                        _ApplyDB(),
+                        record_id=7,
+                        data={"id": 7, "address": "x"},
+                        source_server="iran",
+                    ),
+                    expected,
+                )
+
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("legacy_id", 7)),
+        ):
+            self.assertEqual(
+                await _apply_versioned_user_patch(
+                    _ApplyDB(),
+                    record_id=7,
+                    data={"id": 7, "address": "ignored"},
+                    source_server="foreign",
+                ),
+                "ignored",
+            )
+
+        for existing, expected in ((None, "deferred"), (SimpleNamespace(id=7), "ignored")):
+            db = _ApplyDB(
+                execute_results=[
+                    _QueryResult(rowcount=0),
+                    _QueryResult([] if existing is None else [existing]),
+                ]
+            )
+            with self.subTest(expected=expected), patch.object(
+                sync_router,
+                "_resolve_user_sync_target",
+                new=AsyncMock(return_value=("legacy_id", 7)),
+            ):
+                result = await _apply_versioned_user_patch(
+                    db,
+                    record_id=7,
+                    data={"id": 7, "address": "x", "sync_version": 2},
+                    source_server="iran",
+                )
+            self.assertEqual(result, expected)
+
+    async def test_versioned_insert_and_legacy_resolution_boundaries(self):
+        self.assertEqual(
+            await sync_router._apply_versioned_user_insert(
+                _ApplyDB(),
+                record_id=7,
+                data={"sync_version": 2},
+                source_server="foreign",
+            ),
+            "error",
+        )
+        self.assertIsNone(
+            await sync_router._apply_versioned_user_insert(
+                _ApplyDB(),
+                record_id=7,
+                data={},
+                source_server="iran",
+            )
+        )
+        self.assertEqual(
+            await sync_router._apply_versioned_user_insert(
+                _ApplyDB(),
+                record_id=7,
+                data={"sync_version": 2},
+                source_server="iran",
+            ),
+            "error",
+        )
+        identity = {"current": {"account_name": "stage9"}, "previous": {}}
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("conflict", None)),
+        ):
+            self.assertEqual(
+                await sync_router._apply_versioned_user_insert(
+                    _ApplyDB(),
+                    record_id=7,
+                    data={"sync_version": 2, "_sync_identity": identity},
+                    source_server="iran",
+                ),
+                "error",
+            )
+        self.assertEqual(
+            await sync_router._resolve_user_sync_target(
+                _ApplyDB(), record_id="invalid", identity=None, lock=False
+            ),
+            ("missing", None),
+        )
+
+    @staticmethod
+    def _counter_payload(**overrides):
+        values = {
+            "_counter_event_id": "11111111-2222-4333-8444-555555555555",
+            "_counter_event_kind": "increment",
+            "_counter_epoch": 1,
+            "_counter_deltas": {"trades_count": 1},
+            "_counter_occurred_at": "2026-07-12T12:00:00+00:00",
+            "_sync_identity": {"current": {"account_name": "stage9"}, "previous": {}},
+        }
+        values.update(overrides)
+        return values
+
+    @staticmethod
+    def _counter_user(**overrides):
+        values = {
+            "id": 91,
+            "counter_epoch": 1,
+            "trades_count": 0,
+            "commodities_traded_count": 0,
+            "channel_messages_count": 0,
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    async def test_counter_event_authority_resolution_and_validation_boundaries(self):
+        self.assertEqual(
+            await _apply_user_counter_event(
+                _ApplyDB(),
+                record_id=7,
+                data=self._counter_payload(),
+                source_server="unknown",
+            ),
+            "error",
+        )
+        self.assertEqual(
+            await _apply_user_counter_event(
+                _ApplyDB(),
+                record_id=7,
+                data=self._counter_payload(_counter_event_kind="reset"),
+                source_server="foreign",
+            ),
+            "error",
+        )
+
+        for resolution, user_id, expected in (
+            ("conflict", None, "error"),
+            ("missing", None, "deferred"),
+            ("identity", None, "deferred"),
+        ):
+            with self.subTest(resolution=resolution), patch.object(
+                sync_router,
+                "_resolve_user_sync_target",
+                new=AsyncMock(return_value=(resolution, user_id)),
+            ):
+                result = await _apply_user_counter_event(
+                    _ApplyDB(),
+                    record_id=7,
+                    data=self._counter_payload(),
+                    source_server="iran",
+                )
+            self.assertEqual(result, expected)
+
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    _ApplyDB(execute_results=[_QueryResult([])]),
+                    record_id=7,
+                    data=self._counter_payload(),
+                    source_server="iran",
+                ),
+                "deferred",
+            )
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    _ApplyDB(execute_results=[_QueryResult([self._counter_user()])]),
+                    record_id=7,
+                    data=self._counter_payload(_counter_event_kind="future"),
+                    source_server="iran",
+                ),
+                "error",
+            )
+
+    async def test_counter_event_receipt_epoch_increment_and_reset_boundaries(self):
+        user = self._counter_user()
+        conflicting_receipt = SimpleNamespace(
+            source_server="iran", user_id=91, event_hash="different"
+        )
+        db = _ApplyDB(
+            execute_results=[_QueryResult([user]), _QueryResult([conflicting_receipt])]
+        )
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    db,
+                    record_id=7,
+                    data=self._counter_payload(),
+                    source_server="iran",
+                ),
+                "error",
+            )
+
+    async def test_counter_receipt_race_returns_existing_decision_for_increment_and_reset(self):
+        matching = SimpleNamespace(
+            source_server="iran",
+            user_id=91,
+            event_hash="stable-hash",
+        )
+        increment_db = _ApplyDB(
+            execute_results=[
+                _QueryResult([self._counter_user()]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([matching]),
+            ]
+        )
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ), patch.object(
+            sync_router,
+            "user_counter_event_content_hash",
+            return_value="stable-hash",
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    increment_db,
+                    record_id=7,
+                    data=self._counter_payload(),
+                    source_server="iran",
+                ),
+                "ignored",
+            )
+
+        pre_boundary_db = _ApplyDB(
+            execute_results=[
+                _QueryResult([self._counter_user(counter_epoch=2)]),
+                _QueryResult([]),
+                _QueryResult([(2, "2026-07-12T12:00:00+00:00")]),
+                _QueryResult(["receipt-id"]),
+            ]
+        )
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    pre_boundary_db,
+                    record_id=7,
+                    data=self._counter_payload(
+                        _counter_epoch=2,
+                        _counter_occurred_at="2026-07-12T11:00:00+00:00",
+                    ),
+                    source_server="iran",
+                ),
+                "ignored",
+            )
+
+        reset_success_db = _ApplyDB(
+            execute_results=[
+                _QueryResult([self._counter_user()]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([
+                    {"trades_count": 1},
+                    {"commodities_traded_count": 2},
+                ]),
+                _QueryResult(["receipt-id"]),
+                _QueryResult(rowcount=1),
+            ]
+        )
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    reset_success_db,
+                    record_id=7,
+                    data=self._counter_payload(
+                        _counter_event_kind="reset", _counter_epoch=2
+                    ),
+                    source_server="iran",
+                ),
+                "ok",
+            )
+
+        reset_db = _ApplyDB(
+            execute_results=[
+                _QueryResult([self._counter_user()]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([matching]),
+            ]
+        )
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ), patch.object(
+            sync_router,
+            "user_counter_event_content_hash",
+            return_value="stable-hash",
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    reset_db,
+                    record_id=7,
+                    data=self._counter_payload(
+                        _counter_event_kind="reset", _counter_epoch=2
+                    ),
+                    source_server="iran",
+                ),
+                "ignored",
+            )
+
+    async def test_apply_item_routes_user_updates_and_defers_registration_references(self):
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True), patch.object(
+            sync_router, "is_user_counter_event_payload", return_value=True
+        ), patch.object(
+            sync_router,
+            "_apply_user_counter_event",
+            new=AsyncMock(return_value="ignored"),
+        ) as counter_apply:
+            result = await _apply_item(
+                _ApplyDB(),
+                "users",
+                "UPDATE",
+                7,
+                {"_counter_event_id": "event"},
+                User,
+                [],
+                source_server="iran",
+            )
+        self.assertEqual(result, "ignored")
+        counter_apply.assert_awaited_once()
+
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True), patch.object(
+            sync_router, "is_user_counter_event_payload", return_value=False
+        ), patch.object(
+            sync_router,
+            "_apply_versioned_user_patch",
+            new=AsyncMock(return_value="ok"),
+        ) as patch_apply:
+            result = await _apply_item(
+                _ApplyDB(),
+                "users",
+                "UPDATE",
+                7,
+                {"address": "x"},
+                User,
+                [],
+                source_server="iran",
+            )
+        self.assertEqual(result, "ok")
+        patch_apply.assert_awaited_once()
+
+        with patch.object(
+            sync_router,
+            "_localize_registration_user_reference",
+            new=AsyncMock(return_value=False),
+        ):
+            result = await _apply_item(
+                _ApplyDB(),
+                "invitations",
+                "INSERT",
+                8,
+                {"token": "INV-deferred"},
+                Invitation,
+                [],
+                source_server="iran",
+            )
+        self.assertEqual(result, "deferred")
+
+    async def test_apply_item_ignores_stale_registration_upsert_and_natural_merge(self):
+        stale_db = _ApplyDB(rowcount=0)
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True), patch.object(
+            sync_router,
+            "_localize_registration_user_reference",
+            new=AsyncMock(return_value=True),
+        ):
+            result = await _apply_item(
+                stale_db,
+                "invitations",
+                "INSERT",
+                8,
+                {"token": "INV-stale", "sync_version": 2},
+                Invitation,
+                [],
+                source_server="iran",
+            )
+        self.assertEqual(result, "ignored")
+
+        duplicate = IntegrityError(
+            "insert invitations",
+            {},
+            RuntimeError("duplicate key value violates unique constraint"),
+        )
+        legacy_merge_db = _ApplyDB(
+            execute_results=[duplicate, _QueryResult(rowcount=1)]
+        )
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", False):
+            result = await _apply_item(
+                legacy_merge_db,
+                "invitations",
+                "INSERT",
+                8,
+                {"token": "INV-legacy-merge", "account_name": "stage9"},
+                Invitation,
+                [],
+                source_server="iran",
+            )
+        self.assertEqual(result, "ok")
+
+        merge_db = _ApplyDB(
+            execute_results=[duplicate, _QueryResult(rowcount=0)]
+        )
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True), patch.object(
+            sync_router,
+            "_localize_registration_user_reference",
+            new=AsyncMock(return_value=True),
+        ):
+            result = await _apply_item(
+                merge_db,
+                "invitations",
+                "INSERT",
+                8,
+                {"token": "INV-merge", "sync_version": 2},
+                Invitation,
+                [],
+                source_server="iran",
+            )
+        self.assertEqual(result, "ignored")
+
+    async def test_versioned_insert_missing_identity_and_id_returns_create_path(self):
+        identity = {"current": {"account_name": "stage9"}, "previous": {}}
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("missing", None)),
+        ):
+            result = await sync_router._apply_versioned_user_insert(
+                _ApplyDB(execute_results=[_QueryResult([])]),
+                record_id=7,
+                data={"sync_version": 2, "_sync_identity": identity},
+                source_server="iran",
+            )
+        self.assertIsNone(result)
+        user = self._counter_user()
+
+        for current_epoch, latest, expected in (
+            (1, (2, "2026-07-12T11:00:00+00:00"), "error"),
+            (2, None, "error"),
+        ):
+            db = _ApplyDB(
+                execute_results=[
+                    _QueryResult([self._counter_user(counter_epoch=current_epoch)]),
+                    _QueryResult([]),
+                    _QueryResult([] if latest is None else [latest]),
+                ]
+            )
+            with self.subTest(current_epoch=current_epoch), patch.object(
+                sync_router,
+                "_resolve_user_sync_target",
+                new=AsyncMock(return_value=("identity", 91)),
+            ):
+                result = await _apply_user_counter_event(
+                    db,
+                    record_id=7,
+                    data=self._counter_payload(_counter_epoch=current_epoch),
+                    source_server="iran",
+                )
+            self.assertEqual(result, expected)
+
+        for payload in (
+            self._counter_payload(_counter_epoch=3),
+            self._counter_payload(_counter_deltas={"trades_count": -1}),
+        ):
+            db = _ApplyDB(
+                execute_results=[
+                    _QueryResult([user]),
+                    _QueryResult([]),
+                    _QueryResult([]),
+                ]
+            )
+            with patch.object(
+                sync_router,
+                "_resolve_user_sync_target",
+                new=AsyncMock(return_value=("identity", 91)),
+            ):
+                result = await _apply_user_counter_event(
+                    db, record_id=7, data=payload, source_server="iran"
+                )
+            self.assertIn(result, {"deferred", "error"})
+
+        reset_cases = (
+            (self._counter_user(counter_epoch=1), 1, None, "error"),
+            (self._counter_user(counter_epoch=1), 3, None, "deferred"),
+            (
+                self._counter_user(counter_epoch=2),
+                3,
+                (2, "2026-07-12T12:00:00+00:00"),
+                "error",
+            ),
+        )
+        for reset_user, incoming_epoch, latest, expected in reset_cases:
+            db = _ApplyDB(
+                execute_results=[
+                    _QueryResult([reset_user]),
+                    _QueryResult([]),
+                    _QueryResult([] if latest is None else [latest]),
+                ]
+            )
+            with self.subTest(reset_epoch=incoming_epoch), patch.object(
+                sync_router,
+                "_resolve_user_sync_target",
+                new=AsyncMock(return_value=("identity", 91)),
+            ):
+                result = await _apply_user_counter_event(
+                    db,
+                    record_id=7,
+                    data=self._counter_payload(
+                        _counter_event_kind="reset",
+                        _counter_epoch=incoming_epoch,
+                    ),
+                    source_server="iran",
+                )
+            self.assertEqual(result, expected)
+
+        overflow_db = _ApplyDB(
+            execute_results=[
+                _QueryResult([user]),
+                _QueryResult([]),
+                _QueryResult([]),
+                _QueryResult([{"trades_count": sync_router.USER_COUNTER_MAX_VALUE + 1}]),
+            ]
+        )
+        with patch.object(
+            sync_router,
+            "_resolve_user_sync_target",
+            new=AsyncMock(return_value=("identity", 91)),
+        ):
+            self.assertEqual(
+                await _apply_user_counter_event(
+                    overflow_db,
+                    record_id=7,
+                    data=self._counter_payload(
+                        _counter_event_kind="reset", _counter_epoch=2
+                    ),
+                    source_server="iran",
+                ),
+                "error",
+            )
+
     @staticmethod
     def _identity(label: str) -> dict:
         return {

@@ -42,6 +42,53 @@ def _session_factory(db):
 
 
 class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_web_notification_uses_application_session_factory_by_default(self):
+        db = _FakeDb([])
+        with patch(
+            "core.db.AsyncSessionLocal",
+            new=_session_factory(db),
+        ):
+            await notifications.publish_project_user_joined_web_notifications(
+                new_user_id=9,
+                account_name="ali",
+                full_name="Ali",
+            )
+        db.execute.assert_awaited_once()
+
+    async def test_notification_empty_recipient_and_session_failures_are_isolated(self):
+        db = _FakeDb([])
+        rows = await notifications.enqueue_project_user_joined_telegram_outbox(
+            db,
+            new_user=SimpleNamespace(id=9, account_name="ali", full_name="Ali"),
+        )
+        self.assertEqual(rows, [])
+
+        await notifications.publish_project_user_joined_web_notifications(
+            new_user_id=0,
+            account_name="",
+            full_name="",
+            session_factory=_session_factory(db),
+        )
+        db.execute.assert_awaited_once()
+
+        class FailingSessionContext:
+            async def __aenter__(self):
+                raise RuntimeError("session failed")
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(notifications.logger, "warning") as warning:
+            await notifications.publish_project_user_joined_web_notifications(
+                new_user_id=9,
+                account_name="ali",
+                full_name="Ali",
+                session_factory=lambda: FailingSessionContext(),
+            )
+        self.assertEqual(
+            warning.call_args.kwargs["extra"]["event"],
+            "registration.notification_session_failed",
+        )
     def test_project_registration_announcement_skips_accountants_and_customers(self):
         self.assertTrue(notifications.should_announce_project_user_registration(None, None))
         self.assertFalse(notifications.should_announce_project_user_registration(object(), None))

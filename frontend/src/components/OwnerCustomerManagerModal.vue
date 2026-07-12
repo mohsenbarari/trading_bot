@@ -64,6 +64,7 @@ const detailSaveNotice = ref('')
 const viewportToast = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 const copiedRelationId = ref<number | null>(null)
 const copiedInvitationSurface = ref<'bot' | 'web' | null>(null)
+const copiedInvitationKey = ref('')
 const openSessionsRelationId = ref<number | null>(null)
 const sessionsByRelationId = ref<Record<number, CustomerSessionSummary[]>>({})
 const tradesByRelationId = ref<Record<number, CustomerTradeSummary[]>>({})
@@ -639,10 +640,12 @@ async function copyRegistrationLink(relation: CustomerRelation, surface: 'bot' |
     await navigator.clipboard.writeText(link)
     copiedRelationId.value = relation.id
     copiedInvitationSurface.value = surface
+    copiedInvitationKey.value = `${relation.id}:${surface}`
     window.setTimeout(() => {
       if (copiedRelationId.value === relation.id && copiedInvitationSurface.value === surface) {
         copiedRelationId.value = null
         copiedInvitationSurface.value = null
+        copiedInvitationKey.value = ''
       }
     }, 1800)
   } catch {
@@ -1223,10 +1226,12 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="pending-invitation-actions">
                       <button v-if="invitationRelationLink(relation, 'bot')" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation, 'bot')">
-                        {{ copiedRelationId === relation.id && copiedInvitationSurface === 'bot' ? 'کپی شد' : 'کپی لینک تلگرام' }}
+                        <span v-show="copiedInvitationKey !== `${relation.id}:bot`" class="copy-state--idle">کپی لینک تلگرام</span>
+                        <span v-show="copiedInvitationKey === `${relation.id}:bot`" class="copy-state--copied">کپی شد</span>
                       </button>
                       <button v-if="invitationRelationLink(relation, 'web')" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation, 'web')">
-                        {{ copiedRelationId === relation.id && copiedInvitationSurface === 'web' ? 'کپی شد' : 'کپی لینک وب' }}
+                        <span v-show="copiedInvitationKey !== `${relation.id}:web`" class="copy-state--idle">کپی لینک وب</span>
+                        <span v-show="copiedInvitationKey === `${relation.id}:web`" class="copy-state--copied">کپی شد</span>
                       </button>
                       <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
                         منقضی کردن دعوت

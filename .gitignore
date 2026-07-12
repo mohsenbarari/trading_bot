@@ -41,5 +41,8 @@ uploads/
 map_data/
 
 /tmp/
+/mutants/
+/.coverage
+/.coverage.*
 .deploy_count
 deploy/production/online.env

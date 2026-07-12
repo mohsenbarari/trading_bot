@@ -177,6 +177,78 @@ describe('AccountantWorkspaceView.vue', () => {
     wrapper.unmount()
   })
 
+  it('creates invitations with truthful SMS feedback and copies pending Web links', async () => {
+    vi.useFakeTimers()
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    })
+    const created = {
+      id: 15,
+      owner_user_id: 1,
+      accountant_user_id: null,
+      accountant_account_name: null,
+      global_account_name: 'accountant15',
+      relation_display_name: 'حسابدار جدید',
+      duty_description: 'پیگیری پیشنهادها',
+      mobile_number: '09123334444',
+      status: 'pending',
+      invitation_token: 'new-token',
+      registration_link: 'https://example.test/invite/accountant15',
+      expires_at: null,
+      activated_at: null,
+      deleted_at: null,
+      created_at: '2026-01-03T10:00:00Z',
+    }
+    accountantWorkspaceMocks.createOwnerAccountantRelationMock.mockResolvedValueOnce({
+      ...created,
+      sms_status: 'disabled',
+    })
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    Object.assign(vm.accountantState.createForm, {
+      account_name: 'accountant15',
+      relation_display_name: 'حسابدار جدید',
+      mobile_number: '09123334444',
+      duty_description: 'پیگیری پیشنهادها',
+    })
+
+    await vm.createRelation()
+    await flushPromises()
+    expect(accountantWorkspaceMocks.createOwnerAccountantRelationMock).toHaveBeenCalledWith({
+      account_name: 'accountant15',
+      relation_display_name: 'حسابدار جدید',
+      mobile_number: '09123334444',
+      duty_description: 'پیگیری پیشنهادها',
+    })
+    expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد')
+
+    accountantWorkspaceMocks.createOwnerAccountantRelationMock.mockResolvedValueOnce({
+      ...created,
+      id: 16,
+      sms_status: null,
+    })
+    await vm.createRelation()
+    await flushPromises()
+    expect(wrapper.text()).toContain('دعوت حسابدار با موفقیت ثبت شد.')
+
+    const relation = {
+      id: 12,
+      registration_link: 'https://example.test/invite/accountant12',
+    }
+    await vm.copyRegistrationLink(relation)
+    expect(clipboardWrite).toHaveBeenCalledWith(relation.registration_link)
+    await vi.advanceTimersByTimeAsync(1800)
+
+    await vm.copyRegistrationLink({ id: 13, registration_link: null })
+    expect(clipboardWrite).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('routes relation selection, detail navigation, list back, and operations actions explicitly', async () => {
     accountantWorkspaceMocks.routeState.params = { relationId: '11' }
     accountantWorkspaceMocks.routeState.query = { section: 'sessions', tab: 'duty' }

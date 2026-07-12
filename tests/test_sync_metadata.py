@@ -86,6 +86,15 @@ class SyncMetadataTests(unittest.TestCase):
         )
         self.assertNotEqual(first["aggregate_id"], second["aggregate_id"])
 
+        fallback = build_sync_metadata(
+            "users",
+            5,
+            "UPDATE",
+            {"_sync_contract": "user_counter_event_v2"},
+            change_log_id=94,
+        )
+        self.assertEqual(fallback["aggregate_id"], "5")
+
     def test_publication_state_metadata_uses_dedupe_key_and_owner_server(self):
         metadata = build_sync_metadata(
             "offer_publication_states",

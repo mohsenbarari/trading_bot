@@ -9,7 +9,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.audit_logger import audit_log
-from core.audit_sink import write_audit_record
+from core.audit_sink import (
+    AuditTrailIntegrityError,
+    _canonical_json,
+    _hash_payload,
+    _append_durable_line,
+    _read_record_before,
+    _validated_event_hash,
+    build_audit_record,
+    write_audit_record,
+)
 from core.log_redaction import REDACTED
 from core.logging_config import configure_logging
 from core.request_context import clear_request_context, set_request_context
@@ -154,6 +163,28 @@ class AuditLoggerTests(unittest.TestCase):
         self.assertEqual(payload["audit_durable_reason"], "audit_trail_write_failed")
         self.assertEqual(payload["audit_durable_error_type"], "IsADirectoryError")
 
+    def test_tail_reader_rejects_malformed_or_non_object_records(self):
+        for raw in (b"not-json", b"\xff", b"[]"):
+            with self.subTest(raw=raw):
+                handle = io.BytesIO(raw)
+                with self.assertRaises(AuditTrailIntegrityError):
+                    _read_record_before(handle, len(raw), label="final")
+
+    def test_event_hash_validator_rejects_missing_or_malformed_hash(self):
+        for record in ({}, {"event_hash": "not-a-sha256"}):
+            with self.subTest(record=record):
+                with self.assertRaises(AuditTrailIntegrityError):
+                    _validated_event_hash(record, label="final")
+
+    def test_build_audit_record_fails_safe_when_redactor_returns_non_mapping(self):
+        with patch("core.audit_sink.redact", return_value="unexpected"):
+            record = build_audit_record(
+                {"action": "test.redaction"},
+                durable_written=False,
+            )
+
+        self.assertEqual(record["payload"], {"redacted": REDACTED})
+
     def test_partial_tail_fails_closed_without_appending_or_restarting_chain(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             audit_path = Path(tmpdir) / "audit.jsonl"
@@ -196,6 +227,76 @@ class AuditLoggerTests(unittest.TestCase):
             )
             self.assertEqual(audit_path.read_bytes(), corrupted)
 
+    def test_one_record_with_non_null_predecessor_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = Path(tmpdir) / "audit.jsonl"
+            record = build_audit_record(
+                {"action": "test.first"},
+                previous_hash="0" * 64,
+                durable_written=True,
+                durable_path=str(audit_path),
+            )
+            audit_path.write_text(_canonical_json(record) + "\n", encoding="utf-8")
+            corrupted = audit_path.read_bytes()
+
+            with patch("core.audit_sink._audit_trail_path", return_value=str(audit_path)):
+                rejected = write_audit_record({"action": "test.rejected"})
+
+            self.assertFalse(rejected["audit_durable"])
+            self.assertEqual(rejected["audit_durable_reason"], "audit_trail_integrity_failed")
+            self.assertEqual(audit_path.read_bytes(), corrupted)
+
+    def test_self_consistent_broken_final_link_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = Path(tmpdir) / "audit.jsonl"
+            with patch("core.audit_sink._audit_trail_path", return_value=str(audit_path)):
+                write_audit_record({"action": "test.first"})
+                write_audit_record({"action": "test.second"})
+
+                records = [
+                    json.loads(line)
+                    for line in audit_path.read_text(encoding="utf-8").splitlines()
+                ]
+                records[-1]["previous_hash"] = "0" * 64
+                hash_input = dict(records[-1])
+                hash_input.pop("event_hash")
+                records[-1]["event_hash"] = _hash_payload(hash_input)
+                audit_path.write_text(
+                    "\n".join(_canonical_json(record) for record in records) + "\n",
+                    encoding="utf-8",
+                )
+                corrupted = audit_path.read_bytes()
+
+                rejected = write_audit_record({"action": "test.rejected"})
+
+            self.assertFalse(rejected["audit_durable"])
+            self.assertEqual(rejected["audit_durable_reason"], "audit_trail_integrity_failed")
+            self.assertEqual(audit_path.read_bytes(), corrupted)
+
+    def test_tampered_preceding_tail_record_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = Path(tmpdir) / "audit.jsonl"
+            with patch("core.audit_sink._audit_trail_path", return_value=str(audit_path)):
+                for action in ("تست اول", "تست دوم", "تست سوم"):
+                    write_audit_record({"action": action})
+
+                records = [
+                    json.loads(line)
+                    for line in audit_path.read_text(encoding="utf-8").splitlines()
+                ]
+                records[-2]["payload"]["action"] = "دستکاری"
+                audit_path.write_text(
+                    "\n".join(_canonical_json(record) for record in records) + "\n",
+                    encoding="utf-8",
+                )
+                corrupted = audit_path.read_bytes()
+
+                rejected = write_audit_record({"action": "test.rejected"})
+
+            self.assertFalse(rejected["audit_durable"])
+            self.assertEqual(rejected["audit_durable_reason"], "audit_trail_integrity_failed")
+            self.assertEqual(audit_path.read_bytes(), corrupted)
+
     def test_fsync_failure_returns_non_durable_and_rolls_back_append(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             audit_path = Path(tmpdir) / "audit.jsonl"
@@ -232,6 +333,34 @@ class AuditLoggerTests(unittest.TestCase):
             self.assertFalse(rejected["audit_durable"])
             self.assertEqual(rejected["audit_durable_reason"], "audit_trail_write_failed")
             self.assertEqual(audit_path.read_bytes(), original)
+
+    def test_failed_first_append_tolerates_already_absent_path_during_rollback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = Path(tmpdir) / "audit.jsonl"
+            with patch.object(Path, "exists", return_value=False), patch(
+                "core.audit_sink.os.write", return_value=0
+            ):
+                with self.assertRaisesRegex(OSError, "no progress"):
+                    _append_durable_line(audit_path, b"record\n")
+
+    def test_append_open_and_rollback_failures_are_reported_without_hiding_primary_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = Path(tmpdir) / "audit.jsonl"
+            with patch("core.audit_sink._audit_trail_path", return_value=str(audit_path)), patch(
+                "core.audit_sink.os.open", side_effect=OSError("open failed")
+            ):
+                rejected = write_audit_record({"action": "test.open-failure"})
+            self.assertFalse(rejected["audit_durable"])
+
+            audit_path.write_text("existing", encoding="utf-8")
+            with patch("core.audit_sink.os.write", side_effect=OSError("write failed")), patch(
+                "core.audit_sink.os.ftruncate", side_effect=OSError("rollback failed")
+            ), patch("core.audit_sink._logger") as logger:
+                with self.assertRaisesRegex(OSError, "write failed"):
+                    from core.audit_sink import _append_durable_line
+
+                    _append_durable_line(audit_path, b"new-line\n")
+            logger.exception.assert_called_once()
 
     def test_first_file_directory_fsync_failure_removes_uncommitted_trail(self):
         with tempfile.TemporaryDirectory() as tmpdir:

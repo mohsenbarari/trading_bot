@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
+from api.routers import auth as auth_router
 from api.routers.auth import (
     PendingRegistrationContext,
     RegisterComplete,
@@ -21,6 +22,7 @@ from core.services.authoritative_registration_service import (
     AuthoritativeRegistrationResult,
 )
 from models.session import Platform
+from models.invitation import InvitationKind
 from models.user import UserRole
 
 
@@ -98,6 +100,33 @@ def make_request(headers=None, host="127.0.0.1"):
 
 
 class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_valid_invitation_loader_rejects_used_revoked_and_legacy_rows(self):
+        base = {
+            "is_used": False,
+            "revoked_at": None,
+            "kind": InvitationKind.STANDARD,
+            "expires_at": datetime.utcnow() + timedelta(minutes=5),
+        }
+        for changes, detail in (
+            ({"is_used": True}, "استفاده شده"),
+            ({"revoked_at": datetime.utcnow()}, "لغو شده"),
+            ({"kind": InvitationKind.LEGACY_UNKNOWN}, "قدیمی"),
+        ):
+            invitation = SimpleNamespace(**{**base, **changes})
+            db = FakeDB([FakeExecuteResult(invitation)])
+            with self.subTest(changes=changes), self.assertRaises(HTTPException) as exc:
+                await auth_router._load_valid_invitation_by_token(db, "INV-test")
+            self.assertIn(detail, exc.exception.detail)
+
+        valid = SimpleNamespace(**base)
+        db = FakeDB([FakeExecuteResult(valid)])
+        loaded, accountant, customer = await auth_router._load_valid_invitation_by_token(
+            db, "INV-valid"
+        )
+        self.assertIs(loaded, valid)
+        self.assertIsNone(accountant)
+        self.assertIsNone(customer)
+
     async def test_register_otp_request_rejects_invalid_invitation_states_and_rate_limit(self):
         req = RegisterOTPRequest(token="abc")
         redis = FakeRedis()
@@ -271,6 +300,38 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "خطا در ثبت کاربر")
         session_mock.assert_not_awaited()
+
+    async def test_register_complete_rejects_incomplete_authoritative_result_before_session(self):
+        redis = FakeRedis({"reg_verified:abc": "1"})
+        incomplete_results = (
+            AuthoritativeRegistrationResult(
+                outcome=TelegramRegistrationOutcome.CREATED,
+                authoritative_user_id=77,
+                user=None,
+            ),
+            AuthoritativeRegistrationResult(
+                outcome=TelegramRegistrationOutcome.CREATED,
+                authoritative_user_id=None,
+                user=SimpleNamespace(id=77),
+            ),
+        )
+        for registration_result in incomplete_results:
+            with self.subTest(registration_result=registration_result), patch(
+                "api.routers.auth.get_redis", new=AsyncMock(return_value=redis)
+            ), patch(
+                "api.routers.auth.complete_invitation_registration",
+                new=AsyncMock(return_value=registration_result),
+            ), patch(
+                "api.routers.auth.handle_login_session", new=AsyncMock()
+            ) as session_mock:
+                with self.assertRaises(HTTPException) as exc:
+                    await register_complete(
+                        RegisterComplete(token="abc", address="Tehran address"),
+                        raw_request=make_request(),
+                        db=FakeDB(),
+                    )
+            self.assertEqual(exc.exception.status_code, 500)
+            session_mock.assert_not_awaited()
 
     async def test_register_complete_creates_user_marks_invitation_and_issues_tokens(self):
         new_user = SimpleNamespace(
@@ -479,6 +540,32 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("registration_session:REG-123", redis.delete_calls)
         self.assertEqual(complete_mock.await_args.args[1].invitation_token, "INV-123")
         self.assertEqual(result["access_token"], "access-token")
+
+    async def test_registration_session_cleanup_does_not_require_otp_cleanup_keys(self):
+        redis = FakeRedis({"registration_session:REG-empty": "placeholder"})
+        new_user = SimpleNamespace(id=77, home_server="iran")
+        registration_result = AuthoritativeRegistrationResult(
+            outcome=TelegramRegistrationOutcome.CREATED,
+            authoritative_user_id=77,
+            user=new_user,
+        )
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_registration_session_token",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.auth.complete_invitation_registration",
+            new=AsyncMock(return_value=registration_result),
+        ), patch("api.routers.auth.create_refresh_token", return_value="refresh"), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"session": SimpleNamespace(id="session")}),
+        ), patch("api.routers.auth.create_access_token", return_value="access"):
+            result = await register_complete(
+                RegisterComplete(registration_token="REG-empty", address="Tehran address"),
+                raw_request=make_request(),
+                db=FakeDB(),
+            )
+        self.assertEqual(result["access_token"], "access")
+        self.assertEqual(redis.delete_calls, ["registration_session:REG-empty"])
 
     async def test_register_complete_binds_pending_accountant_relation_and_disables_bot_access(self):
         relation = SimpleNamespace(

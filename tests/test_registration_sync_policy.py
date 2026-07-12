@@ -122,6 +122,24 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
         self.assertFalse(decision.accepted)
         self.assertEqual(decision.reason, "versioned_user_identity_missing")
 
+        previous_only = sanitize_registration_sync_payload(
+            table="users",
+            operation="UPDATE",
+            data={
+                "id": 7,
+                "sync_version": 3,
+                "address": "Iran address",
+                "_sync_identity": {
+                    "current": {},
+                    "previous": {"mobile_number": "09120000000"},
+                },
+            },
+            source_server=SERVER_IRAN,
+            v2_enabled=True,
+            accept_unversioned=True,
+        )
+        self.assertTrue(previous_only.accepted)
+
     def test_counter_event_is_explicit_unversioned_and_strict(self):
         now = datetime.now(timezone.utc)
         valid = {
@@ -180,6 +198,8 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
             },
             {**valid, "unexpected_counter_field": 1},
             {**valid, "_sync_identity": {}},
+            {**valid, "_counter_event_kind": "unknown"},
+            {**valid, "_counter_deltas": []},
         ]
         for payload in malformed:
             with self.subTest(payload=payload):
@@ -192,6 +212,17 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
                     accept_unversioned=True,
                 )
                 self.assertFalse(decision.accepted)
+
+        wrong_operation = sanitize_registration_sync_payload(
+            table="users",
+            operation="INSERT",
+            data=valid,
+            source_server=SERVER_IRAN,
+            v2_enabled=True,
+            accept_unversioned=True,
+        )
+        self.assertFalse(wrong_operation.accepted)
+        self.assertEqual(wrong_operation.reason, "counter_event_operation_forbidden")
 
     def test_foreign_user_insert_and_authoritative_table_mutation_are_rejected(self):
         user_insert = sanitize_registration_sync_payload(
@@ -268,6 +299,7 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
         self.assertTrue(USER_SYNC_COUNTER_FIELDS)
         self.assertTrue(USER_SYNC_COUNTER_FIELDS.isdisjoint(allowed_user_fields_for_source(SERVER_IRAN)))
         self.assertTrue(USER_SYNC_COUNTER_FIELDS.isdisjoint(allowed_user_fields_for_source(SERVER_FOREIGN)))
+        self.assertEqual(allowed_user_fields_for_source("unknown"), frozenset())
 
     def test_health_capabilities_expose_mixed_version_gate(self):
         capabilities = registration_sync_capabilities(

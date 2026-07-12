@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {"id": "MUT-IDENTITY-SQL-GUARD", "module": "core.registration_identity", "function": "_checked_sql_identifier", "matcher": "core.registration_identity.x__checked_sql_identifier*"},
+    {"id": "MUT-REG-REQUEST-SHAPE", "module": "core.services.authoritative_registration_service", "function": "_validate_request_shape", "matcher": "core.services.authoritative_registration_service.x__validate_request_shape*"},
+    {"id": "MUT-INV-EXACT-RETRY", "module": "core.services.canonical_invitation_creation_service", "function": "_is_exact_base_retry", "matcher": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry*"},
+    {"id": "MUT-INTENT-MATCH", "module": "core.services.telegram_registration_intent_service", "function": "_intent_matches_command", "matcher": "core.services.telegram_registration_intent_service.x__intent_matches_command*"},
+    {"id": "MUT-OTP-CONSUME", "module": "core.services.otp_delivery_state_service", "function": "consume_otp_code", "matcher": "core.services.otp_delivery_state_service.x_consume_otp_code*"}
+  ],
+  "equivalent_mutants": [
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_12", "reason": "Invitation always defines created_by_id; changing getattr's missing-attribute default cannot affect a model instance."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_15", "reason": "Invitation always defines created_by_id; omitting getattr's default is behaviorally identical."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_18", "reason": "Invitation always defines created_by_id; changing only the missing-attribute default cannot affect valid input."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_27", "reason": "Invitation always defines kind; omitting getattr's default is behaviorally identical."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_36", "reason": "Invitation always defines role; omitting getattr's default is behaviorally identical."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_43", "reason": "Invitation always defines mobile_number; changing only the missing-attribute default cannot affect valid input."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_46", "reason": "Invitation always defines mobile_number; omitting getattr's default is behaviorally identical."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_49", "reason": "Invitation always defines mobile_number; changing only the missing-attribute default cannot affect valid input."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_54", "reason": "Invitation always defines account_name; changing only the missing-attribute default cannot affect valid input."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_57", "reason": "Invitation always defines account_name; omitting getattr's default is behaviorally identical."},
+    {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_60", "reason": "Invitation always defines account_name; changing only the missing-attribute default cannot affect valid input."},
+    {"name": "core.services.telegram_registration_intent_service.x__intent_matches_command__mutmut_22", "reason": "TelegramRegistrationCommand.model_dump always contains every snapshot key, so pop(key) and pop(key, None) are equivalent."},
+    {"name": "core.services.telegram_registration_intent_service.x__intent_matches_command__mutmut_25", "reason": "TelegramRegistrationCommand.model_dump always contains every snapshot key, so pop(key) and pop(key, None) are equivalent."}
+  ],
+  "ignores": [
+    {"selector": "generated migrations", "reason": "Immutable migration history is covered by migration execution and schema parity tests."},
+    {"selector": "framework bootstrap", "reason": "Import and server bootstrap wiring has no isolated invariant boundary."},
+    {"selector": "logging-only formatting", "reason": "Redaction and audit contracts are covered by dedicated semantic tests."}
+  ]
+}

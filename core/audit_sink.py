@@ -47,6 +47,37 @@ def _hash_payload(value: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _read_record_before(handle, end_position: int, *, label: str) -> tuple[dict[str, Any], int]:
+    position = end_position
+    buffer = bytearray()
+    while position > 0:
+        position -= 1
+        handle.seek(position)
+        char = handle.read(1)
+        if char == b"\n":
+            break
+        buffer.extend(char)
+    try:
+        line = bytes(reversed(buffer)).decode("utf-8", errors="strict")
+        record = json.loads(line)
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise AuditTrailIntegrityError(f"audit trail {label} line is invalid") from exc
+    if not isinstance(record, dict):
+        raise AuditTrailIntegrityError(f"audit trail {label} record is not an object")
+    return record, position
+
+
+def _validated_event_hash(record: dict[str, Any], *, label: str) -> str:
+    event_hash = record.get("event_hash")
+    if not isinstance(event_hash, str) or not _EVENT_HASH_PATTERN.fullmatch(event_hash):
+        raise AuditTrailIntegrityError(f"audit trail {label} record has no valid event hash")
+    hash_input = dict(record)
+    hash_input.pop("event_hash", None)
+    if not hmac.compare_digest(event_hash, _hash_payload(hash_input)):
+        raise AuditTrailIntegrityError(f"audit trail {label} record hash does not match")
+    return event_hash
+
+
 def _last_event_hash(path: Path) -> str | None:
     if not path.exists() or path.stat().st_size <= 0:
         return None
@@ -54,30 +85,30 @@ def _last_event_hash(path: Path) -> str | None:
         handle.seek(-1, os.SEEK_END)
         if handle.read(1) != b"\n":
             raise AuditTrailIntegrityError("audit trail has a partial final line")
-        position = handle.tell() - 1
-        buffer = bytearray()
-        while position > 0:
-            position -= 1
-            handle.seek(position)
-            char = handle.read(1)
-            if char == b"\n":
-                break
-            buffer.extend(char)
-        try:
-            line = bytes(reversed(buffer)).decode("utf-8", errors="strict")
-            record = json.loads(line)
-        except (TypeError, ValueError, UnicodeError) as exc:
-            raise AuditTrailIntegrityError("audit trail final line is invalid") from exc
-    if not isinstance(record, dict):
-        raise AuditTrailIntegrityError("audit trail final record is not an object")
-    event_hash = record.get("event_hash")
-    if not isinstance(event_hash, str) or not _EVENT_HASH_PATTERN.fullmatch(event_hash):
-        raise AuditTrailIntegrityError("audit trail final record has no valid event hash")
-    hash_input = dict(record)
-    hash_input.pop("event_hash", None)
-    if not hmac.compare_digest(event_hash, _hash_payload(hash_input)):
-        raise AuditTrailIntegrityError("audit trail final record hash does not match")
-    return event_hash
+        final_record, preceding_separator = _read_record_before(
+            handle,
+            handle.tell() - 1,
+            label="final",
+        )
+        final_hash = _validated_event_hash(final_record, label="final")
+        if preceding_separator == 0:
+            if final_record.get("previous_hash") is not None:
+                raise AuditTrailIntegrityError("audit trail first record has a predecessor")
+            return final_hash
+
+        preceding_record, _ = _read_record_before(
+            handle,
+            preceding_separator,
+            label="preceding",
+        )
+        preceding_hash = _validated_event_hash(preceding_record, label="preceding")
+        previous_hash = final_record.get("previous_hash")
+        if not isinstance(previous_hash, str) or not hmac.compare_digest(
+            previous_hash,
+            preceding_hash,
+        ):
+            raise AuditTrailIntegrityError("audit trail final predecessor link does not match")
+        return final_hash
 
 
 def _fsync_directory(path: Path) -> None:

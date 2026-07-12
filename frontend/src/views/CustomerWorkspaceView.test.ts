@@ -228,6 +228,129 @@ describe('CustomerWorkspaceView.vue', () => {
     wrapper.unmount()
   })
 
+  it('creates customer invitations and copies both pending registration surfaces', async () => {
+    vi.useFakeTimers()
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    })
+    const created = {
+      id: 15,
+      owner_user_id: 1,
+      customer_user_id: null,
+      customer_account_name: null,
+      invitation_account_name: 'customer_09123334444',
+      mobile_number: '09123334444',
+      management_name: 'مشتری جدید',
+      customer_tier: 'tier1',
+      commission_rate: null,
+      min_trade_quantity: null,
+      max_trade_quantity: null,
+      max_daily_trades: null,
+      max_daily_commodity_volume: null,
+      status: 'pending',
+      invitation_token: 'new-token',
+      registration_link: 'https://example.test/invite/new-token',
+      expires_at: null,
+      activated_at: null,
+      deleted_at: null,
+      created_at: '2026-01-03T10:00:00Z',
+    }
+    customerWorkspaceMocks.createOwnerCustomerRelationMock.mockResolvedValueOnce({
+      ...created,
+      sms_status: 'disabled',
+    })
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    Object.assign(vm.customerState.createForm, {
+      management_name: 'مشتری جدید',
+      mobile_number: '09123334444',
+      customer_tier: 'tier1',
+      commission_rate: '0.50',
+      min_trade_quantity: '',
+      max_trade_quantity: '',
+      max_daily_trades: '',
+      max_daily_commodity_volume: '',
+    })
+
+    await vm.createRelation()
+    await flushPromises()
+    expect(customerWorkspaceMocks.createOwnerCustomerRelationMock).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('پیامک دعوت ارسال نشد')
+
+    customerWorkspaceMocks.createOwnerCustomerRelationMock.mockResolvedValueOnce({
+      ...created,
+      id: 16,
+      sms_status: null,
+    })
+    await vm.createRelation()
+    await flushPromises()
+    expect(wrapper.text()).toContain('دعوت مشتری با موفقیت ثبت شد.')
+
+    const relation = {
+      id: 12,
+      bot_registration_link: 'https://t.me/bot?start=customer12',
+      web_registration_link: 'https://example.test/invite/customer12',
+    }
+    await vm.copyRegistrationLink(relation, 'bot')
+    await vm.copyRegistrationLink(relation, 'web')
+    expect(clipboardWrite).toHaveBeenNthCalledWith(1, relation.bot_registration_link)
+    expect(clipboardWrite).toHaveBeenNthCalledWith(2, relation.web_registration_link)
+    await vi.advanceTimersByTimeAsync(1800)
+
+    await vm.copyRegistrationLink({ id: 13 }, 'web')
+    expect(clipboardWrite).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('uses both rendered copy controls for a dual-surface pending invitation', async () => {
+    vi.useFakeTimers()
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    })
+    customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockResolvedValueOnce([{
+      id: 20,
+      owner_user_id: 1,
+      customer_user_id: null,
+      customer_account_name: null,
+      invitation_account_name: 'dual-surface',
+      mobile_number: '09120000020',
+      management_name: 'دعوت دو مسیره',
+      customer_tier: 'tier1',
+      commission_rate: null,
+      status: 'pending',
+      invitation_token: 'dual-token',
+      registration_link: null,
+      bot_registration_link: 'https://t.me/bot?start=dual-token',
+      web_registration_link: 'https://example.test/invite/dual-token',
+      expires_at: null,
+      activated_at: null,
+      deleted_at: null,
+      created_at: '2026-01-03T10:00:00Z',
+    }])
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    const buttons = wrapper.findAll('.customer-pending-card .ui-button--secondary')
+    expect(buttons).toHaveLength(2)
+    await buttons[0]!.trigger('click')
+    await flushPromises()
+    expect(buttons[0]!.text()).toBe('کپی شد')
+    await buttons[1]!.trigger('click')
+    await flushPromises()
+    expect(buttons[1]!.text()).toBe('کپی شد')
+    expect(clipboardWrite).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=dual-token')
+    expect(clipboardWrite).toHaveBeenNthCalledWith(2, 'https://example.test/invite/dual-token')
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('routes relation selection, detail navigation, list back, and operations actions explicitly', async () => {
     customerWorkspaceMocks.routeState.params = { relationId: '11' }
     customerWorkspaceMocks.routeState.query = { section: 'stats', tab: 'limits' }
