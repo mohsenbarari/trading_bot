@@ -66,6 +66,7 @@ from bot.onboarding import (
     OFFER_TUTORIAL_STEP,
     build_onboarding_keyboard,
     onboarding_text_for_step,
+    pending_onboarding_step,
 )
 from bot.states import Registration
 from bot.keyboards import get_persistent_menu_keyboard
@@ -454,6 +455,15 @@ async def _send_registration_handoff(
         return
 
     user = resolution.user
+    user, pending_tutorial_step = await _ensure_registration_onboarding(user)
+    if pending_tutorial_step is not None:
+        anchor_msg = await message.answer(
+            onboarding_text_for_step(pending_tutorial_step),
+            reply_markup=build_onboarding_keyboard(pending_tutorial_step),
+        )
+        set_anchor(message.chat.id, anchor_msg.message_id)
+        return
+
     anchor_msg = await message.answer(
         await build_linked_account_panel_message(
             getattr(message, "bot", None),
@@ -477,6 +487,34 @@ async def _send_registration_handoff(
         ),
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
+
+
+async def _ensure_registration_onboarding(user: User) -> tuple[User, int | None]:
+    """Persist the foreign-owned tutorial gate before exposing the bot panel."""
+
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(User)
+            .where(
+                User.id == user.id,
+                User.telegram_id == user.telegram_id,
+                User.is_deleted == False,
+            )
+            .with_for_update()
+        )
+        db_user = (await session.execute(stmt)).scalar_one_or_none()
+        if db_user is None:
+            raise RuntimeError("registration_onboarding_user_missing")
+
+        required_step = int(getattr(db_user, "bot_onboarding_required_step", 0) or 0)
+        completed_step = int(getattr(db_user, "bot_onboarding_completed_step", 0) or 0)
+        if completed_step < BOT_ONBOARDING_REQUIRED_STEP:
+            db_user.bot_onboarding_required_step = max(
+                required_step,
+                BOT_ONBOARDING_REQUIRED_STEP,
+            )
+        await session.commit()
+        return db_user, pending_onboarding_step(db_user)
 
 
 async def _begin_direct_registration(
@@ -1482,6 +1520,10 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
             await callback.answer("حساب کاربری شما یافت نشد.", show_alert=True)
             return
 
+        if pending_onboarding_step(db_user) != acknowledged_step:
+            await callback.answer("این مرحله در حال حاضر قابل تایید نیست.", show_alert=True)
+            return
+
         required_step = int(getattr(db_user, "bot_onboarding_required_step", 0) or 0)
         db_user.bot_onboarding_required_step = max(required_step, BOT_ONBOARDING_REQUIRED_STEP)
         db_user.bot_onboarding_completed_step = max(
@@ -1511,6 +1553,17 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
             await callback.message.edit_text("✅ راهنما تایید شد. اکنون می‌توانید از امکانات بات استفاده کنید.")
         except Exception:
             logger.exception("Failed to update bot onboarding completion message")
+        try:
+            anchor_msg = await callback.message.answer(
+                await build_linked_account_panel_message(callback.bot, db_user),
+                reply_markup=get_persistent_menu_keyboard(
+                    db_user.role,
+                    _user_facing_webapp_url(),
+                ),
+            )
+            set_anchor(callback.message.chat.id, anchor_msg.message_id)
+        except Exception:
+            logger.exception("Failed to send bot onboarding welcome message")
 
 
 # --- تایید معامله ---

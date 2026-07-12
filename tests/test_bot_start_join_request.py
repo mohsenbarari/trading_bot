@@ -171,18 +171,39 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
             id=7,
             telegram_id=7,
             is_deleted=False,
+            role=UserRole.STANDARD,
             bot_onboarding_required_step=2,
             bot_onboarding_completed_step=1,
             bot_onboarding_completed_at=None,
         )
         session = FakeSession(user)
+        sent_panel = SimpleNamespace(message_id=91)
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=77),
+            edit_text=AsyncMock(),
+            answer=AsyncMock(return_value=sent_panel),
+        )
         callback = SimpleNamespace(
             from_user=SimpleNamespace(id=7),
+            bot=message.bot,
             answer=AsyncMock(),
-            message=SimpleNamespace(edit_text=AsyncMock()),
+            message=message,
         )
 
-        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(session)):
+        with patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.handlers.start.build_linked_account_panel_message",
+            new=AsyncMock(return_value="welcome panel"),
+        ), patch(
+            "bot.handlers.start.get_persistent_menu_keyboard",
+            return_value="persistent menu",
+        ), patch(
+            "bot.handlers.start._user_facing_webapp_url",
+            return_value="https://app.example",
+        ), patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_customer_tutorial_ack(callback, user=user)
 
         self.assertEqual(user.bot_onboarding_required_step, 2)
@@ -192,6 +213,59 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_awaited_once_with("ثبت شد.")
         callback.message.edit_text.assert_awaited_once()
         self.assertIn("اکنون می‌توانید", callback.message.edit_text.await_args.args[0])
+        callback.message.answer.assert_awaited_once_with(
+            "welcome panel",
+            reply_markup="persistent menu",
+        )
+        set_anchor.assert_called_once_with(77, 91)
+
+    async def test_tutorial_ack_rejects_out_of_order_and_duplicate_callbacks(self):
+        user = SimpleNamespace(
+            id=7,
+            telegram_id=7,
+            is_deleted=False,
+            role=UserRole.STANDARD,
+            bot_onboarding_required_step=2,
+            bot_onboarding_completed_step=0,
+            bot_onboarding_completed_at=None,
+        )
+        session = FakeSession(user)
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=7),
+            bot=SimpleNamespace(),
+            answer=AsyncMock(),
+            message=SimpleNamespace(
+                bot=SimpleNamespace(),
+                chat=SimpleNamespace(id=77),
+                edit_text=AsyncMock(),
+                answer=AsyncMock(),
+            ),
+        )
+
+        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(session)):
+            await handle_customer_tutorial_ack(callback, user=user)
+
+        self.assertEqual(user.bot_onboarding_completed_step, 0)
+        session.commit.assert_not_awaited()
+        callback.answer.assert_awaited_once_with(
+            "این مرحله در حال حاضر قابل تایید نیست.",
+            show_alert=True,
+        )
+        callback.message.edit_text.assert_not_awaited()
+        callback.message.answer.assert_not_awaited()
+
+        user.bot_onboarding_completed_step = 2
+        callback.answer.reset_mock()
+        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(session)):
+            await handle_customer_tutorial_ack(callback, user=user)
+
+        session.commit.assert_not_awaited()
+        callback.answer.assert_awaited_once_with(
+            "این مرحله در حال حاضر قابل تایید نیست.",
+            show_alert=True,
+        )
+        callback.message.edit_text.assert_not_awaited()
+        callback.message.answer.assert_not_awaited()
 
 
 if __name__ == "__main__":

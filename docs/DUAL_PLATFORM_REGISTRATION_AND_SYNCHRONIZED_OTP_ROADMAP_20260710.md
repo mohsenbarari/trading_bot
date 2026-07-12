@@ -227,10 +227,13 @@ implementation.
     provider-specific alert, threshold, or escalation workflow. Existing SMS.ir/Telegram provider,
     templates, rate limits, and operations remain unchanged except for the already approved async
     OTP delivery and invitation-category behavior; staging verifies functional readiness only.
-71. Existing bot welcome/channel-join/onboarding behavior remains unchanged. After complete synced
-    registration state is visible, the new path enters the current linked-account/panel flow; the
-    current channel join request triggers the two existing tutorial messages in their existing
-    order/conditions, and current `خواندم` callbacks/messages are reused without copy or trigger changes.
+71. Existing bot welcome/channel-join/onboarding copy remains unchanged. After complete synced
+    registration state is visible, foreign atomically enables the current two-step onboarding gate
+    and sends the first existing tutorial before exposing the linked-account panel. The current
+    `خواندم` callbacks preserve tutorial order and the final acknowledgement sends the existing
+    welcome/panel with channel and WebApp links. This trigger is independent of a channel join
+    request so users who are already members, admins, or owners cannot bypass onboarding; the
+    existing join-request approval path remains available without becoming the sole trigger.
 72. Existing LoginView, contact-sharing pattern, confirmed-contact/address, welcome, channel,
     tutorial, `خواندم`, and completion copy is reused without redesign. Only already approved safe
     terminal rejection and connectivity-pending text is new; cross-path completion routes into the
@@ -1066,7 +1069,7 @@ exist.
 | IT-03 | Relation activation affects customer pricing, trading limits, accountant access, and market behavior beyond registration. Partial or duplicate activation has financial impact. | Locked outcome: preserve current relation semantics in the authoritative transaction and gate access until projection completeness. | Domain regression suite and exact relation-state assertions. |
 | IT-04 | Telegram-created users later log in on Iran; the model default is `foreign`, and request-derived `_login_home_server` can make a signed foreign-origin command choose the wrong owner. | Closed by owner decision in Stage 0: the shared Iran service writes literal `home_server=iran` for every new User from either surface; request context and model default are not authoritative; bot use does not mutate it; foreign creates no Web session/token. Existing users and Offer/request home fields are out of scope. | Service-mechanism assertion, registration, OTP login, refresh/logout/reset-session, no-foreign-session, and Offer-ownership regressions. |
 | IT-05 | The legacy manager password setup stores `admin_password_hash`, but current authentication does not verify that hash; extending it would add a blocking step without an effective authentication factor. | Closed by owner decision in Stage 0: new Telegram registrations keep `must_change_password=False`; later Web login always uses OTP. Existing legacy password behavior stays unchanged and its removal is a separate scope. | Role-based Telegram-registration-to-Web-OTP tests and regression proof that legacy accounts are unchanged. |
-| IT-06 | New registration must not start existing bot/channel/onboarding behavior from incomplete projections or accidentally reorder current tutorials. | Closed by owner decision: after the approved projection gate, enter the current linked-account/panel flow unchanged; current channel join request, two tutorials, order/conditions, `خواندم` callbacks, welcome/menu copy, and access blocking remain exactly as implemented. | Existing onboarding/join-request regression suite plus direct-registration handoff test. |
+| IT-06 | New registration must not start existing bot/channel/onboarding behavior from incomplete projections, accidentally reorder current tutorials, or let pre-existing channel members/admins/owners bypass them because Telegram emits no join request. | Closed by owner decision: after the approved projection gate, foreign atomically enables the existing two-step gate and sends tutorial one before the panel; ordered `خواندم` callbacks lead to the existing welcome/menu, while channel join approval remains a separate compatible path. Copy and access blocking remain unchanged. | Existing onboarding/join-request regressions plus direct-registration handoff, pre-existing-channel-member, out-of-order, duplicate-callback, and final-welcome tests. |
 | IT-07 | Generic new-user and invitation notifications can fire twice after command retry, Web/Telegram race, or sync replay. | Closed with `DT-15`: stable unique outbox event identity, post-commit dispatch, foreign durable dedupe, and one success message on first terminal intent transition. | Duplicate-command, race, replay, worker-restart, and delivery-failure tests. |
 | IT-08 | Registration reconciliation and OTP fallback need delayed execution without adding services or duplicate jobs. | Closed by owner decision: add two server-guarded job factories to the existing `main.py` background leader, not new workers/processes/containers/queues. Registration job runs only foreign; OTP fallback job only Iran; existing singleton lease plus atomic claim protects duplicates. | Startup/surface matrix, leader failover, wrong-server absence, and duplicate-claim tests. |
 | IT-09 | New registration contracts must remain safe while server versions differ or connectivity is interrupted. | Closed by owner decision: do not redesign deployment/outage handling; integrate additive migrations, tables, contracts, and flags into the project's existing compatibility, queue, recovery, and rollback mechanisms. | Existing deployment/outage regression suite plus mixed-version staging drill for the added artifacts. |
@@ -1690,8 +1693,9 @@ Challenges and engineering decisions in this stage:
   never a second registration, foreign session, or `home_server` mutation.
 - `IT-05`: route later Web access through OTP without a password-setup interruption for users made
   by the new flow.
-- `IT-06`: change no onboarding/welcome/channel copy or sequence; only hand the newly registered
-  synced User into the existing flow.
+- `IT-06`: change no onboarding/welcome/channel copy or sequence; activate the existing two-step
+  gate at successful handoff so channel membership status cannot skip it, then send the existing
+  welcome/panel after the final acknowledgement.
 - `IT-13`: leave existing PWA/service-worker compatibility behavior unchanged; in the current
   LoginView flow only change Telegram-method timer 30 to 40 and remove its zero-time manual action.
 
@@ -2101,7 +2105,7 @@ machine-readable parameter output proves that every tuple ran and passed.
 | `BOT-005` | Address validation tests empty, non-text, 9 characters, exactly 10, over 10, whitespace/control/Unicode input, duplicate delivery, and direct adapter bypass against the exact existing Web rule. |
 | `BOT-006` | Every FSM state receives every input/callback category, duplicate update, out-of-order update, stale callback, `/start` restart, process restart, and Redis loss; illegal transitions cause no durable mutation. |
 | `BOT-007` | Crash before and after durable intent commit and before/after FSM clear proves commit-before-clear, one intent, resumability, and no foreign User/session creation. |
-| `BOT-008` | Projection completion triggers the two current educational messages, acknowledgements, welcome message, channel link, WebApp link, and channel-join controls in the exact current order and conditions. |
+| `BOT-008` | Projection completion atomically triggers the two current educational messages before the panel, then acknowledgements, welcome message, channel link, WebApp link, and channel-join controls in the exact current order and conditions. Repeat with the Telegram user already a channel member, admin, and owner; no absent `chat_join_request` may bypass the tutorials. Cover out-of-order and duplicate acknowledgements and recovery through `/start`. |
 
 #### Authoritative registration and reconciliation
 
@@ -2253,8 +2257,8 @@ race under test.
 | Stale foreign full-User event | Iran-owned fields are not overwritten |
 | Foreign onboarding patch includes role/address | Unauthorized fields dropped and redacted security event recorded |
 | Onboarding step 2 followed by stale step 1 | Stored completion remains step 2; no regression |
-| Direct Telegram registration becomes projection-complete | Existing linked-account/panel and channel-join flow starts unchanged |
-| Existing channel join and tutorial acknowledgements | Same two messages, order, conditions, callbacks, and completion behavior |
+| Direct Telegram registration becomes projection-complete | Existing tutorial gate starts before linked-account/panel exposure, independently of channel membership |
+| Existing channel join and tutorial acknowledgements | Same two messages, order, callbacks, completion behavior, and final welcome; duplicate/out-of-order callbacks fail closed |
 | Generic User patch contains trade counters | Counters ignored/rejected; existing domain authority remains unchanged |
 | Foreign legacy link-token completion | Iran-authoritative link service decides; no foreign User mutation |
 | Concurrent invitation creation across kinds/owners | Chosen uniqueness policy returns deterministic non-duplicate result |

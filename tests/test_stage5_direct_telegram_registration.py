@@ -1318,6 +1318,10 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
             resolution = start.RegistrationHandoffResolution(status=status, user=user)
             with self.subTest(status=status), patch.object(
                 start,
+                "_ensure_registration_onboarding",
+                new=AsyncMock(return_value=(user, None)),
+            ), patch.object(
+                start,
                 "build_linked_account_panel_message",
                 new=AsyncMock(return_value="existing panel"),
             ) as build_panel, patch.object(
@@ -1332,6 +1336,61 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
             for key, value in expected_flags.items():
                 self.assertEqual(build_panel.await_args.kwargs[key], value)
             set_anchor.assert_called_once_with(88, 77)
+
+    async def test_handoff_starts_required_tutorial_before_exposing_panel(self):
+        msg = message()
+        user = SimpleNamespace(id=19, telegram_id=7001, role=UserRole.STANDARD)
+        resolution = start.RegistrationHandoffResolution(
+            status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+            user=user,
+        )
+        with patch.object(
+            start,
+            "_ensure_registration_onboarding",
+            new=AsyncMock(return_value=(user, start.OFFER_TUTORIAL_STEP)),
+        ), patch.object(
+            start,
+            "build_linked_account_panel_message",
+            new=AsyncMock(),
+        ) as build_panel, patch.object(start, "set_anchor") as set_anchor:
+            await start._send_registration_handoff(msg, resolution)
+
+        self.assertIn("راهنمای سریع ثبت آفر", msg.answer.await_args.args[0])
+        self.assertIsNotNone(msg.answer.await_args.kwargs["reply_markup"])
+        build_panel.assert_not_awaited()
+        set_anchor.assert_called_once_with(88, 77)
+
+    async def test_registration_handoff_persists_tutorial_gate_monotonically(self):
+        user = SimpleNamespace(
+            id=19,
+            telegram_id=7001,
+            is_deleted=False,
+            bot_onboarding_required_step=0,
+            bot_onboarding_completed_step=0,
+        )
+        session = FakeSession(user)
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ):
+            loaded_user, pending_step = await start._ensure_registration_onboarding(user)
+
+        self.assertIs(loaded_user, user)
+        self.assertEqual(user.bot_onboarding_required_step, start.BOT_ONBOARDING_REQUIRED_STEP)
+        self.assertEqual(user.bot_onboarding_completed_step, 0)
+        self.assertEqual(pending_step, start.OFFER_TUTORIAL_STEP)
+        self.assertEqual(session.events, ["commit"])
+
+        user.bot_onboarding_completed_step = start.BOT_ONBOARDING_REQUIRED_STEP
+        user.bot_onboarding_required_step = start.BOT_ONBOARDING_REQUIRED_STEP
+        with patch.object(
+            start,
+            "AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ):
+            _, pending_step = await start._ensure_registration_onboarding(user)
+        self.assertIsNone(pending_step)
 
     async def test_handoff_wait_stops_on_terminal_and_returns_pending_at_zero_timeout(self):
         pending = start.RegistrationHandoffResolution(

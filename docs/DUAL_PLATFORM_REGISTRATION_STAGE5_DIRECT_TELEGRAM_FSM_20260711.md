@@ -38,7 +38,9 @@ still pending. That authorization does not waive the review or rollout gates.
   cannot complete directly.
 - Default flags are false. Either flag being false preserves the current Web-only redirect.
 - Existing linked-account panel text, menu, channel join, two tutorials, acknowledgement callbacks,
-  welcome message, channel link, and WebApp link are not reimplemented or reordered.
+  welcome message, channel link, and WebApp link are not reimplemented or reordered. Successful
+  handoff activates the existing tutorial gate before panel exposure, independently of whether the
+  Telegram user is already a channel member, admin, or owner.
 - Logs contain only bounded reason/error codes and opaque intent ids. Token, mobile, Telegram id,
   address, profile text, contact payload, and command body are not logged by the new path.
 - Post-commit polling failure returns the explicit pending-not-final state. It cannot roll back or
