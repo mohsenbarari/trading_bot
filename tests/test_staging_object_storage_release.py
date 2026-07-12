@@ -100,6 +100,37 @@ class StagingObjectStorageReleaseTests(unittest.TestCase):
         self.assertIn("project_payload", manifest["artifacts"])
         self.assertEqual(payload["channels"]["iran-staging"]["key"], "staging/deploy-bridge/channels/iran-staging/latest.json")
 
+    def test_artifact_upload_uses_bounded_managed_multipart_transfer(self):
+        tmpdir, artifacts = self.make_artifacts()
+        self.addCleanup(tmpdir.cleanup)
+        client = mock.Mock()
+        item = {
+            "key": "staging/deploy-bridge/releases/abc123/project.tar.gz",
+            "sha256": "digest",
+        }
+
+        release.upload_artifact(
+            client,
+            bucket="staging-bucket",
+            item=item,
+            path=artifacts["project_payload"],
+            name="project_payload",
+            release_sha="abc123",
+        )
+
+        client.upload_file.assert_called_once()
+        call = client.upload_file.call_args
+        self.assertEqual(call.args[:3], (
+            str(artifacts["project_payload"]),
+            "staging-bucket",
+            item["key"],
+        ))
+        self.assertEqual(call.kwargs["ExtraArgs"]["Metadata"]["release-sha"], "abc123")
+        transfer = call.kwargs["Config"]
+        self.assertEqual(transfer.multipart_threshold, release.ARTIFACT_MULTIPART_THRESHOLD)
+        self.assertEqual(transfer.multipart_chunksize, release.ARTIFACT_MULTIPART_CHUNK_SIZE)
+        self.assertFalse(transfer.use_threads)
+
     def test_non_staging_prefix_is_rejected(self):
         tmpdir, artifacts = self.make_artifacts()
         self.addCleanup(tmpdir.cleanup)

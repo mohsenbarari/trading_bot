@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -46,6 +47,8 @@ ALLOWED_ARTIFACTS = {
     "nginx_artifact",
     "runtime_env_encrypted",
 }
+ARTIFACT_MULTIPART_THRESHOLD = 1024 * 1024
+ARTIFACT_MULTIPART_CHUNK_SIZE = 8 * 1024 * 1024
 
 
 def safe_slug(value: str) -> str:
@@ -73,6 +76,36 @@ def s3_client(config: dict[str, str], timeout: float):
             read_timeout=timeout,
             retries={"max_attempts": 2},
             s3={"addressing_style": "path"},
+        ),
+    )
+
+
+def upload_artifact(
+    client: Any,
+    *,
+    bucket: str,
+    item: dict[str, Any],
+    path: Path,
+    name: str,
+    release_sha: str,
+) -> None:
+    client.upload_file(
+        str(path),
+        bucket,
+        str(item["key"]),
+        ExtraArgs={
+            "Metadata": {
+                "release-sha": safe_slug(release_sha),
+                "sha256": str(item["sha256"]),
+                "artifact-name": name,
+                "schema": "staging-release-v1",
+            }
+        },
+        Config=TransferConfig(
+            multipart_threshold=ARTIFACT_MULTIPART_THRESHOLD,
+            multipart_chunksize=ARTIFACT_MULTIPART_CHUNK_SIZE,
+            max_concurrency=1,
+            use_threads=False,
         ),
     )
 
@@ -287,24 +320,20 @@ def upload_release(args: argparse.Namespace) -> int:
     try:
         for name, item in manifest["artifacts"].items():
             path = artifact_paths[name]
-            with path.open("rb") as body:
-                put_response = client.put_object(
-                    Bucket=config["bucket"],
-                    Key=item["key"],
-                    Body=body,
-                    Metadata={
-                        "release-sha": safe_slug(str(manifest["release_sha"])),
-                        "sha256": str(item["sha256"]),
-                        "artifact-name": name,
-                        "schema": "staging-release-v1",
-                    },
-                )
+            upload_artifact(
+                client,
+                bucket=config["bucket"],
+                item=item,
+                path=path,
+                name=name,
+                release_sha=str(manifest["release_sha"]),
+            )
             head_response = client.head_object(Bucket=config["bucket"], Key=item["key"])
             content_length = int(head_response.get("ContentLength") or -1)
             if content_length != int(item["size_bytes"]):
                 raise ValueError(f"Uploaded size mismatch for {name}: expected {item['size_bytes']}, got {content_length}")
             upload_summary[name] = {
-                "put_status": put_response.get("ResponseMetadata", {}).get("HTTPStatusCode"),
+                "transfer": "managed_multipart",
                 "head_status": head_response.get("ResponseMetadata", {}).get("HTTPStatusCode"),
                 "content_length": content_length,
             }
