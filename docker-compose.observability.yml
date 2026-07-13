@@ -1,6 +1,6 @@
 services:
   loki:
-    image: grafana/loki:3
+    image: grafana/loki:3.5.12
     container_name: trading_bot_loki
     command: -config.file=/etc/loki/config.yml
     ports:
@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
 
   promtail:
-    image: grafana/promtail:3
+    image: grafana/promtail:3.5.12
     container_name: trading_bot_promtail
     command: -config.file=/etc/promtail/config.yml
     volumes:
@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:11
+    image: grafana/grafana:11.6.16
     container_name: trading_bot_grafana
     ports:
       - "127.0.0.1:3000:3000"

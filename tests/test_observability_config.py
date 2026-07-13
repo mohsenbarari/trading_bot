@@ -8,6 +8,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ObservabilityConfigTests(unittest.TestCase):
+    def test_observability_images_use_pullable_pinned_versions(self):
+        compose = (ROOT / "docker-compose.observability.yml").read_text(encoding="utf-8")
+
+        images = dict(re.findall(r"(?m)^\s*image:\s*(grafana/(?:grafana|loki|promtail)):(\S+)\s*$", compose))
+        self.assertEqual(set(images), {"grafana/grafana", "grafana/loki", "grafana/promtail"})
+        for image, tag in images.items():
+            with self.subTest(image=image):
+                self.assertRegex(tag, r"^\d+\.\d+\.\d+$")
+
     def test_promtail_keeps_original_json_line_for_loki_queries(self):
         config = (ROOT / "observability/promtail/promtail-config.yml").read_text(encoding="utf-8")
 
@@ -62,6 +71,11 @@ class ObservabilityConfigTests(unittest.TestCase):
 
         promtail = (ROOT / "observability/promtail/promtail-config.yml").read_text(encoding="utf-8")
         self.assertIsNone(re.search(r"(?m)^\s*source:\s*message\s*$", promtail))
+
+        rule_uids = re.findall(r"(?m)^\s*- uid:\s*(\S+)\s*$", rules)
+        self.assertEqual(len(rule_uids), len(set(rule_uids)))
+        self.assertTrue(rule_uids)
+        self.assertTrue(all(len(uid) <= 40 for uid in rule_uids))
 
     def test_public_nginx_configs_block_metrics_endpoint(self):
         paths = [

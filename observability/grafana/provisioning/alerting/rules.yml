@@ -777,7 +777,7 @@ groups:
           summary: Cross-server sync retry queue is not empty.
           runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-retry-queue-non-empty
 
-      - uid: trading-bot-registration-job-heartbeat-stale
+      - uid: trading-bot-reg-job-heartbeat-stale
         title: Telegram registration reconciliation heartbeat stale
         condition: C
         data:
@@ -790,7 +790,7 @@ groups:
             model:
               refId: A
               queryType: range
-              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" | unwrap registration_job_heartbeat_unhealthy [2m])'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" | keep server_mode, registration_job_heartbeat_unhealthy | unwrap registration_job_heartbeat_unhealthy [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
@@ -843,7 +843,7 @@ groups:
             model:
               refId: A
               queryType: range
-              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" | unwrap registration_job_pending_healthy_age_seconds [2m])'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" | keep server_mode, registration_job_pending_healthy_age_seconds | unwrap registration_job_pending_healthy_age_seconds [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
@@ -883,7 +883,7 @@ groups:
         annotations:
           summary: A Telegram registration intent has remained pending for more than 5 minutes while connectivity is healthy.
 
-      - uid: trading-bot-login-sms-fallback-heartbeat-stale
+      - uid: trading-bot-otp-fallback-heartbeat-stale
         title: Login SMS fallback heartbeat stale
         condition: C
         data:
@@ -896,7 +896,7 @@ groups:
             model:
               refId: A
               queryType: range
-              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" | unwrap login_sms_fallback_job_heartbeat_unhealthy [2m])'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" | keep server_mode, login_sms_fallback_job_heartbeat_unhealthy | unwrap login_sms_fallback_job_heartbeat_unhealthy [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
@@ -949,7 +949,7 @@ groups:
             model:
               refId: A
               queryType: range
-              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" | unwrap login_sms_fallback_job_lag_seconds [2m])'
+              expr: 'last_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" | keep server_mode, login_sms_fallback_job_lag_seconds | unwrap login_sms_fallback_job_lag_seconds [2m])'
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:

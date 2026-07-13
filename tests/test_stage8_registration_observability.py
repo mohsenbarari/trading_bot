@@ -567,15 +567,15 @@ class Stage8AlertTests(unittest.TestCase):
             "observability/grafana/provisioning/alerting/rules.yml"
         ).read_text(encoding="utf-8")
         registration_heartbeat = rules.split(
-            "uid: trading-bot-registration-job-heartbeat-stale",
+            "uid: trading-bot-reg-job-heartbeat-stale",
             1,
         )[1].split("uid: trading-bot-registration-pending-healthy", 1)[0]
         registration_pending = rules.split(
             "uid: trading-bot-registration-pending-healthy",
             1,
-        )[1].split("uid: trading-bot-login-sms-fallback-heartbeat-stale", 1)[0]
+        )[1].split("uid: trading-bot-otp-fallback-heartbeat-stale", 1)[0]
         otp_heartbeat = rules.split(
-            "uid: trading-bot-login-sms-fallback-heartbeat-stale",
+            "uid: trading-bot-otp-fallback-heartbeat-stale",
             1,
         )[1].split("uid: trading-bot-login-sms-fallback-lag-high", 1)[0]
         otp_lag = rules.split(
@@ -586,20 +586,33 @@ class Stage8AlertTests(unittest.TestCase):
         self.assertIn("last_over_time", registration_heartbeat)
         self.assertIn('| server_mode="foreign"', registration_heartbeat)
         self.assertIn("registration_job_heartbeat_unhealthy", registration_heartbeat)
+        self.assertIn(
+            "keep server_mode, registration_job_heartbeat_unhealthy",
+            registration_heartbeat,
+        )
         self.assertIn("noDataState: OK", registration_heartbeat)
         self.assertIn("for: 0s", registration_heartbeat)
         self.assertIn("last_over_time", registration_pending)
         self.assertIn('| server_mode="foreign"', registration_pending)
         self.assertIn("registration_job_pending_healthy_age_seconds", registration_pending)
+        self.assertIn(
+            "keep server_mode, registration_job_pending_healthy_age_seconds",
+            registration_pending,
+        )
         self.assertNotIn("max_over_time", registration_pending)
         self.assertIn("for: 0s", registration_pending)
         self.assertIn("last_over_time", otp_heartbeat)
         self.assertIn('| server_mode="iran"', otp_heartbeat)
         self.assertIn("login_sms_fallback_job_heartbeat_unhealthy", otp_heartbeat)
+        self.assertIn(
+            "keep server_mode, login_sms_fallback_job_heartbeat_unhealthy",
+            otp_heartbeat,
+        )
         self.assertIn("noDataState: OK", otp_heartbeat)
         self.assertIn("for: 0s", otp_heartbeat)
         self.assertIn("last_over_time", otp_lag)
         self.assertIn('| server_mode="iran"', otp_lag)
+        self.assertIn("keep server_mode, login_sms_fallback_job_lag_seconds", otp_lag)
         self.assertNotIn("max_over_time", otp_lag)
         self.assertIn("for: 0s", otp_lag)
 
