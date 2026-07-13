@@ -53,6 +53,7 @@ export interface CustomerTradeSummary {
   id: number
   trade_number: number
   trade_type: string
+  settlement_type: 'cash' | 'tomorrow'
   commodity_name: string
   quantity: number
   price: number

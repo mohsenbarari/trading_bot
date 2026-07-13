@@ -140,13 +140,24 @@ class BotTradeHistoryGenerateExcelTests(unittest.IsolatedAsyncioTestCase):
 
         try:
             sheet = DummyWorkbook.last_instance.active
-            headers = [sheet.cell(4, column).value for column in range(1, 9)]
+            headers = [sheet.cell(4, column).value for column in range(1, 10)]
             self.assertEqual(
                 headers,
-                ["ردیف", "شماره معامله", "تاریخ و ساعت", "طرف دیگر معامله", "نوع معامله", "کالا", "تعداد", "قیمت"],
+                [
+                    "ردیف",
+                    "شماره معامله",
+                    "تاریخ و ساعت",
+                    "طرف دیگر معامله",
+                    "نوع معامله",
+                    "نوع تسویه",
+                    "کالا",
+                    "تعداد",
+                    "قیمت",
+                ],
             )
             self.assertEqual(sheet.cell(5, 4).value, "offer-owner")
             self.assertEqual(sheet.cell(6, 5).value, "فروش")
+            self.assertEqual(sheet.cell(6, 6).value, "نقد حاضر")
             self.assertEqual(sheet.cell(6, 4).value, "other-side")
         finally:
             if os.path.exists(filename):

@@ -90,6 +90,46 @@ describe('OffersList.vue', () => {
     expect(wrapper.find('.price').text()).not.toContain('50,000')
   })
 
+  it('labels cash and tomorrow offers explicitly in market cards', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 21,
+          offer_type: 'buy',
+          settlement_type: 'cash',
+          commodity_name: 'امام',
+          quantity: 20,
+          remaining_quantity: 20,
+          price: 176000,
+          viewer_effective_price: 176000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+        },
+        {
+          id: 22,
+          offer_type: 'sell',
+          settlement_type: 'tomorrow',
+          commodity_name: 'ربع بهار',
+          quantity: 40,
+          remaining_quantity: 40,
+          price: 178000,
+          viewer_effective_price: 178000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+        },
+      ],
+    })
+
+    expect(wrapper.findAll('.offer-settlement').map((label) => label.text())).toEqual([
+      'نقد حاضر ☀️',
+      'فردا ➡️',
+    ])
+  })
+
   it('deduplicates retail lot buttons and falls back for invalid display price and unknown customer tier labels', async () => {
     const wrapper = await mountOffersList({
       offers: [

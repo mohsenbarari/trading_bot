@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.enums import UserAccountStatus, UserRole
+from core.enums import SettlementType, UserAccountStatus, UserRole
 from core.services.bot_access_policy import BotAccessDecision
 from core.services import trade_notification_audience_service as service
 from models.customer_relation import CustomerTier
@@ -53,6 +53,7 @@ def make_trade(
     offer_user,
     responder_user,
     trade_type=TradeType.BUY,
+    settlement_type=SettlementType.CASH,
     status=TradeStatus.COMPLETED,
     offer_home_server: str = "iran",
     notes: str | None = "توضیح تست",
@@ -69,6 +70,7 @@ def make_trade(
         commodity_id=3,
         commodity=SimpleNamespace(name="امام"),
         trade_type=trade_type,
+        settlement_type=settlement_type,
         quantity=20,
         price=150000,
         status=status,
@@ -152,6 +154,26 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("توضیحات: توضیح تست", telegram.message)
         self.assertEqual(built.audience_mock.await_args_list[0].args[1], [responder.id])
         self.assertEqual(built.audience_mock.await_args_list[1].args[1], [owner.id])
+
+    async def test_tomorrow_settlement_is_present_in_webapp_telegram_and_payload(self):
+        owner = make_user(10, account_name="seller", telegram_id=9010)
+        responder = make_user(20, account_name="buyer", telegram_id=9020)
+        trade = make_trade(
+            offer_user=owner,
+            responder_user=responder,
+            settlement_type=SettlementType.TOMORROW,
+        )
+
+        built = await self.build_audience(
+            trade,
+            audience_side_effect=[[responder.id], [owner.id]],
+            users=[owner, responder],
+        )
+
+        for recipient in built.result.recipients:
+            self.assertIn("تسویه: فردایی", recipient.webapp_message)
+            self.assertIn("تسویه: فردایی", channel(recipient, "telegram").message)
+            self.assertEqual(recipient.extra_payload["settlement_type"], "tomorrow")
 
     async def test_admin_normal_user_trade_keeps_bot_eligible_roles(self):
         admin = make_user(1, account_name="admin", role=UserRole.SUPER_ADMIN, telegram_id=9001)

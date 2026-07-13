@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import unittest
 
 from core.offer_sync_payload import build_offer_sync_payload
+from core.enums import SettlementType
 from models.offer import OfferStatus, OfferType
 
 
@@ -16,6 +17,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
             actor_user_id=12,
             home_server="iran",
             offer_type=OfferType.SELL,
+            settlement_type=SettlementType.TOMORROW,
             commodity_id=4,
             quantity=25,
             remaining_quantity=25,
@@ -47,6 +49,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
         self.assertEqual(payload["price_warning_type"], "sell_below_lowest_active")
         self.assertEqual(payload["offer_public_id"], "ofr_warning_7")
         self.assertEqual(payload["version_id"], 3)
+        self.assertEqual(payload["settlement_type"], "tomorrow")
 
     def test_payload_defaults_missing_competitive_warning_fields(self):
         offer = SimpleNamespace(
@@ -56,6 +59,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
             actor_user_id=None,
             home_server="foreign",
             offer_type=OfferType.BUY,
+            settlement_type=SettlementType.CASH,
             commodity_id=4,
             quantity=1,
             remaining_quantity=1,
@@ -77,6 +81,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
 
         self.assertFalse(payload["exclude_from_competitive_price"])
         self.assertIsNone(payload["price_warning_type"])
+        self.assertEqual(payload["settlement_type"], "cash")
 
 
 if __name__ == "__main__":

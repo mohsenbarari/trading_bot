@@ -4,6 +4,7 @@ from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, Fore
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
+from core.enums import SettlementType
 import enum
 
 
@@ -66,6 +67,13 @@ class Trade(Base):
     
     # نوع معامله (از دید responder)
     trade_type = Column(Enum(TradeType), nullable=False)
+    # Snapshot مستقل از آفر برای حفظ نوع تسویه در تاریخچه.
+    settlement_type = Column(
+        Enum(SettlementType),
+        nullable=False,
+        default=SettlementType.CASH,
+        server_default=SettlementType.CASH.name,
+    )
     
     # تعداد و قیمت توافق شده
     quantity = Column(Integer, nullable=False)

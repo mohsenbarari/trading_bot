@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from core.offer_identity import build_offer_public_link, generate_offer_public_id, is_offer_public_id_shape
 from core.offer_source import OfferSourceSurface
+from core.enums import SettlementType
 from core.services.offer_creation_service import (
     OfferCreationCommand,
     OfferCreationValidationError,
@@ -20,6 +21,7 @@ class OfferCreationServiceTests(unittest.TestCase):
                 owner_user_id=1,
                 actor_user_id=1,
                 offer_type="buy",
+                settlement_type="tomorrow",
                 commodity_id=7,
                 quantity=12,
                 price=1000,
@@ -28,6 +30,7 @@ class OfferCreationServiceTests(unittest.TestCase):
 
         self.assertEqual(offer.home_server, "iran")
         self.assertEqual(offer.offer_type, OfferType.BUY)
+        self.assertEqual(offer.settlement_type, SettlementType.TOMORROW)
         self.assertEqual(offer.status, OfferStatus.ACTIVE)
         self.assertTrue(is_offer_public_id_shape(offer.offer_public_id))
 
@@ -46,6 +49,7 @@ class OfferCreationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(offer.home_server, "foreign")
+        self.assertEqual(offer.settlement_type, SettlementType.CASH)
         self.assertEqual(offer.original_lot_sizes, [5, 15])
         self.assertTrue(is_offer_public_id_shape(offer.offer_public_id))
 

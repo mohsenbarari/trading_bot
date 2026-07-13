@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
+import { offerSettlementLabel, normalizeSettlementType, type SettlementType } from '../utils/settlementType';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
 import {
   AppOfferCard,
@@ -24,6 +25,8 @@ interface TradeLotSuggestionState {
   offerId: number;
   offerType: 'buy' | 'sell' | '';
   offerTypeLabel: string;
+  settlementType: SettlementType;
+  settlementTypeLabel: string;
   commodityName: string;
   price: number;
   remainingQuantity: number;
@@ -313,6 +316,8 @@ function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSug
     offerId: data.offer_id || sourceOffer?.id || 0,
     offerType: data.offer_type || sourceOffer?.offer_type || '',
     offerTypeLabel: data.offer_type_label || ((data.offer_type || sourceOffer?.offer_type) === 'buy' ? 'خرید' : 'فروش'),
+    settlementType: normalizeSettlementType(data.settlement_type ?? sourceOffer?.settlement_type),
+    settlementTypeLabel: data.settlement_type_label || offerSettlementLabel(data.settlement_type ?? sourceOffer?.settlement_type),
     commodityName: data.commodity_name || sourceOffer?.commodity_name || 'کالا',
     price: Number(data.price ?? getDisplayedOfferPrice(sourceOffer) ?? 0),
     remainingQuantity: Number(data.remaining_quantity || sourceOffer?.remaining_quantity || sourceOffer?.quantity || 0),
@@ -352,6 +357,8 @@ function syncTradeSuggestionFromOffers() {
     ...tradeSuggestion.value,
     offerType: sourceOffer.offer_type || tradeSuggestion.value.offerType,
     offerTypeLabel: sourceOffer.offer_type === 'buy' ? 'خرید' : 'فروش',
+    settlementType: normalizeSettlementType(sourceOffer.settlement_type),
+    settlementTypeLabel: offerSettlementLabel(sourceOffer.settlement_type),
     commodityName: sourceOffer.commodity_name || tradeSuggestion.value.commodityName,
     price: getDisplayedOfferPrice(sourceOffer) || tradeSuggestion.value.price,
     remainingQuantity: remaining,
@@ -469,6 +476,7 @@ async function cancelOwnOffer(offerId: number) {
     :intro-text="tradeSuggestion?.introText || ''"
     :offer-type="tradeSuggestion?.offerType || ''"
     :offer-type-label="tradeSuggestion?.offerTypeLabel || ''"
+    :settlement-type-label="tradeSuggestion?.settlementTypeLabel || ''"
     :commodity-name="tradeSuggestion?.commodityName || ''"
     :price="tradeSuggestion?.price || 0"
     :remaining-quantity="tradeSuggestion?.remainingQuantity || 0"
@@ -518,6 +526,7 @@ async function cancelOwnOffer(offerId: number) {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <AppOfferQuantityBadge>{{ getOfferQuantityLabel(offer) }}</AppOfferQuantityBadge>
+              <span class="offer-settlement">{{ offerSettlementLabel(offer.settlement_type) }}</span>
               <AppOfferPrice :value="getDisplayedOfferPrice(offer)" />
             </div>
             <AppOfferCustomerContext
@@ -825,12 +834,22 @@ async function cancelOwnOffer(offerId: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .commodity {
   font-weight: 700;
   font-size: 13px;
   color: var(--ds-text-primary);
+}
+
+.offer-settlement {
+  flex: 0 0 auto;
+  color: var(--ds-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .quantity-badge {

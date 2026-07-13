@@ -39,7 +39,7 @@ class BotTradeCreateStartTests(unittest.IsolatedAsyncioTestCase):
             await handle_trade_button(message, state, user=allowed_user)
         state.clear.assert_awaited_once()
         self.assertIn("ثبت لفظ دکمه‌ای غیرفعال شده", message.answer.await_args_list[-1].args[0])
-        self.assertIn("خ امام 30تا 75800", message.answer.await_args_list[-1].args[0])
+        self.assertIn("خ ن امام 30تا 75800", message.answer.await_args_list[-1].args[0])
 
 
 if __name__ == "__main__":

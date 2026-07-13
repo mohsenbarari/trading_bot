@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import BackgroundTasks, HTTPException
 
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
-from core.enums import NotificationCategory, NotificationLevel, UserRole
+from core.enums import NotificationCategory, NotificationLevel, SettlementType, UserRole
 from core.services.offer_expiry_service import OfferExpiryReason
 from models.customer_relation import CustomerTier
 from models.offer import OfferStatus, OfferType
@@ -85,6 +85,7 @@ def make_offer(**overrides):
         "is_wholesale": True,
         "lot_sizes": None,
         "offer_type": OfferType.SELL,
+        "settlement_type": SettlementType.TOMORROW,
         "price": 123456,
         "offer_public_id": "ofr_test_7",
         "home_server": "foreign",
@@ -208,6 +209,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_trade.trade_number, 10000)
         self.assertEqual(new_trade.offer_id, 7)
         self.assertEqual(new_trade.trade_type, TradeType.BUY)
+        self.assertEqual(new_trade.settlement_type, SettlementType.TOMORROW)
         self.assertEqual(new_trade.status, TradeStatus.COMPLETED)
         self.assertEqual(new_trade.quantity, 4)
         self.assertEqual(new_trade.responder_user_id, locked_user.id)
@@ -229,6 +231,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("👤 طرف معامله: seller", responder_notification_message)
         self.assertIn("🔢 شماره معامله: 10000", responder_notification_message)
         self.assertIn("🕐 زمان معامله: 1405/03/06   15:30", responder_notification_message)
+        self.assertIn("🗓️ تسویه: فردایی", responder_notification_message)
         self.assertEqual(
             notif_mock.await_args_list[0].kwargs,
             {
@@ -237,6 +240,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "extra_payload": {
                     "route": "/users/9?account_name=seller",
                     "trade_number": 10000,
+                    "settlement_type": "tomorrow",
                     "counterparty_profile_user_id": 9,
                     "counterparty_profile_account_name": "seller",
                     "highlight_accountant_user_id": None,

@@ -132,6 +132,7 @@ class FakeTradeModel:
     actor_user_id = ExpressionProbe("current_actor_user_id")
     commodity_id = ExpressionProbe("current_commodity_id")
     trade_type = ExpressionProbe("current_trade_type")
+    settlement_type = ExpressionProbe("current_settlement_type")
     quantity = ExpressionProbe("current_quantity")
     price = ExpressionProbe("current_price")
     status = ExpressionProbe("current_status")
@@ -172,6 +173,7 @@ class FakeTradeInsertBuilder:
             "actor_user_id": ExpressionProbe("incoming_actor_user_id"),
             "commodity_id": ExpressionProbe("incoming_commodity_id"),
             "trade_type": ExpressionProbe("incoming_trade_type"),
+            "settlement_type": ExpressionProbe("incoming_settlement_type"),
             "quantity": ExpressionProbe("incoming_quantity"),
             "price": ExpressionProbe("incoming_price"),
             "status": ExpressionProbe("incoming_status"),
@@ -244,6 +246,7 @@ def make_completed_trade(**overrides):
         "actor_user_id": 5,
         "commodity_id": 1,
         "trade_type": "buy",
+        "settlement_type": "tomorrow",
         "quantity": 3,
         "price": 120,
         "status": "completed",
@@ -262,6 +265,7 @@ def completed_trade_payload(**overrides):
         "actor_user_id": 5,
         "commodity_id": 1,
         "trade_type": "buy",
+        "settlement_type": "tomorrow",
         "quantity": 3,
         "price": 120,
         "status": "completed",
@@ -439,6 +443,7 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("current_status !=", rendered_where)
         self.assertIn("OR", rendered_where)
         self.assertIn("current_price IS NOT DISTINCT FROM incoming_price", rendered_where)
+        self.assertIn("current_settlement_type IS NOT DISTINCT FROM incoming_settlement_type", rendered_where)
         self.assertIn("current_trade_number IS NOT DISTINCT FROM incoming_trade_number", rendered_where)
 
     async def test_completed_trade_delete_is_ignored(self):
@@ -509,6 +514,27 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         existing_trade = make_completed_trade()
         db = ApplyDB([FakeTradeExecuteResult(existing_trade)])
         data = completed_trade_payload(price=121)
+
+        with patch("api.routers.sync._build_upsert_stmt") as builder, patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        builder.assert_not_called()
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("protected_business_field_mismatch", rendered_log)
+
+    async def test_completed_trade_settlement_mismatch_is_ignored(self):
+        existing_trade = make_completed_trade()
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade)])
+        data = completed_trade_payload(settlement_type="cash")
 
         with patch("api.routers.sync._build_upsert_stmt") as builder, patch("api.routers.sync.logger") as logger_mock:
             result = await _apply_item(

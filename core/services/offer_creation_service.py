@@ -6,7 +6,9 @@ from typing import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.enums import SettlementType
 from core.offer_identity import generate_offer_public_id
+from core.offer_settlement import normalize_settlement_type
 from core.offer_source import OfferSourceSurface, normalize_offer_source_surface, offer_home_server_for_source
 from models.offer import Offer, OfferStatus, OfferType
 
@@ -24,6 +26,7 @@ class OfferCreationCommand:
     commodity_id: int
     quantity: int
     price: int
+    settlement_type: SettlementType | str = SettlementType.CASH
     is_wholesale: bool = True
     lot_sizes: Sequence[int] | None = None
     original_lot_sizes: Sequence[int] | None = None
@@ -108,6 +111,7 @@ def build_authoritative_offer(command: OfferCreationCommand) -> Offer:
         actor_user_id=command.actor_user_id,
         home_server=home_server,
         offer_type=_normalize_offer_type(command.offer_type),
+        settlement_type=normalize_settlement_type(command.settlement_type),
         commodity_id=command.commodity_id,
         quantity=command.quantity,
         remaining_quantity=command.remaining_quantity if command.remaining_quantity is not None else command.quantity,

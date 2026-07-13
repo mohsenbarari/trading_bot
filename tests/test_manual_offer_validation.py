@@ -104,10 +104,12 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertEqual(payload["offer_id"], 77)
         self.assertEqual(payload["offer_type"], "sell")
         self.assertEqual(payload["offer_type_label"], "فروش")
+        self.assertEqual(payload["settlement_type"], "cash")
+        self.assertEqual(payload["settlement_type_label"], "نقد حاضر ☀️")
         self.assertEqual(payload["available_lots"], [24, 16, 8])
         self.assertEqual(payload["lot_summary"], "24 + 16 + 8")
         self.assertIn("بخش 10 عددی", payload["message"])
-        self.assertIn("🔴فروش سکه امامی 24 عدد 75,800", payload["message"])
+        self.assertIn("🔴فروش سکه امامی 24 عدد نقد حاضر ☀️ 75,800", payload["message"])
         self.assertIn("24 + 16 + 8", payload["message"])
 
     def test_lot_unavailable_payload_handles_empty_available_lots(self):
@@ -195,6 +197,12 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.original_find_commodity = offer_parser.find_commodity
         self.original_get_trading_settings = offer_parser.get_trading_settings
+        offer_parser.get_trading_settings = lambda: SimpleNamespace(
+            offer_min_quantity=5,
+            offer_max_quantity=50,
+            lot_min_size=5,
+            lot_max_count=5,
+        )
 
         async def fake_find_commodity(text):
             mapping = {
@@ -217,11 +225,12 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         offer_parser.get_trading_settings = self.original_get_trading_settings
 
     async def test_text_offer_accepts_required_manual_format(self):
-        result, error = await offer_parser.parse_offer_text("خ امام 30تا 75800 15 15: فقط نقدی")
+        result, error = await offer_parser.parse_offer_text("خ ن امام 30تا 75800 15 15: فقط نقدی")
 
         self.assertIsNone(error)
         self.assertIsNotNone(result)
         self.assertEqual(result.trade_type, "buy")
+        self.assertEqual(result.settlement_type, "cash")
         self.assertEqual(result.commodity_id, 1)
         self.assertEqual(result.quantity, 30)
         self.assertEqual(result.price, 75800)
@@ -236,14 +245,14 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_max_count=3,
         )
 
-        result, error = await offer_parser.parse_offer_text("خ امام 60تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ ن امام 60تا 75800")
 
         self.assertIsNone(error)
         self.assertIsNotNone(result)
         self.assertEqual(result.quantity, 60)
 
     async def test_text_offer_defaults_to_implicit_imam_when_commodity_is_omitted(self):
-        result, error = await offer_parser.parse_offer_text("خ 30تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ ن 30تا 75800")
 
         self.assertIsNone(error)
         self.assertIsNotNone(result)
@@ -252,12 +261,12 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_text_offer_rejects_invalid_manual_format(self):
         invalid_samples = [
-            "خ امام 51تا 75800",
-            "خ امام 30تا 9999",
-            "خ امام 30 75800",
-            "خ امام 30تا 75800 10 10",
-            "خ ربغ 30تا 75800",
-            "خ ربع بهار 10تا 75800".replace("ربع بهار", "ربع بهارک"),
+            "خ ن امام 51تا 75800",
+            "خ ن امام 30تا 9999",
+            "خ ن امام 30 75800",
+            "خ ن امام 30تا 75800 10 10",
+            "خ ن ربغ 30تا 75800",
+            "خ ن ربع بهار 10تا 75800".replace("ربع بهار", "ربع بهارک"),
         ]
 
         for sample in invalid_samples:
@@ -274,7 +283,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_max_count=4,
         )
 
-        result, error = await offer_parser.parse_offer_text("خ امام 45تا 184000 5 20 20: تک فیش")
+        result, error = await offer_parser.parse_offer_text("خ ن امام 45تا 184000 5 20 20: تک فیش")
 
         self.assertIsNone(result)
         self.assertIsNotNone(error)
@@ -310,7 +319,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.original_find_commodity("ناشناس 30تا 75800"), (None, "نامشخص"))
 
     async def test_parse_offer_text_guard_paths(self):
-        too_long_notes = "خ امام 30تا 75800:" + ("الف" * 201)
+        too_long_notes = "خ ن امام 30تا 75800:" + ("الف" * 201)
         result, error = await offer_parser.parse_offer_text(too_long_notes)
         self.assertIsNone(result)
         self.assertEqual(error.message, "❌ توضیحات نباید بیش از 200 کاراکتر باشد")
@@ -319,13 +328,13 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertIsNone(error)
 
-        result, error = await offer_parser.parse_offer_text("خ امام 30تا 75800 @")
+        result, error = await offer_parser.parse_offer_text("خ ن امام 30تا 75800 @")
         self.assertIsNone(result)
         self.assertEqual(error.message, "کاراکتر غیرمجاز: «@»")
 
-        result, error = await offer_parser.parse_offer_text("خ خرید امام 30تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ ن خرید امام 30تا 75800")
         self.assertIsNone(result)
-        self.assertEqual(error.message, "❌ چندین نشانگر خرید در لفظ وجود دارد")
+        self.assertEqual(error.message, "❌ نشانگر خرید یا فروش فقط در ابتدای لفظ مجاز است")
 
         offer_parser.get_trading_settings = lambda: SimpleNamespace(
             offer_min_quantity=5,
@@ -333,9 +342,47 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_min_size=5,
             lot_max_count=3,
         )
-        result, error = await offer_parser.parse_offer_text("خ امام 4تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ ن امام 4تا 75800")
         self.assertIsNone(result)
         self.assertEqual(error.message, "❌ حداقل تعداد باید 5 باشد")
+
+    async def test_text_offer_accepts_all_exact_settlement_prefixes(self):
+        cases = (
+            ("خ ن امام 30تا 75800", "buy", "cash"),
+            ("ف ن امام 30تا 75800", "sell", "cash"),
+            ("خ ن ف امام 30تا 75800", "buy", "tomorrow"),
+            ("ف ن ف امام 30تا 75800", "sell", "tomorrow"),
+            ("خرید نقد امام 30تا 75800", "buy", "cash"),
+            ("فروش نقد امام 30تا 75800", "sell", "cash"),
+            ("خرید نقد فردا امام 30تا 75800", "buy", "tomorrow"),
+            ("فروش نقد فردا امام 30تا 75800", "sell", "tomorrow"),
+        )
+
+        for sample, expected_trade_type, expected_settlement_type in cases:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(error)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.trade_type, expected_trade_type)
+                self.assertEqual(result.settlement_type, expected_settlement_type)
+
+    async def test_text_offer_rejects_legacy_and_loose_settlement_prefixes(self):
+        invalid_samples = (
+            "خ امام 30تا 75800",
+            "ف امام 30تا 75800",
+            "خرید امام 30تا 75800",
+            "فروش امام 30تا 75800",
+            "خ فردا امام 30تا 75800",
+            "خ ف امام 30تا 75800",
+            "خ ن فردا امام 30تا 75800",
+            "فروش فردا امام 30تا 75800",
+        )
+
+        for sample in invalid_samples:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(result)
+                self.assertIsNotNone(error)
 
 
 if __name__ == "__main__":

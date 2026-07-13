@@ -146,6 +146,7 @@ describe('CustomerWorkspaceView.vue', () => {
         id: 1,
         trade_number: 1001,
         trade_type: 'خرید',
+        settlement_type: 'tomorrow',
         commodity_name: 'ربع',
         quantity: 23,
         price: 50800,
@@ -406,6 +407,19 @@ describe('CustomerWorkspaceView.vue', () => {
     expect(wrapper.text()).toContain('تعداد معاملات')
     expect(wrapper.text()).toContain('۱۸٫۴ میلیون تومان')
     expect(wrapper.text()).toContain('ربع')
+  })
+
+  it('shows settlement type in the route-native customer trade history', async () => {
+    customerWorkspaceMocks.routeState.params = { relationId: '11' }
+    customerWorkspaceMocks.routeState.query = { tab: 'trades' }
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    await flushPromises()
+
+    expect(customerWorkspaceMocks.fetchOwnerCustomerTradesMock).toHaveBeenCalledWith(22, { limit: 20 })
+    expect(wrapper.text()).toContain('محسن')
+    expect(wrapper.text()).toContain('فردایی')
   })
 
   it('saves customer limits through the route-native detail form', async () => {

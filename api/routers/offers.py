@@ -42,6 +42,7 @@ from core.services.customer_relation_service import (
 from core.services.user_account_status_service import is_user_market_blocked
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_identity import build_offer_public_link, ensure_offer_public_id, is_offer_public_id_shape
+from core.offer_settlement import settlement_type_value
 from core.offer_request_policy import (
     OfferRequestVisibility,
     map_legacy_expire_reason,
@@ -161,6 +162,7 @@ router = APIRouter(
 class OfferCreate(BaseModel):
     """ایجاد لفظ جدید"""
     offer_type: str = Field(..., pattern="^(buy|sell)$", description="نوع: buy یا sell")
+    settlement_type: str = Field(default="cash", pattern="^(cash|tomorrow)$", description="تسویه: cash یا tomorrow")
     commodity_id: int = Field(..., gt=0)
     quantity: int = Field(..., gt=0)
     price: int = Field(..., gt=0)
@@ -181,6 +183,7 @@ class OfferResponse(BaseModel):
     user_account_name: str = ""
     is_own_offer: bool = False
     offer_type: str
+    settlement_type: str
     commodity_id: int
     commodity_name: str
     quantity: int
@@ -223,6 +226,7 @@ class PublicOfferResponse(BaseModel):
     public_link: str
     status: str
     offer_type: str
+    settlement_type: str
     commodity_name: str
     quantity: int
     remaining_quantity: int
@@ -343,6 +347,7 @@ def offer_to_response(
         user_account_name=owner_display_name,
         is_own_offer=is_own_offer,
         offer_type=offer.offer_type.value,
+        settlement_type=settlement_type_value(getattr(offer, "settlement_type", None)),
         commodity_id=offer.commodity_id,
         commodity_name=offer.commodity.name if offer.commodity else "نامشخص",
         quantity=offer.quantity,
@@ -419,6 +424,7 @@ def _build_public_offer_response(
         public_link=build_offer_public_link(offer_public_id),
         status=status_value,
         offer_type=_enum_value(getattr(offer, "offer_type", None)),
+        settlement_type=settlement_type_value(getattr(offer, "settlement_type", None)),
         commodity_name=getattr(commodity, "name", None) or "نامشخص",
         quantity=int(getattr(offer, "quantity", 0) or 0),
         remaining_quantity=remaining_quantity,
@@ -1063,6 +1069,7 @@ async def create_offer(
                 owner_user_id=owner_user.id,
                 actor_user_id=actor_user.id,
                 offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
+                settlement_type=offer_data.settlement_type,
                 commodity_id=offer_data.commodity_id,
                 quantity=offer_data.quantity,
                 price=offer_data.price,
@@ -1176,6 +1183,7 @@ async def create_offer(
         "public_link": build_offer_public_link(new_offer.offer_public_id),
         "user_id": None,
         "offer_type": new_offer.offer_type.value,
+        "settlement_type": settlement_type_value(getattr(new_offer, "settlement_type", None)),
         "commodity_id": new_offer.commodity_id,
         "commodity_name": new_offer.commodity.name,
         "quantity": new_offer.quantity,
@@ -1893,6 +1901,7 @@ async def parse_offer_text(
         success=True,
         data={
             "trade_type": result.trade_type,
+            "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
             "commodity_id": result.commodity_id,
             "commodity_name": result.commodity_name,
             "quantity": result.quantity,

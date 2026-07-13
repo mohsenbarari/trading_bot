@@ -10,6 +10,7 @@ async function mountAlert(overrides: Record<string, unknown> = {}) {
       introText: 'این مقدارها هنوز در دسترس هستند.',
       offerType: 'buy',
       offerTypeLabel: 'خرید',
+      settlementTypeLabel: 'فردایی',
       commodityName: 'سکه',
       price: 52000,
       remainingQuantity: 25,
@@ -42,6 +43,7 @@ describe('TradeLotSuggestionAlert.vue', () => {
     const wrapper = await mountAlert({ autoCloseSeconds: 3 })
 
     expect(wrapper.text()).toContain('بستن خودکار تا 3 ثانیه')
+    expect(wrapper.text()).toContain('فردایی')
 
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('بستن خودکار تا 2 ثانیه')

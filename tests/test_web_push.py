@@ -138,6 +138,7 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         offer = SimpleNamespace(
             id=42,
             offer_type=SimpleNamespace(value="buy"),
+            settlement_type=SimpleNamespace(value="tomorrow"),
             commodity_id=3,
             commodity=SimpleNamespace(name="سکه"),
             quantity=12,
@@ -152,10 +153,12 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["data"]["kind"], "market_offer")
         self.assertEqual(payload["data"]["offer_id"], 42)
         self.assertEqual(payload["data"]["offer_type"], "buy")
+        self.assertEqual(payload["data"]["settlement_type"], "tomorrow")
         self.assertEqual(payload["data"]["commodity_id"], 3)
         self.assertEqual(payload["data"]["commodity_name"], "سکه")
         self.assertIn("خرید سکه", payload["body"])
         self.assertIn("12", payload["body"])
+        self.assertIn("فردا ➡️", payload["body"])
         self.assertNotIn("091", repr(payload))
 
     async def test_market_offer_targets_require_enabled_subscription_and_preference(self):

@@ -113,6 +113,7 @@ class OffersPublicRoutesTests(unittest.IsolatedAsyncioTestCase):
             "public_link",
             "status",
             "offer_type",
+            "settlement_type",
             "commodity_name",
             "quantity",
             "remaining_quantity",
@@ -149,6 +150,7 @@ class OffersPublicRoutesTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(forbidden_keys.isdisjoint(payload.keys()))
             self.assertEqual(payload["offer_public_id"], PUBLIC_ID)
             self.assertEqual(payload["public_link"], f"/market?offer={PUBLIC_ID}")
+            self.assertEqual(payload["settlement_type"], "cash")
             self.assertIn("offers.offer_public_id", db.statements[0])
 
     async def test_public_detail_denies_unauthenticated_and_unrelated_viewers(self):

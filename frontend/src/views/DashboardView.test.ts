@@ -167,6 +167,7 @@ describe('DashboardView.vue', () => {
         {
           id: 101,
           trade_type: 'buy',
+          settlement_type: 'tomorrow',
           offer_user_id: 44,
           responder_user_id: 12,
           counterparty_name: 'حسین رضایی',
@@ -217,6 +218,7 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-card').text()).toContain('طرف مقابل معامله')
     expect(wrapper.get('.today-trades-card').text()).toContain('حسین رضایی')
     expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
+    expect(wrapper.get('.today-trades-card').text()).toContain('فردایی')
     expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
     expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
     expect(wrapper.find('.dashboard-shortcuts').exists()).toBe(false)

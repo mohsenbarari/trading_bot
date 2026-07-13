@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from core.utils import to_jalali_str
+from core.offer_settlement import trade_settlement_label
 from models.trade import TradeType
 
 
@@ -17,6 +18,7 @@ class TradeHistoryExportRow:
     date_time_label: str
     counterparty_name: str
     trade_type_label: str
+    settlement_type_label: str
     commodity_name: str
     quantity: int
     price: int
@@ -79,6 +81,7 @@ def build_trade_history_export_rows(trades: Sequence[object], perspective_user_i
                 date_time_label=to_jalali_str(getattr(trade, "created_at", None), "%Y/%m/%d %H:%M") or "---",
                 counterparty_name=resolve_counterparty_account_name_for_perspective(trade, perspective_user_id) or "---",
                 trade_type_label=resolve_trade_type_label_for_perspective(trade, perspective_user_id),
+                settlement_type_label=trade_settlement_label(getattr(trade, "settlement_type", None)),
                 commodity_name=getattr(getattr(trade, "commodity", None), "name", "---"),
                 quantity=int(getattr(trade, "quantity", 0) or 0),
                 price=int(getattr(trade, "price", 0) or 0),
@@ -114,6 +117,7 @@ def _history_table_headers() -> list[str]:
         "تاریخ و ساعت",
         "طرف دیگر معامله",
         "نوع معامله",
+        "نوع تسویه",
         "کالا",
         "تعداد",
         "قیمت",
@@ -167,6 +171,7 @@ def generate_trade_history_excel_file(
             row.date_time_label,
             row.counterparty_name,
             row.trade_type_label,
+            row.settlement_type_label,
             row.commodity_name,
             row.quantity,
             row.price,
@@ -176,7 +181,7 @@ def generate_trade_history_excel_file(
             cell.alignment = center
 
     if hasattr(worksheet, "column_dimensions"):
-        widths = {"A": 8, "B": 18, "C": 20, "D": 24, "E": 14, "F": 18, "G": 12, "H": 18}
+        widths = {"A": 8, "B": 18, "C": 20, "D": 24, "E": 14, "F": 14, "G": 18, "H": 12, "I": 18}
         for column_name, width in widths.items():
             worksheet.column_dimensions[column_name].width = width
 
@@ -236,6 +241,7 @@ def generate_trade_history_pdf_file(
             row.date_time_label,
             _shape_rtl_text(row.counterparty_name),
             _shape_rtl_text(row.trade_type_label),
+            _shape_rtl_text(row.settlement_type_label),
             _shape_rtl_text(row.commodity_name),
             str(row.quantity),
             f"{row.price:,}",
@@ -244,7 +250,7 @@ def generate_trade_history_pdf_file(
 
     table = reportlab_platypus.Table(
         table_data,
-        colWidths=[68, 44, 64, 52, 88, 84, 64, 34],
+        colWidths=[68, 44, 64, 56, 52, 88, 84, 64, 34],
     )
     table.setStyle(
         reportlab_platypus.TableStyle(

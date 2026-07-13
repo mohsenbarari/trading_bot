@@ -2,7 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
-from api.routers.sync import receive_sync_data
+from api.routers.sync import _publish_synced_offer_created_realtime_after_sync, receive_sync_data
+from core.enums import SettlementType
 
 
 class FakeOfferExecuteResult:
@@ -75,6 +76,38 @@ def make_terminal_offer():
 
 
 class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
+    async def test_synced_offer_realtime_payload_preserves_tomorrow_settlement(self):
+        offer = SimpleNamespace(
+            id=7,
+            offer_public_id="ofr_sync_7",
+            status="active",
+            offer_type="sell",
+            settlement_type=SettlementType.TOMORROW,
+            commodity_id=2,
+            commodity=SimpleNamespace(name="ربع بهار"),
+            quantity=40,
+            remaining_quantity=40,
+            price=178000,
+            created_at=None,
+            notes=None,
+            is_wholesale=True,
+            lot_sizes=None,
+            original_lot_sizes=None,
+        )
+        db = FakeDB([FakeOfferExecuteResult(offer)])
+
+        with patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
+        ), patch(
+            "core.trading_settings.get_trading_settings_async", new=AsyncMock(return_value=None)
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock:
+            await _publish_synced_offer_created_realtime_after_sync(db, [7, 7])
+
+        publish_mock.assert_awaited_once()
+        event_name, payload = publish_mock.await_args.args
+        self.assertEqual(event_name, "offer:created")
+        self.assertEqual(payload["settlement_type"], "tomorrow")
+
     async def test_receive_sync_data_publishes_new_foreign_offer(self):
         offer = make_offer()
         db = FakeDB([FakeOfferExecuteResult(offer)])

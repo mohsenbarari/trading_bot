@@ -46,6 +46,7 @@ import {
   type CustomerTradeSummary,
 } from '../composables/useOwnerCustomers'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
+import { tradeSettlementLabel } from '../utils/settlementType'
 
 const route = useRoute()
 const router = useRouter()
@@ -823,7 +824,7 @@ onBeforeUnmount(() => {
                   v-for="trade in detailTrades"
                   :key="trade.id"
                   :title="`${trade.commodity_name} - ${trade.trade_type}`"
-                  :description="`${trade.counterparty_name || 'طرف مقابل نامشخص'} · ${formatDate(trade.created_at)}`"
+                  :description="`${trade.counterparty_name || 'طرف مقابل نامشخص'} · ${tradeSettlementLabel(trade.settlement_type)} · ${formatDate(trade.created_at)}`"
                   :meta="`${Number(trade.quantity).toLocaleString('fa-IR')} × ${Number(trade.price).toLocaleString('fa-IR')}`"
                 >
                   <template #leading>

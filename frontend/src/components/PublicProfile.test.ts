@@ -294,6 +294,7 @@ describe('PublicProfile.vue', () => {
         quantity: 1,
         price: 111000,
         trade_type: 'SELL',
+        settlement_type: 'tomorrow',
         offer_user_id: null,
         offer_user_name: null,
         responder_user_id: null,
@@ -329,6 +330,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('خریدار بیرونی')
+    expect(wrapper.find('.mini-trade-card .trade-settlement').text()).toBe('فردایی')
     expect(wrapper.find('.mini-trade-card .trade-counterparty .profile-link-btn').exists()).toBe(false)
   })
   it('shows formatted last-seen text in the profile hero when a timestamp exists', async () => {

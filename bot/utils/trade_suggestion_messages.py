@@ -256,6 +256,7 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
             offer_public_id=getattr(offer, "offer_public_id", None),
             requested_amount=requested_amount,
             offer_type=offer.offer_type,
+            settlement_type=getattr(offer, "settlement_type", None),
             commodity_name=offer.commodity.name if offer.commodity else None,
             price=offer.price,
             remaining_quantity=offer.remaining_quantity or offer.quantity,

@@ -166,6 +166,8 @@ def _format_market_number(value: Any) -> str:
 
 
 def build_market_offer_push_payload(offer: Any) -> dict[str, Any]:
+    from core.offer_settlement import offer_settlement_label, settlement_type_value
+
     offer_type = _enum_value(getattr(offer, "offer_type", "")).lower()
     type_label = "خرید" if offer_type == "buy" else "فروش"
     commodity = getattr(offer, "commodity", None)
@@ -176,6 +178,8 @@ def build_market_offer_push_payload(offer: Any) -> dict[str, Any]:
     body = f"{type_label} {commodity_name}"
     if quantity is not None:
         body += f"، {_format_market_number(quantity)} عدد"
+    settlement_type = settlement_type_value(getattr(offer, "settlement_type", None))
+    body += f"، {offer_settlement_label(settlement_type)}"
     if price is not None:
         body += f"، قیمت {_format_market_number(price)}"
 
@@ -188,6 +192,7 @@ def build_market_offer_push_payload(offer: Any) -> dict[str, Any]:
             "kind": "market_offer",
             "offer_id": getattr(offer, "id", None),
             "offer_type": offer_type,
+            "settlement_type": settlement_type,
             "commodity_id": getattr(offer, "commodity_id", None),
             "commodity_name": commodity_name,
         },

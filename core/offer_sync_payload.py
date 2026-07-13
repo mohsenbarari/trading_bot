@@ -21,6 +21,7 @@ def build_offer_sync_payload(offer: Any) -> dict[str, Any]:
         "actor_user_id": getattr(offer, "actor_user_id", None),
         "home_server": offer.home_server,
         "offer_type": _enum_value(offer.offer_type) if getattr(offer, "offer_type", None) else None,
+        "settlement_type": _enum_value(getattr(offer, "settlement_type", None)),
         "commodity_id": offer.commodity_id,
         "quantity": offer.quantity,
         "remaining_quantity": offer.remaining_quantity,

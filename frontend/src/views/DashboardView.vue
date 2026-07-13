@@ -8,6 +8,7 @@ import { cacheCurrentUserSummary } from '../utils/currentUser'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
+import { tradeSettlementLabel, type SettlementType } from '../utils/settlementType'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 import {
   AppButton,
@@ -28,6 +29,7 @@ import {
 interface DashboardTrade {
   id: number
   trade_type: string
+  settlement_type: SettlementType
   commodity_name: string
   quantity: number
   price: number
@@ -277,6 +279,10 @@ function getTradeTypeLabel(trade: DashboardTrade) {
   if (type === 'buy') return 'خرید'
   if (type === 'sell') return 'فروش'
   return 'نامشخص'
+}
+
+function getTradeSettlementLabel(trade: DashboardTrade) {
+  return tradeSettlementLabel(trade.settlement_type)
 }
 
 async function loadTodayTrades() {
@@ -720,6 +726,7 @@ onMounted(fetchUser)
               <div class="today-trades-row today-trades-row--head" role="row">
                 <span role="columnheader">طرف مقابل معامله</span>
                 <span role="columnheader">نوع معامله</span>
+                <span role="columnheader">نوع تسویه</span>
                 <span role="columnheader">کالا</span>
                 <span role="columnheader">تعداد</span>
                 <span role="columnheader">فی</span>
@@ -731,6 +738,7 @@ onMounted(fetchUser)
                     {{ getTradeTypeLabel(trade) }}
                   </span>
                 </span>
+                <span role="cell">{{ getTradeSettlementLabel(trade) }}</span>
                 <span role="cell">{{ trade.commodity_name || 'نامشخص' }}</span>
                 <span role="cell">{{ formatDashboardNumber(trade.quantity) }}</span>
                 <span role="cell">{{ formatDashboardNumber(trade.price) }}</span>
@@ -1364,14 +1372,14 @@ onMounted(fetchUser)
 }
 
 .today-trades-table {
-  min-width: 620px;
+  min-width: 720px;
   display: flex;
   flex-direction: column;
 }
 
 .today-trades-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1.5fr) minmax(88px, 0.72fr) minmax(116px, 1fr) minmax(76px, 0.62fr) minmax(96px, 0.76fr);
+  grid-template-columns: minmax(150px, 1.5fr) minmax(88px, 0.72fr) minmax(96px, 0.78fr) minmax(116px, 1fr) minmax(76px, 0.62fr) minmax(96px, 0.76fr);
   align-items: center;
   column-gap: 0.65rem;
   padding: 0.72rem 1rem;

@@ -8,11 +8,12 @@ from typing import Any, Optional
 
 from core import telegram_gateway
 from core.config import settings
+from core.offer_settlement import build_offer_summary_text
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
 from core.services.trade_service import get_available_trade_amounts
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
-from models.offer import OfferStatus, OfferType
+from models.offer import OfferStatus
 
 logger = logging.getLogger(__name__)
 
@@ -172,14 +173,18 @@ def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = N
 def build_offer_channel_message(offer: Any, *, history_tag: Optional[str] = None) -> str:
     """Build the canonical channel post text for active and terminal offer states."""
     offer_type = _offer_type_value(getattr(offer, "offer_type", None))
-    trade_emoji = "🟢" if offer_type == OfferType.BUY.value else "🔴"
-    trade_label = "خرید" if offer_type == OfferType.BUY.value else "فروش"
     commodity = getattr(offer, "commodity", None)
     commodity_name = getattr(commodity, "name", None) or "نامشخص"
     quantity = _finite_int(getattr(offer, "quantity", None)) or 0
     price = _finite_int(getattr(offer, "price", None)) or 0
 
-    message = f"{trade_emoji}{trade_label} {commodity_name} {quantity} عدد {price:,}"
+    message = build_offer_summary_text(
+        offer_type=offer_type,
+        settlement_type=getattr(offer, "settlement_type", None),
+        commodity_name=commodity_name,
+        quantity=quantity,
+        price=price,
+    )
     notes = (getattr(offer, "notes", None) or "").strip()
     if notes:
         message += f"\nتوضیحات: {notes}"

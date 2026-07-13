@@ -227,6 +227,7 @@ COMPLETED_TRADE_PROTECTED_FIELDS = (
     "actor_user_id",
     "commodity_id",
     "trade_type",
+    "settlement_type",
     "quantity",
     "price",
     "status",
@@ -358,6 +359,7 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
             "public_link": build_offer_public_link(offer_public_id),
             "user_id": None,
             "offer_type": _enum_value(getattr(offer, "offer_type", None)),
+            "settlement_type": _enum_value(getattr(offer, "settlement_type", None)),
             "commodity_id": getattr(offer, "commodity_id", None),
             "commodity_name": getattr(commodity, "name", None) or "نامشخص",
             "quantity": getattr(offer, "quantity", None),
@@ -511,7 +513,7 @@ from sqlalchemy import insert, update, delete, literal as sa_literal, or_, selec
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from core.enums import ChatType
+from core.enums import ChatType, SettlementType
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
 from models.user import User
@@ -1750,7 +1752,7 @@ def _normalize_completed_trade_field(field: str, value):
             return int(value)
         except (TypeError, ValueError):
             return value
-    if field in {"status", "trade_type"}:
+    if field in {"status", "trade_type", "settlement_type"}:
         return _enum_value(value)
     if field == "archived":
         return bool(value)
@@ -2039,6 +2041,11 @@ def _trade_sql_value_for_field(field: str, value):
     if field == "trade_type":
         enum_value = _enum_value(value)
         for candidate in TradeType:
+            if candidate.value == enum_value:
+                return candidate
+    if field == "settlement_type":
+        enum_value = _enum_value(value)
+        for candidate in SettlementType:
             if candidate.value == enum_value:
                 return candidate
     return value

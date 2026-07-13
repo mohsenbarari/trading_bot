@@ -84,7 +84,17 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         self.assertIsNone(await update_get(type("Other", (), {}), 1))
 
     async def test_handle_text_offer_confirm_publishes_offer_and_updates_channel_message(self):
-        offer_data = dict(quantity=12, trade_type="buy", commodity_id=7, commodity_name="ربع", price=123456, is_wholesale=True, lot_sizes=None, notes="فقط نقدی")
+        offer_data = dict(
+            quantity=12,
+            trade_type="buy",
+            settlement_type="tomorrow",
+            commodity_id=7,
+            commodity_name="ربع",
+            price=123456,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes="فقط نقدی",
+        )
         callback = SimpleNamespace(
             message=SimpleNamespace(edit_text=AsyncMock()),
             answer=AsyncMock(),
@@ -140,9 +150,9 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(create_session.added[0].channel_message_id, 900)
         channel_text = bot.send_message.await_args_list[0].kwargs["text"]
         private_text = bot.send_message.await_args_list[1].kwargs["text"]
-        self.assertIn("🟢خرید ربع بهار 12 عدد 123,456", channel_text)
+        self.assertIn("🟢خرید ربع بهار 12 عدد فردا ➡️ 123,456", channel_text)
         self.assertNotIn("🟢خرید ربع 12 عدد", channel_text)
-        self.assertIn("🟢خرید ربع بهار 12 عدد 123,456", private_text)
+        self.assertIn("🟢خرید ربع بهار 12 عدد فردا ➡️ 123,456", private_text)
         self.assertIn("منتشر شد", callback.message.edit_text.await_args.args[0])
         increment_mock.assert_awaited_once()
         state.clear.assert_awaited_once()

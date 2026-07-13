@@ -109,6 +109,7 @@ def make_offer_response(**overrides):
         "offer_public_id": "ofr_offer_10",
         "public_link": "/market?offer=ofr_offer_10",
         "offer_type": "buy",
+        "settlement_type": "cash",
         "commodity_id": 2,
         "commodity_name": "Gold",
         "quantity": 12,
@@ -322,7 +323,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             message_id = await offers_module.send_offer_to_channel(wholesale_offer, SimpleNamespace(id=5))
 
         self.assertEqual(message_id, 321)
-        self.assertIn("🟢خرید Gold 12 عدد 75,000", send_mock.await_args.args[1])
+        self.assertIn("🟢خرید Gold 12 عدد نقد حاضر ☀️ 75,000", send_mock.await_args.args[1])
         self.assertIn("توضیحات: urgent", send_mock.await_args.args[1])
         self.assertEqual(
             send_mock.await_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"],

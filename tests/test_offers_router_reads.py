@@ -73,6 +73,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         parsed = SimpleNamespace(
             trade_type="buy",
+            settlement_type="tomorrow",
             commodity_id=3,
             commodity_name="Gold",
             quantity=10,
@@ -91,6 +92,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             result.data,
             {
                 "trade_type": "buy",
+                "settlement_type": "tomorrow",
                 "commodity_id": 3,
                 "commodity_name": "Gold",
                 "quantity": 10,

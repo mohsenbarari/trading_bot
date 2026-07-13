@@ -630,6 +630,7 @@ class CoreEventsTests(unittest.TestCase):
                 user_id=9,
                 home_server='foreign',
                 offer_type=SimpleNamespace(value='buy'),
+                settlement_type=SimpleNamespace(value='tomorrow'),
                 commodity_id=11,
                 quantity=20,
                 remaining_quantity=15,
@@ -667,6 +668,7 @@ class CoreEventsTests(unittest.TestCase):
                 responder_user_mobile='0935',
                 commodity_id=11,
                 trade_type='sell',
+                settlement_type='tomorrow',
                 quantity=7,
                 price=90,
                 status='pending',
@@ -735,12 +737,17 @@ class CoreEventsTests(unittest.TestCase):
         self.assertTrue(offer_payloads)
         for payload in offer_payloads:
             self.assertEqual(payload['offer_public_id'], 'ofr_event_1')
+            self.assertEqual(payload['settlement_type'], 'tomorrow')
             self.assertIn('commodity_name', payload)
             self.assertIn('republished_offer_public_id', payload)
             self.assertEqual(payload['expired_by_user_id'], 9)
             self.assertEqual(payload['expired_by_actor_user_id'], 7)
             self.assertEqual(payload['expire_source_surface'], 'webapp')
             self.assertEqual(payload['expire_source_server'], 'iran')
+        trade_payloads = [call.args[4] for call in log_change.call_args_list if call.args[1] == 'trades']
+        self.assertTrue(trade_payloads)
+        for payload in trade_payloads:
+            self.assertEqual(payload['settlement_type'], 'tomorrow')
         publish_event_sync.assert_any_call('offer:created', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:updated', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:expired', {'id': 1})

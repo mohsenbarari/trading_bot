@@ -79,6 +79,7 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
 
         parsed = SimpleNamespace(
             trade_type="sell",
+            settlement_type="cash",
             commodity_id=7,
             commodity_name="سکه",
             quantity=12,
@@ -87,7 +88,7 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
             lot_sizes=[7, 5],
             notes="فقط نقدی",
         )
-        message = SimpleNamespace(text="ف سکه 12تا 123456 7 5", answer=AsyncMock())
+        message = SimpleNamespace(text="ف ن سکه 12تا 123456 7 5", answer=AsyncMock())
         state = SimpleNamespace(get_state=AsyncMock(return_value=None), update_data=AsyncMock(), set_state=AsyncMock())
         with patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True)), patch(
             "bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))
@@ -98,6 +99,7 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
             await handle_text_offer(message, state, user=user, bot=SimpleNamespace())
         state.update_data.assert_awaited_once_with(
             trade_type="sell",
+            settlement_type="cash",
             commodity_id=7,
             commodity_name="سکه",
             quantity=12,

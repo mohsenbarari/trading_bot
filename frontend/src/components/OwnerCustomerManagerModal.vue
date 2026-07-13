@@ -25,6 +25,7 @@ import {
 } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
+import { tradeSettlementLabel } from '../utils/settlementType'
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import HelpPopover from './HelpPopover.vue'
 
@@ -1075,7 +1076,7 @@ onBeforeUnmount(() => {
                       <article v-for="trade in selectedRelationTrades" :key="trade.id" class="trade-row">
                         <div>
                           <strong>#{{ trade.trade_number }} - {{ trade.commodity_name }}</strong>
-                          <p>{{ formatTradeType(trade.trade_type) }} · {{ formatTradeStatus(trade.status) }} · {{ trade.created_at }}</p>
+                          <p>{{ formatTradeType(trade.trade_type) }} · {{ tradeSettlementLabel(trade.settlement_type) }} · {{ formatTradeStatus(trade.status) }} · {{ trade.created_at }}</p>
                         </div>
                         <div class="trade-row-values">
                           <span>{{ trade.quantity.toLocaleString('fa-IR') }} عدد</span>

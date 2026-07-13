@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { AppStatusBadge } from './ui'
+import { offerSettlementLabel, type SettlementType } from '../utils/settlementType'
 
 type ParsedOfferPreview = {
   trade_type: 'buy' | 'sell'
+  settlement_type: SettlementType
   commodity_name: string
   quantity: number
   price: number
@@ -36,6 +38,7 @@ const emit = defineEmits<{
 }>()
 
 const tradeLabel = computed(() => (props.offer.trade_type === 'buy' ? 'خرید' : 'فروش'))
+const settlementLabel = computed(() => offerSettlementLabel(props.offer.settlement_type))
 const formattedPrice = computed(() => props.offer.price.toLocaleString())
 const referencePrice = computed(() => props.warning?.reference_price?.toLocaleString() ?? '')
 const proposedWarningPrice = computed(() => props.warning?.proposed_price?.toLocaleString() ?? '')
@@ -81,7 +84,7 @@ function handleConfirmClick() {
             <AppStatusBadge tone="neutral">{{ lotSummary }}</AppStatusBadge>
           </div>
           <div class="offer-preview-line">
-            {{ offer.commodity_name }} {{ offer.quantity }} عدد {{ formattedPrice }}
+            {{ offer.commodity_name }} {{ offer.quantity }} عدد {{ settlementLabel }} {{ formattedPrice }}
           </div>
           <div v-if="offer.notes" class="offer-preview-notes">
             توضیحات: {{ offer.notes }}

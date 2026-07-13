@@ -24,7 +24,8 @@ from starlette.background import BackgroundTask
 
 from core.db import get_db
 from core.config import settings
-from core.enums import NotificationLevel, NotificationCategory
+from core.enums import NotificationLevel, NotificationCategory, SettlementType
+from core.offer_settlement import settlement_type_value, trade_settlement_label
 from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification as _legacy_create_user_notification,
@@ -183,6 +184,7 @@ class TradeResponse(BaseModel):
     trade_number: int
     offer_id: Optional[int]
     trade_type: str
+    settlement_type: str
     commodity_id: int
     commodity_name: str
     quantity: int
@@ -1053,12 +1055,14 @@ def _build_trade_created_event_payload(
     history_target_user_id: int | None = None,
     audience_user_ids: list[int] | tuple[int, ...] | None = None,
     recipient_specific: bool = False,
+    settlement_type: str = SettlementType.CASH.value,
 ) -> dict[str, object | None]:
     trade_like = SimpleNamespace(
         id=trade_id,
         trade_number=trade_number,
         offer_id=offer_id,
         trade_type=SimpleNamespace(value=trade_type),
+        settlement_type=SimpleNamespace(value=settlement_type),
         commodity_id=commodity_id,
         commodity=SimpleNamespace(name=commodity_name) if commodity_name else None,
         quantity=quantity,
@@ -1090,6 +1094,7 @@ def _build_trade_created_event_payload(
         "trade_number": trade_number,
         "offer_id": offer_id,
         "trade_type": trade_type,
+        "settlement_type": settlement_type_value(settlement_type),
         "commodity_id": commodity_id,
         "commodity_name": commodity_name or "نامشخص",
         "quantity": quantity,
@@ -1176,6 +1181,7 @@ async def _publish_trade_created_realtime(
         "price": getattr(trade, "price", None) or fallback_price,
         "commodity_name": commodity_name,
         "trade_type": trade_type_value,
+        "settlement_type": settlement_type_value(getattr(trade, "settlement_type", None)),
         "status": getattr(getattr(trade, "status", None), "value", None) or fallback_status,
         "created_at": to_jalali_str(getattr(trade, "created_at", None)) or fallback_created_at or "",
         "offer_user": offer_user,
@@ -1289,10 +1295,12 @@ def _build_trade_notification_extra_payload(
     participant_payload: Mapping[str, object | None],
     *,
     trade_number: int,
+    settlement_type: object = SettlementType.CASH,
 ) -> dict[str, object | None]:
     return {
         "route": _build_trade_profile_route_from_payload(field_prefix, participant_payload),
         "trade_number": trade_number,
+        "settlement_type": settlement_type_value(settlement_type),
         "counterparty_profile_user_id": _coerce_trade_user_id(
             participant_payload.get(f"{field_prefix}_profile_user_id")
         ),
@@ -1368,12 +1376,14 @@ def _build_trade_notification_message(
     counterparty_user_id: int | None = None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
+    settlement_type: object = SettlementType.CASH,
 ) -> str:
     lines = [
         f"{trade_emoji} {trade_type_label}",
         f"💰 فی: {trade_price:,}",
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
+        f"🗓️ تسویه: {trade_settlement_label(settlement_type)}",
     ]
     if counterparty_name and not _should_hide_counterparty_for_recipient(
         audience_user_id=audience_user_id,
@@ -1407,15 +1417,18 @@ def _build_trade_message_bundle(
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
+    settlement_type: object = SettlementType.CASH,
 ) -> tuple[str, str, str, str]:
     trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
     normalized_offer_notes = _normalize_offer_notes_for_notification(offer_notes)
     offer_notes_line = f"\n📝 توضیحات: {normalized_offer_notes}" if normalized_offer_notes else ""
+    settlement_line = f"🗓️ تسویه: {trade_settlement_label(settlement_type)}\n"
     responder_msg = (
         f"{responder_trade_emoji} <b>{responder_trade_label}</b>\n\n"
         f"💰 فی: {trade_price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {commodity_name}\n"
+        f"{settlement_line}"
         f"👤 طرف معامله: {offer_user_name}\n"
         f"🔢 شماره معامله: {trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
@@ -1427,6 +1440,7 @@ def _build_trade_message_bundle(
         f"💰 فی: {trade_price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {commodity_name}\n"
+        f"{settlement_line}"
         f"👤 طرف معامله: {responder_user_name}\n"
         f"🔢 شماره معامله: {trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
@@ -1446,6 +1460,7 @@ def _build_trade_message_bundle(
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_summary,
         offer_notes=offer_notes,
+        settlement_type=settlement_type,
     )
     notif_msg_owner = _build_trade_notification_message(
         trade_emoji=offer_trade_emoji,
@@ -1460,6 +1475,7 @@ def _build_trade_message_bundle(
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_summary,
         offer_notes=offer_notes,
+        settlement_type=settlement_type,
     )
     return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
 
@@ -1624,6 +1640,7 @@ def trade_to_response(
         trade_number=trade.trade_number,
         offer_id=trade.offer_id,
         trade_type=trade.trade_type.value,
+        settlement_type=settlement_type_value(getattr(trade, "settlement_type", None)),
         commodity_id=trade.commodity_id,
         commodity_name=trade.commodity.name if trade.commodity else "نامشخص",
         quantity=trade.quantity,
@@ -2886,6 +2903,7 @@ async def _execute_trade_authoritatively(
                     offer_public_id=getattr(offer, "offer_public_id", None),
                     requested_amount=trade_data.quantity,
                     offer_type=offer.offer_type,
+                    settlement_type=getattr(offer, "settlement_type", None),
                     commodity_name=offer.commodity.name if offer.commodity else None,
                     price=offer.price,
                     remaining_quantity=offer.remaining_quantity or offer.quantity,
@@ -3073,6 +3091,7 @@ async def _execute_trade_authoritatively(
                 actor_user_id=actor_user.id,
                 commodity_id=offer.commodity_id,
                 trade_type=responder_trade_type,
+                settlement_type=getattr(offer, "settlement_type", SettlementType.CASH),
                 quantity=trade_quantity,
                 price=executed_trade_price if leg_index == final_leg_index and is_tier2_customer_responder else offer.price,
                 status=TradeStatus.COMPLETED,
@@ -3093,6 +3112,7 @@ async def _execute_trade_authoritatively(
             actor_user_id=actor_user.id,
             commodity_id=offer.commodity_id,
             trade_type=responder_trade_type,
+            settlement_type=getattr(offer, "settlement_type", SettlementType.CASH),
             quantity=trade_quantity,
             price=executed_trade_price,
             status=TradeStatus.COMPLETED,
@@ -3260,6 +3280,7 @@ async def _execute_trade_authoritatively(
                 customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=trade_path_summary,
                 offer_notes=offer_notes,
+                settlement_type=getattr(offer, "settlement_type", SettlementType.CASH),
             )
             if defer_noncritical_side_effects:
                 _queue_trade_user_notification(
@@ -3365,6 +3386,7 @@ async def _execute_trade_authoritatively(
                         "offer_user",
                         leg_offer_payload,
                         trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                        settlement_type=getattr(leg_trade_obj, "settlement_type", getattr(offer, "settlement_type", None)),
                     ),
                 )
                 await _create_trade_notifications_for_leg(
@@ -3381,6 +3403,7 @@ async def _execute_trade_authoritatively(
                         "responder_user",
                         leg_responder_payload,
                         trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                        settlement_type=getattr(leg_trade_obj, "settlement_type", getattr(offer, "settlement_type", None)),
                     ),
                 )
             except Exception as exc:
@@ -3408,11 +3431,13 @@ async def _execute_trade_authoritatively(
                 "offer_user",
                 offer_user_payload,
                 trade_number=response_trade_number,
+                settlement_type=getattr(response_trade, "settlement_type", getattr(offer, "settlement_type", None)),
             )
             offer_owner_notification_payload = _build_trade_notification_extra_payload(
                 "responder_user",
                 responder_user_payload,
                 trade_number=response_trade_number,
+                settlement_type=getattr(response_trade, "settlement_type", getattr(offer, "settlement_type", None)),
             )
 
             await _create_trade_notifications_for_leg(

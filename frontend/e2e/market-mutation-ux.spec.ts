@@ -278,8 +278,8 @@ test.describe('Market mutation UX', () => {
     const offerInput = page.locator('[data-test="market-text-offer-input"]')
     const sendButton = page.locator('[data-test="market-send-button"]')
     await expect(offerInput).toBeVisible()
-    await offerInput.fill('خرید سکه 4 عدد 50000')
-    await expect(offerInput).toHaveValue('خرید سکه 4 عدد 50000')
+    await offerInput.fill('خرید نقد سکه 4 عدد 50000')
+    await expect(offerInput).toHaveValue('خرید نقد سکه 4 عدد 50000')
     await expect(sendButton).toBeEnabled()
     const parseRequest = page.waitForRequest((request) =>
       request.url().includes('/api/offers/parse') && request.method() === 'POST',

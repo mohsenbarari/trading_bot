@@ -16,6 +16,7 @@ from models.trade import Trade, TradeType, TradeStatus
 from models.offer import Offer, OfferType
 from models.commodity import Commodity
 from core.db import AsyncSessionLocal
+from core.offer_settlement import trade_settlement_label
 from core.services.trade_history_export_service import (
     build_trade_history_date_range_label,
     build_trade_history_export_rows,
@@ -190,7 +191,8 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
         
         text += (
             f"{trade_emoji} {trade_label} {trade.commodity.name} "
-            f"{trade.quantity} عدد {trade.price:,}\n"
+            f"{trade.quantity} عدد {trade_settlement_label(getattr(trade, 'settlement_type', None))} "
+            f"{trade.price:,}\n"
             f"   📅 {date_str}\n"
         )
         if is_self:

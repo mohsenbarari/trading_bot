@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core.services import telegram_offer_channel_service as channel_service
+from core.enums import SettlementType
 from models.offer import OfferStatus, OfferType
 
 
@@ -31,6 +32,7 @@ def make_offer(**overrides):
     data = {
         "id": 10,
         "offer_type": OfferType.BUY,
+        "settlement_type": SettlementType.CASH,
         "commodity": SimpleNamespace(name="سکه"),
         "quantity": 30,
         "remaining_quantity": 0,
@@ -82,10 +84,15 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         active_message = channel_service.build_offer_channel_message(offer)
         terminal_message = channel_service.build_offer_channel_message(offer, history_tag="🤝 ✅")
 
-        self.assertIn("🟢خرید سکه 30 عدد 51,000", active_message)
+        self.assertIn("🟢خرید سکه 30 عدد نقد حاضر ☀️ 51,000", active_message)
         self.assertIn("توضیحات: تحویل فوری", active_message)
         self.assertIn("🤝 ✅", terminal_message)
         self.assertTrue(active_message.endswith(channel_service.INVISIBLE_CHANNEL_PADDING))
+
+        tomorrow_message = channel_service.build_offer_channel_message(
+            make_offer(settlement_type=SettlementType.TOMORROW)
+        )
+        self.assertIn("🟢خرید سکه 30 عدد فردا ➡️ 51,000", tomorrow_message)
 
     async def test_apply_terminal_completed_edits_text_and_removes_buttons_on_foreign(self):
         response = SimpleNamespace(status_code=200, text="")

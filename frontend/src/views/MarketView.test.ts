@@ -98,6 +98,7 @@ const offersFixture = [
   {
     id: 1,
     offer_type: 'sell',
+    settlement_type: 'cash',
     commodity_name: 'سکه',
     remaining_quantity: 20,
     quantity: 20,
@@ -110,6 +111,7 @@ const recentOffersFixture = [
   {
     id: 91,
     offer_type: 'sell',
+    settlement_type: 'cash',
     commodity_id: 1,
     commodity_name: 'سکه',
     quantity: 12,
@@ -126,6 +128,7 @@ const recentOffersFixture = [
   {
     id: 92,
     offer_type: 'buy',
+    settlement_type: 'tomorrow',
     commodity_id: 2,
     commodity_name: 'طلای آب‌شده',
     quantity: 8,
@@ -257,6 +260,7 @@ describe('MarketView.vue', () => {
           success: true,
           data: {
             trade_type: 'buy',
+            settlement_type: 'tomorrow',
             commodity_id: 2,
             commodity_name: 'طلای آب‌شده',
             quantity: 50,
@@ -602,6 +606,29 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('filters market offers independently by settlement type', async () => {
+    marketViewMocks.offersRef = ref([
+      { ...offersFixture[0], id: 1, settlement_type: 'cash' },
+      { ...offersFixture[0], id: 2, settlement_type: 'tomorrow' },
+    ])
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(wrapper.find('.offers-count').text()).toBe('2')
+    const settlementTabs = wrapper.findAll('.market-settlement-filter-chips [role="tab"]')
+    expect(settlementTabs.map((tab) => tab.text())).toEqual(['همه', 'نقد حاضر', 'فردا'])
+
+    await settlementTabs[1]!.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.offers-count').text()).toBe('1')
+
+    await settlementTabs[2]!.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.offers-count').text()).toBe('1')
+
+    wrapper.unmount()
+  })
+
   it('parses and submits a text offer from the action bar', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()
@@ -609,13 +636,13 @@ describe('MarketView.vue', () => {
     marketViewMocks.fetchOffersMock.mockClear()
     marketViewMocks.apiFetchMock.mockClear()
 
-    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.text-offer-input').setValue('خرید نقد فردا طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
     expect(marketViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/parse', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ text: 'خرید طلای آب‌شده 50 عدد 222222' }),
+      body: JSON.stringify({ text: 'خرید نقد فردا طلای آب‌شده 50 عدد 222222' }),
       retryNetwork: false,
     }), expect.objectContaining({
       surface: 'market',
@@ -633,6 +660,7 @@ describe('MarketView.vue', () => {
     }))
     expect(JSON.parse(String(marketViewMocks.apiFetchMock.mock.calls[0]![1].body))).toEqual({
       offer_type: 'buy',
+      settlement_type: 'tomorrow',
       commodity_id: 2,
       quantity: 50,
       price: 222222,
@@ -675,7 +703,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.text-offer-input').setValue('خرید نقد فردا طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
@@ -705,7 +733,7 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.text-offer-input').element.tagName).toBe('TEXTAREA')
 
-    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.text-offer-input').setValue('خرید نقد فردا طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
@@ -715,7 +743,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خرید طلای آب‌شده 50 عدد 222222: از متن بازار')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خرید نقد فردا طلای آب‌شده 50 عدد 222222: از متن بازار')
 
     wrapper.unmount()
   })
@@ -744,7 +772,8 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('طلای آب‌شده')
-    expect(wrapper.text()).toContain('8 عدد 222,000')
+    expect(document.body.textContent).toContain('فردا ➡️')
+    expect(wrapper.text()).toContain('8 عدد فردا ➡️ 222,000')
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
     await flushPromises()
@@ -755,6 +784,7 @@ describe('MarketView.vue', () => {
     expect(republishCall).toBeTruthy()
     expect(JSON.parse(String(republishCall![1].body))).toEqual({
       offer_type: 'buy',
+      settlement_type: 'tomorrow',
       commodity_id: 2,
       quantity: 8,
       price: 222000,
@@ -944,6 +974,7 @@ describe('MarketView.vue', () => {
     const activeRecentOffer = {
       id: 93,
       offer_type: 'sell',
+      settlement_type: 'cash',
       commodity_id: 3,
       commodity_name: 'ربع سکه',
       quantity: 9,
@@ -1002,6 +1033,7 @@ describe('MarketView.vue', () => {
     expect(republishCall).toBeTruthy()
     expect(JSON.parse(String(republishCall![1].body))).toEqual({
       offer_type: 'sell',
+      settlement_type: 'cash',
       commodity_id: 3,
       quantity: 5,
       price: 111000,
@@ -1034,7 +1066,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('فروش سکه 12 عدد 345678: از لیست اخیر')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('فروش نقد سکه 12 عدد 345678: از لیست اخیر')
 
     wrapper.unmount()
   })
@@ -1167,7 +1199,7 @@ describe('MarketView.vue', () => {
       return responseOf(null)
     })
 
-    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.text-offer-input').setValue('خرید نقد فردا طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
     await wrapper.find('.offer-preview-confirm').trigger('click')
@@ -1190,7 +1222,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.text-offer-input').setValue('خرید نقد فردا طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
@@ -1357,7 +1389,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خرید سکه 30 عدد 125000')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خرید نقد سکه 30 عدد 125000')
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load market state', expect.any(Error))
@@ -1434,7 +1466,7 @@ describe('MarketView.vue', () => {
     })
     marketViewMocks.apiFetchMock.mockResolvedValueOnce(errorResponse(422, { detail: 'قیمت نامعتبر است' }))
 
-    await wrapper.find('.text-offer-input').setValue('فروش سکه 2 عدد 120000')
+    await wrapper.find('.text-offer-input').setValue('فروش نقد سکه 2 عدد 120000')
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)

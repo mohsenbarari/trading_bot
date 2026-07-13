@@ -38,6 +38,7 @@ from .offer_publication_state import (
     OfferPublicationSurface,
 )
 from .trade import Trade, TradeType, TradeStatus
+from core.enums import SettlementType
 from .trade_delivery_receipt import (
     TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES,
     TradeDeliveryChannel,
@@ -111,6 +112,7 @@ __all__ = [
     "Offer",
     "OfferType",
     "OfferStatus",
+    "SettlementType",
     "OfferRequest",
     "OfferRequestSourceSurface",
     "OfferRequestStatus",

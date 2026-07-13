@@ -13,7 +13,7 @@ from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from bot.states import Trade
 from core.config import settings
-from core.enums import UserRole
+from core.enums import SettlementType, UserRole
 from core.db import AsyncSessionLocal
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_source import OfferSourceSurface
@@ -76,17 +76,18 @@ def _build_channel_offer_text(
     commodity_name: object,
     quantity: object,
     price: object,
+    settlement_type: object = None,
     notes: object = None,
 ) -> str:
-    normalized_trade_type = str(trade_type or "buy").strip().lower()
-    trade_emoji = "🟢" if normalized_trade_type == "buy" else "🔴"
-    trade_label = "خرید" if normalized_trade_type == "buy" else "فروش"
-    try:
-        formatted_price = f"{int(price or 0):,}"
-    except (TypeError, ValueError):
-        formatted_price = str(price or 0)
-    normalized_commodity_name = str(commodity_name or "نامشخص").strip() or "نامشخص"
-    message = f"{trade_emoji}{trade_label} {normalized_commodity_name} {quantity} عدد {formatted_price}"
+    from core.offer_settlement import build_offer_summary_text
+
+    message = build_offer_summary_text(
+        offer_type=trade_type,
+        settlement_type=settlement_type,
+        commodity_name=commodity_name,
+        quantity=quantity,
+        price=price,
+    )
     normalized_notes = str(notes or "").strip()
     if normalized_notes:
         message += f"\nتوضیحات: {normalized_notes}"
@@ -191,8 +192,8 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
         "📝 ثبت لفظ دکمه‌ای غیرفعال شده است.\n\n"
         "لطفاً لفظ را به صورت متن در همین چت ارسال کنید.\n"
         "نمونه‌ها:\n"
-        "خ امام 30تا 75800\n"
-        "ف ربع بهار 20 عدد 765000: فقط نقدی",
+        "خ ن امام 30تا 75800\n"
+        "ف ن ف ربع بهار 20 عدد 765000: تحویل فردا",
     )
 
 
@@ -546,6 +547,7 @@ async def show_trade_preview(message_or_callback, state: FSMContext, edit: bool 
     commodity_name = data.get("commodity_name", "نامشخص")
     quantity = data.get("quantity", 1)
     price = data.get("price", 0)
+    settlement_type = data.get("settlement_type", SettlementType.CASH.value)
     notes = data.get("notes")
 
     channel_text = _build_channel_offer_text(
@@ -553,6 +555,7 @@ async def show_trade_preview(message_or_callback, state: FSMContext, edit: bool 
         commodity_name=commodity_name,
         quantity=quantity,
         price=price,
+        settlement_type=settlement_type,
         notes=notes,
     )
 
@@ -659,6 +662,7 @@ async def _handle_trade_confirm_core(
     commodity_id = data.get("commodity_id")
     commodity_name = data.get("commodity_name")
     price = data.get("price")
+    settlement_type = data.get("settlement_type", SettlementType.CASH.value)
     is_wholesale = data.get("is_wholesale", True)
     lot_sizes = data.get("lot_sizes")
     notes = data.get("notes")
@@ -714,6 +718,7 @@ async def _handle_trade_confirm_core(
                     owner_user_id=user.id,
                     actor_user_id=user.id,
                     offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
+                    settlement_type=settlement_type,
                     commodity_id=commodity_id,
                     quantity=quantity,
                     price=price,
@@ -788,6 +793,7 @@ async def _handle_trade_confirm_core(
             )
             canonical_channel_message = _build_channel_offer_text(
                 trade_type=getattr(getattr(offer, "offer_type", None), "value", None) or trade_type,
+                settlement_type=getattr(offer, "settlement_type", None) or settlement_type,
                 commodity_name=canonical_commodity_name,
                 quantity=getattr(offer, "quantity", None) or quantity,
                 price=getattr(offer, "price", None) or price,
@@ -943,14 +949,14 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
     
     # نمونه‌های صحیح
     examples = [
-        "خ ربع 30تا 75800",
-        "فروش نیم 50عدد 758000",
-        "خرید 40تا 87000: فقط نقدی",
-        "ف 30تا 75800 15 15"
+        "خ ن ربع 30تا 75800",
+        "فروش نقد فردا نیم 50عدد 758000",
+        "خرید نقد امام 40تا 87000: فقط نقدی",
+        "ف ن امام 30تا 75800 15 15"
     ]
     
     hint = "💡 **فرمت صحیح:**\n"
-    hint += "`[خ/ف/خرید/فروش] [کالا] [تعداد]تا [قیمت]`\n\n"
+    hint += "`[خ ن/ف ن/خ ن ف/ف ن ف] [کالا] [تعداد]تا [قیمت]`\n\n"
     
     # پیشنهادات بر اساس نوع خطا
     if "تعداد" in error_message:
@@ -964,16 +970,17 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
             hint += "📌 قیمت باید 5 یا 6 رقم باشد\n"
         hint += "مثال: `75800` یا `758000`\n"
     
-    elif "خرید" in error_message or "فروش" in error_message:
-        hint += "📌 فقط یک نشانگر معامله مجاز است\n"
-        hint += "استفاده کنید از: `خ` یا `ف` یا `خرید` یا `فروش`\n"
+    elif "خرید" in error_message or "فروش" in error_message or "ابتدای لفظ" in error_message:
+        hint += "📌 نوع معامله و تسویه باید فقط در ابتدای لفظ باشد\n"
+        hint += "نقد حاضر: `خ ن` یا `ف ن`\n"
+        hint += "فردایی: `خ ن ف` یا `ف ن ف`\n"
     
     elif "بخش" in error_message or "جمع" in error_message:
         hint += "📌 برای خُرده‌فروشی:\n"
         hint += "- حداکثر 3 بخش\n"
         hint += "- هر بخش حداقل 5 عدد\n"
         hint += "- جمع بخش‌ها = تعداد کل\n"
-        hint += "مثال: `خ 30تا 75800 15 15`\n"
+        hint += "مثال: `خ ن 30تا 75800 15 15`\n"
     
     elif "کاراکتر" in error_message:
         hint += "📌 از علائم خاص استفاده نکنید\n"
@@ -991,14 +998,14 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
     
     return hint
 
-# فیلتر: پیام‌هایی که خ/ف/خرید/فروش دارند
+# فیلتر اولیه برای پیام‌هایی که ممکن است درخواست آفر باشند.
 def has_trade_indicator(text: str) -> bool:
     """چک می‌کند آیا متن حاوی نشانگر معامله است"""
     import re
     if not text:
         return False
     offer_part = text.split(':')[0]  # فقط قبل از توضیحات
-    # خ یا ف مستقل یا خرید/فروش
+    # الگوی قدیمی هم باید به parser برسد تا پیام خطای دقیق دریافت کند.
     pattern = r'(?<![آ-ی])[خف](?![آ-ی])|خرید|فروش'
     return bool(re.search(pattern, offer_part))
 
@@ -1092,7 +1099,7 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
 
 @router.message(F.text.func(has_trade_indicator))
 async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
-    """پردازش لفظ متنی (خ/ف)"""
+    """پردازش آفر متنی با پیشوند دقیق نوع معامله و تسویه."""
     if not user:
         return
     
@@ -1139,7 +1146,7 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     
     result, error = await parse_offer_text(message.text)
     
-    # اگر لفظ نیست (خ/ف ندارد)، نادیده بگیر
+    # اگر متن درخواست آفر نیست، نادیده بگیر.
     if result is None and error is None:
         return
     
@@ -1173,6 +1180,7 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     # ذخیره اطلاعات در state
     await state.update_data(
         trade_type=result.trade_type,
+        settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
         commodity_id=result.commodity_id,
         commodity_name=result.commodity_name,
         quantity=result.quantity,
@@ -1188,6 +1196,7 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
         commodity_name=result.commodity_name,
         quantity=result.quantity,
         price=result.price,
+        settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
         notes=result.notes,
     )
     

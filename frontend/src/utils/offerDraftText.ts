@@ -1,5 +1,8 @@
+import { offerDraftPrefix, type SettlementType } from './settlementType'
+
 export type OfferDraftPreviewLike = {
   trade_type: 'buy' | 'sell'
+  settlement_type: SettlementType
   commodity_name: string
   quantity: number
   price: number
@@ -9,7 +12,7 @@ export type OfferDraftPreviewLike = {
 }
 
 export function buildOfferDraftText(offer: OfferDraftPreviewLike): string {
-  const tradeLabel = offer.trade_type === 'buy' ? 'خرید' : 'فروش'
+  const tradeLabel = offerDraftPrefix(offer.trade_type, offer.settlement_type)
   const lotsPart = !offer.is_wholesale && offer.lot_sizes?.length ? ` ${offer.lot_sizes.join(' ')}` : ''
   const notes = offer.notes?.trim()
   const notesPart = notes ? `: ${notes}` : ''

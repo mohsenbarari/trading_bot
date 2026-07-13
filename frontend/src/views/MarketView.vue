@@ -11,6 +11,7 @@ import { apiFetch, apiFetchJson } from '../utils/auth'
 import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
 import { buildOfferDraftText } from '../utils/offerDraftText'
+import { normalizeSettlementType, offerSettlementLabel, type SettlementType } from '../utils/settlementType'
 import { fetchNotificationPreferences, updateNotificationPreferences } from '../services/webPush'
 
 interface Commodity {
@@ -28,6 +29,7 @@ interface TradingSettings {
 
 interface ParsedOfferPreview {
   trade_type: 'buy' | 'sell'
+  settlement_type: SettlementType
   commodity_id: number
   commodity_name: string
   quantity: number
@@ -52,6 +54,7 @@ interface OfferPriceWarning {
 interface RecentOfferSummary {
   id: number
   offer_type: 'buy' | 'sell'
+  settlement_type: SettlementType
   commodity_id: number
   commodity_name: string
   quantity: number
@@ -84,6 +87,7 @@ interface AdminMarketMessage {
 
 type CustomerTierValue = 'tier1' | 'tier2' | null
 type MarketFilterType = 'all' | 'buy' | 'sell' | 'my'
+type SettlementFilterType = 'all' | SettlementType
 
 function normalizeCustomerTier(raw: unknown): CustomerTierValue {
   return raw === 'tier1' || raw === 'tier2' ? raw : null
@@ -113,13 +117,14 @@ const marketRuntime = ref<MarketRuntimeState>({
 })
 
 const filterType = ref<MarketFilterType>('all')
+const settlementFilterType = ref<SettlementFilterType>('all')
 
 const filteredOffers = computed(() => {
   const list = offers.value || []
-  return list.filter((offer) => matchesMarketFilter(offer, filterType.value))
+  return list.filter((offer) => matchesMarketFilters(offer))
 })
 const filteredMarketHistoryOffers = computed(() => {
-  return marketHistoryOffers.value.filter((offer) => matchesMarketFilter(offer, filterType.value))
+  return marketHistoryOffers.value.filter((offer) => matchesMarketFilters(offer))
 })
 const visibleMarketOffers = computed(() => {
   const activeIds = new Set(filteredOffers.value.map((offer) => Number(offer.id)))
@@ -184,6 +189,11 @@ const visibleFilterOptions = computed(() => visibleTabs.value.map((tab) => ({
   key: tab,
   label: marketFilterLabels[tab],
 })))
+const settlementFilterOptions: Array<{ key: SettlementFilterType; label: string }> = [
+  { key: 'all', label: 'همه' },
+  { key: 'cash', label: 'نقد حاضر' },
+  { key: 'tomorrow', label: 'فردا' },
+]
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
@@ -206,13 +216,19 @@ function matchesMarketFilter(offer: any, filter: MarketFilterType) {
   return offer?.offer_type === filter
 }
 
+function matchesMarketFilters(offer: any) {
+  if (!matchesMarketFilter(offer, filterType.value)) return false
+  if (settlementFilterType.value === 'all') return true
+  return normalizeSettlementType(offer?.settlement_type) === settlementFilterType.value
+}
+
 // Computed
 const randomPlaceholder = computed(() => {
   if (!commodities.value || commodities.value.length === 0) {
-    return 'مثال: خرید سکه 30 عدد 125000'
+    return 'مثال: خرید نقد سکه 30 عدد 125000'
   }
   const comm = commodities.value[Math.floor(Math.random() * commodities.value.length)]
-  return `خرید ${comm?.name || 'کالا'} 50 عدد 125000`
+  return `خرید نقد ${comm?.name || 'کالا'} 50 عدد 125000`
 })
 
 // API Helpers
@@ -434,6 +450,7 @@ function toggleAdminMarketMessage() {
 function buildOfferCreatePayload(offer: ParsedOfferPreview) {
   return {
     offer_type: offer.trade_type,
+    settlement_type: normalizeSettlementType(offer.settlement_type),
     commodity_id: offer.commodity_id,
     quantity: offer.quantity,
     price: offer.price,
@@ -485,7 +502,7 @@ function formatRecentOfferQuantity(offer: RecentOfferSummary) {
 }
 
 function formatRecentOfferDetails(offer: RecentOfferSummary) {
-  const parts: string[] = []
+  const parts: string[] = [offerSettlementLabel(offer.settlement_type)]
 
   if (!offer.is_wholesale) {
     const lots = getRecentOfferRepublishLots(offer)
@@ -634,6 +651,7 @@ function openRecentOfferPreview(offer: RecentOfferSummary) {
   pendingOfferIdempotencyKey.value = null
   pendingOfferPreview.value = {
     trade_type: offer.offer_type,
+    settlement_type: normalizeSettlementType(offer.settlement_type),
     commodity_id: offer.commodity_id,
     commodity_name: offer.commodity_name,
     quantity: getRecentOfferRepublishQuantity(offer),
@@ -940,6 +958,7 @@ onUnmounted(() => {
           <BellOff v-else :size="18" />
         </AppIconButton>
         <AppFilterChips v-model="filterType" class="tabs-container market-filter-chips" label="فیلتر لفظ‌های بازار" :options="visibleFilterOptions" />
+        <AppFilterChips v-model="settlementFilterType" class="tabs-container market-settlement-filter-chips" label="فیلتر نوع تسویه" :options="settlementFilterOptions" />
       </div>
       <div v-if="marketOfferPushError" class="market-notification-error" role="status">
         {{ marketOfferPushError }}
@@ -1137,8 +1156,9 @@ onUnmounted(() => {
 }
 
 .header-controls {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 0.75rem;
   max-width: var(--ds-page-max-width);
   width: 100%;
@@ -1146,6 +1166,7 @@ onUnmounted(() => {
 }
 
 .market-notification-toggle {
+  grid-row: 1 / span 2;
   flex: 0 0 auto;
   width: var(--ds-touch-target, 48px);
   height: var(--ds-touch-target, 48px);
@@ -1182,15 +1203,18 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.market-filter-chips :deep(.ui-filter-chips) {
+.market-filter-chips :deep(.ui-filter-chips),
+.market-settlement-filter-chips :deep(.ui-filter-chips) {
   width: 100%;
 }
 
-.market-filter-chips :deep(.ui-filter-chip) {
+.market-filter-chips :deep(.ui-filter-chip),
+.market-settlement-filter-chips :deep(.ui-filter-chip) {
   min-height: 2.85rem;
 }
 
 .market-filter-chips :deep(.ui-filter-chip:focus-visible),
+.market-settlement-filter-chips :deep(.ui-filter-chip:focus-visible),
 .market-notification-toggle:focus-visible,
 .recent-offers-toggle:focus-visible,
 .text-offer-input:focus-visible,
@@ -1202,7 +1226,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 430px) {
-  .market-filter-chips :deep(.ui-filter-chip) {
+  .market-filter-chips :deep(.ui-filter-chip),
+  .market-settlement-filter-chips :deep(.ui-filter-chip) {
     min-height: 2.72rem;
   }
 }

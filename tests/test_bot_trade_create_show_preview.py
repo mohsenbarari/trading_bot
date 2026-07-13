@@ -11,6 +11,7 @@ class BotTradeCreateShowPreviewTests(unittest.IsolatedAsyncioTestCase):
             get_data=AsyncMock(
                 return_value={
                     "trade_type": "sell",
+                    "settlement_type": "tomorrow",
                     "commodity_name": "سکه",
                     "quantity": 15,
                     "price": 123456,
@@ -23,7 +24,7 @@ class BotTradeCreateShowPreviewTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.trade_create.get_confirm_keyboard", return_value="CK"):
             await show_trade_preview(message, state, edit=False)
         preview_text = message.answer.await_args.args[0]
-        self.assertIn("🔴فروش سکه 15 عدد 123,456", preview_text)
+        self.assertIn("🔴فروش سکه 15 عدد فردا ➡️ 123,456", preview_text)
         self.assertIn("توضیحات: فقط نقدی", preview_text)
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "CK")
 

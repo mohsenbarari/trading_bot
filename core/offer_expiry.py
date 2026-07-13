@@ -229,6 +229,7 @@ async def apply_remote_stale_channel_state(session, cutoff_time) -> int:
         presentation_offer = SimpleNamespace(
             id=offer.id,
             offer_type=offer.offer_type,
+            settlement_type=getattr(offer, "settlement_type", None),
             commodity=getattr(offer, "commodity", None),
             quantity=offer.quantity,
             remaining_quantity=offer.remaining_quantity,

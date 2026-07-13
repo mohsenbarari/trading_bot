@@ -61,6 +61,18 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('offer_publication_surface.create(bind, checkfirst=True)', migration)
         self.assertIn('offer_publication_status.create(bind, checkfirst=True)', migration)
 
+    def test_offer_trade_settlement_migration_is_additive_and_backfills_cash(self):
+        migration = (
+            REPO_ROOT / 'migrations/versions/b9e0f1a2c3d4_add_offer_trade_settlement_type.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('postgresql.ENUM(', migration)
+        self.assertIn('create_type=False', migration)
+        self.assertIn('settlement_type.create(bind, checkfirst=True)', migration)
+        self.assertIn('for table_name in ("offers", "trades")', migration)
+        self.assertIn('nullable=False', migration)
+        self.assertIn("server_default=sa.text(\"'CASH'::settlementtype\")", migration)
+
     def test_new_offer_public_id_backfills_cannot_use_independent_random_values(self):
         allowed_legacy_random_backfills = {
             'a6b7c8d9e0f1_add_offer_public_id.py',

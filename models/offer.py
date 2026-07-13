@@ -4,6 +4,7 @@ from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, Fore
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
+from core.enums import SettlementType
 from core.offer_identity import generate_offer_public_id
 import enum
 
@@ -49,6 +50,12 @@ class Offer(Base):
     
     # نوع لفظ
     offer_type = Column(Enum(OfferType), nullable=False)
+    settlement_type = Column(
+        Enum(SettlementType),
+        nullable=False,
+        default=SettlementType.CASH,
+        server_default=SettlementType.CASH.name,
+    )
     
     # کالا
     commodity_id = Column(Integer, ForeignKey("commodities.id"), nullable=False)

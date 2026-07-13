@@ -20,6 +20,7 @@ from bot.utils.customer_display import attach_customer_management_names, user_di
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
+from core.offer_settlement import settlement_type_value, trade_settlement_label
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.services.block_service import is_trade_blocked_by_principals
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
@@ -135,6 +136,7 @@ def _remote_trade_offer_snapshot(offer: Offer | object) -> dict[str, object]:
     return {
         "id": getattr(offer, "id", None),
         "offer_type": _safe_enum_value(getattr(offer, "offer_type", None)),
+        "settlement_type": settlement_type_value(getattr(offer, "settlement_type", None)),
         "price": getattr(offer, "price", None),
         "notes": getattr(offer, "notes", None),
         "commodity_name": getattr(commodity, "name", None),
@@ -168,6 +170,7 @@ def _build_remote_trade_success_message(body: object, fallback_offer: object, am
         trade_number = body.get("trade_number")
         created_at = body.get("created_at")
         offer_notes = body.get("offer_notes") or fallback_notes
+        settlement_type = body.get("settlement_type") or _snapshot_get(fallback_offer, "settlement_type")
 
         lines = [
             f"{trade_emoji} {trade_label}",
@@ -175,6 +178,7 @@ def _build_remote_trade_success_message(body: object, fallback_offer: object, am
             f"💰 فی: {int(price):,}" if isinstance(price, (int, float)) else f"💰 فی: {price}",
             f"📦 تعداد: {quantity}",
             f"🏷️ کالا: {commodity_name}",
+            f"🗓️ تسویه: {trade_settlement_label(settlement_type)}",
             f"👤 طرف معامله: {counterparty_name}",
         ]
         if trade_number:
@@ -203,6 +207,7 @@ def _build_remote_trade_success_message(body: object, fallback_offer: object, am
         f"💰 فی: {(_snapshot_get(fallback_offer, 'price', 0) or 0):,}",
         f"📦 تعداد: {amount}",
         f"🏷️ کالا: {_snapshot_get(fallback_offer, 'commodity_name') or 'نامشخص'}",
+        f"🗓️ تسویه: {trade_settlement_label(_snapshot_get(fallback_offer, 'settlement_type'))}",
     ]
     fallback_counterparty = _snapshot_get(fallback_offer, "counterparty_name")
     if fallback_counterparty:
@@ -391,6 +396,7 @@ def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object 
     return {
         "trade_number": getattr(trade, "trade_number", None),
         "trade_type": getattr(getattr(trade, "trade_type", None), "value", getattr(trade, "trade_type", None)),
+        "settlement_type": settlement_type_value(getattr(trade, "settlement_type", None)),
         "commodity_name": getattr(commodity, "name", None),
         "quantity": getattr(trade, "quantity", None),
         "price": getattr(trade, "price", None),
@@ -795,6 +801,7 @@ async def _handle_channel_trade(
                     offer_public_id=getattr(offer, "offer_public_id", None),
                     requested_amount=actual_amount,
                     offer_type=offer.offer_type,
+                    settlement_type=getattr(offer, "settlement_type", None),
                     commodity_name=offer.commodity.name if offer.commodity else None,
                     price=offer.price,
                     remaining_quantity=remaining,

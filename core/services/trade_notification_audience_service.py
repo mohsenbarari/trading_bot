@@ -11,6 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from core.enums import SettlementType
+from core.offer_settlement import settlement_type_value, trade_settlement_label
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.bot_access_policy import evaluate_bot_access
@@ -349,12 +351,14 @@ def _build_trade_notification_message(
     counterparty_user_id: int | None = None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
+    settlement_type: object = SettlementType.CASH,
 ) -> str:
     lines = [
         f"{trade_emoji} {trade_type_label}",
         f"💰 فی: {trade_price:,}",
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
+        f"🗓️ تسویه: {trade_settlement_label(settlement_type)}",
     ]
     if counterparty_name and not _should_hide_counterparty_for_recipient(
         audience_user_id=audience_user_id,
@@ -386,6 +390,7 @@ def _build_trade_telegram_message(
     hide_counterparty: bool = False,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
+    settlement_type: object = SettlementType.CASH,
 ) -> str:
     lines = [
         f"{trade_emoji} <b>{trade_type_label}</b>",
@@ -393,6 +398,7 @@ def _build_trade_telegram_message(
         f"💰 فی: {trade_price:,}",
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
+        f"🗓️ تسویه: {trade_settlement_label(settlement_type)}",
     ]
     if counterparty_name and not hide_counterparty:
         lines.append(
@@ -430,6 +436,7 @@ def _build_trade_message_bundle(
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
+    settlement_type: object = SettlementType.CASH,
 ) -> tuple[str, str]:
     responder_msg = _build_trade_telegram_message(
         trade_emoji=responder_trade_emoji,
@@ -443,6 +450,7 @@ def _build_trade_message_bundle(
         counterparty_profile_user_id=offer_user_profile_user_id,
         trade_path_summary=trade_path_summary,
         offer_notes=offer_notes,
+        settlement_type=settlement_type,
     )
     offer_owner_msg = _build_trade_telegram_message(
         trade_emoji=offer_trade_emoji,
@@ -456,6 +464,7 @@ def _build_trade_message_bundle(
         counterparty_profile_user_id=responder_user_profile_user_id,
         trade_path_summary=trade_path_summary,
         offer_notes=offer_notes,
+        settlement_type=settlement_type,
     )
     return responder_msg, offer_owner_msg
 
@@ -477,6 +486,7 @@ def _build_trade_notification_extra_payload(
         "trade_number": trade_number,
         "offer_id": getattr(trade, "offer_id", None),
         "offer_home_server": _offer_home_server(trade),
+        "settlement_type": settlement_type_value(getattr(trade, "settlement_type", None)),
         "route": _build_trade_profile_route_from_payload(field_prefix, participant_payload),
         "counterparty_profile_user_id": _coerce_user_id(
             participant_payload.get(f"{field_prefix}_profile_user_id")
@@ -626,6 +636,7 @@ async def build_trade_completion_notification_audience(
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_payload.get("trade_path_summary"),
         offer_notes=_offer_notes(trade),
+        settlement_type=getattr(trade, "settlement_type", SettlementType.CASH),
     )
 
     side_specs = (
@@ -687,6 +698,7 @@ async def build_trade_completion_notification_audience(
                 customer_relation_map=customer_relation_map,
                 trade_path_summary=trade_path_payload.get("trade_path_summary"),
                 offer_notes=_offer_notes(trade),
+                settlement_type=getattr(trade, "settlement_type", SettlementType.CASH),
             )
             webapp_requirement = TradeNotificationChannelRequirement(
                 channel=WEBAPP_CHANNEL,
@@ -721,6 +733,7 @@ async def build_trade_completion_notification_audience(
                         hide_counterparty=hide_counterparty,
                         trade_path_summary=trade_path_payload.get("trade_path_summary"),
                         offer_notes=_offer_notes(trade),
+                        settlement_type=getattr(trade, "settlement_type", SettlementType.CASH),
                     )
                 telegram_requirement = TradeNotificationChannelRequirement(
                     channel=telegram_requirement.channel,

@@ -678,6 +678,8 @@ def setup_trade_events():
         try:
             # Handle Enum or String
             trade_type_val = target.trade_type.value if hasattr(target.trade_type, 'value') else target.trade_type
+            settlement_type = getattr(target, "settlement_type", None)
+            settlement_type_val = settlement_type.value if hasattr(settlement_type, "value") else settlement_type
             status_val = target.status.value if hasattr(target.status, 'value') else target.status
 
             data = {
@@ -694,6 +696,7 @@ def setup_trade_events():
                 "commodity_id": target.commodity_id,
                 "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
                 "trade_type": trade_type_val,
+                "settlement_type": settlement_type_val,
                 "quantity": target.quantity,
                 "price": target.price,
                 "status": status_val,
@@ -715,6 +718,8 @@ def setup_trade_events():
             return
         try:
             trade_type_val = target.trade_type.value if hasattr(target.trade_type, 'value') else target.trade_type
+            settlement_type = getattr(target, "settlement_type", None)
+            settlement_type_val = settlement_type.value if hasattr(settlement_type, "value") else settlement_type
             status_val = target.status.value if hasattr(target.status, 'value') else target.status
 
             data = {
@@ -731,6 +736,7 @@ def setup_trade_events():
                 "commodity_id": target.commodity_id,
                 "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
                 "trade_type": trade_type_val,
+                "settlement_type": settlement_type_val,
                 "quantity": target.quantity,
                 "price": target.price,
                 "status": status_val,

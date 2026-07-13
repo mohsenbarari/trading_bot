@@ -3,6 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from bot.handlers.trade_history import format_trade_history
+from core.enums import SettlementType
 from models.trade import TradeType
 
 
@@ -10,6 +11,7 @@ def make_trade(index, responder_user_id=2, current_user_id=2):
     return SimpleNamespace(
         responder_user_id=responder_user_id,
         trade_type=TradeType.BUY,
+        settlement_type=SettlementType.CASH,
         commodity=SimpleNamespace(name=f"کالای {index}"),
         quantity=index,
         price=index * 1000,
@@ -31,12 +33,14 @@ class BotTradeHistoryFormatTests(unittest.TestCase):
 
         self.assertIn("📊 تاریخچه معاملات با target", text)
         self.assertIn("🟢 خرید کالای 1", text)
+        self.assertIn("1 عدد نقد حاضر 1,000", text)
         self.assertIn("... و 1 معامله دیگر", text)
 
     def test_format_trade_history_self_view_uses_counterparty_and_sell_label(self):
         trade = SimpleNamespace(
             responder_user_id=99,
             trade_type=TradeType.BUY,
+            settlement_type=SettlementType.TOMORROW,
             commodity=SimpleNamespace(name="سکه"),
             quantity=2,
             price=1234,
@@ -49,6 +53,7 @@ class BotTradeHistoryFormatTests(unittest.TestCase):
 
         self.assertIn("📊 تاریخچه معاملات کل شما", text)
         self.assertIn("🔴 فروش سکه", text)
+        self.assertIn("2 عدد فردایی 1,234", text)
         self.assertIn("طرف معامله: buyer", text)
 
 

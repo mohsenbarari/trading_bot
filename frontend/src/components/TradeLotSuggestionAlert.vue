@@ -8,6 +8,7 @@ const props = defineProps<{
   introText: string
   offerType: 'buy' | 'sell' | ''
   offerTypeLabel: string
+  settlementTypeLabel?: string
   commodityName: string
   price: number
   remainingQuantity: number
@@ -83,7 +84,7 @@ function startAutoClose() {
 }
 
 watch(
-  () => [props.show, props.busy, props.offerType, props.commodityName, props.remainingQuantity, props.lotSummary, props.introText] as const,
+  () => [props.show, props.busy, props.offerType, props.settlementTypeLabel, props.commodityName, props.remainingQuantity, props.lotSummary, props.introText] as const,
   ([show, busy]) => {
     if (!show) {
       clearTimers()
@@ -149,6 +150,7 @@ onBeforeUnmount(() => {
               <div class="trade-offer-main">
                 <span class="trade-offer-commodity">{{ props.commodityName }}</span>
                 <span class="trade-offer-quantity">{{ props.remainingQuantity.toLocaleString() }} عدد</span>
+                <span class="trade-offer-settlement">{{ props.settlementTypeLabel || 'نقد حاضر ☀️' }}</span>
                 <span class="trade-offer-price">{{ props.price.toLocaleString() }}</span>
               </div>
 
@@ -322,6 +324,13 @@ onBeforeUnmount(() => {
   border-radius: 0.55rem;
 }
 
+.trade-offer-settlement {
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .trade-offer-price {
   color: #f59e0b;
   font-weight: 900;
@@ -443,8 +452,5 @@ onBeforeUnmount(() => {
     row-gap: 0.45rem;
   }
 
-  .trade-offer-price {
-    grid-column: 1 / -1;
-  }
 }
 </style>

@@ -7,6 +7,8 @@ Trade Service - منطق مشترک معاملات
 """
 from typing import Any, Dict, Tuple, List, Optional, Union
 
+from core.enums import SettlementType
+from core.offer_settlement import build_offer_summary_text, offer_settlement_label, settlement_type_value
 from core.trading_settings import get_trading_settings
 
 __all__ = [
@@ -317,6 +319,7 @@ def build_lot_unavailable_suggestion_payload(
     price: Union[int, float, str],
     remaining_quantity: Union[int, float, str],
     available_amounts: List[Union[int, float, str]],
+    settlement_type: Optional[Union[str, object]] = SettlementType.CASH,
 ) -> dict:
     """
     Build a shared UI payload for the "requested retail lot was just taken"
@@ -340,9 +343,13 @@ def build_lot_unavailable_suggestion_payload(
     commodity_label = (commodity_name or "کالا").strip() or "کالا"
     title = "پیشنهاد معامله"
     intro_text = f"بخش {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد."
-    offer_summary = (
-        f"{offer_type_emoji}{offer_type_label} {commodity_label} "
-        f"{normalized_remaining} عدد {normalized_price:,}"
+    normalized_settlement_type = settlement_type_value(settlement_type)
+    offer_summary = build_offer_summary_text(
+        offer_type=normalized_offer_type,
+        settlement_type=normalized_settlement_type,
+        commodity_name=commodity_label,
+        quantity=normalized_remaining,
+        price=normalized_price,
     ).strip()
     action_text = (
         "اگر مایل هستید، یکی از دکمه\u200cهای زیر را انتخاب کنید."
@@ -368,6 +375,8 @@ def build_lot_unavailable_suggestion_payload(
         "requested_amount": normalized_requested_amount,
         "offer_type": normalized_offer_type,
         "offer_type_label": offer_type_label,
+        "settlement_type": normalized_settlement_type,
+        "settlement_type_label": offer_settlement_label(normalized_settlement_type),
         "offer_type_emoji": offer_type_emoji,
         "commodity_name": commodity_label,
         "price": normalized_price,

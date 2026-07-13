@@ -13,6 +13,7 @@ __all__ = [
     "ChatType",
     "ChatMemberRole",
     "ChatMembershipStatus",
+    "SettlementType",
 ]
 
 class UserRole(str, enum.Enum):
@@ -26,6 +27,13 @@ class UserRole(str, enum.Enum):
 class UserAccountStatus(str, enum.Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
+
+
+class SettlementType(str, enum.Enum):
+    """زمان تسویه آفر و معامله."""
+
+    CASH = "cash"
+    TOMORROW = "tomorrow"
 
 class NotificationLevel(str, enum.Enum):
     # 👇 مقادیر باید با دیتابیس (مایگریشن) یکسان باشند (حروف بزرگ)

@@ -41,6 +41,7 @@ import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/
 import { currentUserSummary } from '../utils/currentUser';
 import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
 import { formatIranDate } from '../utils/iranTime';
+import { tradeSettlementLabel, type SettlementType } from '../utils/settlementType';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
@@ -129,6 +130,7 @@ interface MutualTradePreview {
   commodity_name: string;
   price: number;
   trade_type?: string;
+  settlement_type?: SettlementType;
   trade_path_kind?: string | null;
   trade_path_summary?: string | null;
 }
@@ -1300,6 +1302,10 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   }
 }
 
+function getTradeSettlementLabel(trade: MutualTradePreview) {
+  return tradeSettlementLabel(trade.settlement_type);
+}
+
 function getTradeCounterpartyLabel(trade: MutualTradePreview) {
   if (typeof trade.counterparty_name === 'string' && trade.counterparty_name.trim()) {
     return trade.counterparty_name;
@@ -1894,6 +1900,7 @@ function handleHistoryPresetChipChange(value: string) {
                     <div class="trade-details">
                         <span class="trade-amount">{{ trade.quantity }} عدد</span>
                         <span class="trade-commodity">{{ trade.commodity_name }}</span>
+                        <span class="trade-settlement">{{ getTradeSettlementLabel(trade) }}</span>
                         <span class="trade-price">{{ formatTradePrice(trade.price) }} ریال</span>
                     </div>
                     <div v-if="!shouldHideCustomerTradeRelationshipDetails" class="trade-counterparty">
@@ -2933,6 +2940,8 @@ function handleHistoryPresetChipChange(value: string) {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.45rem;
     font-weight: 600;
     color: var(--ds-text-secondary);
 }
@@ -2944,6 +2953,12 @@ function handleHistoryPresetChipChange(value: string) {
 .trade-commodity {
   font-size: var(--ds-font-base);
   color: var(--ds-text-muted);
+}
+
+.trade-settlement {
+  font-size: var(--ds-font-sm);
+  color: var(--ds-text-secondary);
+  font-weight: 800;
 }
 
 .trade-price {
