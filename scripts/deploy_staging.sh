@@ -49,6 +49,7 @@ STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
 STAGING_FOREIGN_ONLY="${STAGING_FOREIGN_ONLY:-0}"
+STAGING_BOT_USERNAME="${STAGING_BOT_USERNAME:-}"
 STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
 STAGING_PUBLIC_FOREIGN_SYNC_URL="${STAGING_PUBLIC_FOREIGN_SYNC_URL:-https://staging.362514.ir/foreign-sync}"
 default_staging_internal_foreign_server_url() {
@@ -316,6 +317,13 @@ require_staging_peer_url() {
     esac
 }
 
+validate_staging_bot_username() {
+    [[ -n "$STAGING_BOT_USERNAME" ]] || return 0
+    if [[ ! "$STAGING_BOT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[bB][oO][tT]$ ]]; then
+        die "STAGING_BOT_USERNAME must be a valid public Telegram bot username ending in bot"
+    fi
+}
+
 ensure_env() {
     if [[ -f "$ENV_FILE" ]]; then
         return
@@ -335,7 +343,7 @@ ensure_env() {
 ENVIRONMENT=staging
 SERVER_MODE=iran
 FRONTEND_URL=$STAGING_FRONTEND_URL
-BOT_USERNAME=staging_bot_placeholder
+BOT_USERNAME=${STAGING_BOT_USERNAME:-staging_bot_placeholder}
 
 DATABASE_URL=postgresql+asyncpg://trading_bot_staging:$db_password@db:5432/trading_bot_staging
 SYNC_DATABASE_URL=postgresql://trading_bot_staging:$db_password@db:5432/trading_bot_staging
@@ -381,6 +389,10 @@ EOF
 ensure_runtime_env_values() {
     ensure_env
     require_staging_peer_url
+    validate_staging_bot_username
+    if [[ -n "$STAGING_BOT_USERNAME" ]]; then
+        set_env_value BOT_USERNAME "$STAGING_BOT_USERNAME"
+    fi
     set_env_value FRONTEND_URL "$STAGING_FRONTEND_URL"
     set_env_value IRAN_SERVER_URL "$STAGING_INTERNAL_IRAN_SERVER_URL"
     set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
