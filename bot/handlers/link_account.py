@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User, set_legacy_has_bot_access_compatibility
 from core.config import settings
+from core.deployment_surface import normalize_origin
 from core.db import AsyncSessionLocal, get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
@@ -130,7 +131,11 @@ class LinkState(StatesGroup):
 
 
 def _account_link_webapp_url() -> str | None:
-    return user_facing_webapp_url(settings_obj=settings)
+    if getattr(settings, "public_webapp_url", None):
+        return public_webapp_url_for_links(settings_obj=settings)
+
+    fallback_url = user_facing_webapp_url(settings_obj=settings)
+    return normalize_origin(getattr(settings, "iran_server_url", None)) or fallback_url
 
 
 def build_webapp_link_line() -> str | None:

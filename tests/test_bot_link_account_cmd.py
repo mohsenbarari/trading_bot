@@ -49,6 +49,17 @@ class BotLinkAccountCmdTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("وباپ".replace("\u000c", "‌"), build_accountant_web_only_message())
             self.assertIn("وباپ".replace("\u000c", "‌"), build_customer_web_only_message())
 
+        with unittest.mock.patch.object(
+            module,
+            "settings",
+            SimpleNamespace(
+                iran_server_url="https://coin.gold-trade.ir/",
+                frontend_url="https://coin.362514.ir",
+            ),
+        ):
+            self.assertIn("https://coin.gold-trade.ir", build_webapp_link_line())
+            self.assertNotIn("coin.362514.ir", build_webapp_link_line())
+
         message = SimpleNamespace(answer=AsyncMock())
         state = FakeState()
         user = SimpleNamespace(id=7, role="standard", address="System Default")
