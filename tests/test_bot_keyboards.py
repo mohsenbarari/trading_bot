@@ -12,6 +12,7 @@ class BotKeyboardsTests(unittest.TestCase):
         super_admin_menu = keyboards.get_persistent_menu_keyboard(UserRole.SUPER_ADMIN, 'https://mini-app')
         super_admin_texts = [button.text for row in super_admin_menu.keyboard for button in row]
         self.assertIn('🔐 پنل مدیریت', super_admin_texts)
+        self.assertEqual([button.text for button in super_admin_menu.keyboard[0]], ['📈 معامله'])
 
         middle_manager_menu = keyboards.get_persistent_menu_keyboard(UserRole.MIDDLE_MANAGER, 'https://mini-app')
         middle_manager_texts = [button.text for row in middle_manager_menu.keyboard for button in row]
@@ -21,6 +22,14 @@ class BotKeyboardsTests(unittest.TestCase):
         standard_texts = [button.text for row in standard_menu.keyboard for button in row]
         self.assertIn('👥 لیست همکاران', standard_texts)
         self.assertNotIn('⚙️ تنظیمات', standard_texts)
+        self.assertEqual(
+            [[button.text for button in row] for row in standard_menu.keyboard],
+            [
+                ['📈 معامله'],
+                ['👤 پنل کاربر', '👥 لیست همکاران'],
+                ['📦 لیست کالاها'],
+            ],
+        )
 
         police_menu = keyboards.get_persistent_menu_keyboard(UserRole.POLICE, 'https://mini-app')
         police_texts = [button.text for row in police_menu.keyboard for button in row]
@@ -30,7 +39,16 @@ class BotKeyboardsTests(unittest.TestCase):
         standard_panel_texts = [button.text for row in standard_panel.keyboard for button in row]
         self.assertEqual(
             standard_panel_texts,
-            ['📄 معاملات اخیر', '🚫 کاربران مسدود شده', '👥 مشتریان', '🔙 بازگشت'],
+            ['📈 معامله', '📄 معاملات اخیر', '👥 مشتریان', '🚫 کاربران مسدود شده', '🔙 بازگشت'],
+        )
+        self.assertEqual(
+            [[button.text for button in row] for row in standard_panel.keyboard],
+            [
+                ['📈 معامله'],
+                ['📄 معاملات اخیر', '👥 مشتریان'],
+                ['🚫 کاربران مسدود شده'],
+                ['🔙 بازگشت'],
+            ],
         )
 
         standard_panel_with_support = keyboards.get_user_panel_keyboard(
@@ -42,6 +60,10 @@ class BotKeyboardsTests(unittest.TestCase):
             button.text for row in standard_panel_with_support.keyboard for button in row
         ]
         self.assertIn('☎️ پشتیبانی', standard_panel_with_support_texts)
+        self.assertEqual(
+            [button.text for button in standard_panel_with_support.keyboard[2]],
+            ['🚫 کاربران مسدود شده', '☎️ پشتیبانی'],
+        )
 
         manager_panel_with_support = keyboards.get_user_panel_keyboard(
             UserRole.MIDDLE_MANAGER,
@@ -57,6 +79,11 @@ class BotKeyboardsTests(unittest.TestCase):
         user_panel_texts = [button.text for row in user_panel.keyboard for button in row]
         self.assertIn('⚙️ تنظیمات کاربری', user_panel_texts)
         self.assertIn('🔙 بازگشت', user_panel_texts)
+        self.assertEqual([button.text for button in user_panel.keyboard[0]], ['📈 معامله'])
+        self.assertEqual(
+            [button.text for button in user_panel.keyboard[1]],
+            ['📊 تاریخچه معاملات من', '⚙️ تنظیمات کاربری'],
+        )
 
     def test_admin_and_user_management_keyboards(self):
         admin_panel = keyboards.get_admin_panel_keyboard()

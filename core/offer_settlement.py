@@ -1,6 +1,7 @@
 """Shared settlement normalization and Persian presentation labels."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from core.enums import SettlementType
@@ -30,6 +31,44 @@ def trade_settlement_label(value: Any) -> str:
     if settlement_type_value(value) == SettlementType.TOMORROW.value:
         return "فردایی"
     return "نقد حاضر"
+
+
+def offer_draft_prefix(offer_type: Any, settlement_type: Any) -> str:
+    raw_offer_type = getattr(offer_type, "value", offer_type)
+    trade_label = "خرید" if str(raw_offer_type or "buy").strip().lower() == "buy" else "فروش"
+    if settlement_type_value(settlement_type) == SettlementType.TOMORROW.value:
+        return f"{trade_label} نقد فردا"
+    return f"{trade_label} نقد"
+
+
+def build_offer_draft_text(
+    *,
+    offer_type: Any,
+    settlement_type: Any,
+    commodity_name: Any,
+    quantity: Any,
+    price: Any,
+    is_wholesale: bool = True,
+    lot_sizes: Iterable[Any] | None = None,
+    notes: Any = None,
+) -> str:
+    """Build text accepted by the shared offer parser, without publishing it."""
+    normalized_commodity_name = str(commodity_name or "").strip()
+    parts = [
+        offer_draft_prefix(offer_type, settlement_type),
+        normalized_commodity_name,
+        str(int(quantity)),
+        "عدد",
+        str(int(price)),
+    ]
+    if not is_wholesale and lot_sizes:
+        parts.extend(str(int(item)) for item in lot_sizes)
+
+    draft = " ".join(part for part in parts if part)
+    normalized_notes = str(notes or "").strip()
+    if normalized_notes:
+        draft += f": {normalized_notes}"
+    return draft
 
 
 def build_offer_summary_text(

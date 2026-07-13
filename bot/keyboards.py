@@ -19,6 +19,8 @@ def get_create_token_inline_keyboard() -> InlineKeyboardMarkup | None:
 
 def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> ReplyKeyboardMarkup:
     keyboard_layout = []
+    if user_role in (UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN):
+        keyboard_layout.append([KeyboardButton(text="📈 معامله")])
     row_2_buttons = []
     if user_role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         row_2_buttons.append(KeyboardButton(text="🔐 پنل مدیریت")) 
@@ -42,19 +44,32 @@ def get_user_panel_keyboard(
 ) -> ReplyKeyboardMarkup:
     keyboard_layout = []
     if user_role in (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN) and standard_actions:
-        keyboard_layout.append([KeyboardButton(text="📄 معاملات اخیر")])
-        keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
-        keyboard_layout.append([KeyboardButton(text="👥 مشتریان")])
+        keyboard_layout.append([KeyboardButton(text="📈 معامله")])
+        keyboard_layout.append([
+            KeyboardButton(text="📄 معاملات اخیر"),
+            KeyboardButton(text="👥 مشتریان"),
+        ])
         if show_support and user_role == UserRole.STANDARD:
-            keyboard_layout.append([KeyboardButton(text="☎️ پشتیبانی")])
+            keyboard_layout.append([
+                KeyboardButton(text="🚫 کاربران مسدود شده"),
+                KeyboardButton(text="☎️ پشتیبانی"),
+            ])
+        else:
+            keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
         keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
         return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
+    if user_role in (UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN):
+        keyboard_layout.append([KeyboardButton(text="📈 معامله")])
+
     # دکمه تنظیمات فقط برای نقش‌های غیر عادی (مدیر ارشد، مدیر میانی، پلیس)
     if user_role and user_role != UserRole.STANDARD:
-        keyboard_layout.append([KeyboardButton(text="⚙️ تنظیمات کاربری")])
-    
-    keyboard_layout.append([KeyboardButton(text="📊 تاریخچه معاملات من")])
+        keyboard_layout.append([
+            KeyboardButton(text="📊 تاریخچه معاملات من"),
+            KeyboardButton(text="⚙️ تنظیمات کاربری"),
+        ])
+    else:
+        keyboard_layout.append([KeyboardButton(text="📊 تاریخچه معاملات من")])
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 

@@ -10,13 +10,17 @@ from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from core.config import settings
 from core.db import AsyncSessionLocal
+from core.enums import SettlementType
 from bot.callbacks import (
     TradeTypeCallback,
+    TradeSettlementCallback,
     CommodityCallback,
     PageCallback,
     QuantityCallback,
     LotTypeCallback,
     TradeActionCallback,
+    TradeWizardActionCallback,
+    TradeWizardEditCallback,
     ACTION_NOOP
 )
 
@@ -24,29 +28,63 @@ from bot.callbacks import (
 # KEYBOARDS & UTILS
 # ============================================
 
-def get_trade_type_keyboard() -> InlineKeyboardMarkup:
+def _wizard_back_button(*, return_to_review: bool, fallback_action: str) -> InlineKeyboardButton:
+    if return_to_review:
+        return InlineKeyboardButton(
+            text="🔙 بازگشت به خلاصه",
+            callback_data=TradeWizardActionCallback(action="review").pack(),
+        )
+    return InlineKeyboardButton(
+        text="❌ انصراف" if fallback_action == "cancel" else "🔙 بازگشت",
+        callback_data=TradeActionCallback(action=fallback_action).pack(),
+    )
+
+
+def get_trade_type_keyboard(*, return_to_review: bool = False) -> InlineKeyboardMarkup:
     """کیبورد انتخاب نوع معامله (خرید/فروش)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🟢 خریدارم", callback_data=TradeTypeCallback(type="buy").pack()),
-            InlineKeyboardButton(text="🔴 فروشنده‌ام", callback_data=TradeTypeCallback(type="sell").pack())
+            InlineKeyboardButton(text="🟢 خرید", callback_data=TradeTypeCallback(type="buy").pack()),
+            InlineKeyboardButton(text="🔴 فروش", callback_data=TradeTypeCallback(type="sell").pack())
         ],
-        [InlineKeyboardButton(text="🔙 بازگشت", callback_data="panel_back")]
+        [_wizard_back_button(return_to_review=return_to_review, fallback_action="cancel")],
     ])
 
 
-def get_lot_type_keyboard() -> InlineKeyboardMarkup:
+def get_settlement_type_keyboard(*, return_to_review: bool = False) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="☀️ نقدی",
+                callback_data=TradeSettlementCallback(type=SettlementType.CASH.value).pack(),
+            ),
+            InlineKeyboardButton(
+                text="➡️ فردایی",
+                callback_data=TradeSettlementCallback(type=SettlementType.TOMORROW.value).pack(),
+            ),
+        ],
+        [_wizard_back_button(return_to_review=return_to_review, fallback_action="back_to_type")],
+    ])
+
+
+def get_lot_type_keyboard(*, return_to_review: bool = False) -> InlineKeyboardMarkup:
     """کیبورد انتخاب یکجا یا خُرد"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📦 یکجا (Wholesale)", callback_data=LotTypeCallback(type="wholesale").pack()),
-            InlineKeyboardButton(text="🍰 خُرد (Retail)", callback_data=LotTypeCallback(type="retail").pack())
+            InlineKeyboardButton(text="📦 یکجا", callback_data=LotTypeCallback(type="wholesale").pack()),
+            InlineKeyboardButton(text="خُرد", callback_data=LotTypeCallback(type="retail").pack())
         ],
-        [InlineKeyboardButton(text="🔙 بازگشت", callback_data=TradeActionCallback(action="back_to_quantity").pack())]
+        [_wizard_back_button(return_to_review=return_to_review, fallback_action="back_to_quantity")],
     ])
 
 
-async def get_commodities_keyboard(trade_type: str, page: int = 1, limit: int = 9) -> InlineKeyboardMarkup:
+async def get_commodities_keyboard(
+    trade_type: str,
+    page: int = 1,
+    limit: int = 9,
+    *,
+    return_to_review: bool = False,
+) -> InlineKeyboardMarkup:
     """کیبورد لیست کالاها با pagination"""
     async with AsyncSessionLocal() as session:
         # شمارش کل کالاها
@@ -92,14 +130,19 @@ async def get_commodities_keyboard(trade_type: str, page: int = 1, limit: int = 
     
     # دکمه‌های کنترل
     keyboard_rows.append([
-        InlineKeyboardButton(text="🔙 بازگشت", callback_data=TradeActionCallback(action="back_to_type").pack()),
-        InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())
+        _wizard_back_button(return_to_review=return_to_review, fallback_action="back_to_settlement"),
+        InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack()),
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
-def get_quantity_keyboard(min_quantity: int = 5, max_quantity: int = 50) -> InlineKeyboardMarkup:
+def get_quantity_keyboard(
+    min_quantity: int = 5,
+    max_quantity: int = 50,
+    *,
+    return_to_review: bool = False,
+) -> InlineKeyboardMarkup:
     """کیبورد انتخاب سریع تعداد مطابق بازه تنظیمات سیستم"""
     if min_quantity > max_quantity:
         min_quantity, max_quantity = max_quantity, min_quantity
@@ -127,8 +170,60 @@ def get_quantity_keyboard(min_quantity: int = 5, max_quantity: int = 50) -> Inli
         )
 
     keyboard_rows.append([InlineKeyboardButton(text="✏️ ورود دستی", callback_data=QuantityCallback(value="manual").pack())])
-    keyboard_rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data=TradeActionCallback(action="back_to_commodity").pack())])
+    keyboard_rows.append([
+        _wizard_back_button(return_to_review=return_to_review, fallback_action="back_to_commodity")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+
+def get_wizard_review_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ ادامه با همین متن",
+            callback_data=TradeWizardActionCallback(action="continue").pack(),
+        )],
+        [InlineKeyboardButton(
+            text="✏️ اصلاح گزینه‌ها",
+            callback_data=TradeWizardActionCallback(action="edit").pack(),
+        )],
+        [InlineKeyboardButton(
+            text="❌ لغو",
+            callback_data=TradeWizardActionCallback(action="cancel").pack(),
+        )],
+    ])
+
+
+def get_wizard_edit_keyboard(*, is_wholesale: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="خرید / فروش", callback_data=TradeWizardEditCallback(field="trade_type").pack()),
+            InlineKeyboardButton(text="نقدی / فردایی", callback_data=TradeWizardEditCallback(field="settlement_type").pack()),
+        ],
+        [
+            InlineKeyboardButton(text="کالا", callback_data=TradeWizardEditCallback(field="commodity").pack()),
+            InlineKeyboardButton(text="تعداد", callback_data=TradeWizardEditCallback(field="quantity").pack()),
+        ],
+        [
+            InlineKeyboardButton(text="یکجا / خُرد", callback_data=TradeWizardEditCallback(field="lot_type").pack()),
+            InlineKeyboardButton(text="قیمت", callback_data=TradeWizardEditCallback(field="price").pack()),
+        ],
+    ]
+    if not is_wholesale:
+        rows.append([
+            InlineKeyboardButton(text="ترکیب بخش‌بندی", callback_data=TradeWizardEditCallback(field="lot_sizes").pack()),
+            InlineKeyboardButton(text="توضیحات", callback_data=TradeWizardEditCallback(field="notes").pack()),
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(text="توضیحات", callback_data=TradeWizardEditCallback(field="notes").pack()),
+        ])
+    rows.append([
+        InlineKeyboardButton(
+            text="🔙 بازگشت به متن آفر",
+            callback_data=TradeWizardActionCallback(action="review").pack(),
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def get_confirm_keyboard():

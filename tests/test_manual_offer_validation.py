@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from bot.utils import offer_parser
 from bot.utils.offer_parser import _match_commodity_name
+from core.offer_settlement import build_offer_draft_text
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
@@ -365,6 +366,49 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(result)
                 self.assertEqual(result.trade_type, expected_trade_type)
                 self.assertEqual(result.settlement_type, expected_settlement_type)
+
+    async def test_button_wizard_drafts_round_trip_through_shared_parser(self):
+        cases = (
+            (
+                build_offer_draft_text(
+                    offer_type="buy",
+                    settlement_type="cash",
+                    commodity_name="امام",
+                    quantity=30,
+                    price=75800,
+                ),
+                ("buy", "cash", True, None, None),
+            ),
+            (
+                build_offer_draft_text(
+                    offer_type="sell",
+                    settlement_type="tomorrow",
+                    commodity_name="ربع بهار",
+                    quantity=40,
+                    price=178000,
+                    is_wholesale=False,
+                    lot_sizes=[30, 10],
+                    notes="تحویل هماهنگ شود",
+                ),
+                ("sell", "tomorrow", False, [30, 10], "تحویل هماهنگ شود"),
+            ),
+        )
+
+        for draft, expected in cases:
+            with self.subTest(draft=draft):
+                result, error = await offer_parser.parse_offer_text(draft)
+                self.assertIsNone(error)
+                self.assertIsNotNone(result)
+                self.assertEqual(
+                    (
+                        result.trade_type,
+                        result.settlement_type,
+                        result.is_wholesale,
+                        result.lot_sizes,
+                        result.notes,
+                    ),
+                    expected,
+                )
 
     async def test_text_offer_rejects_legacy_and_loose_settlement_prefixes(self):
         invalid_samples = (

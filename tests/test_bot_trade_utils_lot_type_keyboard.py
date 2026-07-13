@@ -10,7 +10,7 @@ class BotTradeUtilsLotTypeKeyboardTests(unittest.TestCase):
 
         self.assertEqual(len(keyboard.inline_keyboard), 2)
         first_row = keyboard.inline_keyboard[0]
-        self.assertEqual([button.text for button in first_row], ["📦 یکجا (Wholesale)", "🍰 خُرد (Retail)"])
+        self.assertEqual([button.text for button in first_row], ["📦 یکجا", "خُرد"])
         self.assertEqual(first_row[0].callback_data, LotTypeCallback(type="wholesale").pack())
         self.assertEqual(first_row[1].callback_data, LotTypeCallback(type="retail").pack())
         self.assertEqual(

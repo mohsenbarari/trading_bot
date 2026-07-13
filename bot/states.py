@@ -51,11 +51,17 @@ class UserLimitations(StatesGroup):
 
 class Trade(StatesGroup):
     """FSM برای ثبت لفظ معاملاتی"""
+    awaiting_trade_type = State()  # منتظر انتخاب خرید/فروش
+    awaiting_settlement_type = State()  # منتظر انتخاب نقدی/فردایی
+    awaiting_commodity = State()  # منتظر انتخاب کالا
     awaiting_quantity = State()  # منتظر تعداد کالا
     awaiting_lot_type = State()  # منتظر انتخاب یکجا/خُرد
     awaiting_lot_sizes = State() # منتظر ترکیب بخش‌ها
     awaiting_price = State()     # منتظر قیمت (5 یا 6 رقمی)
     awaiting_notes = State()     # منتظر توضیحات (اختیاری)
+    awaiting_wizard_review = State()  # منتظر ادامه، اصلاح یا لغو متن تولیدشده
+    awaiting_wizard_edit = State()  # منتظر انتخاب فیلد برای اصلاح
+    awaiting_legacy_confirm = State()  # فقط برای callbackهای قدیمی و غیرفعال
     awaiting_text_confirm = State()  # منتظر تایید لفظ متنی
 
 

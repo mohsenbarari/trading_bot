@@ -3,14 +3,18 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_create import handle_trade_button
+from bot.handlers.trade_create import Trade, handle_trade_button
 from core.enums import UserRole
 
 
 class BotTradeCreateStartTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_trade_button_handles_watch_role_restriction_and_success(self):
         message = SimpleNamespace(answer=AsyncMock())
-        state = SimpleNamespace(clear=AsyncMock())
+        state = SimpleNamespace(
+            clear=AsyncMock(),
+            update_data=AsyncMock(),
+            set_state=AsyncMock(),
+        )
 
         await handle_trade_button(message, state, user=None)
         message.answer.assert_not_awaited()
@@ -38,8 +42,16 @@ class BotTradeCreateStartTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True)):
             await handle_trade_button(message, state, user=allowed_user)
         state.clear.assert_awaited_once()
-        self.assertIn("ثبت لفظ دکمه‌ای غیرفعال شده", message.answer.await_args_list[-1].args[0])
-        self.assertIn("خ ن امام 30تا 75800", message.answer.await_args_list[-1].args[0])
+        state.update_data.assert_awaited_once_with(wizard_return_to_review=False)
+        state.set_state.assert_awaited_once_with(Trade.awaiting_trade_type)
+        self.assertIn("نوع معامله را انتخاب کنید", message.answer.await_args_list[-1].args[0])
+        button_texts = [
+            button.text
+            for row in message.answer.await_args_list[-1].kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("🟢 خرید", button_texts)
+        self.assertIn("🔴 فروش", button_texts)
 
 
 if __name__ == "__main__":

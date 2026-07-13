@@ -18,7 +18,7 @@ class BotTradeCreateLotTypeTests(unittest.IsolatedAsyncioTestCase):
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
         state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock(), get_data=AsyncMock(return_value={"quantity": 25}))
         await handle_lot_split(callback, state, user=SimpleNamespace(id=1))
-        state.update_data.assert_awaited_once_with(is_wholesale=False)
+        state.update_data.assert_awaited_once_with(is_wholesale=False, lot_sizes=None)
         state.set_state.assert_awaited_once_with(Trade.awaiting_lot_sizes)
         self.assertIn("جمع باید برابر 25 باشد", callback.message.edit_text.await_args.args[0])
 

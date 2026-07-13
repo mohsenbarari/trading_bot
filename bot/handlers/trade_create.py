@@ -30,22 +30,24 @@ from core.services.offer_expiry_service import (
 )
 from core.services.trade_service import (
     validate_lot_sizes,
-    validate_quantity,
     validate_price,
     get_available_trade_amounts,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
-from core.utils import to_jalali_str, check_user_limits, increment_user_counter, utc_now_naive
+from core.utils import to_jalali_str, check_user_limits, increment_user_counter
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
+    get_settlement_type_keyboard,
     get_lot_type_keyboard,
     get_commodities_keyboard,
     get_quantity_keyboard,
-    get_confirm_keyboard
+    get_wizard_review_keyboard,
+    get_wizard_edit_keyboard,
 )
 from bot.callbacks import (
     TradeTypeCallback,
+    TradeSettlementCallback,
     CommodityCallback,
     PageCallback,
     QuantityCallback,
@@ -54,8 +56,8 @@ from bot.callbacks import (
     AcceptLotsCallback,
     SkipNotesCallback,
     TextOfferActionCallback,
-    TextOfferActionCallback,
-    ACTION_NOOP
+    TradeWizardActionCallback,
+    TradeWizardEditCallback,
 )
 
 
@@ -153,9 +155,139 @@ def _get_price_warning_keyboard(confirm_callback_data: str, cancel_callback_data
     )
 
 
+def _trade_type_label(value: object) -> str:
+    return "خرید" if str(getattr(value, "value", value) or "buy") == "buy" else "فروش"
+
+
+def _settlement_type_label(value: object) -> str:
+    raw_value = str(getattr(value, "value", value) or SettlementType.CASH.value)
+    return "فردایی" if raw_value == SettlementType.TOMORROW.value else "نقد حاضر"
+
+
+def _wizard_navigation_keyboard(*, back_action: str, return_to_review: bool) -> InlineKeyboardMarkup:
+    if return_to_review:
+        back_button = InlineKeyboardButton(
+            text="🔙 بازگشت به خلاصه",
+            callback_data=TradeWizardActionCallback(action="review").pack(),
+        )
+    else:
+        back_button = InlineKeyboardButton(
+            text="🔙 بازگشت",
+            callback_data=TradeActionCallback(action=back_action).pack(),
+        )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [back_button],
+        [InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())],
+    ])
+
+
+async def _show_price_prompt(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+    data = await state.get_data()
+    return_to_review = bool(data.get("wizard_return_to_review"))
+    markup = _wizard_navigation_keyboard(
+        back_action="back_to_lot_type",
+        return_to_review=return_to_review,
+    )
+    text = "💰 قیمت را وارد کنید (5 یا 6 رقم):"
+    if edit:
+        await message.edit_text(text, reply_markup=markup)
+    else:
+        await message.answer(text, reply_markup=markup)
+    await state.set_state(Trade.awaiting_price)
+
+
+async def _show_lot_sizes_prompt(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+    data = await state.get_data()
+    quantity = int(data.get("quantity") or 0)
+    return_to_review = bool(data.get("wizard_return_to_review"))
+    markup = _wizard_navigation_keyboard(
+        back_action="back_to_lot_type",
+        return_to_review=return_to_review,
+    )
+    text = (
+        "🔢 ترکیب بخش‌ها را با فاصله وارد کنید:\n"
+        "(مثال: 10 15 25)\n\n"
+        f"⚠️ جمع باید برابر {quantity} باشد\n"
+        "⚠️ حداقل و حداکثر هر بخش مطابق تنظیمات بازار است"
+    )
+    if edit:
+        await message.edit_text(text, reply_markup=markup)
+    else:
+        await message.answer(text, reply_markup=markup)
+    await state.set_state(Trade.awaiting_lot_sizes)
+
+
+async def _show_notes_prompt(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+    data = await state.get_data()
+    return_to_review = bool(data.get("wizard_return_to_review"))
+    if return_to_review:
+        back_button = InlineKeyboardButton(
+            text="🔙 بازگشت به خلاصه",
+            callback_data=TradeWizardActionCallback(action="review").pack(),
+        )
+    else:
+        back_button = InlineKeyboardButton(
+            text="🔙 بازگشت",
+            callback_data=TradeActionCallback(action="back_to_price").pack(),
+        )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭️ بدون توضیحات", callback_data=SkipNotesCallback(target="notes").pack())],
+        [back_button],
+        [InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())],
+    ])
+    text = (
+        "📝 توضیحات یا شرایط (اختیاری)\n\n"
+        "اگر توضیحی ندارید، «بدون توضیحات» را بزنید.\n"
+        "حداکثر 200 کاراکتر"
+    )
+    if edit:
+        await message.edit_text(text, reply_markup=markup)
+    else:
+        await message.answer(text, reply_markup=markup)
+    await state.set_state(Trade.awaiting_notes)
+
+
+async def _show_wizard_review(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+    from core.offer_settlement import build_offer_draft_text
+
+    data = await state.get_data()
+    draft_text = build_offer_draft_text(
+        offer_type=data.get("trade_type"),
+        settlement_type=data.get("settlement_type"),
+        commodity_name=data.get("commodity_name"),
+        quantity=data.get("quantity"),
+        price=data.get("price"),
+        is_wholesale=bool(data.get("is_wholesale", True)),
+        lot_sizes=data.get("lot_sizes"),
+        notes=data.get("notes"),
+    )
+    await state.update_data(
+        generated_offer_text=draft_text,
+        wizard_return_to_review=False,
+        wizard_edit_field=None,
+    )
+    review_text = f"متن استاندارد آفر شما:\n\n{draft_text}\n\nاطلاعات را بررسی کنید."
+    if edit:
+        await message.edit_text(review_text, reply_markup=get_wizard_review_keyboard())
+    else:
+        await message.answer(review_text, reply_markup=get_wizard_review_keyboard())
+    await state.set_state(Trade.awaiting_wizard_review)
+
+
+def _wizard_data_is_complete(data: dict) -> bool:
+    required_fields = ("trade_type", "settlement_type", "commodity_id", "commodity_name", "quantity", "price")
+    if any(data.get(field) in (None, "") for field in required_fields):
+        return False
+    if data.get("is_wholesale") is None:
+        return False
+    if data.get("is_wholesale") is False and not data.get("lot_sizes"):
+        return False
+    return True
+
+
 @router.message(F.text == "📈 معامله")
 async def handle_trade_button(message: types.Message, state: FSMContext, user: Optional[User]):
-    """راهنمای ثبت لفظ متنی به جای فرآیند مرحله‌ای"""
+    """شروع سازنده دکمه‌ای متن آفر بدون ساخت مستقیم آفر."""
     if not user:
         return
 
@@ -188,16 +320,15 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
         return
 
     await state.clear()
+    await state.update_data(wizard_return_to_review=False)
     await message.answer(
-        "📝 ثبت لفظ دکمه‌ای غیرفعال شده است.\n\n"
-        "لطفاً لفظ را به صورت متن در همین چت ارسال کنید.\n"
-        "نمونه‌ها:\n"
-        "خ ن امام 30تا 75800\n"
-        "ف ن ف ربع بهار 20 عدد 765000: تحویل فردا",
+        "📈 ثبت آفر\n\nنوع معامله را انتخاب کنید:",
+        reply_markup=get_trade_type_keyboard(),
     )
+    await state.set_state(Trade.awaiting_trade_type)
 
 
-@router.callback_query(TradeTypeCallback.filter())
+@router.callback_query(Trade.awaiting_trade_type, TradeTypeCallback.filter())
 async def handle_trade_type_selection(
     callback: types.CallbackQuery,
     state: FSMContext,
@@ -208,20 +339,68 @@ async def handle_trade_type_selection(
         return
 
     trade_type = callback_data.type
+    if trade_type not in {"buy", "sell"}:
+        await callback.answer("انتخاب نامعتبر است.", show_alert=True)
+        return
+    data = await state.get_data()
+    return_to_review = bool(data.get("wizard_return_to_review"))
     trade_type_fa = "🟢 خرید" if trade_type == "buy" else "🔴 فروش"
     await state.update_data(trade_type=trade_type, trade_type_fa=trade_type_fa)
-    keyboard = await get_commodities_keyboard(trade_type)
+    if return_to_review:
+        await _show_wizard_review(callback.message, state, edit=True)
+        await callback.answer()
+        return
+
     await callback.message.edit_text(
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {trade_type_fa}\n\n"
-        f"کالای مورد نظر را انتخاب کنید:",
+        "نوع تسویه را انتخاب کنید:",
         parse_mode="Markdown",
-        reply_markup=keyboard,
+        reply_markup=get_settlement_type_keyboard(),
     )
+    await state.set_state(Trade.awaiting_settlement_type)
     await callback.answer()
 
 
-@router.callback_query(PageCallback.filter())
+@router.callback_query(Trade.awaiting_settlement_type, TradeSettlementCallback.filter())
+async def handle_settlement_type_selection(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+    callback_data: TradeSettlementCallback,
+):
+    if not user:
+        await callback.answer()
+        return
+
+    settlement_type = callback_data.type
+    if settlement_type not in {SettlementType.CASH.value, SettlementType.TOMORROW.value}:
+        await callback.answer("انتخاب نامعتبر است.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    return_to_review = bool(data.get("wizard_return_to_review"))
+    await state.update_data(settlement_type=settlement_type)
+    if return_to_review:
+        await _show_wizard_review(callback.message, state, edit=True)
+        await callback.answer()
+        return
+
+    trade_type = str(data.get("trade_type") or "buy")
+    keyboard = await get_commodities_keyboard(trade_type)
+    await callback.message.edit_text(
+        "📈 **ثبت لفظ جدید**\n\n"
+        f"نوع معامله: {_trade_type_label(trade_type)}\n"
+        f"تسویه: {_settlement_type_label(settlement_type)}\n\n"
+        "کالای مورد نظر را انتخاب کنید:",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+    await state.set_state(Trade.awaiting_commodity)
+    await callback.answer()
+
+
+@router.callback_query(Trade.awaiting_commodity, PageCallback.filter())
 async def handle_commodity_page(
     callback: types.CallbackQuery,
     state: FSMContext,
@@ -231,9 +410,17 @@ async def handle_commodity_page(
     if not user:
         return
 
-    trade_type = callback_data.trade_type
+    data = await state.get_data()
+    trade_type = str(data.get("trade_type") or "")
+    if callback_data.trade_type != trade_type:
+        await callback.answer("این صفحه منقضی شده است.", show_alert=True)
+        return
     trade_type_fa = "🟢 خرید" if trade_type == "buy" else "🔴 فروش"
-    keyboard = await get_commodities_keyboard(trade_type, page=callback_data.page)
+    keyboard = await get_commodities_keyboard(
+        trade_type,
+        page=callback_data.page,
+        return_to_review=bool(data.get("wizard_return_to_review")),
+    )
     await callback.message.edit_text(
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {trade_type_fa}\n\n"
@@ -244,7 +431,7 @@ async def handle_commodity_page(
     await callback.answer()
 
 
-@router.callback_query(CommodityCallback.filter())
+@router.callback_query(Trade.awaiting_commodity, CommodityCallback.filter())
 async def handle_commodity_selection(
     callback: types.CallbackQuery,
     state: FSMContext,
@@ -267,7 +454,12 @@ async def handle_commodity_selection(
     ts = await get_trading_settings_async()
 
     data = await state.get_data()
+    return_to_review = bool(data.get("wizard_return_to_review"))
     await state.update_data(commodity_id=commodity.id, commodity_name=commodity.name)
+    if return_to_review:
+        await _show_wizard_review(callback.message, state, edit=True)
+        await callback.answer()
+        return
     await callback.message.edit_text(
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {data.get('trade_type_fa', '🟢 خرید')}\n"
@@ -300,7 +492,11 @@ async def handle_quick_quantity(
 
     from core.trading_settings import get_trading_settings_async
 
-    quantity = int(callback_data.value)
+    try:
+        quantity = int(callback_data.value)
+    except (TypeError, ValueError):
+        await callback.answer("تعداد نامعتبر است.", show_alert=True)
+        return
     ts = await get_trading_settings_async()
     if quantity < ts.offer_min_quantity or quantity > ts.offer_max_quantity:
         await callback.answer(
@@ -311,6 +507,14 @@ async def handle_quick_quantity(
 
     data = await state.get_data()
     await state.update_data(quantity=quantity)
+    if data.get("wizard_return_to_review"):
+        if data.get("is_wholesale") is False:
+            await state.update_data(lot_sizes=None, wizard_edit_field="lot_sizes")
+            await _show_lot_sizes_prompt(callback.message, state, edit=True)
+        else:
+            await _show_wizard_review(callback.message, state, edit=True)
+        await callback.answer()
+        return
     await callback.message.edit_text(
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {data.get('trade_type_fa', '🟢 خرید')}\n"
@@ -334,8 +538,10 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
 
     from core.trading_settings import get_trading_settings
 
+    from bot.utils.offer_parser import normalize_digits
+
     try:
-        quantity = int((message.text or "").strip())
+        quantity = int(normalize_digits((message.text or "").strip()))
         if quantity <= 0:
             raise ValueError()
     except ValueError:
@@ -352,6 +558,13 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
 
     data = await state.get_data()
     await state.update_data(quantity=quantity)
+    if data.get("wizard_return_to_review"):
+        if data.get("is_wholesale") is False:
+            await state.update_data(lot_sizes=None, wizard_edit_field="lot_sizes")
+            await _show_lot_sizes_prompt(message, state, edit=False)
+        else:
+            await _show_wizard_review(message, state, edit=False)
+        return
     await message.answer(
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {data.get('trade_type_fa', '🟢 خرید')}\n"
@@ -370,16 +583,12 @@ async def handle_lot_wholesale(callback: types.CallbackQuery, state: FSMContext,
         await callback.answer()
         return
 
+    data = await state.get_data()
     await state.update_data(is_wholesale=True, lot_sizes=None)
-    await callback.message.edit_text(
-        "💰 قیمت را وارد کنید (5 یا 6 رقم):",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())]
-            ]
-        ),
-    )
-    await state.set_state(Trade.awaiting_price)
+    if data.get("wizard_return_to_review"):
+        await _show_wizard_review(callback.message, state, edit=True)
+    else:
+        await _show_price_prompt(callback.message, state, edit=True)
     await callback.answer()
 
 
@@ -389,23 +598,8 @@ async def handle_lot_split(callback: types.CallbackQuery, state: FSMContext, use
         await callback.answer()
         return
 
-    data = await state.get_data()
-    quantity = data.get("quantity", 1)
-    await state.update_data(is_wholesale=False)
-    await callback.message.edit_text(
-        f"🔢 ترکیب بخش‌ها را با فاصله وارد کنید:\n"
-        f"(مثال: 10 15 25)\n\n"
-        f"⚠️ جمع باید برابر {quantity} باشد\n"
-        f"⚠️ هر بخش حداقل 5 عدد\n"
-        f"⚠️ حداکثر 3 بخش",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())]
-            ]
-        ),
-    )
-    await state.set_state(Trade.awaiting_lot_sizes)
+    await state.update_data(is_wholesale=False, lot_sizes=None)
+    await _show_lot_sizes_prompt(callback.message, state, edit=True)
     await callback.answer()
 
 
@@ -419,8 +613,10 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
 
     data = await state.get_data()
     quantity = data.get("quantity", 1)
+    from bot.utils.offer_parser import normalize_digits
+
     try:
-        lot_sizes = [int(part.strip()) for part in (message.text or "").strip().split()]
+        lot_sizes = [int(part.strip()) for part in normalize_digits((message.text or "").strip()).split()]
         if not lot_sizes:
             raise ValueError()
     except ValueError:
@@ -429,35 +625,34 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
 
     is_valid, error_msg, suggested = validate_lot_sizes(quantity, lot_sizes)
     if not is_valid:
-        keyboard = None
+        keyboard_rows = []
         if suggested:
             suggested_str = "_".join(str(item) for item in suggested)
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=f"✅ قبول: {' '.join(str(item) for item in suggested)}",
-                            callback_data=AcceptLotsCallback(lots=suggested_str).pack(),
-                        )
-                    ]
-                ]
-            )
+            keyboard_rows.append([
+                InlineKeyboardButton(
+                    text=f"✅ قبول: {' '.join(str(item) for item in suggested)}",
+                    callback_data=AcceptLotsCallback(lots=suggested_str).pack(),
+                )
+            ])
+        if data.get("wizard_return_to_review"):
+            keyboard_rows.append([
+                InlineKeyboardButton(
+                    text="🔙 بازگشت به خلاصه",
+                    callback_data=TradeWizardActionCallback(action="review").pack(),
+                )
+            ])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
         await message.answer(error_msg, reply_markup=keyboard)
         return
 
     await state.update_data(lot_sizes=sorted(lot_sizes, reverse=True))
-    await message.answer(
-        "💰 قیمت را وارد کنید (5 یا 6 رقم):",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())]
-            ]
-        ),
-    )
-    await state.set_state(Trade.awaiting_price)
+    if data.get("wizard_return_to_review"):
+        await _show_wizard_review(message, state, edit=False)
+    else:
+        await _show_price_prompt(message, state, edit=False)
 
 
-@router.callback_query(AcceptLotsCallback.filter())
+@router.callback_query(Trade.awaiting_lot_sizes, AcceptLotsCallback.filter())
 async def handle_accept_suggested_lots(
     callback: types.CallbackQuery,
     state: FSMContext,
@@ -468,17 +663,21 @@ async def handle_accept_suggested_lots(
         await callback.answer()
         return
 
-    lot_sizes = [int(item) for item in callback_data.lots.split("_")]
+    data = await state.get_data()
+    try:
+        lot_sizes = [int(item) for item in callback_data.lots.split("_")]
+    except (TypeError, ValueError):
+        await callback.answer("ترکیب بخش‌بندی نامعتبر است.", show_alert=True)
+        return
+    is_valid, error_msg, _suggested = validate_lot_sizes(int(data.get("quantity") or 0), lot_sizes)
+    if not is_valid:
+        await callback.answer(error_msg or "ترکیب بخش‌بندی نامعتبر است.", show_alert=True)
+        return
     await state.update_data(lot_sizes=lot_sizes)
-    await callback.message.edit_text(
-        "💰 قیمت را وارد کنید (5 یا 6 رقم):",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="❌ انصراف", callback_data=TradeActionCallback(action="cancel").pack())]
-            ]
-        ),
-    )
-    await state.set_state(Trade.awaiting_price)
+    if data.get("wizard_return_to_review"):
+        await _show_wizard_review(callback.message, state, edit=True)
+    else:
+        await _show_price_prompt(callback.message, state, edit=True)
     await callback.answer()
 
 
@@ -490,26 +689,20 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     if await _handoff_stale_wizard_state_to_text_offer(message, state, user, bot):
         return
 
-    price_text = (message.text or "").strip()
+    from bot.utils.offer_parser import normalize_digits
+
+    price_text = normalize_digits((message.text or "").strip())
     is_valid, price_error = validate_price(price_text)
     if not is_valid:
         await message.answer(price_error.replace("price", "قیمت"))
         return
 
+    data = await state.get_data()
     await state.update_data(price=int(price_text))
-    await message.answer(
-        "📝 **توضیحات یا شرایط (اختیاری)**\n\n"
-        "اگر شرایط یا توضیحات خاصی دارید وارد کنید.\n"
-        "مثال: فقط نقدی، حداقل 10 عدد، ...\n\n"
-        "_حداکثر 200 کاراکتر_",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⏭️ بدون توضیحات", callback_data=SkipNotesCallback(target="notes").pack())]
-            ]
-        ),
-    )
-    await state.set_state(Trade.awaiting_notes)
+    if data.get("wizard_return_to_review"):
+        await _show_wizard_review(message, state, edit=False)
+    else:
+        await _show_notes_prompt(message, state, edit=False)
 
 
 @router.callback_query(Trade.awaiting_notes, SkipNotesCallback.filter(F.target == "notes"))
@@ -519,7 +712,7 @@ async def handle_skip_notes(callback: types.CallbackQuery, state: FSMContext, us
         return
 
     await state.update_data(notes=None)
-    await show_trade_preview(callback.message, state, edit=True)
+    await _show_wizard_review(callback.message, state, edit=True)
     await callback.answer()
 
 
@@ -537,42 +730,183 @@ async def handle_notes_input(message: types.Message, state: FSMContext, user: Op
         return
 
     await state.update_data(notes=notes)
-    await show_trade_preview(message, state, edit=False)
+    await _show_wizard_review(message, state, edit=False)
 
 
 async def show_trade_preview(message_or_callback, state: FSMContext, edit: bool = False):
-    """نمایش پیش‌نمایش لفظ قبل از تایید نهایی"""
+    """Compatibility wrapper for tests and old callers; no longer creates a direct-confirm path."""
+    await _show_wizard_review(message_or_callback, state, edit=edit)
+
+
+_WIZARD_STATE_VALUES = {
+    Trade.awaiting_trade_type.state,
+    Trade.awaiting_settlement_type.state,
+    Trade.awaiting_commodity.state,
+    Trade.awaiting_quantity.state,
+    Trade.awaiting_lot_type.state,
+    Trade.awaiting_lot_sizes.state,
+    Trade.awaiting_price.state,
+    Trade.awaiting_notes.state,
+    Trade.awaiting_wizard_review.state,
+    Trade.awaiting_wizard_edit.state,
+}
+
+
+async def _wizard_callback_is_current(callback: types.CallbackQuery, state: FSMContext) -> bool:
+    if await state.get_state() in _WIZARD_STATE_VALUES:
+        return True
+    await callback.answer("این فرآیند دیگر فعال نیست.", show_alert=True)
+    return False
+
+
+@router.callback_query(Trade.awaiting_wizard_review, TradeWizardActionCallback.filter(F.action == "edit"))
+async def handle_wizard_edit(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    if not user:
+        await callback.answer()
+        return
     data = await state.get_data()
-    trade_type = data.get("trade_type", "buy")
-    commodity_name = data.get("commodity_name", "نامشخص")
-    quantity = data.get("quantity", 1)
-    price = data.get("price", 0)
-    settlement_type = data.get("settlement_type", SettlementType.CASH.value)
-    notes = data.get("notes")
-
-    channel_text = _build_channel_offer_text(
-        trade_type=trade_type,
-        commodity_name=commodity_name,
-        quantity=quantity,
-        price=price,
-        settlement_type=settlement_type,
-        notes=notes,
+    await callback.message.edit_text(
+        "کدام بخش آفر را می‌خواهید اصلاح کنید؟",
+        reply_markup=get_wizard_edit_keyboard(is_wholesale=bool(data.get("is_wholesale", True))),
     )
+    await state.set_state(Trade.awaiting_wizard_edit)
+    await callback.answer()
 
-    preview = f"**لفظ شما:**\n\n{channel_text}\n\nآیا تایید می‌کنید?"
-    if edit:
-        await message_or_callback.edit_text(
-            preview,
-            parse_mode="Markdown",
-            reply_markup=get_confirm_keyboard(),
-        )
+
+@router.callback_query(Trade.awaiting_wizard_edit, TradeWizardEditCallback.filter())
+async def handle_wizard_edit_field(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+    callback_data: TradeWizardEditCallback,
+):
+    if not user:
+        await callback.answer()
         return
 
-    await message_or_callback.answer(
-        preview,
-        parse_mode="Markdown",
-        reply_markup=get_confirm_keyboard(),
+    field = callback_data.field
+    allowed_fields = {
+        "trade_type",
+        "settlement_type",
+        "commodity",
+        "quantity",
+        "lot_type",
+        "lot_sizes",
+        "price",
+        "notes",
+    }
+    if field not in allowed_fields:
+        await callback.answer("گزینه اصلاح نامعتبر است.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    if field == "lot_sizes" and data.get("is_wholesale") is not False:
+        await callback.answer("برای آفر یکجا بخش‌بندی وجود ندارد.", show_alert=True)
+        return
+
+    await state.update_data(wizard_return_to_review=True, wizard_edit_field=field)
+    if field == "trade_type":
+        await callback.message.edit_text(
+            "نوع معامله را انتخاب کنید:",
+            reply_markup=get_trade_type_keyboard(return_to_review=True),
+        )
+        await state.set_state(Trade.awaiting_trade_type)
+    elif field == "settlement_type":
+        await callback.message.edit_text(
+            "نوع تسویه را انتخاب کنید:",
+            reply_markup=get_settlement_type_keyboard(return_to_review=True),
+        )
+        await state.set_state(Trade.awaiting_settlement_type)
+    elif field == "commodity":
+        trade_type = str(data.get("trade_type") or "buy")
+        await callback.message.edit_text(
+            "کالای مورد نظر را انتخاب کنید:",
+            reply_markup=await get_commodities_keyboard(trade_type, return_to_review=True),
+        )
+        await state.set_state(Trade.awaiting_commodity)
+    elif field == "quantity":
+        from core.trading_settings import get_trading_settings_async
+
+        ts = await get_trading_settings_async()
+        await callback.message.edit_text(
+            "تعداد را انتخاب کنید یا عدد دلخواه را وارد کنید:",
+            reply_markup=get_quantity_keyboard(
+                min_quantity=ts.offer_min_quantity,
+                max_quantity=ts.offer_max_quantity,
+                return_to_review=True,
+            ),
+        )
+        await state.set_state(Trade.awaiting_quantity)
+    elif field == "lot_type":
+        await callback.message.edit_text(
+            "نحوه معامله را انتخاب کنید:",
+            reply_markup=get_lot_type_keyboard(return_to_review=True),
+        )
+        await state.set_state(Trade.awaiting_lot_type)
+    elif field == "lot_sizes":
+        await _show_lot_sizes_prompt(callback.message, state, edit=True)
+    elif field == "price":
+        await _show_price_prompt(callback.message, state, edit=True)
+    else:
+        await _show_notes_prompt(callback.message, state, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(TradeWizardActionCallback.filter(F.action == "review"))
+async def handle_wizard_return_to_review(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    if not user or not await _wizard_callback_is_current(callback, state):
+        return
+    if not _wizard_data_is_complete(await state.get_data()):
+        await callback.answer("اطلاعات این آفر کامل نیست؛ فرآیند را از ابتدا شروع کنید.", show_alert=True)
+        return
+    await _show_wizard_review(callback.message, state, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(Trade.awaiting_wizard_review, TradeWizardActionCallback.filter(F.action == "continue"))
+async def handle_wizard_continue(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    if not user:
+        await callback.answer()
+        return
+    data = await state.get_data()
+    draft_text = str(data.get("generated_offer_text") or "").strip()
+    if not draft_text:
+        await callback.answer("متن آفر تولید نشده است.", show_alert=True)
+        return
+    await _prepare_text_offer(
+        callback.message,
+        state,
+        user,
+        draft_text,
+        edit_response=True,
+        wizard_source=True,
     )
+    await callback.answer()
+
+
+@router.callback_query(TradeWizardActionCallback.filter(F.action == "cancel"))
+async def handle_wizard_cancel(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    if not user or not await _wizard_callback_is_current(callback, state):
+        return
+    await state.clear()
+    await callback.message.edit_text("❌ فرآیند ثبت آفر لغو شد.")
+    await callback.answer()
 
 
 async def _handle_trade_confirm_core(
@@ -879,7 +1213,7 @@ async def _handle_trade_confirm_core(
     await callback.answer()
 
 
-@router.callback_query(TradeActionCallback.filter(F.action == "confirm"))
+@router.callback_query(Trade.awaiting_legacy_confirm, TradeActionCallback.filter(F.action == "confirm"))
 async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     await _handle_trade_confirm_core(
         callback,
@@ -896,7 +1230,7 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
     )
 
 
-@router.callback_query(TradeActionCallback.filter(F.action == "confirm_warning"))
+@router.callback_query(Trade.awaiting_legacy_confirm, TradeActionCallback.filter(F.action == "confirm_warning"))
 async def handle_trade_warning_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     await _handle_trade_confirm_core(
         callback,
@@ -914,18 +1248,88 @@ async def handle_trade_warning_confirm(callback: types.CallbackQuery, state: FSM
     )
 
 
-@router.callback_query(TradeActionCallback.filter(F.action == "back_to_type"))
+@router.callback_query(Trade.awaiting_settlement_type, TradeActionCallback.filter(F.action == "back_to_type"))
 async def handle_back_to_type(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
         await callback.answer()
         return
 
-    await state.clear()
+    await state.update_data(wizard_return_to_review=False)
     await callback.message.edit_text(
         "📈 **ثبت لفظ جدید**\n\nنوع معامله را انتخاب کنید:",
         parse_mode="Markdown",
         reply_markup=get_trade_type_keyboard(),
     )
+    await state.set_state(Trade.awaiting_trade_type)
+    await callback.answer()
+
+
+@router.callback_query(Trade.awaiting_commodity, TradeActionCallback.filter(F.action == "back_to_settlement"))
+async def handle_back_to_settlement(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        "نوع تسویه را انتخاب کنید:",
+        reply_markup=get_settlement_type_keyboard(),
+    )
+    await state.set_state(Trade.awaiting_settlement_type)
+    await callback.answer()
+
+
+@router.callback_query(Trade.awaiting_quantity, TradeActionCallback.filter(F.action == "back_to_commodity"))
+async def handle_back_to_commodity(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    data = await state.get_data()
+    trade_type = str(data.get("trade_type") or "buy")
+    await callback.message.edit_text(
+        "کالای مورد نظر را انتخاب کنید:",
+        reply_markup=await get_commodities_keyboard(trade_type),
+    )
+    await state.set_state(Trade.awaiting_commodity)
+    await callback.answer()
+
+
+@router.callback_query(Trade.awaiting_lot_type, TradeActionCallback.filter(F.action == "back_to_quantity"))
+async def handle_back_to_quantity(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    await callback.message.edit_text(
+        "تعداد را انتخاب کنید یا عدد دلخواه را وارد کنید:",
+        reply_markup=get_quantity_keyboard(
+            min_quantity=ts.offer_min_quantity,
+            max_quantity=ts.offer_max_quantity,
+        ),
+    )
+    await state.set_state(Trade.awaiting_quantity)
+    await callback.answer()
+
+
+@router.callback_query(TradeActionCallback.filter(F.action == "back_to_lot_type"))
+async def handle_back_to_lot_type(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user or await state.get_state() not in {Trade.awaiting_lot_sizes.state, Trade.awaiting_price.state}:
+        await callback.answer("این مرحله دیگر فعال نیست.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "نحوه معامله را انتخاب کنید:",
+        reply_markup=get_lot_type_keyboard(),
+    )
+    await state.set_state(Trade.awaiting_lot_type)
+    await callback.answer()
+
+
+@router.callback_query(Trade.awaiting_notes, TradeActionCallback.filter(F.action == "back_to_price"))
+async def handle_back_to_price(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    await _show_price_prompt(callback.message, state, edit=True)
     await callback.answer()
 
 
@@ -935,6 +1339,8 @@ async def handle_trade_cancel(callback: types.CallbackQuery, state: FSMContext, 
         await callback.answer()
         return
 
+    if not await _wizard_callback_is_current(callback, state):
+        return
     await state.clear()
     await callback.message.edit_text("❌ فرآیند ثبت لفظ لغو شد.")
     await callback.answer()
@@ -1097,71 +1503,102 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
     await message.answer(f"✅ تمام لفظ‌های فعال شما ({expired_count} لفظ) منقضی شدند.")
 
 
-@router.message(F.text.func(has_trade_indicator))
-async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
-    """پردازش آفر متنی با پیشوند دقیق نوع معامله و تسویه."""
-    if not user:
-        return
-    
+async def _text_offer_response(
+    message: types.Message,
+    text: str,
+    *,
+    edit: bool,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
+) -> None:
+    kwargs = {}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
+    if parse_mode is not None:
+        kwargs["parse_mode"] = parse_mode
+    if edit:
+        await message.edit_text(text, **kwargs)
+    else:
+        await message.answer(text, **kwargs)
+
+
+async def _prepare_text_offer(
+    message: types.Message,
+    state: FSMContext,
+    user: User | object,
+    offer_text: str,
+    *,
+    edit_response: bool,
+    wizard_source: bool,
+) -> bool:
+    """Parse and prepare one offer through the single text-offer confirmation path."""
     denial_reason = await _bot_trade_access_denial_reason(user)
     if denial_reason:
-        await message.answer(bot_access_denial_message(denial_reason))
-        return
-    
-    # بررسی مسدودیت
-    if user.trading_restricted_until:
-        from datetime import datetime
+        await _text_offer_response(
+            message,
+            bot_access_denial_message(denial_reason),
+            edit=edit_response,
+        )
+        if wizard_source:
+            await state.clear()
+        return False
+
+    if getattr(user, "trading_restricted_until", None):
         now = datetime.utcnow()
         if user.trading_restricted_until > now:
-            # محاسبه زمان باقیمانده
             remaining = user.trading_restricted_until - now
             total_seconds = int(remaining.total_seconds())
-            
             days = total_seconds // 86400
             hours = (total_seconds % 86400) // 3600
             minutes = (total_seconds % 3600) // 60
-            
             countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
             expiry_jalali = to_jalali_str(user.trading_restricted_until, "%Y/%m/%d - %H:%M")
-            
-            await message.answer(
-                f"⛔️ **حساب شما مسدود است**\n\n"
+            await _text_offer_response(
+                message,
+                "⛔️ حساب شما مسدود است\n\n"
                 f"📅 تاریخ رفع مسدودیت: {expiry_jalali}\n"
                 f"⏳ زمان باقی‌مانده: {countdown}\n\n"
                 f"تا رفع مسدودیت امکان انتشار لفظ در کانال را ندارید.",
-                parse_mode="Markdown"
+                edit=edit_response,
             )
-            return
-    
-    # اگر در state دیگری هستیم، پردازش نکن
-    current_state = await state.get_state()
-    if current_state is not None:
-        return
+            if wizard_source:
+                await state.clear()
+            return False
 
     if not await _bot_market_is_open():
-        await message.answer(BOT_MARKET_CLOSED_MESSAGE)
-        return
-    
-    from bot.utils.offer_parser import parse_offer_text, ParsedOffer
-    
-    result, error = await parse_offer_text(message.text)
-    
-    # اگر متن درخواست آفر نیست، نادیده بگیر.
+        await _text_offer_response(message, BOT_MARKET_CLOSED_MESSAGE, edit=edit_response)
+        if wizard_source:
+            await state.clear()
+        return False
+
+    from bot.utils.offer_parser import parse_offer_text
+
+    result, error = await parse_offer_text(offer_text)
     if result is None and error is None:
-        return
-    
-    # اگر خطا دارد، پیام خطا با پیشنهاد بده
+        if wizard_source:
+            await _text_offer_response(
+                message,
+                "متن ساخته‌شده قابل تشخیص نیست. گزینه‌ها را اصلاح کنید.",
+                edit=edit_response,
+                reply_markup=get_wizard_review_keyboard(),
+            )
+        return False
+
     if error:
-        # ساخت پیام راهنما بر اساس نوع خطا
-        suggestion = _get_offer_suggestion(message.text, error.message)
+        suggestion = _get_offer_suggestion(offer_text, error.message)
         error_msg = f"{error.message}\n\n{suggestion}"
-        await message.answer(error_msg)
-        return
-    
-    # بررسی تعداد لفظ‌های فعال
+        await _text_offer_response(
+            message,
+            error_msg,
+            edit=edit_response,
+            reply_markup=get_wizard_review_keyboard() if wizard_source else None,
+            parse_mode="Markdown",
+        )
+        return False
+
     from core.trading_settings import get_trading_settings
     ts = get_trading_settings()
-    
+
     async with AsyncSessionLocal() as session:
         from sqlalchemy import func
         active_count = await session.scalar(
@@ -1171,13 +1608,15 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
             )
         )
         if active_count >= ts.max_active_offers:
-            await message.answer(
+            await _text_offer_response(
+                message,
                 f"❌ شما حداکثر {ts.max_active_offers} لفظ فعال دارید.\n"
-                f"لطفاً ابتدا یکی از لفظ‌های قبلی را منقضی کنید."
+                "لطفاً ابتدا یکی از لفظ‌های قبلی را منقضی کنید.",
+                edit=edit_response,
+                reply_markup=get_wizard_review_keyboard() if wizard_source else None,
             )
-            return
-    
-    # ذخیره اطلاعات در state
+            return False
+
     await state.update_data(
         trade_type=result.trade_type,
         settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
@@ -1187,10 +1626,9 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
         price=result.price,
         is_wholesale=result.is_wholesale,
         lot_sizes=result.lot_sizes,
-        notes=result.notes
+        notes=result.notes,
     )
-    
-    # نمایش پیش‌نمایش
+
     channel_text = _build_channel_offer_text(
         trade_type=result.trade_type,
         commodity_name=result.commodity_name,
@@ -1199,25 +1637,46 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
         settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
         notes=result.notes,
     )
-    
     lot_info = "یکجا" if result.is_wholesale else f"خُرد {result.lot_sizes}"
-    
     preview = (
-        f"**پیش‌نمایش لفظ:**\n\n"
+        "پیش‌نمایش لفظ:\n\n"
         f"{channel_text}\n\n"
         f"📦 نوع: {lot_info}\n\n"
-        f"آیا تایید می‌کنید؟"
+        "آیا تایید می‌کنید؟"
     )
-    
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ تایید و ارسال", callback_data=TextOfferActionCallback(action="confirm").pack()),
             InlineKeyboardButton(text="❌ انصراف", callback_data=TextOfferActionCallback(action="cancel").pack())
         ]
     ])
-    
-    await message.answer(preview, parse_mode="Markdown", reply_markup=confirm_kb)
+    await _text_offer_response(
+        message,
+        preview,
+        edit=edit_response,
+        reply_markup=confirm_kb,
+    )
     await state.set_state(Trade.awaiting_text_confirm)
+    return True
+
+
+@router.message(F.text.func(has_trade_indicator))
+async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
+    """پردازش آفر متنی با پیشوند دقیق نوع معامله و تسویه."""
+    if not user:
+        return
+
+    if await state.get_state() is not None:
+        return
+
+    await _prepare_text_offer(
+        message,
+        state,
+        user,
+        message.text or "",
+        edit_response=False,
+        wizard_source=False,
+    )
 
 
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm"))

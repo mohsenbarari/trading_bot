@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_create import show_trade_preview
+from bot.handlers.trade_create import Trade, show_trade_preview
 
 
 class BotTradeCreateShowPreviewTests(unittest.IsolatedAsyncioTestCase):
@@ -15,23 +15,26 @@ class BotTradeCreateShowPreviewTests(unittest.IsolatedAsyncioTestCase):
                     "commodity_name": "سکه",
                     "quantity": 15,
                     "price": 123456,
+                    "is_wholesale": True,
                     "notes": "فقط نقدی",
                 }
-            )
+            ),
+            update_data=AsyncMock(),
+            set_state=AsyncMock(),
         )
         message = SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock())
 
-        with patch("bot.handlers.trade_create.get_confirm_keyboard", return_value="CK"):
+        with patch("bot.handlers.trade_create.get_wizard_review_keyboard", return_value="WK"):
             await show_trade_preview(message, state, edit=False)
         preview_text = message.answer.await_args.args[0]
-        self.assertIn("🔴فروش سکه 15 عدد فردا ➡️ 123,456", preview_text)
-        self.assertIn("توضیحات: فقط نقدی", preview_text)
-        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "CK")
+        self.assertIn("فروش نقد فردا سکه 15 عدد 123456: فقط نقدی", preview_text)
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "WK")
+        state.set_state.assert_awaited_with(Trade.awaiting_wizard_review)
 
         message = SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock())
-        with patch("bot.handlers.trade_create.get_confirm_keyboard", return_value="CK"):
+        with patch("bot.handlers.trade_create.get_wizard_review_keyboard", return_value="WK"):
             await show_trade_preview(message, state, edit=True)
-        self.assertEqual(message.edit_text.await_args.kwargs["reply_markup"], "CK")
+        self.assertEqual(message.edit_text.await_args.kwargs["reply_markup"], "WK")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,10 @@ class TradeTypeCallback(CallbackData, prefix="trade_type"):
     """
     type: str
 
+
+class TradeSettlementCallback(CallbackData, prefix="trade_settlement"):
+    type: str
+
 class CommodityCallback(CallbackData, prefix="trade_commodity"):
     """
     Format: trade_commodity:{id}
@@ -72,6 +76,14 @@ class TextOfferActionCallback(CallbackData, prefix="text_offer"):
     Example: text_offer:confirm
     """
     action: str
+
+
+class TradeWizardActionCallback(CallbackData, prefix="trade_wizard"):
+    action: str
+
+
+class TradeWizardEditCallback(CallbackData, prefix="trade_edit"):
+    field: str
 
 class ChannelTradeCallback(CallbackData, prefix=CHANNEL_TRADE_LEGACY_CALLBACK_PREFIX):
     """

@@ -57,7 +57,10 @@ class BotTradeUtilsCommoditiesKeyboardSinglePageTests(unittest.IsolatedAsyncioTe
         self.assertEqual([button.text for button in keyboard.inline_keyboard[0]], ["سکه", "ربع", "نیم"])
         self.assertEqual([button.text for button in keyboard.inline_keyboard[1]], ["تمام"])
         self.assertNotIn(ACTION_NOOP, [button.callback_data for row in keyboard.inline_keyboard for button in row])
-        self.assertEqual(keyboard.inline_keyboard[-1][0].callback_data, TradeActionCallback(action="back_to_type").pack())
+        self.assertEqual(
+            keyboard.inline_keyboard[-1][0].callback_data,
+            TradeActionCallback(action="back_to_settlement").pack(),
+        )
         self.assertEqual(keyboard.inline_keyboard[-1][1].callback_data, TradeActionCallback(action="cancel").pack())
         self.assertEqual(keyboard.inline_keyboard[0][0].callback_data, CommodityCallback(id=1).pack())
 

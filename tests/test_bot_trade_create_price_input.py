@@ -7,7 +7,11 @@ from bot.handlers.trade_create import Trade, handle_price_input
 
 class BotTradeCreatePriceInputTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_price_input_handles_missing_user_invalid_price_and_success(self):
-        state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
+        state = SimpleNamespace(
+            get_data=AsyncMock(return_value={"wizard_return_to_review": False}),
+            update_data=AsyncMock(),
+            set_state=AsyncMock(),
+        )
 
         message = SimpleNamespace(text="12345", answer=AsyncMock())
         await handle_price_input(message, state, user=None, bot=SimpleNamespace())
