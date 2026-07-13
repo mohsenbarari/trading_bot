@@ -32,6 +32,7 @@ CLEANUP_PREFIXES=(
   "pw_pp_"
   "pw_block_"
   "pw_accountant_"
+  "pwacct_"
 )
 
 COMMODITY_NAME_PREFIXES=(
