@@ -1169,7 +1169,7 @@ async def _publish_trade_created_realtime(
     responder_audience_user_ids: list[int] | tuple[int, ...] | None,
     offer_owner_audience_user_ids: list[int] | tuple[int, ...] | None,
 ) -> None:
-    from .realtime import publish_event, publish_user_event
+    from .realtime import publish_user_event
 
     trade_type_value = getattr(getattr(trade, "trade_type", None), "value", None) or fallback_trade_type
     common_payload = {
@@ -1224,40 +1224,6 @@ async def _publish_trade_created_realtime(
                     trade_number=common_payload.get("trade_number"),
                     error_class=type(exc).__name__,
                 )
-
-    generic_audience = sorted(
-        {
-            normalized_user_id
-            for raw_user_id in [
-                *(list(responder_audience_user_ids or [])),
-                *(list(offer_owner_audience_user_ids or [])),
-            ]
-            for normalized_user_id in [_coerce_trade_user_id(raw_user_id)]
-            if normalized_user_id is not None
-        }
-    )
-    try:
-        await publish_event(
-            "trade:created",
-            _build_trade_created_event_payload(
-                **common_payload,
-                audience_user_ids=generic_audience,
-            ),
-        )
-    except Exception as exc:
-        log_trading_event(
-            logger,
-            "trade_realtime_publish_failed",
-            level="warning",
-            action="trading_side_effect",
-            result="failure",
-            side_effect="realtime_publish",
-            offer_id=common_payload.get("offer_id"),
-            trade_id=common_payload.get("trade_id"),
-            trade_number=common_payload.get("trade_number"),
-            error_class=type(exc).__name__,
-        )
-
 
 def _build_trade_profile_route_from_payload(
     field_prefix: str,

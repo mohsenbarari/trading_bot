@@ -54,7 +54,11 @@ class RealtimeRouterRedisListenerTests(unittest.IsolatedAsyncioTestCase):
     async def test_listen_redis_events_formats_notification_and_general_channels(self):
         messages = [
             {"type": "message", "channel": b"notifications:5", "data": b'{"event":"message","data":{"safe":1,"mobile_number":"0912"}}'},
-            {"type": "message", "channel": b"events:offer:created", "data": b'{"safe":2,"mobile_number":"0935"}'},
+            {
+                "type": "message",
+                "channel": b"events:offer:created",
+                "data": b'{"id":2,"status":"active","mobile_number":"0935","home_server":"foreign"}',
+            },
         ]
         pubsub = FakePubSub(messages)
         websocket = FakeWebSocket()
@@ -65,17 +69,18 @@ class RealtimeRouterRedisListenerTests(unittest.IsolatedAsyncioTestCase):
             await listen_redis_events(websocket, user_id=5)
 
         self.assertIn("notifications:5", pubsub.subscribed)
+        self.assertNotIn("events:trade:created", pubsub.subscribed)
         self.assertEqual(
             websocket.sent,
             [
                 {"type": "message", "data": {"safe": 1}},
-                {"type": "offer:created", "data": {"safe": 2}},
+                {"type": "offer:created", "data": {"id": 2, "status": "active"}},
             ],
         )
 
     async def test_listen_redis_events_handles_send_failures_timeout_loop_errors_and_critical_errors(self):
         failing_pubsub = FakePubSub([
-            {"type": "message", "channel": b"events:offer:created", "data": b'{"safe": 1}'},
+            {"type": "message", "channel": b"events:offer:created", "data": b'{"id": 1}'},
         ])
         with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(failing_pubsub)), patch(
             "api.routers.realtime.asyncio.sleep", new=asyncio.sleep

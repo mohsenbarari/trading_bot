@@ -3,9 +3,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from httpx import ASGITransport
 
-from api.routers.realtime import event_generator, sse_stream
+from api.routers.realtime import event_generator, router, sse_stream
 
 
 class FakePubSub:
@@ -44,9 +47,23 @@ class FakeRedisClient:
 
 
 class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sse_stream_rejects_anonymous_requests(self):
+        app = FastAPI()
+        app.include_router(router)
+        transport = ASGITransport(app=app)
+
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await client.get("/stream")
+
+        self.assertEqual(response.status_code, 401)
+
     async def test_event_generator_sanitizes_payload_and_unsubscribes_on_cancel(self):
         pubsub = FakePubSub([
-            {"type": "message", "channel": b"events:offer:created", "data": b'{"safe": 1, "mobile_number": "0912"}'},
+            {
+                "type": "message",
+                "channel": b"events:offer:created",
+                "data": b'{"id": 1, "status": "active", "mobile_number": "0912", "home_server": "foreign"}',
+            },
         ])
         with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)):
             generator = event_generator(user_id=5)
@@ -55,9 +72,12 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
                 await generator.__anext__()
 
         self.assertIn("event: offer:created", first)
-        self.assertIn('"safe": 1', first)
+        self.assertIn('"id": 1', first)
+        self.assertIn('"status": "active"', first)
         self.assertNotIn("mobile_number", first)
+        self.assertNotIn("home_server", first)
         self.assertIn("notifications:5", pubsub.subscribed)
+        self.assertNotIn("events:trade:created", pubsub.subscribed)
         self.assertEqual(pubsub.unsubscribe_calls, 2)
 
     async def test_event_generator_formats_notification_channel_events(self):
@@ -106,7 +126,7 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
                 await generator.__anext__()
 
         self.assertIn("event: offer:updated", first)
-        self.assertIn("data: not-json", first)
+        self.assertIn("data: {}", first)
         self.assertEqual(second, "event: heartbeat\ndata: {}\n\n")
 
 

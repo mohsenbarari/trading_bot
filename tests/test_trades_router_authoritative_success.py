@@ -129,6 +129,29 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         market_eval_patcher.start()
         self.addCleanup(market_eval_patcher.stop)
 
+    def _private_trade_payloads(self):
+        payloads = []
+        seen_trade_keys = set()
+        for call in self.publish_user_event_mock.await_args_list:
+            if len(call.args) < 3 or call.args[1] != "trade:created":
+                continue
+            payload = call.args[2]
+            trade_key = (payload.get("id"), payload.get("trade_number"))
+            if trade_key in seen_trade_keys:
+                continue
+            seen_trade_keys.add(trade_key)
+            payloads.append(payload)
+        return payloads
+
+    def _private_trade_payload_for_user(self, user_id, *, trade_id=None):
+        for call in self.publish_user_event_mock.await_args_list:
+            if len(call.args) < 3 or call.args[0] != user_id or call.args[1] != "trade:created":
+                continue
+            payload = call.args[2]
+            if trade_id is None or payload.get("id") == trade_id:
+                return payload
+        self.fail(f"No private trade:created payload was published for user {user_id}")
+
     async def test_execute_trade_authoritatively_converts_stale_commit_to_conflict(self):
         locked_user = make_user()
         offer = make_offer()
@@ -251,10 +274,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_not_awaited()
         self.assertEqual(locked_user.trades_count, 1)
         self.assertEqual(locked_user.commodities_traded_count, 4)
-        self.assertEqual(publish_mock.await_count, 2)
-        self.assertEqual(publish_mock.await_args_list[0].args[0], "trade:created")
-        self.assertEqual(publish_mock.await_args_list[1].args[0], "offer:updated")
-        self.assertEqual(publish_mock.await_args_list[1].args[1]["status"], "completed")
+        self.assertEqual(publish_mock.await_count, 1)
+        self.assertEqual(publish_mock.await_args_list[0].args[0], "offer:updated")
+        self.assertEqual(publish_mock.await_args_list[0].args[1]["status"], "completed")
         self.assertEqual(self.publish_user_event_mock.await_count, 4)
         self.assertEqual(
             [call.args[0] for call in self.publish_user_event_mock.await_args_list],
@@ -267,7 +289,6 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             all(call.args[2]["trade_number"] == 10000 for call in self.publish_user_event_mock.await_args_list)
         )
-        self.assertEqual(publish_mock.await_args_list[0].args[1]["audience_user_ids"], [locked_user.id, offer.user_id, 15, 19])
         response_mock.assert_called_once_with(
             reloaded_trade,
             identity_map={},
@@ -522,7 +543,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_not_awaited()
         self.assertEqual(locked_user.trades_count, 1)
         self.assertEqual(locked_user.commodities_traded_count, 3)
-        self.assertEqual(publish_mock.await_count, 2)
+        self.assertEqual(publish_mock.await_count, 1)
         logger.error.assert_called_once()
         response_mock.assert_called_once_with(
             reloaded_trade,
@@ -668,7 +689,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_not_awaited()
         self.assertEqual(owner_user.trades_count, 1)
         self.assertEqual(owner_user.commodities_traded_count, 4)
-        self.assertEqual(publish_mock.await_args_list[0].args[1]["responder_user_id"], owner_user.id)
+        trade_payload = self._private_trade_payload_for_user(owner_user.id)
+        self.assertEqual(trade_payload["responder_user_id"], owner_user.id)
         self.assertEqual(result, {"id": 91, "trade_number": 10004})
 
     async def test_execute_trade_authoritatively_projects_tier2_customer_price_on_owner_offer(self):
@@ -755,7 +777,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_not_awaited()
         self.assertEqual(customer_user.trades_count, 1)
         self.assertEqual(customer_user.commodities_traded_count, 4)
-        self.assertEqual(publish_mock.await_args_list[0].args[1]["price"], 49700)
+        trade_payload = self._private_trade_payload_for_user(customer_user.id)
+        self.assertEqual(trade_payload["price"], 49700)
         self.assertEqual(result, {"id": 93, "trade_number": 10005})
 
     async def test_execute_trade_authoritatively_creates_two_legs_for_tier2_customer_on_outsider_owner_offer(self):
@@ -1068,7 +1091,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۲" in message for message in notification_messages))
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
         self.assertEqual({payload["trade_path_summary"] for payload in trade_payloads}, {"مالک ↔ مشتری سطح ۱", "مالک ↔ مشتری سطح ۲"})
 
@@ -1203,7 +1226,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۲" in message for message in notification_messages))
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 3)
         self.assertEqual(
             {payload.get("trade_path_summary") for payload in trade_payloads},
@@ -1341,7 +1364,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۲" in message for message in notification_messages))
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 3)
         self.assertEqual(
             {payload.get("trade_path_summary") for payload in trade_payloads},
@@ -1458,7 +1481,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
         self.assertEqual(
             {payload.get("trade_path_summary") for payload in trade_payloads},
@@ -1579,7 +1602,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
         self.assertEqual(
             {payload.get("trade_path_summary") for payload in trade_payloads},
@@ -1710,7 +1733,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 2)
         self.assertEqual({payload.get("trade_path_summary") for payload in trade_payloads}, {"مالک ↔ مشتری سطح ۱"})
 
@@ -1844,7 +1867,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         notification_messages = [call.args[2] for call in notif_mock.await_args_list]
         self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
 
-        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        trade_payloads = self._private_trade_payloads()
         self.assertEqual(len(trade_payloads), 3)
         self.assertEqual(
             {payload.get("trade_path_summary") for payload in trade_payloads},
@@ -1952,7 +1975,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(direct_trade.trade_type, TradeType.BUY)
         self.assertEqual(result, {"id": 103, "trade_number": 10016, "offer_id": offer.id, "price": 188000})
 
-        trade_payload = next(call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created")
+        trade_payload = self._private_trade_payload_for_user(responder_customer.id)
         self.assertEqual(trade_payload.get("trade_path_summary"), "مالک ↔ مشتری سطح ۱")
 
     async def test_execute_trade_authoritatively_keeps_tier1_to_own_owner_as_single_direct_leg(self):
@@ -2060,7 +2083,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(direct_trade.trade_type, TradeType.BUY)
         self.assertEqual(result, {"id": 104, "trade_number": 10017, "offer_id": offer.id, "price": 200000})
 
-        trade_payload = next(call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created")
+        trade_payload = self._private_trade_payload_for_user(responder_owner.id)
         self.assertEqual(trade_payload.get("trade_path_summary"), "مالک ↔ مشتری سطح ۱")
 
     async def test_execute_trade_authoritatively_fans_out_notifications_to_both_owner_sides(self):
@@ -2167,7 +2190,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         notification_messages = {call.args[1]: call.args[2] for call in notif_mock.await_args_list}
         self.assertIn(owner_user.account_name, notification_messages[offer.user_id])
 
-        trade_created_payload = publish_mock.await_args_list[0].args[1]
+        trade_created_payload = self._private_trade_payload_for_user(owner_user.id)
         self.assertEqual(trade_created_payload["responder_user_id"], owner_user.id)
         self.assertEqual(trade_created_payload["responder_user_name"], owner_user.account_name)
         self.assertNotIn("actor_user_id", trade_created_payload)
@@ -2243,7 +2266,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             '/users/19?account_name=seller_owner&highlight_accountant_user_id=77&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1+%D9%81%D8%B1%D9%88%D8%B4',
         )
 
-        trade_created_payload = publish_mock.await_args_list[0].args[1]
+        trade_created_payload = self._private_trade_payload_for_user(owner_user.id)
         self.assertEqual(trade_created_payload['id'], 94)
         self.assertEqual(trade_created_payload["offer_user_name"], "حسابدار فروش")
         self.assertEqual(trade_created_payload['status'], 'completed')

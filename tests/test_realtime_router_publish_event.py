@@ -31,15 +31,19 @@ class FakeRedisClient:
 class RealtimeRouterPublishEventTests(unittest.IsolatedAsyncioTestCase):
     async def test_publish_event_publishes_to_redis_and_broadcasts_sanitized_payload(self):
         redis_client = FakeRedisClient()
-        data = {"safe": 1, "mobile_number": "0912"}
+        data = {"id": 1, "status": "active", "mobile_number": "0912", "home_server": "foreign"}
+        public_data = {"id": 1, "status": "active"}
 
         with patch("api.routers.realtime.redis.Redis", return_value=redis_client), patch(
             "api.routers.realtime.manager.broadcast", new=AsyncMock()
         ) as broadcast_mock:
             await publish_event("offer:created", data)
 
-        self.assertEqual(redis_client.publish_calls, [("events:offer:created", json.dumps(data, ensure_ascii=False, default=str))])
-        broadcast_mock.assert_awaited_once_with({"type": "offer:created", "data": {"safe": 1}})
+        self.assertEqual(
+            redis_client.publish_calls,
+            [("events:offer:created", json.dumps(public_data, ensure_ascii=False, default=str))],
+        )
+        broadcast_mock.assert_awaited_once_with({"type": "offer:created", "data": public_data})
 
     async def test_publish_event_tolerates_redis_and_broadcast_failures(self):
         redis_client = FakeRedisClient(publish_error=RuntimeError("redis down"))
@@ -47,7 +51,19 @@ class RealtimeRouterPublishEventTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.realtime.redis.Redis", return_value=redis_client), patch(
             "api.routers.realtime.manager.broadcast", new=AsyncMock(side_effect=RuntimeError("ws down"))
         ):
-            await publish_event("offer:created", {"safe": 1})
+            await publish_event("offer:created", {"id": 1})
+
+    async def test_publish_event_blocks_private_and_unknown_event_types(self):
+        redis_client = FakeRedisClient()
+
+        with patch("api.routers.realtime.redis.Redis", return_value=redis_client), patch(
+            "api.routers.realtime.manager.broadcast", new=AsyncMock()
+        ) as broadcast_mock:
+            await publish_event("trade:created", {"id": 10, "price": 50000})
+            await publish_event("internal:unexpected", {"secret": "value"})
+
+        self.assertEqual(redis_client.publish_calls, [])
+        broadcast_mock.assert_not_awaited()
 
     async def test_sync_apply_realtime_source_is_local_fanout_only(self):
         redis_client = FakeRedisClient()
