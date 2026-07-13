@@ -304,7 +304,31 @@ async def publish_offer_to_telegram_channel_once(
             skipped_reason="telegram_publication_foreign_only",
         )
 
+    in_memory_message_id = _coerce_int(getattr(offer, "channel_message_id", None))
     state = await get_or_create_telegram_publication_state(db, offer)
+
+    # Waiting for the publication-state row lock can leave the Offer instance
+    # stale when another publisher completed first. Refresh the versioned
+    # legacy fields before applying that publisher's result to this instance.
+    if getattr(offer, "id", None) is not None:
+        refresh = getattr(db, "refresh", None)
+        if refresh is not None:
+            await refresh(
+                offer,
+                attribute_names=["channel_message_id", "status", "version_id"],
+            )
+
+    # A Telegram send may have succeeded immediately before a DB commit lost an
+    # optimistic-lock race. Preserve that non-transactional side effect when no
+    # competing publisher has already recorded a sent publication state.
+    if (
+        in_memory_message_id
+        and not telegram_publication_is_sent(state)
+        and not _telegram_message_id_from_state(state)
+        and not _coerce_int(getattr(offer, "channel_message_id", None))
+    ):
+        setattr(offer, "channel_message_id", in_memory_message_id)
+
     existing_message_id = apply_existing_telegram_publication_to_offer(offer, state)
     if telegram_publication_is_sent(state):
         return TelegramOfferPublicationResult(

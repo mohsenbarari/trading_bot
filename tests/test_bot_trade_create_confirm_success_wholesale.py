@@ -2,15 +2,20 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.orm.exc import StaleDataError
+
 from bot.handlers.trade_create import handle_trade_confirm
 
 
 class FakeSession:
-    def __init__(self, scalar_values=None, get_map=None):
+    def __init__(self, scalar_values=None, get_map=None, commit_side_effect=None):
         self.scalar_values = list(scalar_values or [])
         self.get_map = dict(get_map or {})
         self.added = []
         self.commits = 0
+        self.commit_side_effect = list(commit_side_effect or [])
+        self.rollbacks = 0
+        self.is_active = True
 
     async def scalar(self, stmt):
         return self.scalar_values.pop(0)
@@ -22,6 +27,15 @@ class FakeSession:
 
     async def commit(self):
         self.commits += 1
+        if self.commit_side_effect:
+            error = self.commit_side_effect.pop(0)
+            if error is not None:
+                self.is_active = False
+                raise error
+
+    async def rollback(self):
+        self.rollbacks += 1
+        self.is_active = True
 
     async def refresh(self, value):
         return None
@@ -154,6 +168,84 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         self.assertIn("با موفقیت در کانال ارسال شد", callback.message.edit_text.await_args.args[0])
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
+
+    async def test_handle_trade_confirm_retries_stale_publication_without_duplicate_send_or_expiry(self):
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=555),
+        )
+        state = SimpleNamespace(
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 12,
+                    "trade_type": "buy",
+                    "commodity_name": "سکه",
+                    "price": 123456,
+                    "commodity_id": 7,
+                    "is_wholesale": True,
+                    "lot_sizes": None,
+                    "notes": None,
+                }
+            ),
+            clear=AsyncMock(),
+        )
+        user = SimpleNamespace(id=1, limitations_expire_at=None, home_server="iran")
+        db_user = SimpleNamespace(id=1)
+        create_session = FakeSession()
+        publish_session = FakeSession(commit_side_effect=[StaleDataError("stale offer version"), None])
+        bot = SimpleNamespace(
+            send_message=AsyncMock(
+                side_effect=[SimpleNamespace(message_id=777), SimpleNamespace(message_id=778)]
+            )
+        )
+
+        async def publish_get(model, key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            if model.__name__ == "User" and key == 1:
+                return db_user
+            return None
+
+        publish_session.get = publish_get
+        publish_calls = 0
+
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            nonlocal publish_calls
+            publish_calls += 1
+            if publish_calls == 1:
+                message_id = await send_offer_to_channel(offer, publish_user)
+                offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=offer.channel_message_id, error_code=None)
+
+        with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
+            "bot.handlers.trade_create.check_user_limits", side_effect=[(True, None), (True, None)]
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeSession([0])),
+                FakeSessionContext(FakeSession()),
+                FakeSessionContext(create_session),
+                FakeSessionContext(publish_session),
+            ],
+        ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
+            "bot.handlers.trade_create.increment_user_counter", new=AsyncMock()
+        ) as increment_mock, patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
+        ), patch("bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")):
+            await handle_trade_confirm(callback, state, user=user, bot=bot)
+
+        self.assertEqual(publish_calls, 2)
+        self.assertEqual(publish_session.rollbacks, 1)
+        self.assertEqual(publish_session.commits, 2)
+        self.assertEqual(bot.send_message.await_count, 2)
+        self.assertEqual(create_session.added[0].status.value, "active")
+        self.assertEqual(create_session.added[0].channel_message_id, 777)
+        increment_mock.assert_awaited_once_with(publish_session, db_user, "channel_message")
+        self.assertIn("با موفقیت در کانال ارسال شد", callback.message.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

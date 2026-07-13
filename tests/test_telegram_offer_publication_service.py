@@ -32,6 +32,7 @@ class FakeDB:
         self.added = []
         self.execute_calls = []
         self.flush = AsyncMock(side_effect=self._flush)
+        self.refresh = AsyncMock()
         self.flush_error = flush_error
 
     async def execute(self, stmt):
@@ -110,6 +111,72 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.message_id, 555)
         self.assertEqual(result.skipped_reason, "already_published")
         self.assertEqual(offer.channel_message_id, 555)
+        db.refresh.assert_awaited_once_with(
+            offer,
+            attribute_names=["channel_message_id", "status", "version_id"],
+        )
+        send_mock.assert_not_awaited()
+
+    async def test_waiting_publisher_refreshes_stale_offer_before_reusing_sent_state(self):
+        offer = make_offer(version_id=1)
+        state = publication_service.build_offer_publication_state(
+            offer,
+            OfferPublicationSurface.TELEGRAM_CHANNEL,
+            status=OfferPublicationStatus.SENT,
+        )
+        state.telegram_message_id = 556
+        state.surface_resource_id = "556"
+        db = FakeDB(state=state)
+
+        async def refresh_offer(refreshed_offer, *, attribute_names):
+            self.assertEqual(attribute_names, ["channel_message_id", "status", "version_id"])
+            refreshed_offer.version_id = 2
+            refreshed_offer.channel_message_id = 556
+
+        db.refresh.side_effect = refresh_offer
+        send_mock = AsyncMock(return_value=999)
+
+        with patch("core.services.telegram_offer_publication_service.current_server", return_value="foreign"):
+            result = await publication_service.publish_offer_to_telegram_channel_once(
+                db,
+                offer,
+                SimpleNamespace(id=1),
+                send_offer_to_channel=send_mock,
+            )
+
+        self.assertEqual(result.message_id, 556)
+        self.assertEqual(result.skipped_reason, "already_published")
+        self.assertEqual(offer.version_id, 2)
+        send_mock.assert_not_awaited()
+
+    async def test_stale_retry_preserves_successful_telegram_side_effect_without_resend(self):
+        offer = make_offer(version_id=1, channel_message_id=557)
+        db = FakeDB()
+
+        async def refresh_offer(refreshed_offer, *, attribute_names):
+            self.assertEqual(attribute_names, ["channel_message_id", "status", "version_id"])
+            refreshed_offer.version_id = 2
+            refreshed_offer.channel_message_id = None
+
+        db.refresh.side_effect = refresh_offer
+        send_mock = AsyncMock(return_value=999)
+
+        with patch("core.services.telegram_offer_publication_service.current_server", return_value="foreign"), patch.object(
+            publication_service.settings,
+            "channel_id",
+            -100,
+        ):
+            result = await publication_service.publish_offer_to_telegram_channel_once(
+                db,
+                offer,
+                SimpleNamespace(id=1),
+                send_offer_to_channel=send_mock,
+            )
+
+        self.assertEqual(result.message_id, 557)
+        self.assertEqual(result.skipped_reason, "legacy_message_id_backfilled")
+        self.assertEqual(offer.channel_message_id, 557)
+        self.assertEqual(db.state.telegram_message_id, 557)
         send_mock.assert_not_awaited()
 
     async def test_publish_success_records_telegram_result_for_sync_back(self):

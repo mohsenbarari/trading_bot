@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import StaleDataError
 from typing import Optional
 from datetime import datetime
 
@@ -1117,6 +1118,7 @@ async def _handle_trade_confirm_core(
             )
 
         published_channel_message: str | None = None
+        published_channel_message_id: int | None = None
         async with AsyncSessionLocal() as session:
             offer = await session.get(Offer, offer_id)
             if not offer:
@@ -1136,27 +1138,67 @@ async def _handle_trade_confirm_core(
             )
 
             async def send_created_offer_to_channel(_offer, _user):
-                nonlocal published_channel_message
+                nonlocal published_channel_message, published_channel_message_id
                 published_channel_message = canonical_channel_message
                 sent_msg = await bot.send_message(
                     chat_id=settings.channel_id,
                     text=canonical_channel_message,
                     reply_markup=trade_keyboard,
                 )
-                return sent_msg.message_id
+                published_channel_message_id = int(sent_msg.message_id)
+                return published_channel_message_id
 
-            try:
-                publish_result = await publish_offer_to_telegram_channel_once(
-                    session,
-                    offer,
-                    user,
-                    send_offer_to_channel=send_created_offer_to_channel,
-                    raise_send_errors=True,
-                )
-                await session.commit()
-            except Exception:
-                await session.commit()
-                raise
+            for publication_attempt in range(2):
+                try:
+                    publish_result = await publish_offer_to_telegram_channel_once(
+                        session,
+                        offer,
+                        user,
+                        send_offer_to_channel=send_created_offer_to_channel,
+                        raise_send_errors=True,
+                    )
+                    await session.commit()
+                    break
+                except StaleDataError:
+                    await session.rollback()
+                    if publication_attempt > 0:
+                        raise
+                    logger.warning(
+                        "Retrying offer publication after concurrent offer update",
+                        extra={
+                            "event": "telegram.offer_publication_stale_retry",
+                            "offer_id": offer_id,
+                        },
+                    )
+                    offer = await session.get(Offer, offer_id)
+                    if offer is None:
+                        raise RuntimeError("offer_not_found_after_publication_retry")
+                    # Telegram side effects cannot be rolled back. If this
+                    # handler sent the message before its DB commit conflicted,
+                    # reuse that message instead of sending a duplicate.
+                    if published_channel_message_id and not offer.channel_message_id:
+                        offer.channel_message_id = published_channel_message_id
+                except Exception:
+                    # A Telegram send exception leaves a valid transaction with
+                    # a FAILED publication state that should be persisted. A DB
+                    # flush exception leaves an inactive Session and must only
+                    # be rolled back.
+                    if getattr(session, "is_active", True):
+                        try:
+                            await session.commit()
+                        except Exception as publication_state_commit_error:
+                            await session.rollback()
+                            logger.warning(
+                                "Could not persist failed Telegram publication state",
+                                exc_info=publication_state_commit_error,
+                                extra={
+                                    "event": "telegram.offer_publication_failure_state_commit_failed",
+                                    "offer_id": offer_id,
+                                },
+                            )
+                    else:
+                        await session.rollback()
+                    raise
             if not publish_result.message_id:
                 raise RuntimeError(publish_result.error_code or "telegram_channel_publication_failed")
 
@@ -1190,6 +1232,11 @@ async def _handle_trade_confirm_core(
             ),
         )
     except TelegramBadRequest as exc:
+        logger.warning(
+            "Telegram rejected offer channel publication",
+            exc_info=exc,
+            extra={"event": "telegram.offer_publication_rejected", "offer_id": locals().get("offer_id")},
+        )
         if "offer_id" in locals():
             try:
                 async with AsyncSessionLocal() as session:
@@ -1198,8 +1245,13 @@ async def _handle_trade_confirm_core(
                         await _expire_offer_after_publication_failure(session, offer, user.id)
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after Telegram error: {rollback_error}")
-        await callback.message.edit_text(f"❌ خطا در ارسال به کانال: {exc}")
+        await callback.message.edit_text("❌ خطا در ارسال به کانال. لطفاً مجدداً تلاش کنید.")
     except Exception as exc:
+        logger.exception(
+            "Unexpected offer channel publication failure",
+            exc_info=exc,
+            extra={"event": "telegram.offer_publication_unexpected_failure", "offer_id": locals().get("offer_id")},
+        )
         if "offer_id" in locals():
             try:
                 async with AsyncSessionLocal() as session:
@@ -1208,7 +1260,7 @@ async def _handle_trade_confirm_core(
                         await _expire_offer_after_publication_failure(session, offer, user.id)
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after unexpected error: {rollback_error}")
-        await callback.message.edit_text(f"{unexpected_error_prefix}: {exc}")
+        await callback.message.edit_text(f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید.")
 
     await state.clear()
     await callback.answer()
