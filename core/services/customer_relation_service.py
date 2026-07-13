@@ -365,9 +365,22 @@ async def list_owner_customer_relations(
     db: AsyncSession,
     owner_user_id: int,
 ) -> list[CustomerRelation]:
-    expired_relations = await sweep_expired_pending_customer_relations(db, owner_user_id=owner_user_id)
-    if expired_relations:
-        await db.commit()
+    if current_server() == SERVER_IRAN:
+        expired_relations = await sweep_expired_pending_customer_relations(db, owner_user_id=owner_user_id)
+        if expired_relations:
+            await db.commit()
+
+    current_time = _utcnow_naive()
+    visible_status = or_(
+        CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+        and_(
+            CustomerRelation.status == CustomerRelationStatus.PENDING,
+            or_(
+                CustomerRelation.expires_at.is_(None),
+                CustomerRelation.expires_at > current_time,
+            ),
+        ),
+    )
 
     stmt = (
         select(CustomerRelation)
@@ -375,7 +388,7 @@ async def list_owner_customer_relations(
         .where(
             CustomerRelation.owner_user_id == owner_user_id,
             CustomerRelation.deleted_at.is_(None),
-            CustomerRelation.status.in_(CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES),
+            visible_status,
         )
         .order_by(CustomerRelation.created_at.desc(), CustomerRelation.id.desc())
     )

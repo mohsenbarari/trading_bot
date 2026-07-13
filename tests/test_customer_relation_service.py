@@ -286,6 +286,23 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [relation_one, relation_two])
         db.commit.assert_awaited_once()
 
+    async def test_list_owner_customer_relations_is_read_only_on_foreign(self):
+        relation = SimpleNamespace(id=1)
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[relation])])
+
+        with patch(
+            "core.services.customer_relation_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.customer_relation_service.sweep_expired_pending_customer_relations",
+            new=AsyncMock(),
+        ) as sweep_mock:
+            result = await list_owner_customer_relations(db, 7)
+
+        self.assertEqual(result, [relation])
+        sweep_mock.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
     async def test_load_customer_relation_invitation_map_returns_tokens(self):
         invitation = SimpleNamespace(token=f"{CUSTOMER_INVITATION_PREFIX}abc", account_name="cust-1")
         db = FakeDB(execute_results=[FakeExecuteResult(values=[invitation])])

@@ -3,14 +3,33 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.trade_create import (
+    handle_text_offer,
     handle_lot_sizes_input,
     handle_manual_quantity,
     handle_notes_input,
     handle_price_input,
 )
+from bot.handlers import trade_create
+from bot.states import AdminBroadcast
 
 
 class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
+    async def test_text_offer_router_does_not_consume_broadcast_message_state(self):
+        handler = next(
+            item for item in trade_create.router.message.handlers
+            if item.callback is handle_text_offer
+        )
+        message = SimpleNamespace(text="خرید امام 20 عدد نقد حاضر 176000")
+
+        idle_match, _ = await handler.check(message, raw_state=None)
+        broadcast_match, _ = await handler.check(
+            message,
+            raw_state=AdminBroadcast.awaiting_message_text,
+        )
+
+        self.assertTrue(idle_match)
+        self.assertFalse(broadcast_match)
+
     async def test_navigation_button_handoffs_before_quantity_validation(self):
         user = SimpleNamespace(id=1)
         state = SimpleNamespace(clear=AsyncMock(), get_data=AsyncMock(return_value={"quantity": 30}))

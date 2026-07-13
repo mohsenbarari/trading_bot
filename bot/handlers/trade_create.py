@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router, F, types, Bot
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
@@ -1660,7 +1661,7 @@ async def _prepare_text_offer(
     return True
 
 
-@router.message(F.text.func(has_trade_indicator))
+@router.message(StateFilter(None), F.text.func(has_trade_indicator))
 async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
     """پردازش آفر متنی با پیشوند دقیق نوع معامله و تسویه."""
     if not user:
