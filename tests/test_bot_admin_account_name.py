@@ -32,6 +32,25 @@ def make_message(text):
 
 
 class BotAdminAccountNameTests(unittest.IsolatedAsyncioTestCase):
+    async def test_process_invitation_account_name_accepts_single_spaces_between_words(self):
+        state = FakeState({"last_prompt_message_id": 50})
+        message = make_message("محمد یگانه")
+
+        await process_invitation_account_name(message, state)
+
+        self.assertEqual(state.updated[0], {"account_name": "محمد یگانه"})
+        self.assertEqual(state.states, [InvitationCreation.awaiting_mobile_number])
+        self.assertIn("محمد یگانه", message.answer.await_args.args[0])
+
+    async def test_process_invitation_account_name_normalizes_repeated_spaces(self):
+        state = FakeState({"last_prompt_message_id": 50})
+        message = make_message("محمد  یگانه")
+
+        await process_invitation_account_name(message, state)
+
+        self.assertEqual(state.updated[0], {"account_name": "محمد یگانه"})
+        self.assertEqual(state.states, [InvitationCreation.awaiting_mobile_number])
+
     async def test_process_invitation_account_name_handles_invalid_and_valid_names(self):
         state = FakeState({"last_prompt_message_id": 50})
         message = make_message("!")

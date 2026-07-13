@@ -111,6 +111,11 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(changes=changes), self.assertRaises(ValidationError):
                 InternalInvitationCreateRequest.model_validate({**base, **changes})
 
+        spaced_name_request = InternalInvitationCreateRequest.model_validate(
+            {**base, "account_name": "محمد یگانه"}
+        )
+        self.assertEqual(spaced_name_request.account_name, "محمد یگانه")
+
     def test_otp_contract_rejects_naive_invalid_or_partial_timeline(self):
         now = datetime(2026, 7, 12, 8, 0, tzinfo=timezone.utc)
         base = {

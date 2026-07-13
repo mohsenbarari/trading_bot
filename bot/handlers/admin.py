@@ -30,6 +30,11 @@ from bot.message_manager import (
 
 router = Router()
 
+_ACCOUNT_NAME_PART = r"a-zA-Z0-9_\u0600-\u06FF۰-۹٠-٩"
+_ACCOUNT_NAME_PATTERN = re.compile(
+    rf"^[{_ACCOUNT_NAME_PART}]+(?: [{_ACCOUNT_NAME_PART}]+)*$"
+)
+
 
 def _can_manage_invitations(user: Optional[User]) -> bool:
     return bool(user and user.role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER))
@@ -100,7 +105,7 @@ async def start_invitation_creation(message: types.Message, state: FSMContext, u
     await state.set_state(InvitationCreation.awaiting_account_name)
     prompt_msg = await message.answer(
         "لطفاً **نام کاربری (Account Name)** را وارد کنید.\n"
-        "(حروف و اعداد فارسی و انگلیسی مجاز است، حداقل ۳ کاراکتر)",
+        "(حروف، اعداد، آندرلاین و فاصله بین کلمات مجاز است، حداقل ۳ کاراکتر)",
         reply_markup=get_commodity_fsm_cancel_keyboard(),
         parse_mode="Markdown"
     )
@@ -115,7 +120,7 @@ async def start_invitation_creation_inline(callback: types.CallbackQuery, state:
     await state.set_state(InvitationCreation.awaiting_account_name)
     await callback.message.edit_text(
         "لطفاً **نام کاربری (Account Name)** را وارد کنید.\n"
-        "(حروف و اعداد فارسی و انگلیسی مجاز است، حداقل ۳ کارکتر)",
+        "(حروف، اعداد، آندرلاین و فاصله بین کلمات مجاز است، حداقل ۳ کاراکتر)",
         reply_markup=get_commodity_fsm_cancel_keyboard(),
         parse_mode="Markdown"
     )
@@ -134,12 +139,12 @@ async def process_invitation_account_name(message: types.Message, state: FSMCont
         except Exception:
             pass
 
-    account_name_raw = message.text.strip()
+    account_name_raw = re.sub(r" {2,}", " ", message.text.strip())
     
-    if not re.match(r"^[a-zA-Z0-9_\u0600-\u06FF۰-۹٠-٩]{3,32}$", account_name_raw):
+    if not 3 <= len(account_name_raw) <= 32 or not _ACCOUNT_NAME_PATTERN.fullmatch(account_name_raw):
         error_msg = await message.answer(
             "❌ **نام کاربری نامعتبر است.**\n"
-            "لطفاً فقط از حروف و اعداد (فارسی یا انگلیسی) و آندرلاین استفاده کنید (حداقل ۳ کاراکتر).",
+            "لطفاً فقط از حروف، اعداد، آندرلاین و فاصله بین کلمات استفاده کنید (۳ تا ۳۲ کاراکتر).",
             reply_markup=get_commodity_fsm_cancel_keyboard(),
             parse_mode="Markdown"
         )
