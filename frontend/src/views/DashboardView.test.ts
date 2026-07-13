@@ -219,6 +219,7 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-card').text()).toContain('حسین رضایی')
     expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
     expect(wrapper.get('.today-trades-card').text()).toContain('فردایی')
+    expect(wrapper.get('.today-trades-card .ui-settlement-badge--tomorrow').attributes('data-settlement-type')).toBe('tomorrow')
     expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
     expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
     expect(wrapper.find('.dashboard-shortcuts').exists()).toBe(false)

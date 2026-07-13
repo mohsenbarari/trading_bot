@@ -32,6 +32,7 @@ import {
   AppPageHeader,
   AppResponsiveDialog,
   AppSearchField,
+  AppSettlementBadge,
   AppSectionCard,
   AppSelect,
   AppStatusBadge,
@@ -124,6 +125,16 @@ describe('ui primitives', () => {
     const sideBadge = mount(AppOfferSideBadge, { props: { side: 'sell' } })
     expect(sideBadge.classes()).toEqual(expect.arrayContaining(['role-badge', 'sell']))
     expect(sideBadge.text()).toBe('فروش')
+
+    const cashSettlement = mount(AppSettlementBadge, { props: { settlementType: 'cash' } })
+    expect(cashSettlement.classes()).toContain('ui-settlement-badge--cash')
+    expect(cashSettlement.text()).toContain('نقد حاضر ☀️')
+
+    const tomorrowSettlement = mount(AppSettlementBadge, {
+      props: { settlementType: 'tomorrow', context: 'trade' },
+    })
+    expect(tomorrowSettlement.classes()).toContain('ui-settlement-badge--tomorrow')
+    expect(tomorrowSettlement.text()).toContain('فردایی')
 
     const quantityBadge = mount(AppOfferQuantityBadge, { slots: { default: '12 عدد' } })
     expect(quantityBadge.classes()).toContain('quantity-badge')

@@ -35,10 +35,10 @@ def trade_settlement_label(value: Any) -> str:
 
 def offer_draft_prefix(offer_type: Any, settlement_type: Any) -> str:
     raw_offer_type = getattr(offer_type, "value", offer_type)
-    trade_label = "خرید" if str(raw_offer_type or "buy").strip().lower() == "buy" else "فروش"
+    trade_label = "خ" if str(raw_offer_type or "buy").strip().lower() == "buy" else "ف"
     if settlement_type_value(settlement_type) == SettlementType.TOMORROW.value:
-        return f"{trade_label} نقد فردا"
-    return f"{trade_label} نقد"
+        return f"{trade_label} ن ف"
+    return f"{trade_label} ن"
 
 
 def build_offer_draft_text(
@@ -52,7 +52,7 @@ def build_offer_draft_text(
     lot_sizes: Iterable[Any] | None = None,
     notes: Any = None,
 ) -> str:
-    """Build text accepted by the shared offer parser, without publishing it."""
+    """Build compact text accepted by the shared offer parser, without publishing it."""
     normalized_commodity_name = str(commodity_name or "").strip()
     parts = [
         offer_draft_prefix(offer_type, settlement_type),

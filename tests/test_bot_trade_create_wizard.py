@@ -150,7 +150,7 @@ class BotTradeCreateWizardTests(unittest.IsolatedAsyncioTestCase):
     async def test_continue_delegates_to_text_offer_pipeline(self):
         callback = SimpleNamespace(message=SimpleNamespace(), answer=AsyncMock())
         state = SimpleNamespace(
-            get_data=AsyncMock(return_value={"generated_offer_text": "خرید نقد امام 30 عدد 75800"}),
+            get_data=AsyncMock(return_value={"generated_offer_text": "خ ن امام 30 عدد 75800"}),
         )
         user = SimpleNamespace(id=7)
 
@@ -161,7 +161,7 @@ class BotTradeCreateWizardTests(unittest.IsolatedAsyncioTestCase):
             callback.message,
             state,
             user,
-            "خرید نقد امام 30 عدد 75800",
+            "خ ن امام 30 عدد 75800",
             edit_response=True,
             wizard_source=True,
         )

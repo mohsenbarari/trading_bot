@@ -14,6 +14,7 @@ import {
   AppOfferLoadingSkeletonList,
   AppOfferPrice,
   AppOfferQuantityBadge,
+  AppSettlementBadge,
   AppOfferSideBadge,
   AppOfferTradeErrorToast,
   AppTradeActionButton,
@@ -517,7 +518,13 @@ async function cancelOwnOffer(offerId: number) {
 
           <!-- Header: role badge + time -->
           <div class="offer-header">
-            <AppOfferSideBadge :side="offer.offer_type" />
+            <div class="offer-classification">
+              <AppOfferSideBadge :side="offer.offer_type" />
+              <AppSettlementBadge
+                class="offer-settlement"
+                :settlement-type="offer.settlement_type"
+              />
+            </div>
             <span class="offer-time">{{ timeAgo(offer.created_at) }}</span>
           </div>
 
@@ -526,7 +533,6 @@ async function cancelOwnOffer(offerId: number) {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <AppOfferQuantityBadge>{{ getOfferQuantityLabel(offer) }}</AppOfferQuantityBadge>
-              <span class="offer-settlement">{{ offerSettlementLabel(offer.settlement_type) }}</span>
               <AppOfferPrice :value="getDisplayedOfferPrice(offer)" />
             </div>
             <AppOfferCustomerContext
@@ -799,7 +805,16 @@ async function cancelOwnOffer(offerId: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.6rem;
   margin-bottom: 6px;
+}
+
+.offer-classification {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .role-badge {
@@ -842,14 +857,6 @@ async function cancelOwnOffer(offerId: number) {
   font-weight: 700;
   font-size: 13px;
   color: var(--ds-text-primary);
-}
-
-.offer-settlement {
-  flex: 0 0 auto;
-  color: var(--ds-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .quantity-badge {

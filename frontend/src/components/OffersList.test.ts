@@ -125,9 +125,13 @@ describe('OffersList.vue', () => {
     })
 
     expect(wrapper.findAll('.offer-settlement').map((label) => label.text())).toEqual([
-      'نقد حاضر ☀️',
-      'فردا ➡️',
+      'تسویه:نقد حاضر ☀️',
+      'تسویه:فردا ➡️',
     ])
+    expect(wrapper.findAll('.offer-header .offer-settlement')).toHaveLength(2)
+    expect(wrapper.findAll('.offer-main .offer-settlement')).toHaveLength(0)
+    expect(wrapper.findAll('.ui-settlement-badge--cash')).toHaveLength(1)
+    expect(wrapper.findAll('.ui-settlement-badge--tomorrow')).toHaveLength(1)
   })
 
   it('deduplicates retail lot buttons and falls back for invalid display price and unknown customer tier labels', async () => {

@@ -87,7 +87,60 @@ test.describe('Market mutation UX', () => {
         return fulfillJson(route, 200, null)
       }
       if (url.pathname === '/api/offers/' && request.method() === 'GET') {
-        return fulfillJson(route, 200, [])
+        return fulfillJson(route, 200, [
+          {
+            id: 901,
+            user_id: 91,
+            user_account_name: 'cash_seller',
+            is_own_offer: false,
+            offer_type: 'sell',
+            settlement_type: 'cash',
+            commodity_id: 1,
+            commodity_name: 'سکه',
+            quantity: 4,
+            remaining_quantity: 4,
+            price: 50000,
+            raw_price: 50000,
+            market_published_price: 50000,
+            viewer_effective_price: 50000,
+            is_wholesale: true,
+            lot_sizes: null,
+            original_lot_sizes: null,
+            notes: null,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            expires_at_ts: Math.floor(Date.now() / 1000) + 3600,
+            customer_badge_visible: false,
+            customer_management_name: null,
+            customer_tier: null,
+          },
+          {
+            id: 902,
+            user_id: 92,
+            user_account_name: 'tomorrow_buyer',
+            is_own_offer: false,
+            offer_type: 'buy',
+            settlement_type: 'tomorrow',
+            commodity_id: 1,
+            commodity_name: 'سکه',
+            quantity: 8,
+            remaining_quantity: 8,
+            price: 51000,
+            raw_price: 51000,
+            market_published_price: 51000,
+            viewer_effective_price: 51000,
+            is_wholesale: true,
+            lot_sizes: null,
+            original_lot_sizes: null,
+            notes: null,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            expires_at_ts: Math.floor(Date.now() / 1000) + 3600,
+            customer_badge_visible: false,
+            customer_management_name: null,
+            customer_tier: null,
+          },
+        ])
       }
       if (url.pathname === '/api/offers/my' && url.searchParams.get('status_filter') === 'expired') {
         return fulfillJson(route, 200, [
@@ -130,6 +183,18 @@ test.describe('Market mutation UX', () => {
     await expect(page.locator('[data-test="recent-offers-toggle"]')).toBeVisible()
     await expect(page.locator('[data-test="market-text-offer-input"]')).toBeVisible()
     await expect(page.locator('[data-test="market-send-button"]')).toBeVisible()
+    const filterStrip = page.locator('.market-filter-strip')
+    await expect(filterStrip).toBeVisible()
+    const filterRows = await filterStrip.locator('[role="tablist"]').evaluateAll((nodes) => nodes.map((node) => {
+      const rect = node.getBoundingClientRect()
+      return { top: rect.top, bottom: rect.bottom }
+    }))
+    expect(filterRows).toHaveLength(2)
+    expect(Math.abs(filterRows[0]!.top - filterRows[1]!.top)).toBeLessThanOrEqual(1)
+    expect(Math.abs(filterRows[0]!.bottom - filterRows[1]!.bottom)).toBeLessThanOrEqual(1)
+    await expect(page.locator('.ui-settlement-badge--cash')).toContainText('نقد حاضر')
+    await expect(page.locator('.ui-settlement-badge--tomorrow')).toContainText('فردا')
+    await expect(page.locator('.offer-header .ui-settlement-badge')).toHaveCount(2)
     const toggleBox = await page.locator('[data-test="recent-offers-toggle"]').boundingBox()
     const inputBox = await page.locator('[data-test="market-text-offer-input"]').boundingBox()
     const sendBox = await page.locator('[data-test="market-send-button"]').boundingBox()

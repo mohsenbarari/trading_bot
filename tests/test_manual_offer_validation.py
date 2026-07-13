@@ -370,6 +370,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
     async def test_button_wizard_drafts_round_trip_through_shared_parser(self):
         cases = (
             (
+                "خ ن امام 30 عدد 75800",
                 build_offer_draft_text(
                     offer_type="buy",
                     settlement_type="cash",
@@ -380,6 +381,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 ("buy", "cash", True, None, None),
             ),
             (
+                "ف ن ف ربع بهار 40 عدد 178000 30 10: تحویل هماهنگ شود",
                 build_offer_draft_text(
                     offer_type="sell",
                     settlement_type="tomorrow",
@@ -394,8 +396,9 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        for draft, expected in cases:
+        for expected_draft, draft, expected in cases:
             with self.subTest(draft=draft):
+                self.assertEqual(draft, expected_draft)
                 result, error = await offer_parser.parse_offer_text(draft)
                 self.assertIsNone(error)
                 self.assertIsNotNone(result)

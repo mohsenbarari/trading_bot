@@ -190,7 +190,7 @@ const visibleFilterOptions = computed(() => visibleTabs.value.map((tab) => ({
   label: marketFilterLabels[tab],
 })))
 const settlementFilterOptions: Array<{ key: SettlementFilterType; label: string }> = [
-  { key: 'all', label: 'همه' },
+  { key: 'all', label: 'همه تسویه‌ها' },
   { key: 'cash', label: 'نقد حاضر' },
   { key: 'tomorrow', label: 'فردا' },
 ]
@@ -957,8 +957,11 @@ onUnmounted(() => {
           <Bell v-else-if="marketOfferPushEnabled" :size="18" />
           <BellOff v-else :size="18" />
         </AppIconButton>
-        <AppFilterChips v-model="filterType" class="tabs-container market-filter-chips" label="فیلتر لفظ‌های بازار" :options="visibleFilterOptions" />
-        <AppFilterChips v-model="settlementFilterType" class="tabs-container market-settlement-filter-chips" label="فیلتر نوع تسویه" :options="settlementFilterOptions" />
+        <div class="market-filter-strip">
+          <AppFilterChips v-model="filterType" class="tabs-container market-filter-chips" label="فیلتر لفظ‌های بازار" :options="visibleFilterOptions" />
+          <span class="market-filter-divider" aria-hidden="true"></span>
+          <AppFilterChips v-model="settlementFilterType" class="tabs-container market-settlement-filter-chips" label="فیلتر نوع تسویه" :options="settlementFilterOptions" />
+        </div>
       </div>
       <div v-if="marketOfferPushError" class="market-notification-error" role="status">
         {{ marketOfferPushError }}
@@ -1158,15 +1161,14 @@ onUnmounted(() => {
 .header-controls {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.65rem;
   max-width: var(--ds-page-max-width);
   width: 100%;
   margin: 0 auto;
 }
 
 .market-notification-toggle {
-  grid-row: 1 / span 2;
   flex: 0 0 auto;
   width: var(--ds-touch-target, 48px);
   height: var(--ds-touch-target, 48px);
@@ -1199,18 +1201,58 @@ onUnmounted(() => {
 }
 
 .tabs-container {
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+.market-filter-strip {
   min-width: 0;
+  min-height: var(--ds-touch-target, 48px);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-inset);
+}
+
+.market-filter-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.market-filter-divider {
+  width: 1px;
+  height: 1.8rem;
+  flex: 0 0 1px;
+  margin-inline: 0.15rem;
+  background: var(--ds-border-medium);
 }
 
 .market-filter-chips :deep(.ui-filter-chips),
 .market-settlement-filter-chips :deep(.ui-filter-chips) {
-  width: 100%;
+  width: max-content;
+  min-height: 40px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .market-filter-chips :deep(.ui-filter-chip),
 .market-settlement-filter-chips :deep(.ui-filter-chip) {
-  min-height: 2.85rem;
+  min-height: 2.5rem;
+}
+
+.market-settlement-filter-chips :deep(.ui-filter-chip.is-active) {
+  color: var(--ds-info-700);
+  background: var(--ds-info-50);
+  border-color: var(--ds-info-500);
 }
 
 .market-filter-chips :deep(.ui-filter-chip:focus-visible),
@@ -1228,11 +1270,12 @@ onUnmounted(() => {
 @media (max-width: 430px) {
   .market-filter-chips :deep(.ui-filter-chip),
   .market-settlement-filter-chips :deep(.ui-filter-chip) {
-    min-height: 2.72rem;
+    min-height: 2.5rem;
+    padding-inline: 0.6rem;
   }
 
   .market-filter-chips :deep(.ui-filter-chip) {
-    padding-inline: 0.45rem;
+    padding-inline: 0.5rem;
   }
 }
 

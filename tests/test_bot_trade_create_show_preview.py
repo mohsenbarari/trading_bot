@@ -27,7 +27,7 @@ class BotTradeCreateShowPreviewTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.trade_create.get_wizard_review_keyboard", return_value="WK"):
             await show_trade_preview(message, state, edit=False)
         preview_text = message.answer.await_args.args[0]
-        self.assertIn("فروش نقد فردا سکه 15 عدد 123456: فقط نقدی", preview_text)
+        self.assertIn("ف ن ف سکه 15 عدد 123456: فقط نقدی", preview_text)
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "WK")
         state.set_state.assert_awaited_with(Trade.awaiting_wizard_review)
 

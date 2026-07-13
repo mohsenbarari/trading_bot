@@ -615,8 +615,18 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offers-count').text()).toBe('2')
+    const filterStrip = wrapper.get('.market-filter-strip')
+    expect(filterStrip.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+      'همه',
+      'خریدار',
+      'فروشنده',
+      'لفظ‌های شما',
+      'همه تسویه‌ها',
+      'نقد حاضر',
+      'فردا',
+    ])
     const settlementTabs = wrapper.findAll('.market-settlement-filter-chips [role="tab"]')
-    expect(settlementTabs.map((tab) => tab.text())).toEqual(['همه', 'نقد حاضر', 'فردا'])
+    expect(settlementTabs.map((tab) => tab.text())).toEqual(['همه تسویه‌ها', 'نقد حاضر', 'فردا'])
 
     await settlementTabs[1]!.trigger('click')
     await nextTick()
@@ -773,7 +783,8 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('طلای آب‌شده')
     expect(document.body.textContent).toContain('فردا ➡️')
-    expect(wrapper.text()).toContain('8 عدد فردا ➡️ 222,000')
+    expect(wrapper.get('.offer-preview-badges .ui-settlement-badge--tomorrow').text()).toContain('فردا ➡️')
+    expect(wrapper.get('.offer-preview-line').text()).toContain('8 عدد 222,000')
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
     await flushPromises()
