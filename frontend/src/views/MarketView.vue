@@ -1230,6 +1230,10 @@ onUnmounted(() => {
   .market-settlement-filter-chips :deep(.ui-filter-chip) {
     min-height: 2.72rem;
   }
+
+  .market-filter-chips :deep(.ui-filter-chip) {
+    padding-inline: 0.45rem;
+  }
 }
 
 /* Main Content */
