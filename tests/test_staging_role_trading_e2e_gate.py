@@ -13,6 +13,19 @@ class StagingRoleTradingE2EGateTests(unittest.TestCase):
         self.assertIn("`pwacct_${suffix}`", spec)
         self.assertIn('"pwacct_"', gate)
 
+    def test_market_schedule_fixture_registers_sync_events_before_mutation(self):
+        spec = (ROOT / "frontend/e2e/market-schedule.spec.ts").read_text(encoding="utf-8")
+        configure_start = spec.index("function configureMarketRuntime")
+        configure_end = spec.index("async function refreshMarketScheduleSettingsInApp", configure_start)
+        configure_fixture = spec[configure_start:configure_end]
+
+        self.assertIn("from core.events import setup_all_events", configure_fixture)
+        self.assertIn("setup_all_events()", configure_fixture)
+        self.assertLess(
+            configure_fixture.index("setup_all_events()"),
+            configure_fixture.index("async def main():"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -138,6 +138,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete
 
 from core.db import AsyncSessionLocal
+from core.events import setup_all_events
 from core.services.market_transition_service import get_market_runtime_view
 from core.trading_settings import save_trading_settings_async
 from models.market_runtime_state import MarketRuntimeState
@@ -147,6 +148,8 @@ mode = ${JSON.stringify(options.mode)}
 notice_visible = ${toPythonBool(options.noticeVisible)}
 offers_since_last_open = ${options.offersSinceLastOpen}
 disable_schedule = ${toPythonBool(!!options.disableSchedule)}
+
+setup_all_events()
 
 async def main():
     tehran_now = datetime.now(ZoneInfo('Asia/Tehran'))
