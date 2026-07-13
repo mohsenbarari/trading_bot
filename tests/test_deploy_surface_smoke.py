@@ -324,6 +324,34 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'scripts/deploy_staging.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_staging_deploy_surface_excludes_object_storage_bridge(self):
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+        staging_readme = (REPO_ROOT / 'deploy/staging/README.md').read_text(encoding='utf-8')
+
+        forbidden_tokens = (
+            'STAGING_OBJECT_STORAGE',
+            'STAGING_OBJECT_RELEASE',
+            'ARVAN_OBJECT_STORAGE',
+            'object-storage-',
+            'object-release-',
+            'staging_object_storage',
+            'arvan_object_storage',
+        )
+        for token in forbidden_tokens:
+            with self.subTest(token=token):
+                self.assertNotIn(token, staging_script)
+                self.assertNotIn(token, staging_example)
+                self.assertNotIn(token, staging_readme)
+
+        for relative_path in (
+            'scripts/arvan_object_storage_probe.py',
+            'scripts/staging_object_storage_artifact.py',
+            'scripts/staging_object_storage_release.py',
+        ):
+            with self.subTest(path=relative_path):
+                self.assertFalse((REPO_ROOT / relative_path).exists())
+
     def test_legacy_staging_recreate_removes_only_stateless_services(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         function_body = staging_script.split('remove_legacy_compose_stateless_containers() {', 1)[1].split('\n}', 1)[0]
@@ -359,34 +387,6 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('STAGING_MIGRATION_SERVER_MODE="$migration_server_mode"', staging_script)
         self.assertIn('STAGING_RELEASE_SHA_OVERRIDE', staging_script)
         self.assertIn('command -v docker-compose', staging_script)
-        self.assertIn('STAGING_OBJECT_STORAGE_PREFIX="${STAGING_OBJECT_STORAGE_PREFIX:-${ARVAN_OBJECT_STORAGE_PREFIX:-staging/deploy-bridge}}"', staging_script)
-        self.assertIn('configure_staging_object_storage_env', staging_script)
-        self.assertIn('stage_object_storage_artifact', staging_script)
-        self.assertIn('stage_object_storage_release', staging_script)
-        self.assertIn('stage_object_storage_release_fetch', staging_script)
-        self.assertIn('stage_object_storage_release_apply', staging_script)
-        self.assertIn('scripts/staging_object_storage_artifact.py', staging_script)
-        self.assertIn('scripts/arvan_object_storage_probe.py', staging_script)
-        self.assertIn('scripts/staging_object_storage_release.py', staging_script)
-        self.assertIn('object-release-package', staging_script)
-        self.assertIn('object-release-upload', staging_script)
-        self.assertIn('object-release-fetch', staging_script)
-        self.assertIn('object-release-fetch-latest', staging_script)
-        self.assertIn('object-release-apply', staging_script)
-        self.assertIn('object-release-apply-latest', staging_script)
-        self.assertIn('STAGING_OBJECT_RELEASE_CHANNEL="${STAGING_OBJECT_RELEASE_CHANNEL:-iran-staging}"', staging_script)
-        self.assertIn('--publish-channel "$STAGING_OBJECT_RELEASE_CHANNEL"', staging_script)
-        self.assertIn('compose build app >&2', staging_script)
-        self.assertIn('-print -quit)', staging_script)
-        self.assertIn('--exclude=\'./.env.*\'', staging_script)
-        self.assertIn('--exclude=\'./tmp\'', staging_script)
-        self.assertIn("'.github'", staging_script)
-        self.assertIn("'tests'", staging_script)
-        self.assertIn("'pip_packages'", staging_script)
-        self.assertIn("'postgres_data'", staging_script)
-        self.assertIn("'redis_data'", staging_script)
-        self.assertIn('"${STAGING_OBJECT_RELEASE_PROJECT_EXCLUDES[@]}" "${STAGING_OBJECT_RELEASE_RECEIVER_PROTECTED[@]}"', staging_script)
-        self.assertIn('STAGING_OBJECT_RELEASE_APPLY_EXECUTE', staging_script)
         self.assertIn('STAGING_FOREIGN_APP_PORT="${STAGING_FOREIGN_APP_PORT:-8121}"', staging_script)
         self.assertIn('STAGING_BOT_USERNAME="${STAGING_BOT_USERNAME:-}"', staging_script)
         self.assertIn('BOT_USERNAME=${STAGING_BOT_USERNAME:-staging_bot_placeholder}', staging_script)
@@ -446,18 +446,6 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('TRUSTED_PROXY_CIDRS=$STAGING_TRUSTED_PROXY_CIDRS', staging_script)
         self.assertIn('set_env_value TRUSTED_PROXY_CIDRS "$STAGING_TRUSTED_PROXY_CIDRS"', staging_script)
         self.assertIn('TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12', staging_example)
-
-    def test_staging_object_storage_bridge_is_documented_as_staging_only(self):
-        staging_readme = (REPO_ROOT / 'deploy/staging/README.md').read_text(encoding='utf-8')
-        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
-        production_doc = (REPO_ROOT / 'docs/PRODUCTION_DEPLOYMENT_ONLINE.md').read_text(encoding='utf-8')
-
-        self.assertIn('Object Storage deploy bridge', staging_readme)
-        self.assertIn('deployment\nartifacts only', staging_readme)
-        self.assertIn('does not replace cross-server sync', staging_readme)
-        self.assertIn('ARVAN_OBJECT_STORAGE_ENDPOINT=https://s3.ir-thr-at1.arvanstorage.ir', staging_example)
-        self.assertIn('ARVAN_OBJECT_STORAGE_PREFIX=staging/deploy-bridge', staging_example)
-        self.assertIn('S3 support has been removed from the production deploy flow', production_doc)
 
     def test_staging_deploy_rejects_shared_production_frontend_dist(self):
         result = run_checked(

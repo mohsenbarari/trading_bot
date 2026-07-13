@@ -57,9 +57,9 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             self.assertGreater(counts.get(area, 0), 0, area)
 
     def test_expected_branch_can_be_overridden_for_staging_continuation(self):
-        args = runner.parse_args(["--expected-branch", "staging/object-storage-artifact-bridge"])
+        args = runner.parse_args(["--expected-branch", "candidate/staging-merge-validation"])
 
-        self.assertEqual(args.expected_branch, "staging/object-storage-artifact-bridge")
+        self.assertEqual(args.expected_branch, "candidate/staging-merge-validation")
 
     def test_expected_branch_default_remains_candidate_guard(self):
         args = runner.parse_args([])
