@@ -339,9 +339,16 @@ staging_release_sha() {
     release_sha
 }
 
+normalize_staging_frontend_permissions() {
+    [[ -d "$STAGING_FRONTEND_DIST_DIR" ]] || die "staging frontend dist is missing"
+    # Nginx serves this public build as an unprivileged user.
+    chmod -R u=rwX,go=rX -- "$STAGING_FRONTEND_DIST_DIR"
+}
+
 build_frontend() {
     if [[ "${STAGING_SKIP_FRONTEND_BUILD:-0}" == "1" ]]; then
         [[ -f "$STAGING_FRONTEND_DIST_DIR/index.html" ]] || die "STAGING_SKIP_FRONTEND_BUILD=1 but staging frontend dist is missing"
+        normalize_staging_frontend_permissions
         log "skipping frontend build; using existing $STAGING_FRONTEND_DIST_DIR"
         return
     fi
@@ -360,6 +367,7 @@ build_frontend() {
         VITE_STAGING_DEV_LOGIN="$dev_login_enabled" \
         npm run build
     )
+    normalize_staging_frontend_permissions
 }
 
 compose() {

@@ -324,6 +324,26 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'scripts/deploy_staging.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_staging_deploy_normalizes_existing_frontend_permissions(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as temp_dir:
+            dist_dir = Path(temp_dir) / 'dist'
+            dist_dir.mkdir(mode=0o700)
+            index_path = dist_dir / 'index.html'
+            index_path.write_text('<!doctype html>', encoding='utf-8')
+            index_path.chmod(0o600)
+
+            result = run_checked(
+                ['scripts/deploy_staging.sh', 'build-frontend'],
+                extra_env={
+                    'STAGING_FRONTEND_DIST_DIR': str(dist_dir),
+                    'STAGING_SKIP_FRONTEND_BUILD': '1',
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            self.assertEqual(dist_dir.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(index_path.stat().st_mode & 0o777, 0o644)
+
     def test_staging_deploy_surface_excludes_object_storage_bridge(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
@@ -377,6 +397,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('process.env.FRONTEND_BUILD_OUT_DIR', vite_config)
         self.assertIn('FRONTEND_BUILD_OUT_DIR="$STAGING_FRONTEND_DIST_DIR"', staging_script)
         self.assertIn('STAGING_SKIP_FRONTEND_BUILD', staging_script)
+        self.assertEqual(staging_script.count('normalize_staging_frontend_permissions'), 3)
+        self.assertIn('chmod -R u=rwX,go=rX -- "$STAGING_FRONTEND_DIST_DIR"', staging_script)
         self.assertIn('STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"', staging_script)
         self.assertIn('STAGING_INTERNAL_FOREIGN_SERVER_URL', staging_script)
         self.assertIn('STAGING_PUBLIC_FOREIGN_SYNC_URL="${STAGING_PUBLIC_FOREIGN_SYNC_URL:-https://staging.362514.ir/foreign-sync}"', staging_script)
