@@ -1233,8 +1233,8 @@ onUnmounted(() => {
   background: var(--ds-border-medium);
 }
 
-.market-filter-chips :deep(.ui-filter-chips),
-.market-settlement-filter-chips :deep(.ui-filter-chips) {
+.market-filter-chips,
+.market-settlement-filter-chips {
   width: max-content;
   min-height: 40px;
   padding: 0;

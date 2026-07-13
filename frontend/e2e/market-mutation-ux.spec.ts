@@ -192,6 +192,17 @@ test.describe('Market mutation UX', () => {
     expect(filterRows).toHaveLength(2)
     expect(Math.abs(filterRows[0]!.top - filterRows[1]!.top)).toBeLessThanOrEqual(1)
     expect(Math.abs(filterRows[0]!.bottom - filterRows[1]!.bottom)).toBeLessThanOrEqual(1)
+    const filterGroupStyles = await filterStrip.locator('[role="tablist"]').evaluateAll((nodes) => nodes.map((node) => {
+      const style = window.getComputedStyle(node)
+      return {
+        borderTopWidth: style.borderTopWidth,
+        backgroundColor: style.backgroundColor,
+      }
+    }))
+    expect(filterGroupStyles).toEqual([
+      { borderTopWidth: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' },
+      { borderTopWidth: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' },
+    ])
     await expect(page.locator('.ui-settlement-badge--cash')).toContainText('نقد حاضر')
     await expect(page.locator('.ui-settlement-badge--tomorrow')).toContainText('فردا')
     await expect(page.locator('.offer-header .ui-settlement-badge')).toHaveCount(2)
