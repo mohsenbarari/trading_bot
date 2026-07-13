@@ -92,7 +92,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         tomorrow_message = channel_service.build_offer_channel_message(
             make_offer(settlement_type=SettlementType.TOMORROW)
         )
-        self.assertIn("🟢خرید سکه 30 عدد فردا ➡️ 51,000", tomorrow_message)
+        self.assertIn("🟢خرید سکه 30 عدد فردا 📆 51,000", tomorrow_message)
 
     async def test_apply_terminal_completed_edits_text_and_removes_buttons_on_foreign(self):
         response = SimpleNamespace(status_code=200, text="")

@@ -11,7 +11,7 @@ import {
 describe('settlement type presentation', () => {
   it('uses explicit offer and trade labels for both settlement modes', () => {
     expect(offerSettlementLabel('cash')).toBe('نقد حاضر ☀️')
-    expect(offerSettlementLabel('tomorrow')).toBe('فردا ➡️')
+    expect(offerSettlementLabel('tomorrow')).toBe('فردا 📆')
     expect(tradeSettlementLabel('cash')).toBe('نقد حاضر')
     expect(tradeSettlementLabel('tomorrow')).toBe('فردایی')
   })

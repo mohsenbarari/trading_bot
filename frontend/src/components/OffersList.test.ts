@@ -126,7 +126,7 @@ describe('OffersList.vue', () => {
 
     expect(wrapper.findAll('.offer-settlement').map((label) => label.text())).toEqual([
       'تسویه:نقد حاضر ☀️',
-      'تسویه:فردا ➡️',
+      'تسویه:فردا 📆',
     ])
     expect(wrapper.findAll('.offer-header .offer-settlement')).toHaveLength(2)
     expect(wrapper.findAll('.offer-main .offer-settlement')).toHaveLength(0)

@@ -158,7 +158,7 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["data"]["commodity_name"], "سکه")
         self.assertIn("خرید سکه", payload["body"])
         self.assertIn("12", payload["body"])
-        self.assertIn("فردا ➡️", payload["body"])
+        self.assertIn("فردا 📆", payload["body"])
         self.assertNotIn("091", repr(payload))
 
     async def test_market_offer_targets_require_enabled_subscription_and_preference(self):

@@ -150,9 +150,9 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(create_session.added[0].channel_message_id, 900)
         channel_text = bot.send_message.await_args_list[0].kwargs["text"]
         private_text = bot.send_message.await_args_list[1].kwargs["text"]
-        self.assertIn("🟢خرید ربع بهار 12 عدد فردا ➡️ 123,456", channel_text)
+        self.assertIn("🟢خرید ربع بهار 12 عدد فردا 📆 123,456", channel_text)
         self.assertNotIn("🟢خرید ربع 12 عدد", channel_text)
-        self.assertIn("🟢خرید ربع بهار 12 عدد فردا ➡️ 123,456", private_text)
+        self.assertIn("🟢خرید ربع بهار 12 عدد فردا 📆 123,456", private_text)
         self.assertIn("منتشر شد", callback.message.edit_text.await_args.args[0])
         increment_mock.assert_awaited_once()
         state.clear.assert_awaited_once()

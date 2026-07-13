@@ -122,8 +122,8 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
         self.assertEqual(payload["detail"], "بخش انتخابی شما لحظاتی قبل انجام شد.")
         self.assertIn("اگر مایل هستید", payload["message"])
         self.assertEqual(payload["settlement_type"], "tomorrow")
-        self.assertEqual(payload["settlement_type_label"], "فردا ➡️")
-        self.assertIn("🔴فروش طلای آب شده 20 عدد فردا ➡️ 75,800", payload["offer_summary"])
+        self.assertEqual(payload["settlement_type_label"], "فردا 📆")
+        self.assertIn("🔴فروش طلای آب شده 20 عدد فردا 📆 75,800", payload["offer_summary"])
 
     def test_build_lot_unavailable_suggestion_payload_handles_unknown_offer_type_and_no_lots(self):
         payload = build_lot_unavailable_suggestion_payload(

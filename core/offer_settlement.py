@@ -23,7 +23,7 @@ def normalize_settlement_type(value: Any) -> SettlementType:
 
 def offer_settlement_label(value: Any) -> str:
     if settlement_type_value(value) == SettlementType.TOMORROW.value:
-        return "فردا ➡️"
+        return "فردا 📆"
     return "نقد حاضر ☀️"
 
 

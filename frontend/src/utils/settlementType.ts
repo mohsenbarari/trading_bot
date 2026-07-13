@@ -5,7 +5,7 @@ export function normalizeSettlementType(value: unknown): SettlementType {
 }
 
 export function offerSettlementLabel(value: unknown): string {
-  return normalizeSettlementType(value) === 'tomorrow' ? 'فردا ➡️' : 'نقد حاضر ☀️'
+  return normalizeSettlementType(value) === 'tomorrow' ? 'فردا 📆' : 'نقد حاضر ☀️'
 }
 
 export function tradeSettlementLabel(value: unknown): string {
