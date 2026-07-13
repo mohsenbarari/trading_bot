@@ -96,6 +96,24 @@ def make_user(**overrides):
 
 
 class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_welcome_panel_prefers_project_account_name_over_telegram_full_name(self):
+        user = make_user(account_name="final_test", full_name="Salar")
+
+        with patch(
+            "bot.handlers.link_account.attach_customer_management_names",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.link_account.build_channel_join_request_text",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.link_account.build_webapp_plain_link_line",
+            return_value=None,
+        ):
+            text = await link_account.build_linked_account_panel_message(None, user, db=object())
+
+        self.assertIn("سلام final_test!", text)
+        self.assertNotIn("Salar", text)
+
     async def test_handle_contact_links_account_and_normalizes_phone(self):
         user = make_user()
         db = FakeDB(user)
@@ -122,7 +140,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(user.telegram_id, 10)
         self.assertEqual(user.username, "mohsen_telegram")
-        self.assertEqual(user.full_name, "Linked_User")
+        self.assertEqual(user.full_name, "acc")
         self.assertTrue(user.has_bot_access)
         self.assertIs(mandatory_mock.await_args.kwargs["user"], user)
         self.assertEqual(db.commits, 1)

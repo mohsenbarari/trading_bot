@@ -41,7 +41,7 @@ def should_announce_project_user_registration(
 
 
 def project_user_joined_message(user: User | object) -> str:
-    display_name = (getattr(user, "full_name", None) or getattr(user, "account_name", "") or "").strip()
+    display_name = (getattr(user, "account_name", None) or getattr(user, "full_name", "") or "").strip()
     return f"{display_name} به لیست همکاران اضافه شدند."
 
 

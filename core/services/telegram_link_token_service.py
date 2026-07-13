@@ -190,8 +190,6 @@ async def consume_telegram_link_token(
     now = utc_now()
     user.telegram_id = telegram_id
     user.username = username
-    if getattr(user, "full_name", None) == getattr(user, "account_name", None) and full_name:
-        user.full_name = full_name
     set_legacy_has_bot_access_compatibility(user, enabled=True)
     token_record.status = TelegramLinkTokenStatus.USED
     token_record.used_at = now

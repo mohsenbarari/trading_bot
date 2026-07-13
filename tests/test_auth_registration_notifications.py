@@ -96,7 +96,7 @@ class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_project_registration_web_announcement_uses_management_payload(self):
         db = _FakeDb([1, 2])
-        new_user = SimpleNamespace(id=9, account_name="ali", full_name="")
+        new_user = SimpleNamespace(id=9, account_name="final_test", full_name="Salar")
 
         with patch(
             "core.services.registration_notification_service.create_user_notification",
@@ -112,16 +112,16 @@ class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_notification.await_count, 2)
         first_call = create_notification.await_args_list[0]
         self.assertEqual(first_call.args[1], 1)
-        self.assertEqual(first_call.args[2], "ali به لیست همکاران اضافه شدند.")
+        self.assertEqual(first_call.args[2], "final_test به لیست همکاران اضافه شدند.")
         self.assertEqual(first_call.args[3], NotificationLevel.INFO)
         self.assertEqual(first_call.args[4], NotificationCategory.SYSTEM)
         self.assertEqual(first_call.kwargs["extra_payload"]["title"], "پیام مدیریت")
-        self.assertEqual(first_call.kwargs["extra_payload"]["route"], "/users/9?account_name=ali")
+        self.assertEqual(first_call.kwargs["extra_payload"]["route"], "/users/9?account_name=final_test")
         db.commit.assert_not_awaited()
 
     async def test_project_registration_telegram_outbox_is_unique_transactional_enqueue(self):
         db = _FakeDb([(7, 111), (8, 222)])
-        new_user = SimpleNamespace(id=9, account_name="ali", full_name="")
+        new_user = SimpleNamespace(id=9, account_name="final_test", full_name="Salar")
 
         with patch(
             "core.services.registration_notification_service.enqueue_telegram_notifications",
@@ -135,7 +135,7 @@ class RegistrationNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 2)
         enqueue_telegram.assert_awaited_once()
         enqueue_call = enqueue_telegram.await_args
-        self.assertEqual(enqueue_call.kwargs["text"], "ali به لیست همکاران اضافه شدند.")
+        self.assertEqual(enqueue_call.kwargs["text"], "final_test به لیست همکاران اضافه شدند.")
         self.assertEqual(enqueue_call.kwargs["source_type"], "project_user_joined")
         self.assertEqual(enqueue_call.kwargs["source_id"], 9)
         self.assertEqual(enqueue_call.kwargs["parse_mode"], None)

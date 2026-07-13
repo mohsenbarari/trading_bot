@@ -998,8 +998,6 @@ async def complete_invitation_registration(
             )
 
             full_name = _registration_full_name(invitation, accountant_relation, customer_relation)
-            if command is not None and full_name == invitation.account_name and command.telegram_full_name:
-                full_name = command.telegram_full_name
             user = User(
                 account_name=invitation.account_name,
                 mobile_number=identity.mobile_number,

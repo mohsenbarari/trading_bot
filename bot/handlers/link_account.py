@@ -103,8 +103,6 @@ async def finalize_account_link(
     else:
         user.telegram_id = message.from_user.id
         user.username = message.from_user.username
-        if user.full_name == user.account_name and message.from_user.full_name:
-            user.full_name = message.from_user.full_name
     if address is not None:
         user.address = address
     set_legacy_has_bot_access_compatibility(user, enabled=True)
@@ -168,8 +166,7 @@ async def build_linked_account_panel_message(
     elif already_linked:
         lines = ["✅ حساب شما قبلاً متصل شده است. این حساب قبلاً به تلگرام متصل شده است."]
     else:
-        full_name = (getattr(user, "full_name", None) or account_name)
-        lines = [f"سلام {full_name}! به پنل کاربری خود خوش آمدید."]
+        lines = [f"سلام {account_name}! به پنل کاربری خود خوش آمدید."]
 
     if address_registered:
         lines.append("📍 آدرس شما ثبت شد و ثبت‌نامتان تکمیل شد.")

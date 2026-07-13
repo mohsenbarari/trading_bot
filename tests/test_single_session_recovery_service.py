@@ -230,6 +230,12 @@ class SingleSessionRecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_active_recovery_status(SingleSessionRecoveryStatus.APPROVED))
 
     def test_display_text_and_terminal_helpers_cover_fallbacks(self):
+        self.assertEqual(
+            get_recovery_requester_display_name(
+                SimpleNamespace(account_name="project_owner", full_name="Telegram Owner")
+            ),
+            "project_owner",
+        )
         self.assertEqual(get_recovery_requester_display_name(SimpleNamespace(full_name="  Owner Name  ")), "Owner Name")
         self.assertEqual(
             get_recovery_requester_display_name(SimpleNamespace(full_name="", account_name="acct-1")),

@@ -106,7 +106,7 @@ def _ensure_status(
 
 
 def get_recovery_requester_display_name(user: User | object) -> str:
-    for field_name in ("full_name", "account_name", "mobile_number"):
+    for field_name in ("account_name", "full_name", "mobile_number"):
         value = getattr(user, field_name, None)
         if isinstance(value, str) and value.strip():
             return value.strip()

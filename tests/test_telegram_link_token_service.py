@@ -196,7 +196,7 @@ class TelegramLinkTokenServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(user.telegram_id, 99)
         self.assertEqual(user.username, "telegram-user")
-        self.assertEqual(user.full_name, "Telegram Name")
+        self.assertEqual(user.full_name, "same-name")
         self.assertEqual(token.status, TelegramLinkTokenStatus.USED)
 
 

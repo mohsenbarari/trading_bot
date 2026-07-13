@@ -1169,7 +1169,7 @@ class AuthoritativeRegistrationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.outcome, TelegramRegistrationOutcome.CREATED)
         self.assertEqual(user.telegram_id, command.telegram_id)
         self.assertEqual(user.username, command.telegram_username)
-        self.assertEqual(user.full_name, command.telegram_full_name)
+        self.assertEqual(user.full_name, invitation.account_name)
         self.assertEqual(user.home_server, "iran")
         self.assertFalse(user.must_change_password)
         self.assertTrue(user.has_bot_access)
