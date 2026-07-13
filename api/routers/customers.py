@@ -28,6 +28,7 @@ from core.services.customer_relation_service import (
     is_user_customer,
     list_owner_customer_relations,
     load_customer_relation_invitation_map,
+    mark_customer_invitation_for_authoritative_replay,
     sweep_expired_pending_customer_relations,
     unlink_owner_customer_relation,
     update_owner_customer_relation,
@@ -420,6 +421,12 @@ async def create_my_customer(
     relation = creation.relation
     invitation = creation.invitation
 
+    if not creation.created:
+        mark_customer_invitation_for_authoritative_replay(relation, invitation)
+        await db.commit()
+        await db.refresh(invitation)
+        await db.refresh(relation)
+
     registration_link = build_customer_registration_link(relation.invitation_token)
     sms_status = await deliver_invitation_sms_once(
         db,
@@ -538,6 +545,12 @@ async def create_owner_customer_internal_from_bot(
     relation = creation.relation
     invitation = creation.invitation
 
+    if not creation.created:
+        mark_customer_invitation_for_authoritative_replay(relation, invitation)
+        await db.commit()
+        await db.refresh(invitation)
+        await db.refresh(relation)
+
     registration_link = build_customer_registration_link(relation.invitation_token)
     sms_status = await deliver_invitation_sms_once(
         db,
@@ -577,6 +590,7 @@ async def create_owner_customer_internal_from_bot(
         created=creation.created,
         already_pending=not creation.created,
         relation_id=relation.id,
+        invitation_token=invitation.token,
         sms_sent=sms_sent,
         idempotency_key=expected_idempotency_key,
         reason=("pending invitation already exists" if not creation.created else None),

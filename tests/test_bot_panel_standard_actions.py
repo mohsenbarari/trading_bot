@@ -269,7 +269,24 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("👤 مشتری دوم | سطح ۲ | در انتظار ثبت‌نام", button_texts)
 
         detail_keyboard = panel.get_customer_detail_keyboard(relation)
-        self.assertIn("اخراج مشتری", detail_keyboard.inline_keyboard[0][0].text)
+        detail_texts = [button.text for row in detail_keyboard.inline_keyboard for button in row]
+        self.assertFalse(any("اخراج" in text or "لغو دعوت" in text for text in detail_texts))
+        self.assertTrue(any("بازگشت" in text for text in detail_texts))
+
+    async def test_legacy_customer_unlink_callbacks_fail_closed_without_mutation(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        callback_data = panel.UserPanelCustomerCallback(action="confirm_unlink", relation_id=3)
+
+        with patch("bot.handlers.panel._load_user_panel_customer_relation", new=AsyncMock()) as load_relation:
+            await panel.ask_unlink_user_panel_customer(callback, callback_data, user=SimpleNamespace(id=1))
+            await panel.confirm_unlink_user_panel_customer(callback, callback_data, user=SimpleNamespace(id=1))
+
+        self.assertEqual(callback.answer.await_count, 2)
+        for call in callback.answer.await_args_list:
+            self.assertEqual(call.args[0], panel.CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT)
+            self.assertTrue(call.kwargs["show_alert"])
+        load_relation.assert_not_awaited()
+        callback.message.edit_text.assert_not_awaited()
 
     async def test_customer_invite_tier2_button_is_webapp_only(self):
         callback = SimpleNamespace(answer=AsyncMock())
@@ -331,12 +348,16 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "created": True,
                         "sms_sent": False,
+                        "invitation_token": "CUST-test",
                         "bot_link": "https://t.me/test_bot?start=CUST-test",
                         "web_link": "https://app.example/register?token=CUST-test",
                     },
                 )
             ),
         ) as forward_mock, patch(
+            "bot.handlers.panel._wait_for_customer_invite_projection",
+            new=AsyncMock(return_value=True),
+        ) as projection_mock, patch(
             "bot.handlers.panel._edit_or_answer_customers_panel",
             new=AsyncMock(),
         ):
@@ -354,10 +375,58 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertTrue(payload["idempotency_key"].startswith("customer-invite:"))
+        projection_mock.assert_awaited_once_with(owner_user_id=1, invitation_token="CUST-test")
         self.assertTrue(state.cleared)
         result_message = callback.message.answer.await_args_list[0].args[0]
         self.assertIn("لینک تلگرام", result_message)
         self.assertIn("لینک وب‌اپ", result_message)
+
+    async def test_customer_invite_confirm_hides_links_until_projection_is_ready(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock()))
+        state = FakeState(
+            {
+                "customer_invite_owner_id": 1,
+                "customer_invite_management_name": "مشتری تست",
+                "customer_invite_mobile_number": "09123456789",
+            }
+        )
+        user = SimpleNamespace(
+            id=1,
+            role=UserRole.STANDARD,
+            account_name="owner1",
+            mobile_number="09120000001",
+            telegram_id=1001,
+            account_status=None,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
+        response = {
+            "created": False,
+            "already_pending": True,
+            "invitation_token": "CUST-stale",
+            "bot_link": "https://t.me/test_bot?start=CUST-stale",
+            "web_link": "https://app.example/register?token=CUST-stale",
+        }
+
+        with patch("bot.handlers.panel._customer_invite_access_allowed", new=AsyncMock(return_value=(True, None))), patch(
+            "bot.handlers.panel.check_customer_invite_sync_ready",
+            new=AsyncMock(return_value=SimpleNamespace(ready=True, message=None)),
+        ), patch(
+            "bot.handlers.panel.forward_customer_invite_to_iran",
+            new=AsyncMock(return_value=(201, response)),
+        ), patch(
+            "bot.handlers.panel._wait_for_customer_invite_projection",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "bot.handlers.panel._edit_or_answer_customers_panel",
+            new=AsyncMock(),
+        ) as edit_panel:
+            await panel.confirm_customer_invite_tier1(callback, state, user)
+
+        text = callback.message.answer.await_args.args[0]
+        self.assertIn("هنوز در بات آماده نیست", text)
+        self.assertNotIn("https://t.me/", text)
+        edit_panel.assert_not_awaited()
 
     async def test_colleagues_list_shows_non_relation_users(self):
         message = SimpleNamespace(answer=AsyncMock())

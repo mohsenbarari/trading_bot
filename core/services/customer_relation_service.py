@@ -65,6 +65,21 @@ class CustomerRelationCreationResult:
     created: bool
 
 
+def mark_customer_invitation_for_authoritative_replay(
+    relation: CustomerRelation,
+    invitation: Invitation,
+) -> None:
+    """Advance Iran-owned rows so an exact retry repairs stale peer projections."""
+
+    if current_server() != SERVER_IRAN:
+        raise RuntimeError("customer_invitation_replay_requires_iran")
+    now = utc_now()
+    relation.sync_version = max(int(getattr(relation, "sync_version", 1) or 1), 1) + 1
+    invitation.sync_version = max(int(getattr(invitation, "sync_version", 1) or 1), 1) + 1
+    relation.updated_at = now
+    invitation.updated_at = now
+
+
 def _utcnow_naive():
     return utc_now().replace(tzinfo=None)
 

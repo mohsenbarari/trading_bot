@@ -9,12 +9,12 @@ from aiogram.filters import Command, StateFilter
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
-from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from models.user import User
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.invitation import Invitation, InvitationKind
 from models.trade import Trade
 from bot.keyboards import (
     get_user_panel_keyboard, 
@@ -79,7 +79,10 @@ USER_PANEL_SUPPORT_MESSAGE = (
     "@coin_trade_owner"
 )
 USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT = "مشتریان سطح2 فقط به وب اپ دسترسی دارند! بنابراین برای دعوت این مشتریان به وب اپ مراجعه فرمایید."
+CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT = "لغو دعوت یا اخراج مشتری فقط از طریق وب‌اپ انجام می‌شود."
 CUSTOMER_INVITE_ALLOWED_ROLES = (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN)
+CUSTOMER_INVITE_PROJECTION_GRACE_SECONDS = 8.0
+CUSTOMER_INVITE_PROJECTION_POLL_SECONDS = 0.5
 
 
 def _settings_admin_write_decision(operation: str):
@@ -588,39 +591,14 @@ def get_user_panel_customers_keyboard(relations: list[CustomerRelation]) -> Inli
 
 
 def get_customer_detail_keyboard(relation: CustomerRelation) -> InlineKeyboardMarkup:
-    rows = []
-    status_value = getattr(relation.status, "value", relation.status)
-    if status_value in (CustomerRelationStatus.PENDING.value, CustomerRelationStatus.ACTIVE.value):
-        action_label = "❌ لغو دعوت مشتری" if status_value == CustomerRelationStatus.PENDING.value else "❌ اخراج مشتری"
-        rows.append([
-            InlineKeyboardButton(
-                text=action_label,
-                callback_data=UserPanelCustomerCallback(action="ask_unlink", relation_id=relation.id).pack(),
-            )
-        ])
-    rows.append([
-        InlineKeyboardButton(text="🔙 بازگشت به مشتریان", callback_data=UserPanelCustomerCallback(action="list").pack())
-    ])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def get_customer_unlink_confirm_keyboard(relation: CustomerRelation) -> InlineKeyboardMarkup:
-    status_value = getattr(relation.status, "value", relation.status)
-    confirm_label = "✅ بله، لغو دعوت شود" if status_value == CustomerRelationStatus.PENDING.value else "✅ بله، اخراج شود"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=confirm_label,
-                    callback_data=UserPanelCustomerCallback(action="confirm_unlink", relation_id=relation.id).pack(),
+                    text="🔙 بازگشت به مشتریان",
+                    callback_data=UserPanelCustomerCallback(action="list").pack(),
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="❌ انصراف",
-                    callback_data=UserPanelCustomerCallback(action="detail", relation_id=relation.id).pack(),
-                )
-            ],
+            ]
         ]
     )
 
@@ -664,7 +642,7 @@ async def _edit_or_answer_customers_panel(target, owner_user_id: int, *, edit: b
     relations = await _load_user_panel_customer_relations(owner_user_id)
     text = "👥 **مشتریان شما**\n\n"
     if relations:
-        text += "برای مشاهده جزئیات یا اخراج مشتری، روی نام او بزنید."
+        text += "برای مشاهده جزئیات مشتری، روی نام او بزنید."
     else:
         text += "هنوز مشتری ثبت نشده است."
     keyboard = get_user_panel_customers_keyboard(relations)
@@ -725,19 +703,7 @@ async def ask_unlink_user_panel_customer(
     callback_data: UserPanelCustomerCallback,
     user: Optional[User],
 ):
-    if not user:
-        await callback.answer()
-        return
-    relation = await _load_user_panel_customer_relation(user.id, callback_data.relation_id)
-    if not relation:
-        await callback.answer("مشتری یافت نشد.", show_alert=True)
-        return
-    await callback.message.edit_text(
-        f"آیا از اخراج/قطع ارتباط با **{_customer_relation_name(relation)}** مطمئن هستید؟",
-        parse_mode="Markdown",
-        reply_markup=get_customer_unlink_confirm_keyboard(relation),
-    )
-    await callback.answer()
+    await callback.answer(CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT, show_alert=True)
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "confirm_unlink"))
@@ -746,28 +712,44 @@ async def confirm_unlink_user_panel_customer(
     callback_data: UserPanelCustomerCallback,
     user: Optional[User],
 ):
-    if not user:
-        await callback.answer()
-        return
-    from core.services.customer_relation_service import unlink_owner_customer_relation
+    await callback.answer(CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT, show_alert=True)
 
-    try:
+
+async def _wait_for_customer_invite_projection(
+    *,
+    owner_user_id: int,
+    invitation_token: str,
+    wait_seconds: float = CUSTOMER_INVITE_PROJECTION_GRACE_SECONDS,
+    poll_seconds: float = CUSTOMER_INVITE_PROJECTION_POLL_SECONDS,
+) -> bool:
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + max(0.0, wait_seconds)
+    while True:
         async with AsyncSessionLocal() as session:
-            relation = await unlink_owner_customer_relation(
-                session,
-                owner_user_id=user.id,
-                relation_id=callback_data.relation_id,
+            stmt = (
+                select(CustomerRelation.id)
+                .join(Invitation, Invitation.token == CustomerRelation.invitation_token)
+                .where(
+                    CustomerRelation.owner_user_id == owner_user_id,
+                    CustomerRelation.invitation_token == invitation_token,
+                    CustomerRelation.customer_user_id.is_(None),
+                    CustomerRelation.customer_tier == CustomerTier.TIER_1,
+                    CustomerRelation.status == CustomerRelationStatus.PENDING,
+                    CustomerRelation.deleted_at.is_(None),
+                    Invitation.kind == InvitationKind.CUSTOMER,
+                    Invitation.is_used.is_(False),
+                    Invitation.revoked_at.is_(None),
+                    Invitation.expires_at.is_not(None),
+                    Invitation.expires_at > datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+                .limit(1)
             )
-            relation_name = _customer_relation_name(relation)
-    except HTTPException as exc:
-        await callback.answer(str(exc.detail), show_alert=True)
-        return
-    except Exception as exc:
-        await callback.answer(f"خطا در اخراج مشتری: {exc}", show_alert=True)
-        return
-
-    await callback.answer(f"{relation_name} از پروژه اخراج شد.", show_alert=True)
-    await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
+            if (await session.execute(stmt)).scalar_one_or_none() is not None:
+                return True
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(max(0.1, poll_seconds))
 
 
 async def _customer_invite_access_allowed(user: Optional[User]) -> tuple[bool, str | None]:
@@ -959,6 +941,18 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
         return
 
     await state.clear()
+    invitation_token = body.get("invitation_token") if isinstance(body, dict) else None
+    if status_code < 400 and (
+        not invitation_token
+        or not await _wait_for_customer_invite_projection(
+            owner_user_id=user.id,
+            invitation_token=str(invitation_token),
+        )
+    ):
+        await callback.message.answer(
+            "دعوت در سرور ایران ثبت شد، اما هنوز در بات آماده نیست. کمی بعد دوباره همین دعوت را ارسال کنید."
+        )
+        return
     await callback.message.answer(_customer_invite_result_message(status_code, body))
     try:
         await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)

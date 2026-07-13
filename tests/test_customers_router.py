@@ -70,6 +70,9 @@ class InternalInviteDB:
     async def commit(self):
         self.commits += 1
 
+    async def refresh(self, _item):
+        return None
+
 
 class FakeRequest:
     def __init__(self, headers=None, body=b"{}"):
@@ -339,6 +342,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             customer_tier=CustomerTier.TIER_1,
             invitation_token="CUST-existing",
             management_name="مشتری",
+            sync_version=4,
         )
         invitation = SimpleNamespace(
             id=31,
@@ -353,10 +357,13 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             completed_via=None,
             revoked_at=None,
             mobile_number="09123456789",
+            sync_version=7,
         )
 
         with patch("api.routers.customers.verify_internal_signature", return_value=True), patch(
             "api.routers.customers.current_server", return_value="iran"
+        ), patch(
+            "core.services.customer_relation_service.current_server", return_value="iran"
         ), patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)), patch(
             "api.routers.customers.is_user_accountant", new=AsyncMock(return_value=False)
         ), patch(
@@ -380,6 +387,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.created)
         self.assertTrue(result.already_pending)
         self.assertEqual(result.relation_id, 11)
+        self.assertEqual(result.invitation_token, "CUST-existing")
+        self.assertEqual(existing_relation.sync_version, 5)
+        self.assertEqual(invitation.sync_version, 8)
         sms_mock.assert_not_called()
 
     async def test_internal_bot_customer_invite_creates_and_surfaces_sms_boolean(self):

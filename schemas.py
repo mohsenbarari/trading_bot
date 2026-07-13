@@ -441,6 +441,7 @@ class InternalCustomerInviteResponse(BaseModel):
     created: bool
     already_pending: bool = False
     relation_id: int | None = None
+    invitation_token: str | None = None
     sms_sent: bool = False
     idempotency_key: str
     error_code: str | None = None

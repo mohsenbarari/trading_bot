@@ -27,6 +27,7 @@ from core.services.customer_relation_service import (
     list_active_customers_for_owner,
     list_shared_group_accountant_ids_for_customer,
     list_owner_customer_relations,
+    mark_customer_invitation_for_authoritative_replay,
     round_customer_price,
     sweep_expired_pending_customer_relations,
     unlink_owner_customer_relation,
@@ -132,6 +133,27 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES,
             (CustomerRelationStatus.PENDING, CustomerRelationStatus.ACTIVE),
         )
+
+    def test_authoritative_replay_advances_both_sync_versions(self):
+        relation = SimpleNamespace(sync_version=3, updated_at=None)
+        invitation = SimpleNamespace(sync_version=7, updated_at=None)
+
+        mark_customer_invitation_for_authoritative_replay(relation, invitation)
+
+        self.assertEqual(relation.sync_version, 4)
+        self.assertEqual(invitation.sync_version, 8)
+        self.assertIsNotNone(relation.updated_at)
+        self.assertEqual(relation.updated_at, invitation.updated_at)
+
+    def test_authoritative_replay_rejects_foreign_callers(self):
+        with patch(
+            "core.services.customer_relation_service.current_server",
+            return_value="foreign",
+        ), self.assertRaisesRegex(RuntimeError, "customer_invitation_replay_requires_iran"):
+            mark_customer_invitation_for_authoritative_replay(
+                SimpleNamespace(sync_version=1),
+                SimpleNamespace(sync_version=1),
+            )
 
     def test_get_effective_max_customers_clamps_invalid_values(self):
         self.assertEqual(get_effective_max_customers(SimpleNamespace(max_customers=6)), 6)

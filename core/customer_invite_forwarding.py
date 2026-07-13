@@ -9,7 +9,7 @@ from typing import Any, Tuple
 import httpx
 
 from core.config import settings
-from core.customer_invite import log_customer_invite_input
+from core.log_redaction import mask_mobile
 from core.server_routing import SERVER_IRAN, current_server, peer_server_url_for
 from core.trade_forwarding import _json_body, _tls_verify_setting, sign_internal_payload
 from core.trading_observability import summarize_response_body
@@ -20,12 +20,16 @@ logger = logging.getLogger(__name__)
 
 def _safe_log_context(payload: dict[str, Any]) -> dict[str, Any]:
     mobile_number = str(payload.get("mobile_number") or "")
-    return {
+    context = {
         "source_server": current_server(),
         "target_server": SERVER_IRAN,
         "has_idempotency_key": bool(payload.get("idempotency_key")),
-        **log_customer_invite_input(int(payload.get("owner_user_id") or 0), mobile_number),
+        "mobile_masked": mask_mobile(mobile_number),
     }
+    owner_user_id = payload.get("owner_user_id")
+    if owner_user_id is not None:
+        context["owner_user_id"] = int(owner_user_id)
+    return context
 
 
 async def forward_customer_invite_to_iran(
