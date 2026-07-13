@@ -83,7 +83,7 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_upgrade_replay_and_mixed_revision_sequence_are_deterministic(self):
         sync_url, async_url = MIGRATION_DATABASE_URLS
         base_revision = "f7c8d9e0a1b2"
-        head_revision = "a8d9e0f1b2c3"
+        stage1_revision = "a8d9e0f1b2c3"
         local_tables = (
             "invitation_identity_reservations",
             "invitation_sms_deliveries",
@@ -150,15 +150,15 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         _run_alembic(sync_url, "upgrade", base_revision)
         try:
-            _run_alembic(sync_url, "upgrade", head_revision)
+            _run_alembic(sync_url, "upgrade", stage1_revision)
             first = await schema_snapshot()
-            self.assertEqual(first[0], head_revision)
+            self.assertEqual(first[0], stage1_revision)
             self.assertEqual(
                 {row[0] for row in first[1]}.intersection(local_tables),
                 set(local_tables),
             )
 
-            _run_alembic(sync_url, "upgrade", "head")
+            _run_alembic(sync_url, "upgrade", stage1_revision)
             replay = await schema_snapshot()
             self.assertEqual(replay, first)
 
@@ -186,7 +186,7 @@ class Stage1MigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-            _run_alembic(sync_url, "upgrade", "head")
+            _run_alembic(sync_url, "upgrade", stage1_revision)
             restored = await schema_snapshot()
             self.assertEqual(restored, first)
         finally:
