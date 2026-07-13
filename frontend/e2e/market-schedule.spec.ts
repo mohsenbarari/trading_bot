@@ -135,7 +135,7 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete
+from sqlalchemy import select
 
 from core.db import AsyncSessionLocal
 from core.events import setup_all_events
@@ -165,7 +165,9 @@ async def main():
     await save_trading_settings_async(settings_payload)
 
     async with AsyncSessionLocal() as db:
-        await db.execute(delete(MarketScheduleOverride))
+        overrides = (await db.execute(select(MarketScheduleOverride))).scalars().all()
+        for override in overrides:
+            await db.delete(override)
 
         state = await db.get(MarketRuntimeState, 1)
         if state is None:

@@ -25,6 +25,9 @@ class StagingRoleTradingE2EGateTests(unittest.TestCase):
             configure_fixture.index("setup_all_events()"),
             configure_fixture.index("async def main():"),
         )
+        self.assertNotIn("db.execute(delete(MarketScheduleOverride))", configure_fixture)
+        self.assertIn("select(MarketScheduleOverride)", configure_fixture)
+        self.assertIn("await db.delete(override)", configure_fixture)
 
 
 if __name__ == "__main__":
