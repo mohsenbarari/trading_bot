@@ -37,6 +37,22 @@ interface TradeLotSuggestionState {
   sourceSignature?: string | null;
 }
 
+type TradeIntentStatus = 'in_flight' | 'uncertain';
+
+interface TradeIntentState {
+  version: 1;
+  offerId: number;
+  quantity: number;
+  idempotencyKey: string;
+  status: TradeIntentStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const TRADE_INTENT_STORAGE_PREFIX = 'market_trade_intents_v1';
+const AMBIGUOUS_TRADE_MESSAGE = 'ارتباط با سرور قطع شد. اگر معامله ثبت شده باشد، تکرار همین درخواست معامله دوم نمی‌سازد.';
+const CONFLICTING_TRADE_INTENT_MESSAGE = 'نتیجه درخواست قبلی این لفظ هنوز مشخص نیست. ابتدا همان درخواست را دوباره ارسال کنید.';
+
 // Define Props
 const props = defineProps<{
   offers: any[];
@@ -60,7 +76,10 @@ const tradingAmount = ref<number | null>(null);
 const tradeError = ref('');
 const tradeSuggestion = ref<TradeLotSuggestionState | null>(null);
 const cancelingOfferId = ref<number | null>(null);
-const tradeIdempotencyKeys = new Map<string, string>();
+const tradeIntents = new Map<string, TradeIntentState>();
+let activeTradeIntentStorageKey: string | null = null;
+let componentActive = true;
+let tradeErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Confirmation state (double-tap like Telegram)
 const pendingConfirm = ref<string | null>(null); // "offerId:amount"
@@ -76,12 +95,15 @@ function tick() {
 }
 
 onMounted(() => {
+  componentActive = true;
   animationFrameId = requestAnimationFrame(tick)
 })
 
 onUnmounted(() => {
+  componentActive = false
   if (animationFrameId) cancelAnimationFrame(animationFrameId)
   if (confirmTimeout) clearTimeout(confirmTimeout)
+  if (tradeErrorTimeout) clearTimeout(tradeErrorTimeout)
 })
 
 // --- Timer percent ---
@@ -228,36 +250,137 @@ function tradeKeyFor(offerId: number, quantity: number): string {
   return `${offerId}:${quantity}`;
 }
 
-function getTradeIdempotencyKey(offerId: number, quantity: number): string {
-  const key = tradeKeyFor(offerId, quantity);
-  const existing = tradeIdempotencyKeys.get(key);
-  if (existing) return existing;
-  const next = createMutationIdempotencyKey('trade');
-  tradeIdempotencyKeys.set(key, next);
-  return next;
+function currentTradeIntentStorageKey(): string | null {
+  const userId = Number(props.currentUserId);
+  if (!Number.isInteger(userId) || userId <= 0) return null;
+  return `${TRADE_INTENT_STORAGE_PREFIX}:user:${userId}`;
 }
 
-function clearTradeIdempotencyKey(offerId: number, quantity: number) {
-  tradeIdempotencyKeys.delete(tradeKeyFor(offerId, quantity));
+function isStoredTradeIntent(value: unknown): value is TradeIntentState {
+  if (!value || typeof value !== 'object') return false;
+  const intent = value as Partial<TradeIntentState>;
+  return intent.version === 1
+    && Number.isInteger(intent.offerId)
+    && Number(intent.offerId) > 0
+    && Number.isInteger(intent.quantity)
+    && Number(intent.quantity) > 0
+    && typeof intent.idempotencyKey === 'string'
+    && intent.idempotencyKey.startsWith('trade:')
+    && intent.idempotencyKey.length <= 64
+    && (intent.status === 'in_flight' || intent.status === 'uncertain')
+    && Number.isFinite(intent.createdAt)
+    && Number.isFinite(intent.updatedAt);
 }
 
-function pruneTradeIdempotencyKeys() {
-  const activeOfferIds = new Set((Array.isArray(props.offers) ? props.offers : []).map((offer: any) => Number(offer.id)));
-  for (const key of tradeIdempotencyKeys.keys()) {
-    const offerId = Number(key.split(':')[0]);
-    if (!activeOfferIds.has(offerId)) {
-      tradeIdempotencyKeys.delete(key);
+function persistTradeIntents() {
+  if (!activeTradeIntentStorageKey || typeof window === 'undefined') return;
+  try {
+    if (tradeIntents.size === 0) {
+      window.sessionStorage.removeItem(activeTradeIntentStorageKey);
+      return;
+    }
+    window.sessionStorage.setItem(activeTradeIntentStorageKey, JSON.stringify([...tradeIntents.values()]));
+  } catch {
+    // The in-memory intent still protects retries while this component is mounted.
+  }
+}
+
+function restoreTradeIntents() {
+  tradeIntents.clear();
+  activeTradeIntentStorageKey = currentTradeIntentStorageKey();
+  if (!activeTradeIntentStorageKey || typeof window === 'undefined') return;
+
+  try {
+    const raw = window.sessionStorage.getItem(activeTradeIntentStorageKey);
+    if (!raw) return;
+    const stored = JSON.parse(raw);
+    if (!Array.isArray(stored) || stored.some((item) => !isStoredTradeIntent(item))) {
+      throw new Error('Invalid stored trade intent');
+    }
+    const restoredAt = Date.now();
+    for (const item of stored) {
+      const intent: TradeIntentState = {
+        ...item,
+        status: 'uncertain',
+        updatedAt: restoredAt,
+      };
+      tradeIntents.set(tradeKeyFor(intent.offerId, intent.quantity), intent);
+    }
+    persistTradeIntents();
+  } catch {
+    tradeIntents.clear();
+    try {
+      window.sessionStorage.removeItem(activeTradeIntentStorageKey);
+    } catch {
+      // Ignore unavailable browser storage.
     }
   }
 }
 
+function getTradeIntent(offerId: number, quantity: number): TradeIntentState {
+  const key = tradeKeyFor(offerId, quantity);
+  const existing = tradeIntents.get(key);
+  if (existing) return existing;
+
+  const createdAt = Date.now();
+  const next: TradeIntentState = {
+    version: 1,
+    offerId,
+    quantity,
+    idempotencyKey: createMutationIdempotencyKey('trade'),
+    status: 'uncertain',
+    createdAt,
+    updatedAt: createdAt,
+  };
+  tradeIntents.set(key, next);
+  persistTradeIntents();
+  return next;
+}
+
+function setTradeIntentStatus(intent: TradeIntentState, status: TradeIntentStatus) {
+  intent.status = status;
+  intent.updatedAt = Date.now();
+  tradeIntents.set(tradeKeyFor(intent.offerId, intent.quantity), intent);
+  persistTradeIntents();
+}
+
+function clearTradeIntent(intent: TradeIntentState) {
+  tradeIntents.delete(tradeKeyFor(intent.offerId, intent.quantity));
+  persistTradeIntents();
+}
+
+function hasConflictingTradeIntent(offerId: number, quantity: number): boolean {
+  return [...tradeIntents.values()].some((intent) => (
+    intent.offerId === offerId && intent.quantity !== quantity
+  ));
+}
+
+function isAmbiguousTradeResponse(response: Response): boolean {
+  const status = Number(response?.status);
+  return Number.isFinite(status) && (status >= 500 || status === 408 || status === 425 || status === 429);
+}
+
+function showTradeError(message: string) {
+  if (!componentActive) return;
+  tradeError.value = message;
+  if (tradeErrorTimeout) clearTimeout(tradeErrorTimeout);
+  tradeErrorTimeout = setTimeout(() => {
+    if (componentActive) tradeError.value = '';
+  }, 5000);
+}
+
 function isRetryableMutationError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || '');
+  const errorName = error && typeof error === 'object' && 'name' in error
+    ? String((error as { name?: unknown }).name || '')
+    : '';
   const normalized = message.toLowerCase();
   return message === 'NetworkError'
+    || errorName === 'AbortError'
     || normalized.includes('network')
     || normalized.includes('failed to fetch')
     || normalized.includes('load failed')
+    || normalized.includes('timeout')
     || normalized.includes('سرور در دسترس نیست');
 }
 
@@ -372,8 +495,10 @@ function syncTradeSuggestionFromOffers() {
 
 watch(() => props.offers, () => {
   syncTradeSuggestionFromOffers();
-  pruneTradeIdempotencyKeys();
 }, { deep: true });
+watch(() => props.currentUserId, () => {
+  restoreTradeIntents();
+}, { immediate: true });
 watch(now, () => {
   if (tradeSuggestion.value?.expiresAtTs && tradeSuggestion.value.expiresAtTs <= now.value) {
     closeTradeSuggestion();
@@ -382,16 +507,27 @@ watch(now, () => {
 
 async function executeTrade(offerId: number, quantity: number) {
   if (tradingOfferId.value !== null) return;
+  if (hasConflictingTradeIntent(offerId, quantity)) {
+    showTradeError(CONFLICTING_TRADE_INTENT_MESSAGE);
+    return;
+  }
+
+  const intent = getTradeIntent(offerId, quantity);
+  const executionStorageKey = activeTradeIntentStorageKey;
   tradingOfferId.value = offerId;
   tradingAmount.value = quantity;
   tradeError.value = '';
-  const idempotencyKey = getTradeIdempotencyKey(offerId, quantity);
+  setTradeIntentStatus(intent, 'in_flight');
   
   try {
     const response = await apiFetch('/api/trades/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ offer_id: offerId, quantity, idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        offer_id: intent.offerId,
+        quantity: intent.quantity,
+        idempotency_key: intent.idempotencyKey,
+      }),
       retryNetwork: false,
     });
     
@@ -402,37 +538,43 @@ async function executeTrade(offerId: number, quantity: number) {
       data = null;
     }
 
+    if (!componentActive || activeTradeIntentStorageKey !== executionStorageKey) return;
+
     if (response.ok) {
       tradeSuggestion.value = null;
-      clearTradeIdempotencyKey(offerId, quantity);
-      emit('trade-completed');
+      clearTradeIntent(intent);
+      if (componentActive) emit('trade-completed');
     } else {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
         tradeSuggestion.value = createTradeSuggestionState(data);
-        clearTradeIdempotencyKey(offerId, quantity);
+        clearTradeIntent(intent);
         return;
       }
-      tradeError.value = await readMarketMutationErrorMessage(response as Response, data, 'خطا در انجام معامله');
-      clearTradeIdempotencyKey(offerId, quantity);
-      setTimeout(() => tradeError.value = '', 5000);
+      if (isAmbiguousTradeResponse(response as Response)) {
+        setTradeIntentStatus(intent, 'uncertain');
+        showTradeError(AMBIGUOUS_TRADE_MESSAGE);
+        return;
+      }
+      clearTradeIntent(intent);
+      showTradeError(await readMarketMutationErrorMessage(response as Response, data, 'خطا در انجام معامله'));
     }
   } catch (e: any) {
-    tradeError.value = isRetryableMutationError(e)
-      ? 'ارتباط با سرور قطع شد. اگر معامله ثبت شده باشد، تکرار همین درخواست معامله دوم نمی‌سازد.'
+    if (!componentActive || activeTradeIntentStorageKey !== executionStorageKey) return;
+    setTradeIntentStatus(intent, 'uncertain');
+    showTradeError(isRetryableMutationError(e)
+      ? AMBIGUOUS_TRADE_MESSAGE
       : getUserFacingErrorMessage(e, {
-          surface: 'market',
-          scope: 'action',
-          operation: 'submit',
-          userInitiated: true,
-          fallbackMessage: 'خطا در ارتباط با سرور',
-        });
-    if (!isRetryableMutationError(e)) {
-      clearTradeIdempotencyKey(offerId, quantity);
-    }
-    setTimeout(() => tradeError.value = '', 5000);
+        surface: 'market',
+        scope: 'action',
+        operation: 'submit',
+        userInitiated: true,
+        fallbackMessage: AMBIGUOUS_TRADE_MESSAGE,
+      }));
   } finally {
-    tradingOfferId.value = null;
-    tradingAmount.value = null;
+    if (componentActive) {
+      tradingOfferId.value = null;
+      tradingAmount.value = null;
+    }
   }
 }
 
