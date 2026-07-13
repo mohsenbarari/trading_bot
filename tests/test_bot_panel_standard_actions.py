@@ -87,7 +87,106 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📄 معاملات اخیر", texts)
         self.assertIn("🚫 کاربران مسدود شده", texts)
         self.assertIn("👥 مشتریان", texts)
+        self.assertIn("☎️ پشتیبانی", texts)
         set_anchor.assert_called_once_with(10, 77)
+
+    async def test_support_button_rechecks_ordinary_user_policy(self):
+        ordinary_message = SimpleNamespace(answer=AsyncMock())
+        ordinary_user = SimpleNamespace(id=5, role=UserRole.STANDARD)
+        with patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.panel._can_view_support", new=AsyncMock(return_value=True)
+        ):
+            await panel.show_support_contact(ordinary_message, ordinary_user)
+
+        ordinary_message.answer.assert_awaited_once_with(panel.USER_PANEL_SUPPORT_MESSAGE)
+
+        for denied_user in (
+            SimpleNamespace(id=6, role=UserRole.SUPER_ADMIN),
+            SimpleNamespace(id=7, role=UserRole.STANDARD),
+        ):
+            denied_message = SimpleNamespace(answer=AsyncMock())
+            with patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+                "bot.handlers.panel._can_view_support", new=AsyncMock(return_value=False)
+            ):
+                await panel.show_support_contact(denied_message, denied_user)
+            denied_message.answer.assert_not_awaited()
+
+    async def test_support_policy_excludes_managers_customers_and_accountants(self):
+        session = SimpleNamespace()
+
+        manager = SimpleNamespace(id=1, role=UserRole.MIDDLE_MANAGER)
+        self.assertFalse(await panel._can_view_support(session, manager))
+
+        customer = SimpleNamespace(id=2, role=UserRole.STANDARD)
+        with patch(
+            "core.services.customer_relation_service.is_user_customer",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.services.accountant_relation_service.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ) as accountant_check:
+            self.assertFalse(await panel._can_view_support(session, customer))
+        accountant_check.assert_not_awaited()
+
+        accountant = SimpleNamespace(id=3, role=UserRole.STANDARD)
+        with patch(
+            "core.services.customer_relation_service.is_user_customer",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "core.services.accountant_relation_service.is_user_accountant",
+            new=AsyncMock(return_value=True),
+        ):
+            self.assertFalse(await panel._can_view_support(session, accountant))
+
+        ordinary_user = SimpleNamespace(id=4, role=UserRole.STANDARD)
+        with patch(
+            "core.services.customer_relation_service.is_user_customer",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "core.services.accountant_relation_service.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ):
+            self.assertTrue(await panel._can_view_support(session, ordinary_user))
+
+    async def test_customer_profile_menu_does_not_show_support(self):
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=10),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=78)),
+        )
+        customer = SimpleNamespace(
+            id=8,
+            role=UserRole.STANDARD,
+            account_status=None,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+            account_name="customer",
+            full_name="Customer",
+            telegram_id=123,
+        )
+
+        with patch("bot.handlers.panel.delete_previous_anchor", new=AsyncMock()), patch(
+            "core.services.customer_relation_service.is_user_customer",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.services.accountant_relation_service.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "bot.handlers.panel.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.panel.attach_customer_management_names",
+            new=AsyncMock(),
+        ), patch("bot.handlers.panel.set_anchor"):
+            await panel.show_my_profile_and_change_keyboard(
+                message,
+                state=SimpleNamespace(),
+                user=customer,
+            )
+
+        markup = message.answer.await_args.kwargs["reply_markup"]
+        texts = [button.text for row in markup.keyboard for button in row]
+        self.assertNotIn("☎️ پشتیبانی", texts)
 
     async def test_recent_trades_pdf_uses_shared_export_service_and_cleans_temp_file(self):
         message = SimpleNamespace(answer=AsyncMock(), answer_document=AsyncMock())

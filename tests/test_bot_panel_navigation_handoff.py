@@ -33,6 +33,14 @@ class BotPanelNavigationHandoffTests(unittest.IsolatedAsyncioTestCase):
         state.clear.assert_awaited_once_with()
         colleagues_handler.assert_awaited_once_with(message, state, user)
 
+        state = SimpleNamespace(clear=AsyncMock())
+        with patch("bot.handlers.panel.show_support_contact", new=AsyncMock()) as support_handler:
+            message = SimpleNamespace(text="☎️ پشتیبانی")
+            result = await handoff_navigation_button(message, state, user)
+        self.assertTrue(result)
+        state.clear.assert_awaited_once_with()
+        support_handler.assert_awaited_once_with(message, user)
+
     async def test_handoff_navigation_button_ignores_non_navigation_text(self):
         user = SimpleNamespace(role="super_admin")
         state = SimpleNamespace(clear=AsyncMock())

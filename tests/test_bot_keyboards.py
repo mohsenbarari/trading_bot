@@ -33,6 +33,26 @@ class BotKeyboardsTests(unittest.TestCase):
             ['📄 معاملات اخیر', '🚫 کاربران مسدود شده', '👥 مشتریان', '🔙 بازگشت'],
         )
 
+        standard_panel_with_support = keyboards.get_user_panel_keyboard(
+            UserRole.STANDARD,
+            standard_actions=True,
+            show_support=True,
+        )
+        standard_panel_with_support_texts = [
+            button.text for row in standard_panel_with_support.keyboard for button in row
+        ]
+        self.assertIn('☎️ پشتیبانی', standard_panel_with_support_texts)
+
+        manager_panel_with_support = keyboards.get_user_panel_keyboard(
+            UserRole.MIDDLE_MANAGER,
+            standard_actions=True,
+            show_support=True,
+        )
+        manager_panel_with_support_texts = [
+            button.text for row in manager_panel_with_support.keyboard for button in row
+        ]
+        self.assertNotIn('☎️ پشتیبانی', manager_panel_with_support_texts)
+
         user_panel = keyboards.get_user_panel_keyboard(UserRole.MIDDLE_MANAGER)
         user_panel_texts = [button.text for row in user_panel.keyboard for button in row]
         self.assertIn('⚙️ تنظیمات کاربری', user_panel_texts)

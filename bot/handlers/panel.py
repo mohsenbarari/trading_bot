@@ -73,6 +73,11 @@ USER_PANEL_RECENT_TRADES_TEXT = "📄 معاملات اخیر"
 USER_PANEL_BLOCKED_USERS_TEXT = "🚫 کاربران مسدود شده"
 USER_PANEL_CUSTOMERS_TEXT = "👥 مشتریان"
 USER_PANEL_COLLEAGUES_TEXT = "👥 لیست همکاران"
+USER_PANEL_SUPPORT_TEXT = "☎️ پشتیبانی"
+USER_PANEL_SUPPORT_MESSAGE = (
+    "جهت ارتباط با پشتیبانی به آیدی تلگرامی زیر پیام دهید:\n"
+    "@coin_trade_owner"
+)
 USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT = "مشتریان سطح2 فقط به وب اپ دسترسی دارند! بنابراین برای دعوت این مشتریان به وب اپ مراجعه فرمایید."
 CUSTOMER_INVITE_ALLOWED_ROLES = (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN)
 
@@ -134,6 +139,7 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
         USER_PANEL_RECENT_TRADES_TEXT: lambda: show_recent_trades_pdf(message, state, user),
         USER_PANEL_BLOCKED_USERS_TEXT: lambda: show_user_panel_blocked_users(message, state, user),
         USER_PANEL_CUSTOMERS_TEXT: lambda: show_user_panel_customers(message, state, user),
+        USER_PANEL_SUPPORT_TEXT: lambda: show_support_contact(message, user),
         COMMODITY_CATALOG_TEXT: lambda: show_commodity_catalog(message, user),
         "➕ ارسال لینک دعوت": lambda: start_invitation_creation(message, state, user),
         ADMIN_BROADCAST_BUTTON_TEXT: lambda: start_telegram_admin_broadcast(message, state, user),
@@ -170,10 +176,15 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         can_use_customer_panel = await _can_use_customer_panel(session, user)
 
     if can_use_customer_panel:
+        show_support = user.role == UserRole.STANDARD
         anchor_msg = await message.answer(
             "👤 **پنل کاربر**\n\nگزینه مورد نظر را انتخاب کنید:",
             parse_mode="Markdown",
-            reply_markup=get_user_panel_keyboard(user.role, standard_actions=True),
+            reply_markup=get_user_panel_keyboard(
+                user.role,
+                standard_actions=True,
+                show_support=show_support,
+            ),
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
@@ -281,6 +292,22 @@ async def _can_view_colleagues_list(session, user: User) -> bool:
     if await is_user_accountant(session, user.id):
         return False
     return True
+
+
+async def _can_view_support(session, user: User) -> bool:
+    return await _can_view_colleagues_list(session, user)
+
+
+@router.message(F.text == USER_PANEL_SUPPORT_TEXT)
+async def show_support_contact(message: types.Message, user: Optional[User]):
+    if not user:
+        return
+
+    async with AsyncSessionLocal() as session:
+        if not await _can_view_support(session, user):
+            return
+
+    await message.answer(USER_PANEL_SUPPORT_MESSAGE)
 
 
 async def _load_colleagues_for_user(session, user_id: int) -> list[User]:

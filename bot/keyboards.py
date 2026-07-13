@@ -34,12 +34,19 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     keyboard_layout.append([KeyboardButton(text="📦 لیست کالاها")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
-def get_user_panel_keyboard(user_role: UserRole = None, *, standard_actions: bool = False) -> ReplyKeyboardMarkup:
+def get_user_panel_keyboard(
+    user_role: UserRole = None,
+    *,
+    standard_actions: bool = False,
+    show_support: bool = False,
+) -> ReplyKeyboardMarkup:
     keyboard_layout = []
     if user_role in (UserRole.STANDARD, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN) and standard_actions:
         keyboard_layout.append([KeyboardButton(text="📄 معاملات اخیر")])
         keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
         keyboard_layout.append([KeyboardButton(text="👥 مشتریان")])
+        if show_support and user_role == UserRole.STANDARD:
+            keyboard_layout.append([KeyboardButton(text="☎️ پشتیبانی")])
         keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
         return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
