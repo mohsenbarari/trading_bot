@@ -169,10 +169,16 @@ const mutualTrades = ref<MutualTradePreview[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
+const isHistoryLoadingMore = ref(false);
 const historyError = ref('');
+const historyPaginationError = ref('');
+const historyNextCursor = ref<string | null>(null);
+const historyHasMore = ref(false);
 const historyFromDate = ref('');
 const historyToDate = ref('');
 const historyCommodityQuery = ref('');
+const historyTradeType = ref('');
+const historySettlementType = ref('');
 const historyActivePresetMonths = ref<number | null>(null);
 const historyLoadedQueryKey = ref('');
 const historyExportingFormat = ref<'excel' | 'pdf' | null>(null);
@@ -317,6 +323,16 @@ const historyPresetChipOptions = computed(() => historyPresetOptions.map((preset
   key: String(preset.months),
   label: preset.label,
 })));
+const historyTradeTypeOptions = [
+  { value: '', label: 'همه جهت‌ها' },
+  { value: 'buy', label: 'خرید' },
+  { value: 'sell', label: 'فروش' },
+];
+const historySettlementTypeOptions = [
+  { value: '', label: 'همه تسویه‌ها' },
+  { value: 'cash', label: 'نقد حاضر' },
+  { value: 'tomorrow', label: 'فردایی' },
+];
 const historyPresetChipValue = computed(() => historyActivePresetMonths.value ? String(historyActivePresetMonths.value) : '');
 function getNormalizedHistoryCommodityQuery() {
   return typeof historyCommodityQuery.value === 'string' ? historyCommodityQuery.value.trim() : '';
@@ -327,7 +343,9 @@ const hasActiveHistoryFilters = computed(() => {
     historyFromDate.value
     || historyToDate.value
     || getNormalizedHistoryCommodityQuery()
-    || historyCounterpartyUserId.value,
+    || historyCounterpartyUserId.value
+    || historyTradeType.value
+    || historySettlementType.value,
   );
 });
 const historyCommoditySuggestions = computed(() => {
@@ -390,6 +408,12 @@ const historyFilterSummary = computed(() => {
   const commodityLabel = getNormalizedHistoryCommodityQuery();
   if (commodityLabel) {
     parts.push(`کالا: ${commodityLabel}`);
+  }
+  if (historyTradeType.value) {
+    parts.push(`جهت: ${historyTradeType.value === 'buy' ? 'خرید' : 'فروش'}`);
+  }
+  if (historySettlementType.value) {
+    parts.push(`تسویه: ${historySettlementType.value === 'cash' ? 'نقد حاضر' : 'فردایی'}`);
   }
   if (historyCounterpartyLabel.value) {
     parts.push(`طرف دیگر: ${historyCounterpartyLabel.value}`);
@@ -638,6 +662,8 @@ function buildHistoryQueryKey() {
     from_date: historyFromDate.value || null,
     to_date: historyToDate.value || null,
     commodity_query: getNormalizedHistoryCommodityQuery() || null,
+    trade_type: historyTradeType.value || null,
+    settlement_type: historySettlementType.value || null,
     counterparty_user_id: historyCounterpartyUserId.value || null,
     self: isOwnProfile.value,
     target_id: profileData.value?.id ?? null,
@@ -659,6 +685,12 @@ function buildHistoryQueryParams(format?: 'excel' | 'pdf') {
   if (commodityQuery) {
     params.set('commodity_query', commodityQuery);
   }
+  if (historyTradeType.value) {
+    params.set('trade_type', historyTradeType.value);
+  }
+  if (historySettlementType.value) {
+    params.set('settlement_type', historySettlementType.value);
+  }
   return params;
 }
 
@@ -672,6 +704,10 @@ function buildTradeHistoryEndpoint(isExport = false) {
     ? '/api/trades/my'
     : `/api/trades/with/${profileData.value?.id}`;
   return isExport ? `${basePath}/export` : basePath;
+}
+
+function buildTradeHistoryPageEndpoint() {
+  return `${buildTradeHistoryEndpoint()}/page`;
 }
 
 function validateHistoryFilters() {
@@ -799,9 +835,14 @@ async function resetHistoryFilters() {
   historyFromDate.value = '';
   historyToDate.value = '';
   historyCommodityQuery.value = '';
+  historyTradeType.value = '';
+  historySettlementType.value = '';
   historyCounterpartyUserId.value = null;
   historyLoadedQueryKey.value = '';
   historyError.value = '';
+  historyPaginationError.value = '';
+  historyNextCursor.value = null;
+  historyHasMore.value = false;
   if (hasLoadedHistoryOnce.value) {
     await loadMutualTrades(true);
   }
@@ -950,40 +991,107 @@ async function handleAvatarSelected(event: Event) {
   }
 }
 
-async function loadMutualTrades(force = false) {
-    if (!profileData.value || isHistoryLoading.value) return;
+function tradeHistoryIdentity(trade: MutualTradePreview) {
+  const tradeNumber = Number(trade?.trade_number);
+  return Number.isInteger(tradeNumber) && tradeNumber > 0
+    ? `number:${tradeNumber}`
+    : `id:${String(trade?.id ?? '')}`;
+}
+
+function mergeTradeHistoryRows(current: MutualTradePreview[], incoming: MutualTradePreview[]) {
+  const seen = new Set<string>();
+  return [...current, ...incoming].filter((trade) => {
+    const identity = tradeHistoryIdentity(trade);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+async function loadMutualTrades(force = false, append = false) {
+  if (!profileData.value || isHistoryLoading.value || isHistoryLoadingMore.value) return;
 
   const validationError = validateHistoryFilters();
   if (validationError) {
     historyError.value = validationError;
     mutualTrades.value = [];
+    historyNextCursor.value = null;
+    historyHasMore.value = false;
     return;
   }
 
   const queryKey = buildHistoryQueryKey();
-  if (!force && historyLoadedQueryKey.value === queryKey) {
+  if (append && historyLoadedQueryKey.value !== queryKey) {
+    await loadMutualTrades(true, false);
+    return;
+  }
+  if (append && (!historyHasMore.value || !historyNextCursor.value)) return;
+  if (!append && !force && historyLoadedQueryKey.value === queryKey) {
     return;
   }
 
-  isHistoryLoading.value = true;
-  historyError.value = '';
+  if (append) {
+    isHistoryLoadingMore.value = true;
+    historyPaginationError.value = '';
+  } else {
+    isHistoryLoading.value = true;
+    historyError.value = '';
+    historyPaginationError.value = '';
+    historyNextCursor.value = null;
+    historyHasMore.value = false;
+    mutualTrades.value = [];
+  }
   try {
     const params = buildHistoryQueryParams();
-    const endpoint = `${buildTradeHistoryEndpoint()}${params.toString() ? `?${params.toString()}` : ''}`;
-    const response = await apiFetch(endpoint);
+    params.set('limit', '50');
+    if (append && historyNextCursor.value) {
+      params.set('cursor', historyNextCursor.value);
+    }
+    const endpoint = `${buildTradeHistoryPageEndpoint()}?${params.toString()}`;
+    const response = await apiFetch(endpoint, { retryNetwork: false });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'خطا در دریافت تاریخچه معاملات'));
     }
-    mutualTrades.value = Array.isArray(payload) ? payload as MutualTradePreview[] : [];
+    const items = Array.isArray(payload)
+      ? payload as MutualTradePreview[]
+      : Array.isArray(payload?.items)
+        ? payload.items as MutualTradePreview[]
+        : null;
+    if (items === null) {
+      throw new Error('پاسخ تاریخچه معاملات معتبر نیست.');
+    }
+    mutualTrades.value = append
+      ? mergeTradeHistoryRows(mutualTrades.value, items)
+      : mergeTradeHistoryRows([], items);
+    historyNextCursor.value = !Array.isArray(payload) && typeof payload?.next_cursor === 'string'
+      ? payload.next_cursor
+      : null;
+    historyHasMore.value = !Array.isArray(payload) && payload?.has_more === true;
     historyLoadedQueryKey.value = queryKey;
   } catch (e: any) {
     console.error("Failed to load history", e);
-    historyError.value = e?.message || 'خطا در دریافت تاریخچه معاملات';
-    mutualTrades.value = [];
+    if (append) {
+      historyPaginationError.value = e?.message === 'NetworkError'
+        ? 'خطا در دریافت ادامه تاریخچه معاملات'
+        : e?.message || 'خطا در دریافت ادامه تاریخچه معاملات';
+    } else {
+      historyError.value = e?.message === 'NetworkError'
+        ? 'خطا در دریافت تاریخچه معاملات'
+        : e?.message || 'خطا در دریافت تاریخچه معاملات';
+      mutualTrades.value = [];
+    }
   } finally {
-    isHistoryLoading.value = false;
+    if (append) {
+      isHistoryLoadingMore.value = false;
+    } else {
+      isHistoryLoading.value = false;
+    }
   }
+}
+
+async function loadMoreMutualTrades() {
+  await loadMutualTrades(false, true);
 }
 
 async function loadProjectUsersDirectory(force = false) {
@@ -1832,6 +1940,18 @@ function handleHistoryPresetChipChange(value: string) {
                     @focus="loadHistoryCommodityOptions"
                   />
                 </AppFormField>
+                <AppFormField label="جهت معامله" class="history-filter-field">
+                  <AppSelect
+                    v-model="historyTradeType"
+                    :options="historyTradeTypeOptions"
+                  />
+                </AppFormField>
+                <AppFormField label="نوع تسویه" class="history-filter-field">
+                  <AppSelect
+                    v-model="historySettlementType"
+                    :options="historySettlementTypeOptions"
+                  />
+                </AppFormField>
                 <AppFormField v-if="isOwnProfile && !shouldHideCustomerTradeRelationshipDetails" label="طرف دیگر معامله" class="history-filter-field history-filter-field-wide">
                   <AppSelect
                     :model-value="historyCounterpartySelectValue"
@@ -1874,7 +1994,7 @@ function handleHistoryPresetChipChange(value: string) {
               <p v-if="historyError" class="error-text history-error-text">{{ historyError }}</p>
             </div>
 
-            <LoadingSkeleton v-if="isHistoryLoading" :count="3" :height="60" />
+            <LoadingSkeleton v-if="isHistoryLoading && mutualTrades.length === 0" :count="3" :height="60" />
             <AppEmptyState
               v-else-if="!hasLoadedHistoryOnce"
               title="تاریخچه هنوز بارگذاری نشده است"
@@ -1934,6 +2054,21 @@ function handleHistoryPresetChipChange(value: string) {
                         <span v-if="getTradeCustomerContextTier(trade)">{{ getCustomerTierLabel(getTradeCustomerContextTier(trade)) }}</span>
                       </span>
                     </div>
+                </div>
+                <div v-if="historyPaginationError" class="history-pagination-error" role="alert">
+                  <span>{{ historyPaginationError }}</span>
+                  <AppButton type="button" size="sm" variant="secondary" @click.stop="loadMoreMutualTrades">
+                    تلاش دوباره
+                  </AppButton>
+                </div>
+                <div v-else-if="historyHasMore || isHistoryLoadingMore" class="history-load-more-row">
+                  <AppButton
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    :disabled="isHistoryLoadingMore"
+                    @click.stop="loadMoreMutualTrades"
+                  >{{ isHistoryLoadingMore ? 'در حال دریافت...' : 'نمایش معاملات بیشتر' }}</AppButton>
                 </div>
             </div>
           </div>
@@ -2794,6 +2929,26 @@ function handleHistoryPresetChipChange(value: string) {
 
 .history-error-text {
   margin: 0;
+}
+
+.history-load-more-row,
+.history-pagination-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.history-pagination-error {
+  justify-content: space-between;
+  padding: 10px 12px;
+  color: var(--ds-danger-700);
+  font-size: var(--ds-font-helper);
+  font-weight: 700;
+  border: 1px solid var(--ds-danger-200);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-danger-50);
 }
 
 .public-accountant-list,

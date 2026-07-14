@@ -107,3 +107,17 @@ Index(
     Trade.created_at.desc(),
     postgresql_where=(Trade.status == TradeStatus.COMPLETED) & Trade.offer_id.isnot(None),
 )
+
+Index(
+    'ix_trades_offer_user_history_cursor',
+    Trade.offer_user_id,
+    Trade.created_at.desc(),
+    Trade.id.desc(),
+)
+
+Index(
+    'ix_trades_responder_history_cursor',
+    Trade.responder_user_id,
+    Trade.created_at.desc(),
+    Trade.id.desc(),
+)

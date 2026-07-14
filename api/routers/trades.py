@@ -3,9 +3,12 @@
 API Router for Trade Management - MiniApp Integration
 """
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import hashlib
+import json
 import time as time_module
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -226,6 +229,13 @@ class TradeResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class TradeHistoryPageResponse(BaseModel):
+    items: List[TradeResponse]
+    next_cursor: Optional[str] = None
+    has_more: bool
+    page_size: int
 
 
 # --- Helper Functions ---
@@ -716,11 +726,16 @@ def _apply_trade_history_filters(
     to_date: date | None,
     commodity_id: int | None,
     commodity_query: str | None,
+    settlement_type: str | None = None,
+    perspective_trade_type: str | None = None,
+    perspective_user_id: int | None = None,
 ):
     from_date = _resolve_history_filter_arg(from_date)
     to_date = _resolve_history_filter_arg(to_date)
     commodity_id = _resolve_history_filter_arg(commodity_id)
     commodity_query = _resolve_history_filter_arg(commodity_query)
+    settlement_type = _resolve_history_filter_arg(settlement_type)
+    perspective_trade_type = _resolve_history_filter_arg(perspective_trade_type)
 
     _validate_trade_history_date_range(from_date, to_date)
 
@@ -730,6 +745,30 @@ def _apply_trade_history_filters(
         query = query.where(Trade.created_at < datetime.combine(to_date + timedelta(days=1), time.min))
     if commodity_id is not None:
         query = query.where(Trade.commodity_id == commodity_id)
+    if settlement_type is not None:
+        query = query.where(
+            Trade.settlement_type == (
+                SettlementType.CASH if settlement_type == "cash" else SettlementType.TOMORROW
+            )
+        )
+
+    if perspective_trade_type is not None:
+        if perspective_user_id is None:
+            raise ValueError("perspective_user_id is required for trade type filtering")
+        responder_type = TradeType.BUY if perspective_trade_type == "buy" else TradeType.SELL
+        offer_owner_type = TradeType.SELL if responder_type == TradeType.BUY else TradeType.BUY
+        query = query.where(
+            or_(
+                and_(
+                    Trade.responder_user_id == perspective_user_id,
+                    Trade.trade_type == responder_type,
+                ),
+                and_(
+                    Trade.offer_user_id == perspective_user_id,
+                    Trade.trade_type == offer_owner_type,
+                ),
+            )
+        )
 
     normalized_commodity_query = _normalize_history_commodity_query(commodity_query)
     if normalized_commodity_query:
@@ -762,6 +801,8 @@ def _build_my_trades_query(
     to_date: date | None,
     commodity_id: int | None,
     commodity_query: str | None,
+    settlement_type: str | None = None,
+    perspective_trade_type: str | None = None,
 ):
     query = _build_trade_history_select().where(
         or_(
@@ -775,6 +816,9 @@ def _build_my_trades_query(
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=perspective_trade_type,
+        perspective_user_id=owner_user_id,
     )
 
 
@@ -787,6 +831,8 @@ async def _build_trades_with_user_query(
     to_date: date | None,
     commodity_id: int | None,
     commodity_query: str | None,
+    settlement_type: str | None = None,
+    perspective_trade_type: str | None = None,
 ):
     owner_user = context.owner_user
     target_customer_relation = await _resolve_viewable_customer_history_relation(
@@ -817,14 +863,146 @@ async def _build_trades_with_user_query(
             )
         )
 
+    perspective_user_id = (
+        other_user_id
+        if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context)
+        else owner_user.id
+    )
     query = _apply_trade_history_filters(
         query,
         from_date=from_date,
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=perspective_trade_type,
+        perspective_user_id=perspective_user_id,
     )
     return query, target_customer_relation
+
+
+def _trade_history_filter_signature(
+    *,
+    scope: str,
+    viewer_owner_user_id: int,
+    target_user_id: int | None,
+    from_date: date | None,
+    to_date: date | None,
+    commodity_id: int | None,
+    commodity_query: str | None,
+    settlement_type: str | None,
+    perspective_trade_type: str | None,
+) -> dict[str, object]:
+    return {
+        "scope": scope,
+        "viewer_owner_user_id": int(viewer_owner_user_id),
+        "target_user_id": int(target_user_id or 0),
+        "from_date": from_date.isoformat() if from_date else "",
+        "to_date": to_date.isoformat() if to_date else "",
+        "commodity_id": int(commodity_id or 0),
+        "commodity_query": _normalize_history_commodity_query(commodity_query) or "",
+        "settlement_type": settlement_type or "",
+        "trade_type": perspective_trade_type or "",
+    }
+
+
+def _encode_trade_history_cursor(
+    trade: Trade | object,
+    *,
+    filter_signature: dict[str, object],
+) -> str:
+    created_at = getattr(trade, "created_at", None)
+    trade_id = getattr(trade, "id", None)
+    if not isinstance(created_at, datetime) or not isinstance(trade_id, int) or trade_id <= 0:
+        raise ValueError("trade history cursor requires created_at and id")
+    payload = {
+        "v": 1,
+        "created_at": created_at.isoformat(),
+        "id": trade_id,
+        "filters": filter_signature,
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def _decode_trade_history_cursor(
+    cursor: str,
+    *,
+    expected_filter_signature: dict[str, object],
+) -> tuple[datetime, int]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.b64decode(f"{cursor}{padding}", altchars=b"-_", validate=True)
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("v") != 1:
+            raise ValueError("unsupported cursor version")
+        trade_id = payload.get("id")
+        if not isinstance(trade_id, int) or isinstance(trade_id, bool) or trade_id <= 0:
+            raise ValueError("invalid cursor id")
+        created_at = datetime.fromisoformat(payload.get("created_at"))
+        if payload.get("filters") != expected_filter_signature:
+            raise ValueError("cursor filters do not match")
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="نشانگر صفحه تاریخچه معاملات نامعتبر است.",
+        ) from exc
+    return created_at, trade_id
+
+
+def _build_trade_history_page_query(
+    query,
+    *,
+    cursor_position: tuple[datetime, int] | None,
+    limit: int,
+):
+    if cursor_position is not None:
+        cursor_created_at, cursor_id = cursor_position
+        query = query.where(
+            or_(
+                Trade.created_at < cursor_created_at,
+                and_(Trade.created_at == cursor_created_at, Trade.id < cursor_id),
+            )
+        )
+    return query.order_by(Trade.created_at.desc(), Trade.id.desc()).limit(limit + 1)
+
+
+async def _serialize_trade_history_rows(
+    db: AsyncSession,
+    trades: list[Trade] | tuple[Trade, ...],
+    *,
+    context: EffectiveOwnerActor,
+    history_target_user_id: int,
+) -> list[TradeResponse]:
+    rows = list(trades)
+    if not rows:
+        return []
+    identity_map = await _load_trade_identity_map(db, rows)
+    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+        db,
+        [
+            raw_user_id
+            for trade in rows
+            for raw_user_id in (
+                getattr(trade, "offer_user_id", None),
+                getattr(trade, "responder_user_id", None),
+                getattr(trade, "actor_user_id", None),
+            )
+        ],
+        include_inactive_historical=True,
+    )
+    return [
+        trade_to_response(
+            trade,
+            identity_map=identity_map,
+            customer_relation_map=customer_relation_map,
+            viewer_context=context,
+            history_target_user_id=history_target_user_id,
+        )
+        for trade in rows
+    ]
 
 
 def _build_trade_history_export_subject_name(*, current_user: object, target_user: object | None) -> str:
@@ -3901,6 +4079,8 @@ async def get_my_trades(
     to_date: Optional[date] = Query(None),
     commodity_id: Optional[int] = Query(None, ge=1),
     commodity_query: Optional[str] = Query(None),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    trade_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
@@ -3914,35 +4094,85 @@ async def get_my_trades(
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
-    ).order_by(Trade.created_at.desc()).offset(skip).limit(limit)
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
+    ).order_by(Trade.created_at.desc(), Trade.id.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     trades = result.scalars().all()
 
-    identity_map = await _load_trade_identity_map(db, list(trades))
-    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+    return await _serialize_trade_history_rows(
         db,
-        [
-            raw_user_id
-            for trade in trades
-            for raw_user_id in (
-                getattr(trade, "offer_user_id", None),
-                getattr(trade, "responder_user_id", None),
-                getattr(trade, "actor_user_id", None),
-            )
-        ],
-        include_inactive_historical=True,
+        trades,
+        context=context,
+        history_target_user_id=owner_user.id,
     )
-    return [
-        trade_to_response(
-            t,
-            identity_map=identity_map,
-            customer_relation_map=customer_relation_map,
-            viewer_context=context,
-            history_target_user_id=owner_user.id,
-        )
-        for t in trades
-    ]
+
+
+@router.get("/my/page", response_model=TradeHistoryPageResponse)
+async def get_my_trades_page(
+    cursor: Optional[str] = Query(None, min_length=1, max_length=768),
+    limit: int = Query(50, ge=1, le=100),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    commodity_id: Optional[int] = Query(None, ge=1),
+    commodity_query: Optional[str] = Query(None),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    trade_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    owner_user = context.owner_user
+    filter_signature = _trade_history_filter_signature(
+        scope="my",
+        viewer_owner_user_id=owner_user.id,
+        target_user_id=None,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
+    )
+    cursor_position = (
+        _decode_trade_history_cursor(cursor, expected_filter_signature=filter_signature)
+        if cursor
+        else None
+    )
+    query = _build_my_trades_query(
+        owner_user.id,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
+    )
+    query = _build_trade_history_page_query(
+        query,
+        cursor_position=cursor_position,
+        limit=limit,
+    )
+    rows = list((await db.execute(query)).scalars().all())
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    items = await _serialize_trade_history_rows(
+        db,
+        page_rows,
+        context=context,
+        history_target_user_id=owner_user.id,
+    )
+    next_cursor = (
+        _encode_trade_history_cursor(page_rows[-1], filter_signature=filter_signature)
+        if has_more and page_rows
+        else None
+    )
+    return TradeHistoryPageResponse(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+        page_size=len(items),
+    )
 
 
 @router.get("/my/export")
@@ -3952,6 +4182,8 @@ async def export_my_trades(
     to_date: Optional[date] = Query(None),
     commodity_id: Optional[int] = Query(None, ge=1),
     commodity_query: Optional[str] = Query(None),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    trade_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
@@ -3962,6 +4194,8 @@ async def export_my_trades(
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
     ).order_by(Trade.created_at.asc(), Trade.id.asc())
     trades = (await db.execute(query)).scalars().all()
     if not trades:
@@ -4046,6 +4280,8 @@ async def get_trades_with_user(
     to_date: Optional[date] = Query(None),
     commodity_id: Optional[int] = Query(None, ge=1),
     commodity_query: Optional[str] = Query(None),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    trade_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
@@ -4066,36 +4302,97 @@ async def get_trades_with_user(
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
     )
-    query = query.order_by(Trade.created_at.desc()).offset(skip).limit(limit)
+    query = query.order_by(Trade.created_at.desc(), Trade.id.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     trades = result.scalars().all()
 
-    identity_map = await _load_trade_identity_map(db, list(trades))
-    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+    return await _serialize_trade_history_rows(
         db,
-        [
-            raw_user_id
-            for trade in trades
-            for raw_user_id in (
-                getattr(trade, "offer_user_id", None),
-                getattr(trade, "responder_user_id", None),
-                getattr(trade, "actor_user_id", None),
-            )
-        ],
-        include_inactive_historical=True,
+        trades,
+        context=context,
+        history_target_user_id=other_user_id,
     )
-    return [
-        trade_to_response(
-            t,
-            identity_map=identity_map,
-            customer_relation_map=customer_relation_map,
-            viewer_context=context,
-            history_target_user_id=other_user_id,
-        )
-        for t in trades
-    ]
+
+
+@router.get("/with/{other_user_id}/page", response_model=TradeHistoryPageResponse)
+async def get_trades_with_user_page(
+    other_user_id: int,
+    cursor: Optional[str] = Query(None, min_length=1, max_length=768),
+    limit: int = Query(50, ge=1, le=100),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    commodity_id: Optional[int] = Query(None, ge=1),
+    commodity_query: Optional[str] = Query(None),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    trade_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    owner_user = context.owner_user
+    if other_user_id == owner_user.id:
+        return TradeHistoryPageResponse(items=[], has_more=False, page_size=0)
+
+    filter_signature = _trade_history_filter_signature(
+        scope="with",
+        viewer_owner_user_id=owner_user.id,
+        target_user_id=other_user_id,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
+    )
+    cursor_position = (
+        _decode_trade_history_cursor(cursor, expected_filter_signature=filter_signature)
+        if cursor
+        else None
+    )
+    query, target_customer_relation = await _build_trades_with_user_query(
+        db,
+        other_user_id=other_user_id,
+        context=context,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
+    )
+    query = _build_trade_history_page_query(
+        query,
+        cursor_position=cursor_position,
+        limit=limit,
+    )
+    rows = list((await db.execute(query)).scalars().all())
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    perspective_user_id = (
+        other_user_id
+        if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context)
+        else owner_user.id
+    )
+    items = await _serialize_trade_history_rows(
+        db,
+        page_rows,
+        context=context,
+        history_target_user_id=perspective_user_id,
+    )
+    next_cursor = (
+        _encode_trade_history_cursor(page_rows[-1], filter_signature=filter_signature)
+        if has_more and page_rows
+        else None
+    )
+    return TradeHistoryPageResponse(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+        page_size=len(items),
+    )
 
 
 @router.get("/with/{other_user_id}/export")
@@ -4106,6 +4403,8 @@ async def export_trades_with_user(
     to_date: Optional[date] = Query(None),
     commodity_id: Optional[int] = Query(None, ge=1),
     commodity_query: Optional[str] = Query(None),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    trade_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
@@ -4117,6 +4416,8 @@ async def export_trades_with_user(
             to_date=to_date,
             commodity_id=commodity_id,
             commodity_query=commodity_query,
+            settlement_type=settlement_type,
+            trade_type=trade_type,
             db=db,
             context=context,
         )
@@ -4129,6 +4430,8 @@ async def export_trades_with_user(
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
+        settlement_type=settlement_type,
+        perspective_trade_type=trade_type,
     )
     trades = (await db.execute(query.order_by(Trade.created_at.asc(), Trade.id.asc()))).scalars().all()
     if not trades:

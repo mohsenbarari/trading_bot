@@ -21,6 +21,15 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Res
   })
 }
 
+function makeHistoryPage(items: unknown[], nextCursor: string | null = null, hasMore = false): Response {
+  return makeResponse({
+    items,
+    next_cursor: nextCursor,
+    has_more: hasMore,
+    page_size: items.length,
+  })
+}
+
 function defaultFetchResponse(input: string): Promise<Response> {
   if (input.endsWith('/api/commodities/')) {
     return Promise.resolve(makeResponse([]))
@@ -40,6 +49,10 @@ function defaultFetchResponse(input: string): Promise<Response> {
 
   if (/\/api\/blocks\/check\/\d+$/.test(input)) {
     return Promise.resolve(makeResponse({ is_blocked_by_me: false }))
+  }
+
+  if (/\/api\/trades\/(?:my|with\/\d+)\/page\?/.test(input)) {
+    return Promise.resolve(makeHistoryPage([]))
   }
 
   return Promise.reject(new Error(`Unhandled fetch call in PublicProfile.test.ts: ${input}`))
@@ -181,7 +194,7 @@ describe('PublicProfile.vue', () => {
     await presetButton!.trigger('click')
     await flushPromises()
 
-    const presetFetchCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50?'))
+    const presetFetchCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))
     expect(presetFetchCalls.length).toBeGreaterThanOrEqual(1)
     expect(presetFetchCalls.at(-1)?.[0]).toContain('from_date=2026-02-28')
     expect(presetFetchCalls.at(-1)?.[0]).toContain('to_date=2026-05-28')
@@ -1832,7 +1845,7 @@ describe('PublicProfile.vue', () => {
     await applyButtonAfterInvalidRange!.trigger('click')
     await flushPromises()
 
-    const historyCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')
+    const historyCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))
     expect(historyCalls).toHaveLength(1)
     expect(wrapper.text()).toContain('خرید')
     expect(wrapper.text()).toContain('فروش')
@@ -1856,7 +1869,7 @@ describe('PublicProfile.vue', () => {
       },
     ])
 
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))).toHaveLength(1)
   })
 
   it('renders target-user history from the viewed profile perspective for super-admin viewers', async () => {
@@ -1919,7 +1932,7 @@ describe('PublicProfile.vue', () => {
     await applyButtonInvalidRange!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/60')).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/60/page?'))).toHaveLength(1)
     expect(wrapper.text()).toContain('خرید')
     expect(wrapper.text()).toContain('سرگروه owner15')
     expect(wrapper.text()).toContain('سطح 2')
@@ -1967,7 +1980,7 @@ describe('PublicProfile.vue', () => {
     await applyButtonWithCommodity!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/my')).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/my/page?'))).toHaveLength(1)
     expect(wrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
   })
 
@@ -2010,7 +2023,7 @@ describe('PublicProfile.vue', () => {
           customer_relations: [],
         }))
       }
-      if (url === '/api/trades/my') {
+      if (url.startsWith('/api/trades/my/page?')) {
         return Promise.resolve(makeResponse([
           {
             id: 10,
@@ -2098,7 +2111,7 @@ describe('PublicProfile.vue', () => {
           accountant_relations: [],
         }))
       }
-      if (url === '/api/trades/my') {
+      if (url.startsWith('/api/trades/my/page?')) {
         return Promise.resolve(makeResponse([]))
       }
       if (url === '/api/commodities/') {
@@ -2109,7 +2122,7 @@ describe('PublicProfile.vue', () => {
           { id: 90, account_name: 'partner90', mobile_number: '09120000090' },
         ]))
       }
-      if (url.startsWith('/api/trades/with/90')) {
+      if (url.startsWith('/api/trades/with/90/page?')) {
         return Promise.resolve(makeResponse([
           {
             id: 5,
@@ -2161,7 +2174,7 @@ describe('PublicProfile.vue', () => {
     await applyButtonAfterInvalidRange!.trigger('click')
     await flushPromises()
 
-    const filteredCall = fetchMock.mock.calls.find(([url]) => url === '/api/trades/with/90')
+    const filteredCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/90/page?'))
     expect(filteredCall).toBeTruthy()
     expect(wrapper.text()).toContain('طرف دیگر: partner90 - 09120000090')
     expect(wrapper.text()).toContain('partner90')
@@ -2239,16 +2252,25 @@ describe('PublicProfile.vue', () => {
     await commoditySelect.trigger('focus')
     await flushPromises()
     await commoditySelect.setValue('سکه')
+    const historyFilterSelects = wrapper.findAll('.history-filter-field select')
+    await historyFilterSelects[1]!.setValue('sell')
+    await historyFilterSelects[2]!.setValue('tomorrow')
 
     const applyButtonAfterFilter = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
     expect(applyButtonAfterFilter).toBeTruthy()
     await applyButtonAfterFilter!.trigger('click')
     await flushPromises()
 
-    const filteredCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50?'))
+    const filteredCall = fetchMock.mock.calls.find(([url]) => (
+      typeof url === 'string'
+      && url.includes('/api/trades/with/50/page?')
+      && url.includes('from_date=2026-05-01')
+    ))
     expect(filteredCall?.[0]).toContain('from_date=2026-05-01')
     expect(filteredCall?.[0]).toContain('to_date=2026-05-31')
     expect(filteredCall?.[0]).toContain('commodity_query=%D8%B3%DA%A9%D9%87')
+    expect(filteredCall?.[0]).toContain('trade_type=sell')
+    expect(filteredCall?.[0]).toContain('settlement_type=tomorrow')
 
     const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
     expect(pdfButton).toBeTruthy()
@@ -2260,11 +2282,120 @@ describe('PublicProfile.vue', () => {
     expect(exportCall?.[0]).toContain('from_date=2026-05-01')
     expect(exportCall?.[0]).toContain('to_date=2026-05-31')
     expect(exportCall?.[0]).toContain('commodity_query=%D8%B3%DA%A9%D9%87')
+    expect(exportCall?.[0]).toContain('trade_type=sell')
+    expect(exportCall?.[0]).toContain('settlement_type=tomorrow')
     expect(createObjectURL).toHaveBeenCalledOnce()
     expect(anchorClick).toHaveBeenCalledOnce()
     expect(revokeObjectURL).toHaveBeenCalledOnce()
 
     anchorClick.mockRestore()
+  })
+
+  it('loads trade history past 50 rows, deduplicates page boundaries, and retries the same cursor', async () => {
+    const fetchMock = vi.mocked(fetch)
+    let loadMoreAttempts = 0
+    const tradeRow = (id: number) => ({
+      id,
+      trade_number: 20_000 + id,
+      created_at: `2026-05-${String((id % 28) + 1).padStart(2, '0')}T09:00:00Z`,
+      quantity: 1,
+      commodity_name: 'سکه',
+      price: 100_000 + id,
+      trade_type: 'BUY',
+      settlement_type: 'cash',
+      offer_user_id: 80,
+      offer_user_name: 'seller80',
+      responder_user_id: 50,
+      responder_user_name: 'owner50',
+    })
+    const firstPage = Array.from({ length: 50 }, (_, index) => tradeRow(100 - index))
+    const secondPage = [tradeRow(51), ...Array.from({ length: 20 }, (_, index) => tradeRow(50 - index))]
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      if (url === '/api/users-public/50') {
+        return Promise.resolve(makeResponse({
+          id: 50,
+          account_name: 'owner50',
+          avatar_file_id: null,
+          mobile_number: '09121112222',
+          address: 'قم',
+          created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+          trades_count: 70,
+          resolved_from_accountant_id: null,
+          highlight_accountant_user_id: null,
+          highlight_accountant_relation_display_name: null,
+          accountant_relations: [],
+        }))
+      }
+      if (url.startsWith('/api/trades/with/50/page?') && url.includes('cursor=cursor-50')) {
+        loadMoreAttempts += 1
+        if (loadMoreAttempts === 1) {
+          return Promise.resolve(makeResponse({ detail: 'ارتباط موقتاً قطع شد.' }, false, 503))
+        }
+        return Promise.resolve(makeHistoryPage(secondPage))
+      }
+      if (url.startsWith('/api/trades/with/50/page?')) {
+        return Promise.resolve(makeHistoryPage(firstPage, 'cursor-50', true))
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const historySelects = wrapper.findAll('.history-filter-field select')
+    expect(historySelects).toHaveLength(3)
+    await historySelects[1]!.setValue('buy')
+    await historySelects[2]!.setValue('cash')
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButton).toBeTruthy()
+    await applyButton!.trigger('click')
+    await flushPromises()
+
+    const firstPageCall = fetchMock.mock.calls.find(([url]) => (
+      typeof url === 'string'
+      && url.startsWith('/api/trades/with/50/page?')
+      && url.includes('trade_type=buy')
+    ))
+    expect(firstPageCall?.[0]).toContain('settlement_type=cash')
+    expect(wrapper.findAll('.mini-trade-card')).toHaveLength(50)
+
+    const loadMoreButton = wrapper.findAll('button').find((node) => node.text().includes('نمایش معاملات بیشتر'))
+    expect(loadMoreButton).toBeTruthy()
+    await loadMoreButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.mini-trade-card')).toHaveLength(50)
+    expect(wrapper.text()).toContain('خطا در دریافت ادامه تاریخچه معاملات')
+
+    const retryButton = wrapper.findAll('button').find((node) => node.text().includes('تلاش دوباره'))
+    expect(retryButton).toBeTruthy()
+    await retryButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.mini-trade-card')).toHaveLength(70)
+    const cursorCalls = fetchMock.mock.calls.filter(([url]) => (
+      typeof url === 'string' && url.includes('cursor=cursor-50')
+    ))
+    expect(cursorCalls).toHaveLength(2)
   })
 
   it('blocks invalid history date ranges before refetch or export', async () => {
@@ -2327,7 +2458,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50/page?'))).toHaveLength(1)
 
     const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
     expect(pdfButton).toBeTruthy()
