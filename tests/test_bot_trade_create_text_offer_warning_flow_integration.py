@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from bot.callbacks import TextOfferActionCallback
 from bot.handlers.trade_create import Trade, handle_text_offer, handle_text_offer_confirm, handle_text_offer_warning_confirm
 from core.enums import UserRole
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeSession:
@@ -83,6 +84,12 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
         )
         self.admission_patcher.start()
         self.addCleanup(self.admission_patcher.stop)
+        self.quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        self.quota_patcher.start()
+        self.addCleanup(self.quota_patcher.stop)
 
     async def test_fake_session_helpers_cover_existing_ids_and_empty_get(self):
         session = FakeSession()
@@ -199,9 +206,6 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=self.make_warning_payload()),
         ), patch(
-            "core.utils.increment_user_counter",
-            new=AsyncMock(),
-        ) as increment_mock, patch(
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch(
@@ -239,7 +243,6 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
         self.assertIn("منتشر شد", callback.message.edit_text.await_args_list[-1].args[0])
         self.assertIsNone(state.current_state)
         self.assertEqual(state.data, {})
-        increment_mock.assert_awaited_once()
         self.assertEqual(bot.send_message.await_count, 2)
         warning_confirm_callback.answer.assert_awaited_once_with()
 

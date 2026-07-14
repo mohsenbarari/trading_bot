@@ -7,9 +7,11 @@ from fastapi import HTTPException
 
 from api.routers.offers import OfferCreate, create_offer
 from core.services.market_transition_service import MarketOfferAdmissionClosedError
+from core.services.offer_creation_service import OfferCreationLimitExceededError
 from core.services.offer_republish_service import OfferNotRepeatableError
 from core.enums import UserRole
 from models.offer import OfferStatus, OfferType
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeExecuteResult:
@@ -59,14 +61,17 @@ class FakeDB:
 
     async def scalar(self, _stmt):
         if self.scalar_results:
-            return self.scalar_results.pop(0)
+            self.last_scalar_value = self.scalar_results.pop(0)
+            return self.last_scalar_value
 
         # In SQLAlchemy 2.0, scalar() is often a shortcut for execute().standard_scalar()
         # Fall back to the execute queue only when a dedicated scalar result was not supplied.
         res = await self.execute(_stmt)
         if isinstance(res, FakeExecuteResult):
-            return res.scalar_one()
-        return res
+            self.last_scalar_value = res.scalar_one()
+        else:
+            self.last_scalar_value = res
+        return self.last_scalar_value
 
     def add(self, item):
         self.added.append(item)
@@ -159,6 +164,12 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.admission_fence_mock = admission_fence_patcher.start()
         self.addCleanup(admission_fence_patcher.stop)
+        quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        quota_patcher.start()
+        self.addCleanup(quota_patcher.stop)
 
     async def test_republish_creates_independent_offer_from_remaining_source(self):
         commodity = SimpleNamespace(id=1)
@@ -217,9 +228,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=None)),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()) as set_count_mock, patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ) as counter_mock, patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=async_settings),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
@@ -253,7 +261,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(old_offer.republished_offer_id)
         self.assertEqual(db.commit.await_count, 1)
         set_count_mock.assert_awaited_once_with(5, 1)
-        counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
         self.assertEqual(publish_mock.await_count, 1)
         response_mock.assert_called_once_with(
             reloaded_offer,
@@ -334,10 +341,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ) as response_mock, patch(
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(),
-        ) as channel_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ) as counter_mock:
+        ) as channel_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock:
             result = await create_offer(
                 make_offer(idempotency_key="offer-create-1"),
                 db=db,
@@ -350,7 +354,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_not_awaited()
         channel_mock.assert_not_awaited()
         publish_mock.assert_not_awaited()
-        counter_mock.assert_not_awaited()
         self.register_market_offer_created_mock.assert_not_awaited()
         response_mock.assert_called_once_with(
             existing_offer,
@@ -389,9 +392,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=555)),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()) as set_count_mock, patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ), patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=async_settings),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
@@ -472,9 +472,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "core.cache.set_active_offer_count",
             new=AsyncMock(side_effect=RuntimeError("redis down")),
         ), patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ), patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=async_settings),
         ), patch(
@@ -521,9 +518,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=None)),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ), patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=async_settings),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
@@ -587,9 +581,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(),
         ) as channel_mock, patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ) as counter_mock, patch(
             "api.routers.realtime.publish_event",
             new=AsyncMock(),
         ) as publish_mock:
@@ -605,7 +596,48 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db.rollback.assert_awaited_once()
         db.commit.assert_not_awaited()
         channel_mock.assert_not_awaited()
-        counter_mock.assert_not_awaited()
+        publish_mock.assert_not_awaited()
+        self.register_market_offer_created_mock.assert_not_awaited()
+
+    async def test_create_offer_maps_final_quota_rejection_without_side_effects(self):
+        commodity = SimpleNamespace(id=1)
+        current_user = make_user(id=5, home_server="iran")
+        db = FakeDB(get_results=[commodity], scalar_results=[0])
+        quota_error = OfferCreationLimitExceededError(
+            "offer_active_limit_exceeded",
+            "شما حداکثر 1 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
+        )
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=1),
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.create_authoritative_offer_with_outcome",
+            new=AsyncMock(side_effect=quota_error),
+        ), patch(
+            "api.routers.offers.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as channel_mock, patch(
+            "api.routers.realtime.publish_event",
+            new=AsyncMock(),
+        ) as publish_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, quota_error.detail)
+        db.rollback.assert_awaited_once()
+        db.commit.assert_not_awaited()
+        channel_mock.assert_not_awaited()
         publish_mock.assert_not_awaited()
         self.register_market_offer_created_mock.assert_not_awaited()
 
@@ -638,9 +670,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=None)),
         ) as send_mock, patch("core.cache.set_active_offer_count", new=AsyncMock()) as set_count_mock, patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ) as counter_mock, patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=async_settings),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
@@ -660,7 +689,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             send_offer_to_channel=ANY,
         )
         set_count_mock.assert_awaited_once_with(5, 1)
-        counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
         response_mock.assert_called_once_with(
             reloaded_offer,
             async_settings,
@@ -710,9 +738,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=None)),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
-            "api.routers.offers.increment_user_counter",
-            new=AsyncMock(),
-        ), patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=async_settings),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(

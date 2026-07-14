@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.trade_create import handle_trade_confirm
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeSession:
@@ -54,6 +55,12 @@ class BotTradeCreateConfirmSuccessRetailTests(unittest.IsolatedAsyncioTestCase):
         )
         self.admission_patcher.start()
         self.addCleanup(self.admission_patcher.stop)
+        self.quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        self.quota_patcher.start()
+        self.addCleanup(self.quota_patcher.stop)
 
     async def test_handle_trade_confirm_builds_unique_retail_buttons(self):
         callback = SimpleNamespace(
@@ -108,7 +115,7 @@ class BotTradeCreateConfirmSuccessRetailTests(unittest.IsolatedAsyncioTestCase):
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
         ), patch(
             "bot.handlers.trade_create.get_available_trade_amounts", return_value=[3, 2, 3, 1]
-        ), patch("bot.handlers.trade_create.increment_user_counter", new=AsyncMock()), patch(
+        ), patch(
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch(

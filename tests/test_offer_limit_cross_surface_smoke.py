@@ -11,6 +11,7 @@ from bot.handlers.trade_create import handle_text_offer_confirm
 from core import trading_settings
 from core.enums import UserRole
 from models.offer import OfferStatus, OfferType
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeExecuteResult:
@@ -60,7 +61,8 @@ class ApiSuccessDB:
     async def scalar(self, _stmt):
         if not self.scalar_results:
             raise AssertionError("Unexpected scalar() call")
-        return self.scalar_results.pop(0)
+        self.last_scalar_value = self.scalar_results.pop(0)
+        return self.last_scalar_value
 
     def add(self, item):
         self.added.append(item)
@@ -194,6 +196,12 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.admission_patcher.start()
         self.addCleanup(self.admission_patcher.stop)
+        quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        quota_patcher.start()
+        self.addCleanup(quota_patcher.stop)
 
     def tearDown(self):
         trading_settings._fallback_cache = None
@@ -283,7 +291,7 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.offers.register_market_offer_created",
             new=AsyncMock(),
-        ), patch("api.routers.offers.increment_user_counter", new=AsyncMock()), patch(
+        ), patch(
             "api.routers.realtime.publish_event",
             new=AsyncMock(),
         ), patch(
@@ -386,7 +394,7 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=None),
-        ), patch("core.utils.increment_user_counter", new=AsyncMock()), patch(
+        ), patch(
             "bot.handlers.trade_create.settings",
             SimpleNamespace(channel_id=-100, bot_username="botname"),
         ), patch(

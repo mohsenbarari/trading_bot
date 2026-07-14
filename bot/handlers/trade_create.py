@@ -19,7 +19,14 @@ from core.enums import SettlementType, UserRole
 from core.db import AsyncSessionLocal
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_source import OfferSourceSurface
-from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
+from core.services.offer_creation_service import (
+    OfferCreationAdmissionError,
+    OfferCreationCommand,
+    OfferCreationLimitExceededError,
+    OfferCreationQuotaPolicy,
+    OfferCreationQuotaUnavailableError,
+    create_authoritative_offer_with_outcome,
+)
 from core.services.market_transition_service import MarketOfferAdmissionError
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.server_routing import current_server, is_remote_home
@@ -38,7 +45,7 @@ from core.services.trade_service import (
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
-from core.utils import to_jalali_str, check_user_limits, increment_user_counter
+from core.utils import to_jalali_str, check_user_limits
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
     get_settlement_type_keyboard,
@@ -920,7 +927,6 @@ async def _handle_trade_confirm_core(
     *,
     check_user_limits_fn,
     to_jalali_str_fn,
-    increment_user_counter_fn,
     success_message_text: str,
     unexpected_error_prefix: str,
     warning_confirm_callback_data: str,
@@ -1048,7 +1054,7 @@ async def _handle_trade_confirm_core(
 
     try:
         async with AsyncSessionLocal() as session:
-            new_offer = await create_authoritative_offer(
+            creation_outcome = await create_authoritative_offer_with_outcome(
                 session,
                 OfferCreationCommand(
                     source_surface=OfferSourceSurface.TELEGRAM_BOT,
@@ -1068,7 +1074,11 @@ async def _handle_trade_confirm_core(
                     status=OfferStatus.ACTIVE,
                 ),
                 enforce_market_admission=True,
+                quota_policy=OfferCreationQuotaPolicy(
+                    max_active_offers=ts.max_active_offers,
+                ),
             )
+            new_offer = creation_outcome.offer
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
 
@@ -1204,10 +1214,6 @@ async def _handle_trade_confirm_core(
             if not publish_result.message_id:
                 raise RuntimeError(publish_result.error_code or "telegram_channel_publication_failed")
 
-            db_user = await session.get(User, user.id)
-            if db_user:
-                await increment_user_counter_fn(session, db_user, "channel_message")
-
         if published_channel_message is None:
             published_channel_message = canonical_channel_message
 
@@ -1243,6 +1249,36 @@ async def _handle_trade_confirm_core(
             },
         )
         await callback.message.edit_text(BOT_MARKET_CLOSED_MESSAGE)
+    except OfferCreationLimitExceededError as exc:
+        logger.info(
+            "Offer creation rejected at final local quota admission",
+            extra={
+                "event": "telegram.offer_create_final_quota_rejected",
+                "user_id": getattr(user, "id", None),
+                "reason": exc.reason,
+            },
+        )
+        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{exc.detail}", parse_mode="Markdown")
+    except OfferCreationQuotaUnavailableError as exc:
+        logger.warning(
+            "Offer creation local quota admission unavailable",
+            extra={
+                "event": "telegram.offer_create_final_quota_unavailable",
+                "user_id": getattr(user, "id", None),
+                "reason": exc.reason,
+            },
+        )
+        await callback.message.edit_text(exc.detail)
+    except OfferCreationAdmissionError as exc:
+        logger.warning(
+            "Offer creation rejected by local quota admission",
+            extra={
+                "event": "telegram.offer_create_final_quota_error",
+                "user_id": getattr(user, "id", None),
+                "reason": exc.reason,
+            },
+        )
+        await callback.message.edit_text(exc.detail)
     except TelegramBadRequest as exc:
         logger.warning(
             "Telegram rejected offer channel publication",
@@ -1287,7 +1323,6 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
         bot,
         check_user_limits_fn=check_user_limits,
         to_jalali_str_fn=to_jalali_str,
-        increment_user_counter_fn=increment_user_counter,
         success_message_text="✅ لفظ شما با موفقیت در کانال ارسال شد!",
         unexpected_error_prefix="❌ لفظ ثبت نشد",
         warning_confirm_callback_data=TradeActionCallback(action="confirm_warning").pack(),
@@ -1304,7 +1339,6 @@ async def handle_trade_warning_confirm(callback: types.CallbackQuery, state: FSM
         bot,
         check_user_limits_fn=check_user_limits,
         to_jalali_str_fn=to_jalali_str,
-        increment_user_counter_fn=increment_user_counter,
         success_message_text="✅ لفظ شما با موفقیت در کانال ارسال شد!",
         unexpected_error_prefix="❌ لفظ ثبت نشد",
         warning_confirm_callback_data=TradeActionCallback(action="confirm_warning").pack(),
@@ -1748,7 +1782,6 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
 async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     """تایید و ارسال لفظ متنی به کانال (از لاجیک مشترک handle_trade_confirm استفاده می‌کند)"""
     from core.utils import check_user_limits as runtime_check_user_limits
-    from core.utils import increment_user_counter as runtime_increment_user_counter
     from core.utils import to_jalali_str as runtime_to_jalali_str
 
     await _handle_trade_confirm_core(
@@ -1758,7 +1791,6 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
         bot,
         check_user_limits_fn=runtime_check_user_limits,
         to_jalali_str_fn=runtime_to_jalali_str,
-        increment_user_counter_fn=runtime_increment_user_counter,
         success_message_text="✅ لفظ شما با موفقیت در کانال منتشر شد!",
         unexpected_error_prefix="❌ خطا در ارسال به کانال",
         warning_confirm_callback_data=TextOfferActionCallback(action="confirm_warning").pack(),
@@ -1769,7 +1801,6 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm_warning"))
 async def handle_text_offer_warning_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     from core.utils import check_user_limits as runtime_check_user_limits
-    from core.utils import increment_user_counter as runtime_increment_user_counter
     from core.utils import to_jalali_str as runtime_to_jalali_str
 
     await _handle_trade_confirm_core(
@@ -1779,7 +1810,6 @@ async def handle_text_offer_warning_confirm(callback: types.CallbackQuery, state
         bot,
         check_user_limits_fn=runtime_check_user_limits,
         to_jalali_str_fn=runtime_to_jalali_str,
-        increment_user_counter_fn=runtime_increment_user_counter,
         success_message_text="✅ لفظ شما با موفقیت در کانال منتشر شد!",
         unexpected_error_prefix="❌ خطا در ارسال به کانال",
         warning_confirm_callback_data=TextOfferActionCallback(action="confirm_warning").pack(),

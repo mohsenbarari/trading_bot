@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.trade_create import handle_text_offer_confirm
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeSession:
@@ -54,6 +55,12 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         )
         self.admission_patcher.start()
         self.addCleanup(self.admission_patcher.stop)
+        self.quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        self.quota_patcher.start()
+        self.addCleanup(self.quota_patcher.stop)
 
     async def test_fake_session_helpers_cover_existing_ids_and_empty_update_get(self):
         session = FakeSession()
@@ -144,8 +151,6 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
         ), patch(
-            "core.utils.increment_user_counter", new=AsyncMock()
-        ) as increment_mock, patch(
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch(
@@ -160,7 +165,6 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         self.assertNotIn("🟢خرید ربع 12 عدد", channel_text)
         self.assertIn("🟢خرید ربع بهار 12 عدد فردا 📆 123,456", private_text)
         self.assertIn("منتشر شد", callback.message.edit_text.await_args.args[0])
-        increment_mock.assert_awaited_once()
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
 

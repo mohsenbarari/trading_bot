@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 from bot.handlers.trade_create import handle_trade_confirm
 from models.offer import OfferStatus
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeSession:
@@ -56,6 +57,12 @@ class BotTradeCreateConfirmTelegramErrorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.admission_patcher.start()
         self.addCleanup(self.admission_patcher.stop)
+        self.quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        self.quota_patcher.start()
+        self.addCleanup(self.quota_patcher.stop)
 
     async def test_fake_session_helpers_cover_stored_offer_and_empty_rollback(self):
         session = FakeSession(stored_offer="stored")

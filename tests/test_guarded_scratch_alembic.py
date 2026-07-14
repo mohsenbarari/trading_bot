@@ -52,6 +52,14 @@ class GuardedScratchAlembicTests(unittest.TestCase):
             )
         self.assertEqual(target.database_name, "stage4_registration_test")
 
+    def test_accepts_market_stage7_scratch_target(self):
+        with patch.dict(os.environ, {"TRADING_BOT_MIGRATION_MODE": "scratch"}, clear=True):
+            target = validate_scratch_database_urls(
+                sync_database_url="postgresql+psycopg2://user:pass@db/market_stage7_quota_test",
+                database_url="postgresql+asyncpg://user:pass@db/market_stage7_quota_test",
+            )
+        self.assertEqual(target.database_name, "market_stage7_quota_test")
+
     def test_rejects_runtime_name_and_url_mismatch(self):
         with patch.dict(os.environ, {"TRADING_BOT_MIGRATION_MODE": "scratch"}, clear=True):
             with self.assertRaisesRegex(ScratchMigrationSafetyError, "runtime"):

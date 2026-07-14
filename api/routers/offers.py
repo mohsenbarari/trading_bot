@@ -18,7 +18,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from core.db import get_db
 from core.config import settings
 from core.trading_settings import TradingSettings, get_trading_settings
-from core.utils import check_user_limits, increment_user_counter, to_jalali_str, utc_now_naive
+from core.utils import check_user_limits, to_jalali_str, utc_now_naive
 from core.services.market_transition_service import (
     MarketOfferAdmissionError,
     MarketOfferAdmissionClosedError,
@@ -52,9 +52,13 @@ from core.offer_request_policy import (
 )
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import (
+    OfferCreationAdmissionError,
     OfferCreationCommand,
+    OfferCreationLimitExceededError,
+    OfferCreationQuotaPolicy,
+    OfferCreationQuotaUnavailableError,
     OfferCreationValidationError,
-    create_authoritative_offer,
+    create_authoritative_offer_with_outcome,
 )
 from core.services.offer_expiry_service import (
     OfferAlreadyInactiveError,
@@ -1088,7 +1092,7 @@ async def create_offer(
         )
 
     try:
-        new_offer = await create_authoritative_offer(
+        creation_outcome = await create_authoritative_offer_with_outcome(
             db,
             OfferCreationCommand(
                 source_surface=OfferSourceSurface.WEBAPP,
@@ -1110,7 +1114,11 @@ async def create_offer(
                 republished_from_offer_public_id=republish_source_public_id or None,
             ),
             enforce_market_admission=True,
+            quota_policy=OfferCreationQuotaPolicy(
+                max_active_offers=ts.max_active_offers,
+            ),
         )
+        new_offer = creation_outcome.offer
     except MarketOfferAdmissionError as exc:
         await db.rollback()
         rejection_reason = (
@@ -1134,6 +1142,34 @@ async def create_offer(
         ) from exc
     except OfferCreationValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except OfferCreationLimitExceededError as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "offer_create.final_quota_rejected",
+            action="offer_create",
+            result="rejected",
+            source_server=current_server(),
+            has_idempotency_key=bool(idempotency_key),
+            reason=exc.reason,
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.detail) from exc
+    except OfferCreationQuotaUnavailableError as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "offer_create.final_quota_unavailable",
+            level="warning",
+            action="offer_create",
+            result="rejected",
+            source_server=current_server(),
+            has_idempotency_key=bool(idempotency_key),
+            reason=exc.reason,
+        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=exc.detail) from exc
+    except OfferCreationAdmissionError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
     except IntegrityError:
         await db.rollback()
         existing_offer = await _load_offer_idempotency_replay(
@@ -1170,6 +1206,38 @@ async def create_offer(
             )
         )[0]
 
+    if not creation_outcome.created:
+        existing_offer = await _load_offer_idempotency_replay(
+            db,
+            owner_user_id=owner_user.id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_offer is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="نتیجه درخواست قبلی قابل بازیابی نیست. لطفاً دوباره تلاش کنید.",
+            )
+        from core.trading_settings import get_trading_settings_async
+
+        replay_settings = await get_trading_settings_async()
+        log_trading_event(
+            logger,
+            "offer_idempotent_replay_after_quota_lock",
+            action="offer_idempotent_replay",
+            result="replay",
+            offer_id=getattr(existing_offer, "id", None),
+            has_idempotency_key=True,
+        )
+        return (
+            await _serialize_offer_responses(
+                [existing_offer],
+                db=db,
+                start_settings=replay_settings,
+                viewer_user_id=owner_user.id,
+                include_owner_identity=True,
+            )
+        )[0]
+
     # بارگذاری روابط
     result = await db.execute(
         select(Offer)
@@ -1199,11 +1267,10 @@ async def create_offer(
         has_idempotency_key=bool(idempotency_key),
     )
     
-    expected_active_count = active_count + 1
+    expected_active_count = creation_outcome.active_offer_count
+    if expected_active_count is None:
+        expected_active_count = await _read_active_offer_count(db, owner_user.id)
     await _set_active_offer_count_safely(owner_user.id, expected_active_count, reason="create_offer_final")
-    
-    # افزایش شمارنده
-    await increment_user_counter(db, owner_user, 'channel_message')
 
     await register_market_offer_created(db)
     

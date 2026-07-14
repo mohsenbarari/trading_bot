@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.orm.exc import StaleDataError
 
 from bot.handlers.trade_create import handle_trade_confirm
+from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
 class FakeSession:
@@ -66,6 +67,12 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         )
         self.admission_patcher.start()
         self.addCleanup(self.admission_patcher.stop)
+        self.quota_patcher = patch(
+            "core.services.offer_creation_service._admit_local_offer_quota",
+            new=AsyncMock(side_effect=bypass_local_offer_quota),
+        )
+        self.quota_patcher.start()
+        self.addCleanup(self.quota_patcher.stop)
 
     async def test_fake_session_helpers_cover_existing_ids_and_update_get_fallbacks(self):
         session = FakeSession()
@@ -151,8 +158,6 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
         ), patch(
-            "bot.handlers.trade_create.increment_user_counter", new=AsyncMock()
-        ) as increment_mock, patch(
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch("bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")):
@@ -170,7 +175,6 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(first_call.kwargs["reply_markup"].inline_keyboard[0][0].text, "12 عدد")
         second_call = bot.send_message.await_args_list[1]
         self.assertEqual(second_call.kwargs["chat_id"], 555)
-        increment_mock.assert_awaited_once_with(update_session, db_user, "channel_message")
         self.assertIn("با موفقیت در کانال ارسال شد", callback.message.edit_text.await_args.args[0])
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
@@ -237,8 +241,6 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
         ), patch(
-            "bot.handlers.trade_create.increment_user_counter", new=AsyncMock()
-        ) as increment_mock, patch(
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch("bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")):
@@ -250,7 +252,6 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(bot.send_message.await_count, 2)
         self.assertEqual(create_session.added[0].status.value, "active")
         self.assertEqual(create_session.added[0].channel_message_id, 777)
-        increment_mock.assert_awaited_once_with(publish_session, db_user, "channel_message")
         self.assertIn("با موفقیت در کانال ارسال شد", callback.message.edit_text.await_args.args[0])
 
 
