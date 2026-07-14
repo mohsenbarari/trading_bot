@@ -427,6 +427,8 @@ Audit فقط‌خواندنی production پیش از تغییر:
 
 ## Stage ۵ - Republish مستقل در نشست جاری بازار (`MKT-04`)
 
+**وضعیت: بسته شد روی staging - runtime commit `783374e93721adede18f071460172b7ac44ce145`**
+
 ### مشکل
 
 رفتار قدیمی هنگام republish، آفر منبع را تغییر می‌داد و حتی می‌توانست با `require_authority=False` روی mirror سرور غیرمرجع mutation ایجاد کند. علاوه بر ریسک authority، آفر جدید به lifecycle آفر قبلی وابسته می‌شد و در quantity خُرد ممکن بود مقدار اولیه به‌جای مانده واقعی تکرار شود.
@@ -475,6 +477,42 @@ Audit فقط‌خواندنی production پیش از تغییر:
 ### ریسک و rollback
 
 ریسک باقیمانده به نسخه مختلط schema و stale mirror محدود می‌شود. rollout باید migration-first باشد؛ نسخه قدیمی ستون جدید را نادیده می‌گیرد و نسخه جدید در نبود runtime state معتبر fail-closed می‌شود. rollback کد با نگه‌داشتن ستون افزایشی امن است؛ حذف ستون تا پایان rollout و retry window ممنوع است.
+
+### گزارش اجرای Stage ۵ - طراحی مستقل ۲۰۲۶-۰۷-۱۴
+
+تصمیم قبلی Stage ۵ به‌صورت غیرمخرب revert شد و پیاده‌سازی از baseline تمیز و آخرین `main` بازسازی شد. migration قبلی `c9a4e7b2d615` به‌دلیل اعمال‌شدن روی staging از تاریخچه Alembic حذف نشد؛ runtime مربوط به mutate/forward/receipt قبلی حذف و migration merge افزایشی `d0b5e6f7a8c9` ایجاد شد.
+
+پیاده‌سازی نهایی:
+
+- policy واحد `offer_republish_service` فقط leafهای `EXPIRED` با reasonهای `time_limit` و `manual`، مانده مثبت، غیرآرشیوی، متعلق به کاربر و ساخته/منقضی‌شده در نشست باز فعلی را می‌پذیرد.
+- create source را با public identity و row lock دوباره اعتبارسنجی می‌کند، payload اقتصادی را با مانده و lotهای فعلی تطبیق می‌دهد و سپس child مستقل می‌سازد. source، channel post و terminal event آن تغییر نمی‌کنند.
+- unique provenance روی `republished_from_offer_public_id` رقابت دو child را در PostgreSQL می‌بندد. lineage در sync و full-seed با public ID حمل می‌شود و به ID عددی peer وابسته نیست.
+- endpoint اختصاصی `/api/offers/my/repeatable` جای query عمومی قبلی را گرفت. WebApp toggle را در بازار بسته پنهان و preview تکرار را در هر transition بازار باطل می‌کند؛ انتخاب «ویرایش متن» provenance تکرار را پاک می‌کند و متن را مانند آفر عادی جدید پردازش می‌کند.
+- quota، validation، Telegram publication، realtime، counter و Web Push child همان مسیر آفر جدید عادی را طی می‌کنند؛ آفر تکرارشده جای یک آفر فعال را رایگان نمی‌گیرد.
+
+شواهد تست و migration:
+
+- focused policy/API/model/sync/migration: `60` تست پاس.
+- offer regression: `140`، trade regression: `242`، market transition/production contract: `43`، bot offer: `19` و Telegram/publication: `41` تست پاس.
+- MarketView: `33` تست پاس؛ frontend build پاس شد. اجرای کل frontend `1153` تست پاس و یک timeout نامرتبط در `PublicProfile` داشت؛ همان فایل بلافاصله به‌تنهایی `42/42` پاس شد.
+- `compileall`، `git diff --check` و single Alembic head پاس شدند.
+- migration از دیتابیس خالی تا head، upgrade از lineage قبلی و backfill `source → child` روی PostgreSQL موقت پاس شد. درج child دوم برای همان source با unique constraint رد شد و فقط یک child باقی ماند؛ دیتابیس‌های موقت سپس حذف شدند.
+- sync/event regression همان سه failure و یک error ثبت‌شده baseline را بدون failure جدید تکرار کرد؛ تست جدید upsert provenance و seed payload سبز است.
+
+شواهد staging دو سرور:
+
+- rollout به‌شکل migration-first انجام شد: ابتدا دیتابیس ایران و خارج به `d0b5e6f7a8c9` رسیدند، سپس runtimeها recreate شدند. در تمام فاصله نسخه قدیمی با schema افزایشی سالم ماند.
+- Iran و foreign هر دو `RELEASE_SHA=783374e93721adede18f071460172b7ac44ce145`، environment برابر `staging` و server mode درست دارند. route جدید در هر دو image ثبت است و smoke بدون session روی endpoint ایران به `401` مورد انتظار رسید.
+- error scan پنج دقیقه پس از deploy برای Iran app/sync worker و foreign app/bot/sync worker صفر match برای traceback، critical، internal 500 و unhandled error داشت.
+- preflight read-only دو سرور با deep parity پاس شد: runtime identity، TLS، internal ingress، storage separation، sync health و manifest همگی سبز؛ ۲۳ جدول با business drift و critical drift صفر، پنج تفاوت صرفاً non-business، صف outbound/retry و unsynced backlog صفر بودند.
+- هیچ full-matrix جهشی، mutation تستی یا production deploy/restart انجام نشد.
+
+ریسک و handoff:
+
+- race نهایی create با transition بسته‌شدن بازار عمداً برای Stage ۶ باقی است و Stage ۵ آن را پنهان یا بازنویسی نمی‌کند.
+- exact replay با idempotency key یکسان و payload متفاوت finding مستقل Stage ۱۵ است. UI برای هر intent key تازه می‌سازد و unique provenance در Stage ۵ از child دوم جلوگیری می‌کند، اما قرارداد conflict کامل در Stage ۱۵ بسته می‌شود.
+- republish فعلی فقط WebApp است. افزودن دکمه مشابه در بات بدون طراحی uniqueness بین دو home مجاز نیست.
+- rollback کد با revert commit `783374e9` و بازگشت frontend انجام می‌شود. ستون child-owned، جدول receipt قبلی و merge migration additive در rollback فوری حذف نمی‌شوند.
 
 ---
 
