@@ -35,8 +35,36 @@ class RealtimeRouterManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(good.messages, [{"type": "offer"}])
         self.assertEqual(manager.active_connections, [good])
 
+        event = {"type": "offer:updated", "data": {"id": 1}, "event_id": "event-1"}
+        await manager.broadcast(event)
+        await manager.broadcast(event)
+        self.assertEqual(good.messages.count(event), 1)
+        next_event = {"type": "offer:updated", "data": {"id": 1}, "event_id": "event-2"}
+        await manager.broadcast(next_event)
+        self.assertEqual(good.messages.count(next_event), 1)
+
         manager.disconnect(good)
         self.assertEqual(manager.active_connections, [])
+        self.assertEqual(manager._seen_event_ids, {})
+
+    async def test_independent_worker_managers_deduplicate_per_connection(self):
+        worker_a = ConnectionManager()
+        worker_b = ConnectionManager()
+        socket_a = GoodWebSocket()
+        socket_b = GoodWebSocket()
+        await worker_a.connect(socket_a)
+        await worker_b.connect(socket_b)
+
+        event = {"type": "offer:updated", "data": {"id": 9}, "event_id": "shared-event"}
+        for worker in (worker_a, worker_b):
+            await worker.broadcast(event)
+            await worker.broadcast(event)
+
+        self.assertEqual(socket_a.messages, [event])
+        self.assertEqual(socket_b.messages, [event])
+
+        worker_a.disconnect(socket_a)
+        worker_b.disconnect(socket_b)
 
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
             {
                 "type": "message",
                 "channel": b"events:offer:created",
-                "data": b'{"id": 1, "status": "active", "mobile_number": "0912", "home_server": "foreign"}',
+                "data": b'{"id": 1, "status": "active", "mobile_number": "0912", "home_server": "foreign", "_realtime_event_id": "event-sse"}',
             },
         ])
         with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)):
@@ -72,6 +72,7 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
                 await generator.__anext__()
 
         self.assertIn("event: offer:created", first)
+        self.assertIn("id: event-sse", first)
         self.assertIn('"id": 1', first)
         self.assertIn('"status": "active"', first)
         self.assertNotIn("mobile_number", first)

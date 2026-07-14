@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect,
 from fastapi.responses import StreamingResponse
 import redis.asyncio as redis
 import asyncio
+from collections import OrderedDict
 import json
 import logging
 import uuid
@@ -170,6 +171,7 @@ def project_public_event_payload(event_type: str, data: Any) -> dict | None:
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self._seen_event_ids: dict[int, OrderedDict[str, None]] = {}
     
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -179,14 +181,32 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        self._seen_event_ids.pop(id(websocket), None)
         set_active_websocket_connections(len(self.active_connections))
+
+    async def send_event_once(self, websocket: WebSocket, message: dict) -> bool:
+        event_id = _normalize_realtime_event_id(message.get("event_id"))
+        seen = self._seen_event_ids.setdefault(id(websocket), OrderedDict())
+        if event_id and event_id in seen:
+            return False
+        if event_id:
+            seen[event_id] = None
+            while len(seen) > REALTIME_EVENT_DEDUP_CACHE_SIZE:
+                seen.popitem(last=False)
+        try:
+            await websocket.send_json(message)
+        except Exception:
+            if event_id:
+                seen.pop(event_id, None)
+            raise
+        return True
     
     async def broadcast(self, message: dict):
         """ارسال پیام به همه کانکشن‌های فعال"""
         disconnected = []
         for connection in self.active_connections:
             try:
-                await connection.send_json(message)
+                await self.send_event_once(connection, message)
             except:
                 disconnected.append(connection)
                 record_websocket_publish_failure(message.get("type", "broadcast"))
@@ -200,6 +220,24 @@ manager = ConnectionManager()
 
 REALTIME_SOURCE_LOCAL = "local"
 REALTIME_SOURCE_SYNC_APPLY = "sync_apply"
+REALTIME_EVENT_ID_FIELD = "_realtime_event_id"
+REALTIME_EVENT_DEDUP_CACHE_SIZE = 512
+
+
+def _normalize_realtime_event_id(value: object) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized or len(normalized) > 128:
+        return None
+    return normalized
+
+
+def _redis_public_event_payload(public_data: dict, *, event_id: str) -> dict:
+    return {**public_data, REALTIME_EVENT_ID_FIELD: event_id}
+
+
+def _project_redis_public_event(event_type: str, payload: dict) -> tuple[dict | None, str | None]:
+    event_id = _normalize_realtime_event_id(payload.get(REALTIME_EVENT_ID_FIELD))
+    return project_public_event_payload(event_type, payload), event_id
 
 
 def realtime_publish_writes_outbound_sync(_source: str = REALTIME_SOURCE_LOCAL) -> bool:
@@ -383,12 +421,15 @@ async def listen_redis_events(websocket: WebSocket, user_id: int = None):
                                 safe_data = sanitize_payload(parsed_data.get("data", {}))
                             else:
                                 event_type = channel.replace("events:", "")
-                                safe_data = project_public_event_payload(event_type, parsed_data)
+                                safe_data, event_id = _project_redis_public_event(event_type, parsed_data)
 
-                            await websocket.send_json({
+                            outgoing = {
                                 "type": event_type,
                                 "data": safe_data
-                            })
+                            }
+                            if not channel.startswith("notifications:") and event_id:
+                                outgoing["event_id"] = event_id
+                            await manager.send_event_once(websocket, outgoing)
                         except Exception as send_err:
                             logging.error(f"❌ Error sending to WebSocket: {send_err}")
                             break
@@ -431,6 +472,7 @@ async def event_generator(user_id: int):
                     raw_data = message.get("data", "")
                     data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
                     event_type = channel.replace("events:", "")
+                    event_id = None
 
                     # Project public events and sanitize recipient-scoped events.
                     try:
@@ -440,13 +482,15 @@ async def event_generator(user_id: int):
                         if channel.startswith("notifications:"):
                             event_type = parsed.get("event", "notification")
                             safe = sanitize_payload(parsed.get("data", {}))
+                            event_id = None
                         else:
-                            safe = project_public_event_payload(event_type, parsed)
+                            safe, event_id = _project_redis_public_event(event_type, parsed)
                         data = json.dumps(safe)
                     except (TypeError, ValueError, json.JSONDecodeError):
                         data = "{}"
                     
-                    yield f"event: {event_type}\ndata: {data}\n\n"
+                    event_id_line = f"id: {event_id}\n" if event_id else ""
+                    yield f"{event_id_line}event: {event_type}\ndata: {data}\n\n"
                 
                 current_time = asyncio.get_event_loop().time()
                 if current_time - last_heartbeat > heartbeat_interval:
@@ -484,22 +528,36 @@ async def publish_event(event_type: str, data: dict | None, *, source: str = REA
         return
 
     public_data = project_public_event_payload(event_type, data)
+    event_id = uuid.uuid4().hex
+    outgoing = {
+        "type": event_type,
+        "data": public_data,
+        "event_id": event_id,
+    }
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             channel = f"events:{event_type}"
-            await redis_client.publish(channel, json.dumps(public_data, ensure_ascii=False, default=str))
+            await redis_client.publish(
+                channel,
+                json.dumps(
+                    _redis_public_event_payload(public_data or {}, event_id=event_id),
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
     except Exception as e:
         record_websocket_publish_failure(event_type)
         logging.warning(f"⚠️ Error publishing event {event_type}: {e}")
-
-    try:
-        await manager.broadcast({
-            "type": event_type,
-            "data": public_data
-        })
-    except Exception as e:
-        record_websocket_publish_failure(event_type)
-        logging.warning(f"⚠️ Error broadcasting event {event_type}: {e}")
+        try:
+            await manager.broadcast(outgoing)
+        except Exception as broadcast_error:
+            record_websocket_publish_failure(event_type)
+            logging.warning(
+                "⚠️ Error broadcasting fallback event %s: %s",
+                event_type,
+                broadcast_error,
+            )
+    return event_id
 
 
 async def publish_user_event(user_id: int | None, event_type: str, data: dict):

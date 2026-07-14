@@ -6,6 +6,8 @@ const isConnected = ref(false);
 let socket: WebSocket | null = null;
 let reconnectInterval: any = null;
 let heartbeatInterval: any = null;
+const seenRealtimeEventIds = new Set<string>();
+const MAX_SEEN_REALTIME_EVENT_IDS = 512;
 
 // Event callbacks
 const eventListeners: Record<string, ((data: any) => void)[]> = {};
@@ -50,6 +52,18 @@ export function useWebSocket() {
                 let message = JSON.parse(event.data);
                 message = cleanDeletedSuffixes(message);
                 if (message.type === 'heartbeat') return;
+                const eventId = typeof message.event_id === 'string' && message.event_id.length <= 128
+                    ? message.event_id.trim()
+                    : '';
+                if (eventId) {
+                    if (seenRealtimeEventIds.has(eventId)) return;
+                    seenRealtimeEventIds.add(eventId);
+                    while (seenRealtimeEventIds.size > MAX_SEEN_REALTIME_EVENT_IDS) {
+                        const oldest = seenRealtimeEventIds.values().next().value;
+                        if (!oldest) break;
+                        seenRealtimeEventIds.delete(oldest);
+                    }
+                }
 
                 // Dispatch to listeners
                 const listeners = eventListeners[message.type];

@@ -167,4 +167,30 @@ describe('useWebSocket', () => {
     expect(MockWebSocket.instances[0]?.close).toHaveBeenCalled()
     errorSpy.mockRestore()
   })
+
+  it('dispatches one callback per realtime event id and accepts a new id', async () => {
+    localStorage.setItem('auth_token', 'token-123')
+    const { useWebSocket } = await importFreshModule()
+    const ws = useWebSocket()
+    const listener = vi.fn()
+    ws.on('offer:updated', listener)
+    ws.connect()
+
+    MockWebSocket.instances[0]!.emitOpen()
+    MockWebSocket.instances[0]!.emitMessage('{"type":"offer:updated","event_id":"event-1","data":{"id":7}}')
+    MockWebSocket.instances[0]!.emitMessage('{"type":"offer:updated","event_id":"event-1","data":{"id":7}}')
+    MockWebSocket.instances[0]!.emitMessage('{"type":"offer:updated","event_id":"event-2","data":{"id":7}}')
+
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenNthCalledWith(1, { id: 7 })
+    expect(listener).toHaveBeenNthCalledWith(2, { id: 7 })
+
+    ws.disconnect()
+    ws.connect()
+    MockWebSocket.instances[1]!.emitOpen()
+    MockWebSocket.instances[1]!.emitMessage('{"type":"offer:updated","event_id":"event-1","data":{"id":7}}')
+    MockWebSocket.instances[1]!.emitMessage('{"type":"offer:updated","event_id":"event-3","data":{"id":7}}')
+    expect(listener).toHaveBeenCalledTimes(3)
+    ws.disconnect()
+  })
 })
