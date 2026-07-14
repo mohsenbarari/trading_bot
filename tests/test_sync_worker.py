@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -77,6 +77,7 @@ class FakeDBSession:
         self.value = value
         self.values = list(value) if isinstance(value, list) else None
         self.statements = []
+        self.commit_count = 0
 
     async def __aenter__(self):
         return self
@@ -89,6 +90,9 @@ class FakeDBSession:
         if self.values is not None:
             return FakeExecuteResult(self.values.pop(0))
         return FakeExecuteResult(self.value)
+
+    async def commit(self):
+        self.commit_count += 1
 
 
 class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
@@ -457,6 +461,54 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["sync_protocol"], build_sync_protocol_metadata())
         self.assertEqual(item["data"], {"id": 42, "status": "confirmed"})
         self.assertEqual(len(fake_session.statements), 1)
+        compiled_query = str(fake_session.statements[0])
+        self.assertIn("change_log.quarantined_at IS NULL", compiled_query)
+        self.assertIn("change_log.next_delivery_attempt_at", compiled_query)
+        self.assertIn("EXISTS", compiled_query)
+
+    async def test_rejected_change_log_row_backs_off_then_quarantines(self):
+        attempted_at = datetime(2026, 7, 14, 8, 0, tzinfo=timezone.utc)
+        entry = SimpleNamespace(
+            delivery_attempt_count=0,
+            last_delivery_error=None,
+            last_delivery_attempt_at=None,
+            next_delivery_attempt_at=None,
+            quarantined_at=None,
+        )
+        first_session = FakeDBSession(entry)
+        item = {"change_log_id": 88, "table": "customer_relations", "id": 1}
+
+        with patch("core.db.AsyncSessionLocal", return_value=first_session):
+            first_state = await sync_worker.record_change_log_delivery_failure(
+                item,
+                reason="deferred_foreign_key_dependency_missing",
+                now=attempted_at,
+            )
+
+        self.assertEqual(first_state.attempt_count, 1)
+        self.assertFalse(first_state.quarantined)
+        self.assertEqual(first_state.next_attempt_at, attempted_at + timedelta(seconds=1))
+        self.assertEqual(entry.delivery_attempt_count, 1)
+        self.assertEqual(entry.last_delivery_error, "deferred_foreign_key_dependency_missing")
+        self.assertEqual(first_session.commit_count, 1)
+
+        entry.delivery_attempt_count = sync_worker.SYNC_PEER_REJECTION_MAX_ATTEMPTS - 1
+        final_session = FakeDBSession(entry)
+        with patch("core.db.AsyncSessionLocal", return_value=final_session):
+            final_state = await sync_worker.record_change_log_delivery_failure(
+                item,
+                reason="deferred_foreign_key_dependency_missing",
+                now=attempted_at,
+            )
+
+        self.assertEqual(
+            final_state.attempt_count,
+            sync_worker.SYNC_PEER_REJECTION_MAX_ATTEMPTS,
+        )
+        self.assertTrue(final_state.quarantined)
+        self.assertIsNone(final_state.next_attempt_at)
+        self.assertEqual(entry.quarantined_at, attempted_at)
+        self.assertEqual(final_session.commit_count, 1)
 
     async def test_offer_change_log_replay_uses_original_committed_payload(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)
@@ -538,6 +590,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         marker_return_value=1,
         fetch_return_value=None,
         fetch_side_effect=None,
+        failure_state_return_value=None,
         sync_verify_tls=True,
         sync_ca_bundle=None,
     ):
@@ -555,6 +608,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         send_mock = AsyncMock(side_effect=send_side_effect, return_value=send_return_value)
         marker_mock = AsyncMock(side_effect=marker_side_effect, return_value=marker_return_value)
         fetch_mock = AsyncMock(side_effect=fetch_side_effect, return_value=fetch_return_value)
+        failure_state_mock = AsyncMock(return_value=failure_state_return_value)
         sleep_mock = AsyncMock()
 
         with patch("core.sync_worker.redis.Redis", return_value=fake_redis), patch(
@@ -566,12 +620,15 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.sync_worker.fetch_next_unsynced_change_log_item", fetch_mock
         ), patch(
+            "core.sync_worker.record_change_log_delivery_failure", failure_state_mock
+        ), patch(
             "core.sync_worker.asyncio.sleep", sleep_mock
         ):
             with self.assertRaises(asyncio.CancelledError):
                 await sync_worker.main()
 
         self.fetch_mock = fetch_mock
+        self.failure_state_mock = failure_state_mock
         self.client_ctor = client_ctor
         return fake_redis, send_mock, sleep_mock, marker_mock
 
@@ -858,6 +915,62 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake_redis.blpop_calls), 2)
         sleep_mock.assert_not_awaited()
 
+    async def test_main_delivers_each_notification_outbox_message_individually(self):
+        items = [
+            {
+                "type": "db_change",
+                "operation": "INSERT",
+                "table": "telegram_notification_outbox",
+                "id": 501,
+                "data": {
+                    "id": 501,
+                    "dedupe_key": "registration:152:recipient:10",
+                    "recipient_user_id": 10,
+                    "text": "پیام عضویت کاربر ۱۵۲",
+                },
+                "hash": "notification-hash-501",
+                "timestamp": 1700000501,
+                "change_log_id": 1501,
+            },
+            {
+                "type": "db_change",
+                "operation": "INSERT",
+                "table": "telegram_notification_outbox",
+                "id": 502,
+                "data": {
+                    "id": 502,
+                    "dedupe_key": "registration:153:recipient:10",
+                    "recipient_user_id": 10,
+                    "text": "پیام عضویت کاربر ۱۵۳",
+                },
+                "hash": "notification-hash-502",
+                "timestamp": 1700000502,
+                "change_log_id": 1502,
+            },
+        ]
+        response = FakeResponse(
+            200,
+            '{"status":"success","processed":1,"errors":0}',
+            {"status": "success", "processed": 1, "errors": 0},
+        )
+
+        _, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[None, asyncio.CancelledError()],
+            fetch_side_effect=[*items, None],
+            send_return_value=response,
+        )
+
+        self.assertEqual(send_mock.await_count, 2)
+        self.assertEqual(
+            [call.args[1]["data"] for call in send_mock.await_args_list],
+            [item["data"] for item in items],
+        )
+        self.assertEqual(
+            [call.args[0]["change_log_id"] for call in marker_mock.await_args_list],
+            [1501, 1502],
+        )
+        sleep_mock.assert_not_awaited()
+
     async def test_main_stops_poll_backlog_drain_after_delivery_failure(self):
         item = {
             "type": "db_change",
@@ -957,7 +1070,18 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         response = FakeResponse(
             200,
             '{"status":"partial","processed":0,"errors":1}',
-            {"status": "partial", "processed": 0, "errors": 1},
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {
+                        "table": "offers",
+                        "record_id": 5,
+                        "reason": "deferred_foreign_key_dependency_missing",
+                    }
+                ],
+            },
         )
 
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
@@ -968,6 +1092,10 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
 
         send_mock.assert_awaited_once()
         marker_mock.assert_not_awaited()
+        self.failure_state_mock.assert_awaited_once_with(
+            item,
+            reason="deferred_foreign_key_dependency_missing",
+        )
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_awaited_once_with(1)
 

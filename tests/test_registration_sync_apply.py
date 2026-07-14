@@ -792,6 +792,48 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(resolved)
         self.assertEqual(token_data["user_id"], 42)
 
+    async def test_deleted_relation_preserves_existing_local_user_links_after_anonymization(self):
+        existing_relation = SimpleNamespace(
+            id=11,
+            owner_user_id=401,
+            customer_user_id=402,
+            created_by_user_id=401,
+        )
+        stale_identity = {
+            "current": {
+                "account_name": "identity-before-delete",
+                "mobile_number": "09120000000",
+            },
+            "previous": {},
+        }
+        relation_data = {
+            "invitation_token": "CUST-delete-regression",
+            "status": "deleted",
+            "owner_user_id": 30,
+            "customer_user_id": 33,
+            "created_by_user_id": 30,
+            REGISTRATION_USER_REFERENCES_FIELD: {
+                "owner_user_id": stale_identity,
+                "customer_user_id": stale_identity,
+                "created_by_user_id": stale_identity,
+            },
+        }
+        db = _ApplyDB(execute_results=[_QueryResult([existing_relation])])
+
+        with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
+            resolved = await _localize_registration_user_reference(
+                db,
+                "customer_relations",
+                relation_data,
+            )
+
+        self.assertTrue(resolved)
+        self.assertEqual(relation_data["owner_user_id"], 401)
+        self.assertEqual(relation_data["customer_user_id"], 402)
+        self.assertEqual(relation_data["created_by_user_id"], 401)
+        self.assertNotIn(REGISTRATION_USER_REFERENCES_FIELD, relation_data)
+        self.assertEqual(len(db.statements), 1)
+
     async def test_registration_user_reference_defers_until_user_or_invitation_arrives(self):
         with patch("api.routers.sync.settings.registration_sync_v2_enabled", True):
             invitation_ready = await _localize_registration_user_reference(

@@ -4,10 +4,13 @@ import logging
 import time
 import hmac
 import hashlib
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 import httpx
 import redis.asyncio as redis
 from core.background_job_authority import JOB_SYNC_WORKER, assert_background_job_authority
-from sqlalchemy import case, select, update
+from sqlalchemy import case, exists, or_, select, update
+from sqlalchemy.orm import aliased
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
@@ -23,6 +26,7 @@ from core.sync_metadata import (
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_protocol import build_sync_protocol_metadata
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
+from core.utils import utc_now
 
 # Configure logging
 configure_logging("sync-worker")
@@ -53,19 +57,36 @@ SYNC_OUTBOUND_TABLE_PRIORITY = (
     "user_blocks",
 )
 SYNC_CHANGE_LOG_POLL_DRAIN_LIMIT = 100
+SYNC_PEER_REJECTION_MAX_ATTEMPTS = 5
+SYNC_PEER_REJECTION_BACKOFF_SECONDS = (1, 5, 15, 30)
 
 
 class SyncDeliveryError(Exception):
-    def __init__(self, *, status_code: int, response_summary: dict):
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        response_summary: dict,
+        peer_rejection_reason: str | None = None,
+    ):
         super().__init__(f"sync delivery rejected with status {status_code}")
         self.status_code = status_code
         self.response_summary = response_summary
+        self.peer_rejection_reason = peer_rejection_reason
 
 
 class SyncDeliveryMarkerError(Exception):
     def __init__(self, *, error_type: str):
         super().__init__("sync delivery marker failed")
         self.error_type = error_type
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeliveryFailureState:
+    change_log_id: int
+    attempt_count: int
+    quarantined: bool
+    next_attempt_at: datetime | None
 
 
 def summarize_queue_payload(payload: str) -> dict:
@@ -148,6 +169,28 @@ def _single_item_partial_rejection_reason(response) -> str | None:
         return None
     reason = error_item.get("reason")
     return reason if isinstance(reason, str) else None
+
+
+def peer_rejection_reason_for_item(response, item: dict) -> str | None:
+    """Return a safe failure reason for a rejected single-item delivery."""
+    error_item = _single_item_partial_rejection_detail(response)
+    if error_item is not None:
+        same_table = _sync_identity_value_matches(error_item.get("table"), item.get("table"))
+        same_record = _sync_identity_value_matches(error_item.get("record_id"), item.get("id"))
+        if same_table and same_record:
+            reason = error_item.get("reason")
+            if isinstance(reason, str) and reason.strip():
+                return reason.strip()[:120]
+
+    if getattr(response, "status_code", None) != 200:
+        return None
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if isinstance(payload, dict) and payload.get("status") == "partial":
+        return "peer_partial_rejection"
+    return None
 
 
 def _terminal_policy_rejection_reason(error_item: dict | None) -> str | None:
@@ -238,6 +281,15 @@ async def fetch_next_unsynced_change_log_item() -> dict | None:
     from core.db import AsyncSessionLocal
     from models.change_log import ChangeLog
 
+    older_change = aliased(ChangeLog)
+    older_unsynced_same_aggregate = exists(
+        select(1).where(
+            older_change.synced.is_(False),
+            older_change.table_name == ChangeLog.table_name,
+            older_change.record_id == ChangeLog.record_id,
+            older_change.id < ChangeLog.id,
+        )
+    )
     table_priority = case(
         *[
             (ChangeLog.table_name == table_name, priority)
@@ -248,7 +300,15 @@ async def fetch_next_unsynced_change_log_item() -> dict | None:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(ChangeLog)
-            .where(ChangeLog.synced.is_(False))
+            .where(
+                ChangeLog.synced.is_(False),
+                ChangeLog.quarantined_at.is_(None),
+                or_(
+                    ChangeLog.next_delivery_attempt_at.is_(None),
+                    ChangeLog.next_delivery_attempt_at <= utc_now(),
+                ),
+                ~older_unsynced_same_aggregate,
+            )
             .order_by(table_priority, ChangeLog.id.asc())
             .limit(1)
         )
@@ -291,10 +351,73 @@ async def mark_change_log_delivered(item: dict) -> int:
         result = await db.execute(
             update(ChangeLog)
             .where(*conditions)
-            .values(synced=True, verified=True)
+            .values(
+                synced=True,
+                verified=True,
+                next_delivery_attempt_at=None,
+                quarantined_at=None,
+            )
         )
         await db.commit()
         return int(result.rowcount or 0)
+
+
+async def record_change_log_delivery_failure(
+    item: dict,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> SyncDeliveryFailureState | None:
+    """Back off a rejected row and quarantine it after repeated peer rejection.
+
+    Quarantine is deliberately not equivalent to delivery: the row remains
+    unsynced for audit and repair, while unrelated aggregates can continue.
+    """
+    from core.db import AsyncSessionLocal
+    from models.change_log import ChangeLog
+
+    change_log_id = coerce_positive_int(item.get("change_log_id"))
+    if change_log_id is None:
+        return None
+
+    attempted_at = now or utc_now()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ChangeLog)
+            .where(
+                ChangeLog.id == change_log_id,
+                ChangeLog.synced.is_(False),
+            )
+            .with_for_update()
+        )
+        entry = result.scalars().first()
+        if entry is None:
+            return None
+
+        attempt_count = int(entry.delivery_attempt_count or 0) + 1
+        quarantined = attempt_count >= SYNC_PEER_REJECTION_MAX_ATTEMPTS
+        next_attempt_at = None
+        if not quarantined:
+            delay_index = min(
+                attempt_count - 1,
+                len(SYNC_PEER_REJECTION_BACKOFF_SECONDS) - 1,
+            )
+            next_attempt_at = attempted_at + timedelta(
+                seconds=SYNC_PEER_REJECTION_BACKOFF_SECONDS[delay_index]
+            )
+
+        entry.delivery_attempt_count = attempt_count
+        entry.last_delivery_error = str(reason or "peer_rejection")[:120]
+        entry.last_delivery_attempt_at = attempted_at
+        entry.next_delivery_attempt_at = next_attempt_at
+        entry.quarantined_at = attempted_at if quarantined else None
+        await db.commit()
+        return SyncDeliveryFailureState(
+            change_log_id=change_log_id,
+            attempt_count=attempt_count,
+            quarantined=quarantined,
+            next_attempt_at=next_attempt_at,
+        )
 
 
 def queue_poll_order(iteration: int) -> list[str]:
@@ -503,6 +626,7 @@ async def main():
                             raise SyncDeliveryError(
                                 status_code=response.status_code,
                                 response_summary=summarize_peer_response(response),
+                                peer_rejection_reason=peer_rejection_reason_for_item(response, data),
                             )
 
                 except SyncDeliveryMarkerError as marker_err:
@@ -523,6 +647,27 @@ async def main():
                     await asyncio.sleep(1)
                 except SyncDeliveryError as delivery_err:
                     poll_drain_remaining = 0
+                    failure_state = None
+                    if (
+                        origin_queue == "change_log"
+                        and delivery_err.peer_rejection_reason is not None
+                    ):
+                        try:
+                            failure_state = await record_change_log_delivery_failure(
+                                data,
+                                reason=delivery_err.peer_rejection_reason,
+                            )
+                        except Exception as failure_record_err:
+                            logger.error(
+                                "Could not persist sync delivery failure state",
+                                extra={
+                                    "event": "job.item.failure_state_error",
+                                    "job_name": "sync_worker",
+                                    "run_id": run_id,
+                                    "iteration": iteration,
+                                    "error_type": type(failure_record_err).__name__,
+                                },
+                            )
                     logger.error(
                         "❌ Sync delivery rejected by peer",
                         extra={
@@ -531,9 +676,30 @@ async def main():
                             "run_id": run_id,
                             "iteration": iteration,
                             "duration_ms": duration_ms_since(start_time),
+                            "peer_rejection_reason": delivery_err.peer_rejection_reason,
+                            "delivery_attempt_count": (
+                                failure_state.attempt_count if failure_state is not None else None
+                            ),
+                            "change_log_quarantined": (
+                                failure_state.quarantined if failure_state is not None else False
+                            ),
                             **delivery_err.response_summary,
                         },
                     )
+                    if failure_state is not None and failure_state.quarantined:
+                        logger.critical(
+                            "Sync change-log row quarantined after repeated peer rejection",
+                            extra={
+                                "event": "job.item.quarantined",
+                                "job_name": "sync_worker",
+                                "run_id": run_id,
+                                "change_log_id": failure_state.change_log_id,
+                                "table": data.get("table"),
+                                "record_id": data.get("id"),
+                                "delivery_attempt_count": failure_state.attempt_count,
+                                "peer_rejection_reason": delivery_err.peer_rejection_reason,
+                            },
+                        )
                     # Push to retry queue (at the end)
                     await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                     await asyncio.sleep(1) # Backoff slightly

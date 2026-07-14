@@ -430,6 +430,7 @@ def evaluate_host_report(host: dict[str, Any]) -> list[dict[str, Any]]:
     sync = host.get("sync") or {}
     if not alert_if_collector_failed(alerts, role, "sync", sync):
         unsynced = int(sync.get("unsynced_change_log_count") or 0)
+        quarantined = int(sync.get("quarantined_change_log_count") or 0)
         oldest = float(sync.get("oldest_unsynced_age_seconds") or 0)
         queues = sync.get("redis_queues") or {}
         retry = int(queues.get("sync:retry") or 0)
@@ -440,6 +441,8 @@ def evaluate_host_report(host: dict[str, Any]) -> list[dict[str, Any]]:
             add_alert(alerts, role=role, component="sync", severity="warning", metric="unsynced_change_log_count", value=unsynced, threshold="> 100", summary="Cross-server sync backlog is high")
         elif unsynced > 0:
             add_alert(alerts, role=role, component="sync", severity="warning", metric="unsynced_change_log_count", value=unsynced, threshold="> 0 after retry window", summary="Cross-server sync backlog is non-zero")
+        if quarantined > 0:
+            add_alert(alerts, role=role, component="sync", severity="critical", metric="quarantined_change_log_count", value=quarantined, threshold="> 0", summary="Cross-server sync contains quarantined rows requiring repair")
         if oldest > 3600:
             add_alert(alerts, role=role, component="sync", severity="critical", metric="oldest_unsynced_age_seconds", value=round(oldest, 2), threshold="> 3600 seconds", summary="Cross-server sync lag is critically old")
         elif oldest > 900:
