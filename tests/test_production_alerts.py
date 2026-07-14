@@ -43,6 +43,7 @@ class ProductionAlertsTests(unittest.TestCase):
                 },
                 sync={
                     "unsynced_change_log_count": 1500,
+                    "quarantined_change_log_count": 1,
                     "oldest_unsynced_age_seconds": 3700,
                     "redis_queues": {"sync:outbound": 1200, "sync:retry": 120},
                 },
@@ -57,6 +58,7 @@ class ProductionAlertsTests(unittest.TestCase):
         self.assertIn("used_memory", critical_metrics)
         self.assertIn("aof_last_write_status", critical_metrics)
         self.assertIn("unsynced_change_log_count", critical_metrics)
+        self.assertIn("quarantined_change_log_count", critical_metrics)
         self.assertIn("oldest_unsynced_age_seconds", critical_metrics)
         self.assertIn("sync:retry", critical_metrics)
         self.assertIn("sync:outbound", critical_metrics)

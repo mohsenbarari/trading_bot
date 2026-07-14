@@ -219,6 +219,7 @@ RELATION_LINK_FIELDS = {
     "customer_relations": "customer_user_id",
 }
 NON_TERMINAL_RELATION_STATUSES = {"pending", "active"}
+TERMINAL_REGISTRATION_RELATION_STATUSES = {"revoked", "expired", "deleted"}
 COMPLETED_TRADE_STATUS = "completed"
 COMPLETED_TRADE_PROTECTED_FIELDS = (
     "offer_id",
@@ -1681,6 +1682,37 @@ async def _localize_registration_user_reference(
     fields = REGISTRATION_USER_REFERENCE_FIELDS.get(table)
     if fields is None:
         return True
+
+    # Terminal relation updates do not change who owns the relation. When the
+    # row already exists locally, preserve its localized foreign keys instead
+    # of resolving mutable user identities again. This matters for cascading
+    # account deletion: user account/mobile identities may already have been
+    # anonymized by a higher-priority User sync event before the relation
+    # tombstone reaches the peer.
+    terminal_relation_models = {
+        "accountant_relations": AccountantRelation,
+        "customer_relations": CustomerRelation,
+    }
+    status = _enum_value(data.get("status"))
+    invitation_token = _nonempty_text(data.get("invitation_token"))
+    relation_model = terminal_relation_models.get(table)
+    if (
+        relation_model is not None
+        and status in TERMINAL_REGISTRATION_RELATION_STATUSES
+        and invitation_token
+    ):
+        existing_result = await db.execute(
+            select(relation_model)
+            .where(relation_model.invitation_token == invitation_token)
+            .limit(1)
+        )
+        existing_relation = _result_scalar_one_or_none(existing_result)
+        if existing_relation is not None:
+            data.pop(REGISTRATION_USER_REFERENCES_FIELD, None)
+            for field_name in fields:
+                data[field_name] = getattr(existing_relation, field_name, None)
+            return True
+
     references = data.pop(REGISTRATION_USER_REFERENCES_FIELD, None)
     if not isinstance(references, dict):
         return False
@@ -4397,9 +4429,10 @@ async def get_sync_health(
     summary_stmt = select(
         sa_func.count(ChangeLog.id),
         sa_func.min(ChangeLog.created_at),
+        sa_func.count(ChangeLog.id).filter(ChangeLog.quarantined_at.is_not(None)),
     ).where(ChangeLog.synced == False)
     result = await db.execute(summary_stmt)
-    unsynced_count, oldest_unsynced_at = result.one()
+    unsynced_count, oldest_unsynced_at, quarantined_count = result.one()
 
     table_stmt = (
         select(ChangeLog.table_name, sa_func.count(ChangeLog.id))
@@ -4500,6 +4533,7 @@ async def get_sync_health(
         "peer_server_url_configured": bool(default_peer_server_url()),
         "redis_ok": redis_ok,
         "unsynced_change_log_count": int(unsynced_count or 0),
+        "quarantined_change_log_count": int(quarantined_count or 0),
         "oldest_unsynced_age_seconds": round(oldest_age, 3),
         "unsynced_by_table": unsynced_by_table,
         "redis_queues": {
@@ -4530,6 +4564,7 @@ async def get_sync_health(
             "server_mode": payload["server_mode"],
             "redis_ok": payload["redis_ok"],
             "unsynced_change_log_count": payload["unsynced_change_log_count"],
+            "quarantined_change_log_count": payload["quarantined_change_log_count"],
             "oldest_unsynced_age_seconds": payload["oldest_unsynced_age_seconds"],
             "sync_outbound_queue_length": outbound_queue,
             "sync_retry_queue_length": retry_queue,

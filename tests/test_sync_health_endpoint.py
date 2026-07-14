@@ -66,7 +66,7 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 503)
 
     async def test_sync_health_allows_loopback_without_observability_key(self):
-        db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
+        db = FakeDB(FakeSummaryResult((0, None, 0)), FakeTableRows([]))
         redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]), get=AsyncMock(return_value=None))
         request = SimpleNamespace(
             headers={},
@@ -106,7 +106,7 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_sync_health_reports_backlog_and_queue_state(self):
         oldest = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
         db = FakeDB(
-            FakeSummaryResult((3, oldest)),
+            FakeSummaryResult((3, oldest, 1)),
             FakeTableRows([("offers", 2), ("trades", 1)]),
         )
         redis_client = SimpleNamespace(
@@ -138,6 +138,7 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["server_mode"], "foreign")
         self.assertEqual(payload["unsynced_change_log_count"], 3)
+        self.assertEqual(payload["quarantined_change_log_count"], 1)
         self.assertEqual(payload["redis_queues"], {"sync:outbound": 4, "sync:retry": 1})
         self.assertEqual(payload["unsynced_by_table"], {"offers": 2, "trades": 1})
         self.assertEqual(payload["active_publication_gate"]["enabled"], True)
@@ -161,7 +162,7 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         record_publication_health.assert_called_once()
 
     async def test_sync_health_marks_expected_registration_job_unavailable_when_redis_fails(self):
-        db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
+        db = FakeDB(FakeSummaryResult((0, None, 0)), FakeTableRows([]))
         redis_client = SimpleNamespace(llen=AsyncMock(side_effect=RuntimeError("redis down")))
         request = SimpleNamespace(
             headers={"X-Observability-Api-Key": "obs-key"},
@@ -210,7 +211,7 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_sync_health_reports_fresh_stored_parity_status(self):
-        db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
+        db = FakeDB(FakeSummaryResult((0, None, 0)), FakeTableRows([]))
         parity_summary = {
             "status": "ok",
             "fresh": True,
