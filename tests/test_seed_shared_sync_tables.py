@@ -14,6 +14,28 @@ from scripts.seed_shared_sync_tables import (
 )
 
 
+class FakeRows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: list(self._rows))
+
+
+class FakeSession:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, _stmt):
+        return FakeRows(self._rows)
+
+
 class SeedSharedSyncTablesTests(unittest.TestCase):
     def setUp(self):
         self.references = SeedReferenceIndex(
@@ -123,6 +145,21 @@ class SeedSharedSyncTablesTests(unittest.TestCase):
 
 
 class SeedSharedSyncDryRunTests(unittest.IsolatedAsyncioTestCase):
+    async def test_offer_seed_loads_only_rows_authoritative_on_the_source_server(self):
+        rows = [
+            SimpleNamespace(id=3, home_server="foreign"),
+            SimpleNamespace(id=2, home_server="iran"),
+            SimpleNamespace(id=1, home_server=None),
+        ]
+        with patch("scripts.seed_shared_sync_tables.AsyncSessionLocal", return_value=FakeSession(rows)), patch(
+            "scripts.seed_shared_sync_tables.current_server", return_value="foreign"
+        ):
+            from scripts.seed_shared_sync_tables import load_table_rows
+
+            loaded = await load_table_rows("offers")
+
+        self.assertEqual([row.id for row in loaded], [3, 1])
+
     async def test_dry_run_validates_references_without_network_delivery(self):
         references = SeedReferenceIndex(
             commodity_names_by_id={},
