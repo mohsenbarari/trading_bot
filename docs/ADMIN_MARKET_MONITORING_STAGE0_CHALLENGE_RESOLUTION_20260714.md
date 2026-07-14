@@ -9,6 +9,7 @@
 - وضعیت کلی: `IN_PROGRESS`
 - وضعیت `AMM-C01`: `DECIDED`
 - وضعیت `AMM-C02`: `DECIDED`
+- وضعیت `AMM-C03`: `PROPOSED_FOR_PRODUCT_APPROVAL`
 - کدنویسی feature و migration تا بسته‌شدن P0ها مجاز نیست.
 
 این سند تصمیم‌های Stage 0 را به‌ترتیب challenge ثبت می‌کند. هر تصمیم ابتدا با وضعیت `PROPOSED_FOR_PRODUCT_APPROVAL` نوشته می‌شود و فقط پس از تأیید مالک محصول به `DECIDED` تغییر می‌کند. پس از `DECIDED` شدن، ردیف متناظر در Roadmap نیز به‌روزرسانی خواهد شد.
@@ -401,6 +402,217 @@
 
 ---
 
+## AMM-C03 - قرارداد جداسازی هویت از API و Realtime عمومی
+
+### وضعیت
+
+`PROPOSED_FOR_PRODUCT_APPROVAL`
+
+### پرسش
+
+هویت آفر‌دهنده و context مشتری چگونه به صفحه `رصد بازار` برسد، بدون اینکه از پاسخ بازار عمومی، WebSocket، SSE، cache، Web Push، URL یا log برای کاربران دیگر قابل استخراج باشد؟
+
+### واقعیت فعلی پروژه
+
+- serializer آفر می‌تواند پاسخ دارای هویت یا بدون هویت بسازد.
+- endpointهای عمومی active و history با حالت بدون هویت پاسخ می‌دهند.
+- رخداد عمومی ایجاد آفر، `user_id` را null و نام کاربر را خالی منتشر می‌کند.
+- مسیر sync نیز رخداد آفر foreign را با همین projection بدون هویت منتشر می‌کند.
+- WebSocket فعلی پس از احراز هویت، همه کاربران را به channelهای عمومی یکسان متصل می‌کند و نقش مدیر را برای channel آفر تفکیک نمی‌کند.
+- SSE نیز همان channelهای عمومی بازار را مصرف می‌کند.
+- `publish_event` علاوه بر Redis، payload را مستقیماً برای تمام connectionهای فعال broadcast می‌کند.
+- sanitization فعلی بر denylist چند فیلد حساس تکیه دارد و به‌تنهایی مانع قطعی انتشار اشتباهی هویت آفر‌دهنده نیست.
+- frontend در رخداد create، feed را دوباره می‌خواند و در رخدادهای update/terminal نیز state را همگرا می‌کند.
+- dependency مشترک `verify_admin_user` برای پذیرش مدیر میانی و مدیر ارشد وجود دارد.
+- endpoint یا read model مستقل برای feed هویتی `رصد بازار` هنوز وجود ندارد.
+
+شواهد اصلی baseline:
+
+- `api/routers/offers.py`
+- `api/routers/realtime.py`
+- `api/routers/sync.py`
+- `api/deps.py`
+- `frontend/src/composables/useOffers.ts`
+- `frontend/src/composables/useWebSocket.ts`
+- `frontend/vite.config.ts`
+- `tests/test_realtime_router_sanitize.py`
+- `tests/test_realtime_router_publish_event.py`
+- `tests/test_realtime_router_redis_listener.py`
+- `tests/test_realtime_router_sse.py`
+
+### گزینه‌ها
+
+#### گزینه A - پاسخ متفاوت از همان endpoint عمومی بر اساس نقش
+
+همان URL بازار عمومی برای مدیر پاسخ دارای هویت و برای سایر کاربران پاسخ بدون هویت برگرداند.
+
+مزیت:
+
+- endpoint کمتری ساخته می‌شود.
+
+ایراد:
+
+- قرارداد یک URL بر اساس نقش تغییر می‌کند.
+- احتمال اشتباه در cache، تست، proxy یا reuse frontend بالا می‌رود.
+- یک flag یا خطای permission می‌تواند هویت را وارد surface عمومی کند.
+
+نتیجه پیشنهادی: `REJECT`
+
+#### گزینه B - API مستقل admin-only و Realtime عمومی بدون هویت
+
+صفحه `رصد بازار` feed هویتی را فقط از API مدیریتی مستقل می‌خواند. رخدادهای عمومی هیچ هویتی ندارند و فقط صفحه را وادار به refresh همان API مدیریتی می‌کنند.
+
+مزیت:
+
+- مرز امنیتی قابل فهم و قابل تست است.
+- public market و Realtime آن برای همه نقش‌ها دقیقاً یکسان باقی می‌ماند.
+- نیاز به channel هویتی جدید و role-aware WebSocket از بین می‌رود.
+- event گم‌شده با refresh کامل یا polling قابل جبران است.
+
+نتیجه پیشنهادی: `ACCEPT`
+
+#### گزینه C - channel Realtime جداگانه با payload هویتی
+
+مدیران علاوه بر feed اولیه، updateهای دارای هویت را از channel اختصاصی دریافت کنند.
+
+مزیت:
+
+- تعداد refetchها کمتر می‌شود.
+
+ایراد:
+
+- اتصال WebSocket فعلی role-aware نیست و direct broadcast نیز عمومی است.
+- لغو نقش، reconnect، Redis subscription و SSE باید همزمان مرز امنیتی تازه‌ای را enforce کنند.
+- برای نسخه اول، هویت در event ارزش محصولی مستقلی نسبت به refetch ندارد.
+
+نتیجه پیشنهادی: `REJECT_FOR_INITIAL_RELEASE`
+
+### تصمیم پیشنهادی C03
+
+1. `رصد بازار` یک read endpoint مستقل و admin-only دارد.
+2. endpoint عمومی بازار هیچ query flag، header یا حالت اختیاری برای افزودن هویت دریافت نمی‌کند.
+3. backend در هر درخواست read مدیریتی، نقش مدیر میانی یا مدیر ارشد را کنترل می‌کند؛ route guard frontend به‌تنهایی معتبر نیست.
+4. read model مدیریتی همان feed مصوب C01 را با identity مصوب C02 ترکیب می‌کند.
+5. پاسخ مدیریتی فقط هویت آفر‌دهنده و context مجاز مشتری را اضافه می‌کند؛ actor داخلی در آن وجود ندارد.
+6. هیچ رخداد Realtime عمومی یا اختصاصی برای حمل هویت آفر‌دهنده ساخته نمی‌شود.
+7. رویدادهای lifecycle آفر در WebSocket و SSE برای همه نقش‌ها، حتی مدیر، بدون هویت باقی می‌مانند.
+8. صفحه `رصد بازار` با دریافت create/update/expired/completed یک silent refetch از API مدیریتی انجام می‌دهد.
+9. reconnect و بازگشت visibility نیز باعث refetch کامل feed مدیریتی می‌شود.
+10. projection رخداد عمومی آفر باید allowlist صریح داشته باشد؛ اتکا به denylist عمومی sanitization برای جلوگیری از نشت هویت کافی نیست.
+11. مسیر Redis و direct broadcast باید دقیقاً یک payload عمومی و بدون هویت منتشر کنند.
+12. پاسخ API مدیریتی با `Cache-Control: private, no-store` ارائه می‌شود و در service worker، cache عمومی، localStorage یا IndexedDB پایدار ذخیره نمی‌شود.
+13. state هویتی فقط در حافظه session جاری WebApp نگه داشته می‌شود.
+14. در logout، لغو session یا پاسخ 401/403، identity state بلافاصله پاک و صفحه مدیریتی بسته می‌شود.
+15. خطای transient شبکه یا 5xx می‌تواند آخرین snapshot مجاز را با حالت stale نگه دارد، اما 401/403 هرگز به حفظ snapshot منجر نمی‌شود.
+16. خطا، log، metric و URL نباید نام، شناسه داخلی کاربر یا context مشتری را ثبت کنند.
+17. Web Push عمومی و پیام یا channel عمومی بازار از قرارداد هویت مدیریتی بی‌تأثیر می‌مانند.
+
+### ماتریس دسترسی پیشنهادی
+
+| درخواست‌کننده | public market API | admin monitoring API | Realtime آفر |
+| --- | --- | --- | --- |
+| بدون session | مطابق قرارداد فعلی بازار | `401` | بدون هویت |
+| کاربر عادی | بدون هویت | `403` | بدون هویت |
+| مشتری سطح ۱ یا ۲ | بدون هویت | `403` | بدون هویت |
+| حسابدار | بازار طبق محدودیت فعلی خودش | `403` | بدون هویت |
+| مدیر میانی | همان پاسخ عمومی بدون هویت | پاسخ هویتی مجاز | بدون هویت + refetch مدیریتی |
+| مدیر ارشد | همان پاسخ عمومی بدون هویت | پاسخ هویتی مجاز | بدون هویت + refetch مدیریتی |
+
+### رفتار Realtime پیشنهادی
+
+#### ایجاد آفر
+
+- همه کاربران event بدون هویت را دریافت می‌کنند.
+- بازار عمومی feed عمومی را refresh می‌کند.
+- `رصد بازار` feed admin-only را refresh و identity را از read model می‌گیرد.
+
+#### تغییر، معامله یا انقضا
+
+- event فقط شناسه عمومی/فنی لازم و وضعیت عمومی تغییر را حمل می‌کند.
+- صفحه مدیریتی هیچ identity موجود در event را مصرف نمی‌کند.
+- پس از refresh، active/history و identity از snapshot واحد همگرا می‌شوند.
+
+#### sync آفر foreign-home
+
+- sync ابتدا داده را روی peer اعمال می‌کند.
+- پس از apply، event عمومی بدون هویت منتشر می‌شود.
+- refetch مدیریتی هویت را از داده محلی همگام‌شده می‌خواند.
+- اگر identity هنوز نرسیده باشد، row آفر باقی می‌ماند و حالت کنترل‌شده `هویت در حال همگام‌سازی` نمایش داده می‌شود؛ هویت دیگری حدس زده نمی‌شود.
+
+#### گم‌شدن event یا reconnect
+
+- refetch کامل هنگام reconnect، visibility return یا polling همگرایی را بازیابی می‌کند.
+- correctness به دریافت تک‌تک eventها وابسته نیست.
+
+### قرارداد cache و پاک‌سازی state
+
+- API مدیریتی در CDN یا reverse proxy به‌صورت shared cache ذخیره نمی‌شود.
+- response هویتی در service worker یا storage پایدار مرورگر نوشته نمی‌شود.
+- کلید cache عمومی بازار هرگز پاسخ admin را دریافت نمی‌کند.
+- logout و role downgrade، state هویتی و نمای سریع باز را پاک می‌کنند.
+- تغییر کاربر در همان browser نباید snapshot مدیر قبلی را به session جدید نشان دهد.
+
+### سناریوهای منفی
+
+- افزودن `?include_identity=true` به endpoint عمومی نباید هویت برگرداند.
+- مدیر از WebSocket یا SSE عمومی payload هویتی دریافت نکند.
+- non-admin با فراخوانی مستقیم URL مدیریتی پاسخ partial یا masked دریافت نکند؛ درخواست باید رد شود.
+- payload هویتی قبل از permission check ساخته یا cache نشود.
+- public event producer نتواند با اضافه‌کردن تصادفی `user_id` یا نام کاربر آن را broadcast کند.
+- خطای serializer، stack trace یا log هویت را افشا نکند.
+- پاسخ admin یک کاربر در browser session کاربر بعدی باقی نماند.
+- در sync lag، relation یا آفر‌دهنده دیگری به‌عنوان fallback جایگزین نشود.
+
+### معیارهای پذیرش قابل تست
+
+1. پاسخ public market برای کاربر عادی، مدیر میانی و مدیر ارشد از نظر هویت یکسان و خالی باشد.
+2. درخواست بدون session به API مدیریتی `401` بگیرد.
+3. کاربر عادی، مشتری و حسابدار از API مدیریتی `403` بگیرند.
+4. مدیر میانی و مدیر ارشد فقط فیلدهای هویتی مصوب C02 را دریافت کنند.
+5. actor داخلی در response مدیریتی وجود نداشته باشد.
+6. WebSocket عمومی برای تمام نقش‌ها از identity fields خالی باشد.
+7. SSE عمومی برای تمام نقش‌ها از identity fields خالی باشد.
+8. Redis publication و direct broadcast با allowlist یکسان تست شوند.
+9. create محلی و create حاصل از sync هر دو event بدون هویت بسازند.
+10. update، expired و completed نیز هیچ هویت اضافه نکنند.
+11. رخداد Realtime باعث refetch API مدیریتی شود و identity از event patch نشود.
+12. پاسخ مدیریتی headerهای `private, no-store` داشته باشد.
+13. service worker و storage پایدار، response مدیریتی را نگه ندارند.
+14. logout، session revoke و role downgrade فوراً identity state را پاک کنند.
+15. 5xx آخرین snapshot مجاز را stale نگه دارد، اما 401/403 آن را پاک کند.
+16. sync lag حالت `هویت در حال همگام‌سازی` بدهد و row را حذف یا با کاربر دیگر پر نکند.
+17. تست منفی log و error response عدم وجود نام و شناسه داخلی کاربر را ثابت کند.
+
+### dependencyها
+
+- `AMM-C01`: parity feed عمومی و مدیریتی
+- `AMM-C02`: projection هویت آفر‌دهنده و مشتری
+- `AMM-C04`: permission مدیر میانی و مدیر ارشد
+- `AMM-C11`: reuse کارت عمومی و identity shell
+- `AMM-C13`: refresh، reconnect و convergence
+- `AMM-C18`: sync و parity دو سرور
+
+### stop conditionهای C03
+
+- همان endpoint عمومی بر اساس نقش پاسخ هویتی متفاوت بدهد.
+- identity در WebSocket، SSE، Web Push یا channel عمومی قرار گیرد.
+- امنیت event فقط به denylist عمومی متکی باشد.
+- response هویتی در cache مشترک یا storage پایدار ذخیره شود.
+- frontend پس از 401/403 یا تغییر session، identity قبلی را نگه دارد.
+- identity از event patch شود و API مدیریتی منبع نهایی نباشد.
+- direct broadcast و Redis path projection متفاوت داشته باشند.
+
+### تأیید مالک محصول
+
+- وضعیت: `PENDING`
+- تصمیم ثبت‌شده: هنوز تأیید نشده است.
+- پس از تأیید:
+  - وضعیت C03 در این سند به `DECIDED` تغییر می‌کند.
+  - ردیف `AMM-C03` و خروجی لازم آن در Roadmap با قرارداد identity-free Realtime به‌روزرسانی می‌شود.
+  - تحلیل `AMM-C04` آغاز می‌شود.
+
+---
+
 ## صف ادامه Stage 0
 
-`AMM-C02` نهایی شده است. challenge بعدی `AMM-C03` است: جلوگیری قطعی از نشت هویت به API و Realtime عمومی.
+`AMM-C03` در انتظار تأیید مالک محصول است. challenge بعدی `AMM-C04` خواهد بود: ماتریس مجوز مدیر میانی و مدیر ارشد برای مشاهده و اقدام.
