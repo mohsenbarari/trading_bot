@@ -1101,6 +1101,22 @@ query تاریخچه بزرگ ممکن است سنگین شود. ordering/index 
 
 حذف broadcast مستقیم بدون fallback می‌تواند realtime را هنگام خرابی Redis قطع کند؛ health و fallback باید جداگانه اثبات شوند.
 
+### گزارش اجرای Stage ۱۴ - ۲۰۲۶-۰۷-۱۴
+
+وضعیت: پیاده‌سازی و دروازه تست سطح Stage تکمیل شد؛ پذیرش multi-instance واقعی در full-matrix نهایی staging انجام می‌شود.
+
+- runtime commit برابر `53aabec40ac2c54c81588c86b43dda7414d5f00f` است. Redis transport اصلی رویدادهای عمومی است و direct local broadcast فقط در exception قطعی publish اجرا می‌شود؛ مقدار subscriber count برابر صفر fallback را فعال نمی‌کند.
+- هر event عمومی یک شناسه پایدار دارد که در payload تخت Redis با کلید رزروشده و سازگار با listener قدیمی حمل می‌شود. listener جدید آن را به envelope WebSocket و `id` استاندارد SSE منتقل می‌کند و projection عمومی همچنان کلید رزروشده و داده‌های خصوصی را حذف می‌کند.
+- dedup محدود ۵۱۲تایی هم در مرز هر WebSocket سرور و هم در WebApp اعمال می‌شود. cache سمت WebApp در reconnect همان صفحه باقی می‌ماند، event جدید را حذف نمی‌کند و پیام نسخه قدیمی بدون event id همچنان پذیرفته می‌شود. در publish مبهم که Redis event را پذیرفته ولی پاسخ خطا شده باشد، fallback همان event id را استفاده می‌کند.
+- routing خصوصی Stage ۱، notificationهای user-scoped و ممنوعیت انتشار عمومی `trade:created` تغییر نکرده‌اند. sync-apply همچنان فقط side effect محلی realtime دارد و outbound sync تازه ایجاد نمی‌کند.
+- ۲۵ تست backend realtime پاس شدند و حالت‌های Redis سالم، subscriber صفر، failure/fallback، دو manager مستقل شبیه دو worker، duplicate در یک connection، event جدید، SSE id و fail-closed خصوصی را پوشش دادند. ۴۲ تست frontend مربوط به WebSocket/Offers/Market و build کامل production نیز پاس شدند.
+- یک تست نامرتبط sync با انتظار `ignored` مقدار `deferred` گرفت؛ همان failure به‌تنهایی و بدون تغییر روی commit والد `969f79b2` عیناً بازتولید شد، پس regression این Stage نیست. فایل‌های runtime آن مسیر در Stage ۱۴ تغییر نکرده‌اند.
+
+ریسک باقی‌مانده و rollback:
+
+- fallback هنگام outage کامل Redis فقط connectionهای worker ناشر را پوشش می‌دهد؛ پوشش سراسری چند worker بدون transport مشترک ممکن نیست. این رفتار عمداً degraded-local است و health Redis باید alert مستقل داشته باشد.
+- rollback runtime با `git revert 53aabec4` انجام می‌شود و schema یا migration ندارد. قبل از release production، تست واقعی چند connection روی چند worker در staging و شمارش یک event به‌ازای هر subscriber باید در ماتریس نهایی پاس شود.
+
 ---
 
 ## Stage ۱۵ - تطبیق Payload در Idempotency ثبت آفر (`MKT-15`)
