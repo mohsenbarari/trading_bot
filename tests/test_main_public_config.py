@@ -51,6 +51,10 @@ def writer_snapshot(site: str = "webapp_fi", *, evidence: bool = False):
         readiness_approved_by="operator@example" if evidence else None,
         readiness_approved_at=now - timedelta(seconds=10) if evidence else None,
         readiness_expires_at=now + timedelta(minutes=5) if evidence else None,
+        witness_lease_id="lease-current" if evidence else None,
+        witness_lease_expires_at=now + timedelta(minutes=2) if evidence else None,
+        witness_proof_hash="b" * 64 if evidence else None,
+        witness_transition_id="witness-transition-current" if evidence else None,
     )
 
 
@@ -64,7 +68,7 @@ class ScalarResult:
 
 class FakeHealthDb:
     async def execute(self, _statement):
-        return ScalarResult("d1c6e7f8a9b0")
+        return ScalarResult("d2e7f8a9b0c1")
 
 
 class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
@@ -109,6 +113,23 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed[0].physical_site, "webapp_fi")
         self.assertEqual(observed[0].writer_epoch, 4)
         self.assertIsNone(current_writer_fence_context())
+
+    async def test_enabled_witness_gate_rejects_active_row_without_signed_lease(self):
+        downstream = AsyncMock(return_value=Response(status_code=201))
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity()), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch(
+            "main._load_runtime_writer_snapshot",
+            new=AsyncMock(return_value=writer_snapshot()),
+        ):
+            response = await main.enforce_webapp_writer_fence(
+                request("POST", "/api/offers"),
+                downstream,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("writer_witness_proof_missing", response.body.decode("utf-8"))
+        downstream.assert_not_awaited()
 
     async def test_term_change_during_request_returns_controlled_503(self):
         async def downstream(_request):
@@ -167,7 +188,11 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             main.settings, "release_sha", "release-current"
         ), patch.object(
-            main.settings, "origin_expected_migration_revision", "d1c6e7f8a9b0"
+            main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
+        ), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch(
+            "main.witness_public_key_is_valid", return_value=True
         ), patch.object(
             main.settings, "background_jobs_enabled", True
         ), patch(
@@ -182,7 +207,7 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["origin_ready"])
         self.assertEqual(payload["writer_epoch"], 4)
-        self.assertEqual(payload["migration_revision"], "d1c6e7f8a9b0")
+        self.assertEqual(payload["migration_revision"], "d2e7f8a9b0c1")
 
     async def test_origin_readiness_fails_for_standby_even_when_dependencies_work(self):
         with patch.object(main, "RUNTIME_IDENTITY", webapp_identity("webapp_ir")), patch(
@@ -194,7 +219,11 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             main.settings, "release_sha", "release-current"
         ), patch.object(
-            main.settings, "origin_expected_migration_revision", "d1c6e7f8a9b0"
+            main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
+        ), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch(
+            "main.witness_public_key_is_valid", return_value=True
         ), patch.object(
             main.settings, "background_jobs_enabled", True
         ), patch(
@@ -209,6 +238,33 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertFalse(payload["origin_ready"])
         self.assertIn("writer_active_site_mismatch", payload["reasons"])
+
+    async def test_origin_readiness_fails_until_witness_enforcement_is_enabled(self):
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity()), patch(
+            "main._local_dependency_health",
+            new=AsyncMock(return_value=(True, True, ())),
+        ), patch(
+            "main.load_writer_snapshot",
+            new=AsyncMock(return_value=writer_snapshot(evidence=True)),
+        ), patch.object(
+            main.settings, "release_sha", "release-current"
+        ), patch.object(
+            main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
+        ), patch.object(
+            main.settings, "writer_witness_required", False
+        ), patch.object(
+            main.settings, "background_jobs_enabled", True
+        ), patch(
+            "main.Path.is_file", return_value=True
+        ):
+            response = await main.get_health_origin_ready(
+                request("GET", "/health/origin-ready"),
+                FakeHealthDb(),
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("writer_witness_not_enforced", payload["reasons"])
 
 
 if __name__ == "__main__":

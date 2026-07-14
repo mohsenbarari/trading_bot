@@ -69,6 +69,7 @@ from core.writer_fencing import (
     register_writer_fence_listener,
     writer_fence_scope,
 )
+from core.writer_witness_contract import witness_public_key_is_valid
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -267,11 +268,19 @@ def _background_job_factories(writer_snapshot: WriterStateSnapshot | None = None
         )
     if settings.telegram_login_otp_enabled and settings.otp_sms_auto_fallback_enabled:
         jobs.append(("otp_sms_fallback", otp_sms_fallback_loop))
-    runtime_role = (
-        writer_snapshot.local_runtime_role(RUNTIME_IDENTITY.physical_site)
-        if writer_snapshot is not None
-        else "active"
-    )
+    if writer_snapshot is None:
+        runtime_role = "active"
+    else:
+        writer_active, _ = snapshot_is_local_active(
+            RUNTIME_IDENTITY,
+            writer_snapshot,
+            require_witness_lease=settings.writer_witness_required,
+        )
+        runtime_role = (
+            writer_snapshot.local_runtime_role(RUNTIME_IDENTITY.physical_site)
+            if writer_active
+            else "fenced"
+        )
     return filter_allowed_background_job_factories(
         jobs,
         server_mode=settings.server_mode,
@@ -306,7 +315,19 @@ def _writer_snapshot_changed(
         or previous.transition_id != current.transition_id
         or previous.active_site != current.active_site
         or previous.control_state != current.control_state
+        or previous.witness_lease_id != current.witness_lease_id
     )
+
+
+def _writer_snapshot_is_eligible(snapshot: WriterStateSnapshot | None) -> bool:
+    if snapshot is None:
+        return True
+    active, _ = snapshot_is_local_active(
+        RUNTIME_IDENTITY,
+        snapshot,
+        require_witness_lease=settings.writer_witness_required,
+    )
+    return active
 
 
 def _create_background_tasks(
@@ -315,10 +336,19 @@ def _create_background_tasks(
 ) -> list[asyncio.Task]:
     if writer_snapshot is None:
         return [asyncio.create_task(factory()) for _, factory in jobs]
-    active, _ = snapshot_is_local_active(RUNTIME_IDENTITY, writer_snapshot)
+    active, _ = snapshot_is_local_active(
+        RUNTIME_IDENTITY,
+        writer_snapshot,
+        require_witness_lease=settings.writer_witness_required,
+    )
     if not active:
         return [asyncio.create_task(factory()) for _, factory in jobs]
-    with writer_fence_scope(RUNTIME_IDENTITY, writer_snapshot, source="background_job"):
+    with writer_fence_scope(
+        RUNTIME_IDENTITY,
+        writer_snapshot,
+        source="background_job",
+        require_witness_lease=settings.writer_witness_required,
+    ):
         return [asyncio.create_task(factory()) for _, factory in jobs]
 
 
@@ -353,6 +383,7 @@ async def _run_background_leader(redis_client) -> None:
             acquired_lock = True
 
             writer_snapshot = await _load_runtime_writer_snapshot()
+            writer_eligible_at_start = _writer_snapshot_is_eligible(writer_snapshot)
             jobs = _background_job_factories(writer_snapshot)
             logger.info(
                 "API worker acquired background leader lock",
@@ -386,7 +417,11 @@ async def _run_background_leader(redis_client) -> None:
                     )
                     break
                 current_writer_snapshot = await _load_runtime_writer_snapshot()
-                if _writer_snapshot_changed(writer_snapshot, current_writer_snapshot):
+                if (
+                    _writer_snapshot_changed(writer_snapshot, current_writer_snapshot)
+                    or _writer_snapshot_is_eligible(current_writer_snapshot)
+                    != writer_eligible_at_start
+                ):
                     logger.warning(
                         "WebApp writer state changed; restarting background authority set",
                         extra={
@@ -449,7 +484,11 @@ async def _run_authorized_startup_mutations(
     writer_snapshot: WriterStateSnapshot | None,
 ) -> None:
     if writer_snapshot is not None:
-        active, reasons = snapshot_is_local_active(RUNTIME_IDENTITY, writer_snapshot)
+        active, reasons = snapshot_is_local_active(
+            RUNTIME_IDENTITY,
+            writer_snapshot,
+            require_witness_lease=settings.writer_witness_required,
+        )
         if not active:
             logger.warning(
                 "Skipping startup mutations because this WebApp site is not the active writer",
@@ -472,6 +511,7 @@ async def _run_authorized_startup_mutations(
                     RUNTIME_IDENTITY,
                     writer_snapshot,
                     source="startup_mutation",
+                    require_witness_lease=settings.writer_witness_required,
                 ):
                     await ensure_mandatory_channel_rollout(session)
                     await session.commit()
@@ -618,7 +658,11 @@ async def enforce_webapp_writer_fence(request: Request, call_next):
         return _writer_fenced_response(("writer_state_unavailable",))
     if writer_snapshot is None:
         return _writer_fenced_response(("writer_state_missing",))
-    active, reasons = snapshot_is_local_active(RUNTIME_IDENTITY, writer_snapshot)
+    active, reasons = snapshot_is_local_active(
+        RUNTIME_IDENTITY,
+        writer_snapshot,
+        require_witness_lease=settings.writer_witness_required,
+    )
     if not active:
         logger.warning(
             "Blocked mutation on a non-writer WebApp origin",
@@ -633,7 +677,12 @@ async def enforce_webapp_writer_fence(request: Request, call_next):
         )
         return _writer_fenced_response(reasons)
     try:
-        with writer_fence_scope(RUNTIME_IDENTITY, writer_snapshot, source="http_request"):
+        with writer_fence_scope(
+            RUNTIME_IDENTITY,
+            writer_snapshot,
+            source="http_request",
+            require_witness_lease=settings.writer_witness_required,
+        ):
             return await call_next(request)
     except WriterFenceError as exc:
         logger.warning(
@@ -754,6 +803,10 @@ async def get_health_origin_ready(
         raise HTTPException(status_code=404, detail="Not found")
 
     reasons: list[str] = []
+    if not settings.writer_witness_required:
+        reasons.append("writer_witness_not_enforced")
+    elif not witness_public_key_is_valid(settings.writer_witness_public_key):
+        reasons.append("writer_witness_public_key_invalid")
     database_ok, redis_ok, dependency_reasons = await _local_dependency_health(db)
     reasons.extend(dependency_reasons)
     try:
@@ -762,6 +815,7 @@ async def get_health_origin_ready(
             RUNTIME_IDENTITY,
             writer_snapshot,
             require_readiness_evidence=True,
+            require_witness_lease=True,
         )
         if not active:
             reasons.extend(writer_reasons)
@@ -806,6 +860,15 @@ async def get_health_origin_ready(
         ),
         "writer_epoch": writer_snapshot.writer_epoch if writer_snapshot is not None else None,
         "transition_id": writer_snapshot.transition_id if writer_snapshot is not None else None,
+        "witness_lease_id": (
+            writer_snapshot.witness_lease_id if writer_snapshot is not None else None
+        ),
+        "witness_lease_expires_at": (
+            writer_snapshot.witness_lease_expires_at.isoformat()
+            if writer_snapshot is not None
+            and writer_snapshot.witness_lease_expires_at is not None
+            else None
+        ),
         "readiness_evidence_id": (
             writer_snapshot.readiness_evidence_id if writer_snapshot is not None else None
         ),

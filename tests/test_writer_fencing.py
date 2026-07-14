@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from core.runtime_identity import RuntimeIdentity
@@ -15,7 +16,8 @@ def identity(site="webapp_fi"):
     return RuntimeIdentity("webapp", site, "iran", False)
 
 
-def snapshot(site="webapp_fi", epoch=2, transition_id="transition-current"):
+def snapshot(site="webapp_fi", epoch=2, transition_id="transition-current", *, witness=False):
+    now = datetime.now(timezone.utc)
     return WriterStateSnapshot(
         active_site=site,
         writer_epoch=epoch,
@@ -26,6 +28,10 @@ def snapshot(site="webapp_fi", epoch=2, transition_id="transition-current"):
         readiness_approved_by=None,
         readiness_approved_at=None,
         readiness_expires_at=None,
+        witness_lease_id="lease-current" if witness else None,
+        witness_lease_expires_at=now + timedelta(seconds=180) if witness else None,
+        witness_proof_hash="a" * 64 if witness else None,
+        witness_transition_id="witness-current" if witness else None,
     )
 
 
@@ -95,6 +101,34 @@ class WriterFenceTests(unittest.TestCase):
         session = SimpleNamespace(connection=lambda: self.fail("must not query writer state"))
 
         _enforce_writer_fence_before_commit(session)
+
+    def test_commit_boundary_fails_closed_when_required_witness_is_near_expiry(self):
+        now = datetime.now(timezone.utc)
+        valid_row = {
+            "active_site": "webapp_fi",
+            "writer_epoch": 2,
+            "control_state": "active",
+            "transition_id": "transition-current",
+            "witness_lease_id": "lease-current",
+            "witness_lease_expires_at": now + timedelta(seconds=180),
+            "database_now": now,
+        }
+        with writer_fence_scope(
+            identity(),
+            snapshot(witness=True),
+            source="test",
+            require_witness_lease=True,
+        ):
+            _enforce_writer_fence_before_commit(FakeSession(valid_row))
+            with self.assertRaises(WriterFenceError):
+                _enforce_writer_fence_before_commit(
+                    FakeSession(
+                        {
+                            **valid_row,
+                            "witness_lease_expires_at": now + timedelta(seconds=10),
+                        }
+                    )
+                )
 
 
 if __name__ == "__main__":

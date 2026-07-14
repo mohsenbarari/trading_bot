@@ -16,6 +16,12 @@ Post-review status update - 2026-06-28:
 - Merge to `main`, production rollout, strict watermark mode, and production repair are blocked until `docs/CROSS_SERVER_SYNC_PARITY_REVIEW_REMEDIATION_ROADMAP.md` is completed.
 - The remediation roadmap is now the active execution contract for the remaining sync parity hardening work.
 
+Three-site DR extension: use
+`docs/THREE_SITE_WEBAPP_DR_FAILOVER_RECOVERY_ROADMAP_20260710.md` for the
+additional WebApp-FI/WebApp-IR journal, destination receipt, recovery barrier,
+writer-term, and failover gates. Existing two-authority parity rules remain in
+force and must not be weakened by the physical third site.
+
 ## Execution Guardrails
 
 - Before every code change, verify the current branch with `git branch --show-current` and verify there are no unrelated working-tree changes.

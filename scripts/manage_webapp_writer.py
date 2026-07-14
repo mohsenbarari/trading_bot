@@ -20,14 +20,16 @@ from core.webapp_writer_control import (
     ACTION_ACTIVATE,
     ACTION_APPROVE,
     ACTION_FENCE,
+    ACTION_LEASE_REFRESH,
     WriterControlError,
     load_writer_snapshot,
     transition_writer_state,
     validate_readiness_evidence,
 )
+from core.writer_witness_contract import WitnessProofError, validate_witness_lease_proof
 
 
-ACTIONS = ("status", ACTION_FENCE, ACTION_ACTIVATE, ACTION_APPROVE)
+ACTIONS = ("status", ACTION_FENCE, ACTION_ACTIVATE, ACTION_APPROVE, ACTION_LEASE_REFRESH)
 
 
 def _expected_site(value: str | None) -> str | None:
@@ -55,6 +57,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--operator")
     parser.add_argument("--reason")
     parser.add_argument("--evidence-file")
+    parser.add_argument("--witness-proof-file")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     return parser.parse_args(argv)
@@ -79,6 +82,13 @@ def _snapshot_payload(snapshot, physical_site: str) -> dict:
             if snapshot.readiness_expires_at is not None
             else None
         ),
+        "witness_lease_id": snapshot.witness_lease_id,
+        "witness_lease_expires_at": (
+            snapshot.witness_lease_expires_at.isoformat()
+            if snapshot.witness_lease_expires_at is not None
+            else None
+        ),
+        "witness_transition_id": snapshot.witness_transition_id,
     }
 
 
@@ -105,7 +115,36 @@ async def run(args: argparse.Namespace) -> dict:
             f"current_epoch={before.writer_epoch} current_site={before.active_site!r}"
         )
 
-    target_epoch = before.writer_epoch + 1 if args.action == ACTION_ACTIVATE else before.writer_epoch
+    witness_proof = None
+    if args.witness_proof_file:
+        public_key = str(settings.writer_witness_public_key or "").strip()
+        if not public_key:
+            raise WriterControlError(
+                "WRITER_WITNESS_PUBLIC_KEY is required to validate a witness proof"
+            )
+        witness_payload = json.loads(Path(args.witness_proof_file).read_text(encoding="utf-8"))
+        witness_proof = validate_witness_lease_proof(
+            witness_payload,
+            public_key_base64=public_key,
+            expected_site=identity.physical_site,
+            expected_epoch=(before.writer_epoch if args.action == ACTION_LEASE_REFRESH else None),
+            safety_margin_seconds=settings.writer_witness_safety_margin_seconds,
+            max_clock_skew_seconds=settings.writer_witness_max_clock_skew_seconds,
+            max_lifetime_seconds=settings.writer_witness_lease_duration_seconds,
+        )
+    if settings.writer_witness_required and args.action in {
+        ACTION_ACTIVATE,
+        ACTION_LEASE_REFRESH,
+    } and witness_proof is None:
+        raise WriterControlError(f"{args.action} requires --witness-proof-file")
+
+    target_epoch = (
+        witness_proof.writer_epoch
+        if args.action == ACTION_ACTIVATE and witness_proof is not None
+        else before.writer_epoch + 1
+        if args.action == ACTION_ACTIVATE
+        else before.writer_epoch
+    )
     evidence = None
     if args.action in {ACTION_ACTIVATE, ACTION_APPROVE}:
         if not args.evidence_file:
@@ -132,6 +171,7 @@ async def run(args: argparse.Namespace) -> dict:
         "target_epoch": target_epoch,
         "required_confirmation": required_confirmation,
         "evidence_hash": evidence.content_hash if evidence is not None else None,
+        "witness_proof_hash": witness_proof.proof_hash if witness_proof is not None else None,
     }
     if not args.apply:
         return plan
@@ -157,6 +197,7 @@ async def run(args: argparse.Namespace) -> dict:
                 operator=args.operator,
                 reason=args.reason,
                 evidence=evidence,
+                witness_proof=witness_proof,
             )
             await session.commit()
         except Exception:
@@ -164,7 +205,14 @@ async def run(args: argparse.Namespace) -> dict:
             raise
     async with AsyncSessionLocal() as session:
         verified = await load_writer_snapshot(session)
-    if verified.transition_id != after.transition_id:
+    if args.action == ACTION_LEASE_REFRESH:
+        if (
+            witness_proof is None
+            or verified.witness_proof_hash != witness_proof.proof_hash
+            or verified.transition_id != before.transition_id
+        ):
+            raise WriterControlError("witness lease refresh commit could not be verified")
+    elif verified.transition_id != after.transition_id:
         raise WriterControlError("writer transition commit could not be verified")
     plan.update(
         status="applied",
@@ -178,7 +226,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         result = asyncio.run(run(args))
-    except (WriterControlError, OSError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        WriterControlError,
+        WitnessProofError,
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False, sort_keys=True))
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))

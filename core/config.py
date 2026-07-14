@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     origin_readiness_api_key: str | None = None
     origin_expected_migration_revision: str | None = None
     origin_readiness_max_evidence_age_seconds: int = 900
+    # Disabled until the dedicated Iran-reachable witness service and drills exist.
+    writer_witness_required: bool = False
+    writer_witness_public_key: str | None = None
+    writer_witness_private_key_file: str | None = None
+    writer_witness_lease_duration_seconds: int = 180
+    writer_witness_renew_interval_seconds: int = 30
+    writer_witness_safety_margin_seconds: int = 15
+    writer_witness_max_clock_skew_seconds: int = 5
+    writer_witness_authoritative_site: str = "webapp_ir"
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None

@@ -8,6 +8,7 @@ from core.webapp_writer_control import (
     ACTION_ACTIVATE,
     ACTION_APPROVE,
     ACTION_FENCE,
+    ACTION_LEASE_REFRESH,
     CONTROL_ACTIVE,
     CONTROL_FENCED,
     REQUIRED_READY_EVIDENCE_FLAGS,
@@ -17,6 +18,7 @@ from core.webapp_writer_control import (
     transition_writer_state,
     validate_readiness_evidence,
 )
+from core.writer_witness_contract import ValidatedWitnessLeaseProof
 
 
 NOW = datetime(2026, 7, 14, 21, 0, tzinfo=timezone.utc)
@@ -57,6 +59,10 @@ def writer_state(*, active_site="webapp_fi", epoch=1, control_state=CONTROL_ACTI
         readiness_expires_at=None,
         updated_by="migration",
         reason="bootstrap",
+        witness_lease_id=None,
+        witness_lease_expires_at=None,
+        witness_proof_hash=None,
+        witness_transition_id=None,
     )
 
 
@@ -240,6 +246,82 @@ class WriterTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reasons, ())
         self.assertFalse(standby)
         self.assertIn("writer_active_site_mismatch", standby_reasons)
+
+    async def test_lease_refresh_preserves_writer_transition_for_inflight_transactions(self):
+        state = writer_state(active_site="webapp_fi", epoch=7)
+        state.witness_lease_id = "lease-7"
+        state.witness_lease_expires_at = NOW + timedelta(seconds=60)
+        state.witness_proof_hash = "a" * 64
+        state.witness_transition_id = "witness-before"
+        session = FakeSession()
+        proof = ValidatedWitnessLeaseProof(
+            holder_site="webapp_fi",
+            writer_epoch=7,
+            lease_id="lease-7",
+            issued_at=NOW,
+            expires_at=NOW + timedelta(seconds=180),
+            witness_transition_id="witness-renewed",
+            proof_hash="b" * 64,
+            canonical_payload={},
+        )
+
+        with patch(
+            "core.webapp_writer_control.load_writer_state",
+            new=AsyncMock(return_value=state),
+        ):
+            refreshed = await transition_writer_state(
+                session,
+                action=ACTION_LEASE_REFRESH,
+                identity=webapp_identity(),
+                expected_epoch=7,
+                expected_active_site="webapp_fi",
+                operator="operator@example",
+                reason="scheduled lease refresh",
+                witness_proof=proof,
+                now=NOW,
+            )
+
+        self.assertEqual(refreshed.transition_id, "transition-before")
+        self.assertEqual(refreshed.witness_proof_hash, "b" * 64)
+        self.assertEqual(session.added[0].action, ACTION_LEASE_REFRESH)
+        self.assertNotEqual(session.added[0].transition_id, refreshed.transition_id)
+        self.assertEqual(session.added[0].witness_proof_hash, "b" * 64)
+
+    def test_snapshot_witness_gate_uses_local_safety_margin(self):
+        base = WriterStateSnapshot(
+            active_site="webapp_fi",
+            writer_epoch=3,
+            control_state=CONTROL_ACTIVE,
+            transition_id="transition-current",
+            readiness_evidence_hash=None,
+            readiness_evidence_id=None,
+            readiness_approved_by=None,
+            readiness_approved_at=None,
+            readiness_expires_at=None,
+            witness_lease_id="lease-3",
+            witness_lease_expires_at=NOW + timedelta(seconds=16),
+            witness_proof_hash="a" * 64,
+            witness_transition_id="witness-3",
+        )
+
+        active, _ = snapshot_is_local_active(
+            webapp_identity(),
+            base,
+            now=NOW,
+            require_witness_lease=True,
+            witness_safety_margin_seconds=15,
+        )
+        expired, reasons = snapshot_is_local_active(
+            webapp_identity(),
+            base,
+            now=NOW + timedelta(seconds=1),
+            require_witness_lease=True,
+            witness_safety_margin_seconds=15,
+        )
+
+        self.assertTrue(active)
+        self.assertFalse(expired)
+        self.assertIn("writer_witness_lease_expired", reasons)
 
 
 if __name__ == "__main__":

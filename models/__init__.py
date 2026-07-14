@@ -79,7 +79,12 @@ from .upload_session import (
 from .change_log import ChangeLog
 from .sync_block import SyncBlock
 from .sync_apply_watermark import SyncApplyWatermark
-from .webapp_writer_state import WebappWriterState, WebappWriterTransition
+from .webapp_writer_state import (
+    WebappWriterState,
+    WebappWriterTransition,
+    WebappWriterWitnessReceipt,
+    WebappWriterWitnessState,
+)
 
 __all__ = [
     # User & Auth
@@ -172,4 +177,6 @@ __all__ = [
     "SyncApplyWatermark",
     "WebappWriterState",
     "WebappWriterTransition",
+    "WebappWriterWitnessState",
+    "WebappWriterWitnessReceipt",
 ]

@@ -5,12 +5,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Iterator
 
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
 from core.runtime_identity import RuntimeIdentity
+from core.config import settings
 from core.webapp_writer_control import WriterStateSnapshot, snapshot_is_local_active
 
 
@@ -23,6 +25,8 @@ class WriterFenceContext:
     physical_site: str
     writer_epoch: int
     transition_id: str
+    witness_lease_id: str | None
+    require_witness_lease: bool
     source: str
 
 
@@ -43,14 +47,21 @@ def writer_fence_scope(
     snapshot: WriterStateSnapshot,
     *,
     source: str,
+    require_witness_lease: bool = False,
 ) -> Iterator[WriterFenceContext]:
-    active, reasons = snapshot_is_local_active(identity, snapshot)
+    active, reasons = snapshot_is_local_active(
+        identity,
+        snapshot,
+        require_witness_lease=require_witness_lease,
+    )
     if not active:
         raise WriterFenceError("writer preflight rejected: " + ",".join(reasons))
     context = WriterFenceContext(
         physical_site=identity.physical_site,
         writer_epoch=snapshot.writer_epoch,
         transition_id=snapshot.transition_id,
+        witness_lease_id=snapshot.witness_lease_id,
+        require_witness_lease=require_witness_lease,
         source=source,
     )
     token: Token = _writer_fence_context.set(context)
@@ -67,7 +78,9 @@ def _enforce_writer_fence_before_commit(session: Session) -> None:
     row = session.connection().execute(
         text(
             """
-            SELECT active_site, writer_epoch, control_state, transition_id
+            SELECT active_site, writer_epoch, control_state, transition_id,
+                   witness_lease_id, witness_lease_expires_at,
+                   clock_timestamp() AS database_now
             FROM webapp_writer_state
             WHERE authority = 'webapp'
             FOR SHARE
@@ -84,6 +97,16 @@ def _enforce_writer_fence_before_commit(session: Session) -> None:
         raise WriterFenceError("writer epoch changed before commit")
     if row["transition_id"] != context.transition_id:
         raise WriterFenceError("writer transition changed before commit")
+    if context.require_witness_lease:
+        if not context.witness_lease_id or row["witness_lease_id"] != context.witness_lease_id:
+            raise WriterFenceError("writer witness lease changed before commit")
+        if row["witness_lease_expires_at"] is None:
+            raise WriterFenceError("writer witness lease expiry is missing at commit boundary")
+        safety_deadline = row["database_now"] + timedelta(
+            seconds=max(0, int(settings.writer_witness_safety_margin_seconds))
+        )
+        if row["witness_lease_expires_at"] <= safety_deadline:
+            raise WriterFenceError("writer witness lease expired before commit")
 
 
 def register_writer_fence_listener() -> None:

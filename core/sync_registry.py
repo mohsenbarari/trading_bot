@@ -435,6 +435,22 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "append-only local audit; exchange only through signed recovery evidence",
         "promotion, demotion, and readiness audit only",
     ),
+    "webapp_writer_witness_state": _entry(
+        "webapp_writer_witness_state",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_witness_control_plane",),
+        "Iran-reachable witness database only",
+        "never product-sync or resolve this singleton through ordinary sync",
+        "global writer epoch and time-bounded lease authority only",
+    ),
+    "webapp_writer_witness_receipts": _entry(
+        "webapp_writer_witness_receipts",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_witness_control_plane", "operator_audit"),
+        "Iran-reachable witness database only",
+        "replay-safe local request ledger; never product-sync",
+        "witness command idempotency and audit only",
+    ),
 }
 
 

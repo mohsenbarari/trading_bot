@@ -46,6 +46,10 @@ class WriterFencingPostgresTests(unittest.IsolatedAsyncioTestCase):
                         writer_epoch = 10,
                         control_state = 'active',
                         transition_id = 'integration-active-term',
+                        witness_lease_id = 'integration-lease',
+                        witness_lease_expires_at = clock_timestamp() + interval '180 seconds',
+                        witness_proof_hash = repeat('a', 64),
+                        witness_transition_id = 'integration-witness-term',
                         updated_by = 'integration-test',
                         reason = 'integration setup'
                     WHERE authority = 'webapp'
@@ -80,6 +84,34 @@ class WriterFencingPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.sessions() as stale_session:
             with writer_fence_scope(identity, snapshot, source="postgres_integration"):
+                with self.assertRaises(WriterFenceError):
+                    await stale_session.commit()
+                await stale_session.rollback()
+
+    async def test_commit_rejects_witness_lease_inside_safety_margin(self):
+        identity = RuntimeIdentity("webapp", "webapp_fi", "iran", False)
+        async with self.sessions() as session:
+            snapshot = await load_writer_snapshot(session)
+
+        async with self.sessions() as control_session:
+            await control_session.execute(
+                text(
+                    """
+                    UPDATE webapp_writer_state
+                    SET witness_lease_expires_at = clock_timestamp() + interval '5 seconds'
+                    WHERE authority = 'webapp'
+                    """
+                )
+            )
+            await control_session.commit()
+
+        async with self.sessions() as stale_session:
+            with writer_fence_scope(
+                identity,
+                snapshot,
+                source="postgres_witness_integration",
+                require_witness_lease=True,
+            ):
                 with self.assertRaises(WriterFenceError):
                     await stale_session.commit()
                 await stale_session.rollback()

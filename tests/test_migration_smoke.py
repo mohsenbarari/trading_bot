@@ -38,7 +38,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         self.assertTrue(result.stdout.strip(), msg='Expected at least one Alembic head revision')
-        self.assertIn('d1c6e7f8a9b0', result.stdout)
+        self.assertIn('d2e7f8a9b0c1', result.stdout)
 
     def test_webapp_writer_migration_bootstraps_current_fi_writer(self):
         migration = (
@@ -50,6 +50,19 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('webapp_writer_transitions', migration)
         self.assertIn("'webapp_fi', 1, 'active'", migration)
         self.assertIn('ck_webapp_writer_state_active_consistency', migration)
+
+    def test_webapp_writer_witness_migration_is_additive_and_bootstraps_vacant(self):
+        migration = (
+            REPO_ROOT
+            / 'migrations/versions/d2e7f8a9b0c1_add_webapp_writer_witness_lease.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "d1c6e7f8a9b0"', migration)
+        self.assertIn('webapp_writer_witness_state', migration)
+        self.assertIn('webapp_writer_witness_receipts', migration)
+        self.assertIn("'webapp', NULL, 0, NULL, 'vacant'", migration)
+        self.assertIn('lease_refresh', migration)
+        self.assertIn('witness_proof_hash', migration)
 
     def test_offer_request_ledger_enum_migration_is_idempotent(self):
         migration = (REPO_ROOT / 'migrations/versions/c8d9e0f1a2b3_add_offer_request_ledger.py').read_text(

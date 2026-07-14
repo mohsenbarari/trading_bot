@@ -86,6 +86,8 @@ class SyncRegistryTests(unittest.TestCase):
             "sync_blocks",
             "webapp_writer_state",
             "webapp_writer_transitions",
+            "webapp_writer_witness_state",
+            "webapp_writer_witness_receipts",
         }:
             with self.subTest(table_name=table_name):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.INTERNAL_BOOKKEEPING)

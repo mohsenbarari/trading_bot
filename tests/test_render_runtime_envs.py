@@ -26,8 +26,15 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "OBSERVABILITY_API_KEY": "obs-key",
             "RELEASE_SHA": "release-sha",
             "IRAN_ORIGIN_READINESS_API_KEY": "origin-ready-key",
-            "ORIGIN_EXPECTED_MIGRATION_REVISION": "d1c6e7f8a9b0",
+            "ORIGIN_EXPECTED_MIGRATION_REVISION": "d2e7f8a9b0c1",
             "ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS": "900",
+            "WRITER_WITNESS_REQUIRED": "false",
+            "WRITER_WITNESS_PUBLIC_KEY": "witness-public-key",
+            "WRITER_WITNESS_LEASE_DURATION_SECONDS": "180",
+            "WRITER_WITNESS_RENEW_INTERVAL_SECONDS": "30",
+            "WRITER_WITNESS_SAFETY_MARGIN_SECONDS": "15",
+            "WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS": "5",
+            "WRITER_WITNESS_AUTHORITATIVE_SITE": "webapp_ir",
             "CHANNEL_ID": "-100123",
             "CHANNEL_INVITE_LINK": "https://t.me/example",
             "SMSIR_API_KEY": "sms-key",
@@ -160,7 +167,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["OTP_DELIVERY_STATE_SECRET"], "")
         self.assertEqual(foreign["ORIGIN_READINESS_API_KEY"], "")
         self.assertEqual(iran["ORIGIN_READINESS_API_KEY"], "origin-ready-key")
-        self.assertEqual(iran["ORIGIN_EXPECTED_MIGRATION_REVISION"], "d1c6e7f8a9b0")
+        self.assertEqual(iran["ORIGIN_EXPECTED_MIGRATION_REVISION"], "d2e7f8a9b0c1")
+        self.assertEqual(iran["WRITER_WITNESS_REQUIRED"], "false")
+        self.assertEqual(iran["WRITER_WITNESS_PUBLIC_KEY"], "witness-public-key")
         self.assertEqual(iran["RELEASE_SHA"], "release-sha")
         self.assertEqual(
             iran["OTP_DELIVERY_STATE_SECRET"],
@@ -270,9 +279,11 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("ORIGIN_READINESS_API_KEY=", foreign_lines)
             self.assertIn("ORIGIN_READINESS_API_KEY=origin-ready-key", iran_lines)
             self.assertIn(
-                "ORIGIN_EXPECTED_MIGRATION_REVISION=d1c6e7f8a9b0",
+                "ORIGIN_EXPECTED_MIGRATION_REVISION=d2e7f8a9b0c1",
                 iran_lines,
             )
+            self.assertIn("WRITER_WITNESS_REQUIRED=false", iran_lines)
+            self.assertIn("WRITER_WITNESS_PUBLIC_KEY=witness-public-key", iran_lines)
             self.assertIn(
                 "OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
                 iran_lines,

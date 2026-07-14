@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any
@@ -14,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.runtime_identity import RuntimeIdentity, WEBAPP_SITES
+from core.writer_witness_contract import (
+    ValidatedWitnessLeaseProof,
+    witness_timing_configuration_is_safe,
+)
 from models.webapp_writer_state import WebappWriterState, WebappWriterTransition
 
 
@@ -24,6 +28,7 @@ CONTROL_HANDOFF = "handoff"
 ACTION_FENCE = "fence"
 ACTION_ACTIVATE = "activate"
 ACTION_APPROVE = "approve"
+ACTION_LEASE_REFRESH = "lease_refresh"
 
 REQUIRED_READY_EVIDENCE_FLAGS = (
     "schema_compatible",
@@ -52,6 +57,10 @@ class WriterStateSnapshot:
     readiness_approved_by: str | None
     readiness_approved_at: datetime | None
     readiness_expires_at: datetime | None
+    witness_lease_id: str | None = None
+    witness_lease_expires_at: datetime | None = None
+    witness_proof_hash: str | None = None
+    witness_transition_id: str | None = None
 
     def local_runtime_role(self, physical_site: str) -> str:
         if self.control_state == CONTROL_ACTIVE:
@@ -89,6 +98,10 @@ def writer_state_snapshot(state: WebappWriterState) -> WriterStateSnapshot:
         readiness_approved_by=state.readiness_approved_by,
         readiness_approved_at=state.readiness_approved_at,
         readiness_expires_at=state.readiness_expires_at,
+        witness_lease_id=getattr(state, "witness_lease_id", None),
+        witness_lease_expires_at=getattr(state, "witness_lease_expires_at", None),
+        witness_proof_hash=getattr(state, "witness_proof_hash", None),
+        witness_transition_id=getattr(state, "witness_transition_id", None),
     )
 
 
@@ -189,6 +202,8 @@ def snapshot_is_local_active(
     *,
     now: datetime | None = None,
     require_readiness_evidence: bool = False,
+    require_witness_lease: bool = False,
+    witness_safety_margin_seconds: int | None = None,
 ) -> tuple[bool, tuple[str, ...]]:
     reasons: list[str] = []
     if not identity.is_webapp_site or not identity.is_webapp_authority:
@@ -206,6 +221,34 @@ def snapshot_is_local_active(
             reasons.append("readiness_approval_missing")
         elif _utc(snapshot.readiness_expires_at) <= _utc(now or datetime.now(timezone.utc)):
             reasons.append("readiness_evidence_expired")
+    if require_witness_lease:
+        if not witness_timing_configuration_is_safe(
+            lease_duration_seconds=settings.writer_witness_lease_duration_seconds,
+            renew_interval_seconds=settings.writer_witness_renew_interval_seconds,
+            safety_margin_seconds=settings.writer_witness_safety_margin_seconds,
+            max_clock_skew_seconds=settings.writer_witness_max_clock_skew_seconds,
+        ):
+            reasons.append("writer_witness_timing_invalid")
+        if (
+            not snapshot.witness_lease_id
+            or not snapshot.witness_proof_hash
+            or not snapshot.witness_transition_id
+        ):
+            reasons.append("writer_witness_proof_missing")
+        if snapshot.witness_lease_expires_at is None:
+            reasons.append("writer_witness_expiry_missing")
+        else:
+            margin = max(
+                0,
+                int(
+                    witness_safety_margin_seconds
+                    if witness_safety_margin_seconds is not None
+                    else settings.writer_witness_safety_margin_seconds
+                ),
+            )
+            deadline = _utc(now or datetime.now(timezone.utc)) + timedelta(seconds=margin)
+            if _utc(snapshot.witness_lease_expires_at) <= deadline:
+                reasons.append("writer_witness_lease_expired")
     return not reasons, tuple(reasons)
 
 
@@ -215,6 +258,23 @@ def _clear_readiness(state: WebappWriterState) -> None:
     state.readiness_approved_by = None
     state.readiness_approved_at = None
     state.readiness_expires_at = None
+
+
+def _clear_witness_lease(state: WebappWriterState) -> None:
+    state.witness_lease_id = None
+    state.witness_lease_expires_at = None
+    state.witness_proof_hash = None
+    state.witness_transition_id = None
+
+
+def _store_witness_lease(
+    state: WebappWriterState,
+    proof: ValidatedWitnessLeaseProof,
+) -> None:
+    state.witness_lease_id = proof.lease_id
+    state.witness_lease_expires_at = proof.expires_at
+    state.witness_proof_hash = proof.proof_hash
+    state.witness_transition_id = proof.witness_transition_id
 
 
 async def transition_writer_state(
@@ -227,10 +287,15 @@ async def transition_writer_state(
     operator: str,
     reason: str,
     evidence: ValidatedReadinessEvidence | None = None,
+    witness_proof: ValidatedWitnessLeaseProof | None = None,
     now: datetime | None = None,
 ) -> WriterStateSnapshot:
     if not identity.is_webapp_site:
         raise WriterControlError("writer transitions are valid only on a WebApp physical site")
+    if evidence is not None and action not in {ACTION_ACTIVATE, ACTION_APPROVE}:
+        raise WriterControlError("readiness evidence is not valid for this writer action")
+    if witness_proof is not None and action not in {ACTION_ACTIVATE, ACTION_LEASE_REFRESH}:
+        raise WriterControlError("witness lease proof is not valid for this writer action")
     operator = operator.strip()
     reason = reason.strip()
     if not operator or not reason:
@@ -247,10 +312,12 @@ async def transition_writer_state(
             f"stale active site: current={previous_site!r} expected={expected_active_site!r}"
         )
 
-    transition_id = str(uuid4())
+    audit_transition_id = str(uuid4())
+    transition_id = audit_transition_id
     new_site: str | None
     new_epoch = previous_epoch
     evidence_hash: str | None = None
+    witness_hash = witness_proof.proof_hash if witness_proof is not None else None
     approved_at = _utc(now or datetime.now(timezone.utc))
 
     if action == ACTION_FENCE:
@@ -259,11 +326,18 @@ async def transition_writer_state(
         state.control_state = CONTROL_FENCED
         state.active_site = None
         _clear_readiness(state)
+        _clear_witness_lease(state)
         new_site = None
     elif action == ACTION_ACTIVATE:
         if state.control_state != CONTROL_FENCED or state.active_site is not None:
             raise WriterControlError("activation requires a locally fenced writer state")
-        new_epoch = previous_epoch + 1
+        new_epoch = witness_proof.writer_epoch if witness_proof is not None else previous_epoch + 1
+        if new_epoch <= previous_epoch:
+            raise WriterControlError("activation witness epoch must advance the local writer epoch")
+        if settings.writer_witness_required and witness_proof is None:
+            raise WriterControlError("activation requires a validated witness lease proof")
+        if witness_proof is not None and witness_proof.holder_site != identity.physical_site:
+            raise WriterControlError("activation witness proof does not belong to the local site")
         if evidence is None:
             raise WriterControlError("activation requires validated readiness evidence")
         if evidence.target_site != identity.physical_site or evidence.writer_epoch != new_epoch:
@@ -276,8 +350,32 @@ async def transition_writer_state(
         state.readiness_approved_by = operator
         state.readiness_approved_at = approved_at
         state.readiness_expires_at = evidence.expires_at
+        if witness_proof is not None:
+            _store_witness_lease(state, witness_proof)
         evidence_hash = evidence.content_hash
         new_site = identity.physical_site
+    elif action == ACTION_LEASE_REFRESH:
+        if state.control_state != CONTROL_ACTIVE or state.active_site != identity.physical_site:
+            raise WriterControlError("lease refresh requires the local site to be active")
+        if witness_proof is None:
+            raise WriterControlError("lease refresh requires a validated witness lease proof")
+        if (
+            witness_proof.holder_site != identity.physical_site
+            or witness_proof.writer_epoch != previous_epoch
+        ):
+            raise WriterControlError("witness lease proof does not match the local active term")
+        if state.witness_lease_id and state.witness_lease_id != witness_proof.lease_id:
+            raise WriterControlError("witness lease id changed inside an active writer term")
+        if (
+            state.witness_lease_expires_at is not None
+            and _utc(witness_proof.expires_at) <= _utc(state.witness_lease_expires_at)
+        ):
+            raise WriterControlError("witness lease refresh must advance the local expiry")
+        _store_witness_lease(state, witness_proof)
+        new_site = identity.physical_site
+        # Lease renewal must not invalidate in-flight transactions. Keep the
+        # writer transition id stable and use a separate audit row id.
+        transition_id = state.transition_id
     elif action == ACTION_APPROVE:
         if state.control_state != CONTROL_ACTIVE or state.active_site != identity.physical_site:
             raise WriterControlError("readiness approval requires the local site to be active")
@@ -300,7 +398,7 @@ async def transition_writer_state(
     state.reason = reason
     session.add(
         WebappWriterTransition(
-            transition_id=transition_id,
+            transition_id=audit_transition_id,
             authority="webapp",
             action=action,
             previous_active_site=previous_site,
@@ -310,6 +408,7 @@ async def transition_writer_state(
             operator=operator,
             reason=reason,
             evidence_hash=evidence_hash,
+            witness_proof_hash=witness_hash,
         )
     )
     await session.flush()
