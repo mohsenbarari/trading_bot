@@ -3607,12 +3607,15 @@ async def _execute_trade_authoritatively(
 
     from .realtime import publish_event
     try:
-        await publish_event("offer:updated", {
+        realtime_offer_payload = {
             "id": offer.id,
             "remaining_quantity": offer.remaining_quantity,
             "lot_sizes": offer.lot_sizes,
             "status": offer.status.value
-        })
+        }
+        if getattr(offer, "offer_public_id", None):
+            realtime_offer_payload["offer_public_id"] = offer.offer_public_id
+        await publish_event("offer:updated", realtime_offer_payload)
     except Exception as exc:
         log_trading_event(
             logger,

@@ -1564,7 +1564,10 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
         except Exception as exc:
             logger.warning("bot_cancel_all_channel_state_failed: %s", type(exc).__name__)
         try:
-            await publish_event("offer:expired", {"id": offer.id})
+            realtime_payload = {"id": offer.id}
+            if getattr(offer, "offer_public_id", None):
+                realtime_payload["offer_public_id"] = offer.offer_public_id
+            await publish_event("offer:expired", realtime_payload)
         except Exception as exc:
             logger.warning("bot_cancel_all_realtime_failed: %s", type(exc).__name__)
     if result.total_count and result.remaining_active_count is not None:

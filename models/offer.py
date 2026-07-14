@@ -122,3 +122,10 @@ Index(
     Offer.created_at.desc(),
     postgresql_where=(Offer.status == OfferStatus.EXPIRED) & (Offer.expire_reason == "time_limit"),
 )
+
+Index(
+    'ix_offers_active_created_id',
+    Offer.created_at.desc(),
+    Offer.id.desc(),
+    postgresql_where=Offer.status == OfferStatus.ACTIVE,
+)

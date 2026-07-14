@@ -2,6 +2,9 @@
 """
 API Router for Offer Management - Web App Integration
 """
+import base64
+import binascii
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
@@ -102,7 +105,7 @@ from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
 from models.user import User
-from core.enums import UserRole
+from core.enums import SettlementType, UserRole
 from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
 from models.offer_publication_state import OfferPublicationState
@@ -241,6 +244,13 @@ class OfferResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ActiveOfferPageResponse(BaseModel):
+    items: List[OfferResponse]
+    next_cursor: Optional[str] = None
+    has_more: bool
+    page_size: int
 
 
 class MarketHistoryOfferResponse(OfferResponse):
@@ -630,6 +640,111 @@ def _offer_response_to_dict(response: OfferResponse) -> dict:
     return response.dict()
 
 
+def _active_offer_filter_signature(
+    *,
+    offer_type: str | None,
+    settlement_type: str | None,
+    commodity_id: int | None,
+    own_only: bool,
+) -> dict[str, object]:
+    return {
+        "offer_type": offer_type or "",
+        "settlement_type": settlement_type or "",
+        "commodity_id": int(commodity_id or 0),
+        "own_only": bool(own_only),
+    }
+
+
+def _encode_active_offer_cursor(
+    offer: Offer | object,
+    *,
+    filter_signature: dict[str, object],
+) -> str:
+    created_at = getattr(offer, "created_at", None)
+    offer_id = getattr(offer, "id", None)
+    if not isinstance(created_at, datetime) or not isinstance(offer_id, int) or offer_id <= 0:
+        raise ValueError("active offer cursor requires created_at and id")
+    payload = {
+        "v": 1,
+        "created_at": created_at.isoformat(),
+        "id": offer_id,
+        "filters": filter_signature,
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def _decode_active_offer_cursor(
+    cursor: str,
+    *,
+    expected_filter_signature: dict[str, object],
+) -> tuple[datetime, int]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.b64decode(
+            f"{cursor}{padding}",
+            altchars=b"-_",
+            validate=True,
+        )
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("v") != 1:
+            raise ValueError("unsupported cursor version")
+        offer_id = payload.get("id")
+        if not isinstance(offer_id, int) or isinstance(offer_id, bool) or offer_id <= 0:
+            raise ValueError("invalid cursor id")
+        created_at = datetime.fromisoformat(payload.get("created_at"))
+        if payload.get("filters") != expected_filter_signature:
+            raise ValueError("cursor filters do not match")
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="نشانگر صفحه بازار نامعتبر است.",
+        ) from exc
+    return created_at, offer_id
+
+
+def _build_active_offer_page_query(
+    *,
+    owner_user_id: int,
+    offer_type: str | None,
+    settlement_type: str | None,
+    commodity_id: int | None,
+    own_only: bool,
+    cursor_position: tuple[datetime, int] | None,
+    limit: int,
+):
+    query = select(Offer).options(
+        *build_offer_read_options(include_owner_identity=False)
+    ).where(Offer.status == OfferStatus.ACTIVE)
+
+    if offer_type:
+        query = query.where(
+            Offer.offer_type == (OfferType.BUY if offer_type == "buy" else OfferType.SELL)
+        )
+    if settlement_type:
+        query = query.where(
+            Offer.settlement_type == (
+                SettlementType.CASH if settlement_type == "cash" else SettlementType.TOMORROW
+            )
+        )
+    if commodity_id:
+        query = query.where(Offer.commodity_id == commodity_id)
+    if own_only:
+        query = query.where(Offer.user_id == owner_user_id)
+    if cursor_position is not None:
+        cursor_created_at, cursor_id = cursor_position
+        query = query.where(
+            or_(
+                Offer.created_at < cursor_created_at,
+                and_(Offer.created_at == cursor_created_at, Offer.id < cursor_id),
+            )
+        )
+
+    return query.order_by(Offer.created_at.desc(), Offer.id.desc()).limit(limit + 1)
+
+
 def _build_market_history_response(
     response: OfferResponse,
     offer: Offer,
@@ -768,7 +883,10 @@ async def _expire_offer_side_effects(
             dedupe_key=side_effect_dedupe_key,
         )
     await _remove_offer_channel_buttons_safely(offer, reason=channel_reason, timeout=channel_timeout)
-    await _publish_offer_event_safely("offer:expired", {"id": offer.id}, reason=realtime_reason)
+    realtime_payload = {"id": offer.id}
+    if getattr(offer, "offer_public_id", None):
+        realtime_payload["offer_public_id"] = offer.offer_public_id
+    await _publish_offer_event_safely("offer:expired", realtime_payload, reason=realtime_reason)
     if update_active_count and getattr(offer, "user_id", None):
         active_count = await _read_active_offer_count(db, offer.user_id)
         await _set_active_offer_count_safely(offer.user_id, active_count, reason=realtime_reason)
@@ -1483,7 +1601,7 @@ async def get_active_offers(
     if commodity_id:
         query = query.where(Offer.commodity_id == commodity_id)
     
-    query = query.order_by(Offer.created_at.desc()).offset(skip).limit(limit)
+    query = query.order_by(Offer.created_at.desc(), Offer.id.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     offers = result.scalars().all()
@@ -1500,6 +1618,73 @@ async def get_active_offers(
         start_settings=ts,
         viewer_user_id=owner_user.id,
         include_owner_identity=False,
+    )
+
+
+@router.get("/page", response_model=ActiveOfferPageResponse)
+async def get_active_offer_page(
+    offer_type: Optional[str] = Query(None, pattern="^(buy|sell)$"),
+    settlement_type: Optional[str] = Query(None, pattern="^(cash|tomorrow)$"),
+    commodity_id: Optional[int] = Query(None, gt=0),
+    own_only: bool = Query(False),
+    cursor: Optional[str] = Query(None, min_length=1, max_length=512),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
+):
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+    owner_user = context.owner_user
+    filter_signature = _active_offer_filter_signature(
+        offer_type=offer_type,
+        settlement_type=settlement_type,
+        commodity_id=commodity_id,
+        own_only=own_only,
+    )
+    cursor_position = None
+    if cursor:
+        cursor_position = _decode_active_offer_cursor(
+            cursor,
+            expected_filter_signature=filter_signature,
+        )
+
+    query = _build_active_offer_page_query(
+        owner_user_id=owner_user.id,
+        offer_type=offer_type,
+        settlement_type=settlement_type,
+        commodity_id=commodity_id,
+        own_only=own_only,
+        cursor_position=cursor_position,
+        limit=limit,
+    )
+    rows = list((await db.execute(query)).scalars().all())
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    if not page_rows:
+        return ActiveOfferPageResponse(items=[], has_more=False, page_size=0)
+
+    from core.trading_settings import get_trading_settings_async
+
+    trading_settings = await get_trading_settings_async()
+    items = await _serialize_offer_responses(
+        page_rows,
+        db=db,
+        start_settings=trading_settings,
+        viewer_user_id=owner_user.id,
+        include_owner_identity=False,
+    )
+    next_cursor = None
+    if has_more:
+        next_cursor = _encode_active_offer_cursor(
+            page_rows[-1],
+            filter_signature=filter_signature,
+        )
+    return ActiveOfferPageResponse(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+        page_size=len(items),
     )
 
 

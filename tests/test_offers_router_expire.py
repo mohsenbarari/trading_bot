@@ -219,7 +219,10 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.expire_source_surface, "webapp")
         self.assertEqual(offer.expire_source_server, "iran")
         db.commit.assert_awaited_once()
-        publish_mock.assert_awaited_once_with("offer:expired", {"id": 7})
+        publish_mock.assert_awaited_once_with(
+            "offer:expired",
+            {"id": 7, "offer_public_id": "ofr_api_7"},
+        )
         set_count_mock.assert_awaited_once_with(5, 0)
 
     async def test_expire_offer_forwards_remote_home_without_local_mutation(self):
@@ -399,7 +402,10 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.expire_source_surface, "webapp")
         self.assertEqual(offer.expire_source_server, "iran")
         db.commit.assert_awaited_once()
-        publish_mock.assert_awaited_once_with("offer:expired", {"id": 21})
+        publish_mock.assert_awaited_once_with(
+            "offer:expired",
+            {"id": 21, "offer_public_id": "ofr_internal_21"},
+        )
         set_count_mock.assert_awaited_once_with(5, 0)
 
     async def test_expire_offer_applies_channel_state_when_message_exists(self):

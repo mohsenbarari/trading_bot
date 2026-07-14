@@ -1160,4 +1160,40 @@ describe('OffersList.vue', () => {
 
     expect(wrapper.find('.trade-suggestion-card').exists()).toBe(false)
   })
+
+  it('emits active pagination requests and disables the action while loading', async () => {
+    const wrapper = await mountOffersList({
+      offers: [buildTradeOffer()],
+      hasMoreActive: true,
+      activeLoading: false,
+    })
+
+    const button = wrapper.get('.active-load-more-btn')
+    await button.trigger('click')
+    expect(wrapper.emitted('load-more-active')).toHaveLength(1)
+
+    await wrapper.setProps({ activeLoading: true })
+    expect(wrapper.get('.active-load-more-btn').attributes()).toHaveProperty('disabled')
+    expect(wrapper.get('.active-load-more-btn').text()).toContain('در حال دریافت')
+  })
+
+  it('offers retry after initial and paginated active-list failures', async () => {
+    const initialWrapper = await mountOffersList({
+      offers: [],
+      activeLoadError: 'دریافت بازار ممکن نشد.',
+    })
+    expect(initialWrapper.text()).toContain('دریافت بازار ممکن نشد.')
+    await initialWrapper.get('.market-page-retry-btn').trigger('click')
+    expect(initialWrapper.emitted('retry-active')).toHaveLength(1)
+
+    const paginatedWrapper = await mountOffersList({
+      offers: [buildTradeOffer()],
+      hasMoreActive: true,
+      activeLoadError: 'دریافت ادامه بازار ممکن نشد.',
+    })
+    expect(paginatedWrapper.get('.active-load-error').text()).toContain('دریافت ادامه بازار ممکن نشد.')
+    await paginatedWrapper.get('.market-page-retry-btn').trigger('click')
+    expect(paginatedWrapper.emitted('retry-active')).toHaveLength(1)
+    expect(paginatedWrapper.find('.active-load-more-btn').exists()).toBe(false)
+  })
 })

@@ -5,7 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const marketViewMocks = vi.hoisted(() => ({
   offersRef: null as any,
   isLoadingRef: null as any,
+  isLoadingMoreRef: null as any,
+  errorRef: null as any,
+  paginationErrorRef: null as any,
+  hasMoreRef: null as any,
   fetchOffersMock: vi.fn(),
+  loadMoreOffersMock: vi.fn(),
+  setFiltersMock: vi.fn(),
   startPollingMock: vi.fn(),
   stopPollingMock: vi.fn(),
   toggleSortMock: vi.fn(),
@@ -22,7 +28,13 @@ vi.mock('../composables/useOffers', () => ({
   useOffers: () => ({
     offers: marketViewMocks.offersRef,
     isLoading: marketViewMocks.isLoadingRef,
+    isLoadingMore: marketViewMocks.isLoadingMoreRef,
+    error: marketViewMocks.errorRef,
+    paginationError: marketViewMocks.paginationErrorRef,
+    hasMore: marketViewMocks.hasMoreRef,
     fetchOffers: marketViewMocks.fetchOffersMock,
+    loadMoreOffers: marketViewMocks.loadMoreOffersMock,
+    setFilters: marketViewMocks.setFiltersMock,
     startPolling: marketViewMocks.startPollingMock,
     stopPolling: marketViewMocks.stopPollingMock,
   }),
@@ -194,13 +206,29 @@ async function mountMarketView() {
       stubs: {
         transition: true,
         OffersList: {
-          props: ['offers', 'loading', 'expiryMinutes', 'currentUserId', 'expiredLoading', 'hasMoreExpired', 'canLoadExpired'],
+          props: [
+            'offers',
+            'loading',
+            'expiryMinutes',
+            'currentUserId',
+            'expiredLoading',
+            'hasMoreExpired',
+            'canLoadExpired',
+            'activeLoading',
+            'hasMoreActive',
+            'activeLoadError',
+          ],
           template: `
             <div class="offers-list-stub">
               <div class="offers-count">{{ offers.length }}</div>
               <div class="offers-statuses">{{ offers.map((offer) => offer.status || 'active').join(',') }}</div>
               <div class="offers-expiry">{{ expiryMinutes }}</div>
               <div class="offers-user-id">{{ currentUserId }}</div>
+              <div class="offers-active-loading">{{ activeLoading }}</div>
+              <div class="offers-active-more">{{ hasMoreActive }}</div>
+              <div class="offers-active-error">{{ activeLoadError }}</div>
+              <button class="emit-load-more-active" @click="$emit('load-more-active')">active-more</button>
+              <button class="emit-retry-active" @click="$emit('retry-active')">active-retry</button>
               <button class="emit-load-more-expired" @click="$emit('load-more-expired')">more</button>
               <button class="emit-trade-completed" @click="$emit('trade-completed')">emit</button>
             </div>
@@ -219,7 +247,16 @@ describe('MarketView.vue', () => {
     clearCurrentUserSummary()
     marketViewMocks.offersRef = ref(offersFixture)
     marketViewMocks.isLoadingRef = ref(false)
+    marketViewMocks.isLoadingMoreRef = ref(false)
+    marketViewMocks.errorRef = ref('')
+    marketViewMocks.paginationErrorRef = ref('')
+    marketViewMocks.hasMoreRef = ref(false)
     marketViewMocks.fetchOffersMock.mockReset()
+    marketViewMocks.fetchOffersMock.mockResolvedValue(undefined)
+    marketViewMocks.loadMoreOffersMock.mockReset()
+    marketViewMocks.loadMoreOffersMock.mockResolvedValue(undefined)
+    marketViewMocks.setFiltersMock.mockReset()
+    marketViewMocks.setFiltersMock.mockResolvedValue(undefined)
     marketViewMocks.startPollingMock.mockReset()
     marketViewMocks.stopPollingMock.mockReset()
     marketViewMocks.toggleSortMock.mockReset()
@@ -290,6 +327,12 @@ describe('MarketView.vue', () => {
 
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
     expect(marketViewMocks.startPollingMock).toHaveBeenCalled()
+    expect(marketViewMocks.setFiltersMock).toHaveBeenCalledWith({
+      offerType: undefined,
+      settlementType: undefined,
+      commodityId: undefined,
+      ownOnly: false,
+    })
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/')
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/')
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-state')
@@ -309,6 +352,10 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.send-btn').classes()).toContain('ui-icon-button--neutral')
     expect(wrapper.find('.market-notification-toggle').attributes('aria-label')).toBe('خاموش کردن اعلان آفرهای بازار')
     expect(wrapper.find('.market-notification-toggle').attributes('aria-pressed')).toBe('true')
+
+    marketViewMocks.loadMoreOffersMock.mockClear()
+    await wrapper.find('.emit-load-more-active').trigger('click')
+    expect(marketViewMocks.loadMoreOffersMock).toHaveBeenCalledTimes(1)
 
     marketViewMocks.fetchOffersMock.mockClear()
     await wrapper.find('.emit-trade-completed').trigger('click')
@@ -626,6 +673,9 @@ describe('MarketView.vue', () => {
       'همه تسویه‌ها',
       'نقد حاضر',
       'فردا',
+      'همه کالاها',
+      'سکه',
+      'طلای آب‌شده',
     ])
     const settlementTabs = wrapper.findAll('.market-settlement-filter-chips [role="tab"]')
     expect(settlementTabs.map((tab) => tab.text())).toEqual(['همه تسویه‌ها', 'نقد حاضر', 'فردا'])
@@ -633,10 +683,32 @@ describe('MarketView.vue', () => {
     await settlementTabs[1]!.trigger('click')
     await nextTick()
     expect(wrapper.find('.offers-count').text()).toBe('1')
+    expect(marketViewMocks.setFiltersMock).toHaveBeenLastCalledWith({
+      offerType: undefined,
+      settlementType: 'cash',
+      commodityId: undefined,
+      ownOnly: false,
+    })
 
     await settlementTabs[2]!.trigger('click')
     await nextTick()
     expect(wrapper.find('.offers-count').text()).toBe('1')
+    expect(marketViewMocks.setFiltersMock).toHaveBeenLastCalledWith({
+      offerType: undefined,
+      settlementType: 'tomorrow',
+      commodityId: undefined,
+      ownOnly: false,
+    })
+
+    const commodityTabs = wrapper.findAll('.market-commodity-filter-chips [role="tab"]')
+    await commodityTabs[1]!.trigger('click')
+    await nextTick()
+    expect(marketViewMocks.setFiltersMock).toHaveBeenLastCalledWith({
+      offerType: undefined,
+      settlementType: 'tomorrow',
+      commodityId: 1,
+      ownOnly: false,
+    })
 
     wrapper.unmount()
   })

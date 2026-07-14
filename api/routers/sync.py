@@ -283,18 +283,29 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
     terminal_offer_rows = result.scalars().all()
     for offer in terminal_offer_rows:
         status_value = _enum_value(getattr(offer, "status", None))
+        offer_public_id = getattr(offer, "offer_public_id", None)
         try:
             if status_value == OfferStatus.EXPIRED.value:
-                await publish_event("offer:expired", {"id": offer.id}, source=REALTIME_SOURCE_SYNC_APPLY)
+                realtime_payload = {"id": offer.id}
+                if offer_public_id:
+                    realtime_payload["offer_public_id"] = offer_public_id
+                await publish_event(
+                    "offer:expired",
+                    realtime_payload,
+                    source=REALTIME_SOURCE_SYNC_APPLY,
+                )
             else:
+                realtime_payload = {
+                    "id": offer.id,
+                    "status": status_value,
+                    "remaining_quantity": getattr(offer, "remaining_quantity", None),
+                    "lot_sizes": getattr(offer, "lot_sizes", None),
+                }
+                if offer_public_id:
+                    realtime_payload["offer_public_id"] = offer_public_id
                 await publish_event(
                     "offer:updated",
-                    {
-                        "id": offer.id,
-                        "status": status_value,
-                        "remaining_quantity": getattr(offer, "remaining_quantity", None),
-                        "lot_sizes": getattr(offer, "lot_sizes", None),
-                    },
+                    realtime_payload,
                     source=REALTIME_SOURCE_SYNC_APPLY,
                 )
         except Exception as exc:

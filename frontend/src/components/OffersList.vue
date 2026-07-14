@@ -10,6 +10,7 @@ import {
   AppOfferCard,
   AppOfferCustomerContext,
   AppOfferEmptyState,
+  AppErrorState,
   AppOfferHistoryStamp,
   AppOfferLoadingSkeletonList,
   AppOfferPrice,
@@ -63,10 +64,15 @@ const props = defineProps<{
   expiredLoading?: boolean;
   hasMoreExpired?: boolean;
   canLoadExpired?: boolean;
+  activeLoading?: boolean;
+  hasMoreActive?: boolean;
+  activeLoadError?: string;
 }>();
 
 const emit = defineEmits<{
   (e: 'trade-completed'): void;
+  (e: 'load-more-active'): void;
+  (e: 'retry-active'): void;
   (e: 'load-more-expired'): void;
 }>();
 
@@ -648,6 +654,18 @@ async function cancelOwnOffer(offerId: number) {
 
     <AppOfferLoadingSkeletonList v-if="loading" :count="limit || 5" />
 
+    <AppErrorState
+      v-else-if="activeLoadError && filteredOffers.length === 0"
+      title="لفظ‌های بازار دریافت نشد"
+      :message="activeLoadError"
+    >
+      <template #actions>
+        <button type="button" class="market-page-retry-btn" @click="emit('retry-active')">
+          تلاش دوباره
+        </button>
+      </template>
+    </AppErrorState>
+
     <AppOfferEmptyState v-else-if="filteredOffers.length === 0" />
 
     <div v-else class="offers-list">
@@ -728,6 +746,26 @@ async function cancelOwnOffer(offerId: number) {
 
         </div><!-- /offer-card-inner -->
       </AppOfferCard>
+      <div v-if="activeLoadError" class="active-load-error" role="alert">
+        <span>{{ activeLoadError }}</span>
+        <button type="button" class="market-page-retry-btn" @click="emit('retry-active')">
+          تلاش دوباره
+        </button>
+      </div>
+      <div
+        v-if="!activeLoadError && (hasMoreActive || activeLoading)"
+        class="active-load-more-row"
+      >
+        <button
+          type="button"
+          class="active-load-more-btn"
+          :disabled="activeLoading"
+          @click="emit('load-more-active')"
+        >
+          <Loader2 v-if="activeLoading" class="inline animate-spin" :size="14" />
+          <span>{{ activeLoading ? 'در حال دریافت' : 'نمایش لفظ‌های بیشتر' }}</span>
+        </button>
+      </div>
       <div v-if="canLoadExpired && (hasMoreExpired || expiredLoading)" class="expired-load-more-row">
         <button
           type="button"
@@ -1129,13 +1167,16 @@ async function cancelOwnOffer(offerId: number) {
   cursor: wait;
 }
 
+.active-load-more-row,
 .expired-load-more-row {
   display: flex;
   justify-content: center;
   padding: 2px 0 6px;
 }
 
-.expired-load-more-btn {
+.active-load-more-btn,
+.expired-load-more-btn,
+.market-page-retry-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1152,9 +1193,25 @@ async function cancelOwnOffer(offerId: number) {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
-.expired-load-more-btn:disabled {
+.active-load-more-btn:disabled,
+.expired-load-more-btn:disabled,
+.market-page-retry-btn:disabled {
   opacity: 0.68;
   cursor: wait;
+}
+
+.active-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  color: var(--ds-danger-700);
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1px solid var(--ds-danger-200);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-danger-50);
 }
 
 /* ── Soft pulse for confirm state ── */
