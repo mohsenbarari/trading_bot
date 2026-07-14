@@ -166,6 +166,7 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("telegram_registration_intents", "address"): SyncFieldClassification.NO_SYNC,
             ("telegram_registration_command_receipts", "request_hash"): SyncFieldClassification.NO_SYNC,
             ("telegram_registration_command_receipts", "invitation_token_hash"): SyncFieldClassification.NO_SYNC,
+            ("offer_expiry_command_receipts", "request_hash"): SyncFieldClassification.NO_SYNC,
             ("trades", "offer_user_mobile"): SyncFieldClassification.SYNC,
             ("notifications", "message"): SyncFieldClassification.SYNC,
             ("notifications", "extra_payload"): SyncFieldClassification.SYNC,

@@ -215,6 +215,14 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         sensitive=True,
         reason="Iran-local invitation reference hash",
     ),
+    ("offer_expiry_command_receipts", "request_hash"): _entry(
+        "offer_expiry_command_receipts",
+        "request_hash",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="home-local forwarded expiry command fingerprint",
+    ),
     ("telegram_link_tokens", "token_hash"): _entry(
         "telegram_link_tokens",
         "token_hash",

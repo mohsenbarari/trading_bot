@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     trade_forward_ca_bundle: str | None = None
     trade_contention_gate_ttl_seconds: float = 2.5
     trade_contention_gate_max_inflight: int = 3
+    offer_expiry_command_receipts_enabled: bool = False
     foreign_server_url: str | None = None
     public_webapp_url: str | None = None
     sync_api_key: str | None = None

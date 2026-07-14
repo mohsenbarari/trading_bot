@@ -12,6 +12,7 @@ TRADING_LOG_CLASS = "trading"
 
 _ALLOWED_ACTIONS = {
     "offer_create",
+    "offer_expiry_command",
     "offer_expiry_forward",
     "offer_idempotent_replay",
     "trade_execute",
@@ -40,6 +41,7 @@ _ALLOWED_SIDE_EFFECTS = {
     "notification",
     "offer_channel_buttons_remove",
     "offer_channel_state_apply",
+    "offer_expiry_post_commit",
     "realtime_publish",
     "telegram_channel_buttons",
     "telegram_message",
@@ -109,6 +111,13 @@ def _safe_float(value: Any) -> float | None:
     return normalized if normalized >= 0 else None
 
 
+def _safe_opaque_hash(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
 def summarize_response_body(text: str | bytes | None) -> dict[str, Any]:
     if text is None:
         return {"response_body_size": 0, "response_body_sha256": None}
@@ -147,6 +156,9 @@ def safe_trading_log_context(
     phase_duration_ms: Any = None,
     total_duration_ms: Any = None,
     request_source_server: Any = None,
+    command_id: Any = None,
+    offer_public_id: Any = None,
+    dedupe_key: Any = None,
 ) -> dict[str, Any]:
     safe_action = _safe_choice(action, _ALLOWED_ACTIONS, fallback="trading_side_effect")
     safe_result = _safe_choice(result, _ALLOWED_RESULTS, fallback="error")
@@ -174,6 +186,13 @@ def safe_trading_log_context(
         context["target_server"] = normalize_server(str(target_server), default="unknown")
     if request_source_server:
         context["request_source_server"] = normalize_server(str(request_source_server), default="unknown")
+    for key, value in (
+        ("command_id_hash", _safe_opaque_hash(command_id)),
+        ("offer_public_id_hash", _safe_opaque_hash(offer_public_id)),
+        ("dedupe_key_hash", _safe_opaque_hash(dedupe_key)),
+    ):
+        if value is not None:
+            context[key] = value
     if error_class:
         context["error_class"] = str(error_class)[:80]
     if has_idempotency_key is not None:

@@ -85,9 +85,12 @@ class SyncRegistryTests(unittest.TestCase):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.INTERNAL_BOOKKEEPING)
 
     def test_offer_metadata_tables_are_classified_for_sync(self):
+        expiry_receipts = get_sync_registry_entry("offer_expiry_command_receipts")
         offer_requests = get_sync_registry_entry("offer_requests")
         publication_states = get_sync_registry_entry("offer_publication_states")
 
+        self.assertEqual(expiry_receipts.policy, SyncPolicy.NO_SYNC)
+        self.assertIn("home server", expiry_receipts.authority)
         self.assertFalse(offer_requests.planned)
         self.assertEqual(offer_requests.policy, SyncPolicy.SYNC)
         self.assertEqual(offer_requests.authority, "offer_home_server")

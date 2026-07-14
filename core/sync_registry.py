@@ -209,6 +209,15 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "provider diagnostics are local runtime evidence, not business truth."
         ),
     ),
+    "offer_expiry_command_receipts": _entry(
+        "offer_expiry_command_receipts",
+        SyncPolicy.NO_SYNC,
+        ("offer_home_server",),
+        "offer home server local command authority",
+        "command id, idempotency key, and canonical request hash; no cross-server merge",
+        "forwarded offer-expiry replay protection",
+        notes="Terminal receipts are retained for 365 days; incomplete receipts are never auto-deleted.",
+    ),
     "offer_requests": _entry(
         "offer_requests",
         SyncPolicy.SYNC,

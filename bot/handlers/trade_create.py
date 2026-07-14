@@ -18,6 +18,10 @@ from core.config import settings
 from core.enums import SettlementType, UserRole
 from core.db import AsyncSessionLocal
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
+from core.offer_expiry_contracts import (
+    OfferExpiryCommandIdentityError,
+    build_offer_expiry_forward_payload,
+)
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import (
     OfferCreationAdmissionError,
@@ -1577,17 +1581,30 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
 
         remote_expired_count = 0
         for offer in remote_offers:
+            try:
+                payload = build_offer_expiry_forward_payload(
+                    offer,
+                    owner_user_id=user.id,
+                    actor_user_id=user.id,
+                    source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
+                    source_server=current_server(),
+                    expire_reason=OfferExpiryReason.BOT_CANCEL_ALL,
+                    include_command_identity=bool(
+                        settings.offer_expiry_command_receipts_enabled
+                    ),
+                )
+            except OfferExpiryCommandIdentityError:
+                logger.warning(
+                    "offer_expiry_forward_identity_invalid",
+                    extra={
+                        "event": "offer_expiry_forward.identity_invalid",
+                        "offer_id": getattr(offer, "id", None),
+                    },
+                )
+                continue
             status_code, _body = await forward_offer_expiry_to_home_server(
                 offer.home_server,
-                {
-                    "offer_id": getattr(offer, "id", None),
-                    "offer_public_id": getattr(offer, "offer_public_id", None),
-                    "owner_user_id": user.id,
-                    "actor_user_id": user.id,
-                    "source_surface": OfferExpirySourceSurface.TELEGRAM_BOT.value,
-                    "source_server": current_server(),
-                    "expire_reason": OfferExpiryReason.BOT_CANCEL_ALL,
-                },
+                payload,
             )
             if status_code < 400:
                 remote_expired_count += 1

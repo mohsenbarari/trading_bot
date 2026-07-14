@@ -297,6 +297,48 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(hasattr(offer, "expire_reason"))
         db.commit.assert_not_awaited()
 
+    async def test_expire_offer_retries_remote_receipt_when_local_mirror_is_inactive(self):
+        settings = SimpleNamespace(
+            offer_expire_rate_per_minute=5,
+            offer_expire_daily_limit_after_threshold=10,
+        )
+        offer = SimpleNamespace(
+            id=14,
+            user_id=5,
+            status=OfferStatus.EXPIRED,
+            home_server="foreign",
+            offer_public_id="ofr_remote_14_retry_123",
+            channel_message_id=None,
+        )
+        db = FakeDB(get_result=offer)
+        current_user = SimpleNamespace(id=5)
+
+        with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
+            "api.routers.offers.is_remote_home",
+            return_value=True,
+        ), patch(
+            "api.routers.offers.settings.offer_expiry_command_receipts_enabled",
+            True,
+        ), patch(
+            "api.routers.offers.current_server",
+            return_value="iran",
+        ), patch(
+            "api.routers.offers.forward_offer_expiry_to_home_server",
+            new=AsyncMock(return_value=(200, {"expired": True, "replayed": True})),
+        ) as forward_mock:
+            response = await expire_offer(
+                offer_id=14,
+                db=db,
+                context=make_context(current_user),
+            )
+
+        self.assertEqual(response.status_code, 204)
+        forward_mock.assert_awaited_once()
+        payload = forward_mock.await_args.args[1]
+        self.assertIn("command_id", payload)
+        self.assertIn("idempotency_key", payload)
+        db.commit.assert_not_awaited()
+
     async def test_internal_expire_records_forwarded_source_metadata(self):
         offer = SimpleNamespace(
             id=21,

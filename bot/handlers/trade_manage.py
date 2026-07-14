@@ -7,9 +7,14 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from models.user import User
 from models.offer import Offer, OfferStatus
+from core.config import settings
 from core.db import AsyncSessionLocal
 from core.trading_settings import get_trading_settings
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
+from core.offer_expiry_contracts import (
+    OfferExpiryCommandIdentityError,
+    build_offer_expiry_forward_payload,
+)
 from core.server_routing import current_server, is_remote_home
 from core.services.offer_expiry_service import (
     OfferAlreadyInactiveError,
@@ -69,28 +74,41 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 await callback.answer("❌ شما مالک این لفظ نیستید")
                 return
 
-            if offer.status != OfferStatus.ACTIVE:
-                await callback.answer("❌ این لفظ دیگر فعال نیست")
-                return
-
             if is_remote_home(getattr(offer, "home_server", None)):
+                try:
+                    payload = build_offer_expiry_forward_payload(
+                        offer,
+                        owner_user_id=user.id,
+                        actor_user_id=user.id,
+                        source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
+                        source_server=current_server(),
+                        expire_reason=OfferExpiryReason.MANUAL,
+                        include_command_identity=bool(
+                            settings.offer_expiry_command_receipts_enabled
+                        ),
+                    )
+                except OfferExpiryCommandIdentityError:
+                    logger.warning(
+                        "offer_expiry_forward_identity_invalid",
+                        extra={
+                            "event": "offer_expiry_forward.identity_invalid",
+                            "offer_id": getattr(offer, "id", None),
+                        },
+                    )
+                    await callback.answer("❌ شناسه عمومی لفظ برای انتقال معتبر نیست")
+                    return
                 status_code, body = await forward_offer_expiry_to_home_server(
                     offer.home_server,
-                    {
-                        "offer_id": getattr(offer, "id", offer_id),
-                        "offer_public_id": getattr(offer, "offer_public_id", None),
-                        "owner_user_id": user.id,
-                        "actor_user_id": user.id,
-                        "source_surface": OfferExpirySourceSurface.TELEGRAM_BOT.value,
-                        "source_server": current_server(),
-                        "expire_reason": OfferExpiryReason.MANUAL,
-                    },
+                    payload,
                 )
                 if status_code >= 400:
                     detail = body.get("detail") if isinstance(body, dict) else None
                     await callback.answer(f"❌ {detail or 'خطا در منقضی کردن لفظ'}")
                     return
             else:
+                if offer.status != OfferStatus.ACTIVE:
+                    await callback.answer("❌ این لفظ دیگر فعال نیست")
+                    return
                 _expunge_if_supported(session, offer)
                 try:
                     offer = await session.get(

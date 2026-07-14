@@ -99,6 +99,29 @@ class TradingObservabilityTests(unittest.TestCase):
         self.assertIn('result="failure"', body)
         self.assertNotIn("RequestError", body)
 
+    def test_offer_expiry_command_identifiers_are_hashed_before_logging(self):
+        logger = Mock()
+        command_id = "85f737c9-477b-47ca-a2b2-d069fdc6d094"
+        offer_public_id = "ofr_stage11_observability_123456"
+        dedupe_key = f"offer-expiry-side-effects:v1:{command_id}:{offer_public_id}:v2"
+
+        extra = log_trading_event(
+            logger,
+            "offer_expiry_command.committed",
+            action="offer_expiry_command",
+            result="success",
+            command_id=command_id,
+            offer_public_id=offer_public_id,
+            dedupe_key=dedupe_key,
+        )
+
+        self.assertEqual(extra["action"], "offer_expiry_command")
+        self.assertRegex(extra["command_id_hash"], r"^[a-f0-9]{16}$")
+        self.assertRegex(extra["offer_public_id_hash"], r"^[a-f0-9]{16}$")
+        self.assertRegex(extra["dedupe_key_hash"], r"^[a-f0-9]{16}$")
+        self.assertNotIn(command_id, repr(extra))
+        self.assertNotIn(offer_public_id, repr(extra))
+
     def test_trade_commit_slow_context_accepts_duration_without_raw_payload(self):
         logger = Mock()
 

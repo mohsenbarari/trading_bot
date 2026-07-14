@@ -58,6 +58,50 @@ class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
                 await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=user, bot=SimpleNamespace())
             self.assertIn(expected, callback.answer.await_args.args[0])
 
+    async def test_remote_inactive_mirror_still_replays_authoritative_command(self):
+        settings_obj = SimpleNamespace(
+            offer_expire_rate_per_minute=5,
+            offer_expire_daily_limit_after_threshold=99,
+        )
+        offer = SimpleNamespace(
+            id=5,
+            user_id=4,
+            status=OfferStatus.EXPIRED,
+            home_server="iran",
+            offer_public_id="ofr_bot_remote_retry_123456",
+        )
+        callback = make_callback()
+        factory = FakeSessionFactory(FakeSession(offer))
+
+        with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
+            "bot.handlers.trade_manage.AsyncSessionLocal",
+            new=factory,
+        ), patch(
+            "bot.handlers.trade_manage.settings.offer_expiry_command_receipts_enabled",
+            True,
+        ), patch(
+            "bot.handlers.trade_manage.is_remote_home",
+            return_value=True,
+        ), patch(
+            "bot.handlers.trade_manage.current_server",
+            return_value="foreign",
+        ), patch(
+            "bot.handlers.trade_manage.forward_offer_expiry_to_home_server",
+            new=AsyncMock(return_value=(200, {"expired": True, "replayed": True})),
+        ) as forward_mock:
+            await handle_expire_offer(
+                callback,
+                SimpleNamespace(offer_id=5),
+                user=SimpleNamespace(id=4),
+                bot=SimpleNamespace(),
+            )
+
+        forward_mock.assert_awaited_once()
+        payload = forward_mock.await_args.args[1]
+        self.assertIn("command_id", payload)
+        callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+        self.assertIn("منقضی شد", callback.answer.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

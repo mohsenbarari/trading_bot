@@ -5,10 +5,11 @@ API Router for Offer Management - Web App Integration
 import logging
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,12 @@ from core.services.customer_relation_service import (
 )
 from core.services.user_account_status_service import is_user_market_blocked
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
+from core.offer_expiry_contracts import (
+    OfferExpiryCommandIdentityError,
+    build_offer_expiry_forward_payload,
+    canonical_offer_expiry_command_payload,
+    validate_offer_expiry_command_identity,
+)
 from core.offer_identity import build_offer_public_link, ensure_offer_public_id, is_offer_public_id_shape
 from core.offer_settlement import settlement_type_value
 from core.offer_request_policy import (
@@ -75,6 +82,15 @@ from core.services.offer_expiry_limits import (
     enforce_manual_offer_expire_limits,
 )
 from core.services.offer_expiry_gate import try_acquire_offer_expiry_gate
+from core.services.offer_expiry_command_receipt_service import (
+    OfferExpiryCommandReceiptIncomplete,
+    OfferExpiryCommandReplayConflict,
+    OfferExpiryReceiptOutcome,
+    finalize_offer_expiry_command_receipt,
+    offer_expiry_side_effect_dedupe_key,
+    prepare_offer_expiry_command_receipt,
+    replay_offer_expiry_receipt_outcome,
+)
 from core.services.offer_republish_service import (
     OfferNotRepeatableError,
     ensure_republish_payload_matches_source,
@@ -307,6 +323,21 @@ class InternalOfferExpireRequest(BaseModel):
     source_surface: str
     source_server: str
     expire_reason: str
+    command_id: Optional[UUID] = None
+    idempotency_key: Optional[str] = Field(
+        None,
+        min_length=16,
+        max_length=192,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+
+    @model_validator(mode="after")
+    def validate_optional_command_identity(self):
+        if (self.command_id is None) != (self.idempotency_key is None):
+            raise ValueError("command_id and idempotency_key must be provided together")
+        if self.command_id is not None and not self.offer_public_id:
+            raise ValueError("offer_public_id is required for idempotent expiry")
+        return self
 
 
 # --- Helper Functions ---
@@ -723,7 +754,18 @@ async def _expire_offer_side_effects(
     channel_reason: str,
     channel_timeout: float,
     update_active_count: bool = True,
+    side_effect_dedupe_key: str | None = None,
 ) -> None:
+    if side_effect_dedupe_key:
+        log_trading_event(
+            logger,
+            "offer_expiry_side_effects.dispatch",
+            action="trading_side_effect",
+            result="attempt",
+            side_effect="offer_expiry_post_commit",
+            offer_id=getattr(offer, "id", None),
+            dedupe_key=side_effect_dedupe_key,
+        )
     await _remove_offer_channel_buttons_safely(offer, reason=channel_reason, timeout=channel_timeout)
     await _publish_offer_event_safely("offer:expired", {"id": offer.id}, reason=realtime_reason)
     if update_active_count and getattr(offer, "user_id", None):
@@ -817,15 +859,15 @@ def _build_offer_expiry_forward_payload(
     source_surface: OfferExpirySourceSurface | str,
     expire_reason: str,
 ) -> dict:
-    return {
-        "offer_id": offer.id,
-        "offer_public_id": getattr(offer, "offer_public_id", None),
-        "owner_user_id": owner_user_id,
-        "actor_user_id": actor_user_id,
-        "source_surface": getattr(source_surface, "value", source_surface),
-        "source_server": current_server(),
-        "expire_reason": expire_reason,
-    }
+    return build_offer_expiry_forward_payload(
+        offer,
+        owner_user_id=owner_user_id,
+        actor_user_id=actor_user_id,
+        source_surface=source_surface,
+        source_server=current_server(),
+        expire_reason=expire_reason,
+        include_command_identity=bool(settings.offer_expiry_command_receipts_enabled),
+    )
 
 
 async def _forward_offer_expiry_if_remote_home(
@@ -839,13 +881,27 @@ async def _forward_offer_expiry_if_remote_home(
     if not is_remote_home(getattr(offer, "home_server", None)):
         return None
 
-    payload = _build_offer_expiry_forward_payload(
-        offer,
-        owner_user_id=owner_user_id,
-        actor_user_id=actor_user_id,
-        source_surface=source_surface,
-        expire_reason=expire_reason,
-    )
+    try:
+        payload = _build_offer_expiry_forward_payload(
+            offer,
+            owner_user_id=owner_user_id,
+            actor_user_id=actor_user_id,
+            source_surface=source_surface,
+            expire_reason=expire_reason,
+        )
+    except OfferExpiryCommandIdentityError:
+        log_trading_event(
+            logger,
+            "offer_expiry_forward.identity_invalid",
+            level="warning",
+            action="offer_expiry_forward",
+            result="denied",
+            offer_id=getattr(offer, "id", None),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "شناسه عمومی لفظ برای انتقال معتبر نیست."},
+        )
     status_code, body = await forward_offer_expiry_to_home_server(offer.home_server, payload)
     if status_code < 400:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -860,13 +916,24 @@ async def _forward_offer_expiry_for_cancel_all(
     source_surface: OfferExpirySourceSurface | str,
     expire_reason: str,
 ) -> bool:
-    payload = _build_offer_expiry_forward_payload(
-        offer,
-        owner_user_id=owner_user_id,
-        actor_user_id=actor_user_id,
-        source_surface=source_surface,
-        expire_reason=expire_reason,
-    )
+    try:
+        payload = _build_offer_expiry_forward_payload(
+            offer,
+            owner_user_id=owner_user_id,
+            actor_user_id=actor_user_id,
+            source_surface=source_surface,
+            expire_reason=expire_reason,
+        )
+    except OfferExpiryCommandIdentityError:
+        log_trading_event(
+            logger,
+            "offer_expiry_forward.identity_invalid",
+            level="warning",
+            action="offer_expiry_forward",
+            result="denied",
+            offer_id=getattr(offer, "id", None),
+        )
+        return False
     status_code, _body = await forward_offer_expiry_to_home_server(offer.home_server, payload)
     return status_code < 400
 
@@ -1774,6 +1841,199 @@ async def get_my_offers(
     )
 
 
+def _offer_expiry_receipt_response(receipt, *, replayed: bool) -> dict[str, Any]:
+    outcome = replay_offer_expiry_receipt_outcome(receipt)
+    return {
+        "expired": outcome == OfferExpiryReceiptOutcome.EXPIRED,
+        "offer_public_id": receipt.offer_public_id,
+        "command_id": str(receipt.command_id),
+        "outcome": outcome.value,
+        "replayed": replayed,
+    }
+
+
+async def _expire_offer_internal_with_receipt(
+    internal_data: InternalOfferExpireRequest,
+    *,
+    target_server: str,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    assert internal_data.command_id is not None
+    assert internal_data.idempotency_key is not None
+    assert internal_data.offer_public_id is not None
+
+    try:
+        canonical_payload = canonical_offer_expiry_command_payload(
+            offer_public_id=internal_data.offer_public_id,
+            owner_user_id=internal_data.owner_user_id,
+            actor_user_id=internal_data.actor_user_id,
+            source_surface=internal_data.source_surface,
+            source_server=internal_data.source_server,
+            expire_reason=internal_data.expire_reason,
+        )
+        identity = validate_offer_expiry_command_identity(
+            command_id=internal_data.command_id,
+            idempotency_key=internal_data.idempotency_key,
+            offer_public_id=internal_data.offer_public_id,
+            owner_user_id=internal_data.owner_user_id,
+            actor_user_id=internal_data.actor_user_id,
+            source_surface=internal_data.source_surface,
+            source_server=internal_data.source_server,
+            expire_reason=internal_data.expire_reason,
+        )
+    except OfferExpiryCommandIdentityError as exc:
+        await _rollback_if_supported(db)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="هویت فرمان انقضا با محتوای درخواست همخوانی ندارد.",
+        ) from exc
+
+    try:
+        receipt, replayed = await prepare_offer_expiry_command_receipt(
+            db,
+            command_id=identity.command_id,
+            idempotency_key=identity.idempotency_key,
+            request_hash=identity.request_hash,
+            offer_public_id=canonical_payload["offer_public_id"],
+            source_server=canonical_payload["source_server"],
+            source_surface=canonical_payload["source_surface"],
+            expire_reason=canonical_payload["expire_reason"],
+        )
+        if replayed:
+            response = _offer_expiry_receipt_response(receipt, replayed=True)
+            await db.commit()
+            log_trading_event(
+                logger,
+                "offer_expiry_command.replayed",
+                action="offer_expiry_command",
+                result="success",
+                command_id=str(identity.command_id),
+                offer_public_id=canonical_payload["offer_public_id"],
+            )
+            return response
+
+        try:
+            result = await db.execute(
+                select(Offer)
+                .where(Offer.offer_public_id == canonical_payload["offer_public_id"])
+                .options(selectinload(Offer.commodity))
+                .with_for_update(nowait=True)
+            )
+            offer = result.scalar_one_or_none()
+        except (OperationalError, DBAPIError) as exc:
+            if is_offer_expiry_lock_busy(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=OFFER_EXPIRY_LOCK_BUSY_DETAIL,
+                ) from exc
+            raise
+
+        if not offer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+        if normalize_server(getattr(offer, "home_server", None), target_server) != target_server:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع لفظ نیست.")
+        if offer.user_id != canonical_payload["owner_user_id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
+        if offer.status != OfferStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="این لفظ قبلاً غیرفعال شده است.",
+            )
+
+        if canonical_payload["expire_reason"] == OfferExpiryReason.MANUAL:
+            try:
+                await enforce_manual_offer_expire_limits(
+                    db,
+                    owner_user_id=canonical_payload["owner_user_id"],
+                )
+            except OfferManualExpireLimitError as exc:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+        await expire_offer_authoritatively(
+            db,
+            offer,
+            OfferExpiryCommand(
+                reason=canonical_payload["expire_reason"],
+                source_surface=canonical_payload["source_surface"],
+                source_server=canonical_payload["source_server"],
+                expired_by_user_id=canonical_payload["owner_user_id"],
+                expired_by_actor_user_id=canonical_payload["actor_user_id"],
+            ),
+            commit=False,
+        )
+        finalize_offer_expiry_command_receipt(
+            receipt,
+            outcome=OfferExpiryReceiptOutcome.EXPIRED,
+        )
+        await db.flush()
+        await db.commit()
+        log_trading_event(
+            logger,
+            "offer_expiry_command.committed",
+            action="offer_expiry_command",
+            result="success",
+            command_id=str(identity.command_id),
+            offer_public_id=canonical_payload["offer_public_id"],
+        )
+    except OfferExpiryCommandReplayConflict as exc:
+        await _rollback_if_supported(db)
+        log_trading_event(
+            logger,
+            "offer_expiry_command.replay_conflict",
+            level="warning",
+            action="offer_expiry_command",
+            result="denied",
+            command_id=str(identity.command_id),
+            offer_public_id=canonical_payload["offer_public_id"],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این شناسه فرمان قبلاً با محتوای دیگری استفاده شده است.",
+        ) from exc
+    except OfferExpiryCommandReceiptIncomplete as exc:
+        await _rollback_if_supported(db)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="نتیجه فرمان قبلی کامل نیست؛ لطفاً بعداً دوباره تلاش کنید.",
+        ) from exc
+    except OfferNotAuthoritativeError as exc:
+        await _rollback_if_supported(db)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع لفظ نیست.") from exc
+    except OfferAlreadyInactiveError as exc:
+        await _rollback_if_supported(db)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="این لفظ قبلاً غیرفعال شده است.",
+        ) from exc
+    except StaleDataError as exc:
+        await _rollback_if_supported(db)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="این لفظ قبلاً غیرفعال شده است.",
+        ) from exc
+    except HTTPException:
+        await _rollback_if_supported(db)
+        raise
+    except Exception:
+        await _rollback_if_supported(db)
+        raise
+
+    dedupe_key = offer_expiry_side_effect_dedupe_key(
+        command_id=identity.command_id,
+        offer_public_id=canonical_payload["offer_public_id"],
+        offer_version=int(getattr(offer, "version_id", 1) or 1),
+    )
+    await _expire_offer_side_effects(
+        db,
+        offer,
+        realtime_reason="internal_offer_expire",
+        channel_reason="internal_offer_expire",
+        channel_timeout=10,
+        side_effect_dedupe_key=dedupe_key,
+    )
+    return _offer_expiry_receipt_response(receipt, replayed=False)
+
+
 @router.post("/internal/expire", status_code=status.HTTP_200_OK)
 async def expire_offer_internal(
     internal_data: InternalOfferExpireRequest,
@@ -1799,6 +2059,13 @@ async def expire_offer_internal(
         or payload_source_server == target_server
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal offer expiry source")
+
+    if internal_data.command_id is not None:
+        return await _expire_offer_internal_with_receipt(
+            internal_data,
+            target_server=target_server,
+            db=db,
+        )
 
     try:
         offer = await db.get(
@@ -1889,9 +2156,6 @@ async def expire_offer(
         if offer.user_id != owner_user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
 
-        if offer.status != OfferStatus.ACTIVE:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
-
         forwarded_response = await _forward_offer_expiry_if_remote_home(
             offer,
             owner_user_id=owner_user.id,
@@ -1901,6 +2165,9 @@ async def expire_offer(
         )
         if forwarded_response is not None:
             return forwarded_response
+
+        if offer.status != OfferStatus.ACTIVE:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
 
         _expunge_if_supported(db, offer)
         try:

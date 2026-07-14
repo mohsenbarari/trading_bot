@@ -33,6 +33,8 @@ def _safe_forward_log_context(target_server: str, payload: dict[str, Any]) -> di
         "source_server": current_server(),
         "target_server": normalize_server(target_server, default=""),
         "offer_id": payload.get("offer_id"),
+        "offer_public_id": payload.get("offer_public_id"),
+        "command_id": payload.get("command_id"),
     }
 
 
@@ -105,6 +107,25 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
             **summarize_response_body(response.text),
         )
         return response.status_code, {"detail": "پاسخ نامعتبر از سرور مرجع لفظ"}
+
+    expected_command_id = str(payload.get("command_id") or "").strip()
+    acknowledged_command_id = (
+        str(body.get("command_id") or "").strip() if isinstance(body, dict) else ""
+    )
+    if (
+        response.status_code < 400
+        and expected_command_id
+        and acknowledged_command_id != expected_command_id
+    ):
+        log_trading_event(
+            logger,
+            "offer_expiry_forward.legacy_success_without_receipt_ack",
+            level="warning",
+            action="offer_expiry_forward",
+            result="success",
+            status_code=response.status_code,
+            **log_context,
+        )
 
     log_trading_event(
         logger,
