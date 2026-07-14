@@ -245,6 +245,9 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.evaluate_current_market_schedule",
             new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
         ), patch(
+            "api.routers.trades.load_offer_request_by_idempotency",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "api.routers.trades.check_user_limits",
             return_value=(True, None),
         ), patch(

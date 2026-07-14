@@ -102,6 +102,46 @@ def make_context(owner_user, actor_user=None):
     return SimpleNamespace(owner_user=owner_user, actor_user=actor, relation=None, is_accountant_context=owner_user.id != actor.id)
 
 
+def make_completed_ledger(owner_user, **overrides):
+    data = {
+        "request_home_server": "foreign",
+        "local_offer_id": 7,
+        "offer_public_id": "ofr_test_7",
+        "requester_user_id": owner_user.id,
+        "actor_user_id": owner_user.id,
+        "requested_quantity": 5,
+        "idempotency_key": "idem-completed-replay",
+        "result_status": OfferRequestStatus.COMPLETED_TRADE,
+        "resulting_trade_id": 88,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def make_completed_trade(owner_user, **overrides):
+    data = {
+        "id": 88,
+        "trade_number": 10020,
+        "offer_id": 7,
+        "offer_user_id": 9,
+        "responder_user_id": owner_user.id,
+        "actor_user_id": owner_user.id,
+        "commodity_id": 1,
+        "quantity": 5,
+        "price": 123456,
+        "trade_type": TradeType.BUY,
+        "settlement_type": SettlementType.TOMORROW,
+        "status": TradeStatus.COMPLETED,
+        "created_at": datetime(2026, 7, 14, 3, 0, tzinfo=timezone.utc),
+        "idempotency_key": "idem-completed-replay",
+        "offer_user": SimpleNamespace(id=9, account_name="seller", mobile_number="09125555555", telegram_id=999),
+        "responder_user": owner_user,
+        "commodity": SimpleNamespace(name="Gold"),
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         customer_relation_patcher = patch(
@@ -126,8 +166,14 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.evaluate_current_market_schedule",
             new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
         )
-        market_eval_patcher.start()
+        self.market_eval_mock = market_eval_patcher.start()
         self.addCleanup(market_eval_patcher.stop)
+        early_replay_patcher = patch(
+            "api.routers.trades.load_offer_request_by_idempotency",
+            new=AsyncMock(return_value=None),
+        )
+        self.early_replay_ledger_mock = early_replay_patcher.start()
+        self.addCleanup(early_replay_patcher.stop)
 
     def _private_trade_payloads(self):
         payloads = []
@@ -300,42 +346,18 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_trade_authoritatively_replays_completed_idempotent_request_after_offer_completion(self):
         locked_user = make_user()
-        offer = make_offer(
-            status=OfferStatus.COMPLETED,
-            remaining_quantity=0,
-            quantity=5,
-            user=SimpleNamespace(id=9, account_name="seller", mobile_number="09125555555", telegram_id=999),
-        )
-        existing_ledger = SimpleNamespace(
-            result_status=OfferRequestStatus.COMPLETED_TRADE,
-            resulting_trade_id=88,
-        )
-        existing_trade = SimpleNamespace(
-            id=88,
-            trade_number=10020,
-            offer_id=offer.id,
-            offer_user_id=offer.user_id,
-            responder_user_id=locked_user.id,
-            actor_user_id=locked_user.id,
-            commodity_id=offer.commodity_id,
-            quantity=5,
-            price=offer.price,
-            idempotency_key="idem-completed-replay",
-            offer_user=offer.user,
-            responder_user=locked_user,
-            commodity=offer.commodity,
-        )
+        existing_ledger = make_completed_ledger(locked_user)
+        existing_trade = make_completed_trade(locked_user)
         db = FakeDB(
-            get_results=[offer],
-            execute_results=[
-                FakeExecuteResult(single=locked_user),
-                FakeExecuteResult(single_or_none=existing_ledger),
-                FakeExecuteResult(single_or_none=existing_trade),
-            ],
+            execute_results=[FakeExecuteResult(single_or_none=existing_trade)],
         )
         background_tasks = BackgroundTasks()
+        replay_order = []
+        self.early_replay_ledger_mock.side_effect = lambda *_args, **_kwargs: replay_order.append("load") or existing_ledger
+        self.market_eval_mock.return_value = SimpleNamespace(is_open=False, reason="closed")
+        self.publish_user_event_mock.reset_mock()
 
-        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+        with patch("api.routers.trades.check_user_limits", return_value=(False, "daily limit")) as limits_mock, patch(
             "api.routers.trades._is_offer_expired_for_trade",
             new=AsyncMock(return_value=False),
         ) as expired_mock, patch(
@@ -345,6 +367,17 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
         ), patch(
+            "api.routers.trades._lock_trade_idempotency_key",
+            new=AsyncMock(side_effect=lambda *_args, **_kwargs: replay_order.append("lock") or True),
+        ), patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock, patch(
+            "api.routers.trades._apply_offer_trade_mutation",
+        ) as offer_mutation_mock, patch(
+            "api.routers.trades._commit_trade_execution",
+            new=AsyncMock(),
+        ) as commit_trade_mock, patch(
             "api.routers.trades.trade_to_response",
             return_value={"id": 88, "trade_number": 10020},
         ) as response_mock:
@@ -359,10 +392,155 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added, [])
         self.assertEqual(db.offer_requests, [])
         db.commit.assert_not_awaited()
+        self.assertEqual(replay_order, ["lock", "load"])
+        self.market_eval_mock.assert_not_awaited()
+        limits_mock.assert_not_called()
         expired_mock.assert_not_awaited()
         validate_mock.assert_not_called()
+        counter_mock.assert_not_awaited()
+        offer_mutation_mock.assert_not_called()
+        commit_trade_mock.assert_not_awaited()
+        self.publish_user_event_mock.assert_not_awaited()
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(len(background_tasks.tasks), 1)
+
+    async def test_early_completed_replay_rejects_mismatched_ledger_identity_and_payload(self):
+        owner_user = make_user()
+        existing_trade = make_completed_trade(owner_user)
+        mismatch_cases = {
+            "home_server": {"request_home_server": "iran"},
+            "offer": {"local_offer_id": 8},
+            "requester": {"requester_user_id": 99},
+            "actor": {"actor_user_id": 99},
+            "quantity": {"requested_quantity": 6},
+            "key": {"idempotency_key": "another-key"},
+            "public_offer": {"offer_public_id": "ofr_other"},
+        }
+
+        for case_name, ledger_overrides in mismatch_cases.items():
+            with self.subTest(case=case_name):
+                ledger = make_completed_ledger(owner_user, **ledger_overrides)
+                self.early_replay_ledger_mock.reset_mock()
+                self.early_replay_ledger_mock.return_value = ledger
+                db = FakeDB(execute_results=[FakeExecuteResult(single_or_none=existing_trade)])
+                trade_data = TradeCreate(
+                    offer_id=7,
+                    offer_public_id="ofr_test_7" if case_name == "public_offer" else None,
+                    quantity=5,
+                    idempotency_key="idem-completed-replay",
+                )
+
+                with patch("api.routers.trades.trade_to_response") as response_mock:
+                    with self.assertRaises(HTTPException) as exc_info:
+                        await _execute_trade_authoritatively(
+                            trade_data,
+                            BackgroundTasks(),
+                            db=db,
+                            context=make_context(owner_user),
+                        )
+
+                self.assertEqual(exc_info.exception.status_code, 409)
+                response_mock.assert_not_called()
+                db.commit.assert_not_awaited()
+                self.market_eval_mock.assert_not_awaited()
+
+    async def test_early_completed_replay_rejects_mismatched_trade_result(self):
+        owner_user = make_user()
+        ledger = make_completed_ledger(owner_user)
+        mismatch_cases = {
+            "result_id": {"id": 89},
+            "offer": {"offer_id": 8},
+            "responder": {"responder_user_id": 99},
+            "actor": {"actor_user_id": 99},
+            "quantity": {"quantity": 6},
+            "key": {"idempotency_key": "another-key"},
+        }
+
+        for case_name, trade_overrides in mismatch_cases.items():
+            with self.subTest(case=case_name):
+                existing_trade = make_completed_trade(owner_user, **trade_overrides)
+                self.early_replay_ledger_mock.reset_mock()
+                self.early_replay_ledger_mock.return_value = ledger
+                db = FakeDB(execute_results=[FakeExecuteResult(single_or_none=existing_trade)])
+
+                with patch("api.routers.trades.trade_to_response") as response_mock:
+                    with self.assertRaises(HTTPException) as exc_info:
+                        await _execute_trade_authoritatively(
+                            TradeCreate(offer_id=7, quantity=5, idempotency_key="idem-completed-replay"),
+                            BackgroundTasks(),
+                            db=db,
+                            context=make_context(owner_user),
+                        )
+
+                self.assertEqual(exc_info.exception.status_code, 409)
+                response_mock.assert_not_called()
+                db.commit.assert_not_awaited()
+                self.market_eval_mock.assert_not_awaited()
+
+    async def test_early_completed_replay_fails_closed_when_result_trade_is_missing(self):
+        owner_user = make_user()
+        self.early_replay_ledger_mock.return_value = make_completed_ledger(owner_user)
+        db = FakeDB(execute_results=[FakeExecuteResult(single_or_none=None)])
+        background_tasks = BackgroundTasks()
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=5, idempotency_key="idem-completed-replay"),
+                background_tasks,
+                db=db,
+                context=make_context(owner_user),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 503)
+        self.assertEqual(db.added, [])
+        db.commit.assert_not_awaited()
+        self.market_eval_mock.assert_not_awaited()
+        self.assertEqual(background_tasks.tasks, [])
+
+    async def test_early_completed_replay_preserves_offer_notes_from_trade_relation(self):
+        owner_user = make_user()
+        existing_trade = make_completed_trade(
+            owner_user,
+            offer=SimpleNamespace(notes="توضیح ثبت‌شده آفر"),
+        )
+        self.early_replay_ledger_mock.return_value = make_completed_ledger(owner_user)
+        db = FakeDB(execute_results=[FakeExecuteResult(single_or_none=existing_trade)])
+
+        with patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=5, idempotency_key="idem-completed-replay"),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(owner_user),
+            )
+
+        self.assertEqual(result.offer_notes, "توضیح ثبت‌شده آفر")
+        self.market_eval_mock.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    async def test_noncompleted_ledger_does_not_bypass_market_guard(self):
+        owner_user = make_user()
+        self.early_replay_ledger_mock.return_value = SimpleNamespace(
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+        )
+        self.market_eval_mock.return_value = SimpleNamespace(is_open=False, reason="closed")
+        db = FakeDB()
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=5, idempotency_key="rejected-request"),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(owner_user),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("بازار", exc_info.exception.detail)
+        self.market_eval_mock.assert_awaited_once()
+        db.commit.assert_not_awaited()
 
     async def test_execute_trade_authoritatively_allows_time_limit_expired_offer_inside_edge_grace(self):
         locked_user = make_user()

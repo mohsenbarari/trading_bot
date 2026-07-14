@@ -11,6 +11,7 @@ from core.services.offer_request_ledger_service import (
     build_offer_request_history_query,
     create_offer_request_ledger_entry,
     customer_relation_snapshot,
+    load_offer_request_by_idempotency,
 )
 from models.customer_relation import CustomerTier
 from models.offer_request import OfferRequestStatus
@@ -36,6 +37,36 @@ class _FakeDB:
 
 
 class OfferRequestLedgerServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_idempotency_lookup_is_read_only_and_scoped_to_home_server(self):
+        existing = SimpleNamespace(id=31)
+        db = _FakeDB(existing=existing)
+
+        result = await load_offer_request_by_idempotency(
+            db,
+            request_home_server="IR",
+            idempotency_key="  trade:existing  ",
+        )
+
+        self.assertIs(result, existing)
+        db.execute.assert_awaited_once()
+        compiled = str(db.execute.await_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("offer_requests.request_home_server = 'iran'", compiled)
+        self.assertIn("offer_requests.idempotency_key = 'trade:existing'", compiled)
+        self.assertEqual(db.added, [])
+        db.flush.assert_not_awaited()
+
+    async def test_idempotency_lookup_without_key_does_not_query(self):
+        db = _FakeDB()
+
+        result = await load_offer_request_by_idempotency(
+            db,
+            request_home_server="foreign",
+            idempotency_key=None,
+        )
+
+        self.assertIsNone(result)
+        db.execute.assert_not_awaited()
+
     async def test_webapp_and_bot_requests_record_source_metadata(self):
         db = _FakeDB()
         received_at = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)

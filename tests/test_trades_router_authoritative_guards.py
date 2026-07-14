@@ -118,6 +118,37 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         self.market_eval_mock = market_eval_patcher.start()
         self.addCleanup(market_eval_patcher.stop)
+        early_replay_patcher = patch(
+            "api.routers.trades.load_offer_request_by_idempotency",
+            new=AsyncMock(return_value=None),
+        )
+        self.early_replay_ledger_mock = early_replay_patcher.start()
+        self.addCleanup(early_replay_patcher.stop)
+
+    async def test_early_replay_does_not_bypass_role_or_inactive_account_guards(self):
+        completed_ledger = SimpleNamespace(result_status=OfferRequestStatus.COMPLETED_TRADE)
+        guarded_users = (
+            make_user(role=UserRole.WATCH),
+            make_user(account_status=UserAccountStatus.INACTIVE),
+        )
+
+        for guarded_user in guarded_users:
+            with self.subTest(role=guarded_user.role, status=guarded_user.account_status):
+                self.early_replay_ledger_mock.reset_mock()
+                self.early_replay_ledger_mock.return_value = completed_ledger
+                with patch("api.routers.trades._lock_trade_idempotency_key", new=AsyncMock()) as lock_mock:
+                    with self.assertRaises(HTTPException) as exc_info:
+                        await _execute_trade_authoritatively(
+                            TradeCreate(offer_id=7, quantity=4, idempotency_key="guarded-replay"),
+                            BackgroundTasks(),
+                            db=FakeDB(),
+                            context=make_context(guarded_user),
+                        )
+
+                self.assertEqual(exc_info.exception.status_code, 403)
+                lock_mock.assert_not_awaited()
+                self.early_replay_ledger_mock.assert_not_awaited()
+                self.market_eval_mock.assert_not_awaited()
 
     async def test_execute_trade_authoritatively_rejects_watch_restricted_and_limit_failures(self):
         trade_data = TradeCreate(offer_id=7, quantity=4)

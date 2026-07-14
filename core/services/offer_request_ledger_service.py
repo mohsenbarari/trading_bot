@@ -97,18 +97,20 @@ def _normalized_idempotency_key(value: str | None) -> str | None:
     return normalized or None
 
 
-async def _load_existing_by_idempotency(
+async def load_offer_request_by_idempotency(
     db: AsyncSession,
     *,
     request_home_server: str,
     idempotency_key: str | None,
 ) -> OfferRequest | None:
-    if not idempotency_key:
+    normalized_key = _normalized_idempotency_key(idempotency_key)
+    if not normalized_key:
         return None
+    normalized_home_server = normalize_server(request_home_server, current_server())
     result = await db.execute(
         select(OfferRequest).where(
-            OfferRequest.request_home_server == request_home_server,
-            OfferRequest.idempotency_key == idempotency_key,
+            OfferRequest.request_home_server == normalized_home_server,
+            OfferRequest.idempotency_key == normalized_key,
         )
     )
     return result.scalar_one_or_none()
@@ -189,7 +191,7 @@ async def create_offer_request_ledger_entry(
 
     request_home_server = normalize_server(command.request_home_server, current_server())
     idempotency_key = _normalized_idempotency_key(command.idempotency_key)
-    existing = await _load_existing_by_idempotency(
+    existing = await load_offer_request_by_idempotency(
         db,
         request_home_server=request_home_server,
         idempotency_key=idempotency_key,

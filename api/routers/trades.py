@@ -66,6 +66,7 @@ from core.services.offer_request_ledger_service import (
     apply_offer_request_decision,
     create_offer_request_ledger_entry,
     customer_relation_snapshot,
+    load_offer_request_by_idempotency,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
@@ -2266,6 +2267,7 @@ async def _load_completed_idempotent_replay_trade(
     stmt = (
         select(Trade)
         .options(
+            selectinload(Trade.offer),
             selectinload(Trade.offer_user),
             selectinload(Trade.responder_user),
             selectinload(Trade.commodity),
@@ -2286,35 +2288,56 @@ def _validate_completed_idempotent_replay_trade(
     *,
     existing_trade: Trade | object,
     ledger: OfferRequest | object,
-    offer: Offer | object,
+    offer: Offer | object | None,
     owner_user: User | object,
     actor_user: User | object,
     trade_data: TradeCreate,
 ) -> None:
     mismatches: list[str] = []
+    expected_owner_user_id = _coerce_trade_user_id(getattr(owner_user, "id", None))
+    expected_actor_user_id = _coerce_trade_user_id(getattr(actor_user, "id", None))
+    ledger_offer_id = _coerce_trade_user_id(getattr(ledger, "local_offer_id", None))
+    ledger_requester_user_id = _coerce_trade_user_id(getattr(ledger, "requester_user_id", None))
+    ledger_actor_user_id = _coerce_trade_user_id(getattr(ledger, "actor_user_id", None))
+    ledger_quantity = _coerce_trade_user_id(getattr(ledger, "requested_quantity", None))
+    ledger_idempotency_key = (getattr(ledger, "idempotency_key", None) or "").strip()
+    ledger_home_server = normalize_server(getattr(ledger, "request_home_server", None), default="")
+
+    if ledger_home_server != current_server():
+        mismatches.append("request_home_server")
+    if ledger_offer_id != trade_data.offer_id:
+        mismatches.append("ledger_offer_id")
+    if ledger_requester_user_id != expected_owner_user_id:
+        mismatches.append("ledger_requester_user_id")
+    if ledger_actor_user_id != expected_actor_user_id:
+        mismatches.append("ledger_actor_user_id")
+    if ledger_quantity != trade_data.quantity:
+        mismatches.append("ledger_quantity")
+    if ledger_idempotency_key != (trade_data.idempotency_key or "").strip():
+        mismatches.append("ledger_idempotency_key")
+    if (
+        trade_data.offer_public_id
+        and (getattr(ledger, "offer_public_id", None) or "").strip() != trade_data.offer_public_id.strip()
+    ):
+        mismatches.append("ledger_offer_public_id")
+
     resulting_trade_id = getattr(ledger, "resulting_trade_id", None)
     if resulting_trade_id is not None and getattr(existing_trade, "id", None) != resulting_trade_id:
         mismatches.append("resulting_trade_id")
-    if getattr(existing_trade, "offer_id", None) not in (None, getattr(offer, "id", None)):
+    expected_offer_id = getattr(offer, "id", None) if offer is not None else ledger_offer_id
+    if getattr(existing_trade, "offer_id", None) not in (None, expected_offer_id):
         mismatches.append("offer_id")
-    if getattr(existing_trade, "commodity_id", None) != getattr(offer, "commodity_id", None):
+    if offer is not None and getattr(existing_trade, "commodity_id", None) != getattr(offer, "commodity_id", None):
         mismatches.append("commodity_id")
     if getattr(existing_trade, "quantity", None) != trade_data.quantity:
         mismatches.append("quantity")
-    if _coerce_trade_user_id(getattr(existing_trade, "responder_user_id", None)) != _coerce_trade_user_id(
-        getattr(owner_user, "id", None)
-    ):
+    if _coerce_trade_user_id(getattr(existing_trade, "responder_user_id", None)) != expected_owner_user_id:
         mismatches.append("responder_user_id")
     existing_actor_user_id = _coerce_trade_user_id(getattr(existing_trade, "actor_user_id", None))
-    expected_actor_user_id = _coerce_trade_user_id(getattr(actor_user, "id", None))
     if existing_actor_user_id is not None and existing_actor_user_id != expected_actor_user_id:
         mismatches.append("actor_user_id")
     existing_idempotency_key = getattr(existing_trade, "idempotency_key", None)
-    if (
-        existing_idempotency_key
-        and trade_data.idempotency_key
-        and existing_idempotency_key != trade_data.idempotency_key
-    ):
+    if existing_idempotency_key != trade_data.idempotency_key:
         mismatches.append("idempotency_key")
 
     if mismatches:
@@ -2326,7 +2349,7 @@ def _validate_completed_idempotent_replay_trade(
             result="conflict",
             offer_id=trade_data.offer_id,
             trade_id=getattr(existing_trade, "id", None),
-            mismatches=",".join(mismatches),
+            reason="idempotency_integrity_conflict",
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -2339,7 +2362,7 @@ async def _try_return_completed_idempotent_replay(
     db: AsyncSession,
     background_tasks: BackgroundTasks,
     offer_request_ledger: OfferRequest | object | None,
-    offer: Offer | object,
+    offer: Offer | object | None,
     trade_data: TradeCreate,
     owner_user: User | object,
     actor_user: User | object,
@@ -2353,7 +2376,21 @@ async def _try_return_completed_idempotent_replay(
         trade_data=trade_data,
     )
     if existing_trade_obj is None:
-        return None
+        log_trading_event(
+            logger,
+            "trade_idempotent_replay_missing_result",
+            level="error",
+            action="trade_idempotent_replay",
+            result="failure",
+            offer_id=trade_data.offer_id,
+            trade_id=getattr(offer_request_ledger, "resulting_trade_id", None),
+            source_server=current_server(),
+            has_idempotency_key=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="نتیجه قطعی معامله موقتاً در دسترس نیست. لطفاً همین درخواست را دوباره تلاش کنید.",
+        )
 
     _validate_completed_idempotent_replay_trade(
         existing_trade=existing_trade_obj,
@@ -2387,7 +2424,7 @@ async def _try_return_completed_idempotent_replay(
         "identity_map": existing_identity_map,
         "customer_relation_map": existing_customer_relation_map,
     }
-    existing_offer_notes = getattr(offer, "notes", None)
+    existing_offer_notes = getattr(offer, "notes", None) if offer is not None else None
     if existing_offer_notes is not None:
         existing_response_kwargs["offer_notes"] = existing_offer_notes
     return trade_to_response(existing_trade_obj, **existing_response_kwargs)
@@ -2681,6 +2718,25 @@ async def _execute_trade_authoritatively(
             detail="حساب شما غیرفعال است و امکان انجام معامله ندارید.",
         )
 
+    if trade_data.idempotency_key:
+        idempotency_lock_held = await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
+        completed_ledger = await load_offer_request_by_idempotency(
+            db,
+            request_home_server=current_server(),
+            idempotency_key=trade_data.idempotency_key,
+        )
+        completed_replay_response = await _try_return_completed_idempotent_replay(
+            db=db,
+            background_tasks=background_tasks,
+            offer_request_ledger=completed_ledger,
+            offer=None,
+            trade_data=trade_data,
+            owner_user=owner_user,
+            actor_user=actor_user,
+        )
+        if completed_replay_response is not None:
+            return completed_replay_response
+
     market_evaluation = await evaluate_current_market_schedule(db)
     if not market_evaluation.is_open:
         raise HTTPException(
@@ -2708,7 +2764,8 @@ async def _execute_trade_authoritatively(
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
 
-    idempotency_lock_held = await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
+    if not idempotency_lock_held:
+        idempotency_lock_held = await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
     if not await _try_lock_trade_offer_execution(db, trade_data.offer_id, wait=request_pre_gated):
         await _reject_trade_offer_contention(
             db,
