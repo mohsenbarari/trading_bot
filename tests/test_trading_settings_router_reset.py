@@ -31,6 +31,8 @@ class TradingSettingsRouterResetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.offer_expiry_minutes, defaults.offer_expiry_minutes)
         self.assertEqual(result.offer_max_quantity, defaults.offer_max_quantity)
         self.assertEqual(result.anti_abuse_daily_base, defaults.anti_abuse_daily_base)
+        self.assertFalse(result.competitive_price_validation_enabled)
+        self.assertTrue(result.offer_price_warning_enabled)
 
 
 if __name__ == "__main__":

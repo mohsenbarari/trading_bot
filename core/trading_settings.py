@@ -55,6 +55,10 @@ class TradingSettings(BaseModel):
     
     # حداکثر تعداد لفظ‌های فعال همزمان - پیش‌فرض 4
     max_active_offers: int = 4
+
+    # کنترل‌های قیمت؛ رد رقابتی فعلاً تعلیق است اما هشدار تأیید دوم فعال می‌ماند.
+    competitive_price_validation_enabled: bool = False
+    offer_price_warning_enabled: bool = True
     
     # تعداد دفعات منقضی کردن لفظ در دقیقه - پیش‌فرض 2
     offer_expire_rate_per_minute: int = 2

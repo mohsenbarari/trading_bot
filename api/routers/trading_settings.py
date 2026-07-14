@@ -36,6 +36,8 @@ class TradingSettingsUpdate(BaseModel):
     offer_min_quantity: Optional[int] = None
     offer_max_quantity: Optional[int] = None
     max_active_offers: Optional[int] = None
+    competitive_price_validation_enabled: Optional[bool] = None
+    offer_price_warning_enabled: Optional[bool] = None
     offer_expire_rate_per_minute: Optional[int] = None
     offer_expire_daily_limit_after_threshold: Optional[int] = None
     anti_abuse_daily_base: Optional[int] = None
@@ -54,6 +56,8 @@ class TradingSettingsResponse(BaseModel):
     offer_min_quantity: int
     offer_max_quantity: int
     max_active_offers: int
+    competitive_price_validation_enabled: bool
+    offer_price_warning_enabled: bool
     offer_expire_rate_per_minute: int
     offer_expire_daily_limit_after_threshold: int
     anti_abuse_daily_base: int
@@ -103,6 +107,8 @@ def _serialize_trading_settings(settings: TradingSettings) -> TradingSettingsRes
         offer_min_quantity=settings.offer_min_quantity,
         offer_max_quantity=settings.offer_max_quantity,
         max_active_offers=settings.max_active_offers,
+        competitive_price_validation_enabled=settings.competitive_price_validation_enabled,
+        offer_price_warning_enabled=settings.offer_price_warning_enabled,
         offer_expire_rate_per_minute=settings.offer_expire_rate_per_minute,
         offer_expire_daily_limit_after_threshold=settings.offer_expire_daily_limit_after_threshold,
         anti_abuse_daily_base=settings.anti_abuse_daily_base,

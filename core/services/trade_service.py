@@ -8,7 +8,7 @@ Trade Service - منطق مشترک معاملات
 from typing import Any, Dict, Tuple, List, Optional, Union
 
 from core.enums import SettlementType
-from core.offer_settlement import build_offer_summary_text, offer_settlement_label, settlement_type_value
+from core.offer_settlement import build_offer_summary_text, normalize_settlement_type, offer_settlement_label, settlement_type_value
 from core.trading_settings import get_trading_settings
 
 __all__ = [
@@ -525,6 +525,7 @@ def _get_quantity_bounds(quantity: int) -> Optional[Tuple[int, int]]:
 async def _get_comparable_active_prices(
     db,
     offer_type: str,
+    settlement_type: SettlementType | str,
     commodity_id: int,
     quantity: int,
     user_id: Optional[int],
@@ -538,10 +539,12 @@ async def _get_comparable_active_prices(
 
     min_qty, max_qty = quantity_bounds
     offer_type_enum = OfferType.SELL if offer_type == "sell" else OfferType.BUY
+    normalized_settlement_type = normalize_settlement_type(settlement_type)
 
     stmt = select(Offer.price).where(
         Offer.commodity_id == commodity_id,
         Offer.offer_type == offer_type_enum,
+        Offer.settlement_type == normalized_settlement_type,
         Offer.status == OfferStatus.ACTIVE,
         Offer.quantity >= min_qty,
         Offer.quantity <= max_qty,
@@ -610,14 +613,19 @@ def _build_price_warning_payload(
 async def detect_offer_price_warning(
     db,
     offer_type: str,
+    settlement_type: SettlementType | str,
     commodity_id: int,
     quantity: int,
     proposed_price: int,
     user_id: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
+    if not get_trading_settings().offer_price_warning_enabled:
+        return None
+
     prices = await _get_comparable_active_prices(
         db=db,
         offer_type=offer_type,
+        settlement_type=settlement_type,
         commodity_id=commodity_id,
         quantity=quantity,
         user_id=user_id,
@@ -652,6 +660,7 @@ async def detect_offer_price_warning(
 async def validate_competitive_price(
     db,  # AsyncSession
     offer_type: str,
+    settlement_type: SettlementType | str,
     commodity_id: int,
     quantity: int,
     proposed_price: int,
@@ -679,6 +688,9 @@ async def validate_competitive_price(
         (True, "") اگر معتبر باشد
         (False, "پیام خطا") اگر نامعتبر باشد
     """
+    if not get_trading_settings().competitive_price_validation_enabled:
+        return True, ""
+
     quantity_bounds = _get_quantity_bounds(quantity)
     if quantity_bounds is None:
         # اگر خارج از رنج‌های تعریف شده باشد، بدون اعتبارسنجی تایید می‌شود
@@ -686,6 +698,7 @@ async def validate_competitive_price(
     prices = await _get_comparable_active_prices(
         db=db,
         offer_type=offer_type,
+        settlement_type=settlement_type,
         commodity_id=commodity_id,
         quantity=quantity,
         user_id=user_id,

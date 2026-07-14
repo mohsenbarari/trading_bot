@@ -1065,6 +1065,7 @@ async def create_offer(
     is_valid_comp, err_comp = await validate_competitive_price(
         db=db,
         offer_type=offer_data.offer_type,
+        settlement_type=offer_data.settlement_type,
         commodity_id=offer_data.commodity_id,
         quantity=offer_data.quantity,
         proposed_price=offer_data.price,
@@ -1076,6 +1077,7 @@ async def create_offer(
     price_warning = await detect_offer_price_warning(
         db=db,
         offer_type=offer_data.offer_type,
+        settlement_type=offer_data.settlement_type,
         commodity_id=offer_data.commodity_id,
         quantity=offer_data.quantity,
         proposed_price=offer_data.price,

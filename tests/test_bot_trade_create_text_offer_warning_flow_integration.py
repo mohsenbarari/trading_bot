@@ -202,10 +202,10 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
         ), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
-        ), patch(
+        ) as competitive_price_mock, patch(
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=self.make_warning_payload()),
-        ), patch(
+        ) as price_warning_mock, patch(
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
         ), patch(
@@ -237,6 +237,8 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
 
             await handle_text_offer_warning_confirm(warning_confirm_callback, state, user=user, bot=bot)
 
+        self.assertEqual(competitive_price_mock.await_args.kwargs["settlement_type"], "cash")
+        self.assertEqual(price_warning_mock.await_args.kwargs["settlement_type"], "cash")
         self.assertEqual(create_session.added[0].channel_message_id, 910)
         self.assertTrue(create_session.added[0].exclude_from_competitive_price)
         self.assertEqual(create_session.added[0].price_warning_type, "sell_below_lowest_active")

@@ -19,6 +19,8 @@ def make_settings(**overrides):
         "offer_min_quantity": 1,
         "offer_max_quantity": 50,
         "max_active_offers": 10,
+        "competitive_price_validation_enabled": False,
+        "offer_price_warning_enabled": True,
         "offer_expire_rate_per_minute": 3,
         "offer_expire_daily_limit_after_threshold": 20,
         "anti_abuse_daily_base": 2,
@@ -67,6 +69,8 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
             offer_expiry_minutes=45,
             offer_max_quantity=50,
             anti_abuse_weekly_base=9,
+            competitive_price_validation_enabled=False,
+            offer_price_warning_enabled=True,
             market_schedule_enabled=True,
             market_open_time_local="10:00",
             market_close_time_local="17:00",
@@ -99,6 +103,8 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
                 "offer_min_quantity": 1,
                 "offer_max_quantity": 50,
                 "max_active_offers": 10,
+                "competitive_price_validation_enabled": False,
+                "offer_price_warning_enabled": True,
                 "offer_expire_rate_per_minute": 3,
                 "offer_expire_daily_limit_after_threshold": 20,
                 "anti_abuse_daily_base": 2,
@@ -117,6 +123,8 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.offer_expiry_minutes, 45)
         self.assertEqual(result.offer_max_quantity, 50)
         self.assertEqual(result.anti_abuse_weekly_base, 9)
+        self.assertFalse(result.competitive_price_validation_enabled)
+        self.assertTrue(result.offer_price_warning_enabled)
         self.assertTrue(result.market_schedule_enabled)
         self.assertEqual(result.market_open_time_local, "10:00")
         self.assertEqual(result.market_close_time_local, "17:00")

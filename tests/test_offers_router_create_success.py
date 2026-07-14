@@ -731,10 +731,10 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
-        ), patch(
+        ) as competitive_price_mock, patch(
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=warning_payload),
-        ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+        ) as price_warning_mock, patch("api.routers.offers.current_server", return_value="foreign"), patch(
             "api.routers.offers.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=None)),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
@@ -750,6 +750,8 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 context=make_context(current_user),
             )
 
+        self.assertEqual(competitive_price_mock.await_args.kwargs["settlement_type"], "cash")
+        self.assertEqual(price_warning_mock.await_args.kwargs["settlement_type"], "cash")
         new_offer = db.added[0]
         self.assertTrue(new_offer.exclude_from_competitive_price)
         self.assertEqual(new_offer.price_warning_type, "sell_below_lowest_active")

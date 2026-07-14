@@ -24,6 +24,8 @@ const defaultSettings = {
   offer_min_quantity: 5,
   offer_max_quantity: 50,
   max_active_offers: 4,
+  competitive_price_validation_enabled: false,
+  offer_price_warning_enabled: true,
   offer_expire_rate_per_minute: 2,
   offer_expire_daily_limit_after_threshold: 10,
   anti_abuse_daily_base: 2,
@@ -42,6 +44,8 @@ const loadedSettings = {
   offer_min_quantity: 10,
   offer_max_quantity: 120,
   max_active_offers: 8,
+  competitive_price_validation_enabled: false,
+  offer_price_warning_enabled: true,
   offer_expire_rate_per_minute: 4,
   offer_expire_daily_limit_after_threshold: 21,
   anti_abuse_daily_base: 6,
@@ -209,6 +213,10 @@ describe('TradingSettings.vue', () => {
     expect(wrapper.get('[data-testid="market-open-time"]').classes()).toContain('ui-input')
     expect(wrapper.get('[data-testid="market-close-time"]').classes()).toContain('ui-input')
     expect(wrapper.get('[data-testid="market-schedule-enabled"]').classes()).toContain('ui-checkbox')
+    expect(wrapper.get('[data-testid="competitive-price-validation-enabled"]').classes()).toContain('ui-checkbox')
+    expect(wrapper.get('[data-testid="offer-price-warning-enabled"]').classes()).toContain('ui-checkbox')
+    expect((wrapper.get('[data-testid="competitive-price-validation-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-testid="offer-price-warning-enabled"]').element as HTMLInputElement).checked).toBe(true)
     await wrapper.get('[data-testid="market-schedule-enabled"]').setValue(false)
     await wrapper.get('[data-testid="market-open-time"]').setValue('09:30')
     await wrapper.get('[data-testid="market-close-time"]').setValue('16:45')
@@ -219,28 +227,28 @@ describe('TradingSettings.vue', () => {
     await saveFooterButton.trigger('click')
     await flushPromises()
 
-    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith(
-      '/api/trading-settings/',
-      expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({
-          invitation_expiry_days: 3,
-          offer_expiry_minutes: 30,
-          offer_min_quantity: 10,
-          offer_max_quantity: 120,
-          max_active_offers: 8,
-          offer_expire_rate_per_minute: 4,
-          offer_expire_daily_limit_after_threshold: 21,
-          anti_abuse_daily_base: 6,
-          anti_abuse_weekly_base: 14,
-          anti_abuse_monthly_base: 12,
-          market_schedule_enabled: false,
-          market_open_time_local: '09:30',
-          market_close_time_local: '16:45',
-          market_closed_weekdays: [3, 4],
-        }),
-      }),
+    const putCall = tradingSettingsMocks.apiFetchMock.mock.calls.find(
+      ([url, options]) => url === '/api/trading-settings/' && options?.method === 'PUT',
     )
+    expect(putCall).toBeDefined()
+    expect(JSON.parse(String(putCall![1]?.body))).toEqual({
+      invitation_expiry_days: 3,
+      offer_expiry_minutes: 30,
+      offer_min_quantity: 10,
+      offer_max_quantity: 120,
+      max_active_offers: 8,
+      offer_expire_rate_per_minute: 4,
+      offer_expire_daily_limit_after_threshold: 21,
+      anti_abuse_daily_base: 6,
+      anti_abuse_weekly_base: 14,
+      anti_abuse_monthly_base: 12,
+      market_schedule_enabled: false,
+      competitive_price_validation_enabled: false,
+      offer_price_warning_enabled: true,
+      market_open_time_local: '09:30',
+      market_close_time_local: '16:45',
+      market_closed_weekdays: [3, 4],
+    })
     expect(wrapper.text()).toContain('تنظیمات با موفقیت ذخیره شد')
     expect(wrapper.get('.settings-viewport-toast--success').text()).toBe('تنظیمات با موفقیت ذخیره شد')
     expect((inputs[1]!.element as HTMLInputElement).value).toBe('')

@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from core.services.trade_service import (
     BUY_PRICE_WARNING_TYPE,
@@ -16,6 +16,20 @@ def make_result(prices):
 
 
 class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.price_settings = SimpleNamespace(
+            competitive_price_validation_enabled=True,
+            offer_price_warning_enabled=True,
+        )
+        self.settings_patch = patch(
+            "core.services.trade_service.get_trading_settings",
+            return_value=self.price_settings,
+        )
+        self.settings_patch.start()
+
+    def tearDown(self):
+        self.settings_patch.stop()
+
     def test_get_quantity_range_respects_defined_boundaries(self):
         cases = [
             (4, None),
@@ -38,6 +52,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         is_valid, error = await validate_competitive_price(
             db=db,
             offer_type="sell",
+            settlement_type="cash",
             commodity_id=1,
             quantity=99,
             proposed_price=100000,
@@ -54,6 +69,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         is_valid, error = await validate_competitive_price(
             db=db,
             offer_type="sell",
+            settlement_type="cash",
             commodity_id=1,
             quantity=10,
             proposed_price=110000,
@@ -70,6 +86,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         is_valid, error = await validate_competitive_price(
             db=db,
             offer_type="sell",
+            settlement_type="cash",
             commodity_id=1,
             quantity=10,
             proposed_price=100401,
@@ -85,6 +102,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         is_valid, error = await validate_competitive_price(
             db=db,
             offer_type="sell",
+            settlement_type="cash",
             commodity_id=1,
             quantity=10,
             proposed_price=100400,
@@ -100,6 +118,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         is_valid, error = await validate_competitive_price(
             db=db,
             offer_type="buy",
+            settlement_type="tomorrow",
             commodity_id=1,
             quantity=25,
             proposed_price=99599,
@@ -115,6 +134,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         is_valid, error = await validate_competitive_price(
             db=db,
             offer_type="buy",
+            settlement_type="tomorrow",
             commodity_id=1,
             quantity=25,
             proposed_price=99600,
@@ -130,6 +150,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         warning = await detect_offer_price_warning(
             db=db,
             offer_type="sell",
+            settlement_type="cash",
             commodity_id=1,
             quantity=10,
             proposed_price=99900,
@@ -147,6 +168,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         warning = await detect_offer_price_warning(
             db=db,
             offer_type="buy",
+            settlement_type="tomorrow",
             commodity_id=1,
             quantity=25,
             proposed_price=100500,
@@ -163,6 +185,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_execute(stmt):
             seen_stmt["sql"] = str(stmt)
+            seen_stmt["params"] = stmt.compile().params
             return make_result([100000, 100000, 100000])
 
         db = SimpleNamespace(execute=AsyncMock(side_effect=fake_execute))
@@ -170,6 +193,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         await validate_competitive_price(
             db=db,
             offer_type="sell",
+            settlement_type="cash",
             commodity_id=1,
             quantity=10,
             proposed_price=100400,
@@ -177,6 +201,55 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("exclude_from_competitive_price", seen_stmt["sql"])
+        self.assertIn("settlement_type", seen_stmt["sql"])
+        self.assertIn("cash", seen_stmt["params"].values())
+
+    async def test_disabled_competitive_validation_skips_db_without_disabling_warning(self):
+        self.price_settings.competitive_price_validation_enabled = False
+        db = SimpleNamespace(execute=AsyncMock(return_value=make_result([100000])))
+
+        is_valid, error = await validate_competitive_price(
+            db=db,
+            offer_type="sell",
+            settlement_type="cash",
+            commodity_id=1,
+            quantity=10,
+            proposed_price=110000,
+            user_id=7,
+        )
+
+        self.assertTrue(is_valid)
+        self.assertEqual(error, "")
+        db.execute.assert_not_awaited()
+
+        warning = await detect_offer_price_warning(
+            db=db,
+            offer_type="sell",
+            settlement_type="cash",
+            commodity_id=1,
+            quantity=10,
+            proposed_price=99900,
+            user_id=7,
+        )
+        self.assertIsNotNone(warning)
+        db.execute.assert_awaited_once()
+
+    async def test_disabled_price_warning_skips_db_independently(self):
+        self.price_settings.offer_price_warning_enabled = False
+        db = SimpleNamespace(execute=AsyncMock())
+
+        warning = await detect_offer_price_warning(
+            db=db,
+            offer_type="buy",
+            settlement_type="tomorrow",
+            commodity_id=1,
+            quantity=25,
+            proposed_price=100500,
+            user_id=7,
+        )
+
+        self.assertIsNone(warning)
+        db.execute.assert_not_awaited()
 
 
 if __name__ == "__main__":

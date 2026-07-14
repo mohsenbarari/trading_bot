@@ -41,6 +41,8 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.invitation_expiry_minutes, 4320)
         self.assertEqual(settings.lot_min_size, 7)
         self.assertEqual(settings.lot_max_count, 3)
+        self.assertFalse(settings.competitive_price_validation_enabled)
+        self.assertTrue(settings.offer_price_warning_enabled)
 
     async def test_trading_settings_schedule_fields_are_json_serializable(self):
         settings = trading_settings.TradingSettings(

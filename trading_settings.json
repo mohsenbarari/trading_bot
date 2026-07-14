@@ -4,6 +4,8 @@
     "offer_min_quantity": 5,
     "offer_max_quantity": 50,
     "max_active_offers": 4,
+    "competitive_price_validation_enabled": false,
+    "offer_price_warning_enabled": true,
     "offer_expire_rate_per_minute": 2,
     "offer_expire_daily_limit_after_threshold": 10,
     "anti_abuse_daily_base": 2,

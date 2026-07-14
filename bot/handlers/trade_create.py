@@ -1015,6 +1015,7 @@ async def _handle_trade_confirm_core(
         is_valid_comp, err_comp = await validate_competitive_price(
             db=session,
             offer_type=trade_type,
+            settlement_type=settlement_type,
             commodity_id=commodity_id,
             quantity=quantity,
             proposed_price=price,
@@ -1024,6 +1025,7 @@ async def _handle_trade_confirm_core(
             price_warning = await detect_offer_price_warning(
                 db=session,
                 offer_type=trade_type,
+                settlement_type=settlement_type,
                 commodity_id=commodity_id,
                 quantity=quantity,
                 proposed_price=price,

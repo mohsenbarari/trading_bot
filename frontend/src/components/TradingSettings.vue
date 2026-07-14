@@ -77,6 +77,11 @@ const defaultSchedule = {
   market_closed_weekdays: [] as number[],
 }
 
+const defaultPriceControls = {
+  competitive_price_validation_enabled: false,
+  offer_price_warning_enabled: true,
+}
+
 const weekdayOptions = [
   { value: 5, label: 'شنبه' },
   { value: 6, label: 'یکشنبه' },
@@ -131,6 +136,7 @@ const settings = ref<Record<EditableSettingKey, number>>({ ...defaultVals })
 // مقادیری که کاربر در حال ویرایش آن‌هاست
 const form = ref<Partial<Record<EditableSettingKey, number | ''>>>({})
 const scheduleForm = ref({ ...defaultSchedule })
+const priceControlsForm = ref({ ...defaultPriceControls })
 const marketState = ref<MarketRuntimeState | null>(null)
 const overrides = ref<MarketScheduleOverrideRow[]>([])
 const overridesLoading = ref(false)
@@ -193,6 +199,14 @@ const applySettingsResponse = (data: Record<string, any>) => {
     market_closed_weekdays: Array.isArray(data.market_closed_weekdays)
       ? [...data.market_closed_weekdays].sort((a, b) => a - b)
       : [...defaultSchedule.market_closed_weekdays],
+  }
+  priceControlsForm.value = {
+    competitive_price_validation_enabled: Boolean(
+      data.competitive_price_validation_enabled ?? defaultPriceControls.competitive_price_validation_enabled,
+    ),
+    offer_price_warning_enabled: Boolean(
+      data.offer_price_warning_enabled ?? defaultPriceControls.offer_price_warning_enabled,
+    ),
   }
 }
 
@@ -320,6 +334,8 @@ const saveSettings = async () => {
     const fullPayload = {
       ...payload,
       market_schedule_enabled: scheduleForm.value.market_schedule_enabled,
+      competitive_price_validation_enabled: priceControlsForm.value.competitive_price_validation_enabled,
+      offer_price_warning_enabled: priceControlsForm.value.offer_price_warning_enabled,
       market_open_time_local: scheduleForm.value.market_open_time_local,
       market_close_time_local: scheduleForm.value.market_close_time_local,
       market_closed_weekdays: [...scheduleForm.value.market_closed_weekdays].sort((a, b) => a - b),
@@ -511,6 +527,20 @@ onBeforeUnmount(() => {
               :class="{'is-default': isDefault('max_active_offers')}"
             />
           </div>
+          <label class="schedule-toggle" data-testid="competitive-price-validation-row">
+            <AppCheckbox
+              data-testid="competitive-price-validation-enabled"
+              v-model="priceControlsForm.competitive_price_validation_enabled"
+            />
+            <span>کنترل قیمت رقابتی</span>
+          </label>
+          <label class="schedule-toggle" data-testid="offer-price-warning-row">
+            <AppCheckbox
+              data-testid="offer-price-warning-enabled"
+              v-model="priceControlsForm.offer_price_warning_enabled"
+            />
+            <span>هشدار قیمت و تأیید دوم</span>
+          </label>
         </div>
       </div>
 

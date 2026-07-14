@@ -118,6 +118,7 @@ async def validate_offer_creation_command(db: AsyncSession, command: OfferCreati
     is_valid_comp, err_comp = await trade_service.validate_competitive_price(
         db=db,
         offer_type=_normalize_offer_type(command.offer_type).value,
+        settlement_type=normalize_settlement_type(command.settlement_type),
         commodity_id=command.commodity_id,
         quantity=command.quantity,
         proposed_price=command.price,
