@@ -6,6 +6,7 @@ from unittest.mock import ANY, AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.offers import OfferCreate, create_offer
+from core.services.market_transition_service import MarketOfferAdmissionClosedError
 from core.services.offer_republish_service import OfferNotRepeatableError
 from core.enums import UserRole
 from models.offer import OfferStatus, OfferType
@@ -152,6 +153,12 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.register_market_offer_created_mock = register_offer_patcher.start()
         self.addCleanup(register_offer_patcher.stop)
+        admission_fence_patcher = patch(
+            "core.services.offer_creation_service.acquire_market_offer_admission_fence",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True)),
+        )
+        self.admission_fence_mock = admission_fence_patcher.start()
+        self.addCleanup(admission_fence_patcher.stop)
 
     async def test_republish_creates_independent_offer_from_remaining_source(self):
         commodity = SimpleNamespace(id=1)
@@ -551,6 +558,56 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(result, {"id": 99})
+
+    async def test_create_offer_rejects_when_market_closes_at_final_admission_without_side_effects(self):
+        commodity = SimpleNamespace(id=1)
+        current_user = make_user(id=5, home_server="iran")
+        db = FakeDB(
+            get_results=[commodity],
+            scalar_results=[0],
+            execute_results=[FakeExecuteResult(None)],
+        )
+        self.admission_fence_mock.side_effect = MarketOfferAdmissionClosedError(
+            "market_closed_during_offer_admission"
+        )
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=5),
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as channel_mock, patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock, patch(
+            "api.routers.realtime.publish_event",
+            new=AsyncMock(),
+        ) as publish_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.",
+        )
+        self.assertEqual(db.added, [])
+        db.rollback.assert_awaited_once()
+        db.commit.assert_not_awaited()
+        channel_mock.assert_not_awaited()
+        counter_mock.assert_not_awaited()
+        publish_mock.assert_not_awaited()
+        self.register_market_offer_created_mock.assert_not_awaited()
 
     async def test_create_offer_stamps_owner_actor_id_for_self_context(self):
         commodity = SimpleNamespace(id=1)

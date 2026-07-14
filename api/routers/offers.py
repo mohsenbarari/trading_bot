@@ -20,6 +20,8 @@ from core.config import settings
 from core.trading_settings import TradingSettings, get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str, utc_now_naive
 from core.services.market_transition_service import (
+    MarketOfferAdmissionError,
+    MarketOfferAdmissionClosedError,
     evaluate_current_market_schedule,
     register_market_offer_created,
 )
@@ -1107,7 +1109,29 @@ async def create_offer(
                 status=OfferStatus.ACTIVE,
                 republished_from_offer_public_id=republish_source_public_id or None,
             ),
+            enforce_market_admission=True,
         )
+    except MarketOfferAdmissionError as exc:
+        await db.rollback()
+        rejection_reason = (
+            "market_closed_at_final_admission"
+            if isinstance(exc, MarketOfferAdmissionClosedError)
+            else "market_admission_fence_unavailable"
+        )
+        log_trading_event(
+            logger,
+            "offer_create.final_admission_rejected",
+            action="offer_create",
+            result="rejected",
+            source_server=current_server(),
+            has_idempotency_key=bool(idempotency_key),
+            reason=rejection_reason,
+            error_class=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=MARKET_CLOSED_DETAIL,
+        ) from exc
     except OfferCreationValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except IntegrityError:

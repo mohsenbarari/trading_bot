@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from core.offer_identity import build_offer_public_link, generate_offer_public_id, is_offer_public_id_shape
 from core.offer_source import OfferSourceSurface
@@ -9,6 +10,10 @@ from core.services.offer_creation_service import (
     OfferCreationValidationError,
     build_authoritative_offer,
     create_authoritative_offer,
+)
+from core.services.market_transition_service import (
+    MarketOfferAdmissionClosedError,
+    MarketOfferAdmissionUnavailableError,
 )
 from models.offer import OfferStatus, OfferType
 
@@ -144,6 +149,69 @@ class OfferCreationServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
                 await create_authoritative_offer(db, command)
 
         self.assertEqual(db.added, [])
+
+    async def test_create_authoritative_offer_holds_final_market_fence_through_commit(self):
+        db = FakeDB()
+        command = OfferCreationCommand(
+            source_surface=OfferSourceSurface.WEBAPP,
+            owner_user_id=1,
+            actor_user_id=1,
+            offer_type="buy",
+            commodity_id=7,
+            quantity=10,
+            price=1000,
+        )
+
+        with patch(
+            "core.services.offer_creation_service.validate_offer_creation_command",
+            new=AsyncMock(),
+        ) as validate_mock, patch(
+            "core.services.offer_creation_service.acquire_market_offer_admission_fence",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True)),
+        ) as fence_mock:
+            offer = await create_authoritative_offer(
+                db,
+                command,
+                enforce_market_admission=True,
+            )
+
+        validate_mock.assert_awaited_once_with(db, command)
+        fence_mock.assert_awaited_once_with(db)
+        self.assertIs(db.added[0], offer)
+
+    async def test_create_authoritative_offer_rejected_final_fence_adds_nothing(self):
+        command = OfferCreationCommand(
+            source_surface=OfferSourceSurface.TELEGRAM_BOT,
+            owner_user_id=1,
+            actor_user_id=1,
+            offer_type="sell",
+            commodity_id=7,
+            quantity=10,
+            price=1000,
+        )
+
+        errors = (
+            MarketOfferAdmissionClosedError("market_closed_during_offer_admission"),
+            MarketOfferAdmissionUnavailableError("market_offer_admission_fence_unavailable"),
+        )
+        for rejection in errors:
+            with self.subTest(rejection=type(rejection).__name__):
+                db = FakeDB()
+                with patch(
+                    "core.services.offer_creation_service.validate_offer_creation_command",
+                    new=AsyncMock(),
+                ), patch(
+                    "core.services.offer_creation_service.acquire_market_offer_admission_fence",
+                    new=AsyncMock(side_effect=rejection),
+                ):
+                    with self.assertRaises(type(rejection)):
+                        await create_authoritative_offer(
+                            db,
+                            command,
+                            enforce_market_admission=True,
+                        )
+
+                self.assertEqual(db.added, [])
 
 
 if __name__ == "__main__":

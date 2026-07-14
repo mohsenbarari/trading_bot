@@ -188,6 +188,12 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         trading_settings._fallback_cache = trading_settings.TradingSettings(max_active_offers=4)
         trading_settings._fallback_timestamp = time.time()
+        self.admission_patcher = patch(
+            "core.services.offer_creation_service.acquire_market_offer_admission_fence",
+            new=AsyncMock(),
+        )
+        self.admission_patcher.start()
+        self.addCleanup(self.admission_patcher.stop)
 
     def tearDown(self):
         trading_settings._fallback_cache = None

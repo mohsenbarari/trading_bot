@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
+from sqlalchemy.exc import OperationalError
+
 from core.services.market_schedule_service import MarketScheduleEvaluation
 from core.services import market_transition_service
 from models.market_runtime_state import MarketRuntimeState
@@ -565,6 +567,115 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pg_advisory_xact_lock", str(stmt))
         self.assertEqual(params, {"lock_key": market_transition_service.MARKET_RUNTIME_ADVISORY_LOCK_KEY})
 
+    async def test_offer_admission_fence_locks_before_final_open_evaluation(self):
+        events = []
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+        )
+
+        async def acquire_lock(_db, **_kwargs):
+            events.append("lock")
+
+        async def evaluate(_db, *, current_time=None):
+            events.append("evaluate")
+            return evaluation
+
+        with patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(side_effect=acquire_lock),
+        ), patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(side_effect=evaluate),
+        ):
+            result = await market_transition_service.acquire_market_offer_admission_fence(
+                SimpleNamespace()
+            )
+
+        self.assertIs(result, evaluation)
+        self.assertEqual(events, ["lock", "evaluate"])
+
+    async def test_offer_admission_fence_rejects_closed_market_after_lock(self):
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+        )
+
+        with patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ) as lock_mock, patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(return_value=evaluation),
+        ) as evaluate_mock:
+            with self.assertRaises(market_transition_service.MarketOfferAdmissionClosedError):
+                await market_transition_service.acquire_market_offer_admission_fence(
+                    SimpleNamespace()
+                )
+
+        lock_mock.assert_awaited_once()
+        evaluate_mock.assert_awaited_once()
+
+    async def test_offer_admission_fence_fails_closed_when_lock_times_out(self):
+        lock_error = OperationalError(
+            "SELECT pg_advisory_xact_lock(:lock_key)",
+            {},
+            RuntimeError("lock timeout"),
+        )
+
+        with patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(side_effect=lock_error),
+        ), patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(),
+        ) as evaluate_mock:
+            with self.assertRaises(
+                market_transition_service.MarketOfferAdmissionUnavailableError
+            ):
+                await market_transition_service.acquire_market_offer_admission_fence(
+                    SimpleNamespace()
+                )
+
+        evaluate_mock.assert_not_awaited()
+
+    def test_offer_admission_lock_timeout_is_bounded_and_invalid_values_fall_back(self):
+        with patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS": "10"},
+        ):
+            self.assertEqual(
+                market_transition_service._market_offer_admission_lock_timeout_ms(),
+                250,
+            )
+        with patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS": "99999"},
+        ):
+            self.assertEqual(
+                market_transition_service._market_offer_admission_lock_timeout_ms(),
+                30000,
+            )
+        with patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS": "invalid"},
+        ), patch.object(market_transition_service, "logger") as logger_mock:
+            self.assertEqual(
+                market_transition_service._market_offer_admission_lock_timeout_ms(),
+                market_transition_service.MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS,
+            )
+        logger_mock.warning.assert_called_once()
+
     async def test_apply_market_schedule_transition_is_idempotent_when_runtime_matches(self):
         state = MarketRuntimeState(id=1, is_open=True, active_web_notice_visible=False, offers_since_last_open=1)
         db = SimpleNamespace(
@@ -828,15 +939,19 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.services.market_transition_service.current_server",
             return_value="foreign",
-        ), patch(
-            "core.services.offer_expiry_service.current_server",
-            return_value="foreign",
         ), patch.object(
             market_transition_service,
-            "_load_active_local_offers",
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ) as lock_mock, patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.market_transition_service._load_active_local_offers",
             new=AsyncMock(return_value=offers),
-        ) as load_offers_mock, patch(
-            "core.services.market_transition_service.apply_offer_channel_state",
+        ) as load_offers_mock, patch.object(
+            market_transition_service,
+            "apply_offer_channel_state",
             new=AsyncMock(),
         ) as apply_channel_state_mock, patch(
             "core.cache.decr_active_offer_count",
@@ -860,6 +975,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([offer.expire_source_surface for offer in offers], ["system", "system"])
         self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
         self.assertEqual([offer.expired_at for offer in offers], [close_time, close_time])
+        lock_mock.assert_awaited_once_with(db)
         load_offers_mock.assert_awaited_once()
         db.commit.assert_awaited_once()
         self.assertEqual(apply_channel_state_mock.await_count, 2)
@@ -900,6 +1016,42 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         load_offers_mock.assert_not_awaited()
         db.commit.assert_not_awaited()
         notice_mock.assert_awaited_once_with(db, state, source="sync_receive")
+
+    async def test_foreign_closed_reconciliation_releases_fence_without_active_offers(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc),
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch(
+            "core.services.market_transition_service.current_server",
+            return_value="foreign",
+        ), patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ) as lock_mock, patch.object(
+            market_transition_service,
+            "_load_active_local_offers",
+            new=AsyncMock(return_value=[]),
+        ), patch.object(
+            market_transition_service,
+            "reconcile_market_channel_notice_for_state",
+            new=AsyncMock(),
+        ):
+            result = await market_transition_service.reconcile_market_runtime_side_effects_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertFalse(result.changed)
+        lock_mock.assert_awaited_once_with(db)
+        db.commit.assert_awaited_once()
 
     async def test_foreign_market_schedule_autonomy_waits_until_grace_expires(self):
         transition_at = datetime(2026, 6, 29, 18, 30, tzinfo=timezone.utc)
@@ -1249,8 +1401,8 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_called_once()
         self.assertEqual(publish_mock.call_args.args[0], "market:notice_hidden")
 
-    async def test_register_market_offer_created_initializes_missing_state(self):
-        db = SimpleNamespace(commit=AsyncMock(), add=Mock())
+    async def test_register_market_offer_created_does_not_initialize_closed_runtime(self):
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock(), add=Mock())
         evaluation = MarketScheduleEvaluation(
             is_open=False,
             reason="after_daily_window_close",
@@ -1275,9 +1427,86 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             state = await market_transition_service.register_market_offer_created(db, current_time=now)
 
         self.assertFalse(state.is_open)
-        self.assertEqual(state.offers_since_last_open, 1)
-        db.add.assert_called_once_with(state)
-        db.commit.assert_awaited_once()
+        self.assertEqual(state.offers_since_last_open, 0)
+        db.add.assert_not_called()
+        db.commit.assert_not_awaited()
+        db.rollback.assert_awaited_once()
+
+    async def test_register_market_offer_created_does_not_preempt_pending_close_transition(self):
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock(), add=Mock())
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+        )
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=False,
+            offers_since_last_open=2,
+            last_transition_at=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+        )
+
+        with patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(return_value=evaluation),
+        ), patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=state),
+        ):
+            result = await market_transition_service.register_market_offer_created(db)
+
+        self.assertIs(result, state)
+        self.assertTrue(state.is_open)
+        self.assertEqual(state.offers_since_last_open, 2)
+        db.add.assert_not_called()
+        db.commit.assert_not_awaited()
+        db.rollback.assert_awaited_once()
+
+    async def test_register_market_offer_created_does_not_preempt_pending_open_transition(self):
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock(), add=Mock())
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+        )
+        state = MarketRuntimeState(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 5, 21, 18, 0, tzinfo=timezone.utc),
+        )
+
+        with patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(return_value=evaluation),
+        ), patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=state),
+        ):
+            result = await market_transition_service.register_market_offer_created(db)
+
+        self.assertIs(result, state)
+        self.assertFalse(state.is_open)
+        self.assertEqual(state.offers_since_last_open, 0)
+        db.add.assert_not_called()
+        db.commit.assert_not_awaited()
+        db.rollback.assert_awaited_once()
 
     async def test_register_market_offer_created_logs_notice_hidden_publish_failures(self):
         db = SimpleNamespace(commit=AsyncMock())

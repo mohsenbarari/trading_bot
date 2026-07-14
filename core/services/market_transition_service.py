@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -56,9 +57,22 @@ MARKET_NOTICE_DISABLE_VALUES = {"1", "true", "yes", "on", "disabled"}
 MARKET_NOTICE_STALENESS_SECONDS = 120
 MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS = 30
 MARKET_RUNTIME_ADVISORY_LOCK_KEY = 202605220901
+MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS = 5000
 MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS = float(
     os.getenv("TRADING_BOT_MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS", "1.0")
 )
+
+
+class MarketOfferAdmissionError(RuntimeError):
+    """Base error for final offer-admission rejection."""
+
+
+class MarketOfferAdmissionClosedError(MarketOfferAdmissionError):
+    """Raised when the market closes before an offer creation can commit."""
+
+
+class MarketOfferAdmissionUnavailableError(MarketOfferAdmissionError):
+    """Raised when final admission cannot safely obtain the market fence."""
 
 
 @dataclass(slots=True)
@@ -160,11 +174,41 @@ def _build_initial_market_runtime_state(
     )
 
 
-async def _acquire_market_runtime_lock(db: AsyncSession) -> None:
+async def _acquire_market_runtime_lock(
+    db: AsyncSession,
+    *,
+    lock_timeout_ms: int | None = None,
+) -> None:
+    if lock_timeout_ms is not None:
+        await db.execute(
+            text("SELECT set_config('lock_timeout', :lock_timeout, true)"),
+            {"lock_timeout": f"{max(1, int(lock_timeout_ms))}ms"},
+        )
     await db.execute(
         text("SELECT pg_advisory_xact_lock(:lock_key)"),
         {"lock_key": MARKET_RUNTIME_ADVISORY_LOCK_KEY},
     )
+
+
+async def acquire_market_offer_admission_fence(
+    db: AsyncSession,
+    *,
+    current_time: datetime | None = None,
+) -> MarketScheduleEvaluation:
+    """Serialize final offer admission with local market transitions."""
+    try:
+        await _acquire_market_runtime_lock(
+            db,
+            lock_timeout_ms=_market_offer_admission_lock_timeout_ms(),
+        )
+    except DBAPIError as exc:
+        raise MarketOfferAdmissionUnavailableError(
+            "market_offer_admission_fence_unavailable"
+        ) from exc
+    evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
+    if not evaluation.is_open:
+        raise MarketOfferAdmissionClosedError("market_closed_during_offer_admission")
+    return evaluation
 
 
 def _market_notice_text_for_transition(transition: str) -> str:
@@ -242,6 +286,20 @@ def _foreign_independent_grace_seconds() -> int:
             extra={"event": "market.foreign_independent_grace_invalid", "value": raw},
         )
         return MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS
+
+
+def _market_offer_admission_lock_timeout_ms() -> int:
+    raw = os.getenv("TRADING_BOT_MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS")
+    if raw is None:
+        return MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS
+    try:
+        return min(30000, max(250, int(raw)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid TRADING_BOT_MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS; falling back to default",
+            extra={"event": "market.offer_admission_lock_timeout_invalid", "value": raw},
+        )
+        return MARKET_OFFER_ADMISSION_LOCK_TIMEOUT_MS
 
 
 def _market_notice_is_stale(*, transition_at: datetime, now: datetime) -> bool:
@@ -621,13 +679,14 @@ async def reconcile_market_runtime_side_effects_for_state(
     expired_offer_ids: tuple[int, ...] = ()
     transition: str | None = None
     if current_server() == SERVER_FOREIGN and not state.is_open:
+        await _acquire_market_runtime_lock(db)
         close_time = _market_notice_transition_at_for_state(state) or utc_now()
         expiry_result, expired_user_ids = await _expire_active_local_offers_for_market_close(
             db,
             now=close_time,
         )
+        await db.commit()
         if expiry_result.expired_count:
-            await db.commit()
             await _apply_market_close_expiry_side_effects(
                 expiry_result.expired_offers,
                 expired_user_ids,
@@ -812,13 +871,22 @@ async def register_market_offer_created(
     *,
     current_time: datetime | None = None,
 ) -> MarketRuntimeState:
-    evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
     await _acquire_market_runtime_lock(db)
+    evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
     state = await get_market_runtime_state(db)
     if state is None:
+        if not evaluation.is_open:
+            await db.rollback()
+            return _build_initial_market_runtime_state(
+                evaluation,
+                current_time=current_time,
+            )
         state = _build_initial_market_runtime_state(evaluation, current_time=current_time)
         db.add(state)
-    state.is_open = evaluation.is_open
+    elif not evaluation.is_open or not state.is_open:
+        await db.rollback()
+        return state
+
     state.offers_since_last_open = int(state.offers_since_last_open or 0) + 1
     should_hide_notice = bool(
         state.active_web_notice_visible and state.offers_since_last_open >= 2

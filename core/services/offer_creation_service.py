@@ -10,6 +10,7 @@ from core.enums import SettlementType
 from core.offer_identity import generate_offer_public_id
 from core.offer_settlement import normalize_settlement_type
 from core.offer_source import OfferSourceSurface, normalize_offer_source_surface, offer_home_server_for_source
+from core.services.market_transition_service import acquire_market_offer_admission_fence
 from models.offer import Offer, OfferStatus, OfferType
 
 
@@ -140,9 +141,12 @@ async def create_authoritative_offer(
     commit: bool = True,
     refresh: bool = True,
     validate_market: bool = True,
+    enforce_market_admission: bool = False,
 ) -> Offer:
     if validate_market:
         await validate_offer_creation_command(db, command)
+    if enforce_market_admission:
+        await acquire_market_offer_admission_fence(db)
     offer = build_authoritative_offer(command)
     db.add(offer)
     if commit:

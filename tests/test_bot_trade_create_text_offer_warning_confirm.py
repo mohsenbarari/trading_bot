@@ -48,6 +48,12 @@ class BotTradeCreateTextOfferWarningConfirmTests(unittest.IsolatedAsyncioTestCas
         self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
         self.market_patcher.start()
         self.addCleanup(self.market_patcher.stop)
+        self.admission_patcher = patch(
+            "core.services.offer_creation_service.acquire_market_offer_admission_fence",
+            new=AsyncMock(),
+        )
+        self.admission_patcher.start()
+        self.addCleanup(self.admission_patcher.stop)
 
     def make_state(self):
         return SimpleNamespace(

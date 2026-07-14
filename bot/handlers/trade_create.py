@@ -20,6 +20,7 @@ from core.db import AsyncSessionLocal
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
+from core.services.market_transition_service import MarketOfferAdmissionError
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.server_routing import current_server, is_remote_home
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
@@ -1066,6 +1067,7 @@ async def _handle_trade_confirm_core(
                     notes=notes,
                     status=OfferStatus.ACTIVE,
                 ),
+                enforce_market_admission=True,
             )
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
@@ -1231,6 +1233,16 @@ async def _handle_trade_confirm_core(
                 ]
             ),
         )
+    except MarketOfferAdmissionError as exc:
+        logger.info(
+            "Offer creation rejected at final market admission",
+            extra={
+                "event": "telegram.offer_create_final_admission_rejected",
+                "user_id": getattr(user, "id", None),
+                "error_class": type(exc).__name__,
+            },
+        )
+        await callback.message.edit_text(BOT_MARKET_CLOSED_MESSAGE)
     except TelegramBadRequest as exc:
         logger.warning(
             "Telegram rejected offer channel publication",

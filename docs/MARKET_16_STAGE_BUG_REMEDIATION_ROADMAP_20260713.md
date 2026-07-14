@@ -542,6 +542,14 @@ Audit فقط‌خواندنی production پیش از تغییر:
 - بنابراین هر دو home در دامنه هستند، اما fencing روی هر دیتابیس محلی انجام می‌شود. foreign نباید صرفاً به runtime state دیررس تکیه کند و پس از مرز قطعی schedule آفر جدید بپذیرد.
 - ترتیب قفل مشترک Stageهای ۶ و ۷: market-admission fence، سپس user/quota lock، سپس Offer transaction. ترتیب متفاوت بدون تحلیل deadlock مجاز نیست.
 
+### تصمیم نهایی تأییدشده
+
+- بسته‌شدن بازار اولویت دارد: اگر close پیش از commit نهایی ساخت آفر، fence محلی را گرفته باشد، create باید پس از آزادشدن fence وضعیت بازار را دوباره ارزیابی و بدون ساخت row یا side effect رد شود.
+- اگر create زودتر fence را بگیرد و commit کند، close منتظر می‌ماند و سپس همان آفر را همراه سایر آفرهای فعال منقضی می‌کند؛ بنابراین هیچ آفر فعال پس از close باقی نمی‌ماند.
+- بررسی اولیه WebApp/بات فقط برای پاسخ سریع است و معیار نهایی نیست. بررسی قطعی در سرویس canonical ساخت آفر، بعد از validation و زیر همان transaction/fence انجام می‌شود.
+- انتظار create برای fence محدود و fail-closed است؛ timeout نباید row، پیام کانال، realtime، counter یا Web Push بسازد.
+- تابع ثبت آمار نشست بازار حق تغییر `market_runtime_state.is_open` ندارد. فقط transition رسمی می‌تواند وضعیت بازار را عوض کند تا مسیر expire و اعلان close دور زده نشود.
+
 ### تست‌های اجباری
 
 - interleavingهای «create قبل از close»، «create همزمان با close» و «create بعد از close» اجرا شوند.
@@ -549,6 +557,9 @@ Audit فقط‌خواندنی production پیش از تغییر:
 - آفر ردشده row فعال، پیام کانال، notification یا request counter اشتباه نسازد.
 - بازشدن بعدی بازار آفر ردشده را زنده نکند.
 - contention و lock timeout با Stage ۷ باعث deadlock یا پذیرش آفر بعد از close نشود.
+- تست واقعی PostgreSQL با دو connection ثابت کند برنده fence اول اجرا می‌شود: close-first به rejection و create-first به commit-before-close منجر شود.
+- close نهایی در WebApp و بات قبل از ساخت row، publication، notification، realtime، counter و Web Push رد شود.
+- ثبت آمار آفر در فاصله create/close وضعیت runtime را تغییر ندهد و close رسمی همچنان همه آفرهای local-home را منقضی کند.
 
 ### معیار خروج
 
