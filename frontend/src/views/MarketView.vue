@@ -53,7 +53,6 @@ interface OfferPriceWarning {
 
 interface RecentOfferSummary {
   id: number
-  offer_public_id: string
   offer_type: 'buy' | 'sell'
   settlement_type: SettlementType
   commodity_id: number
@@ -153,7 +152,6 @@ const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const republishedFromOfferId = ref<number | null>(null)
-const republishedFromOfferPublicId = ref<string | null>(null)
 const pendingOfferIdempotencyKey = ref<string | null>(null)
 let offerPreviewConfirmLocked = false
 const recentOffers = ref<RecentOfferSummary[]>([])
@@ -650,7 +648,6 @@ function toggleRecentOffersMenu() {
 
 function openRecentOfferPreview(offer: RecentOfferSummary) {
   republishedFromOfferId.value = offer.id
-  republishedFromOfferPublicId.value = offer.offer_public_id
   pendingOfferIdempotencyKey.value = null
   pendingOfferPreview.value = {
     trade_type: offer.offer_type,
@@ -674,7 +671,6 @@ function cancelOfferPreview() {
   previewError.value = ''
   previewWarning.value = null
   republishedFromOfferId.value = null
-  republishedFromOfferPublicId.value = null
   pendingOfferIdempotencyKey.value = null
 }
 
@@ -722,7 +718,6 @@ async function confirmOfferPreview() {
       body: JSON.stringify({
         ...buildOfferCreatePayload(pendingOfferPreview.value),
         republished_from_id: republishedFromOfferId.value,
-        republished_from_public_id: republishedFromOfferPublicId.value,
         warning_acknowledged: !!previewWarning.value,
         idempotency_key: getPendingOfferIdempotencyKey(),
       }),
@@ -747,7 +742,6 @@ async function confirmOfferPreview() {
     pendingOfferPreview.value = null
     previewWarning.value = null
     republishedFromOfferId.value = null
-    republishedFromOfferPublicId.value = null
     pendingOfferIdempotencyKey.value = null
     refreshMarketOffers()
     void fetchRecentOffers(true)
@@ -781,7 +775,6 @@ function parseAndSubmitTextOffer() {
     return
   }
   republishedFromOfferId.value = null
-  republishedFromOfferPublicId.value = null
   pendingOfferIdempotencyKey.value = null
   isSubmitting.value = true
   parseError.value = ''
@@ -883,7 +876,6 @@ watch(isTier2Customer, (blocked) => {
   previewWarning.value = null
   previewError.value = ''
   republishedFromOfferId.value = null
-  republishedFromOfferPublicId.value = null
   pendingOfferIdempotencyKey.value = null
   closeRecentOffersMenu()
   recentOffers.value = []

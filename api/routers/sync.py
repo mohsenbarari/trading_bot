@@ -776,12 +776,6 @@ def _sync_item_policy_rejection_reason(item: dict) -> str | None:
 
 
 def _sync_item_authority_rejection_reason(item: dict, table: str) -> str | None:
-    if table == "offers":
-        data = _sync_item_data_for_policy(item)
-        offer_home_server = normalize_server(data.get("home_server"), default="")
-        source_server = _sync_item_source_server(item)
-        if offer_home_server and source_server and source_server != offer_home_server:
-            return f"source_authority_forbidden:{source_server}"
     if table not in IRAN_AUTHORITATIVE_SYNC_TABLES:
         return None
     source_server = _sync_item_source_server(item)
@@ -1647,7 +1641,7 @@ async def _localize_commodity_reference_by_name(db: AsyncSession, table: str, da
 
 
 async def _localize_republished_offer_reference(db: AsyncSession, data: dict) -> bool:
-    republished_public_id = _nonempty_text(data.get("republished_offer_public_id"))
+    republished_public_id = _nonempty_text(data.pop("republished_offer_public_id", None))
     if not republished_public_id:
         return True
     local_offer_id = await _resolve_offer_id_by_public_id(db, republished_public_id)
@@ -1655,7 +1649,6 @@ async def _localize_republished_offer_reference(db: AsyncSession, data: dict) ->
         data["republished_offer_id"] = None
         return False
     data["republished_offer_id"] = local_offer_id
-    data["republished_offer_public_id"] = republished_public_id
     return True
 
 

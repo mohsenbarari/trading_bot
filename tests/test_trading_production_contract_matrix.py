@@ -125,30 +125,6 @@ CONTRACT_COVERAGE = {
         "tests/test_offers_router_create_success.py",
         "test_create_offer_tolerates_post_commit_cache_and_realtime_failures",
     ),
-    "offer_republish_remote_authority": (
-        "tests/test_offers_router_create_success.py",
-        "test_republish_remote_home_forwards_durable_command_before_creating_iran_offer",
-    ),
-    "offer_republish_remote_outage_safety": (
-        "tests/test_offers_router_create_success.py",
-        "test_republish_remote_home_outage_does_not_mutate_mirror_or_create_replacement",
-    ),
-    "offer_republish_mixed_version_fail_closed": (
-        "tests/test_offers_router_create_success.py",
-        "test_republish_remote_home_rejects_legacy_success_response_without_creating_replacement",
-    ),
-    "offer_republish_response_loss_replay": (
-        "tests/test_offers_router_expire.py",
-        "test_internal_republish_replays_durable_result_after_response_loss",
-    ),
-    "offer_republish_public_identity": (
-        "tests/test_offer_expiry_command_receipts.py",
-        "test_command_hash_ignores_peer_local_offer_id_but_detects_business_changes",
-    ),
-    "offer_republish_stale_mirror_rejected": (
-        "tests/test_offer_expiry_command_receipts.py",
-        "test_sync_rejects_offer_updates_emitted_by_a_non_home_mirror",
-    ),
     "trade_standard_success": (
         "tests/test_trades_router_authoritative_success.py",
         "test_execute_trade_authoritatively_persists_trade_and_runs_side_effects",

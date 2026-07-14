@@ -762,23 +762,6 @@ class CoreEventsTests(unittest.TestCase):
         log_change.assert_not_called()
         publish_event_sync.assert_not_called()
 
-    def test_offer_event_listeners_do_not_emit_sync_or_realtime_for_non_home_mirrors(self):
-        registry = {}
-        with patch('core.events.event.listens_for', side_effect=_capture_listeners(registry)):
-            events.setup_offer_events()
-
-        mirror = SimpleNamespace(id=77, home_server='iran')
-        connection = _FakeConnection()
-        with patch('core.events.current_server', return_value='foreign'), patch(
-            'core.events.log_change'
-        ) as log_change, patch('core.events.publish_event_sync') as publish_event_sync:
-            registry[('Offer', 'after_insert')](None, connection, mirror)
-            registry[('Offer', 'after_update')](None, connection, mirror)
-            registry[('Offer', 'after_delete')](None, connection, mirror)
-
-        log_change.assert_not_called()
-        publish_event_sync.assert_not_called()
-
     def test_registration_v2_user_insert_emits_only_iran_owned_fields(self):
         registry = {}
         now = datetime(2026, 7, 11, 10, 0, 0)

@@ -23,7 +23,6 @@ from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
 from core.offer_sync_payload import build_offer_sync_payload
-from core.server_routing import current_server, normalize_server
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
 from core.sync_field_policy import sanitize_sync_payload
 from core.config import settings
@@ -47,11 +46,6 @@ logger = logging.getLogger(__name__)
 # ─── Persistent Redis connection for sync pushes ───
 _sync_redis = None
 _event_listeners_initialized = False
-
-
-def _offer_is_authoritative_here(target) -> bool:
-    server = current_server()
-    return normalize_server(getattr(target, "home_server", None), server) == server
 
 
 def _changed_column_fields(target) -> set[str]:
@@ -442,14 +436,14 @@ def setup_offer_events():
 
     @event.listens_for(Offer, 'after_insert')
     def on_offer_created(mapper, connection, target):
-        if connection.get_execution_options().get("is_sync") or not _offer_is_authoritative_here(target):
+        if connection.get_execution_options().get("is_sync"):
             return
         try:
             data = build_offer_sync_payload(target)
             data["commodity_name"] = _lookup_commodity_name(connection, target.commodity_id)
-            data["republished_offer_public_id"] = (
-                getattr(target, "republished_offer_public_id", None)
-                or _lookup_offer_public_id(connection, getattr(target, "republished_offer_id", None))
+            data["republished_offer_public_id"] = _lookup_offer_public_id(
+                connection,
+                getattr(target, "republished_offer_id", None),
             )
             log_change(connection, "offers", target.id, "INSERT", data)
             publish_event_sync("offer:created", data)
@@ -458,14 +452,14 @@ def setup_offer_events():
 
     @event.listens_for(Offer, 'after_update')
     def on_offer_updated(mapper, connection, target):
-        if connection.get_execution_options().get("is_sync") or not _offer_is_authoritative_here(target):
+        if connection.get_execution_options().get("is_sync"):
             return
         try:
             data = build_offer_sync_payload(target)
             data["commodity_name"] = _lookup_commodity_name(connection, target.commodity_id)
-            data["republished_offer_public_id"] = (
-                getattr(target, "republished_offer_public_id", None)
-                or _lookup_offer_public_id(connection, getattr(target, "republished_offer_id", None))
+            data["republished_offer_public_id"] = _lookup_offer_public_id(
+                connection,
+                getattr(target, "republished_offer_id", None),
             )
             log_change(connection, "offers", target.id, "UPDATE", data)
             if target.status.value == "expired":
@@ -477,7 +471,7 @@ def setup_offer_events():
 
     @event.listens_for(Offer, 'after_delete')
     def on_offer_deleted(mapper, connection, target):
-        if connection.get_execution_options().get("is_sync") or not _offer_is_authoritative_here(target):
+        if connection.get_execution_options().get("is_sync"):
             return
         try:
             data = {"id": target.id}

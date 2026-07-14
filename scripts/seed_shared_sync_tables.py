@@ -37,7 +37,7 @@ from core.registration_sync_policy import (
     REGISTRATION_USER_REFERENCE_FIELDS,
     REGISTRATION_USER_REFERENCES_FIELD,
 )
-from core.server_routing import current_server, default_peer_server_url, normalize_server, peer_server_url_for
+from core.server_routing import current_server, default_peer_server_url, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity
 from core.sync_protocol import build_sync_protocol_metadata
@@ -189,10 +189,7 @@ def enrich_seed_payload(
 
     if table_name == "offers":
         republished_offer_id = getattr(row, "republished_offer_id", None)
-        republished_offer_public_id = getattr(row, "republished_offer_public_id", None)
-        if republished_offer_public_id:
-            enriched["republished_offer_public_id"] = republished_offer_public_id
-        elif republished_offer_id is not None:
+        if republished_offer_id is not None:
             enriched["republished_offer_public_id"] = _required_reference(
                 references.offer_public_ids_by_id,
                 republished_offer_id,
@@ -254,15 +251,7 @@ async def load_table_rows(table_name: str) -> list[Any]:
         order_columns = [column.desc() for column in primary_key_columns]
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(model).order_by(*order_columns))
-        rows = list(result.scalars().all())
-        if table_name == "offers":
-            server = current_server()
-            rows = [
-                row
-                for row in rows
-                if normalize_server(getattr(row, "home_server", None), server) == server
-            ]
-        return rows
+        return list(result.scalars().all())
 
 
 async def load_seed_reference_index() -> SeedReferenceIndex:
