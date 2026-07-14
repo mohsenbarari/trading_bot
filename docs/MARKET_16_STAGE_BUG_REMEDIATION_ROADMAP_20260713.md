@@ -877,6 +877,22 @@ cancel-all برای هر آفر locking و مدیریت conflict کافی ندا
 
 ریسک اصلی تغییر semantics پاسخ بات است. قرارداد نتیجه باید backward-compatible یا همزمان در backend و bot تغییر کند.
 
+### گزارش اجرای Stage ۱۰ - ۲۰۲۶-۰۷-۱۴
+
+وضعیت: پیاده‌سازی و دروازه تست سطح Stage تکمیل شد؛ پذیرش نهایی staging در full-matrix مشترک مراحل باقی‌مانده انجام می‌شود.
+
+- runtime commit برابر `5a2d2578` است. سرویس canonical جدید `offer_cancel_all_service` فهرست active را snapshot می‌کند، هر آفر را با gate و transaction مستقل پردازش می‌کند و local mutation را فقط پس از lock سطری و authority/owner/status check انجام می‌دهد. در نتیجه lock/conflict یک آفر session آفر بعدی را poison یا rollback نمی‌کند.
+- forwarding آفر remote از همان command identity و receipt Stage ۱۱ استفاده می‌کند. پاسخ هر آفر به `cancelled`، `already_inactive` یا `failed` نگاشت می‌شود و پاسخ API ضمن حفظ `cancelled_count`، شمارش‌های افزایشی، `complete`، `remaining_active_count` و result مستقل هر public ID را برمی‌گرداند.
+- handler بات دیگر query، mutation یا forwarding جداگانه ندارد و فقط سرویس مشترک را فراخوانی، side effect آفرهای local واقعاً commit‌شده را اجرا و summary دقیق را render می‌کند. در حضور failure متن «تمام لفظ‌ها» تولید نمی‌شود.
+- شمارنده active پس از batch از دیتابیس بازخوانی می‌شود و mirrorهای remote که success/already-inactive قطعی گرفته‌اند از شمارش موقت حذف می‌شوند؛ failure شمارنده بعد از commit، نتیجه لغو موفق را به خطای کاذب تبدیل نمی‌کند.
+- ۳۹ تست focused، ۲۰۲ تست خانواده آفر با ۱۸ skip اختیاری، ۱۴۴ تست خانواده بات و ۴ تست واقعی PostgreSQL پاس شدند. تست PostgreSQL اثبات کرد row lock یک آفر مانع commit آفر مستقل نمی‌شود، معامله برنده lock با مانده صفر completed باقی می‌ماند و stale snapshot پس از re-read به already-inactive تبدیل می‌شود.
+- تست PostgreSQL فقط روی دیتابیس guardدار `market_stage10_cancel_all_test` اجرا شد؛ allowlist ابزار migration فقط با prefix محدود `market_stage10_*` گسترش یافت و scratch database بلافاصله پس از تست حذف شد. schema runtime تغییر نکرد.
+
+ریسک باقی‌مانده و rollback:
+
+- production تا receiver-first rollout و فعال‌سازی کنترل‌شده receiptهای Stage ۱۱ نباید از semantics replay دقیق remote استفاده کند؛ flag کد همچنان default برابر false دارد و در این Stage production deploy یا restart انجام نشد.
+- rollback runtime با `git revert 5a2d2578` و recreate سرویس‌های درگیر انجام می‌شود. چون migration یا داده ماندگار جدیدی وجود ندارد، rollback دیتابیس لازم نیست.
+
 ---
 
 ## Stage ۱۱ - Idempotency انقضای Forwarded Offer (`MKT-13`)
