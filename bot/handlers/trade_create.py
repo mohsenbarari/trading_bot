@@ -17,11 +17,6 @@ from bot.states import Trade
 from core.config import settings
 from core.enums import SettlementType, UserRole
 from core.db import AsyncSessionLocal
-from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
-from core.offer_expiry_contracts import (
-    OfferExpiryCommandIdentityError,
-    build_offer_expiry_forward_payload,
-)
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import (
     OfferCreationAdmissionError,
@@ -33,14 +28,17 @@ from core.services.offer_creation_service import (
 )
 from core.services.market_transition_service import MarketOfferAdmissionError
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
-from core.server_routing import current_server, is_remote_home
+from core.server_routing import current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
     OfferExpiryReason,
     OfferExpirySourceSurface,
     expire_offer_authoritatively,
-    expire_offers_authoritatively,
+)
+from core.services.offer_cancel_all_service import (
+    cancel_all_active_offers_authoritatively,
+    format_offer_cancel_all_bot_message,
 )
 from core.services.trade_service import (
     validate_lot_sizes,
@@ -1548,77 +1546,34 @@ async def _handoff_stale_wizard_state_to_text_offer(
 async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:
         return
-        
-    async with AsyncSessionLocal() as session:
-        query = select(Offer).where(
-            Offer.user_id == user.id,
-            Offer.status == OfferStatus.ACTIVE
-        ).options(selectinload(Offer.commodity))
-        result = await session.execute(query)
-        offers = result.scalars().all()
-        
-        if not offers:
-            await message.answer("شما هیچ لفظ فعالی ندارید.")
-            return
-            
-        from api.routers.realtime import publish_event
-        from core.cache import decr_active_offer_count
 
-        local_offers = [offer for offer in offers if not is_remote_home(getattr(offer, "home_server", None))]
-        remote_offers = [offer for offer in offers if is_remote_home(getattr(offer, "home_server", None))]
-        local_result = await expire_offers_authoritatively(
-            session,
-            local_offers,
-            OfferExpiryCommand(
-                reason=OfferExpiryReason.BOT_CANCEL_ALL,
-                source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
-                source_server=current_server(),
-                expired_by_user_id=user.id,
-                expired_by_actor_user_id=user.id,
-            ),
-            commit=bool(local_offers),
-        )
+    result = await cancel_all_active_offers_authoritatively(
+        owner_user_id=user.id,
+        actor_user_id=user.id,
+        source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
+        expire_reason=OfferExpiryReason.BOT_CANCEL_ALL,
+        session_factory=AsyncSessionLocal,
+    )
 
-        remote_expired_count = 0
-        for offer in remote_offers:
-            try:
-                payload = build_offer_expiry_forward_payload(
-                    offer,
-                    owner_user_id=user.id,
-                    actor_user_id=user.id,
-                    source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
-                    source_server=current_server(),
-                    expire_reason=OfferExpiryReason.BOT_CANCEL_ALL,
-                    include_command_identity=bool(
-                        settings.offer_expiry_command_receipts_enabled
-                    ),
-                )
-            except OfferExpiryCommandIdentityError:
-                logger.warning(
-                    "offer_expiry_forward_identity_invalid",
-                    extra={
-                        "event": "offer_expiry_forward.identity_invalid",
-                        "offer_id": getattr(offer, "id", None),
-                    },
-                )
-                continue
-            status_code, _body = await forward_offer_expiry_to_home_server(
-                offer.home_server,
-                payload,
-            )
-            if status_code < 400:
-                remote_expired_count += 1
+    from api.routers.realtime import publish_event
+    from core.cache import set_active_offer_count
 
-        for offer in local_result.expired_offers:
+    for offer in result.locally_cancelled_offers:
+        try:
             await apply_offer_channel_state(offer, reason="bot_cancel_all", timeout=5)
+        except Exception as exc:
+            logger.warning("bot_cancel_all_channel_state_failed: %s", type(exc).__name__)
+        try:
             await publish_event("offer:expired", {"id": offer.id})
-            await decr_active_offer_count(user.id)
+        except Exception as exc:
+            logger.warning("bot_cancel_all_realtime_failed: %s", type(exc).__name__)
+    if result.total_count and result.remaining_active_count is not None:
+        try:
+            await set_active_offer_count(user.id, result.remaining_active_count)
+        except Exception as exc:
+            logger.warning("bot_cancel_all_cache_failed: %s", type(exc).__name__)
 
-        for _ in range(remote_expired_count):
-            await decr_active_offer_count(user.id)
-        
-    expired_count = local_result.expired_count + remote_expired_count
-    await message.answer(f"✅ تمام لفظ‌های فعال شما ({expired_count} لفظ) منقضی شدند.")
+    await message.answer(format_offer_cancel_all_bot_message(result))
 
 
 async def _text_offer_response(

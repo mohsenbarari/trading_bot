@@ -7,6 +7,11 @@ from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError
 
 from api.routers.offers import InternalOfferExpireRequest, cancel_all_active_offers, expire_offer, expire_offer_internal
+from core.services.offer_cancel_all_service import (
+    OfferCancelAllItemResult,
+    OfferCancelAllItemStatus,
+    OfferCancelAllResult,
+)
 from models.offer import OfferStatus
 
 
@@ -477,51 +482,72 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         set_count_mock.assert_not_awaited()
 
     async def test_cancel_all_active_offers_returns_zero_when_no_offer_exists(self):
-        db = FakeDB(execute_results=[FakeExecuteResult([])])
+        db = FakeDB()
+        service_result = OfferCancelAllResult(items=(), remaining_active_count=0)
 
-        result = await cancel_all_active_offers(db=db, context=make_context(SimpleNamespace(id=5)))
+        with patch(
+            "api.routers.offers.cancel_all_active_offers_authoritatively",
+            new=AsyncMock(return_value=service_result),
+        ) as cancel_service, patch(
+            "api.routers.offers._set_active_offer_count_safely",
+            new=AsyncMock(),
+        ) as set_count:
+            result = await cancel_all_active_offers(db=db, context=make_context(SimpleNamespace(id=5)))
 
-        self.assertEqual(result, {"cancelled_count": 0})
+        self.assertEqual(result["cancelled_count"], 0)
+        self.assertEqual(result["failed_count"], 0)
+        self.assertTrue(result["complete"])
+        cancel_service.assert_awaited_once()
+        set_count.assert_not_awaited()
         db.commit.assert_not_awaited()
 
-    async def test_cancel_all_active_offers_expires_offers_and_logs_channel_state_failures(self):
+    async def test_cancel_all_active_offers_uses_canonical_results_and_local_side_effects(self):
         offers = [
             SimpleNamespace(id=1, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=333, user_id=5),
             SimpleNamespace(id=2, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=None, user_id=5),
         ]
-        db = FakeDB(execute_results=[FakeExecuteResult(offers)])
-        order = []
-        db.commit.side_effect = lambda: order.append("commit")
+        service_result = OfferCancelAllResult(
+            items=tuple(
+                OfferCancelAllItemResult(
+                    offer_public_id=f"ofr_stage10_{offer.id:020d}",
+                    home_server="foreign",
+                    status=OfferCancelAllItemStatus.CANCELLED,
+                    local_offer=offer,
+                )
+                for offer in offers
+            ),
+            remaining_active_count=0,
+        )
+        db = FakeDB()
 
-        async def fail_channel_state(*_args, **_kwargs):
-            order.append("channel")
-            raise RuntimeError("telegram down")
-
-        with patch("api.routers.offers.current_server", return_value="foreign"), patch(
-            "core.services.offer_expiry_service.current_server",
-            return_value="foreign",
-        ), patch(
-            "api.routers.offers.apply_offer_channel_state",
-            new=AsyncMock(side_effect=fail_channel_state),
-        ) as apply_offer_channel_state, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
-            "core.cache.set_active_offer_count",
-            new=AsyncMock(side_effect=lambda *_args, **_kwargs: order.append("cache")),
-        ) as set_count_mock, patch("api.routers.offers.logger") as logger:
+        with patch(
+            "api.routers.offers.cancel_all_active_offers_authoritatively",
+            new=AsyncMock(return_value=service_result),
+        ) as cancel_service, patch(
+            "api.routers.offers._expire_offer_side_effects",
+            new=AsyncMock(),
+        ) as expiry_side_effects, patch(
+            "api.routers.offers._set_active_offer_count_safely",
+            new=AsyncMock(),
+        ) as set_count_mock:
             result = await cancel_all_active_offers(db=db, context=make_context(SimpleNamespace(id=5)))
 
-        self.assertEqual(result, {"cancelled_count": 2})
-        self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
-        self.assertEqual([offer.expire_reason for offer in offers], ["cancel_all", "cancel_all"])
-        self.assertEqual([offer.expired_by_user_id for offer in offers], [5, 5])
-        self.assertEqual([offer.expired_by_actor_user_id for offer in offers], [5, 5])
-        self.assertEqual([offer.expire_source_surface for offer in offers], ["webapp", "webapp"])
-        self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
-        self.assertEqual(publish_mock.await_count, 2)
-        set_count_mock.assert_awaited_once_with(5, 0)
-        apply_offer_channel_state.assert_awaited_once_with(offers[0], reason="cancel_all_active_offers", timeout=5)
-        db.commit.assert_awaited_once()
-        self.assertEqual(order[0], "commit")
-        logger.warning.assert_called_once()
+        self.assertEqual(result["cancelled_count"], 2)
+        self.assertEqual(result["failed_count"], 0)
+        self.assertEqual(len(result["results"]), 2)
+        cancel_service.assert_awaited_once()
+        self.assertEqual(expiry_side_effects.await_count, 2)
+        for offer in offers:
+            expiry_side_effects.assert_any_await(
+                db,
+                offer,
+                realtime_reason="cancel_all_active_offers",
+                channel_reason="cancel_all_active_offers",
+                channel_timeout=5,
+                update_active_count=False,
+            )
+        set_count_mock.assert_awaited_once_with(5, 0, reason="cancel_all_active_offers")
+        db.commit.assert_not_awaited()
 
 
 if __name__ == "__main__":

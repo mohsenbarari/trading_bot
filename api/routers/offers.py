@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
-from core.db import get_db
+from core.db import AsyncSessionLocal, get_db
 from core.config import settings
 from core.trading_settings import TradingSettings, get_trading_settings
 from core.utils import check_user_limits, to_jalali_str, utc_now_naive
@@ -74,9 +74,9 @@ from core.services.offer_expiry_service import (
     OfferExpirySourceSurface,
     OfferNotAuthoritativeError,
     expire_offer_authoritatively,
-    expire_offers_authoritatively,
     is_offer_expiry_lock_busy,
 )
+from core.services.offer_cancel_all_service import cancel_all_active_offers_authoritatively
 from core.services.offer_expiry_limits import (
     OfferManualExpireLimitError,
     enforce_manual_offer_expire_limits,
@@ -906,36 +906,6 @@ async def _forward_offer_expiry_if_remote_home(
     if status_code < 400:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     return JSONResponse(status_code=status_code, content=body)
-
-
-async def _forward_offer_expiry_for_cancel_all(
-    offer: Offer,
-    *,
-    owner_user_id: int,
-    actor_user_id: int | None,
-    source_surface: OfferExpirySourceSurface | str,
-    expire_reason: str,
-) -> bool:
-    try:
-        payload = _build_offer_expiry_forward_payload(
-            offer,
-            owner_user_id=owner_user_id,
-            actor_user_id=actor_user_id,
-            source_surface=source_surface,
-            expire_reason=expire_reason,
-        )
-    except OfferExpiryCommandIdentityError:
-        log_trading_event(
-            logger,
-            "offer_expiry_forward.identity_invalid",
-            level="warning",
-            action="offer_expiry_forward",
-            result="denied",
-            offer_id=getattr(offer, "id", None),
-        )
-        return False
-    status_code, _body = await forward_offer_expiry_to_home_server(offer.home_server, payload)
-    return status_code < 400
 
 
 # --- Endpoints ---
@@ -2245,51 +2215,31 @@ async def cancel_all_active_offers(
     _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     
-    query = select(Offer).where(
-        Offer.user_id == owner_user.id,
-        Offer.status == OfferStatus.ACTIVE
-    ).options(selectinload(Offer.commodity))
-    result = await db.execute(query)
-    offers = result.scalars().all()
-    
-    if not offers:
-        return {"cancelled_count": 0}
-        
-    local_offers = [offer for offer in offers if not is_remote_home(getattr(offer, "home_server", None))]
-    remote_offers = [offer for offer in offers if is_remote_home(getattr(offer, "home_server", None))]
-    local_result = await expire_offers_authoritatively(
-        db,
-        local_offers,
-        OfferExpiryCommand(
-            reason=OfferExpiryReason.CANCEL_ALL,
-            source_surface=OfferExpirySourceSurface.WEBAPP,
-            source_server=current_server(),
-            expired_by_user_id=owner_user.id,
-            expired_by_actor_user_id=getattr(context.actor_user, "id", owner_user.id),
-        ),
-        commit=bool(local_offers),
+    result = await cancel_all_active_offers_authoritatively(
+        owner_user_id=owner_user.id,
+        actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+        source_surface=OfferExpirySourceSurface.WEBAPP,
+        expire_reason=OfferExpiryReason.CANCEL_ALL,
+        session_factory=AsyncSessionLocal,
     )
 
-    remote_expired_count = 0
-    for offer in remote_offers:
-        if await _forward_offer_expiry_for_cancel_all(
+    for offer in result.locally_cancelled_offers:
+        await _expire_offer_side_effects(
+            db,
             offer,
-            owner_user_id=owner_user.id,
-            actor_user_id=getattr(context.actor_user, "id", owner_user.id),
-            source_surface=OfferExpirySourceSurface.WEBAPP,
-            expire_reason=OfferExpiryReason.CANCEL_ALL,
-        ):
-            remote_expired_count += 1
-
-    for offer in local_result.expired_offers:
-        await _remove_offer_channel_buttons_safely(offer, reason="cancel_all_active_offers", timeout=5)
-        await _publish_offer_event_safely("offer:expired", {"id": offer.id}, reason="cancel_all_active_offers")
-
-    if local_result.expired_count or remote_expired_count:
-        cache_count = 0 if local_result.expired_count + remote_expired_count == len(offers) else await _read_active_offer_count(db, owner_user.id)
-        await _set_active_offer_count_safely(owner_user.id, cache_count, reason="cancel_all_active_offers")
+            realtime_reason="cancel_all_active_offers",
+            channel_reason="cancel_all_active_offers",
+            channel_timeout=5,
+            update_active_count=False,
+        )
+    if result.total_count and result.remaining_active_count is not None:
+        await _set_active_offer_count_safely(
+            owner_user.id,
+            result.remaining_active_count,
+            reason="cancel_all_active_offers",
+        )
     
-    return {"cancelled_count": local_result.expired_count + remote_expired_count}
+    return result.to_payload()
 
 
 @router.post("/parse", response_model=ParseOfferResponse)
