@@ -3,7 +3,10 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
+from fastapi import HTTPException
+
 from api.routers.offers import OfferCreate, create_offer
+from core.services.offer_republish_service import OfferNotRepeatableError
 from core.enums import UserRole
 from models.offer import OfferStatus, OfferType
 
@@ -85,6 +88,7 @@ def make_offer(**overrides):
         "lot_sizes": None,
         "notes": "urgent",
         "republished_from_id": None,
+        "republished_from_public_id": None,
     }
     data.update(overrides)
     return OfferCreate(**data)
@@ -149,23 +153,51 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.register_market_offer_created_mock = register_offer_patcher.start()
         self.addCleanup(register_offer_patcher.stop)
 
-    async def test_create_offer_stamps_home_server_and_links_republished_offer(self):
+    async def test_republish_creates_independent_offer_from_remaining_source(self):
         commodity = SimpleNamespace(id=1)
-        old_offer = SimpleNamespace(id=99, user_id=5, status=OfferStatus.ACTIVE, republished_offer_id=None, channel_message_id=None)
+        old_offer = SimpleNamespace(
+            id=99,
+            offer_public_id="ofr_source_99",
+            user_id=5,
+            status=OfferStatus.EXPIRED,
+            offer_type=OfferType.BUY,
+            settlement_type="cash",
+            commodity_id=1,
+            quantity=10,
+            remaining_quantity=8,
+            price=123456,
+            is_wholesale=False,
+            lot_sizes=[8],
+            original_lot_sizes=[5, 7, 8],
+            notes="urgent",
+            republished_offer_id=None,
+            channel_message_id=None,
+        )
         reloaded_offer = make_reloaded_offer(offer_id=77)
+        reloaded_offer.quantity = 8
+        reloaded_offer.remaining_quantity = 8
+        reloaded_offer.is_wholesale = False
+        reloaded_offer.lot_sizes = [8]
+        reloaded_offer.original_lot_sizes = [8]
         db = FakeDB(
-            get_results=[old_offer, commodity],
-            scalar_results=[1],
-            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
+            get_results=[commodity],
+            scalar_results=[0],
+            execute_results=[
+                FakeExecuteResult(None),
+                FakeExecuteResult(reloaded_offer),
+                *empty_customer_read_context_results(),
+            ],
         )
         current_user = make_user()
         settings = SimpleNamespace(max_active_offers=1)
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
-        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+        with patch(
+            "api.routers.offers.lock_repeatable_offer", new=AsyncMock(return_value=old_offer)
+        ), patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "api.routers.offers.get_trading_settings",
             return_value=settings,
-        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=1)), patch(
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
             "core.services.trade_service.validate_quantity",
             return_value=(True, None),
         ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
@@ -188,7 +220,14 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             return_value={"id": 77, "user_id": 5},
         ) as response_mock:
             result = await create_offer(
-                make_offer(republished_from_id=99),
+                make_offer(
+                    quantity=8,
+                    is_wholesale=False,
+                    lot_sizes=[8],
+                    republished_from_id=99,
+                    republished_from_public_id="ofr_source_99",
+                    idempotency_key="republish-source-99",
+                ),
                 db=db,
                 context=make_context(current_user),
             )
@@ -198,15 +237,17 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_offer.home_server, "iran")
         self.assertTrue(new_offer.offer_public_id.startswith("ofr_"))
         self.assertEqual(new_offer.offer_type, OfferType.BUY)
+        self.assertEqual(new_offer.quantity, 8)
+        self.assertEqual(new_offer.remaining_quantity, 8)
+        self.assertEqual(new_offer.lot_sizes, [8])
+        self.assertEqual(new_offer.original_lot_sizes, [8])
+        self.assertEqual(new_offer.republished_from_offer_public_id, "ofr_source_99")
         self.assertEqual(old_offer.status, OfferStatus.EXPIRED)
-        self.assertIsNotNone(old_offer.expired_at)
-        self.assertEqual(old_offer.expire_reason, "republished")
-        self.assertEqual(old_offer.republished_offer_id, 77)
-        self.assertEqual(db.commit.await_count, 2)
+        self.assertIsNone(old_offer.republished_offer_id)
+        self.assertEqual(db.commit.await_count, 1)
         set_count_mock.assert_awaited_once_with(5, 1)
         counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
-        self.assertEqual(publish_mock.await_count, 2)
-        publish_mock.assert_any_await("offer:expired", {"id": 99})
+        self.assertEqual(publish_mock.await_count, 1)
         response_mock.assert_called_once_with(
             reloaded_offer,
             async_settings,
@@ -217,6 +258,59 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result, {"id": 77, "user_id": 5})
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
+
+    async def test_republish_rejects_ineligible_source_before_side_effects(self):
+        db = FakeDB(execute_results=[FakeExecuteResult(None)])
+        with patch(
+            "api.routers.offers.lock_repeatable_offer",
+            new=AsyncMock(side_effect=OfferNotRepeatableError("offer_ineligible")),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(
+                        republished_from_id=99,
+                        republished_from_public_id="ofr_source_99",
+                        idempotency_key="republish-ineligible-99",
+                    ),
+                    db=db,
+                    context=make_context(),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(db.added, [])
+        db.commit.assert_not_awaited()
+
+    async def test_republish_rejects_payload_not_matching_source_remainder(self):
+        source = SimpleNamespace(
+            id=98,
+            offer_public_id="ofr_source_98",
+            user_id=5,
+            offer_type=OfferType.BUY,
+            settlement_type="cash",
+            commodity_id=1,
+            quantity=10,
+            remaining_quantity=5,
+            price=123456,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes="urgent",
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(None)])
+        with patch("api.routers.offers.lock_repeatable_offer", new=AsyncMock(return_value=source)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(
+                        quantity=10,
+                        republished_from_id=98,
+                        republished_from_public_id="ofr_source_98",
+                        idempotency_key="republish-mismatch-98",
+                    ),
+                    db=db,
+                    context=make_context(),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(db.added, [])
 
     async def test_create_offer_idempotent_replay_returns_existing_offer_without_side_effects(self):
         existing_offer = make_reloaded_offer(offer_id=72)

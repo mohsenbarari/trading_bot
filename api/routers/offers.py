@@ -60,7 +60,6 @@ from core.services.offer_expiry_service import (
     OfferExpiryReason,
     OfferExpirySourceSurface,
     OfferNotAuthoritativeError,
-    apply_offer_expiry,
     expire_offer_authoritatively,
     expire_offers_authoritatively,
     is_offer_expiry_lock_busy,
@@ -70,6 +69,12 @@ from core.services.offer_expiry_limits import (
     enforce_manual_offer_expire_limits,
 )
 from core.services.offer_expiry_gate import try_acquire_offer_expiry_gate
+from core.services.offer_republish_service import (
+    OfferNotRepeatableError,
+    ensure_republish_payload_matches_source,
+    list_repeatable_offers,
+    lock_repeatable_offer,
+)
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
@@ -170,6 +175,11 @@ class OfferCreate(BaseModel):
     lot_sizes: Optional[List[int]] = Field(default=None, description="بخش‌ها برای فروش خُرد")
     notes: Optional[str] = Field(default=None, max_length=200)
     republished_from_id: Optional[int] = Field(default=None, description="شناسه لفظ قدیمی برای تکرار")
+    republished_from_public_id: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        description="شناسه عمومی لفظ منبع برای تکرار",
+    )
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
     idempotency_key: Optional[str] = Field(default=None, max_length=64, description="شناسه یکتای تلاش ثبت لفظ")
 
@@ -923,6 +933,44 @@ async def create_offer(
             status_code=status.HTTP_409_CONFLICT,
             detail=MARKET_CLOSED_DETAIL,
         )
+
+    republish_source_public_id = (offer_data.republished_from_public_id or "").strip()
+    republish_requested = bool(offer_data.republished_from_id or republish_source_public_id)
+    if republish_requested:
+        if not idempotency_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="برای انتشار مجدد، شناسه یکتای درخواست الزامی است.",
+            )
+        if not is_offer_public_id_shape(republish_source_public_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="شناسه عمومی لفظ قبلی برای انتشار مجدد الزامی است.",
+            )
+        try:
+            republish_source = await lock_repeatable_offer(
+                db,
+                owner_user_id=owner_user.id,
+                offer_public_id=republish_source_public_id,
+                expected_local_id=offer_data.republished_from_id,
+                market_is_open=True,
+            )
+            ensure_republish_payload_matches_source(
+                republish_source,
+                offer_type=offer_data.offer_type,
+                settlement_type=offer_data.settlement_type,
+                commodity_id=offer_data.commodity_id,
+                quantity=offer_data.quantity,
+                price=offer_data.price,
+                is_wholesale=offer_data.is_wholesale,
+                lot_sizes=offer_data.lot_sizes,
+                notes=offer_data.notes,
+            )
+        except OfferNotRepeatableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="این لفظ دیگر قابل انتشار مجدد نیست. فهرست لفظ‌های اخیر را تازه‌سازی کنید.",
+            ) from exc
     
     # بررسی مسدودیت
     if owner_user.trading_restricted_until:
@@ -959,20 +1007,12 @@ async def create_offer(
     # بررسی تعداد لفظ‌های فعال
     ts = get_trading_settings()
 
-    old_offer = None
-    republishing_active_offer = False
-    if offer_data.republished_from_id:
-        old_offer = await db.get(Offer, offer_data.republished_from_id)
-        if old_offer and old_offer.user_id == owner_user.id:
-            republishing_active_offer = old_offer.status == OfferStatus.ACTIVE
-
     active_count = await _read_active_offer_count(db, owner_user.id)
     cached_active_count = await _cached_active_offer_count(owner_user.id)
     if cached_active_count != active_count:
         await _set_active_offer_count_safely(owner_user.id, active_count, reason="create_offer_guard_repair")
 
-    effective_active_count = max(0, active_count - 1) if republishing_active_offer else active_count
-    if effective_active_count >= ts.max_active_offers:
+    if active_count >= ts.max_active_offers:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"شما حداکثر {ts.max_active_offers} لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید."
@@ -1045,22 +1085,6 @@ async def create_offer(
             },
         )
 
-    # مدیریت تکرار لفظ قدیمی
-    if old_offer and old_offer.user_id == owner_user.id:
-        # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
-        if old_offer.status == OfferStatus.ACTIVE:
-            apply_offer_expiry(
-                old_offer,
-                OfferExpiryCommand(
-                    reason=OfferExpiryReason.REPUBLISHED,
-                    source_surface=OfferExpirySourceSurface.WEBAPP,
-                    source_server=current_server(),
-                    expired_by_user_id=owner_user.id,
-                    expired_by_actor_user_id=actor_user.id,
-                ),
-                require_authority=False,
-            )
-
     try:
         new_offer = await create_authoritative_offer(
             db,
@@ -1081,6 +1105,7 @@ async def create_offer(
                 notes=offer_data.notes,
                 idempotency_key=idempotency_key,
                 status=OfferStatus.ACTIVE,
+                republished_from_offer_public_id=republish_source_public_id or None,
             ),
         )
     except OfferCreationValidationError as exc:
@@ -1093,6 +1118,11 @@ async def create_offer(
             idempotency_key=idempotency_key,
         )
         if existing_offer is None:
+            if republish_source_public_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="این لفظ قبلاً مجدداً منتشر شده است.",
+                )
             raise
         from core.trading_settings import get_trading_settings_async
 
@@ -1115,14 +1145,6 @@ async def create_offer(
                 include_owner_identity=True,
             )
         )[0]
-
-    # لینک کردن لفظ قدیمی به جدید
-    if offer_data.republished_from_id:
-        # دوباره لود می‌کنیم چون ممکن است سشن بسته شده باشد یا نیاز به اتچ مجدد باشد، اما اینجا سشن باز است
-        # فقط باید مطمئن شویم old_offer در سشن است
-        if old_offer and old_offer.user_id == owner_user.id:
-            old_offer.republished_offer_id = new_offer.id
-            await db.commit()
 
     # بارگذاری روابط
     result = await db.execute(
@@ -1153,7 +1175,7 @@ async def create_offer(
         has_idempotency_key=bool(idempotency_key),
     )
     
-    expected_active_count = active_count if republishing_active_offer else active_count + 1
+    expected_active_count = active_count + 1
     await _set_active_offer_count_safely(owner_user.id, expected_active_count, reason="create_offer_final")
     
     # افزایش شمارنده
@@ -1173,10 +1195,6 @@ async def create_offer(
     except Exception:
         pass
     
-    if republishing_active_offer and old_offer:
-        await _remove_offer_channel_buttons_safely(old_offer, reason="republish_old_offer", timeout=10)
-        await _publish_offer_event_safely("offer:expired", {"id": old_offer.id}, reason="republish_old_offer")
-
     await _publish_offer_event_safely("offer:created", {
         "id": new_offer.id,
         "offer_public_id": new_offer.offer_public_id,
@@ -1200,22 +1218,21 @@ async def create_offer(
         "expires_at_ts": sse_expires_at_ts,
     }, reason="create_offer")
 
-    if not republishing_active_offer:
-        try:
-            from core.web_push import schedule_market_offer_web_push
+    try:
+        from core.web_push import schedule_market_offer_web_push
 
-            schedule_market_offer_web_push(new_offer.id)
-        except Exception as exc:
-            log_trading_event(
-                logger,
-                "market_offer_web_push_schedule_failed",
-                level="warning",
-                action="trading_side_effect",
-                result="failure",
-                side_effect="web_push_schedule",
-                offer_id=getattr(new_offer, "id", None),
-                error_class=type(exc).__name__,
-            )
+        schedule_market_offer_web_push(new_offer.id)
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "market_offer_web_push_schedule_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="web_push_schedule",
+            offer_id=getattr(new_offer, "id", None),
+            error_class=type(exc).__name__,
+        )
     
     return (
         await _serialize_offer_responses(
@@ -1513,6 +1530,43 @@ async def get_market_expired_offers(
 
     result = await db.execute(query)
     offers = result.scalars().all()
+    if not offers:
+        return []
+
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    return await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=context.owner_user.id,
+        include_owner_identity=False,
+    )
+
+
+@router.get("/my/repeatable", response_model=List[OfferResponse])
+async def get_my_repeatable_offers(
+    limit: int = Query(3, ge=1, le=10),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
+):
+    """Return repeatable leaf offers created and expired in the current market session."""
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+
+    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
+    if actor_relation is not None and actor_relation.customer_tier == CustomerTier.TIER_2:
+        return []
+
+    offers = await list_repeatable_offers(
+        db,
+        owner_user_id=context.owner_user.id,
+        limit=limit,
+        since_hours=1,
+        options=build_offer_read_options(include_owner_identity=False),
+    )
     if not offers:
         return []
 

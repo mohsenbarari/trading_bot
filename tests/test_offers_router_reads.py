@@ -10,8 +10,10 @@ from api.routers.offers import (
     build_offer_read_options,
     get_active_offers,
     get_my_offers,
+    get_my_repeatable_offers,
     parse_offer_text,
 )
+from models.customer_relation import CustomerTier
 
 
 class FakeScalarRows:
@@ -251,6 +253,67 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 skip=0,
                 limit=50,
                 db=FakeDB(),
+                context=self.make_context(owner_id=61, actor_id=62),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
+    async def test_get_my_repeatable_offers_uses_current_session_service(self):
+        offers = [SimpleNamespace(id=15, user_id=88)]
+        context = self.make_context(owner_id=88)
+        serialized = [{"id": 15, "user_id": 88}]
+
+        with patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.list_repeatable_offers",
+            new=AsyncMock(return_value=offers),
+        ) as list_mock, patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=30)),
+        ), patch(
+            "api.routers.offers._serialize_offer_responses",
+            new=AsyncMock(return_value=serialized),
+        ) as serialize_mock:
+            result = await get_my_repeatable_offers(
+                limit=3,
+                db=SimpleNamespace(),
+                context=context,
+            )
+
+        self.assertEqual(result, serialized)
+        list_mock.assert_awaited_once()
+        self.assertEqual(list_mock.await_args.kwargs["owner_user_id"], 88)
+        self.assertEqual(list_mock.await_args.kwargs["limit"], 3)
+        serialize_mock.assert_awaited_once()
+
+    async def test_get_my_repeatable_offers_hides_tier2_customer(self):
+        context = self.make_context(owner_id=88)
+        relation = SimpleNamespace(customer_tier=CustomerTier.TIER_2)
+
+        with patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=relation),
+        ), patch(
+            "api.routers.offers.list_repeatable_offers",
+            new=AsyncMock(),
+        ) as list_mock:
+            result = await get_my_repeatable_offers(
+                limit=3,
+                db=SimpleNamespace(),
+                context=context,
+            )
+
+        self.assertEqual(result, [])
+        list_mock.assert_not_awaited()
+
+    async def test_get_my_repeatable_offers_rejects_accountant_context(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_my_repeatable_offers(
+                limit=3,
+                db=SimpleNamespace(),
                 context=self.make_context(owner_id=61, actor_id=62),
             )
 

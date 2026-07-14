@@ -39,6 +39,7 @@ def make_offer(**overrides):
         "lot_sizes": None,
         "notes": None,
         "republished_from_id": None,
+        "republished_from_public_id": None,
     }
     data.update(overrides)
     return OfferCreate(**data)
@@ -180,6 +181,66 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             exc_info.exception.detail,
             "شما حداکثر 5 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
         )
+
+    async def test_republish_is_an_independent_offer_for_active_quota(self):
+        current_user = make_user()
+        db = FakeDB(scalar_result=5)
+        settings = SimpleNamespace(max_active_offers=5)
+        source = SimpleNamespace(
+            id=31,
+            offer_public_id="ofr_source_31",
+            offer_type="buy",
+            settlement_type="cash",
+            commodity_id=1,
+            quantity=10,
+            remaining_quantity=10,
+            price=123456,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes=None,
+        )
+
+        with patch(
+            "api.routers.offers.lock_repeatable_offer",
+            new=AsyncMock(return_value=source),
+        ), patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
+            "core.cache.get_active_offer_count",
+            new=AsyncMock(return_value=5),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(
+                        republished_from_id=31,
+                        republished_from_public_id="ofr_source_31",
+                        idempotency_key="repeat-source-31",
+                    ),
+                    db=db,
+                    context=make_context(current_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "شما حداکثر 5 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
+        )
+
+    async def test_republish_requires_source_public_identity(self):
+        with patch("api.routers.offers.lock_repeatable_offer", new=AsyncMock()) as lock_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(
+                        republished_from_id=31,
+                        idempotency_key="repeat-source-31",
+                    ),
+                    db=FakeDB(),
+                    context=make_context(),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        lock_mock.assert_not_awaited()
 
     async def test_create_offer_rejects_missing_commodity(self):
         current_user = make_user()

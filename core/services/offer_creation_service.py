@@ -38,6 +38,7 @@ class OfferCreationCommand:
     price_warning_type: str | None = None
     incoming_home_server: str | None = None
     offer_public_id: str | None = None
+    republished_from_offer_public_id: str | None = None
 
 
 def _normalize_offer_type(value: OfferType | str) -> OfferType:
@@ -124,6 +125,11 @@ def build_authoritative_offer(command: OfferCreationCommand) -> Offer:
         notes=command.notes,
         idempotency_key=command.idempotency_key,
         status=_normalize_offer_status(command.status),
+        republished_from_offer_public_id=(
+            str(command.republished_from_offer_public_id).strip()
+            if command.republished_from_offer_public_id
+            else None
+        ),
     )
 
 

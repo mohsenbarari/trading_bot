@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from models.trade_delivery_receipt import TradeDeliveryReceipt
+from models.offer import Offer
 from models.user import User
 from scripts.seed_shared_sync_tables import (
     DEFAULT_TABLES,
@@ -79,6 +80,16 @@ class SeedSharedSyncTablesTests(unittest.TestCase):
         data = enrich_seed_payload("offers", row, {"republished_offer_id": 31}, self.references)
 
         self.assertEqual(data["republished_offer_public_id"], "ofr_source_31")
+
+    def test_offer_snapshot_keeps_child_owned_republish_provenance(self):
+        offer = Offer(
+            offer_public_id="ofr_child_31",
+            republished_from_offer_public_id="ofr_source_31",
+        )
+
+        data = row_payload("offers", offer)
+
+        self.assertEqual(data["republished_from_offer_public_id"], "ofr_source_31")
 
     def test_offer_request_local_references_use_stable_identities(self):
         row = SimpleNamespace(resulting_trade_id=88, customer_relation_id=17)

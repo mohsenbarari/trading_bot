@@ -53,6 +53,7 @@ interface OfferPriceWarning {
 
 interface RecentOfferSummary {
   id: number
+  offer_public_id: string
   offer_type: 'buy' | 'sell'
   settlement_type: SettlementType
   commodity_id: number
@@ -152,6 +153,7 @@ const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const republishedFromOfferId = ref<number | null>(null)
+const republishedFromOfferPublicId = ref<string | null>(null)
 const pendingOfferIdempotencyKey = ref<string | null>(null)
 let offerPreviewConfirmLocked = false
 const recentOffers = ref<RecentOfferSummary[]>([])
@@ -399,6 +401,9 @@ function handleMarketOpened(data: Partial<MarketRuntimeState> | undefined) {
     offers_since_last_open: data?.offers_since_last_open ?? 0,
     last_transition_at: data?.last_transition_at ?? marketRuntime.value.last_transition_at,
   })
+  closeRecentOffersMenu()
+  recentOffers.value = []
+  discardRepeatPreviewForMarketTransition()
 }
 
 function handleMarketClosed(data: Partial<MarketRuntimeState> | undefined) {
@@ -408,6 +413,9 @@ function handleMarketClosed(data: Partial<MarketRuntimeState> | undefined) {
     offers_since_last_open: data?.offers_since_last_open ?? marketRuntime.value.offers_since_last_open,
     last_transition_at: data?.last_transition_at ?? marketRuntime.value.last_transition_at,
   })
+  closeRecentOffersMenu()
+  recentOffers.value = []
+  discardRepeatPreviewForMarketTransition()
 }
 
 function handleMarketNoticeHidden(data: Partial<MarketRuntimeState> | undefined) {
@@ -474,21 +482,12 @@ function getPendingOfferIdempotencyKey() {
 }
 
 function getRecentOfferRepublishQuantity(offer: RecentOfferSummary) {
-  if (offer.status === 'active' && offer.remaining_quantity > 0) {
-    return offer.remaining_quantity
-  }
-  return offer.quantity
+  return offer.remaining_quantity
 }
 
 function getRecentOfferRepublishLots(offer: RecentOfferSummary) {
   if (offer.is_wholesale) {
     return null
-  }
-  if (offer.status === 'active' && offer.lot_sizes?.length) {
-    return [...offer.lot_sizes]
-  }
-  if (offer.original_lot_sizes?.length) {
-    return [...offer.original_lot_sizes]
   }
   return offer.lot_sizes ? [...offer.lot_sizes] : null
 }
@@ -545,7 +544,7 @@ async function fetchRecentOffers(silent = false) {
   recentOffersError.value = ''
 
   try {
-    const response = await apiFetch('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
+    const response = await apiFetch('/api/offers/my/repeatable?limit=3')
     if (!response.ok) {
       throw await createHttpErrorFromResponse(response, {
         surface: 'market',
@@ -648,6 +647,7 @@ function toggleRecentOffersMenu() {
 
 function openRecentOfferPreview(offer: RecentOfferSummary) {
   republishedFromOfferId.value = offer.id
+  republishedFromOfferPublicId.value = offer.offer_public_id
   pendingOfferIdempotencyKey.value = null
   pendingOfferPreview.value = {
     trade_type: offer.offer_type,
@@ -666,11 +666,19 @@ function openRecentOfferPreview(offer: RecentOfferSummary) {
   closeRecentOffersMenu()
 }
 
+function discardRepeatPreviewForMarketTransition() {
+  if (republishedFromOfferId.value === null && republishedFromOfferPublicId.value === null) {
+    return
+  }
+  cancelOfferPreview()
+}
+
 function cancelOfferPreview() {
   pendingOfferPreview.value = null
   previewError.value = ''
   previewWarning.value = null
   republishedFromOfferId.value = null
+  republishedFromOfferPublicId.value = null
   pendingOfferIdempotencyKey.value = null
 }
 
@@ -718,6 +726,7 @@ async function confirmOfferPreview() {
       body: JSON.stringify({
         ...buildOfferCreatePayload(pendingOfferPreview.value),
         republished_from_id: republishedFromOfferId.value,
+        republished_from_public_id: republishedFromOfferPublicId.value,
         warning_acknowledged: !!previewWarning.value,
         idempotency_key: getPendingOfferIdempotencyKey(),
       }),
@@ -742,6 +751,7 @@ async function confirmOfferPreview() {
     pendingOfferPreview.value = null
     previewWarning.value = null
     republishedFromOfferId.value = null
+    republishedFromOfferPublicId.value = null
     pendingOfferIdempotencyKey.value = null
     refreshMarketOffers()
     void fetchRecentOffers(true)
@@ -775,6 +785,7 @@ function parseAndSubmitTextOffer() {
     return
   }
   republishedFromOfferId.value = null
+  republishedFromOfferPublicId.value = null
   pendingOfferIdempotencyKey.value = null
   isSubmitting.value = true
   parseError.value = ''
@@ -876,6 +887,7 @@ watch(isTier2Customer, (blocked) => {
   previewWarning.value = null
   previewError.value = ''
   republishedFromOfferId.value = null
+  republishedFromOfferPublicId.value = null
   pendingOfferIdempotencyKey.value = null
   closeRecentOffersMenu()
   recentOffers.value = []
@@ -1031,6 +1043,7 @@ onUnmounted(() => {
         <!-- Text Input Row -->
         <div ref="recentOffersRef" class="input-wrapper">
           <AppIconButton
+            v-if="isMarketOpen"
             ref="recentOffersToggleRef"
             class="recent-offers-toggle"
             data-test="recent-offers-toggle"

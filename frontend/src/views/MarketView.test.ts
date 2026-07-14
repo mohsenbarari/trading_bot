@@ -110,6 +110,7 @@ const offersFixture = [
 const recentOffersFixture = [
   {
     id: 91,
+    offer_public_id: 'ofr_recent_91',
     offer_type: 'sell',
     settlement_type: 'cash',
     commodity_id: 1,
@@ -127,6 +128,7 @@ const recentOffersFixture = [
   },
   {
     id: 92,
+    offer_public_id: 'ofr_recent_92',
     offer_type: 'buy',
     settlement_type: 'tomorrow',
     commodity_id: 2,
@@ -239,7 +241,7 @@ describe('MarketView.vue', () => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
       if (path === '/api/offers/market-history?skip=0&limit=25') return responseOf([])
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
+      if (path === '/api/offers/my/repeatable?limit=3') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
           is_open: true,
@@ -678,6 +680,7 @@ describe('MarketView.vue', () => {
       lot_sizes: null,
       notes: 'از متن بازار',
       republished_from_id: null,
+      republished_from_public_id: null,
       warning_acknowledged: false,
       idempotency_key: expect.any(String),
     })
@@ -767,13 +770,13 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my/repeatable?limit=3')
     const recentItems = getRecentOfferItems()
     expect(recentItems).toHaveLength(2)
     expect(document.body.textContent).toContain('سکه')
     expect(document.body.textContent).toContain('طلای آب‌شده')
     expect(document.body.textContent).toContain('توضیح: از لیست اخیر')
-    expect(document.body.textContent).toContain('خرد · پله‌ها: ۵ + ۳')
+    expect(document.body.textContent).toContain('خرد · پله‌ها: ۳ + ۲')
     expect(document.body.textContent).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
     expect(document.body.textContent).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
 
@@ -784,7 +787,7 @@ describe('MarketView.vue', () => {
     expect(wrapper.text()).toContain('طلای آب‌شده')
     expect(document.body.textContent).toContain('فردا 📆')
     expect(wrapper.get('.offer-preview-badges .ui-settlement-badge--tomorrow').text()).toContain('فردا 📆')
-    expect(wrapper.get('.offer-preview-line').text()).toContain('8 عدد 222,000')
+    expect(wrapper.get('.offer-preview-line').text()).toContain('5 عدد 222,000')
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
     await flushPromises()
@@ -797,12 +800,13 @@ describe('MarketView.vue', () => {
       offer_type: 'buy',
       settlement_type: 'tomorrow',
       commodity_id: 2,
-      quantity: 8,
+      quantity: 5,
       price: 222000,
       is_wholesale: false,
-      lot_sizes: [5, 3],
+      lot_sizes: [3, 2],
       notes: null,
       republished_from_id: 92,
+      republished_from_public_id: 'ofr_recent_92',
       warning_acknowledged: false,
       idempotency_key: expect.any(String),
     })
@@ -820,7 +824,7 @@ describe('MarketView.vue', () => {
       if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf([])
+      if (path === '/api/offers/my/repeatable?limit=3') return responseOf([])
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
           is_open: true,
@@ -948,7 +952,7 @@ describe('MarketView.vue', () => {
         })
       }
       if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') {
+      if (path === '/api/offers/my/repeatable?limit=3') {
         return recentOffersMode === 'error'
           ? errorResponse(503, { detail: 'بارگذاری لفظ‌های اخیر شکست خورد' })
           : responseOf(recentOffersFixture.slice(0, 1))
@@ -981,9 +985,10 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
-  it('republishes active retail recent offers from remaining quantity and current lot sizes', async () => {
+  it('republishes expired retail offers from remaining quantity and current lot sizes', async () => {
     const activeRecentOffer = {
       id: 93,
+      offer_public_id: 'ofr_recent_93',
       offer_type: 'sell',
       settlement_type: 'cash',
       commodity_id: 3,
@@ -996,7 +1001,7 @@ describe('MarketView.vue', () => {
       lot_sizes: [3, 2],
       original_lot_sizes: [4, 3, 2],
       notes: '   ',
-      status: 'active',
+      status: 'expired',
       created_at: '۱۴۰۵/۰۳/۰۱ ۱۳:۱۰',
     }
 
@@ -1013,7 +1018,7 @@ describe('MarketView.vue', () => {
         })
       }
       if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') {
+      if (path === '/api/offers/my/repeatable?limit=3') {
         return responseOf([activeRecentOffer])
       }
       if (path === '/api/offers/' && options?.method === 'POST') {
@@ -1052,10 +1057,35 @@ describe('MarketView.vue', () => {
       lot_sizes: [3, 2],
       notes: '   ',
       republished_from_id: 93,
+      republished_from_public_id: 'ofr_recent_93',
       warning_acknowledged: false,
       idempotency_key: expect.any(String),
     })
     expect(republishCall![1]).toEqual(expect.objectContaining({ retryNetwork: false }))
+
+    wrapper.unmount()
+  })
+
+  it('discards a repeated-offer preview when the market session changes', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+    getRecentOfferItems()[0]!.click()
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    emitWs('market:closed', {
+      is_open: false,
+      active_web_notice_visible: true,
+      offers_since_last_open: 0,
+    })
+    await nextTick()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect(wrapper.find('.recent-offers-toggle').exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -1105,6 +1135,7 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.market-runtime-notice').text()).toContain('پایان فعالیت بازار')
     expect(wrapper.find('.text-offer-input').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.send-btn').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.recent-offers-toggle').exists()).toBe(false)
 
     emitWs('market:opened', {
       is_open: true,
@@ -1115,6 +1146,7 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.market-runtime-notice').text()).toContain('شروع فعالیت بازار')
     expect(wrapper.find('.text-offer-input').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.recent-offers-toggle').exists()).toBe(true)
 
     emitWs('market:notice_hidden', {
       is_open: true,

@@ -286,6 +286,20 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["republished_offer_id"], 91)
         self.assertNotIn("republished_offer_public_id", data)
 
+    def test_offer_upsert_preserves_child_owned_republish_provenance(self):
+        stmt = _build_upsert_stmt(
+            Offer,
+            "offers",
+            {
+                "offer_public_id": "ofr_child_31",
+                "republished_from_offer_public_id": "ofr_source_31",
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("republished_from_offer_public_id", compiled)
+        self.assertIn("ON CONFLICT (offer_public_id)", compiled)
+
     async def test_offer_request_customer_relation_localizes_by_invitation_token(self):
         db = FakeDB([ScalarOneOrNoneResult(71)])
         data = {

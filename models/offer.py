@@ -82,7 +82,7 @@ class Offer(Base):
     # لیست بخش‌ها برای فروش خُرد (JSON array مثل [10, 15, 25])
     lot_sizes = Column(JSON, nullable=True)
     
-    # لیست اولیه بخش‌ها (برای تکرار لفظ - چون lot_sizes با معامله تغییر می‌کند)
+    # لیست اولیه بخش‌ها برای تاریخچه؛ تکرار فقط از مانده و lot_sizes فعلی استفاده می‌کند
     original_lot_sizes = Column(JSON, nullable=True)
     
     # وضعیت لفظ
@@ -96,6 +96,10 @@ class Offer(Base):
     
     # آیدی لفظ جدید (اگر این لفظ تکرار شده باشد)
     republished_offer_id = Column(Integer, nullable=True)
+
+    # Immutable provenance owned by the replacement offer. Unlike the legacy
+    # outgoing pointer above, creating a replacement never mutates its source.
+    republished_from_offer_public_id = Column(String(40), nullable=True, unique=True, index=True)
     
     # زمان ایجاد
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

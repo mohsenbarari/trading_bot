@@ -53,6 +53,23 @@ class OfferCreationServiceTests(unittest.TestCase):
         self.assertEqual(offer.original_lot_sizes, [5, 15])
         self.assertTrue(is_offer_public_id_shape(offer.offer_public_id))
 
+    def test_republish_provenance_is_stored_only_on_new_offer(self):
+        offer = build_authoritative_offer(
+            OfferCreationCommand(
+                source_surface=OfferSourceSurface.WEBAPP,
+                owner_user_id=2,
+                actor_user_id=2,
+                offer_type=OfferType.SELL,
+                commodity_id=7,
+                quantity=8,
+                price=2000,
+                republished_from_offer_public_id="ofr_source_offer",
+            )
+        )
+
+        self.assertEqual(offer.republished_from_offer_public_id, "ofr_source_offer")
+        self.assertIsNone(offer.republished_offer_id)
+
     def test_internal_sync_preserves_incoming_home_and_public_id(self):
         offer = build_authoritative_offer(
             OfferCreationCommand(

@@ -36,6 +36,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
             status=OfferStatus.ACTIVE,
             channel_message_id=9988,
             republished_offer_id=None,
+            republished_from_offer_public_id="ofr_source_6",
             created_at=datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
             updated_at=datetime(2026, 6, 27, 12, 1, tzinfo=timezone.utc),
             expired_at=None,
@@ -50,6 +51,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
         self.assertEqual(payload["offer_public_id"], "ofr_warning_7")
         self.assertEqual(payload["version_id"], 3)
         self.assertEqual(payload["settlement_type"], "tomorrow")
+        self.assertEqual(payload["republished_from_offer_public_id"], "ofr_source_6")
 
     def test_payload_defaults_missing_competitive_warning_fields(self):
         offer = SimpleNamespace(
@@ -71,6 +73,7 @@ class OfferSyncPayloadTests(unittest.TestCase):
             status=OfferStatus.ACTIVE,
             channel_message_id=None,
             republished_offer_id=None,
+            republished_from_offer_public_id=None,
             created_at=None,
             updated_at=None,
             idempotency_key=None,

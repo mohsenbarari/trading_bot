@@ -111,7 +111,7 @@ def make_context(owner_user, actor_user=None):
 CONTRACT_COVERAGE = {
     "offer_create_success": (
         "tests/test_offers_router_create_success.py",
-        "test_create_offer_stamps_home_server_and_links_republished_offer",
+        "test_republish_creates_independent_offer_from_remaining_source",
     ),
     "offer_market_and_user_guards": (
         "tests/test_offers_router_create_guards.py",

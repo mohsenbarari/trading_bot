@@ -73,6 +73,16 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('nullable=False', migration)
         self.assertIn("server_default=sa.text(\"'CASH'::settlementtype\")", migration)
 
+    def test_offer_republish_provenance_migration_merges_heads_and_backfills_lineage(self):
+        migration = (
+            REPO_ROOT / "migrations/versions/d0b5e6f7a8c9_add_offer_republish_provenance.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('(\"c7d8e9f0a1b4\", \"c9a4e7b2d615\")', migration)
+        self.assertIn("republished_from_offer_public_id", migration)
+        self.assertIn("source.republished_offer_public_id = replacement.offer_public_id", migration)
+        self.assertIn("unique=True", migration)
+
     def test_new_offer_public_id_backfills_cannot_use_independent_random_values(self):
         allowed_legacy_random_backfills = {
             'a6b7c8d9e0f1_add_offer_public_id.py',
