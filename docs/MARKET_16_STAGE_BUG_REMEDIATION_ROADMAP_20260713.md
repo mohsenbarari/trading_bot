@@ -15,7 +15,7 @@
 ## تفکیک baseline و وضعیت اجرا
 
 - verdict مربوط به وجود هر باگ فقط از کد `main@6dfde01f` گرفته شده است.
-- عبارت «بسته شد» در Stageهای ۱ تا ۴ به معنی پیاده‌سازی، تست و deploy روی staging در برنچ candidate است؛ به معنی وجود fix روی `main` نیست.
+- عبارت «بسته شد» در Stageهای ۱ تا ۵ به معنی پیاده‌سازی، تست و deploy روی staging در برنچ candidate است؛ به معنی وجود fix روی `main` نیست.
 - گزارش‌های اجرای Stageهای بسته‌شده بخشی از تاریخچه اجرایی همین roadmap هستند و حذف یا با baseline اصلی مخلوط نمی‌شوند.
 - production deploy، merge به `main` و صحت نسخه production همچنان gateهای مستقل هستند.
 
@@ -94,7 +94,7 @@
 
 شماره Stage شناسه ثابت finding است و الزاماً ترتیب زمانی اجرا نیست. ترتیب کم‌ریسک پیشنهادی برای مراحل باقی‌مانده:
 
-`۵ → ۶ → ۷ → ۸ → ۹ → ۱۱ → ۱۰ → ۱۴ → ۱۶ → ۱۲ → ۱۳ → ۱۵`
+`۶ → ۷ → ۸ → ۹ → ۱۱ → ۱۰ → ۱۴ → ۱۶ → ۱۲ → ۱۳ → ۱۵`
 
 - Stage ۵ فقط receipt و fingerprint لازم برای command اختصاصی republish را پایه‌گذاری می‌کند؛ Stage ۱۱ همان pattern را برای تمام expireهای forwarded canonical می‌کند.
 - Stage ۱۰ تا بسته‌شدن Stage ۱۱ release نمی‌شود.
@@ -427,6 +427,8 @@ Audit فقط‌خواندنی production پیش از تغییر:
 
 ## Stage ۵ - Republish فقط روی سرور مرجع (`MKT-04`)
 
+**وضعیت: بسته شد روی staging - commitهای `cf6998eacc68` و `77e14acf9094`**
+
 ### مشکل
 
 republish آفر فعال در WebApp می‌تواند با `require_authority=False` روی mirror سرور غیرمرجع تغییر ایجاد کند و نسخه نادرست را دوباره sync کند.
@@ -471,6 +473,47 @@ republish آفر فعال در WebApp می‌تواند با `require_authority=
 ### ریسک و rollback
 
 ریسک اصلی از دسترس خارج‌شدن موقت republish هنگام قطع ارتباط است؛ این توقف کنترل‌شده از mutation اشتباه امن‌تر است.
+
+### گزارش اجرای Stage ۵ - ۲۰۲۶-۰۷-۱۴
+
+پیاده‌سازی محدود و کم‌ریسک:
+
+- فرمان republish با `command_id` و idempotency key قطعی، fingerprint canonical و public ID ثابت برای آفر جایگزین ساخته شد. شناسه integer محلی peer در fingerprint یا lineage بین‌سروری نقشی ندارد.
+- روی home server یک receipt پایدار و قفل advisory از اجرای همزمان یا تکراری جلوگیری می‌کند. پاسخ گم‌شده با همان نتیجه قطعی replay می‌شود و replay با payload متفاوت `409` می‌گیرد.
+- در آفر local-home، انقضای آفر فعال، ثبت lineage و ساخت آفر جایگزین در یک transaction انجام می‌شود. در آفر remote-home، ایران پیش از پاسخ معتبر home نه mirror را تغییر می‌دهد و نه replacement را می‌سازد.
+- پاسخ peer به‌صورت fail-closed اعتبارسنجی می‌شود؛ پاسخ legacy یا مبهم، command ID یا replacement ID متفاوت و outcome نامعتبر اجازه ادامه mutation را نمی‌دهد.
+- receiver تغییر آفر از source غیرمالک را رد می‌کند. worker این رد authority را terminal تشخیص می‌دهد تا retry بی‌پایان نسازد؛ event listener و recovery seed نیز برای mirror غیرمالک snapshot تجاری تولید نمی‌کنند.
+- `republished_offer_public_id` به‌صورت additive به آفر اضافه شد و receipt جدید در جدول مستقل `offer_expiry_command_receipts` قرار گرفت. migration دارای یک head قطعی `c9a4e7b2d615` است.
+- publication state همچنان مسیر مستقل و syncپذیر خود را دارد و محدودسازی mirror به آن اعمال نشده است.
+
+سازگاری نسخه مختلط و rollout:
+
+- schema ابتدا به‌صورت additive نصب شد. staging ایران ابتدا و staging خارج سپس deploy شد تا receiver جدید قبل از sender جدید در دسترس باشد.
+- sender جدید پاسخ قدیمی یا فاقد receipt contract را موفق تلقی نمی‌کند؛ بنابراین در نسخه مختلط، republish ممکن است موقتاً متوقف شود ولی mutation دوگانه یا اشتباه انجام نمی‌شود.
+- receiptها فعلاً purge زمان‌بندی‌شده ندارند و تحت retention دیتابیس و backup نگهداری می‌شوند. receipt ناتمام هرگز خودکار حذف نمی‌شود و receipt قطعی نیز پیش از پایان retry/drain window حذف نخواهد شد. Stage ۱۱ باید همین ledger را گسترش دهد و ساخت ledger دوم ممنوع است.
+
+شواهد تست:
+
+- focused Stage ۵ شامل receipt، create/republish، expire، migration و production contract: `46` تست پاس.
+- پس از hardening نهایی، suiteهای receipt، create، expire، migration، contract، authority event، recovery seed و sync worker: `92` تست پاس؛ artifact با SHA-256 برابر `961ad140b2eeec167e910639f92ba1c305c8f8a5d1818c438f1238e2efdf72ff`.
+- regression آفر: `137` تست، بات آفر: `19` تست، publication/Telegram: `37` تست و unit frontend بازار: `32` تست پاس.
+- frontend build، `compileall`، `git diff --check` و `alembic heads` پاس شدند.
+- در sync regression چهار failure قدیمی تکرار شد؛ همان چهار failure روی checkout تمیز `be18144d` نیز عیناً وجود داشتند و regression این stage نیستند. تست‌های جدید authority و sync worker در مجموعه نهایی سبز هستند.
+
+شواهد staging دو سرور:
+
+- هر دو runtime با SHA کامل `77e14acf90940310bb53b1ffbf1a4e9a0cacc33f`، environment برابر `staging` و migration head برابر `c9a4e7b2d615` اجرا می‌شوند.
+- پیش از repair، دو آفر foreign-home قدیمی روی home منقضی ولی روی mirror ایران فعال مانده بودند. این drift پیش از migration Stage ۵ ایجاد شده بود و lineage جدید در هر دو سمت null بود. پنج آفر authoritative foreign پس از dry-run از مسیر رسمی seed/sync به ایران ارسال شدند؛ دو mirror قدیمی اکنون `EXPIRED` هستند.
+- preflight عمیق R3 تمام checkها را پاس کرد: backlog و صف outbound/retry هر دو سرور صفر، publication reconciliation بدون finding، business/critical drift صفر و parity در ۲۳ جدول تازه است. پنج تفاوت باقی‌مانده فقط `local_only/volatile` و غیرتجاری هستند.
+- SHA-256 شواهد اصلی: preflight برابر `f086fa26d69f3446db41fa11e801d69e6f9faf7678d8cd7c1d50a8c38e1e79a9`، parity برابر `df4176892200982b204230f2fc093d7702bd6b1a3f7ebb830396ca21bf6be156` و sync health برابر `16ccb3b7251df89a51a13f178d45e7604dc454d75c6289a3f99a3bb85d511ff1` است.
+- smoke امضاشده واقعی با public ID ناموجود از foreign به Iran به پاسخ مورد انتظار `404` رسید؛ هیچ receipt یا داده‌ای ماندگار نشد. از زمان deploy در سرویس‌های staging traceback، `CRITICAL`، خطای `500` یا exception جدید ثبت نشد.
+- production deploy، restart یا mutation انجام نشد.
+
+ریسک باقیمانده و rollback:
+
+- در قطع ارتباط با home server، republish عمداً fail-closed و قابل retry است. این توقف کوتاه‌مدت ریسک پذیرفته‌شده Stage ۵ است.
+- Stage ۱۱ هنوز باید receipt contract را برای همه expireهای forwarded canonical کند؛ Stage ۱۰ تا پایان آن release نمی‌شود.
+- rollback کد با revert دو commit Stage ۵ انجام می‌شود. جدول receipt و ستون lineage additive باید دست‌کم تا پایان retry/drain window باقی بمانند و downgrade فوری schema مجاز نیست؛ نسخه قدیمی وجود این ستون و جدول را نادیده می‌گیرد.
 
 ---
 
