@@ -34,7 +34,11 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
         row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
     keyboard_layout.append(row_2_buttons)
     keyboard_layout.append([KeyboardButton(text="📦 لیست کالاها")])
-    return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard_layout,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 def get_user_panel_keyboard(
     user_role: UserRole = None,
@@ -57,7 +61,11 @@ def get_user_panel_keyboard(
         else:
             keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
         keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
-        return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+        return ReplyKeyboardMarkup(
+            keyboard=keyboard_layout,
+            resize_keyboard=True,
+            is_persistent=True,
+        )
 
     if user_role in (UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN):
         keyboard_layout.append([KeyboardButton(text="📈 معامله")])
@@ -71,7 +79,11 @@ def get_user_panel_keyboard(
     else:
         keyboard_layout.append([KeyboardButton(text="📊 تاریخچه معاملات من")])
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
-    return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard_layout,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 def get_admin_panel_keyboard(user_role: UserRole | None = None) -> ReplyKeyboardMarkup:
     keyboard_layout = [[KeyboardButton(text="➕ ارسال لینک دعوت")], [KeyboardButton(text="👥 مدیریت کاربران")]]
@@ -83,7 +95,11 @@ def get_admin_panel_keyboard(user_role: UserRole | None = None) -> ReplyKeyboard
         keyboard_layout.append([KeyboardButton(text="📣 ارسال پیام همگانی بات")])
 
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
-    return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard_layout,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 # --- تابع جدید برای کیبورد مدیریت کاربران ---
 def get_users_management_keyboard() -> ReplyKeyboardMarkup:
@@ -92,7 +108,11 @@ def get_users_management_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🔍 جستجوی کاربر")],
         [KeyboardButton(text="🔙 بازگشت به پنل مدیریت")]
     ]
-    return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard_layout,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 # ------------------------------------------
 
 

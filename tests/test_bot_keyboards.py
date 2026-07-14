@@ -10,6 +10,7 @@ class BotKeyboardsTests(unittest.TestCase):
         self.assertEqual(inline.inline_keyboard[0][0].callback_data, 'create_invitation_inline')
 
         super_admin_menu = keyboards.get_persistent_menu_keyboard(UserRole.SUPER_ADMIN, 'https://mini-app')
+        self.assertTrue(super_admin_menu.is_persistent)
         super_admin_texts = [button.text for row in super_admin_menu.keyboard for button in row]
         self.assertIn('🔐 پنل مدیریت', super_admin_texts)
         self.assertEqual([button.text for button in super_admin_menu.keyboard[0]], ['📈 معامله'])
@@ -36,6 +37,7 @@ class BotKeyboardsTests(unittest.TestCase):
         self.assertIn('⚙️ تنظیمات', police_texts)
 
         standard_panel = keyboards.get_user_panel_keyboard(UserRole.STANDARD, standard_actions=True)
+        self.assertTrue(standard_panel.is_persistent)
         standard_panel_texts = [button.text for row in standard_panel.keyboard for button in row]
         self.assertEqual(
             standard_panel_texts,
@@ -76,6 +78,7 @@ class BotKeyboardsTests(unittest.TestCase):
         self.assertNotIn('☎️ پشتیبانی', manager_panel_with_support_texts)
 
         user_panel = keyboards.get_user_panel_keyboard(UserRole.MIDDLE_MANAGER)
+        self.assertTrue(user_panel.is_persistent)
         user_panel_texts = [button.text for row in user_panel.keyboard for button in row]
         self.assertIn('⚙️ تنظیمات کاربری', user_panel_texts)
         self.assertIn('🔙 بازگشت', user_panel_texts)
@@ -87,6 +90,7 @@ class BotKeyboardsTests(unittest.TestCase):
 
     def test_admin_and_user_management_keyboards(self):
         admin_panel = keyboards.get_admin_panel_keyboard()
+        self.assertTrue(admin_panel.is_persistent)
         admin_texts = [button.text for row in admin_panel.keyboard for button in row]
         self.assertIn('👥 مدیریت کاربران', admin_texts)
         self.assertNotIn('📣 ارسال پیام همگانی بات', admin_texts)
@@ -101,6 +105,7 @@ class BotKeyboardsTests(unittest.TestCase):
         self.assertNotIn('📣 ارسال پیام همگانی بات', middle_admin_texts)
 
         users_management = keyboards.get_users_management_keyboard()
+        self.assertTrue(users_management.is_persistent)
         management_texts = [button.text for row in users_management.keyboard for button in row]
         self.assertEqual(management_texts, ['📋 لیست کاربران', '🔍 جستجوی کاربر', '🔙 بازگشت به پنل مدیریت'])
 
