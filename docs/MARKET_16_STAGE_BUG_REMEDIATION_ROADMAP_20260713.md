@@ -802,6 +802,39 @@ workerهای ترمیم پیام کانال و نمایش stale هر بار batc
 
 تغییر صف می‌تواند فشار API تلگرام یا sync را بالا ببرد. batch size، rate limit و backoff باید محدود بمانند.
 
+وضعیت Stage: بسته شد؛ پیاده‌سازی، تست رقابت واقعی PostgreSQL، deploy و پایش دو سرور staging و deep parity نهایی کامل شده است.
+
+### گزارش اجرای Stage ۹ - ۲۰۲۶-۰۷-۱۴
+
+پیاده‌سازی نهایی در commit `095d478b26c5afdb73cc3d454ea0b5e1c910ee15`:
+
+- هر دو مسیر ترمیم publication و وضعیت پیام کانال فقط candidateهای due را با ترتیب قدیمی‌ترین مورد می‌خوانند. شکست یک ردیف با backoff نمایی و `next_retry_at` پایدار از بقیه batch جدا می‌شود و خطای دائمی پس از retry محدود به وضعیت پایدار terminal/set-aside می‌رسد.
+- حافظه process-local وضعیت پیام حذف شد. retry وضعیت کانال metadata مستقل `channel_state_*` دارد و با retry انتشار اولیه مخلوط نمی‌شود؛ restart worker زمان retry و attempt قبلی را از دیتابیس ادامه می‌دهد.
+- هر candidate transaction مستقل، PostgreSQL advisory lock و revalidation پس از lock دارد. بنابراین دو worker همزمان side effect تلگرام را دوبار اجرا نمی‌کنند و failure یک candidate transaction بقیه backlog را rollback نمی‌کند.
+- پاسخ `429` ادامه batch را متوقف و cooldown محدود ایجاد می‌کند؛ خطای retryable و `400` terminal رفتار جدا دارند. فاصله فعلی بین فراخوانی‌های موفق تلگرام حفظ شده و batch size بدون افزایش باقی مانده است.
+- observability اکنون backlog کل/due، سن قدیمی‌ترین کل/due، تعداد skipped-locked، response classها، rate-limit و failureهای retryable/terminal را گزارش می‌کند.
+- schema یا migration جدیدی وجود ندارد. تغییر guard migration فقط نام ایزوله `market_stage9_*_test` را برای تست PostgreSQL scratch مجاز می‌کند.
+
+شواهد تست:
+
+- suite متمرکز worker/reconciliation/scratch guard برابر `41 passed` است و سناریوهای backlog `101`تایی، شکست دائمی اولین ردیف، restart، backoff، `429`، terminal `400`، observability و جلوگیری از side effect تکراری را پوشش می‌دهد.
+- چهار تست واقعی PostgreSQL روی دیتابیس محافظت‌شده `market_stage9_repair_test` پاس شدند: guard نام دیتابیس، تخلیه `101` candidate در پنج cycle، عدم starvation بیست‌وپنج ردیف قدیمی در حضور صد ردیف جدید و اجرای دقیقاً یک provider edit توسط دو worker همزمان.
+- regression خانواده Offer برابر `165 passed, 9 skipped` و Telegram channel/publication برابر `18 passed` است. `compileall` و `git diff --check` نیز پاس شدند.
+- در اجرای گسترده sync، هشت failure ثبت شد: دو مورد در `test_sync_router_apply_item_success`، پنج مورد در `test_sync_router_receive_offer_publish` و یک مورد در `test_sync_guarantee_matrix`. هر هشت مورد با همان خروجی روی checkout موقت `main` بازتولید شدند و baseline قبلی‌اند؛ هیچ‌کدام از فایل‌های تغییرکرده Stage ۹ نیستند.
+
+شواهد staging دو سرور:
+
+- پنج سرویس روی میزبان خارج (`app`، `foreign_app`، `bot`، `sync_worker` و `foreign_sync_worker`) و دو سرویس روی میزبان staging ایران (`app` و `sync_worker`) با full `RELEASE_SHA=095d478b26c5afdb73cc3d454ea0b5e1c910ee15` اجرا شدند. checksum فایل runtime worker در هر هفت سرویس یکسان و Alembic هر دو دیتابیس برابر `d0b5e6f7a8c9` بود.
+- worker خارجی شش وضعیت قدیمی کانال را در batch محدود خواند؛ دو failure انتقال موقت با retry پایدار ادامه یافت و backlog نهایی publication/channel هر دو صفر شد.
+- preflight اولیه `MARKET-STAGE9-REPAIR-WORKER-FAIRNESS-20260714-R1` به‌درستی fail-close شد، چون پنج وضعیت publication تاریخی که در فاصله نسخه مختلط repair شده بودند در ایران اعمال نشده بودند. هیچ DB row به‌صورت مستقیم و کور تغییر نکرد؛ snapshot پشتیبان گرفته شد و پنج current-state replay امضاشده با manifest، natural identity و همان source sequenceهای اصلی `694/698/700/704/706` از ابزار رسمی `sync_repair_tool.py` اجرا شد. هر پنج مورد در مقصد `processed=1` و `Sync Item Applied` داشتند.
+- preflight نهایی فقط‌خواندنی `MARKET-STAGE9-REPAIR-WORKER-FAIRNESS-20260714-R2` با deep parity پاس شد: `business_drift=0`، `critical_drift=0`، queueهای outbound/retry صفر، change log unsynced/quarantined صفر و تمام findingهای publication reconciliation صفر بودند. پنج اختلاف باقی‌مانده فقط local/volatile و مطابق قرارداد parity هستند.
+- production deploy، restart، mutation تستی بازار و full-matrix جهشی انجام نشد.
+
+ریسک باقی‌مانده و rollback:
+
+- API تلگرام می‌تواند rate-limit یا outage داشته باشد، اما اکنون این وضعیت باعث loop سریع یا starvation بقیه backlog نمی‌شود و از طریق due backlog/oldest age قابل مشاهده است.
+- rollback runtime با revert commit `095d478b` و recreate سرویس‌های staging انجام می‌شود. چون schema تغییر نکرده است rollback دیتابیس لازم نیست؛ metadata اضافه در JSON با runtime قبلی سازگار و قابل نادیده‌گرفتن است.
+
 ---
 
 ## Stage ۱۰ - Cancel-All دقیق و مقاوم در برابر رقابت (`MKT-11`)
