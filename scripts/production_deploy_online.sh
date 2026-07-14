@@ -728,6 +728,12 @@ validate_web_push_env_file() {
 
 export_runtime_renderer_overrides() {
     local key
+    RELEASE_SHA="$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)"
+    ORIGIN_EXPECTED_MIGRATION_REVISION="$(
+        cd "$LOCAL_PROJECT_DIR"
+        python3 -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; print(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())'
+    )"
+    export RELEASE_SHA ORIGIN_EXPECTED_MIGRATION_REVISION
     local keys=(
         PUBLIC_WEBAPP_URL
         FOREIGN_SERVER_ALIASES
@@ -751,6 +757,8 @@ export_runtime_renderer_overrides() {
         REGISTRATION_SYNC_V2_ENABLED
         REGISTRATION_SYNC_ACCEPT_UNVERSIONED
         INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE
+        IRAN_ORIGIN_READINESS_API_KEY
+        ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS
         DB_POOL_SIZE
         DB_MAX_OVERFLOW
         IRAN_DB_POOL_SIZE

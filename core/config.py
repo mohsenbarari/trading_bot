@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
+    # Logical authority remains compatible with server_mode. physical_site is
+    # deployment identity and must not be reused as business/home authority.
+    logical_authority: str | None = None
+    physical_site: str | None = None
+    origin_readiness_api_key: str | None = None
+    origin_expected_migration_revision: str | None = None
+    origin_readiness_max_evidence_age_seconds: int = 900
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None

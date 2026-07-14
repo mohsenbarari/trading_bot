@@ -24,6 +24,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "SYNC_VERIFY_TLS": "true",
             "SYNC_CA_BUNDLE": "",
             "OBSERVABILITY_API_KEY": "obs-key",
+            "RELEASE_SHA": "release-sha",
+            "IRAN_ORIGIN_READINESS_API_KEY": "origin-ready-key",
+            "ORIGIN_EXPECTED_MIGRATION_REVISION": "d1c6e7f8a9b0",
+            "ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS": "900",
             "CHANNEL_ID": "-100123",
             "CHANNEL_INVITE_LINK": "https://t.me/example",
             "SMSIR_API_KEY": "sms-key",
@@ -120,6 +124,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         self.assertEqual(foreign["SERVER_MODE"], "foreign")
         self.assertEqual(iran["SERVER_MODE"], "iran")
+        self.assertEqual(foreign["LOGICAL_AUTHORITY"], "foreign")
+        self.assertEqual(foreign["PHYSICAL_SITE"], "bot_fi")
+        self.assertEqual(iran["LOGICAL_AUTHORITY"], "webapp")
+        self.assertEqual(iran["PHYSICAL_SITE"], "webapp_fi")
         self.assertEqual(foreign["API_WORKERS"], "2")
         self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
@@ -150,6 +158,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
         self.assertEqual(foreign["OTP_DELIVERY_STATE_SECRET"], "")
+        self.assertEqual(foreign["ORIGIN_READINESS_API_KEY"], "")
+        self.assertEqual(iran["ORIGIN_READINESS_API_KEY"], "origin-ready-key")
+        self.assertEqual(iran["ORIGIN_EXPECTED_MIGRATION_REVISION"], "d1c6e7f8a9b0")
+        self.assertEqual(iran["RELEASE_SHA"], "release-sha")
         self.assertEqual(
             iran["OTP_DELIVERY_STATE_SECRET"],
             "iran-only-otp-state-secret-0123456789abcdef",
@@ -214,6 +226,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
+            self.assertIn("LOGICAL_AUTHORITY=foreign", foreign_lines)
+            self.assertIn("PHYSICAL_SITE=bot_fi", foreign_lines)
+            self.assertIn("LOGICAL_AUTHORITY=webapp", iran_lines)
+            self.assertIn("PHYSICAL_SITE=webapp_fi", iran_lines)
             self.assertIn("API_WORKERS=2", foreign_lines)
             self.assertIn("API_WORKERS=4", iran_lines)
             self.assertIn("DB_POOL_SIZE=8", iran_lines)
@@ -251,6 +267,12 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("WEB_PUSH_TTL_SECONDS=7200", iran_lines)
             self.assertIn("WEB_PUSH_TIMEOUT_SECONDS=7.5", iran_lines)
             self.assertIn("OTP_DELIVERY_STATE_SECRET=", foreign_lines)
+            self.assertIn("ORIGIN_READINESS_API_KEY=", foreign_lines)
+            self.assertIn("ORIGIN_READINESS_API_KEY=origin-ready-key", iran_lines)
+            self.assertIn(
+                "ORIGIN_EXPECTED_MIGRATION_REVISION=d1c6e7f8a9b0",
+                iran_lines,
+            )
             self.assertIn(
                 "OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
                 iran_lines,

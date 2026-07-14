@@ -80,7 +80,13 @@ class SyncRegistryTests(unittest.TestCase):
         self.assertIn("must not represent current active runtime surface", users.notes)
 
     def test_sync_bookkeeping_tables_are_internal_not_product_sync(self):
-        for table_name in {"change_log", "sync_apply_watermarks", "sync_blocks"}:
+        for table_name in {
+            "change_log",
+            "sync_apply_watermarks",
+            "sync_blocks",
+            "webapp_writer_state",
+            "webapp_writer_transitions",
+        }:
             with self.subTest(table_name=table_name):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.INTERNAL_BOOKKEEPING)
 

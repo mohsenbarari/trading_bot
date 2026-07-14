@@ -27,6 +27,10 @@ COMMON_RUNTIME_KEYS = (
     "SYNC_VERIFY_TLS",
     "SYNC_CA_BUNDLE",
     "OBSERVABILITY_API_KEY",
+    "RELEASE_SHA",
+    "IRAN_ORIGIN_READINESS_API_KEY",
+    "ORIGIN_EXPECTED_MIGRATION_REVISION",
+    "ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS",
     "CHANNEL_ID",
     "CHANNEL_INVITE_LINK",
     "SMSIR_API_KEY",
@@ -78,6 +82,10 @@ COMMON_RUNTIME_KEYS = (
 OPTIONAL_RUNTIME_DEFAULTS = {
     "CHANNEL_INVITE_LINK": "",
     "ERROR_TRACKING_DSN": "",
+    "RELEASE_SHA": "",
+    "IRAN_ORIGIN_READINESS_API_KEY": "",
+    "ORIGIN_EXPECTED_MIGRATION_REVISION": "",
+    "ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS": "900",
     "SYNC_VERIFY_TLS": "true",
     "SYNC_CA_BUNDLE": "",
     "SMSIR_OTP_TEMPLATE_ID": "585147",
@@ -255,16 +263,21 @@ def build_runtime_env(
 ) -> OrderedDict[str, str]:
     rendered = OrderedDict()
     rendered["SERVER_MODE"] = role
+    rendered["LOGICAL_AUTHORITY"] = "foreign" if role == "foreign" else "webapp"
+    rendered["PHYSICAL_SITE"] = "bot_fi" if role == "foreign" else "webapp_fi"
     rendered["API_WORKERS"] = str(api_workers)
     for key in COMMON_RUNTIME_KEYS[:6]:
         rendered[key] = values[key]
     rendered["FRONTEND_URL"] = frontend_url
     for key in COMMON_RUNTIME_KEYS[6:]:
-        if key == "IRAN_OTP_DELIVERY_STATE_SECRET":
+        if key in {"IRAN_OTP_DELIVERY_STATE_SECRET", "IRAN_ORIGIN_READINESS_API_KEY"}:
             continue
         rendered[key] = values.get(key, OPTIONAL_RUNTIME_DEFAULTS.get(key, ""))
     rendered["OTP_DELIVERY_STATE_SECRET"] = (
         values.get("IRAN_OTP_DELIVERY_STATE_SECRET", "") if role == "iran" else ""
+    )
+    rendered["ORIGIN_READINESS_API_KEY"] = (
+        values.get("IRAN_ORIGIN_READINESS_API_KEY", "") if role == "iran" else ""
     )
     role_prefix = role.upper()
     for key in PERFORMANCE_RUNTIME_DEFAULTS:

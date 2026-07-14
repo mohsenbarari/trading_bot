@@ -419,6 +419,22 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "immutable event UUID ledger; never copied as a table",
         "counter period reconstruction and replay protection only",
     ),
+    "webapp_writer_state": _entry(
+        "webapp_writer_state",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_control_plane", "origin_readiness"),
+        "local physical-site control plane",
+        "never product-sync writer leases or local routing authority rows",
+        "writer fencing and public-origin eligibility only",
+    ),
+    "webapp_writer_transitions": _entry(
+        "webapp_writer_transitions",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_control_plane", "operator_audit"),
+        "local physical-site control plane",
+        "append-only local audit; exchange only through signed recovery evidence",
+        "promotion, demotion, and readiness audit only",
+    ),
 }
 
 

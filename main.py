@@ -5,12 +5,14 @@ import time
 import uuid
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from jose import JWTError, jwt
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
     trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages
@@ -20,7 +22,7 @@ from api.routers import customers
 from core.config import settings
 from core.deployment_surface import allowed_cors_origins
 from core.redis import init_redis, close_redis, get_redis_client
-from core.db import AsyncSessionLocal, init_db
+from core.db import AsyncSessionLocal, get_db, init_db
 from core.events import setup_event_listeners
 from core.server_routing import SERVER_FOREIGN, normalize_server
 from core.background_job_authority import (
@@ -55,12 +57,26 @@ from core.audit_logger import audit_log
 from core.security import constant_time_secret_equals
 from core.request_logging import install_request_logging_middleware
 from core.public_webapp_url import public_webapp_url_for_links
+from core.runtime_identity import resolve_runtime_identity
+from core.webapp_writer_control import (
+    WriterControlError,
+    WriterStateSnapshot,
+    load_writer_snapshot,
+    snapshot_is_local_active,
+)
+from core.writer_fencing import (
+    WriterFenceError,
+    register_writer_fence_listener,
+    writer_fence_scope,
+)
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
 # -------------------------------------------------------
 configure_logging("api")
 logger = logging.getLogger(__name__)
+RUNTIME_IDENTITY = resolve_runtime_identity(settings)
+register_writer_fence_listener()
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 FOREIGN_INTERNAL_EXACT_PATHS = {"/metrics"}
@@ -98,6 +114,8 @@ PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES = (
     "/api/auth/internal/telegram-link",
     "/api/auth/internal/telegram-otp",
 )
+WRITER_FENCE_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+WRITER_FENCE_PROJECTION_PREFIXES = ("/api/sync",)
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -207,7 +225,30 @@ def _should_apply_production_test_isolation_to_path(path: str) -> bool:
     return path.startswith("/api/")
 
 
-def _background_job_factories():
+def _request_requires_webapp_writer(request: Request) -> bool:
+    if not RUNTIME_IDENTITY.is_webapp_authority:
+        return False
+    if request.method.upper() not in WRITER_FENCE_UNSAFE_METHODS:
+        return False
+    path = request.url.path
+    if any(_path_matches_prefix(path, prefix) for prefix in WRITER_FENCE_PROJECTION_PREFIXES):
+        return False
+    return path.startswith("/api/")
+
+
+def _writer_fenced_response(reasons: tuple[str, ...]) -> JSONResponse:
+    return JSONResponse(
+        {
+            "detail": "این سرور در حال حاضر مجوز ثبت تغییرات وب‌اپ را ندارد.",
+            "code": "webapp_writer_fenced",
+            "reasons": list(reasons),
+        },
+        status_code=503,
+        headers={"Cache-Control": "no-store", "X-WebApp-Writer-State": "fenced"},
+    )
+
+
+def _background_job_factories(writer_snapshot: WriterStateSnapshot | None = None):
     jobs = [
         ("connectivity_monitor", connectivity_monitor_loop),
         ("offer_expiry", offer_expiry_loop),
@@ -226,8 +267,16 @@ def _background_job_factories():
         )
     if settings.telegram_login_otp_enabled and settings.otp_sms_auto_fallback_enabled:
         jobs.append(("otp_sms_fallback", otp_sms_fallback_loop))
+    runtime_role = (
+        writer_snapshot.local_runtime_role(RUNTIME_IDENTITY.physical_site)
+        if writer_snapshot is not None
+        else "active"
+    )
     return filter_allowed_background_job_factories(
         jobs,
+        server_mode=settings.server_mode,
+        physical_site=RUNTIME_IDENTITY.physical_site,
+        runtime_role=runtime_role,
         on_rejected=_log_background_job_authority_rejection,
     )
 
@@ -237,6 +286,40 @@ def _log_background_job_authority_rejection(decision: BackgroundJobAuthorityDeci
         "Skipping background job on this server by authority policy",
         extra=decision.as_log_extra(),
     )
+
+
+async def _load_runtime_writer_snapshot() -> WriterStateSnapshot | None:
+    if not RUNTIME_IDENTITY.is_webapp_authority:
+        return None
+    async with AsyncSessionLocal() as session:
+        return await load_writer_snapshot(session)
+
+
+def _writer_snapshot_changed(
+    previous: WriterStateSnapshot | None,
+    current: WriterStateSnapshot | None,
+) -> bool:
+    if previous is None or current is None:
+        return previous is not current
+    return (
+        previous.writer_epoch != current.writer_epoch
+        or previous.transition_id != current.transition_id
+        or previous.active_site != current.active_site
+        or previous.control_state != current.control_state
+    )
+
+
+def _create_background_tasks(
+    jobs,
+    writer_snapshot: WriterStateSnapshot | None,
+) -> list[asyncio.Task]:
+    if writer_snapshot is None:
+        return [asyncio.create_task(factory()) for _, factory in jobs]
+    active, _ = snapshot_is_local_active(RUNTIME_IDENTITY, writer_snapshot)
+    if not active:
+        return [asyncio.create_task(factory()) for _, factory in jobs]
+    with writer_fence_scope(RUNTIME_IDENTITY, writer_snapshot, source="background_job"):
+        return [asyncio.create_task(factory()) for _, factory in jobs]
 
 
 async def _cancel_background_jobs(tasks: list[asyncio.Task]) -> None:
@@ -269,7 +352,8 @@ async def _run_background_leader(redis_client) -> None:
                 continue
             acquired_lock = True
 
-            jobs = _background_job_factories()
+            writer_snapshot = await _load_runtime_writer_snapshot()
+            jobs = _background_job_factories(writer_snapshot)
             logger.info(
                 "API worker acquired background leader lock",
                 extra={
@@ -280,7 +364,7 @@ async def _run_background_leader(redis_client) -> None:
                     "lock_ttl_seconds": ttl_seconds,
                 },
             )
-            tasks = [asyncio.create_task(factory()) for _, factory in jobs]
+            tasks = _create_background_tasks(jobs, writer_snapshot)
 
             while True:
                 await asyncio.sleep(refresh_seconds)
@@ -298,6 +382,19 @@ async def _run_background_leader(redis_client) -> None:
                             "event": "background.leader.lost",
                             "worker_pid": os.getpid(),
                             "lock_key": lock_key,
+                        },
+                    )
+                    break
+                current_writer_snapshot = await _load_runtime_writer_snapshot()
+                if _writer_snapshot_changed(writer_snapshot, current_writer_snapshot):
+                    logger.warning(
+                        "WebApp writer state changed; restarting background authority set",
+                        extra={
+                            "event": "background.writer_state.changed",
+                            "worker_pid": os.getpid(),
+                            "physical_site": RUNTIME_IDENTITY.physical_site,
+                            "previous_epoch": getattr(writer_snapshot, "writer_epoch", None),
+                            "current_epoch": getattr(current_writer_snapshot, "writer_epoch", None),
                         },
                     )
                     break
@@ -348,21 +445,36 @@ def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
     )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("🚀 Starting up...")
-    validate_otp_delivery_runtime_settings(settings)
-    if settings.invitation_contract_v2_enabled:
-        public_webapp_url_for_links()
-    await init_db()
-    redis_client = await init_redis()
-    setup_event_listeners()
+async def _run_authorized_startup_mutations(
+    writer_snapshot: WriterStateSnapshot | None,
+) -> None:
+    if writer_snapshot is not None:
+        active, reasons = snapshot_is_local_active(RUNTIME_IDENTITY, writer_snapshot)
+        if not active:
+            logger.warning(
+                "Skipping startup mutations because this WebApp site is not the active writer",
+                extra={
+                    "event": "startup.mutations.fenced",
+                    "physical_site": RUNTIME_IDENTITY.physical_site,
+                    "writer_epoch": writer_snapshot.writer_epoch,
+                    "reasons": list(reasons),
+                },
+            )
+            return
 
     async with AsyncSessionLocal() as session:
         try:
-            await ensure_mandatory_channel_rollout(session)
-            await session.commit()
+            if writer_snapshot is None:
+                await ensure_mandatory_channel_rollout(session)
+                await session.commit()
+            else:
+                with writer_fence_scope(
+                    RUNTIME_IDENTITY,
+                    writer_snapshot,
+                    source="startup_mutation",
+                ):
+                    await ensure_mandatory_channel_rollout(session)
+                    await session.commit()
         except IntegrityError as exc:
             await session.rollback()
             if not _is_mandatory_channel_membership_race(exc):
@@ -377,6 +489,20 @@ async def lifespan(app: FastAPI):
         except Exception:
             await session.rollback()
             raise
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("🚀 Starting up...")
+    validate_otp_delivery_runtime_settings(settings)
+    if settings.invitation_contract_v2_enabled:
+        public_webapp_url_for_links()
+    await init_db()
+    redis_client = await init_redis()
+    setup_event_listeners()
+    writer_snapshot = await _load_runtime_writer_snapshot()
+    await _run_authorized_startup_mutations(writer_snapshot)
     background_leader_task = None
     if settings.background_jobs_enabled:
         background_leader_task = _start_background_leader_task(redis_client)
@@ -473,6 +599,56 @@ async def enforce_production_test_isolation(request: Request, call_next):
         headers={"Cache-Control": "no-store"},
     )
 
+
+@app.middleware("http")
+async def enforce_webapp_writer_fence(request: Request, call_next):
+    if not _request_requires_webapp_writer(request):
+        return await call_next(request)
+    try:
+        writer_snapshot = await _load_runtime_writer_snapshot()
+    except (WriterControlError, RuntimeError) as exc:
+        logger.error(
+            "Writer preflight could not load durable state",
+            extra={
+                "event": "writer.preflight.unavailable",
+                "physical_site": RUNTIME_IDENTITY.physical_site,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return _writer_fenced_response(("writer_state_unavailable",))
+    if writer_snapshot is None:
+        return _writer_fenced_response(("writer_state_missing",))
+    active, reasons = snapshot_is_local_active(RUNTIME_IDENTITY, writer_snapshot)
+    if not active:
+        logger.warning(
+            "Blocked mutation on a non-writer WebApp origin",
+            extra={
+                "event": "writer.preflight.rejected",
+                "path": request.url.path,
+                "method": request.method,
+                "physical_site": RUNTIME_IDENTITY.physical_site,
+                "writer_epoch": writer_snapshot.writer_epoch,
+                "reasons": list(reasons),
+            },
+        )
+        return _writer_fenced_response(reasons)
+    try:
+        with writer_fence_scope(RUNTIME_IDENTITY, writer_snapshot, source="http_request"):
+            return await call_next(request)
+    except WriterFenceError as exc:
+        logger.warning(
+            "Blocked mutation whose writer term changed before commit",
+            extra={
+                "event": "writer.commit.rejected",
+                "path": request.url.path,
+                "method": request.method,
+                "physical_site": RUNTIME_IDENTITY.physical_site,
+                "writer_epoch": writer_snapshot.writer_epoch,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return _writer_fenced_response(("writer_term_changed",))
+
 # -------------------------------------------------------
 # 🛣️ API Routers
 # -------------------------------------------------------
@@ -508,6 +684,140 @@ async def get_public_config():
         "bot_username": settings.bot_username,
         "frontend_url": settings.frontend_url,
     }
+
+
+async def _local_dependency_health(db: AsyncSession) -> tuple[bool, bool, tuple[str, ...]]:
+    reasons: list[str] = []
+    database_ok = False
+    redis_ok = False
+    try:
+        await db.execute(text("SELECT 1"))
+        database_ok = True
+    except Exception:
+        reasons.append("database_unavailable")
+    try:
+        redis_client = get_redis_client()
+        redis_ok = bool(await redis_client.ping())
+        if not redis_ok:
+            reasons.append("redis_unavailable")
+    except Exception:
+        reasons.append("redis_unavailable")
+    return database_ok, redis_ok, tuple(dict.fromkeys(reasons))
+
+
+def _origin_readiness_request_allowed(request: Request) -> bool:
+    configured_key = getattr(settings, "origin_readiness_api_key", None)
+    supplied_key = request.headers.get("X-Origin-Readiness-Key")
+    if constant_time_secret_equals(supplied_key, configured_key):
+        return True
+    return _is_loopback_client(request.client.host if request.client else None)
+
+
+@app.get("/health/live")
+async def get_health_live():
+    return {
+        "status": "ok",
+        "physical_site": RUNTIME_IDENTITY.physical_site,
+        "logical_authority": RUNTIME_IDENTITY.logical_authority,
+    }
+
+
+@app.get("/health/ready")
+async def get_health_ready(db: AsyncSession = Depends(get_db)):
+    database_ok, redis_ok, reasons = await _local_dependency_health(db)
+    payload = {
+        "ready": not reasons,
+        "database_ok": database_ok,
+        "redis_ok": redis_ok,
+        "physical_site": RUNTIME_IDENTITY.physical_site,
+        "reasons": list(reasons),
+    }
+    if reasons:
+        return JSONResponse(payload, status_code=503, headers={"Cache-Control": "no-store"})
+    return payload
+
+
+@app.get("/health/sync")
+async def get_health_sync(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await sync.get_sync_health(request=request, db=db)
+
+
+@app.get("/health/origin-ready")
+async def get_health_origin_ready(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    if not _origin_readiness_request_allowed(request):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    reasons: list[str] = []
+    database_ok, redis_ok, dependency_reasons = await _local_dependency_health(db)
+    reasons.extend(dependency_reasons)
+    try:
+        writer_snapshot = await load_writer_snapshot(db)
+        active, writer_reasons = snapshot_is_local_active(
+            RUNTIME_IDENTITY,
+            writer_snapshot,
+            require_readiness_evidence=True,
+        )
+        if not active:
+            reasons.extend(writer_reasons)
+    except WriterControlError:
+        writer_snapshot = None
+        reasons.append("writer_state_unavailable")
+
+    release_sha = str(getattr(settings, "release_sha", None) or "").strip()
+    if not release_sha:
+        reasons.append("release_sha_missing")
+
+    expected_revision = str(
+        getattr(settings, "origin_expected_migration_revision", None) or ""
+    ).strip()
+    current_revision = None
+    if not expected_revision:
+        reasons.append("expected_migration_revision_missing")
+    elif database_ok:
+        try:
+            current_revision = (
+                await db.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one_or_none()
+            if current_revision != expected_revision:
+                reasons.append("migration_revision_mismatch")
+        except Exception:
+            reasons.append("migration_revision_unavailable")
+
+    if not settings.background_jobs_enabled:
+        reasons.append("background_jobs_disabled")
+    if not (Path("mini_app_dist") / "index.html").is_file():
+        reasons.append("frontend_assets_missing")
+
+    reasons = list(dict.fromkeys(reasons))
+    payload = {
+        "origin_ready": not reasons,
+        "physical_site": RUNTIME_IDENTITY.physical_site,
+        "logical_authority": RUNTIME_IDENTITY.logical_authority,
+        "runtime_role": (
+            writer_snapshot.local_runtime_role(RUNTIME_IDENTITY.physical_site)
+            if writer_snapshot is not None
+            else "fenced"
+        ),
+        "writer_epoch": writer_snapshot.writer_epoch if writer_snapshot is not None else None,
+        "transition_id": writer_snapshot.transition_id if writer_snapshot is not None else None,
+        "readiness_evidence_id": (
+            writer_snapshot.readiness_evidence_id if writer_snapshot is not None else None
+        ),
+        "release_sha": release_sha or None,
+        "migration_revision": current_revision,
+        "database_ok": database_ok,
+        "redis_ok": redis_ok,
+        "reasons": reasons,
+    }
+    if reasons:
+        return JSONResponse(payload, status_code=503, headers={"Cache-Control": "no-store"})
+    return JSONResponse(payload, status_code=200, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/metrics")

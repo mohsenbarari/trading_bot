@@ -185,6 +185,43 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertFalse(decision.ok)
         self.assertEqual(decision.current_server, "foreign")
 
+    def test_webapp_standby_runs_only_local_runtime_jobs(self):
+        authoritative = check_background_job_authority(
+            JOB_OFFER_EXPIRY,
+            server_mode="iran",
+            physical_site="webapp_ir",
+            runtime_role="standby",
+        )
+        local_session = check_background_job_authority(
+            JOB_SESSION_EXPIRY,
+            server_mode="iran",
+            physical_site="webapp_ir",
+            runtime_role="standby",
+        )
+        local_sync = check_background_job_authority(
+            JOB_SYNC_WORKER,
+            server_mode="iran",
+            physical_site="webapp_ir",
+            runtime_role="standby",
+        )
+
+        self.assertFalse(authoritative.ok)
+        self.assertEqual(authoritative.reason, "webapp_writer_not_active")
+        self.assertTrue(local_session.ok)
+        self.assertTrue(local_sync.ok)
+
+    def test_webapp_active_site_keeps_authoritative_jobs(self):
+        decision = check_background_job_authority(
+            JOB_USER_ACCOUNT_STATUS,
+            server_mode="iran",
+            physical_site="webapp_fi",
+            runtime_role="active",
+        )
+
+        self.assertTrue(decision.ok)
+        self.assertEqual(decision.physical_site, "webapp_fi")
+        self.assertEqual(decision.runtime_role, "active")
+
 
 if __name__ == "__main__":
     unittest.main()
