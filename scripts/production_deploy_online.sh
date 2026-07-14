@@ -1552,6 +1552,7 @@ build_release() {
         --exclude 'tmp' \
         --exclude 'uploads' \
         --exclude 'map_data' \
+        --exclude 'audit_trail' \
         --exclude 'pip_packages' \
         "$LOCAL_PROJECT_DIR/" "$iran_context_dir/"
     rsync -a --delete "$iran_pip_dir/" "$iran_context_dir/pip_packages/"
@@ -1807,6 +1808,7 @@ sync_project() {
         --exclude 'tmp' \
         --exclude 'uploads' \
         --exclude 'map_data' \
+        --exclude 'audit_trail' \
         -e "$RSYNC_SSH" \
         "$LOCAL_PROJECT_DIR/" "$IRAN_SSH_TARGET:$staging_dir/"
     local local_pip_hash_file="$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
