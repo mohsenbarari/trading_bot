@@ -40,6 +40,7 @@ def build_offer_sync_payload(offer: Any) -> dict[str, Any]:
         "status": _enum_value(offer.status) if getattr(offer, "status", None) else None,
         "channel_message_id": offer.channel_message_id,
         "republished_offer_id": offer.republished_offer_id,
+        "republished_offer_public_id": getattr(offer, "republished_offer_public_id", None),
         "created_at": _isoformat_or_none(offer.created_at),
         "updated_at": _isoformat_or_none(offer.updated_at),
         "expired_at": _isoformat_or_none(getattr(offer, "expired_at", None)),

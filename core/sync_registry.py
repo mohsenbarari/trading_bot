@@ -209,6 +209,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "provider diagnostics are local runtime evidence, not business truth."
         ),
     ),
+    "offer_expiry_command_receipts": _entry(
+        "offer_expiry_command_receipts",
+        SyncPolicy.NO_SYNC,
+        ("internal_forward",),
+        "offer home server",
+        "command id, idempotency key, and canonical request hash; no cross-server merge",
+        "authoritative offer-expiry replay protection",
+    ),
     "offer_requests": _entry(
         "offer_requests",
         SyncPolicy.SYNC,

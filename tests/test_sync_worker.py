@@ -128,10 +128,11 @@ class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PeerResponsePolicyTests(unittest.TestCase):
-    def test_terminal_source_authority_tables_share_receiver_authority_set(self):
+    def test_terminal_source_authority_tables_include_receiver_set_and_offer_home_authority(self):
         from api.routers.sync import IRAN_AUTHORITATIVE_SYNC_TABLES as receiver_authority_tables
 
-        self.assertIs(sync_worker.TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES, receiver_authority_tables)
+        self.assertTrue(receiver_authority_tables.issubset(sync_worker.TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES))
+        self.assertIn("offers", sync_worker.TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES)
 
     def test_policy_forbidden_no_sync_response_is_detected(self):
         response = FakeResponse(
@@ -200,7 +201,7 @@ class PeerResponsePolicyTests(unittest.TestCase):
                 ],
             },
         )
-        non_authority_table_response = FakeResponse(
+        offer_home_authority_response = FakeResponse(
             200,
             '{"status":"partial","processed":0,"errors":1}',
             {
@@ -210,6 +211,22 @@ class PeerResponsePolicyTests(unittest.TestCase):
                 "error_items": [
                     {
                         "table": "offers",
+                        "record_id": 1,
+                        "reason": "source_authority_forbidden:foreign",
+                    }
+                ],
+            },
+        )
+        non_authority_table_response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {
+                        "table": "trades",
                         "record_id": 1,
                         "reason": "source_authority_forbidden:foreign",
                     }
@@ -227,6 +244,12 @@ class PeerResponsePolicyTests(unittest.TestCase):
             sync_worker.peer_response_is_terminal_policy_rejection_for_item(
                 allowed_response,
                 {"table": "market_runtime_state", "id": 2},
+            )
+        )
+        self.assertTrue(
+            sync_worker.peer_response_is_terminal_policy_rejection_for_item(
+                offer_home_authority_response,
+                {"table": "offers", "id": 1},
             )
         )
         self.assertFalse(sync_worker.peer_response_is_terminal_policy_rejection(non_authority_table_response))

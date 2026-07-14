@@ -441,9 +441,9 @@ def setup_offer_events():
         try:
             data = build_offer_sync_payload(target)
             data["commodity_name"] = _lookup_commodity_name(connection, target.commodity_id)
-            data["republished_offer_public_id"] = _lookup_offer_public_id(
-                connection,
-                getattr(target, "republished_offer_id", None),
+            data["republished_offer_public_id"] = (
+                getattr(target, "republished_offer_public_id", None)
+                or _lookup_offer_public_id(connection, getattr(target, "republished_offer_id", None))
             )
             log_change(connection, "offers", target.id, "INSERT", data)
             publish_event_sync("offer:created", data)
@@ -457,9 +457,9 @@ def setup_offer_events():
         try:
             data = build_offer_sync_payload(target)
             data["commodity_name"] = _lookup_commodity_name(connection, target.commodity_id)
-            data["republished_offer_public_id"] = _lookup_offer_public_id(
-                connection,
-                getattr(target, "republished_offer_id", None),
+            data["republished_offer_public_id"] = (
+                getattr(target, "republished_offer_public_id", None)
+                or _lookup_offer_public_id(connection, getattr(target, "republished_offer_id", None))
             )
             log_change(connection, "offers", target.id, "UPDATE", data)
             if target.status.value == "expired":

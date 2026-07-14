@@ -96,6 +96,8 @@ class Offer(Base):
     
     # آیدی لفظ جدید (اگر این لفظ تکرار شده باشد)
     republished_offer_id = Column(Integer, nullable=True)
+    # Canonical cross-server lineage; republished_offer_id is only a local projection.
+    republished_offer_public_id = Column(String(40), nullable=True, index=True)
     
     # زمان ایجاد
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

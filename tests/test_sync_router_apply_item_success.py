@@ -284,7 +284,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(resolved)
         self.assertEqual(data["republished_offer_id"], 91)
-        self.assertNotIn("republished_offer_public_id", data)
+        self.assertEqual(data["republished_offer_public_id"], "ofr_source_31")
 
     async def test_offer_request_customer_relation_localizes_by_invitation_token(self):
         db = FakeDB([ScalarOneOrNoneResult(71)])

@@ -73,6 +73,19 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('nullable=False', migration)
         self.assertIn("server_default=sa.text(\"'CASH'::settlementtype\")", migration)
 
+    def test_offer_expiry_receipt_migration_is_additive_and_backfills_public_lineage(self):
+        migration = (
+            REPO_ROOT / "migrations/versions/c9a4e7b2d615_add_offer_expiry_command_receipts.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "b9e0f1a2c3d4"', migration)
+        self.assertIn('op.add_column("offers"', migration)
+        self.assertIn("republished_offer_public_id", migration)
+        self.assertIn('op.create_table(\n        "offer_expiry_command_receipts"', migration)
+        self.assertIn("ux_offer_expiry_receipts_command_id", migration)
+        self.assertIn("ux_offer_expiry_receipts_idempotency_key", migration)
+        self.assertIn('op.drop_table("offer_expiry_command_receipts")', migration)
+
     def test_new_offer_public_id_backfills_cannot_use_independent_random_values(self):
         allowed_legacy_random_backfills = {
             'a6b7c8d9e0f1_add_offer_public_id.py',

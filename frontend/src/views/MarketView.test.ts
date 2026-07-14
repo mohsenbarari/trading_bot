@@ -110,6 +110,7 @@ const offersFixture = [
 const recentOffersFixture = [
   {
     id: 91,
+    offer_public_id: 'ofr_recent_91',
     offer_type: 'sell',
     settlement_type: 'cash',
     commodity_id: 1,
@@ -127,6 +128,7 @@ const recentOffersFixture = [
   },
   {
     id: 92,
+    offer_public_id: 'ofr_recent_92',
     offer_type: 'buy',
     settlement_type: 'tomorrow',
     commodity_id: 2,
@@ -678,6 +680,7 @@ describe('MarketView.vue', () => {
       lot_sizes: null,
       notes: 'از متن بازار',
       republished_from_id: null,
+      republished_from_public_id: null,
       warning_acknowledged: false,
       idempotency_key: expect.any(String),
     })
@@ -803,6 +806,7 @@ describe('MarketView.vue', () => {
       lot_sizes: [5, 3],
       notes: null,
       republished_from_id: 92,
+      republished_from_public_id: 'ofr_recent_92',
       warning_acknowledged: false,
       idempotency_key: expect.any(String),
     })
@@ -984,6 +988,7 @@ describe('MarketView.vue', () => {
   it('republishes active retail recent offers from remaining quantity and current lot sizes', async () => {
     const activeRecentOffer = {
       id: 93,
+      offer_public_id: 'ofr_recent_93',
       offer_type: 'sell',
       settlement_type: 'cash',
       commodity_id: 3,
@@ -1052,6 +1057,7 @@ describe('MarketView.vue', () => {
       lot_sizes: [3, 2],
       notes: '   ',
       republished_from_id: 93,
+      republished_from_public_id: 'ofr_recent_93',
       warning_acknowledged: false,
       idempotency_key: expect.any(String),
     })

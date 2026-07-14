@@ -29,7 +29,9 @@ configure_logging("sync-worker")
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
 
-TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = IRAN_AUTHORITATIVE_SYNC_TABLES
+TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = frozenset(
+    (*IRAN_AUTHORITATIVE_SYNC_TABLES, "offers")
+)
 SYNC_OUTBOUND_TABLE_PRIORITY = (
     "users",
     "invitations",

@@ -189,7 +189,10 @@ def enrich_seed_payload(
 
     if table_name == "offers":
         republished_offer_id = getattr(row, "republished_offer_id", None)
-        if republished_offer_id is not None:
+        republished_offer_public_id = getattr(row, "republished_offer_public_id", None)
+        if republished_offer_public_id:
+            enriched["republished_offer_public_id"] = republished_offer_public_id
+        elif republished_offer_id is not None:
             enriched["republished_offer_public_id"] = _required_reference(
                 references.offer_public_ids_by_id,
                 republished_offer_id,

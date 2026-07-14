@@ -31,6 +31,7 @@ from .market_schedule_override import MarketScheduleOverride, MarketScheduleOver
 from .market_runtime_state import MarketRuntimeState
 from .market_channel_notice_receipt import MarketChannelNoticeReceipt
 from .offer import Offer, OfferType, OfferStatus
+from .offer_expiry_command_receipt import OfferExpiryCommandReceipt
 from .offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
 from .offer_publication_state import (
     OfferPublicationState,
@@ -112,6 +113,7 @@ __all__ = [
     "Offer",
     "OfferType",
     "OfferStatus",
+    "OfferExpiryCommandReceipt",
     "SettlementType",
     "OfferRequest",
     "OfferRequestSourceSurface",
