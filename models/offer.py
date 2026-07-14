@@ -107,6 +107,8 @@ class Offer(Base):
 
     # ===== Sync Fields =====
     idempotency_key = Column(String(64), unique=True, nullable=True)
+    idempotency_fingerprint_version = Column(Integer, nullable=True)
+    idempotency_fingerprint = Column(String(64), nullable=True)
     archived = Column(Boolean, default=False)
 
     

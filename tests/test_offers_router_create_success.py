@@ -121,7 +121,10 @@ def make_reloaded_offer(*, offer_id=77, channel_message_id=None, notes="urgent")
         id=offer_id,
         offer_public_id=f"ofr_offer_{offer_id}",
         user_id=5,
+        actor_user_id=5,
+        home_server="iran",
         offer_type=OfferType.BUY,
+        settlement_type="cash",
         commodity_id=1,
         commodity=SimpleNamespace(name="Gold"),
         user=SimpleNamespace(account_name="user1"),
@@ -135,6 +138,9 @@ def make_reloaded_offer(*, offer_id=77, channel_message_id=None, notes="urgent")
         status=OfferStatus.ACTIVE,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         channel_message_id=channel_message_id,
+        republished_from_offer_public_id=None,
+        idempotency_fingerprint_version=None,
+        idempotency_fingerprint=None,
     )
 
 
@@ -363,6 +369,32 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             offer_owner_relation=None,
             viewer_customer_relation=None,
         )
+
+    async def test_create_offer_rejects_same_idempotency_key_with_different_payload(self):
+        existing_offer = make_reloaded_offer(offer_id=73)
+        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer)])
+
+        with patch(
+            "api.routers.offers.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as channel_mock, patch(
+            "api.routers.realtime.publish_event",
+            new=AsyncMock(),
+        ) as publish_mock:
+            with self.assertRaises(HTTPException) as raised:
+                await create_offer(
+                    make_offer(idempotency_key="offer-create-1", price=123457),
+                    db=db,
+                    context=make_context(),
+                )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("مشخصات متفاوت", raised.exception.detail)
+        self.assertEqual(db.added, [])
+        db.commit.assert_not_awaited()
+        channel_mock.assert_not_awaited()
+        publish_mock.assert_not_awaited()
+        self.register_market_offer_created_mock.assert_not_awaited()
 
     async def test_create_offer_uses_webapp_home_server_even_when_owner_and_runtime_are_foreign(self):
         commodity = SimpleNamespace(id=1)

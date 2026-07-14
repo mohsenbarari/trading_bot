@@ -41,6 +41,8 @@ class OfferSyncPayloadTests(unittest.TestCase):
             updated_at=datetime(2026, 6, 27, 12, 1, tzinfo=timezone.utc),
             expired_at=None,
             idempotency_key="offer-warning-7",
+            idempotency_fingerprint_version=1,
+            idempotency_fingerprint="a" * 64,
             archived=False,
         )
 
@@ -52,6 +54,8 @@ class OfferSyncPayloadTests(unittest.TestCase):
         self.assertEqual(payload["version_id"], 3)
         self.assertEqual(payload["settlement_type"], "tomorrow")
         self.assertEqual(payload["republished_from_offer_public_id"], "ofr_source_6")
+        self.assertEqual(payload["idempotency_fingerprint_version"], 1)
+        self.assertEqual(payload["idempotency_fingerprint"], "a" * 64)
 
         offer.remaining_quantity = 0
         self.assertEqual(build_offer_sync_payload(offer)["remaining_quantity"], 0)
@@ -87,6 +91,8 @@ class OfferSyncPayloadTests(unittest.TestCase):
 
         self.assertFalse(payload["exclude_from_competitive_price"])
         self.assertIsNone(payload["price_warning_type"])
+        self.assertIsNone(payload["idempotency_fingerprint_version"])
+        self.assertIsNone(payload["idempotency_fingerprint"])
         self.assertEqual(payload["settlement_type"], "cash")
 
 

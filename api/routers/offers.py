@@ -65,11 +65,13 @@ from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import (
     OfferCreationAdmissionError,
     OfferCreationCommand,
+    OfferCreationIdempotencyConflictError,
     OfferCreationLimitExceededError,
     OfferCreationQuotaPolicy,
     OfferCreationQuotaUnavailableError,
     OfferCreationValidationError,
     create_authoritative_offer_with_outcome,
+    ensure_offer_idempotency_replay_matches,
 )
 from core.services.offer_expiry_service import (
     OfferAlreadyInactiveError,
@@ -165,7 +167,6 @@ def build_offer_read_options(*, include_owner_identity: bool):
 async def _load_offer_idempotency_replay(
     db: AsyncSession,
     *,
-    owner_user_id: int,
     idempotency_key: str | None,
 ) -> Offer | None:
     normalized_key = (idempotency_key or "").strip()
@@ -175,10 +176,7 @@ async def _load_offer_idempotency_replay(
     result = await db.execute(
         select(Offer)
         .options(*build_offer_read_options(include_owner_identity=True))
-        .where(
-            Offer.user_id == owner_user_id,
-            Offer.idempotency_key == normalized_key,
-        )
+        .where(Offer.idempotency_key == normalized_key)
     )
     return result.scalar_one_or_none()
 
@@ -208,6 +206,58 @@ class OfferCreate(BaseModel):
     )
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
     idempotency_key: Optional[str] = Field(default=None, max_length=64, description="شناسه یکتای تلاش ثبت لفظ")
+
+
+def _build_webapp_offer_creation_command(
+    offer_data: OfferCreate,
+    *,
+    owner_user_id: int,
+    actor_user_id: int,
+    idempotency_key: str | None,
+    republish_source_public_id: str | None,
+    price_warning: dict[str, Any] | None = None,
+) -> OfferCreationCommand:
+    return OfferCreationCommand(
+        source_surface=OfferSourceSurface.WEBAPP,
+        owner_user_id=owner_user_id,
+        actor_user_id=actor_user_id,
+        offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
+        settlement_type=offer_data.settlement_type,
+        commodity_id=offer_data.commodity_id,
+        quantity=offer_data.quantity,
+        price=offer_data.price,
+        exclude_from_competitive_price=bool(price_warning),
+        price_warning_type=price_warning["warning_type"] if price_warning else None,
+        is_wholesale=offer_data.is_wholesale,
+        lot_sizes=offer_data.lot_sizes,
+        original_lot_sizes=offer_data.lot_sizes,
+        notes=offer_data.notes,
+        idempotency_key=idempotency_key,
+        status=OfferStatus.ACTIVE,
+        republished_from_offer_public_id=republish_source_public_id or None,
+    )
+
+
+def _ensure_offer_replay_matches_or_conflict(
+    offer: Offer,
+    command: OfferCreationCommand,
+) -> None:
+    try:
+        ensure_offer_idempotency_replay_matches(offer, command)
+    except OfferCreationIdempotencyConflictError as exc:
+        log_trading_event(
+            logger,
+            "offer_idempotent_replay_conflict",
+            level="warning",
+            action="offer_idempotent_replay",
+            result="conflict",
+            offer_id=getattr(offer, "id", None),
+            reason=exc.reason,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        ) from exc
 
 
 class OfferResponse(BaseModel):
@@ -1048,13 +1098,21 @@ async def create_offer(
     owner_user = context.owner_user
     actor_user = context.actor_user
     idempotency_key = (offer_data.idempotency_key or "").strip() or None
+    republish_source_public_id = (offer_data.republished_from_public_id or "").strip()
+    creation_command = _build_webapp_offer_creation_command(
+        offer_data,
+        owner_user_id=owner_user.id,
+        actor_user_id=actor_user.id,
+        idempotency_key=idempotency_key,
+        republish_source_public_id=republish_source_public_id,
+    )
 
     existing_offer = await _load_offer_idempotency_replay(
         db,
-        owner_user_id=owner_user.id,
         idempotency_key=idempotency_key,
     )
     if existing_offer is not None:
+        _ensure_offer_replay_matches_or_conflict(existing_offer, creation_command)
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
@@ -1096,7 +1154,6 @@ async def create_offer(
             detail=MARKET_CLOSED_DETAIL,
         )
 
-    republish_source_public_id = (offer_data.republished_from_public_id or "").strip()
     republish_requested = bool(offer_data.republished_from_id or republish_source_public_id)
     if republish_requested:
         if not idempotency_key:
@@ -1250,27 +1307,17 @@ async def create_offer(
         )
 
     try:
+        creation_command = _build_webapp_offer_creation_command(
+            offer_data,
+            owner_user_id=owner_user.id,
+            actor_user_id=actor_user.id,
+            idempotency_key=idempotency_key,
+            republish_source_public_id=republish_source_public_id,
+            price_warning=price_warning,
+        )
         creation_outcome = await create_authoritative_offer_with_outcome(
             db,
-            OfferCreationCommand(
-                source_surface=OfferSourceSurface.WEBAPP,
-                owner_user_id=owner_user.id,
-                actor_user_id=actor_user.id,
-                offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
-                settlement_type=offer_data.settlement_type,
-                commodity_id=offer_data.commodity_id,
-                quantity=offer_data.quantity,
-                price=offer_data.price,
-                exclude_from_competitive_price=bool(price_warning),
-                price_warning_type=price_warning["warning_type"] if price_warning else None,
-                is_wholesale=offer_data.is_wholesale,
-                lot_sizes=offer_data.lot_sizes,
-                original_lot_sizes=offer_data.lot_sizes,
-                notes=offer_data.notes,
-                idempotency_key=idempotency_key,
-                status=OfferStatus.ACTIVE,
-                republished_from_offer_public_id=republish_source_public_id or None,
-            ),
+            creation_command,
             enforce_market_admission=True,
             quota_policy=OfferCreationQuotaPolicy(
                 max_active_offers=ts.max_active_offers,
@@ -1332,7 +1379,6 @@ async def create_offer(
         await db.rollback()
         existing_offer = await _load_offer_idempotency_replay(
             db,
-            owner_user_id=owner_user.id,
             idempotency_key=idempotency_key,
         )
         if existing_offer is None:
@@ -1342,6 +1388,7 @@ async def create_offer(
                     detail="این لفظ قبلاً مجدداً منتشر شده است.",
                 )
             raise
+        _ensure_offer_replay_matches_or_conflict(existing_offer, creation_command)
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
@@ -1367,7 +1414,6 @@ async def create_offer(
     if not creation_outcome.created:
         existing_offer = await _load_offer_idempotency_replay(
             db,
-            owner_user_id=owner_user.id,
             idempotency_key=idempotency_key,
         )
         if existing_offer is None:
@@ -1375,6 +1421,7 @@ async def create_offer(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="نتیجه درخواست قبلی قابل بازیابی نیست. لطفاً دوباره تلاش کنید.",
             )
+        _ensure_offer_replay_matches_or_conflict(existing_offer, creation_command)
         from core.trading_settings import get_trading_settings_async
 
         replay_settings = await get_trading_settings_async()

@@ -1,11 +1,14 @@
 """Shared command surface for authoritative offer creation."""
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from dataclasses import dataclass
 from typing import Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.enums import SettlementType
@@ -38,6 +41,17 @@ class OfferCreationQuotaUnavailableError(OfferCreationAdmissionError):
     """Raised when the local per-user quota lock cannot be acquired safely."""
 
 
+class OfferCreationIdempotencyConflictError(OfferCreationAdmissionError):
+    """Raised when one idempotency key is reused for a different intent."""
+
+
+OFFER_CREATION_FINGERPRINT_VERSION = 1
+OFFER_CREATION_IDEMPOTENCY_CONFLICT_DETAIL = (
+    "شناسه یکتای این درخواست قبلاً با مشخصات متفاوت استفاده شده است. "
+    "لطفاً فهرست بازار را تازه‌سازی و درخواست جدیدی ثبت کنید."
+)
+
+
 @dataclass(frozen=True)
 class OfferCreationCommand:
     source_surface: OfferSourceSurface | str
@@ -60,6 +74,8 @@ class OfferCreationCommand:
     incoming_home_server: str | None = None
     offer_public_id: str | None = None
     republished_from_offer_public_id: str | None = None
+    idempotency_fingerprint_version: int | None = None
+    idempotency_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +107,123 @@ def _normalize_offer_status(value: OfferStatus | str) -> OfferStatus:
 
 def _list_or_none(value: Sequence[int] | None) -> list[int] | None:
     return list(value) if value is not None else None
+
+
+def _canonical_lot_sizes(value: Sequence[int] | None) -> list[int]:
+    if not value:
+        return []
+    return sorted(int(item) for item in value)
+
+
+def _canonical_notes(value: str | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def canonical_offer_creation_payload(command: OfferCreationCommand) -> dict[str, object]:
+    """Return the versioned economic intent used by offer idempotency."""
+    source_surface = normalize_offer_source_surface(command.source_surface)
+    home_server = offer_home_server_for_source(
+        source_surface,
+        incoming_home_server=command.incoming_home_server,
+    )
+    return {
+        "version": OFFER_CREATION_FINGERPRINT_VERSION,
+        "source_surface": source_surface.value,
+        "home_server": home_server,
+        "owner_user_id": (
+            int(command.owner_user_id) if command.owner_user_id is not None else None
+        ),
+        "actor_user_id": (
+            int(command.actor_user_id) if command.actor_user_id is not None else None
+        ),
+        "offer_type": _normalize_offer_type(command.offer_type).value,
+        "settlement_type": normalize_settlement_type(command.settlement_type).value,
+        "commodity_id": int(command.commodity_id),
+        "quantity": int(command.quantity),
+        "price": int(command.price),
+        "is_wholesale": bool(command.is_wholesale),
+        "lot_sizes": _canonical_lot_sizes(command.lot_sizes),
+        "notes": _canonical_notes(command.notes),
+        "republished_from_offer_public_id": (
+            str(command.republished_from_offer_public_id).strip() or None
+            if command.republished_from_offer_public_id is not None
+            else None
+        ),
+    }
+
+
+def offer_creation_fingerprint(command: OfferCreationCommand) -> str:
+    canonical = canonical_offer_creation_payload(command)
+    encoded = json.dumps(
+        canonical,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _legacy_offer_creation_command(offer: Offer | object) -> OfferCreationCommand:
+    home_server = str(getattr(offer, "home_server", "") or "").strip().lower()
+    if home_server == "iran":
+        source_surface = OfferSourceSurface.WEBAPP
+    elif home_server == "foreign":
+        source_surface = OfferSourceSurface.TELEGRAM_BOT
+    else:
+        raise ValueError("legacy offer has no reconstructable source surface")
+
+    original_lot_sizes = getattr(offer, "original_lot_sizes", None)
+    if original_lot_sizes is None:
+        original_lot_sizes = getattr(offer, "lot_sizes", None)
+    return OfferCreationCommand(
+        source_surface=source_surface,
+        owner_user_id=getattr(offer, "user_id", None),
+        actor_user_id=getattr(offer, "actor_user_id", None),
+        offer_type=getattr(offer, "offer_type"),
+        settlement_type=getattr(offer, "settlement_type", SettlementType.CASH),
+        commodity_id=getattr(offer, "commodity_id"),
+        quantity=getattr(offer, "quantity"),
+        price=getattr(offer, "price"),
+        is_wholesale=bool(getattr(offer, "is_wholesale", True)),
+        lot_sizes=original_lot_sizes,
+        notes=getattr(offer, "notes", None),
+        republished_from_offer_public_id=getattr(
+            offer,
+            "republished_from_offer_public_id",
+            None,
+        ),
+    )
+
+
+def ensure_offer_idempotency_replay_matches(
+    offer: Offer | object,
+    command: OfferCreationCommand,
+) -> None:
+    """Fail closed unless an existing offer represents exactly this intent."""
+    expected = offer_creation_fingerprint(command)
+    stored_version = getattr(offer, "idempotency_fingerprint_version", None)
+    stored_fingerprint = getattr(offer, "idempotency_fingerprint", None)
+
+    if stored_version is None and stored_fingerprint is None:
+        try:
+            stored_fingerprint = offer_creation_fingerprint(
+                _legacy_offer_creation_command(offer)
+            )
+        except (AttributeError, TypeError, ValueError):
+            stored_fingerprint = None
+    elif (
+        stored_version != OFFER_CREATION_FINGERPRINT_VERSION
+        or not isinstance(stored_fingerprint, str)
+        or len(stored_fingerprint) != 64
+    ):
+        stored_fingerprint = None
+
+    if not stored_fingerprint or not hmac.compare_digest(stored_fingerprint, expected):
+        raise OfferCreationIdempotencyConflictError(
+            "offer_idempotency_payload_mismatch",
+            OFFER_CREATION_IDEMPOTENCY_CONFLICT_DETAIL,
+        )
 
 
 async def validate_offer_creation_command(db: AsyncSession, command: OfferCreationCommand) -> None:
@@ -143,6 +276,13 @@ def build_authoritative_offer(command: OfferCreationCommand) -> Offer:
     if source_surface == OfferSourceSurface.INTERNAL_SYNC and not command.offer_public_id:
         raise ValueError("internal_sync offers require incoming offer_public_id")
 
+    normalized_idempotency_key = (command.idempotency_key or "").strip() or None
+    idempotency_fingerprint_version = command.idempotency_fingerprint_version
+    idempotency_fingerprint = command.idempotency_fingerprint
+    if normalized_idempotency_key and source_surface != OfferSourceSurface.INTERNAL_SYNC:
+        idempotency_fingerprint_version = OFFER_CREATION_FINGERPRINT_VERSION
+        idempotency_fingerprint = offer_creation_fingerprint(command)
+
     return Offer(
         offer_public_id=offer_public_id,
         user_id=command.owner_user_id,
@@ -160,7 +300,9 @@ def build_authoritative_offer(command: OfferCreationCommand) -> Offer:
         lot_sizes=lot_sizes,
         original_lot_sizes=original_lot_sizes,
         notes=command.notes,
-        idempotency_key=command.idempotency_key,
+        idempotency_key=normalized_idempotency_key,
+        idempotency_fingerprint_version=idempotency_fingerprint_version,
+        idempotency_fingerprint=idempotency_fingerprint,
         status=_normalize_offer_status(command.status),
         republished_from_offer_public_id=(
             str(command.republished_from_offer_public_id).strip()
@@ -193,19 +335,18 @@ async def _lock_offer_owner(db: AsyncSession, owner_user_id: int) -> User:
 async def _load_local_idempotency_replay(
     db: AsyncSession,
     *,
-    owner_user_id: int,
-    idempotency_key: str | None,
+    command: OfferCreationCommand,
 ) -> Offer | None:
-    normalized_key = (idempotency_key or "").strip()
+    normalized_key = (command.idempotency_key or "").strip()
     if not normalized_key:
         return None
     result = await db.execute(
-        select(Offer).where(
-            Offer.user_id == owner_user_id,
-            Offer.idempotency_key == normalized_key,
-        )
+        select(Offer).where(Offer.idempotency_key == normalized_key)
     )
-    return result.scalar_one_or_none()
+    replay = result.scalar_one_or_none()
+    if replay is not None:
+        ensure_offer_idempotency_replay_matches(replay, command)
+    return replay
 
 
 async def _admit_local_offer_quota(
@@ -224,8 +365,7 @@ async def _admit_local_offer_quota(
     owner = await _lock_offer_owner(db, int(command.owner_user_id))
     replay = await _load_local_idempotency_replay(
         db,
-        owner_user_id=owner.id,
-        idempotency_key=command.idempotency_key,
+        command=command,
     )
     if replay is not None:
         return owner, replay, -1
@@ -303,7 +443,18 @@ async def create_authoritative_offer_with_outcome(
 
         increment_user_counters(locked_owner, channel_messages=1)
     if commit:
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            replay = await _load_local_idempotency_replay(db, command=command)
+            if replay is not None:
+                return OfferCreationOutcome(
+                    offer=replay,
+                    created=False,
+                    active_offer_count=None,
+                )
+            raise
         if refresh:
             await db.refresh(offer)
     return OfferCreationOutcome(

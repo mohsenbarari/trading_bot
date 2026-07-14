@@ -45,5 +45,11 @@ def build_offer_sync_payload(offer: Any) -> dict[str, Any]:
         "updated_at": _isoformat_or_none(offer.updated_at),
         "expired_at": _isoformat_or_none(getattr(offer, "expired_at", None)),
         "idempotency_key": offer.idempotency_key,
+        "idempotency_fingerprint_version": getattr(
+            offer,
+            "idempotency_fingerprint_version",
+            None,
+        ),
+        "idempotency_fingerprint": getattr(offer, "idempotency_fingerprint", None),
         "archived": offer.archived,
     }
