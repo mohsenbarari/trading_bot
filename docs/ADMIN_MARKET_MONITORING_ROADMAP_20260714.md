@@ -9,7 +9,7 @@
   - شاخه `candidate/admin-market-monitoring` مستقیماً از HEAD شاخه `main` ساخته شد.
   - فاصله `main...candidate/admin-market-monitoring` در لحظه ایجاد برابر `0/0` بود.
   - هیچ شاخه candidate قبلی در مبنای این شاخه merge نشده است.
-- وضعیت Roadmap: سناریوی محصول WebApp تأیید شده؛ تحلیل و رفع چالش‌های Stage 0 هنوز شروع نشده است.
+- وضعیت Roadmap: سناریوی محصول WebApp تأیید شده؛ Stage 0 در حال اجرا و `AMM-C01` نهایی شده است.
 - این سند مجوز deploy یا production release نیست.
 
 این Roadmap مسیر کامل ساخت قابلیت «رصد بازار» را از بستن چالش‌ها و قراردادهای محصول تا کدنویسی، تست، مستندسازی و اعتبارسنجی staging مشخص می‌کند. اجرای هر Stage فقط پس از بسته‌شدن معیارهای خروج Stage قبلی مجاز است.
@@ -134,7 +134,7 @@
 
 | شناسه | اولویت | وضعیت | چالش | خروجی لازم برای بسته‌شدن |
 | --- | --- | --- | --- | --- |
-| `AMM-C01` | P0 | OPEN | تعریف دقیق «همان آفرهای بازار» برای active و terminal rows بدون فیلتر | قرارداد feed، ترتیب، pagination و رفتار rowهای معامله‌شده/منقضی |
+| `AMM-C01` | P0 | DECIDED | تعریف دقیق «همان آفرهای بازار» برای active و terminal rows بدون فیلتر | قرارداد feed، ترتیب، دسترسی به feed و رفتار rowهای معامله‌شده/منقضی |
 | `AMM-C02` | P0 | OPEN | تفکیک صاحب آفر و ثبت‌کننده در سناریوهای owner/accountant/customer | ماتریس identity و label قطعی برای کارت و نمای سریع |
 | `AMM-C03` | P0 | OPEN | جلوگیری قطعی از نشت هویت به API و Realtime عمومی | read model و event channel مستقل admin-only با تست منفی |
 | `AMM-C04` | P0 | OPEN | ماتریس مجوز مدیر میانی و مدیر ارشد برای دیدن و اقدام | جدول permission سمت backend و UI با حالت disabled/denied |
