@@ -569,6 +569,40 @@ Audit فقط‌خواندنی production پیش از تغییر:
 
 lock اشتباه می‌تواند ثبت آفر یا transition بازار را متوقف کند. timeout و ترتیب lockها باید صریح و تست‌شده باشند.
 
+وضعیت Stage: بسته شد؛ پیاده‌سازی، تست هم‌زمانی واقعی PostgreSQL، deploy و پایش دو سرور staging کامل شده است.
+
+### گزارش اجرای Stage ۶ - ۲۰۲۶-۰۷-۱۴
+
+پیاده‌سازی نهایی در commit `328d29cec3f31f85a8192697754c5ccbced13ea3`:
+
+- سرویس canonical ساخت آفر پس از validation و پیش از ساخت row، advisory lock همان transaction مربوط به transition بازار را می‌گیرد و سپس برنامه زمانی بازار را دوباره ارزیابی می‌کند. WebApp و بات هر دو این fence نهایی را فعال می‌کنند.
+- اگر close زودتر lock را گرفته باشد، create پس از آزادشدن lock وضعیت بسته را می‌بیند و با همان پیام فعلی بسته‌بودن بازار رد می‌شود؛ row، Telegram publication، realtime، Web Push، notification و counter ساخته نمی‌شوند.
+- اگر create زودتر lock را گرفته باشد، commit آن پیش از ادامه close انجام می‌شود و close همان آفر را مانند سایر آفرهای فعال منقضی می‌کند. lock فقط محلی است: Iran آفرهای Iran-home و foreign آفرهای foreign-home را با authority فعلی پروژه fence می‌کنند.
+- انتظار create برای lock به‌صورت پیش‌فرض `5000ms` و در بازه `250..30000ms` محدود است. timeout به‌صورت fail-closed پاسخ داده می‌شود و caller transaction را rollback می‌کند.
+- foreign هنگام reconciliation بسته‌شدن بازار نیز قبل از scan/expiry همان lock را می‌گیرد و transaction را حتی در نبود آفر فعال commit می‌کند تا fence آزاد شود.
+- `register_market_offer_created` دیگر `market_runtime_state.is_open` را تغییر نمی‌دهد و در فاصله pending-open یا pending-close شمارنده را commit نمی‌کند؛ فقط transition رسمی وضعیت بازار را عوض می‌کند.
+
+شواهد تست:
+
+- suite متمرکز transition/schedule/canonical create/WebApp/Bot: `86` تست پاس.
+- offer regression: `143`، trade regression: `242`، bot-create regression: `61` و publication regression: `41` تست پاس.
+- دو تست واقعی PostgreSQL با دو connection ثابت کردند close-first باعث انتظار و سپس rejection می‌شود و create-first باعث انتظار close تا commit create می‌شود؛ دیتابیس موقت پس از تست حذف شد.
+- `compileall`، `git diff --check` و single Alembic head برابر `d0b5e6f7a8c9` پاس شدند. این Stage migration یا تغییر schema ندارد.
+- دو تست مستقیم دریافت و reconciliation runtime بازار پاس شدند. suite گسترده sync همان `9` failure از `16` تست را هم روی branch و هم checkout تمیز baseline `6ce1adbe` با نام‌های دقیقاً یکسان تکرار کرد؛ این failureها پیش از منطق Stage ۶ و مربوط به fixture/policy metadata موجود هستند و regression این Stage نیستند.
+
+شواهد staging دو سرور:
+
+- Iran و foreign هر دو با full `RELEASE_SHA=328d29cec3f31f85a8192697754c5ccbced13ea3`، environment برابر `staging`، server mode درست و Alembic head یکسان اجرا می‌شوند. hash چهار فایل runtime میان checkout و imageهای هر دو سرور دقیقاً برابر است.
+- preflight فقط‌خواندنی `MARKET-STAGE6-ADMISSION-FENCE-20260714-R2` با deep parity پاس شد: ۲۳ جدول، business/critical/incomplete/duplicate drift صفر، پنج تفاوت صرفاً local/volatile، صف‌های outbound/retry و unsynced backlog صفر.
+- اسکن پنج‌دقیقه‌ای Iran app/sync worker و foreign app/bot/sync worker صفر `ERROR`، `CRITICAL`، traceback، internal 500 یا unhandled exception داشت.
+- هیچ سناریوی mutating full-matrix، migration جدید، production deploy/restart یا تغییر داده production انجام نشد.
+
+ریسک و rollback:
+
+- rollback runtime با revert commit `328d29ce` و recreate سرویس‌های staging انجام می‌شود و rollback schema لازم نیست.
+- timeout کوتاه ممکن است در contention شدید یک create سالم را محافظه‌کارانه رد کند، اما آفر پس از close نمی‌پذیرد. متریک/لاگ rejection برای تفکیک close از unavailable ثبت شده است.
+- Stage ۷ باید ترتیب lock تثبیت‌شده `market-admission fence → user/quota lock → Offer transaction` را رعایت کند؛ تغییر ترتیب بدون تست PostgreSQL رقابت و deadlock مجاز نیست.
+
 ---
 
 ## Stage ۷ - اتمیک‌کردن محدودیت‌های ثبت آفر (`MKT-08`)
