@@ -9,6 +9,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from core.db import AsyncSessionLocal
+from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.redis import pool
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
@@ -259,7 +260,10 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
             settlement_type=getattr(offer, "settlement_type", None),
             commodity_name=offer.commodity.name if offer.commodity else None,
             price=offer.price,
-            remaining_quantity=offer.remaining_quantity or offer.quantity,
+            remaining_quantity=coalesce_offer_remaining_quantity(
+                offer.remaining_quantity,
+                offer.quantity,
+            ),
             available_amounts=available_amounts,
         )
         reply_markup = build_trade_amount_buttons(

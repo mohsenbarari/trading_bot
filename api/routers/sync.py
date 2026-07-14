@@ -43,6 +43,7 @@ from core.user_counter_sync import (
     user_counter_event_content_hash,
 )
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
+from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
 from core.sync_parity_observability import summarize_parity_comparison
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
@@ -364,7 +365,10 @@ async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, of
             "commodity_id": getattr(offer, "commodity_id", None),
             "commodity_name": getattr(commodity, "name", None) or "نامشخص",
             "quantity": getattr(offer, "quantity", None),
-            "remaining_quantity": getattr(offer, "remaining_quantity", None) or getattr(offer, "quantity", None),
+            "remaining_quantity": coalesce_offer_remaining_quantity(
+                getattr(offer, "remaining_quantity", None),
+                getattr(offer, "quantity", None),
+            ),
             "price": getattr(offer, "price", None),
             "status": status_value,
             "created_at": to_jalali_str(getattr(offer, "created_at", None)) or "",

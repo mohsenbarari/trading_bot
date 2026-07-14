@@ -186,6 +186,14 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(expired_response.expires_at_ts)
 
+        for remaining, expected in ((None, 12), (0, 0), (5, 5), (12, 12)):
+            with self.subTest(remaining=remaining):
+                quantity_response = offers_module.offer_to_response(
+                    make_offer_model(remaining_quantity=remaining),
+                    SimpleNamespace(offer_expiry_minutes=15),
+                )
+                self.assertEqual(quantity_response.remaining_quantity, expected)
+
         with patch.object(offers_module, "logger") as logger, patch(
             "api.routers.offers.to_jalali_str",
             return_value="",

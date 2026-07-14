@@ -157,6 +157,14 @@ function getFiniteNumber(value: unknown): number | null {
   return Number.isFinite(numericValue) ? numericValue : null
 }
 
+function getOfferRemainingQuantity(offer: any): number {
+  const remaining = offer?.remaining_quantity
+  if (remaining !== null && remaining !== undefined) {
+    return getFiniteNumber(remaining) ?? 0
+  }
+  return getFiniteNumber(offer?.quantity) ?? 0
+}
+
 function getHistoryStampLabel(offer: any): string {
   if (isTradedHistoryOffer(offer)) {
     const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
@@ -195,7 +203,7 @@ function timeAgo(dateString: string) {
 
 // --- Lot buttons logic (matching Telegram channel) ---
 function getLotButtons(offer: any): number[] {
-  const remaining = offer.remaining_quantity || offer.quantity;
+  const remaining = getOfferRemainingQuantity(offer);
   if (remaining <= 0) return [];
   
   if (offer.is_wholesale || !offer.lot_sizes || offer.lot_sizes.length === 0) {
@@ -428,7 +436,7 @@ function isPending(offerId: number, amount: number): boolean {
 function buildOfferSignature(offer: any | null): string | null {
   if (!offer) return null;
   const availableLots = getLotButtons(offer);
-  const remaining = Number(offer.remaining_quantity ?? offer.quantity ?? 0);
+  const remaining = getOfferRemainingQuantity(offer);
   return [offer.status || '', remaining, availableLots.join(','), offer.expires_at_ts ?? ''].join('|');
 }
 
@@ -444,7 +452,9 @@ function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSug
     settlementTypeLabel: data.settlement_type_label || offerSettlementLabel(data.settlement_type ?? sourceOffer?.settlement_type),
     commodityName: data.commodity_name || sourceOffer?.commodity_name || 'کالا',
     price: Number(data.price ?? getDisplayedOfferPrice(sourceOffer) ?? 0),
-    remainingQuantity: Number(data.remaining_quantity || sourceOffer?.remaining_quantity || sourceOffer?.quantity || 0),
+    remainingQuantity: data?.remaining_quantity !== null && data?.remaining_quantity !== undefined
+      ? (getFiniteNumber(data.remaining_quantity) ?? 0)
+      : getOfferRemainingQuantity(sourceOffer),
     lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? formatLotSummary(data.available_lots) : ''),
     availableLots: Array.isArray(data.available_lots) ? data.available_lots : [],
     expiresAtTs: sourceOffer?.expires_at_ts ?? null,
@@ -469,7 +479,7 @@ function syncTradeSuggestionFromOffers() {
   }
 
   const expired = !!sourceOffer.expires_at_ts && sourceOffer.expires_at_ts <= now.value;
-  const remaining = Number(sourceOffer.remaining_quantity ?? sourceOffer.quantity ?? 0);
+  const remaining = getOfferRemainingQuantity(sourceOffer);
   const availableLots = getLotButtons(sourceOffer);
 
   if (expired || sourceOffer.status !== 'active' || remaining <= 0 || availableLots.length === 0) {

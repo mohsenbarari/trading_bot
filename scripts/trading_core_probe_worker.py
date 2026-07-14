@@ -66,6 +66,7 @@ from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
 from core.services.trade_contention_gate import TradeContentionLease, try_acquire_trade_contention_gate
 from core.offer_source import OfferSourceSurface, normalize_offer_source_surface
+from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
@@ -2900,7 +2901,12 @@ async def mark_offer_completed_for_negative_guard(
             actor_user_id=int(actor_user_id),
             commodity_id=int(offer.commodity_id),
             trade_type=TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL,
-            quantity=int(offer.remaining_quantity or offer.quantity),
+            quantity=int(
+                coalesce_offer_remaining_quantity(
+                    offer.remaining_quantity,
+                    offer.quantity,
+                )
+            ),
             price=int(offer.price),
             status=TradeStatus.COMPLETED,
             idempotency_key=f"{getattr(offer, 'offer_public_id', offer.id)}:ng-complete",
@@ -4803,7 +4809,7 @@ async def inspect_hot_offer_persistence(offer_id: int) -> HotOfferPersistenceSna
         return HotOfferPersistenceSnapshot(
             offer_id=offer_id,
             original_quantity=int(offer.quantity or 0),
-            remaining_quantity=int(offer.remaining_quantity or 0) if offer.remaining_quantity is not None else None,
+            remaining_quantity=int(offer.remaining_quantity) if offer.remaining_quantity is not None else None,
             offer_status=getattr(getattr(offer, "status", None), "value", None),
             persisted_trade_count=len(trade_ids),
             completed_trade_quantity=completed_trade_quantity,
@@ -5928,7 +5934,11 @@ async def run_race_probe(
     async with AsyncSessionLocal() as db:
         trade_count = int(await db.scalar(select(func.count(Trade.id)).where(Trade.offer_id == offer_id)) or 0)
         offer = await db.get(Offer, offer_id)
-        remaining_quantity = int(offer.remaining_quantity or 0) if offer else None
+        remaining_quantity = (
+            int(offer.remaining_quantity)
+            if offer is not None and offer.remaining_quantity is not None
+            else (0 if offer is not None else None)
+        )
         status_value = getattr(getattr(offer, "status", None), "value", None)
 
     assert_race_acceptance(

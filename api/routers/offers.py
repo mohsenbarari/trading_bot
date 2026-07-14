@@ -51,6 +51,7 @@ from core.offer_expiry_contracts import (
     validate_offer_expiry_command_identity,
 )
 from core.offer_identity import build_offer_public_link, ensure_offer_public_id, is_offer_public_id_shape
+from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.offer_settlement import settlement_type_value
 from core.offer_request_policy import (
     OfferRequestVisibility,
@@ -352,7 +353,7 @@ def offer_to_response(
     viewer_customer_relation: object | None = None,
 ) -> OfferResponse:
     """تبدیل مدل Offer به پاسخ API"""
-    remaining = offer.remaining_quantity or offer.quantity
+    remaining = coalesce_offer_remaining_quantity(offer.remaining_quantity, offer.quantity)
     is_own_offer = viewer_user_id is not None and offer.user_id == viewer_user_id
     offer_read_model = build_customer_offer_read_model(
         raw_price=offer.price,
@@ -1335,7 +1336,10 @@ async def create_offer(
         "commodity_id": new_offer.commodity_id,
         "commodity_name": new_offer.commodity.name,
         "quantity": new_offer.quantity,
-        "remaining_quantity": new_offer.remaining_quantity or new_offer.quantity,
+        "remaining_quantity": coalesce_offer_remaining_quantity(
+            new_offer.remaining_quantity,
+            new_offer.quantity,
+        ),
         "price": new_offer.price,
         "status": new_offer.status.value,
         "created_at": to_jalali_str(new_offer.created_at) or "",

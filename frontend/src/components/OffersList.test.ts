@@ -199,6 +199,18 @@ describe('OffersList.vue', () => {
     expect(wrapper.text()).toContain('سطح نامشخص')
   })
 
+  it('does not restore the initial quantity when remaining quantity is zero or malformed', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        buildTradeOffer({ id: 29, quantity: 10, remaining_quantity: 0 }),
+        buildTradeOffer({ id: 30, quantity: 20, remaining_quantity: 'invalid' }),
+      ],
+    })
+
+    expect(wrapper.text()).toContain('0 عدد')
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+  })
+
   it('renders manually expired offers as read-only history cards', async () => {
     const wrapper = await mountOffersList({
       offers: [

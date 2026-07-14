@@ -267,6 +267,39 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(remove_record.await_count, 2)
 
+    async def test_sync_for_active_offer_preserves_zero_in_suggestion_payload(self):
+        offer = SimpleNamespace(
+            id=5,
+            status=suggestion_messages.OfferStatus.ACTIVE,
+            quantity=20,
+            remaining_quantity=0,
+            is_wholesale=False,
+            lot_sizes=[],
+            offer_type='sell',
+            price=100,
+            commodity=SimpleNamespace(name='Gold'),
+        )
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=offer)
+        session.refresh = AsyncMock()
+
+        with patch(
+            'bot.utils.trade_suggestion_messages.get_trade_suggestion_records',
+            AsyncMock(return_value=[{'chat_id': 1, 'message_id': 2, 'requested_amount': 7}]),
+        ), patch(
+            'bot.utils.trade_suggestion_messages.AsyncSessionLocal',
+            return_value=_AsyncSessionContext(session),
+        ), patch(
+            'bot.utils.trade_suggestion_messages.build_lot_unavailable_suggestion_payload',
+            return_value={'message': 'empty'},
+        ) as build_payload, patch(
+            'bot.utils.trade_suggestion_messages.remove_trade_suggestion_record',
+            AsyncMock(),
+        ):
+            await suggestion_messages.sync_trade_suggestions_for_offer(AsyncMock(), 5)
+
+        self.assertEqual(build_payload.call_args.kwargs['remaining_quantity'], 0)
+
     async def test_schedule_cleanup_and_pending_reset(self):
         created = []
 

@@ -111,7 +111,7 @@ class OfferService:
         if offer.user_id == responder_user_id:
             raise ValidationError("نمی‌توانید با لفظ خود معامله کنید")
         
-        remaining = offer.remaining_quantity or offer.quantity
+        remaining = offer.quantity if offer.remaining_quantity is None else offer.remaining_quantity
         if amount > remaining:
             raise ValidationError(f"تعداد درخواستی ({amount}) بیشتر از موجودی ({remaining}) است")
         
@@ -138,7 +138,11 @@ class OfferService:
             offer_type=entity.offer_type,
             commodity_id=entity.commodity_id,
             quantity=entity.quantity,
-            remaining_quantity=entity.remaining_quantity or entity.quantity,
+            remaining_quantity=(
+                entity.quantity
+                if entity.remaining_quantity is None
+                else entity.remaining_quantity
+            ),
             price=entity.price,
             is_wholesale=entity.is_wholesale,
             lot_sizes=entity.lot_sizes,

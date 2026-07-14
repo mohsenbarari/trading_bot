@@ -26,6 +26,7 @@ from core.db import get_db
 from core.config import settings
 from core.enums import NotificationLevel, NotificationCategory, SettlementType
 from core.offer_settlement import settlement_type_value, trade_settlement_label
+from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification as _legacy_create_user_notification,
@@ -2927,7 +2928,10 @@ async def _execute_trade_authoritatively(
                     settlement_type=getattr(offer, "settlement_type", None),
                     commodity_name=offer.commodity.name if offer.commodity else None,
                     price=offer.price,
-                    remaining_quantity=offer.remaining_quantity or offer.quantity,
+                    remaining_quantity=coalesce_offer_remaining_quantity(
+                        offer.remaining_quantity,
+                        offer.quantity,
+                    ),
                     available_amounts=available_amounts,
                 ),
             )

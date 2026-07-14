@@ -21,6 +21,7 @@ from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
 from core.offer_settlement import settlement_type_value, trade_settlement_label
+from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.services.block_service import is_trade_blocked_by_principals
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
@@ -653,7 +654,10 @@ async def _handle_channel_trade(
         # =======================
         
         # تعداد واقعی معامله
-        actual_amount = trade_amount or offer.remaining_quantity or offer.quantity
+        actual_amount = trade_amount or coalesce_offer_remaining_quantity(
+            offer.remaining_quantity,
+            offer.quantity,
+        )
         if is_remote_home(getattr(offer, "home_server", None)):
             is_confirmed = bool(trade_contention_preconfirmed) or await check_double_click(
                 user.id,
@@ -663,7 +667,10 @@ async def _handle_channel_trade(
             )
             local_available_amounts = get_available_trade_amounts(
                 quantity=offer.quantity,
-                remaining_quantity=offer.remaining_quantity or offer.quantity,
+                remaining_quantity=coalesce_offer_remaining_quantity(
+                    offer.remaining_quantity,
+                    offer.quantity,
+                ),
                 is_wholesale=offer.is_wholesale,
                 lot_sizes=offer.lot_sizes,
             )
@@ -786,7 +793,10 @@ async def _handle_channel_trade(
             return
 
         
-        remaining = offer.remaining_quantity or offer.quantity
+        remaining = coalesce_offer_remaining_quantity(
+            offer.remaining_quantity,
+            offer.quantity,
+        )
         is_valid_amount, amount_error, actual_amount, available_amounts = validate_offer_trade_amount(
             quantity=offer.quantity,
             remaining_quantity=remaining,

@@ -53,6 +53,9 @@ class OfferSyncPayloadTests(unittest.TestCase):
         self.assertEqual(payload["settlement_type"], "tomorrow")
         self.assertEqual(payload["republished_from_offer_public_id"], "ofr_source_6")
 
+        offer.remaining_quantity = 0
+        self.assertEqual(build_offer_sync_payload(offer)["remaining_quantity"], 0)
+
     def test_payload_defaults_missing_competitive_warning_fields(self):
         offer = SimpleNamespace(
             id=8,

@@ -1,6 +1,6 @@
 import unittest
 
-from api.routers.realtime import sanitize_payload
+from api.routers.realtime import project_public_event_payload, sanitize_payload
 
 
 class RealtimeRouterSanitizeTests(unittest.TestCase):
@@ -18,6 +18,15 @@ class RealtimeRouterSanitizeTests(unittest.TestCase):
     def test_sanitize_payload_returns_non_dict_values_unchanged(self):
         self.assertEqual(sanitize_payload("x"), "x")
         self.assertEqual(sanitize_payload([1, 2]), [1, 2])
+
+    def test_public_projection_preserves_zero_remaining_quantity(self):
+        self.assertEqual(
+            project_public_event_payload(
+                "offer:updated",
+                {"id": 7, "status": "completed", "remaining_quantity": 0},
+            ),
+            {"id": 7, "status": "completed", "remaining_quantity": 0},
+        )
 
 
 if __name__ == "__main__":
