@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import secrets
 import string
 from typing import Mapping
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
@@ -16,6 +17,7 @@ from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMembershipStatus, ChatType
 from core.server_routing import SERVER_IRAN, current_server
+from core.services.market_schedule_service import DEFAULT_MARKET_TIMEZONE
 from core.services.canonical_invitation_creation_service import (
     CanonicalInvitationCreationError,
     create_or_reuse_canonical_invitation,
@@ -35,6 +37,7 @@ from models.chat_member import ChatMember
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation, InvitationKind
 from models.offer import OfferType
+from models.trade import Trade, TradeStatus
 from models.user import User, UserRole
 
 
@@ -46,6 +49,27 @@ CUSTOMER_INVITATION_PREFIX = "CUST-"
 # Deprecated compatibility constant. New invitations use core.trading_settings.
 CUSTOMER_PENDING_LIFETIME = None
 PRICE_ROUNDING_UNIT = Decimal("100")
+
+CUSTOMER_TRADE_LIMIT_DETAILS = {
+    "relation_required": "Customer relation is required",
+    "relation_not_active": "Customer relation is not active",
+    "quantity_not_positive": "Trade quantity must be positive",
+    "temporarily_restricted": "Customer is temporarily restricted from trading",
+    "below_minimum": "Trade quantity is below the customer's minimum limit",
+    "above_maximum": "Trade quantity exceeds the customer's maximum limit",
+    "daily_trade_limit": "Customer has reached the daily trade limit",
+    "daily_volume_limit": "Customer has reached the daily commodity volume limit",
+}
+
+CUSTOMER_TRADE_LIMIT_PUBLIC_MESSAGES = {
+    "relation_not_active": "امکان انجام معامله برای حساب شما وجود ندارد.",
+    "quantity_not_positive": "مقدار معامله نامعتبر است.",
+    "temporarily_restricted": "امکان انجام معامله برای حساب شما موقتاً محدود شده است.",
+    "below_minimum": "مقدار معامله کمتر از حد مجاز شماست.",
+    "above_maximum": "مقدار معامله بیشتر از حد مجاز شماست.",
+    "daily_trade_limit": "به سقف تعداد معاملات مجاز امروز رسیده‌اید.",
+    "daily_volume_limit": "به سقف حجم معاملات مجاز امروز رسیده‌اید.",
+}
 
 
 @dataclass(frozen=True)
@@ -63,6 +87,20 @@ class CustomerRelationCreationResult:
     relation: CustomerRelation
     invitation: Invitation
     created: bool
+
+
+@dataclass(frozen=True)
+class CustomerDailyTradeUsage:
+    trades: int = 0
+    commodity_volume: int = 0
+
+
+class CustomerTradeLimitViolation(ValueError):
+    def __init__(self, *, customer_user_id: int, relation_id: int | None, reason_code: str):
+        self.customer_user_id = int(customer_user_id)
+        self.relation_id = int(relation_id) if relation_id is not None else None
+        self.reason_code = str(reason_code)
+        super().__init__(self.reason_code)
 
 
 def mark_customer_invitation_for_authoritative_replay(
@@ -962,6 +1000,215 @@ async def load_offer_customer_read_context(
     return owner_relation_map, viewer_relation
 
 
+def _as_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _customer_trade_limit_failure_code(
+    relation: CustomerRelation | object | None,
+    *,
+    quantity: int | str,
+    trades_today: int = 0,
+    commodity_volume_today: int = 0,
+    now: datetime | None = None,
+) -> str | None:
+    if relation is None:
+        return "relation_required"
+
+    relation_status = getattr(getattr(relation, "status", None), "value", getattr(relation, "status", None))
+    if relation_status != CustomerRelationStatus.ACTIVE.value:
+        return "relation_not_active"
+
+    normalized_quantity = _normalize_non_negative_int(quantity, name="quantity")
+    if normalized_quantity <= 0:
+        return "quantity_not_positive"
+
+    current_time = _as_utc_naive(now or utc_now())
+    restricted_until = getattr(relation, "trading_restricted_until", None)
+    if restricted_until is not None and _as_utc_naive(restricted_until) > current_time:
+        return "temporarily_restricted"
+
+    min_trade_quantity = getattr(relation, "min_trade_quantity", None)
+    if min_trade_quantity is not None and normalized_quantity < int(min_trade_quantity):
+        return "below_minimum"
+
+    max_trade_quantity = getattr(relation, "max_trade_quantity", None)
+    if max_trade_quantity is not None and normalized_quantity > int(max_trade_quantity):
+        return "above_maximum"
+
+    normalized_trades_today = _normalize_non_negative_int(trades_today, name="trades_today")
+    max_daily_trades = getattr(relation, "max_daily_trades", None)
+    if max_daily_trades is not None and normalized_trades_today >= int(max_daily_trades):
+        return "daily_trade_limit"
+
+    normalized_commodity_volume_today = _normalize_non_negative_int(commodity_volume_today, name="commodity_volume_today")
+    max_daily_commodity_volume = getattr(relation, "max_daily_commodity_volume", None)
+    if (
+        max_daily_commodity_volume is not None
+        and normalized_commodity_volume_today + normalized_quantity > int(max_daily_commodity_volume)
+    ):
+        return "daily_volume_limit"
+    return None
+
+
+def customer_trade_limit_public_message(reason_code: str) -> str:
+    return CUSTOMER_TRADE_LIMIT_PUBLIC_MESSAGES.get(
+        str(reason_code or ""),
+        "امکان انجام این معامله وجود ندارد.",
+    )
+
+
+def customer_trade_day_bounds(
+    *,
+    now: datetime | None = None,
+    timezone_name: str = DEFAULT_MARKET_TIMEZONE,
+) -> tuple[datetime, datetime]:
+    reference = now or utc_now()
+    if reference.tzinfo is None or reference.utcoffset() is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    else:
+        reference = reference.astimezone(timezone.utc)
+
+    try:
+        local_timezone = ZoneInfo(str(timezone_name or DEFAULT_MARKET_TIMEZONE))
+    except (ValueError, ZoneInfoNotFoundError):
+        local_timezone = ZoneInfo(DEFAULT_MARKET_TIMEZONE)
+
+    local_now = reference.astimezone(local_timezone)
+    local_start = datetime.combine(local_now.date(), datetime_time.min, tzinfo=local_timezone)
+    local_end = local_start + timedelta(days=1)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+
+
+def _relation_has_customer_trade_policy(relation: CustomerRelation | object) -> bool:
+    return any(
+        getattr(relation, field_name, None) is not None
+        for field_name in (
+            "trading_restricted_until",
+            "min_trade_quantity",
+            "max_trade_quantity",
+            "max_daily_trades",
+            "max_daily_commodity_volume",
+        )
+    )
+
+
+async def _load_customer_daily_trade_usage(
+    db: AsyncSession,
+    *,
+    customer_user_id: int,
+    day_start: datetime,
+    day_end: datetime,
+) -> CustomerDailyTradeUsage:
+    result = await db.execute(
+        select(
+            func.count(Trade.id),
+            func.coalesce(func.sum(Trade.quantity), 0),
+        ).where(
+            Trade.status == TradeStatus.COMPLETED,
+            Trade.created_at >= day_start,
+            Trade.created_at < day_end,
+            or_(
+                Trade.offer_user_id == customer_user_id,
+                Trade.responder_user_id == customer_user_id,
+            ),
+        )
+    )
+    trades, commodity_volume = result.one()
+    return CustomerDailyTradeUsage(
+        trades=int(trades or 0),
+        commodity_volume=int(commodity_volume or 0),
+    )
+
+
+async def enforce_customer_trade_limits_for_trade(
+    db: AsyncSession,
+    *,
+    customer_relations: Mapping[int, CustomerRelation | object | None],
+    quantity: int | str,
+    now: datetime | None = None,
+    timezone_name: str = DEFAULT_MARKET_TIMEZONE,
+) -> None:
+    expected_relations: list[tuple[int, int]] = []
+    for raw_customer_user_id, relation in customer_relations.items():
+        if relation is None:
+            continue
+        customer_user_id = int(raw_customer_user_id)
+        relation_id = getattr(relation, "id", None)
+        if customer_user_id <= 0 or relation_id is None or int(relation_id) <= 0:
+            raise ValueError("customer trade relation identity is invalid")
+        expected_relations.append((customer_user_id, int(relation_id)))
+
+    if not expected_relations:
+        return
+
+    relation_ids = sorted({relation_id for _, relation_id in expected_relations})
+    locked_result = await db.execute(
+        select(CustomerRelation)
+        .where(
+            CustomerRelation.id.in_(relation_ids),
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .order_by(CustomerRelation.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    locked_by_id = {
+        int(relation.id): relation
+        for relation in locked_result.scalars().all()
+        if getattr(relation, "id", None) is not None
+    }
+
+    reference_time = now or utc_now()
+    day_start: datetime | None = None
+    day_end: datetime | None = None
+    for customer_user_id, relation_id in expected_relations:
+        relation = locked_by_id.get(relation_id)
+        if relation is None or int(getattr(relation, "customer_user_id", 0) or 0) != customer_user_id:
+            raise CustomerTradeLimitViolation(
+                customer_user_id=customer_user_id,
+                relation_id=relation_id,
+                reason_code="relation_not_active",
+            )
+
+        if not _relation_has_customer_trade_policy(relation):
+            continue
+
+        usage = CustomerDailyTradeUsage()
+        if (
+            getattr(relation, "max_daily_trades", None) is not None
+            or getattr(relation, "max_daily_commodity_volume", None) is not None
+        ):
+            if day_start is None or day_end is None:
+                day_start, day_end = customer_trade_day_bounds(
+                    now=reference_time,
+                    timezone_name=timezone_name,
+                )
+            usage = await _load_customer_daily_trade_usage(
+                db,
+                customer_user_id=customer_user_id,
+                day_start=day_start,
+                day_end=day_end,
+            )
+
+        failure_code = _customer_trade_limit_failure_code(
+            relation,
+            quantity=quantity,
+            trades_today=usage.trades,
+            commodity_volume_today=usage.commodity_volume,
+            now=reference_time,
+        )
+        if failure_code is not None:
+            raise CustomerTradeLimitViolation(
+                customer_user_id=customer_user_id,
+                relation_id=relation_id,
+                reason_code=failure_code,
+            )
+
+
 def validate_customer_trade_limits(
     relation: CustomerRelation | object,
     *,
@@ -970,42 +1217,15 @@ def validate_customer_trade_limits(
     commodity_volume_today: int = 0,
     now=None,
 ) -> None:
-    if relation is None:
-        raise HTTPException(status_code=400, detail="Customer relation is required")
-
-    relation_status = getattr(getattr(relation, "status", None), "value", getattr(relation, "status", None))
-    if relation_status != CustomerRelationStatus.ACTIVE.value:
-        raise HTTPException(status_code=400, detail="Customer relation is not active")
-
-    normalized_quantity = _normalize_non_negative_int(quantity, name="quantity")
-    if normalized_quantity <= 0:
-        raise HTTPException(status_code=400, detail="Trade quantity must be positive")
-
-    current_time = now or _utcnow_naive()
-    restricted_until = getattr(relation, "trading_restricted_until", None)
-    if restricted_until is not None and restricted_until > current_time:
-        raise HTTPException(status_code=400, detail="Customer is temporarily restricted from trading")
-
-    min_trade_quantity = getattr(relation, "min_trade_quantity", None)
-    if min_trade_quantity is not None and normalized_quantity < int(min_trade_quantity):
-        raise HTTPException(status_code=400, detail="Trade quantity is below the customer's minimum limit")
-
-    max_trade_quantity = getattr(relation, "max_trade_quantity", None)
-    if max_trade_quantity is not None and normalized_quantity > int(max_trade_quantity):
-        raise HTTPException(status_code=400, detail="Trade quantity exceeds the customer's maximum limit")
-
-    normalized_trades_today = _normalize_non_negative_int(trades_today, name="trades_today")
-    max_daily_trades = getattr(relation, "max_daily_trades", None)
-    if max_daily_trades is not None and normalized_trades_today >= int(max_daily_trades):
-        raise HTTPException(status_code=400, detail="Customer has reached the daily trade limit")
-
-    normalized_commodity_volume_today = _normalize_non_negative_int(commodity_volume_today, name="commodity_volume_today")
-    max_daily_commodity_volume = getattr(relation, "max_daily_commodity_volume", None)
-    if (
-        max_daily_commodity_volume is not None
-        and normalized_commodity_volume_today + normalized_quantity > int(max_daily_commodity_volume)
-    ):
-        raise HTTPException(status_code=400, detail="Customer has reached the daily commodity volume limit")
+    failure_code = _customer_trade_limit_failure_code(
+        relation,
+        quantity=quantity,
+        trades_today=trades_today,
+        commodity_volume_today=commodity_volume_today,
+        now=now,
+    )
+    if failure_code is not None:
+        raise HTTPException(status_code=400, detail=CUSTOMER_TRADE_LIMIT_DETAILS[failure_code])
 
 
 async def build_allowed_customer_chat_targets(

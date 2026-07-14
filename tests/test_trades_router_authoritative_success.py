@@ -150,6 +150,12 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         customer_relation_patcher.start()
         self.addCleanup(customer_relation_patcher.stop)
+        customer_limit_patcher = patch(
+            "api.routers.trades.enforce_customer_trade_limits_for_trade",
+            new=AsyncMock(),
+        )
+        self.customer_limit_mock = customer_limit_patcher.start()
+        self.addCleanup(customer_limit_patcher.stop)
         trade_relation_map_patcher = patch(
             "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
             new=AsyncMock(return_value={}),
@@ -397,6 +403,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         limits_mock.assert_not_called()
         expired_mock.assert_not_awaited()
         validate_mock.assert_not_called()
+        self.customer_limit_mock.assert_not_awaited()
         counter_mock.assert_not_awaited()
         offer_mutation_mock.assert_not_called()
         commit_trade_mock.assert_not_awaited()

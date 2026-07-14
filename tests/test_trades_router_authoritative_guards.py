@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively, _is_time_limit_expired_offer
 from core.enums import UserAccountStatus, UserRole
+from core.services.customer_relation_service import CustomerTradeLimitViolation
 from core.services.offer_expiry_service import OfferExpiryReason
 from models.customer_relation import CustomerTier
 from models.offer import OfferStatus, OfferType
@@ -106,6 +107,12 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         customer_relation_patcher.start()
         self.addCleanup(customer_relation_patcher.stop)
+        customer_limit_patcher = patch(
+            "api.routers.trades.enforce_customer_trade_limits_for_trade",
+            new=AsyncMock(),
+        )
+        self.customer_limit_mock = customer_limit_patcher.start()
+        self.addCleanup(customer_limit_patcher.stop)
         trade_relation_map_patcher = patch(
             "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
             new=AsyncMock(return_value={}),
@@ -527,6 +534,121 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "درخواست قبلی رد شده است.")
         self.assertEqual(db.added, [])
         db.commit.assert_not_awaited()
+
+    async def test_customer_limit_rejection_is_durable_and_specific_for_responder(self):
+        locked_user = make_user(id=5)
+        offer = make_offer(
+            user_id=9,
+            is_wholesale=True,
+            lot_sizes=None,
+            remaining_quantity=10,
+            quantity=10,
+        )
+        responder_relation = SimpleNamespace(
+            id=12,
+            customer_user_id=locked_user.id,
+            owner_user_id=offer.user_id,
+            status="active",
+        )
+        db = FakeDB(
+            execute_results=[FakeExecuteResult(single=locked_user)],
+            get_results=[offer],
+        )
+        self.customer_limit_mock.side_effect = CustomerTradeLimitViolation(
+            customer_user_id=locked_user.id,
+            relation_id=responder_relation.id,
+            reason_code="daily_trade_limit",
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[responder_relation, None]),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=offer.id, quantity=4),
+                    BackgroundTasks(),
+                    db=db,
+                    context=make_context(locked_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "به سقف تعداد معاملات مجاز امروز رسیده‌اید.")
+        self.assertEqual(db.added, [])
+        self.assertEqual(offer.remaining_quantity, 10)
+        self.assertEqual(len(db.offer_requests), 1)
+        ledger = db.offer_requests[0]
+        self.assertEqual(ledger.result_status, OfferRequestStatus.REJECTED_BUSINESS_RULE)
+        self.assertEqual(ledger.public_failure_code, "customer_trade_limit")
+        self.assertEqual(ledger.internal_failure_code, "customer_trade_limit_daily_trade_limit")
+        self.assertEqual(ledger.internal_failure_context, {"affected_side": "responder", "relation_id": 12})
+        limit_kwargs = self.customer_limit_mock.await_args.kwargs
+        self.assertEqual(limit_kwargs["quantity"], 4)
+        self.assertIs(limit_kwargs["customer_relations"][locked_user.id], responder_relation)
+        self.assertIsNone(limit_kwargs["customer_relations"][offer.user_id])
+        db.commit.assert_awaited_once()
+
+    async def test_customer_limit_rejection_hides_source_customer_policy(self):
+        locked_user = make_user(id=5)
+        offer = make_offer(
+            user_id=9,
+            is_wholesale=True,
+            lot_sizes=None,
+            remaining_quantity=10,
+            quantity=10,
+        )
+        source_relation = SimpleNamespace(
+            id=14,
+            customer_user_id=offer.user_id,
+            owner_user_id=locked_user.id,
+            status="active",
+        )
+        db = FakeDB(
+            execute_results=[FakeExecuteResult(single=locked_user)],
+            get_results=[offer],
+        )
+        self.customer_limit_mock.side_effect = CustomerTradeLimitViolation(
+            customer_user_id=offer.user_id,
+            relation_id=source_relation.id,
+            reason_code="daily_volume_limit",
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, source_relation]),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=offer.id, quantity=4),
+                    BackgroundTasks(),
+                    db=db,
+                    context=make_context(locked_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "امکان انجام این معامله وجود ندارد.")
+        self.assertNotIn("سقف", exc_info.exception.detail)
+        self.assertEqual(db.added, [])
+        self.assertEqual(offer.remaining_quantity, 10)
+        ledger = db.offer_requests[0]
+        self.assertEqual(ledger.public_failure_message, "امکان انجام این معامله وجود ندارد.")
+        self.assertEqual(ledger.internal_failure_context, {"affected_side": "source", "relation_id": 14})
+        limit_kwargs = self.customer_limit_mock.await_args.kwargs
+        self.assertIsNone(limit_kwargs["customer_relations"][locked_user.id])
+        self.assertIs(limit_kwargs["customer_relations"][offer.user_id], source_relation)
+        db.commit.assert_awaited_once()
 
 
 if __name__ == "__main__":

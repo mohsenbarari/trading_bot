@@ -40,8 +40,11 @@ from core.services.trade_history_export_service import (
     generate_trade_history_pdf_file,
 )
 from core.services.customer_relation_service import (
+    CustomerTradeLimitViolation,
     apply_customer_commission,
     customer_management_name_for_user_id,
+    customer_trade_limit_public_message,
+    enforce_customer_trade_limits_for_trade,
     get_active_customer_relation_for_customer,
 )
 from core.services.trade_service import (
@@ -2859,11 +2862,6 @@ async def _execute_trade_authoritatively(
     
     responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
     _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)
-    responder_customer_tier = getattr(
-        getattr(responder_customer_relation, "customer_tier", None),
-        "value",
-        getattr(responder_customer_relation, "customer_tier", None),
-    )
     source_customer_relation = await get_active_customer_relation_for_customer(db, offer.user_id)
 
     # بررسی بلاک بین سرگروه‌های واقعی دو طرف. اگر یک طرف مشتری باشد،
@@ -2949,6 +2947,47 @@ async def _execute_trade_authoritatively(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=amount_error
         )
+
+    try:
+        await enforce_customer_trade_limits_for_trade(
+            db,
+            customer_relations={
+                int(owner_user.id): responder_customer_relation,
+                int(offer.user_id): source_customer_relation,
+            },
+            quantity=trade_quantity,
+            timezone_name=getattr(market_evaluation, "timezone", None),
+        )
+    except CustomerTradeLimitViolation as exc:
+        affected_side = "responder" if exc.customer_user_id == int(owner_user.id) else "source"
+        public_message = (
+            customer_trade_limit_public_message(exc.reason_code)
+            if affected_side == "responder"
+            else TRADE_UNAVAILABLE_DETAIL
+        )
+        await _commit_rejected_offer_request_ledger(
+            db,
+            offer_request_ledger,
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+            public_failure_code="customer_trade_limit",
+            public_failure_message=public_message,
+            internal_failure_code=f"customer_trade_limit_{exc.reason_code}",
+            internal_failure_context={
+                "affected_side": affected_side,
+                "relation_id": exc.relation_id,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=public_message,
+        ) from exc
+
+    _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)
+    responder_customer_tier = getattr(
+        getattr(responder_customer_relation, "customer_tier", None),
+        "value",
+        getattr(responder_customer_relation, "customer_tier", None),
+    )
     
     # بارگذاری روابط لفظ
     await db.refresh(offer, ["user", "commodity"])

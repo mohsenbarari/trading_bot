@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -15,6 +15,10 @@ from core.services.customer_relation_service import (
     cancel_pending_customer_relation,
     create_owner_customer_relation,
     CUSTOMER_INVITATION_PREFIX,
+    CustomerTradeLimitViolation,
+    customer_trade_day_bounds,
+    customer_trade_limit_public_message,
+    enforce_customer_trade_limits_for_trade,
     get_active_customer_relation_for_customer,
     get_active_customer_relation_for_user,
     get_effective_max_customers,
@@ -56,9 +60,10 @@ class FakeScalarResult:
 
 
 class FakeExecuteResult:
-    def __init__(self, values=None, scalar_one_value=None):
+    def __init__(self, values=None, scalar_one_value=None, row=None):
         self._values = values or []
         self._scalar_one_value = scalar_one_value
+        self._row = row
 
     def scalars(self):
         return FakeScalarResult(self._values)
@@ -68,6 +73,11 @@ class FakeExecuteResult:
 
     def scalar_one_or_none(self):
         return self._scalar_one_value
+
+    def one(self):
+        if self._row is None:
+            raise AssertionError("No row configured")
+        return self._row
 
 
 class FakeDB:
@@ -952,6 +962,222 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(owner_relation_map, {9: owner_relation})
         self.assertIsNone(viewer_relation)
+
+    def test_customer_trade_day_bounds_follow_market_timezone_and_fallback(self):
+        start, end = customer_trade_day_bounds(
+            now=datetime(2026, 7, 14, 20, 31, tzinfo=timezone.utc),
+            timezone_name="Asia/Tehran",
+        )
+
+        self.assertEqual(start, datetime(2026, 7, 14, 20, 30, tzinfo=timezone.utc))
+        self.assertEqual(end, datetime(2026, 7, 15, 20, 30, tzinfo=timezone.utc))
+        self.assertEqual(end - start, timedelta(days=1))
+
+        fallback_start, fallback_end = customer_trade_day_bounds(
+            now=datetime(2026, 7, 14, 20, 31),
+            timezone_name="Invalid/Timezone",
+        )
+        self.assertEqual((fallback_start, fallback_end), (start, end))
+
+    async def test_customer_trade_limit_enforcement_is_noop_without_relations(self):
+        db = FakeDB()
+
+        await enforce_customer_trade_limits_for_trade(
+            db,
+            customer_relations={5: None, 9: None},
+            quantity=10,
+        )
+
+        self.assertEqual(db.executed_statements, [])
+
+    async def test_customer_trade_limit_enforcement_locks_relation_before_validation(self):
+        relation = SimpleNamespace(
+            id=12,
+            customer_user_id=5,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[relation])])
+
+        await enforce_customer_trade_limits_for_trade(
+            db,
+            customer_relations={5: relation},
+            quantity=10,
+            now=datetime(2026, 7, 14, 12, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(len(db.executed_statements), 1)
+        statement_sql = str(db.executed_statements[0].compile(compile_kwargs={"literal_binds": True})).lower()
+        self.assertIn("customer_relations.id in (12)", statement_sql)
+        self.assertIn("customer_relations.status = 'active'", statement_sql)
+        self.assertIn("customer_relations.deleted_at is null", statement_sql)
+        self.assertIn("order by customer_relations.id asc", statement_sql)
+        self.assertIn("for update", statement_sql)
+
+    async def test_customer_trade_limit_enforcement_keeps_unconfigured_customer_unrestricted(self):
+        relation = SimpleNamespace(
+            id=12,
+            customer_user_id=5,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[relation])])
+
+        await enforce_customer_trade_limits_for_trade(
+            db,
+            customer_relations={5: relation},
+            quantity=500,
+            now=datetime(2026, 7, 14, 12, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(len(db.executed_statements), 1)
+
+    async def test_customer_trade_limit_enforcement_accepts_exact_daily_boundaries(self):
+        relation = SimpleNamespace(
+            id=12,
+            customer_user_id=5,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+            max_daily_trades=3,
+            max_daily_commodity_volume=20,
+        )
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[relation]),
+                FakeExecuteResult(row=(2, 15)),
+            ]
+        )
+
+        await enforce_customer_trade_limits_for_trade(
+            db,
+            customer_relations={5: relation},
+            quantity=5,
+            now=datetime(2026, 7, 14, 12, tzinfo=timezone.utc),
+            timezone_name="Asia/Tehran",
+        )
+
+        usage_sql = str(db.executed_statements[1].compile(compile_kwargs={"literal_binds": True})).lower()
+        self.assertIn("trades.status = 'completed'", usage_sql)
+        self.assertIn("trades.created_at >=", usage_sql)
+        self.assertIn("trades.created_at <", usage_sql)
+        self.assertIn("trades.offer_user_id = 5 or trades.responder_user_id = 5", usage_sql)
+
+    async def test_customer_trade_limit_enforcement_rejects_every_policy_violation(self):
+        now = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+        cases = (
+            ("temporarily_restricted", {"trading_restricted_until": now + timedelta(minutes=1)}, (0, 0)),
+            ("below_minimum", {"min_trade_quantity": 6}, (0, 0)),
+            ("above_maximum", {"max_trade_quantity": 4}, (0, 0)),
+            ("daily_trade_limit", {"max_daily_trades": 3}, (3, 10)),
+            ("daily_volume_limit", {"max_daily_commodity_volume": 14}, (2, 10)),
+        )
+
+        for reason_code, overrides, usage_row in cases:
+            with self.subTest(reason_code=reason_code):
+                relation_data = {
+                    "id": 12,
+                    "customer_user_id": 5,
+                    "status": CustomerRelationStatus.ACTIVE,
+                    "deleted_at": None,
+                    "trading_restricted_until": None,
+                    "min_trade_quantity": None,
+                    "max_trade_quantity": None,
+                    "max_daily_trades": None,
+                    "max_daily_commodity_volume": None,
+                }
+                relation_data.update(overrides)
+                relation = SimpleNamespace(**relation_data)
+                execute_results = [FakeExecuteResult(values=[relation])]
+                if relation.max_daily_trades is not None or relation.max_daily_commodity_volume is not None:
+                    execute_results.append(FakeExecuteResult(row=usage_row))
+                db = FakeDB(execute_results=execute_results)
+
+                with self.assertRaises(CustomerTradeLimitViolation) as exc_info:
+                    await enforce_customer_trade_limits_for_trade(
+                        db,
+                        customer_relations={5: relation},
+                        quantity=5,
+                        now=now,
+                    )
+
+                self.assertEqual(exc_info.exception.customer_user_id, 5)
+                self.assertEqual(exc_info.exception.relation_id, 12)
+                self.assertEqual(exc_info.exception.reason_code, reason_code)
+
+    async def test_customer_trade_limit_enforcement_fails_closed_if_relation_changes(self):
+        relation = SimpleNamespace(id=12, customer_user_id=5)
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[])])
+
+        with self.assertRaises(CustomerTradeLimitViolation) as exc_info:
+            await enforce_customer_trade_limits_for_trade(
+                db,
+                customer_relations={5: relation},
+                quantity=5,
+            )
+
+        self.assertEqual(exc_info.exception.reason_code, "relation_not_active")
+
+    async def test_customer_trade_limit_enforcement_validates_responder_before_source(self):
+        responder_relation = SimpleNamespace(
+            id=20,
+            customer_user_id=5,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=6,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+        )
+        source_relation = SimpleNamespace(
+            id=10,
+            customer_user_id=9,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=7,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[source_relation, responder_relation])])
+
+        with self.assertRaises(CustomerTradeLimitViolation) as exc_info:
+            await enforce_customer_trade_limits_for_trade(
+                db,
+                customer_relations={5: responder_relation, 9: source_relation},
+                quantity=5,
+            )
+
+        self.assertEqual(exc_info.exception.customer_user_id, 5)
+        self.assertEqual(exc_info.exception.relation_id, 20)
+
+    def test_customer_trade_limit_public_messages_do_not_disclose_relation_values(self):
+        for reason_code in (
+            "relation_not_active",
+            "temporarily_restricted",
+            "below_minimum",
+            "above_maximum",
+            "daily_trade_limit",
+            "daily_volume_limit",
+        ):
+            message = customer_trade_limit_public_message(reason_code)
+            self.assertTrue(message)
+            self.assertNotIn("relation", message.lower())
+            self.assertNotRegex(message, r"\d")
 
     def test_validate_customer_trade_limits_accepts_valid_relation(self):
         relation = SimpleNamespace(
