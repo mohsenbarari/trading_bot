@@ -16,6 +16,9 @@ class BotTradeCreateTextHelperTests(unittest.TestCase):
     def test_has_trade_indicator_detects_valid_markers_only(self):
         self.assertTrue(has_trade_indicator("خ ربع 30تا 75800"))
         self.assertTrue(has_trade_indicator("فروش نیم 50عدد 758000: فقط نقدی"))
+        self.assertTrue(has_trade_indicator("امام 30تا 75800 خ ن"))
+        self.assertTrue(has_trade_indicator("ربع 30تا فروش نقد فردا 75800"))
+        self.assertFalse(has_trade_indicator("امام 30تا 75800: خ ن"))
         self.assertFalse(has_trade_indicator("این پیام عادی است"))
         self.assertFalse(has_trade_indicator(""))
 

@@ -33,6 +33,39 @@ def all_result(items):
     return result
 
 
+# Snapshot of every current production commodity name and alias. Keeping the
+# canonical target beside every accepted input also verifies longest-match,
+# dotted, multi-word, and zero-width-non-joiner variants.
+CURRENT_COMMODITY_CATALOG = (
+    (1, "امام", ("امام", "امامی", "تمام")),
+    (2, "بهار", ("بهار", "آزادی", "ت پ", "ت.پ", "تاریخ پایین")),
+    (3, "ربع بهار", ("ربع بهار", "ربع", "ربع‌بهار")),
+    (4, "نیم بهار", ("نیم بهار", "نیم", "نیم‌بهار")),
+    (
+        5,
+        "ربع تاریخ پایین",
+        ("ربع تاریخ پایین", "ربع ت.پ", "ربع پ", "ربع پایین"),
+    ),
+    (
+        6,
+        "نیم تاریخ پایین",
+        ("نیم تاریخ پایین", "نیم ت.پ", "نیم پ", "نیم پایین"),
+    ),
+    (7, "یک گرمی", ("یک گرمی", "مرکزی", "یک گرمی مرکزی")),
+)
+
+OFFER_CONTEXT_CASES = (
+    ("خ ن", "buy", "cash"),
+    ("ف ن", "sell", "cash"),
+    ("خ ن ف", "buy", "tomorrow"),
+    ("ف ن ف", "sell", "tomorrow"),
+    ("خرید نقد", "buy", "cash"),
+    ("فروش نقد", "sell", "cash"),
+    ("خرید نقد فردا", "buy", "tomorrow"),
+    ("فروش نقد فردا", "sell", "tomorrow"),
+)
+
+
 class ManualOfferValidationTests(unittest.TestCase):
     def test_price_must_be_five_or_six_digits(self):
         self.assertFalse(validate_price(9999)[0])
@@ -207,10 +240,9 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_find_commodity(text):
             mapping = {
-                "امام": (1, "امام"),
-                "بهار": (2, "بهار"),
-                "ربع بهار": (3, "ربع بهار"),
-                "نیم بهار": (4, "نیم بهار"),
+                accepted_name: (commodity_id, canonical_name)
+                for commodity_id, canonical_name, accepted_names in CURRENT_COMMODITY_CATALOG
+                for accepted_name in accepted_names
             }
             commodity = _match_commodity_name(text, mapping)
             if commodity[0] is not None:
@@ -267,7 +299,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             "خ ن امام 30 75800",
             "خ ن امام 30تا 75800 10 10",
             "خ ن ربغ 30تا 75800",
-            "خ ن ربع بهار 10تا 75800".replace("ربع بهار", "ربع بهارک"),
+            "خ ن کالای ناشناخته 10تا 75800",
         ]
 
         for sample in invalid_samples:
@@ -335,7 +367,10 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
         result, error = await offer_parser.parse_offer_text("خ ن خرید امام 30تا 75800")
         self.assertIsNone(result)
-        self.assertEqual(error.message, "❌ نشانگر خرید یا فروش فقط در ابتدای لفظ مجاز است")
+        self.assertEqual(
+            error.message,
+            "❌ نشانگر خرید یا فروش فقط داخل بلوک نوع معامله و تسویه مجاز است",
+        )
 
         offer_parser.get_trading_settings = lambda: SimpleNamespace(
             offer_min_quantity=5,
@@ -348,24 +383,155 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.message, "❌ حداقل تعداد باید 5 باشد")
 
     async def test_text_offer_accepts_all_exact_settlement_prefixes(self):
-        cases = (
-            ("خ ن امام 30تا 75800", "buy", "cash"),
-            ("ف ن امام 30تا 75800", "sell", "cash"),
-            ("خ ن ف امام 30تا 75800", "buy", "tomorrow"),
-            ("ف ن ف امام 30تا 75800", "sell", "tomorrow"),
-            ("خرید نقد امام 30تا 75800", "buy", "cash"),
-            ("فروش نقد امام 30تا 75800", "sell", "cash"),
-            ("خرید نقد فردا امام 30تا 75800", "buy", "tomorrow"),
-            ("فروش نقد فردا امام 30تا 75800", "sell", "tomorrow"),
-        )
-
-        for sample, expected_trade_type, expected_settlement_type in cases:
+        for context, expected_trade_type, expected_settlement_type in OFFER_CONTEXT_CASES:
+            sample = f"{context} امام 30تا 75800"
             with self.subTest(sample=sample):
                 result, error = await offer_parser.parse_offer_text(sample)
                 self.assertIsNone(error)
                 self.assertIsNotNone(result)
                 self.assertEqual(result.trade_type, expected_trade_type)
                 self.assertEqual(result.settlement_type, expected_settlement_type)
+
+    async def test_trade_settlement_block_is_movable_for_every_current_commodity_input(self):
+        tested_cases = 0
+
+        for commodity_id, canonical_name, accepted_names in CURRENT_COMMODITY_CATALOG:
+            for accepted_name in accepted_names:
+                base_sections = [accepted_name, "30تا", "75800"]
+                for context, expected_trade_type, expected_settlement_type in OFFER_CONTEXT_CASES:
+                    for insertion_index in range(len(base_sections) + 1):
+                        sections = list(base_sections)
+                        sections.insert(insertion_index, context)
+                        sample = " ".join(sections)
+
+                        with self.subTest(sample=sample):
+                            result, error = await offer_parser.parse_offer_text(sample)
+                            self.assertIsNone(error)
+                            self.assertIsNotNone(result)
+                            self.assertEqual(result.trade_type, expected_trade_type)
+                            self.assertEqual(result.settlement_type, expected_settlement_type)
+                            self.assertEqual(result.commodity_id, commodity_id)
+                            self.assertEqual(result.commodity_name, canonical_name)
+                            self.assertEqual(result.quantity, 30)
+                            self.assertEqual(result.price, 75800)
+                            self.assertTrue(result.is_wholesale)
+                            self.assertIsNone(result.lot_sizes)
+                        tested_cases += 1
+
+        self.assertEqual(tested_cases, 800)
+
+    async def test_movable_block_handles_retail_lots_persian_digits_and_notes_for_full_catalog(self):
+        tested_cases = 0
+
+        for commodity_id, canonical_name, accepted_names in CURRENT_COMMODITY_CATALOG:
+            for accepted_name in accepted_names:
+                base_sections = [accepted_name, "۳۰ عدد", "۷۵۸۰۰", "۱۵", "۱۵"]
+                for context, expected_trade_type, expected_settlement_type in OFFER_CONTEXT_CASES:
+                    for insertion_index in range(len(base_sections) + 1):
+                        sections = list(base_sections)
+                        sections.insert(insertion_index, context)
+                        sample = " ".join(sections) + ": تحویل هماهنگ شود"
+
+                        with self.subTest(sample=sample):
+                            result, error = await offer_parser.parse_offer_text(sample)
+                            self.assertIsNone(error)
+                            self.assertIsNotNone(result)
+                            self.assertEqual(result.trade_type, expected_trade_type)
+                            self.assertEqual(result.settlement_type, expected_settlement_type)
+                            self.assertEqual(result.commodity_id, commodity_id)
+                            self.assertEqual(result.commodity_name, canonical_name)
+                            self.assertEqual(result.quantity, 30)
+                            self.assertEqual(result.price, 75800)
+                            self.assertFalse(result.is_wholesale)
+                            self.assertEqual(result.lot_sizes, [15, 15])
+                            self.assertEqual(result.notes, "تحویل هماهنگ شود")
+                        tested_cases += 1
+
+        self.assertEqual(tested_cases, 1200)
+
+    async def test_movable_block_supports_implicit_default_commodity_at_every_position(self):
+        tested_cases = 0
+
+        for context, expected_trade_type, expected_settlement_type in OFFER_CONTEXT_CASES:
+            base_sections = ["30تا", "75800"]
+            for insertion_index in range(len(base_sections) + 1):
+                sections = list(base_sections)
+                sections.insert(insertion_index, context)
+                sample = " ".join(sections)
+
+                with self.subTest(sample=sample):
+                    result, error = await offer_parser.parse_offer_text(sample)
+                    self.assertIsNone(error)
+                    self.assertIsNotNone(result)
+                    self.assertEqual(result.trade_type, expected_trade_type)
+                    self.assertEqual(result.settlement_type, expected_settlement_type)
+                    self.assertEqual(result.commodity_id, 1)
+                    self.assertEqual(result.commodity_name, "امام")
+                tested_cases += 1
+
+        self.assertEqual(tested_cases, 24)
+
+    async def test_trade_settlement_block_must_be_unique_and_internally_complete(self):
+        for first_context, _, _ in OFFER_CONTEXT_CASES:
+            for second_context, _, _ in OFFER_CONTEXT_CASES:
+                sample = f"{first_context} امام 30تا 75800 {second_context}"
+                with self.subTest(sample=sample):
+                    result, error = await offer_parser.parse_offer_text(sample)
+                    self.assertIsNone(result)
+                    self.assertIsNotNone(error)
+                    self.assertEqual(
+                        error.message,
+                        "❌ نوع معامله و تسویه فقط یک بار در لفظ مجاز است",
+                    )
+
+        invalid_samples = (
+            "امام خ 30تا 75800",
+            "امام ف 30تا 75800",
+            "امام خرید 30تا 75800",
+            "امام فروش 30تا 75800",
+            "امام خ فردا 30تا 75800",
+            "امام خ ف 30تا 75800",
+            "امام خ ن فردا 30تا 75800",
+            "امام فروش فردا 30تا 75800",
+            "امام خ 30تا ن 75800",
+        )
+        for sample in invalid_samples:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(result)
+                self.assertIsNotNone(error)
+
+    async def test_trade_and_settlement_markers_outside_the_single_block_are_rejected(self):
+        cases = (
+            ("امام 30تا 75800 خ ن خرید", offer_parser.RESIDUAL_TRADE_MARKER_MESSAGE),
+            ("فروش امام 30تا 75800 خ ن", offer_parser.RESIDUAL_TRADE_MARKER_MESSAGE),
+            ("امام نقد 30تا 75800 خ ن", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
+            ("امام 30تا فردا 75800 خ ن", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
+            ("امام 30تا 75800 خ ن فردایی", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
+        )
+
+        for sample, expected_message in cases:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(result)
+                self.assertIsNotNone(error)
+                self.assertEqual(error.message, expected_message)
+
+    async def test_notes_are_excluded_from_movable_block_detection(self):
+        result, error = await offer_parser.parse_offer_text(
+            "امام 30تا 75800 خ ن: فروش نقد فردا"
+        )
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.trade_type, "buy")
+        self.assertEqual(result.settlement_type, "cash")
+        self.assertEqual(result.notes, "فروش نقد فردا")
+
+        result, error = await offer_parser.parse_offer_text(
+            "امام 30تا 75800: خ ن"
+        )
+        self.assertIsNone(result)
+        self.assertIsNone(error)
 
     async def test_button_wizard_drafts_round_trip_through_shared_parser(self):
         cases = (
