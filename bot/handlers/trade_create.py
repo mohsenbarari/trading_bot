@@ -1457,7 +1457,7 @@ async def handle_trade_cancel(callback: types.CallbackQuery, state: FSMContext, 
 def _get_offer_suggestion(original_text: str, error_message: str) -> str:
     """پیشنهاد فرمت صحیح بر اساس نوع خطا"""
     import re
-    
+
     # نمونه‌های صحیح
     examples = [
         "خ ن ربع 30تا 75800",

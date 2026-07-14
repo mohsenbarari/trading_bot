@@ -925,6 +925,41 @@ retry شبکه‌ای هیچ‌گاه یک عملیات موفق را به failu
 
 اگر نتیجه فقط در حافظه نگهداری شود با restart از بین می‌رود؛ persistence و retention باید متناسب با retry window واقعی باشد.
 
+وضعیت Stage: بسته شد؛ قرارداد پایدار فرمان، receipt اتمیک، تست PostgreSQL و smoke واقعی دو سرور staging کامل شده است.
+
+### گزارش اجرای Stage ۱۱ - ۲۰۲۶-۰۷-۱۴
+
+پیاده‌سازی runtime در commit `ea3d0f9632dec7687efd2be392b9e4c061fb27fc`:
+
+- payload canonical نسخه ۱ از `offer_public_id`، مالک/عامل، سطح و سرور مبدأ و علت انقضا ساخته می‌شود. `command_id` از UUIDv5 و `idempotency_key` از همان canonical payload مشتق می‌شوند؛ ID عددی آفر عمداً در fingerprint نیست تا اختلاف شناسه محلی دو دیتابیس replay را نشکند.
+- schema افزایشی موجود `offer_expiry_command_receipts` با model و service خانه‌محور تکمیل شد. lockهای advisory روی command/key با ترتیب ثابت گرفته می‌شوند؛ exact replay فقط terminal outcome قبلی را برمی‌گرداند و key یا command یکسان با payload متفاوت `409` می‌گیرد.
+- lookup آفر در مسیر جدید فقط با `offer_public_id` انجام می‌شود. mutation آفر و terminal شدن receipt در یک transaction commit می‌شوند؛ side effect فقط بعد از commit و فقط برای transition نخست با dedupe key مشتق از command/public-id/version dispatch می‌شود.
+- HMAC، تطابق source header با payload، ممنوعیت source برابر target، home authority و owner check پیش از mutation حفظ شدند. فرمان مستقل روی آفر inactive همچنان `400` می‌گیرد و receipt ناقص ناشی از rollback باقی نمی‌ماند.
+- قرارداد قدیمی بدون command identity برای rollout نسخه مختلط حفظ شده است. feature flag با پیش‌فرض `false` اضافه شد و rollout staging در دو مرحله انجام شد: ابتدا schema/receiver/caller روی هر دو peer، سپس فعال‌سازی همزمان flag و recreate فقط سرویس‌های stateless.
+- receipt جدول `NO_SYNC` و home-local است؛ raw command/public ID و dedupe key در observability فقط به‌صورت hash ثبت می‌شوند. سیاست retention حداقل `365` روز است و cleanup primitive فقط terminal receiptهای قدیمی‌تر را مجاز می‌داند؛ incomplete receipt هرگز توسط آن حذف نمی‌شود. در این Stage timer حذف خودکار متصل نشده و بنابراین داده تا اجرای maintenance ایمن، بیشتر از حداقل retention نگه داشته می‌شود.
+
+شواهد تست:
+
+- suite متمرکز command/endpoint/forwarding/observability/sync policy برابر `62 passed` است.
+- خانواده Offer برابر `193 passed, 15 skipped` و خانواده Bot trade برابر `143 passed` است.
+- migration/scratch guard/sync registry/field policy برابر `52 passed` و transport/expiry/publication worker برابر `43 passed` است.
+- هفت تست واقعی PostgreSQL روی دیتابیس guardدار `market_stage11_receipt_test` پاس شدند: دو درخواست همزمان یک mutation و یک side effect، replay بعد از engine restart، بی‌اثر بودن اختلاف ID عددی، rollback مشترک Offer/receipt، شکست side effect بعد از commit و repair توسط worker، رد فرمان مستقل روی inactive و دقیقاً یک Offer UPDATE outbox بدون receipt outbox. scratch database پس از اجرا حذف شد.
+- `tests.test_core_events` روی candidate و همان لحظه روی `main` دقیقاً با یک failure و یک error یکسان بازتولید شد (`test_offer_trade_and_user_event_listeners` و `test_listener_sync_short_circuit_and_error_paths`)؛ این baseline از Stage ۱۱ مستقل است و هیچ فایل runtime مربوط به آن در این Stage تغییر نکرده است.
+- `compileall` و single Alembic head پاس شدند. یک trailing whitespace تاریخی که به‌علت قرارگرفتن در hunk کل branch توسط `git diff --check` گزارش می‌شد، بدون تغییر رفتار حذف شد.
+
+شواهد staging دو سرور:
+
+- Iran WebApp/API و sync worker روی `staging.gold-trade.ir` و foreign API/bot/workers روی `staging.362514.ir` همگی با full `RELEASE_SHA=ea3d0f9632dec7687efd2be392b9e4c061fb27fc`، role صحیح و `OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=true` اجرا می‌شوند. Alembic هر دو دیتابیس `d0b5e6f7a8c9` و جدول receipt در هر دو موجود است.
+- smoke واقعی خارج به ایران با fixture یکتای staging اجرا شد. دو request همزمان با command یکسان و ID عددی متفاوت، یک پاسخ `replayed=false` و یک پاسخ `replayed=true` دادند؛ replay سوم نیز `200/replayed=true` بود. payload تغییرکرده با همان identity برابر `409` و command مستقل روی آفر inactive برابر `400` شد.
+- دیتابیس خانه پس از smoke دقیقاً یک receipt terminal، یک Offer با status `expired` و یک Offer UPDATE outbox داشت. لاگ‌ها دقیقاً یک `offer_expiry_command.committed`، دو `replayed` و یک dispatch side effect نشان دادند و شناسه‌ها hash شده بودند. fixture، receipt و outbox آزمون حذف و نبود آن‌ها روی هر دو دیتابیس تأیید شد؛ sync worker ایران سپس دوباره راه‌اندازی شد.
+- preflight نخست `MARKET-STAGE11-OFFER-EXPIRY-RECEIPTS-20260714-R1` fail-close شد، چون اجرای اولیه deploy محلی foreign public guard را موقتاً خاموش کرده بود و runner نام صحیح env کلید observability را دریافت نکرده بود. Nginx به حالت استاندارد `404` بازگردانده شد و secret یا داده بازار تغییر نکرد.
+- preflight نهایی فقط‌خواندنی `MARKET-STAGE11-OFFER-EXPIRY-RECEIPTS-20260714-R2` با deep parity، binding کامل SHA، storage identity جدا، sync health سالم و بدون failed check پاس شد. production deploy، restart یا mutation انجام نشد.
+
+ریسک باقی‌مانده و rollback:
+
+- production همچنان flag را به‌صورت پیش‌فرض `false` دارد. rollout production باید همان ترتیب receiver-first و SHA parity را رعایت کند؛ rollback فوری با false کردن flag در هر دو peer و recreate سرویس‌های stateless انجام می‌شود.
+- rollback کد با revert commit runtime انجام می‌شود، اما receipt table و داده terminal تا پایان retry/retention window حذف نمی‌شوند. endpoint قدیمی additive باقی مانده و schema downgrade هنگام وجود caller جدید مجاز نیست.
+
 ---
 
 ## Stage ۱۲ - Pagination کامل بازار فعال (`MKT-05`)
