@@ -506,6 +506,13 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertNotIn('eval "\\$compose_cmd -f docker-compose.iran.yml up -d \\$wait_args"', production_script)
         self.assertNotIn('up -d --wait --wait-timeout 180"', legacy_script)
 
+    def test_production_release_excludes_runtime_audit_files(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+        gitignore = (REPO_ROOT / '.gitignore').read_text(encoding='utf-8')
+
+        self.assertIn('/audit_trail/', gitignore.splitlines())
+        self.assertGreaterEqual(production_script.count("--exclude 'audit_trail'"), 2)
+
     def test_production_preseed_backlog_covers_all_shared_sync_tables(self):
         from core.sync_registry import SyncPolicy, sync_registry_entries
 

@@ -39,6 +39,7 @@ DEV_TOOLS.md
 
 uploads/
 map_data/
+/audit_trail/
 
 /tmp/
 /mutants/
