@@ -1,8 +1,10 @@
 import unittest
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core.services import offer_publication_reconciliation_service as service
+from core.utils import utc_now
 from models.offer import OfferStatus
 from models.offer_publication_state import OfferPublicationStatus, OfferPublicationSurface
 
@@ -26,6 +28,11 @@ class FakeSummaryResult:
 
     def scalar(self):
         return self._scalar_value
+
+    def one(self):
+        if not self._rows:
+            return (self._scalar_value,)
+        return self._rows[0]
 
 
 class FakeSummaryDB:
@@ -317,6 +324,195 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["processed"], 0)
         db.commit.assert_not_awaited()
+
+    async def test_permanent_first_failure_is_deferred_without_blocking_batch(self):
+        db = FakeDB()
+        candidates = [
+            service.PublicationReconciliationCandidate(
+                issue="failed_telegram_publication",
+                offer=make_offer(id=index, offer_public_id=f"ofr_{index}"),
+                state=make_state(id=index * 10),
+                surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+            )
+            for index in range(1, 27)
+        ]
+        send_results = [
+            SimpleNamespace(
+                message_id=None,
+                error_code="telegram_server_error",
+                skipped_reason=None,
+                send_attempted=True,
+                response_class="5xx",
+                retry_after_seconds=None,
+            ),
+            *[
+                SimpleNamespace(
+                    message_id=1000 + index,
+                    error_code=None,
+                    skipped_reason=None,
+                    send_attempted=True,
+                    response_class="2xx",
+                    retry_after_seconds=None,
+                )
+                for index in range(25)
+            ],
+        ]
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=candidates),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=send_results),
+        ) as publish_mock:
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(),
+            )
+
+        self.assertEqual(publish_mock.await_count, 26)
+        self.assertEqual(report["processed"], 26)
+        self.assertEqual(report["failed"], 1)
+        self.assertEqual(report["repaired"], 25)
+        self.assertIsNotNone(candidates[0].state.next_retry_at)
+        self.assertEqual(candidates[0].state.state_metadata[service._REPAIR_ATTEMPT_METADATA_KEY], 1)
+
+    async def test_backlog_of_101_candidates_drains_in_bounded_batches(self):
+        db = FakeDB()
+        candidates = [
+            service.PublicationReconciliationCandidate(
+                issue="failed_telegram_publication",
+                offer=make_offer(id=index, offer_public_id=f"ofr_{index}"),
+                state=make_state(id=index * 10),
+                surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+            )
+            for index in range(1, 102)
+        ]
+
+        async def load_due(_db, *, limit, now=None):
+            return [item for item in candidates if item.state.status == OfferPublicationStatus.FAILED][:limit]
+
+        async def repair(_db, item, **_kwargs):
+            item.state.status = OfferPublicationStatus.SENT
+            return {"result": "repaired", "reason": "test_repaired"}
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            side_effect=load_due,
+        ), patch(
+            "core.services.offer_publication_reconciliation_service._repair_candidate", side_effect=repair
+        ) as repair_mock:
+            reports = [
+                await service.reconcile_offer_publications(
+                    db,
+                    server_mode="foreign",
+                    dry_run=False,
+                    limit=25,
+                )
+                for _ in range(5)
+            ]
+
+        self.assertEqual(repair_mock.await_count, 101)
+        self.assertEqual(sum(report["repaired"] for report in reports), 101)
+        self.assertEqual(reports[-1]["processed"], 1)
+        self.assertTrue(all(item.state.status == OfferPublicationStatus.SENT for item in candidates))
+
+    async def test_retry_metadata_survives_restart_and_increases_backoff(self):
+        db = FakeDB()
+        state = make_state()
+        item = service.PublicationReconciliationCandidate(
+            issue="failed_telegram_publication",
+            offer=make_offer(),
+            state=state,
+            surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+        )
+        failed_send = SimpleNamespace(
+            message_id=None,
+            error_code="telegram_server_error",
+            skipped_reason=None,
+            send_attempted=True,
+            response_class="5xx",
+            retry_after_seconds=None,
+        )
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=[item]),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(return_value=failed_send),
+        ), patch.object(service.settings, "offer_publication_worker_retry_base_seconds", 5):
+            first = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(),
+            )
+            first_retry_at = state.next_retry_at
+            state.next_retry_at = utc_now() - timedelta(seconds=1)
+            second = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(),
+            )
+
+        self.assertEqual(first["findings"][0]["retry_delay_seconds"], 5)
+        self.assertEqual(second["findings"][0]["retry_delay_seconds"], 10)
+        self.assertEqual(state.state_metadata[service._REPAIR_ATTEMPT_METADATA_KEY], 2)
+        self.assertGreater(state.next_retry_at, first_retry_at)
+
+    async def test_locked_candidate_does_not_repeat_provider_side_effect(self):
+        db = FakeDB()
+        item = service.PublicationReconciliationCandidate(
+            issue="failed_telegram_publication",
+            offer=make_offer(),
+            state=make_state(),
+            surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+        )
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=[item]),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service._try_acquire_candidate_repair_lock",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as publish_mock:
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(),
+            )
+
+        self.assertEqual(report["skipped_locked"], 1)
+        self.assertEqual(report["processed"], 0)
+        publish_mock.assert_not_awaited()
+        db.commit.assert_awaited_once()
+
+    async def test_backlog_observability_reports_total_due_and_oldest_ages(self):
+        now = utc_now()
+        db = FakeSummaryDB(
+            FakeSummaryResult(rows=[(7, 3, now - timedelta(seconds=90), now - timedelta(seconds=30))])
+        )
+
+        backlog = await service.publication_reconciliation_backlog(
+            db,
+            server_mode="foreign",
+            now=now,
+        )
+
+        self.assertEqual(backlog.total, 7)
+        self.assertEqual(backlog.due, 3)
+        self.assertEqual(backlog.oldest_age_seconds, 90)
+        self.assertEqual(backlog.oldest_due_age_seconds, 30)
+        sql = db.statements[0]
+        self.assertIn("next_retry_at", sql)
+        self.assertIn("count", sql.lower())
 
     async def test_publication_summary_reports_state_counts_and_sync_backlog_findings(self):
         db = FakeSummaryDB(
