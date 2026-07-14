@@ -1019,6 +1019,25 @@ WebApp فقط batch پیش‌فرض ۵۰ آفر را دریافت می‌کند 
 
 offset pagination زیر تغییرات realtime مستعد duplicate/gap است؛ cursor پایدار ترجیح دارد و fallback باید روشن باشد.
 
+### گزارش اجرای Stage ۱۲ - ۲۰۲۶-۰۷-۱۴
+
+وضعیت: پیاده‌سازی و دروازه تست سطح Stage تکمیل شد؛ پذیرش viewport و چندسروری در full-matrix نهایی staging انجام می‌شود.
+
+- runtime commit برابر `e268210e5af70db10253bf88c64a6783728e1214` است. endpoint افزایشی `/api/offers/page` با cursor نسخه‌دار و مقید به فیلتر، ترتیب پایدار `(created_at DESC, id DESC)` و page size حداکثر ۱۰۰ اضافه شد. endpoint قدیمی `skip/limit` حذف یا تغییر قرارداد نداده و فقط tie-break شناسه به ordering آن افزوده شده است.
+- فیلترهای جهت، نقد/فردا، کالا و «لفظ‌های شما» در backend اعمال می‌شوند. cursor فیلتر قبلی در tab یا فیلتر جدید پذیرفته نمی‌شود و با `400` fail-closed است. مجوز accountant و effective owner در هر صفحه دوباره اعمال می‌شود و cursor هیچ مجوز جدیدی ایجاد نمی‌کند.
+- WebApp load-more، empty/end state، خطای initial/page و retry را دارد. merge صفحات بر اساس `offer_public_id` dedupe می‌شود؛ realtime نیز در صورت وجود public id همان هویت سراسری را ترجیح می‌دهد و id محلی WebApp را با id سرور مقابل جایگزین نمی‌کند. event producerهای اصلی public id را به‌صورت additive می‌فرستند و مصرف eventهای قدیمی فاقد آن همچنان پشتیبانی می‌شود.
+- index partial جدید `ix_offers_active_created_id` به‌صورت `CREATE INDEX CONCURRENTLY` افزوده شد. migration روی دیتابیس scratch واقعی upgrade شد، downgrade تا `d0b5e6f7a8c9` و upgrade مجدد تا head پاس شد؛ Alembic دقیقاً یک head به نام `e0b5e6f7a8ca` دارد.
+- تست PostgreSQL واقعی با ۱۳۷ آفر، timestampهای مساوی، pageهای ۵۱ و ۱۰۰، همه فیلترها و insert/expire میان صفحات در `4` تست پاس شد. scratch فقط با الگوی `market_stage12_*_test` مجاز بود و پس از تست حذف شد؛ دیتابیس runtime staging و production انتخاب یا mutation نشدند.
+- `23` تست cursor/endpoint/migration guard، `203` تست خانواده آفر با `18` skip، `77` تست خانواده معاملات، `145` تست خانواده معامله بات و `80` تست frontend پاس شدند. build کامل frontend، `compileall`، `git diff --check` و Alembic single-head نیز پاس شدند.
+- suiteهای قدیمی sync که روی Stage ۹ به بعد baseline failure دارند، برای اثبات event projectionهای تغییرکرده به تست‌های متمرکز تفکیک شدند؛ انتظارهای additive public id در تست‌های expiry به‌روز شد و failure تازه‌ای به Stage ۱۲ منتسب نماند.
+
+ریسک باقی‌مانده و rollout/rollback:
+
+- rollout باید API و migration را پیش از frontend انجام دهد؛ کلاینت جدید به endpoint additive وابسته است ولی کلاینت قدیمی با endpoint قبلی کار می‌کند. index concurrent از lock طولانی جدول جلوگیری می‌کند.
+- silent refresh صفحه اول، pageهای بارگذاری‌شده را حفظ می‌کند و eventهای terminal آن‌ها را حذف می‌کنند. صحت نهایی این تعامل، عدم overlap کنترل‌ها در mobile/desktop و رفتار چند worker در full-matrix staging سنجیده می‌شود.
+- rollback فوری frontend با بازگرداندن `MarketView`، `OffersList` و `useOffers` به endpoint قدیمی ممکن است. endpoint و index افزایشی می‌توانند بدون استفاده باقی بمانند؛ حذف index فقط پس از rollback همه callerهای جدید و با migration downgrade مجاز است.
+- production deploy، restart و mutation انجام نشد.
+
 ---
 
 ## Stage ۱۳ - Pagination کامل تاریخچه معاملات (`MKT-12`)
