@@ -1081,6 +1081,22 @@ offset pagination زیر تغییرات realtime مستعد duplicate/gap است
 
 query تاریخچه بزرگ ممکن است سنگین شود. ordering/index و سقف منطقی page size باید حفظ شود.
 
+### گزارش اجرای Stage ۱۳ - ۲۰۲۶-۰۷-۱۴
+
+وضعیت: پیاده‌سازی و دروازه تست سطح Stage تکمیل شد؛ پذیرش deploy شده در ماتریس نهایی مشترک staging انجام می‌شود.
+
+- runtime commit برابر `473d8952ea79f804abeec3e4a5845eb0ca3392ac` است. endpointهای افزایشی `/api/trades/my/page` و `/api/trades/with/{other_user_id}/page` با cursor پایدار `(created_at, id)` اضافه شدند و endpointهای قدیمی برای سازگاری نسخه مختلط باقی ماندند.
+- cursor به viewer، target و همه فیلترها متصل است، اما مجوز ایجاد نمی‌کند؛ relation و دسترسی customer/super-admin در هر صفحه دوباره از دیتابیس بررسی می‌شوند. جهت خرید/فروش از دید موضوع همان تاریخچه محاسبه می‌شود.
+- WebApp صفحه‌های ۵۰تایی را با dedup دریافت می‌کند، خطای ادامه صفحه رکوردهای قبلی را حذف نمی‌کند و retry همان cursor را تکرار می‌کند. فیلترهای کالا، جهت و تسویه در pagination و export یکسان اعمال می‌شوند.
+- migration افزایشی `f0b5e6f7a8cb` دو index cursor برای `offer_user_id` و `responder_user_id` می‌سازد. create/drop به‌صورت concurrent است و downgrade به head قبلی و upgrade مجدد روی scratch PostgreSQL پاس شد.
+- ۲۳ تست cursor/authorization/guard، ۵ تست واقعی PostgreSQL با ۱۲۸ معامله، ۷۷ تست خانواده معاملات، ۲۰ تست helper/export و ۶۳ تست frontend پاس شدند. build کامل Vite، `compileall`، single Alembic head و `git diff --check` نیز سبز هستند.
+- artifact اصلی PostgreSQL با SHA-256 برابر `99f9cbf7157643beed3d91b2df35ab6214e73d38b9d515e41732766f5433b7dd` ثبت شد. دیتابیس scratch با نام محافظت‌شده `market_stage13_history_test` پس از تست حذف شد و هیچ داده staging runtime یا production تغییر نکرد.
+
+ریسک و rollback:
+
+- هر page حداکثر ۱۰۰ row می‌خواند و indexهای participant/order مانع scan کامل رایج می‌شوند. export فعلی همچنان کل نتیجه مجاز را تولید می‌کند و عمداً در این Stage تغییر معماری نکرده است.
+- rollback runtime با revert commit `473d8952` انجام می‌شود. اگر rollback schema لازم باشد، ابتدا runtime قدیمی rollout و سپس migration به `e0b5e6f7a8ca` downgrade می‌شود؛ endpointهای قدیمی در تمام مدت قابل استفاده‌اند.
+
 ---
 
 ## Stage ۱۴ - حذف تحویل دوگانه Realtime (`MKT-14`)
