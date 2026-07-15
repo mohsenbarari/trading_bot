@@ -5,7 +5,7 @@
 - تاریخ ایجاد: `2026-07-15`
 - شاخه اختصاصی: `candidate/telegram-offer-publication-queue`
 - مبنای شاخه: `main@ca6348af`
-- وضعیت Roadmap: تصمیم‌های محصول و معماری ثبت شده‌اند و پیش‌نویس سناریوی دقیق staging در سند همراه این Roadmap قرار دارد.
+- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند؛ قرارداد اجرایی و failure-injectionهای قطعی Stage 2 در `2026-07-15` پیاده و پاس شده‌اند. worker پایدار و اتصال runtime هنوز ساخته نشده و موضوع Stage 3 است.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -353,6 +353,24 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - تست عدم انقضای آفر روی خطای موقت
 
 معیار خروج: تمام failure injectionها بدون پیام گم‌شده و duplicate کنترل‌نشده پاس شوند.
+
+#### نتیجه اجرای Stage 2 در `2026-07-15`
+
+- قرارداد pure و بدون side effect در `core/telegram_delivery_queue_contract.py` ایجاد شد تا مستقیماً مبنای adapter پایدار Stage 3 باشد.
+- اولویت `P0` تا `P3`، ترتیب داخلی `P1` و FIFO قطعی شد.
+- `429` رکورد را pending نگه می‌دارد، `retry_after + safety_margin` را اعمال می‌کند و فقط lane همان مقصد را تا موعد retry می‌بندد.
+- `5xx` و خطاهای transport قابل retry با backoff محدود مدل شدند؛ خطای payload معیوب `400` terminal و `403` موجب pause مقصد می‌شود.
+- dedupe هم‌زمان، collision یک dedupe key با payload متفاوت، claim هم‌زمان، مالکیت lease، نتیجه دیررس worker قبلی و بازیابی پس از restart تست شدند.
+- timeout مبهم `sendMessage` retry کور نمی‌شود و در وضعیت `AMBIGUOUS` می‌ماند؛ فقط شاهد صریح reconciliation می‌تواند آن را `SENT` یا «قطعاً غایب و قابل retry» کند. روش تولید این شاهد برای production همچنان چالش باز `TOPQ-C07` است.
+- قرارداد terminal edit دقیقاً یک `editMessageText` با متن نهایی و `reply_markup={"inline_keyboard": []}` تولید می‌کند.
+- تصمیم‌های خطای موقت هیچ mutation برای Offer برنمی‌گردانند؛ اتصال این اصل به مسیر واقعی ثبت آفر در Stage 3 انجام می‌شود.
+- `18` تست قرارداد جدید و در مجموع `125` تست هدفمند همراه regressionهای publication، expiry، channel edit و notification outbox فعلی پاس شدند.
+
+مرز این مرحله:
+
+- `core/offer_publication_worker.py` و `core/telegram_notification_outbox_worker.py` همچنان worker صف مشترک نیستند.
+- هنوز جدول/مدل صف مشترک، migration، PostgreSQL claim با `SKIP LOCKED`، limiter توزیع‌شده، feature flag، startup task و جایگزینی مسیرهای مستقیم Telegram ساخته نشده است.
+- بررسی schema نشان داد `offer_publication_states` فقط publication آفر و `telegram_notification_outbox` فقط پیام خصوصی را مدل می‌کنند؛ هیچ‌کدام به‌تنهایی method/payload عمومی، P0 تا P3، ترتیب داخلی P1 و cooldown مشترک مقصد را با قرارداد کامل نگه نمی‌دارند. Stage 3 باید adapter پایدار و migration حداقلی را بر همین اساس اضافه کند.
 
 ### Stage 3 — پیاده‌سازی پشت feature flag
 
