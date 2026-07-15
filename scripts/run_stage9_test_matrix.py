@@ -23,6 +23,15 @@ SKIPPED_RE = re.compile(r"skipped=(\d+)")
 TEST_START_RE = re.compile(
     r"^(?P<method>(?:test_[^( ]+|runTest)) \((?P<case>[^)]+)\) \.\.\.(?P<tail>.*)$"
 )
+DETERMINISTIC_FEATURE_ENV = {
+    "SERVER_MODE": "foreign",
+    "TELEGRAM_DIRECT_REGISTRATION_ENABLED": "false",
+    "TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED": "false",
+    "TELEGRAM_LOGIN_OTP_ENABLED": "false",
+    "OTP_SMS_AUTO_FALLBACK_ENABLED": "false",
+    "INVITATION_CONTRACT_V2_ENABLED": "false",
+    "REGISTRATION_SYNC_V2_ENABLED": "false",
+}
 
 
 class MatrixConfigurationError(ValueError):
@@ -239,6 +248,10 @@ def _run_lane(
     started = time.monotonic()
     command = [sys.executable, "-m", "unittest", "-v", *modules]
     env = os.environ.copy()
+    # Match the merge-gate defaults even when this runner is invoked from a
+    # production-configured checkout. Feature-enabled behavior is covered by
+    # tests that opt in explicitly.
+    env.update(DETERMINISTIC_FEATURE_ENV)
     stage9_packages = str(REPO_ROOT / "tmp/stage9-site-packages")
     env["PYTHONPATH"] = stage9_packages + os.pathsep + env.get("PYTHONPATH", "")
     if resources:

@@ -366,7 +366,7 @@
     {
       "id": "MKT-SPECIAL-REPUBLISH-LINEAGE",
       "test_references": ["tests/test_offers_router_create_success.py"],
-      "test_id": "tests.test_offers_router_create_success.OffersRouterCreateSuccessTests.test_create_offer_stamps_home_server_and_links_republished_offer"
+      "test_id": "tests.test_offers_router_create_success.OffersRouterCreateSuccessTests.test_republish_creates_independent_offer_from_remaining_source"
     },
     {
       "id": "MKT-SPECIAL-TELEGRAM-PUBLICATION-REPAIR",

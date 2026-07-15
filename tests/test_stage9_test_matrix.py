@@ -235,6 +235,8 @@ class Stage9TestMatrixTests(unittest.TestCase):
         self.assertEqual(env["SYNC_DATABASE_URL"], resources["sync_database_url"])
         self.assertEqual(env["REDIS_URL"], resources["redis_url"])
         self.assertEqual(Path(env["TMPDIR"]), ROOT / resources["tmp_dir"])
+        for key, value in matrix_runner.DETERMINISTIC_FEATURE_ENV.items():
+            self.assertEqual(env[key], value)
         self.assertEqual(result["status"], "passed")
 
     def test_manifest_rejects_every_invalid_structural_boundary(self):

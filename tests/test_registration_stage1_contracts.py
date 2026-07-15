@@ -439,7 +439,7 @@ class RegistrationStage1ContractTests(unittest.IsolatedAsyncioTestCase):
             ).bot
         )
 
-        expiry = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+        expiry = datetime(2099, 7, 13, 12, 0, tzinfo=timezone.utc)
         invitation = SimpleNamespace(
             token="INV-contract-test",
             short_code="Ab12Cd34",
