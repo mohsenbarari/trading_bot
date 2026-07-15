@@ -1495,7 +1495,7 @@ The audit also found reusable foundations. They must not be mistaken for complet
 | T-001 | P0 | `logical_authority` and explicit `physical_site` now model `bot_fi`, `webapp_fi`, and `webapp_ir`, while legacy `server_mode` remains for compatibility. Runtime role is derived from durable local writer state. Event metadata, remaining tooling, metrics, and every deploy surface have not yet been migrated to the new identity. | An unconverted path can still treat logical Iran/WebApp authority as a physical host and route, authorize, or label work incorrectly. | Complete the identity inventory and migration; prove every write, event, job, metric, lock, CLI, and deployment surface records and validates the correct logical authority, physical site, runtime role, and epoch. |
 | T-002 | P0 | Additive migrations now provide local durable writer epoch/state, transition audit, optional signed-lease evidence, HTTP/startup/background preflight, and a SQL `before_commit` recheck. This protects a local database but does not yet bind every command/event/side effect to the global epoch or stop an old remote database by itself. | An unaudited path, external side effect, long-lived process, or independently active remote database can escape the local fence after promotion. | Complete the mutation/side-effect audit, carry and reject stale epochs at every destination, deploy the witness, and demonstrate simultaneous promotion against independent databases with exactly one accepted writer. |
 | T-003 | P0 | Main WebApp HTTP mutations, the known startup mutation, and policy-listed background jobs now consult physical site/local writer state and, when enabled, witness lease validity; the leader restarts when lease eligibility changes. Repair tools, every worker/route, and effects that can occur before commit still need a complete audit. | An uncovered worker, direct-origin path, repair command, or pre-commit external effect can write or act after the site's term is no longer valid. | Fence every HTTP/WebSocket mutation, startup mutation, recurring job, side-effect worker, repair process, and migration helper; prove no external effect can escape a stale or expired term. |
-| T-004 | P0 | The accepted database-clock witness remains dark on the independent Iran-reachable host with isolated PostgreSQL roles/schema, private TLS, fixed FI/IR ingress, pairwise HMAC, Ed25519 signing custody, measured clock evidence, reboot persistence, local backups, and encrypted immutable HEL1 custody. A second clean host at `185.206.95.94` was rebuilt from a checksumed manifest/wheelhouse, restored first into an isolated database and then into live through a validated candidate/rollback swap, rebooted, and revalidated as `webapp:0:vacant`. WebApp-FI authenticated TLS returned `200`, unsigned access returned `401`, and a non-allowlisted source timed out. The guarded four-PostgreSQL drill still proves concurrent acquisition, asymmetric partition, delayed negative replay, lost response, service/database recreation, local fail-closed expiry, and epoch-2 IR activation. All WebApp witness enforcement/renewal flags remain disabled. | Credential rotation, a live WebApp-IR-to-replacement TLS probe, and the real independent-host directional fault matrix are still unproved; host compromise, clock jump, disk-full, unsafe operator action, or a network interleaving outside the container drill can still prevent safe ownership proof. | Obtain an execution path on WebApp-IR and repeat authenticated TLS/clock checks to the replacement IP, drill credential rotation/revocation, then repeat concurrent acquire, lost response, delayed packet, process/DB/VM pause, host loss, clock jump, disk-full, and directional FI/IR faults across the real hosts before enabling any lease. |
+| T-004 | P0 | The accepted database-clock witness remains dark on the independent Iran-reachable host with isolated PostgreSQL roles/schema, private TLS, fixed FI/IR ingress, pairwise HMAC, Ed25519 signing custody, measured clock evidence, reboot persistence, local backups, and encrypted immutable HEL1 custody. A second clean host at `185.206.95.94` was rebuilt from a checksumed manifest/wheelhouse, restored first into an isolated database and then into live through a validated candidate/rollback swap, rebooted, and revalidated as `webapp:0:vacant`. WebApp-FI and WebApp-IR authenticated TLS each returned `200`, unsigned access from each returned `401`, WebApp-IR direct TCP `443` and UTC/NTP alignment were proven, and a non-allowlisted source timed out. The guarded four-PostgreSQL drill still proves concurrent acquisition, asymmetric partition, delayed negative replay, lost response, service/database recreation, local fail-closed expiry, and epoch-2 IR activation. All WebApp witness enforcement/renewal flags remain disabled. | Credential rotation and the real independent-host directional fault matrix are still unproved; host compromise, clock jump, disk-full, unsafe operator action, or a network interleaving outside the container drill can still prevent safe ownership proof. | Drill credential rotation/revocation, then repeat concurrent acquire, lost response, delayed packet, process/DB/VM pause, host loss, clock jump, disk-full, and directional FI/IR faults across the real hosts before enabling any lease. |
 | T-005 | P0 | models/change_log.py has one local integer id and one synced/verified state; core/sync_worker.py drains to one target URL and marks the row delivered after that peer succeeds. | Delivery to Bot-FI can incorrectly imply delivery to WebApp-IR, or vice versa; retention can delete an event still needed by one destination. | Implement immutable global event identity plus a per-destination delivery ledger, destination-specific ACKs, retry state, retention gates, and backlog metrics. |
 | T-006 | P0 | Receiver-applied transactions use is_sync and core/events.py intentionally suppresses new change-log creation for such writes. This prevents two-site echoes but also prevents WebApp-FI from relaying an original Bot-FI event to WebApp-IR through the current outbox. | WebApp-IR misses foreign-origin changes accumulated at WebApp-FI during a national outage, or relay is re-enabled naively and creates loops. | Implement preserved-origin relay: same event_id, origin site, origin sequence, authority, epoch, and payload hash; create only the missing destination delivery without generating a new business event. |
 | T-007 | P0 | Sync ordering uses the local change-log integer as source_sequence. The worker prioritizes table class before id, so a larger sequence can be sent before a smaller one, while the receiver can advance to the larger value without a durable missing-range record. Database sequences may also contain rollback gaps, and two physical WebApp databases can overlap. | A legitimate event is classified stale, a missing event is never requested, or different events occupy the same apparent sequence. | Define an emitted stream sequence independent of ordinary database id gaps, scope it by producer_site and epoch, persist gap ranges, and test priority reordering, rollback gaps, restore, promotion, and same-sequence/different-hash cases. |
@@ -2250,10 +2250,13 @@ validated candidate database, swapped into the live name while preserving the
 fresh database as a no-connection rollback, and survived a real VM reboot.
 
 This does not authorize a lease. Authenticated replacement-host reachability
-was repeated from WebApp-FI, while the equivalent WebApp-IR probe remains open
-because SSH to that host refused the operator connection. Credential
-rotation/revocation, independent escrow access, real fault injection, and the
-decision to retain or retire either dark Witness host remain operational gates.
+was repeated from both WebApp-FI and WebApp-IR. The earlier WebApp-IR operator
+failure was a default-port assumption; the host accepts operator SSH on port
+`37067`. Direct TCP `443`, private-CA TLS, HMAC authentication, rejection of an
+unsigned request, and UTC/NTP clock alignment were then proven from WebApp-IR.
+Credential rotation/revocation, independent escrow access, real fault
+injection, and the decision to retain or retire either dark Witness host remain
+operational gates.
 
 ## 43. Replacement Witness VPS Provisioning Gate - 2026-07-15
 
@@ -2385,8 +2388,18 @@ the smoke test, and were not persisted in WebApp-FI configuration. WebApp-FI
 production containers remained healthy. The original Witness at
 `185.231.182.6` also remained healthy and unchanged at `webapp:0:vacant`.
 
-WebApp-IR SSH currently refuses connections, so its authenticated TLS probe to
-the replacement host is not yet evidence-complete. The UFW rule exists, but a
-rule is not proof of end-to-end reachability. No credential was delivered to a
-WebApp runtime, no Witness lease was acquired, no WebApp flag was enabled, no
-old Witness was retired, and no CDN or Arvan routing setting changed.
+WebApp-IR operator SSH is exposed on port `37067`, not the default port `22`.
+After using the correct port, the host reported UTC with synchronized NTP and
+direct TCP `443` to the replacement Witness succeeded. Its authenticated
+private-CA TLS/HMAC status request returned `200` with `webapp:0:vacant`; the
+same endpoint without authentication returned `401`. WebApp-IR and Witness
+timestamps were within the same second. The temporary client credential,
+private CA, and smoke helper existed only under `/run/witness-recovery-smoke`,
+were removed by an exit trap, and the replacement IP was not persisted in the
+WebApp-IR runtime configuration.
+
+Therefore replacement-host reachability is evidence-complete from both WebApp
+sites. No credential was delivered to a WebApp runtime, no Witness lease was
+acquired, no WebApp flag was enabled, no old Witness was retired, and no CDN or
+Arvan routing setting changed. Credential rotation/revocation and the real-host
+directional fault matrix remain mandatory before activation.
