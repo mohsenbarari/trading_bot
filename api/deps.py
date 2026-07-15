@@ -7,6 +7,7 @@ from jose import jwt, JWTError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm.exc import StaleDataError
 from core import security
 from core.config import settings
 from core.db import get_db
@@ -41,6 +42,43 @@ def _opaque_session_id(session_id: str | None) -> str | None:
     if not session_id:
         return None
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+
+
+def _ensure_user_access_allowed(user: User) -> None:
+    if user.is_deleted or is_user_global_web_locked(user):
+        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+    if user.must_change_password and user.role in [UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="REQUIRES_PASSWORD_CHANGE",
+        )
+
+
+async def _touch_last_seen(db: AsyncSession, user: User) -> User:
+    """Update presence without letting an optimistic-lock race fail the request."""
+    user_id = int(user.id)
+    for _attempt in range(3):
+        now = utc_now_naive()
+        if user.last_seen_at and (now - user.last_seen_at).total_seconds() <= 60:
+            return user
+
+        user.last_seen_at = now
+        try:
+            await db.commit()
+            return user
+        except StaleDataError:
+            await db.rollback()
+            stmt = (
+                select(User)
+                .where(User.id == user_id)
+                .execution_options(populate_existing=True)
+            )
+            user = (await db.execute(stmt)).scalar_one_or_none()
+            if user is None:
+                raise HTTPException(status_code=404, detail="User not found")
+
+    return user
 
 
 async def get_current_user(
@@ -115,23 +153,10 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-    if user.is_deleted:
-        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+    _ensure_user_access_allowed(user)
 
-    if is_user_global_web_locked(user):
-        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
-        
-    # Check if admin must change password (prevent doing anything else)
-    if user.must_change_password and user.role in [UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="REQUIRES_PASSWORD_CHANGE"
-        )
-        
-    # Update last_seen
-    if not user.last_seen_at or (utc_now_naive() - user.last_seen_at).total_seconds() > 60:
-        user.last_seen_at = utc_now_naive()
-        await db.commit()
+    user = await _touch_last_seen(db, user)
+    _ensure_user_access_allowed(user)
 
     set_request_context(
         actor_id=user.id,
