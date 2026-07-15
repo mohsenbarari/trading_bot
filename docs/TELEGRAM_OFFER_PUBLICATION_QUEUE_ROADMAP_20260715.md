@@ -5,7 +5,7 @@
 - تاریخ ایجاد: `2026-07-15`
 - شاخه اختصاصی: `candidate/telegram-offer-publication-queue`
 - مبنای شاخه: `main@ca6348af`
-- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند؛ قرارداد اجرایی و failure-injectionهای قطعی Stage 2 در `2026-07-15` پیاده و پاس شده‌اند. worker پایدار و اتصال runtime هنوز ساخته نشده و موضوع Stage 3 است.
+- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند و قرارداد اجرایی Stage 2 پاس شده است. ممیزی فنی/غیرفنی Stage 2.5 در `2026-07-15` challenge register را ایجاد کرد؛ Stage 3 تا تبدیل همه موارد `BLOCKER` به تصمیم ثبت‌شده مجاز نیست. worker پایدار و اتصال runtime هنوز ساخته نشده‌اند.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -372,6 +372,27 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - هنوز جدول/مدل صف مشترک، migration، PostgreSQL claim با `SKIP LOCKED`، limiter توزیع‌شده، feature flag، startup task و جایگزینی مسیرهای مستقیم Telegram ساخته نشده است.
 - بررسی schema نشان داد `offer_publication_states` فقط publication آفر و `telegram_notification_outbox` فقط پیام خصوصی را مدل می‌کنند؛ هیچ‌کدام به‌تنهایی method/payload عمومی، P0 تا P3، ترتیب داخلی P1 و cooldown مشترک مقصد را با قرارداد کامل نگه نمی‌دارند. Stage 3 باید adapter پایدار و migration حداقلی را بر همین اساس اضافه کند.
 
+### Stage 2.5 — ممیزی چالش‌ها و گیت پیش از کدنویسی worker
+
+هدف این Stage جلوگیری از کشف دیرهنگام مسئله در توسعه، staging یا production است. ایجاد challenge register به معنی حل چالش‌ها نیست؛ موارد `BLOCKER` باید قبل از اولین migration یا worker پایدار به ADR، SLO، owner و تست پذیرش قابل اجرا تبدیل شوند.
+
+خروجی‌های اجباری:
+
+- ثبت چالش‌های فنی و غیرفنی با failure mode، کنترل پیشگیرانه و شاهد بسته‌شدن
+- تفکیک blockerهای قبل از کدنویسی از مواردی که در Stage 3 یا Stage 4 قابل حل‌اند
+- ثبت ADR برای ظرفیت/عمر آفر، منبع حقیقت صف، مرز Iran/foreign، timeout مبهم، limiter و rollout نسخه مختلط
+- تعیین SLOهای تجربه کاربر، زمان publication، backlog، P0 callback و incident response
+- تعیین owner عملیاتی، مسیر escalation، مجوز go/no-go و نگهداری حساب‌ها و credentialهای staging
+- افزودن تست یا preflight متناظر برای هر چالش قابل‌آزمایش
+
+معیار خروج:
+
+- هیچ مورد `BLOCKER` بدون تصمیم باقی نماند.
+- هر تصمیم دارای owner، stage اجرا، تست پذیرش و rollback باشد.
+- تعارض میان «پذیرش ۳ آفر بر ثانیه»، ظرفیت واقعی یک کانال و عمر دو دقیقه‌ای آفر صریحاً تعیین تکلیف شود.
+- طراحی migration و rollout ثابت کند در هیچ بازه‌ای direct sender و worker جدید یک job منطقی را دو بار ارسال نمی‌کنند.
+- مالک محصول و مالک عملیات گزارش challenge closure را پیش از شروع Stage 3 تأیید کنند.
+
 ### Stage 3 — پیاده‌سازی پشت feature flag
 
 - producer اتمیک publication intent
@@ -412,36 +433,141 @@ goodput = SENT / wall_clock_time_including_cooldowns
 
 راهنمای وضعیت:
 
+- `BLOCKER`: شروع Stage 3 تا ثبت تصمیم و معیار پذیرش این مورد ممنوع است.
 - `OPEN`: قرارداد هنوز بسته نشده است.
 - `DECIDED`: تصمیم گرفته شده ولی پیاده‌سازی نشده است.
 - `IMPLEMENTED`: کد و تست تکمیل شده است.
 - `VERIFIED`: در staging با شواهد تأیید شده است.
 
-| شناسه | اولویت | وضعیت | چالش | خروجی لازم |
-| --- | --- | --- | --- | --- |
-| `TOPQ-C01` | P0 | DECIDED | یک بات، یک کانال و یک پیام مستقل برای هر آفر | حفظ معماری بدون batching یا کانال اضافه |
-| `TOPQ-C02` | P0 | DECIDED | پذیرش پایدار آفر مستقل از Telegram side effect | تراکنش offer + pending publication |
-| `TOPQ-C03` | P0 | DECIDED | تجربه عادی کاربر در خطای موقت Telegram | پاسخ یکسان پس از commit و عدم نمایش queue/error |
-| `TOPQ-C04` | P0 | DECIDED | اولویت پیام‌ها | P0 تا P3 و ترتیب داخلی P1 مطابق این سند |
-| `TOPQ-C05` | P0 | DECIDED | رفتار `429` | pending، cooldown طبق retry_after و retry بدون fail |
-| `TOPQ-C06` | P0 | DECIDED | کاهش دو edit terminal به یک API call | متن نهایی و حذف دکمه در یک editMessageText |
-| `TOPQ-C07` | P0 | OPEN | قرارداد timeout با نتیجه نامشخص | جلوگیری از duplicate بدون حذف پیام محتمل‌الارسال |
-| `TOPQ-C08` | P0 | OPEN | سناریوی کامل staging | سند سناریو، load generator، stop condition و گزارش |
-| `TOPQ-C09` | P0 | OPEN | انتخاب interval نهایی | آزمایش پرتکرار و goodput پایدار در بار ترکیبی |
-| `TOPQ-C10` | P0 | OPEN | یک scheduler مشترک برای مسیرهای مستقیم و workerها | حذف bypass و اعمال global/per-destination limiter |
-| `TOPQ-C11` | P1 | DECIDED | آفر terminal پیش از publication | بازخوانی وضعیت و تبدیل به DISABLED بدون ارسال stale |
-| `TOPQ-C12` | P1 | OPEN | جلوگیری از starvation و backlog غیرقابل‌مشاهده | metrics، aging policy و ظرفیت رزروشده |
-| `TOPQ-C13` | P1 | OPEN | reconciliation دقیق active/history | گزارش شناسه، علت، retry و تفکیک خطای تاریخی |
-| `TOPQ-C14` | P1 | OPEN | پوشش تمام کالاها و حالات تجارت | acceptance matrix کامل و fixture read-only production |
-| `TOPQ-C15` | P1 | DECIDED | مرز اجرای Telegram | foreign-only execution و عدم اجرای مستقیم روی Iran |
-| `TOPQ-C16` | P1 | OPEN | rollout و rollback بدون گم‌شدن pendingها | feature flag، drain/pause و runbook |
-| `TOPQ-C17` | P0 | DECIDED | دریافت واقعی همه پاسخ‌های طبیعی Telegram | catalog پاسخ کسب‌وکار، ارسال واقعی، observer سمت گیرنده و تطبیق ledger |
-| `TOPQ-C18` | P0 | DECIDED | نسبت بار معتبر و نامعتبر | `1800` آفر معتبر به‌اضافه `400` تلاش نامعتبر در هر دور ده‌دقیقه‌ای |
-| `TOPQ-C19` | P1 | DECIDED | استفاده امن از الگوی آفر production | sampler فقط‌خواندنی، حذف هویت و بازسازی payload برای staging |
-| `TOPQ-C20` | P0 | DECIDED | pool کاربری نزدیک‌تر به بازار بدون تغییر production | `max_active_offers=50` فقط در staging، pool پایه ۸۰ حساب و guard عدم نشت به production |
+### 13.1 شواهد ممیزی پیش از کدنویسی
+
+- جست‌وجوی ایستا در `bot/`, `api/` و `core/` حدود `340` محل متنی مرتبط با `send_message`, edit و callback answer پیدا کرد. این عدد شامل wrapper و تعریف متد نیز هست و شمار side effect واقعی نیست، اما نشان می‌دهد جایگزینی فقط دو مسیر ساخت آفر برای یک limiter مشترک کافی نیست.
+- مسیر Bot اکنون `bot.send_message` کانال را داخل جریان publication اجرا می‌کند و شکست آن می‌تواند بعد از ثبت Offer به exception کاربرپسند نامناسب منجر شود.
+- API نیز publication را در request آفر اجرا می‌کند؛ در نتیجه direct producer، repair worker و مسیرهای edit می‌توانند هم‌زمان مالک یک side effect منطقی شوند.
+- `run_bot.py` هم‌اکنون workerهای publication، trade delivery، admin broadcast و notification outbox را کنار هم شروع می‌کند؛ worker جدید بدون برنامه مالکیت باعث رقابت یا duplicate می‌شود.
+- `core/telegram_gateway.py` در وضعیت فعلی `HTTP 200` را بدون کنترل صریح `response_json.ok` موفق می‌داند، برای هر درخواست client جدید می‌سازد و endpoint اصلی Telegram را hardcode کرده است. بنابراین `HTTP 200 + ok=false`، connection churn و Test Bot API نیازمند اصلاح طراحی هستند.
+- برخی مسیرهای فعلی `retry_after` را تا `120` یا `300` ثانیه محدود می‌کنند؛ قرارداد جدید باید مقدار اعلامی Telegram را به‌اضافه safety margin رعایت کند و truncation فقط با دلیل و alert مجاز باشد.
+- `offer_publication_states` method/payload/priority/lease عمومی ندارد و `telegram_notification_outbox` برای پیام خصوصی طراحی شده است. استفاده هم‌زمان از هر دو به‌عنوان منبع حقیقت صف مبهم است.
+- sync فعلی فیلدهای provider و lease را local-only نگه می‌دارد. intent قابل‌ساخت روی Iran و اجرای foreign باید بدون sync loop و بدون انتقال lease پیاده شود.
+- Alembic در checkout فعلی یک head با شناسه `f1b6e7f8a9dc` دارد، اما این پروژه سابقه revisionهای اجراشده از شاخه دیگر را دارد؛ برابری graph فایل‌ها و head واقعی هر دو دیتابیس بخشی از preflight migration است.
+
+### 13.2 هشدار ظرفیت و عمر آفر
+
+این یک مثال تحلیلی است، نه پیش‌بینی نتیجه staging. اگر ورودی آفر `λ=3/s`، ظرفیت خام publication کانال `μ=1/s` و عمر آفر `L=120s` باشد، حتی بدون هیچ edit دیگری، انتظار تقریبی آفر ثبت‌شده در زمان `t` برابر `(λ/μ - 1) × t = 2t` ثانیه می‌شود. از حدود ثانیه `60` به بعد، انتظار از عمر باقی‌مانده آفر عبور می‌کند؛ در این مثال فقط حدود `180` آفر ابتدای دور ده‌دقیقه‌ای فرصت publication پیش از expiry دارند. terminal edit، partial edit و پیام بازار ظرفیت publication جدید را کمتر می‌کنند.
+
+صف از گم‌شدن رکورد جلوگیری می‌کند، اما کمبود ظرفیت کانال را برطرف نمی‌کند. بنابراین یکی از این قراردادها باید پیش از کدنویسی انتخاب شود:
+
+1. expiry همچنان از زمان ثبت محاسبه شود و پذیرفته شود که بخشی از آفرهای پیک هرگز در کانال ظاهر نمی‌شوند؛
+2. زمان expiry برای pending publication تغییر کند؛ این گزینه semantics بازار و تازگی قیمت را عوض می‌کند؛
+3. admission/backpressure با ظرفیت کانال هماهنگ شود؛ این گزینه پذیرش سه آفر بر ثانیه را محدود می‌کند؛
+4. SLO یا محدودیت معماری تغییر کند؛ افزودن کانال، batching و ناشر دوم فعلاً طبق تصمیم محصول خارج از scope هستند.
+
+### 13.3 تصمیم‌های قبلی و چالش‌های پایه
+
+| شناسه | نوع | اولویت | وضعیت | چالش | خروجی لازم |
+| --- | --- | --- | --- | --- | --- |
+| `TOPQ-C01` | محصول | P0 | DECIDED | یک بات، یک کانال و یک پیام مستقل برای هر آفر | حفظ معماری بدون batching یا کانال اضافه |
+| `TOPQ-C02` | فنی | P0 | DECIDED | پذیرش پایدار آفر مستقل از Telegram side effect | تراکنش Offer + intent پایدار |
+| `TOPQ-C03` | UX | P0 | DECIDED | تجربه عادی کاربر در خطای موقت Telegram | پاسخ یکسان پس از commit و عدم نمایش queue/error |
+| `TOPQ-C04` | محصول/فنی | P0 | DECIDED | اولویت پیام‌ها | P0 تا P3 و ترتیب داخلی P1 مطابق این سند |
+| `TOPQ-C05` | فنی | P0 | DECIDED | رفتار `429` | pending، cooldown طبق retry_after و retry بدون fail |
+| `TOPQ-C06` | فنی | P0 | DECIDED | کاهش دو edit terminal به یک API call | متن نهایی و حذف دکمه در یک editMessageText |
+| `TOPQ-C07` | فنی | P0 | BLOCKER | timeout با نتیجه نامشخص و نبود exactly-once در Bot API | ADR جلوگیری از retry کور، وضعیت AMBIGUOUS و reconciliation قابل‌اثبات |
+| `TOPQ-C08` | تست/عملیات | P0 | OPEN | سناریوی کامل staging | load generator، stop condition و گزارش واقعی |
+| `TOPQ-C09` | فنی/عملیات | P0 | OPEN | انتخاب interval نهایی | آزمایش پرتکرار و goodput پایدار در بار ترکیبی |
+| `TOPQ-C10` | معماری | P0 | BLOCKER | scheduler مشترک در برابر مسیرهای مستقیم و workerها | inventory مالکیت و طرح حذف bypass پیش از تغییر producer |
+| `TOPQ-C11` | محصول/فنی | P1 | DECIDED | آفر terminal پیش از publication | بازخوانی وضعیت و تبدیل به DISABLED بدون ارسال stale |
+| `TOPQ-C12` | فنی/عملیات | P1 | OPEN | starvation و backlog غیرقابل‌مشاهده | metrics، aging policy و ظرفیت رزروشده |
+| `TOPQ-C13` | عملیات | P1 | OPEN | reconciliation دقیق active/history | گزارش شناسه، علت، retry و تفکیک خطای تاریخی |
+| `TOPQ-C14` | تست | P1 | OPEN | پوشش تمام کالاها و حالات تجارت | acceptance matrix و fixture read-only production |
+| `TOPQ-C15` | معماری | P1 | DECIDED | مرز اجرای Telegram | foreign-only execution و عدم اجرای مستقیم روی Iran |
+| `TOPQ-C16` | انتشار | P0 | BLOCKER | rollout و rollback بدون گم‌شدن pending یا double-send | versioned flag، drain/pause، ترتیب receiver-first و runbook |
+| `TOPQ-C17` | تست | P0 | DECIDED | دریافت واقعی همه پاسخ‌های طبیعی Telegram | observer سمت گیرنده و تطبیق ledger |
+| `TOPQ-C18` | محصول/تست | P0 | DECIDED | نسبت بار معتبر و نامعتبر | `1800` آفر معتبر + `400` تلاش نامعتبر |
+| `TOPQ-C19` | حریم خصوصی | P1 | DECIDED | استفاده امن از الگوی آفر production | sampler فقط‌خواندنی، حذف هویت و بازسازی staging |
+| `TOPQ-C20` | عملیات تست | P0 | DECIDED | pool کاربری واقعی بدون تغییر production | `max_active_offers=50` فقط staging، ۸۰ حساب و guard عدم نشت |
+
+### 13.4 چالش‌های فنی تفصیلی
+
+| شناسه | شدت | وضعیت | چالش و failure mode | کنترل یا تصمیم لازم | شاهد بسته‌شدن |
+| --- | --- | --- | --- | --- | --- |
+| `TOPQ-C21` | بحرانی | BLOCKER | ظرفیت کانال کمتر از ورودی و expiry دو دقیقه‌ای؛ Offer پذیرفته می‌شود ولی قبل از publication terminal می‌شود | ADR ظرفیت/عمر آفر و حداقل channel-goodput قابل‌قبول | مدل ظرفیت برای بار ترکیبی + تصمیم مالک محصول + تست backlog/expiry |
+| `TOPQ-C22` | بحرانی | BLOCKER | نامشخص‌بودن منبع حقیقت میان جدول جدید، `offer_publication_states` و outboxهای فعلی | ADR schema و مالک واحد هر job؛ یک dedupe identity و state machine | ERD، migration plan و تست unique/concurrent enqueue |
+| `TOPQ-C23` | بحرانی | BLOCKER | Offer روی home server ثبت می‌شود ولی Telegram فقط foreign اجرا می‌شود؛ intent ممکن است بین commit و sync گم یا دیر برسد | ثبت Offer و intent در یک تراکنش محلی و sync durable بر پایه natural identity | تست قطع peer پس از commit و تحویل دقیق پس از recovery |
+| `TOPQ-C24` | بحرانی | BLOCKER | crash بعد از پذیرش Telegram و قبل از ثبت `message_id` می‌تواند duplicate یا پیام گم‌شده بسازد | قرارداد AMBIGUOUS، timeout/lease fencing و reconciliation؛ idempotency key داخلی تضمین Telegram نیست | fault test در مرز send/commit بدون retry کور |
+| `TOPQ-C25` | بحرانی | BLOCKER | scope پاسخ `429` صریحاً global یا chat-local اعلام نمی‌شود؛ pause فقط مقصد ممکن است storm را به مقصدهای دیگر منتقل کند | limiter دو‌سطحی bot/destination با رفتار محافظه‌کارانه و probe کنترل‌شده | تست 429 هم‌زمان چند مقصد و اثبات نبود retry storm |
+| `TOPQ-C26` | بحرانی | BLOCKER | `answerCallbackQuery` زمان‌حساس است و queue طولانی progress bar کاربر را باز نگه می‌دارد یا query را stale می‌کند | SLO جدا برای P0، deadline/TTL و terminalization بدون retry دیرهنگام | p95/p99 callback latency و تست query-too-old |
+| `TOPQ-C27` | بحرانی | BLOCKER | صدها call site مستقیم aiogram/raw HTTP می‌توانند scheduler را دور بزنند | inventory machine-readable، gateway اجباری و static guard در CI | صفر call site غیرمجاز در allowlist و تست runtime bypass |
+| `TOPQ-C28` | بحرانی | BLOCKER | نسخه مختلط: producer قدیمی مستقیم می‌فرستد و producer/worker جدید همان event را enqueue می‌کند | rollout دو‌فازی با ownership flag و producer/consumer compatibility matrix | تست mixed-version و شمار دقیق یک side effect |
+| `TOPQ-C29` | بالا | OPEN | FIFO با ID محلی یا timestamp بین Iran/foreign و در clock skew پایدار نیست | ترتیب پایدار با source identity/sequence و tie-breaker قطعی | property test reorder/sync delay/clock skew |
+| `TOPQ-C30` | بالا | OPEN | strict priority می‌تواند P2/P3 یا حتی publication جدید P1 را برای همیشه گرسنه کند | aging، reserved capacity و max-wait per class بدون شکستن P0/P1 | endurance با backlog و max-age هر priority |
+| `TOPQ-C31` | بالا | OPEN | publish، partial edit و terminal edit یک Offer ممکن است out-of-order یا هم‌زمان شوند | dependency/supersession و coalescing بر پایه offer version | تست publish→partial→terminal با تمام reorderها |
+| `TOPQ-C32` | بالا | OPEN | snapshot payload stale می‌شود؛ rebuild کامل نیز ممکن است به داده sync‌نشده یا حذف‌شده وابسته باشد | قرارداد hybrid: identity + immutable snapshot + rebuild از آخرین state معتبر | تست تغییر قیمت/لات/status قبل از claim |
+| `TOPQ-C33` | بالا | OPEN | message ID در Offer و publication state می‌تواند ناسازگار، مفقود یا متعلق به مقصد اشتباه باشد | canonical message identity و validation chat/message before edit | reconciliation دو منبع و fault message-not-found |
+| `TOPQ-C34` | بالا | OPEN | طبقه‌بندی خطا باید method و destination-aware باشد؛ `403` کانال با blocked private user یکسان نیست | catalog `400/401/403/404/409/429/5xx/transport` برای هر method | table-driven tests برای تمام response classها |
+| `TOPQ-C35` | بالا | OPEN | lease کوتاه‌تر از HTTP timeout یا recovery هم‌زمان با send باعث دو worker فعال می‌شود | lease > timeout+margin، heartbeat/fencing و recheck پیش از side effect | restart/slow-network test با دو worker و یک send |
+| `TOPQ-C36` | بالا | OPEN | claim با `SKIP LOCKED` view ناسازگار می‌دهد و بدون index مناسب scan/lock contention می‌سازد | query/index بر priority,next_retry,id و transaction کوتاه؛ HTTP خارج transaction | `EXPLAIN ANALYZE` و PostgreSQL concurrency test |
+| `TOPQ-C37` | بالا | OPEN | رفتار DB، Redis و Telegram outage متفاوت است؛ fail-open limiter می‌تواند burst ناامن بسازد | matrix degraded mode: DB fail request، Redis fail-closed send، Telegram backlog | chaos test هر outage و drain پس از recovery |
+| `TOPQ-C38` | بالا | OPEN | sync worker ممکن است statusهای execution را loop کند یا lease foreign را overwrite کند | field policy shared intent/local lease، receiver guard و natural-key upsert | sync parity و bidirectional replay tests |
+| `TOPQ-C39` | بالا | OPEN | workerهای publication، trade، broadcast و notification semantics retry متفاوت دارند | migration map برای ادغام یا adapter؛ هر job فقط یک consumer owner | ownership matrix و تست نبود claim متقاطع |
+| `TOPQ-C40` | بالا | OPEN | worker جدید باید در background authority، startup/shutdown و feature flag درست ثبت شود | flag پیش‌فرض خاموش، foreign-only guard و graceful cancellation | startup surface tests و task recreation evidence |
+| `TOPQ-C41` | بحرانی | OPEN | gateway ممکن است `HTTP 200 + ok=false` را success ببیند، connection pooling ندارد و Test endpoint hardcode است | parse envelope `ok/result/error`, client مشترک lifecycle-safe و base URL allowlisted | contract tests envelope/body/TLS و smoke Test Bot API |
+| `TOPQ-C42` | بالا | OPEN | truncation فعلی `retry_after` و safety margin ناسازگار با قرارداد مالک محصول است | ذخیره مقدار خام، cap فقط با alert و config جدا برای safety margin | تست retry_after بزرگ/مفقود و زمان‌بندی دقیق |
+| `TOPQ-C43` | متوسط | OPEN | backlog و audit rowها باعث رشد table/index، bloat و query degradation می‌شوند | retention/archival، index partial و vacuum capacity plan | load test چندبرابر horizon و size/query SLO |
+| `TOPQ-C44` | بالا | OPEN | metrics process-local، high-cardinality یا حاوی PII می‌تواند alert را گم یا داده را افشا کند | metrics مشترک کم‌کاردینال، hash identity و ledger امن | dashboard/alert test و privacy review |
+| `TOPQ-C45` | بالا | OPEN | worker foreign نباید Offer مرجع Iran را expire/mutate کند؛ market close نیز ممکن است هنگام backlog برسد | re-read state و market authority؛ فقط delivery state روی foreign | test home_server/peer outage/market-close reorder |
+| `TOPQ-C46` | بالا | OPEN | terminal text و حذف button اگر دوباره دو call شوند state نیمه‌کاره می‌سازند | یک `editMessageText` با empty inline keyboard و idempotent no-op | یک gateway call در test و receiver observation |
+| `TOPQ-C47` | بالا | OPEN | ۴۰۰ ورودی نامعتبر یا replay conflict ممکن است اشتباهاً intent بسازند | producer فقط پس از validation/admission و در transaction موفق | شمار صفر Offer/job برای تمام invalid manifest |
+| `TOPQ-C48` | بحرانی | OPEN | token/channel/base URL اشتباه می‌تواند load staging را به production بفرستد | environment fingerprint، allowlist مقصد و preflight fail-closed | negative test با production token/channel و refusal log |
+| `TOPQ-C49` | بالا | OPEN | observer ممکن است update را از دست بدهد و delivery سالم را missing گزارش کند | offset/session checkpoint، receiver dedupe و سه‌جانبه sender/API/receiver ledger | restart observer test بدون gap/duplicate |
+| `TOPQ-C50` | بالا | OPEN | تولید زنده 401/403 یا خراب‌کردن token/channel می‌تواند محیط staging را مختل کند | fault adapter برای خطاهای مخرب و جداسازی natural-response run | test matrix با عدم تغییر credential زنده |
+| `TOPQ-C51` | بحرانی | OPEN | migration graph یا head دو دیتابیس ممکن است متفاوت باشد و rollback schema pendingها را orphan کند | preflight graph/head، migration additive و rollback forward-compatible | upgrade/downgrade scratch + head equality هر دو staging DB |
+| `TOPQ-C52` | بالا | OPEN | load generator خود می‌تواند bottleneck شود یا burst طبیعی را صاف کند؛ تعداد job بسیار بیشتر از تعداد Offer است | seed/trace replay، barrier concurrency و ledger مشتقات P0-P3 | generator self-metrics و تطبیق دقیق expected/actual |
+| `TOPQ-C53` | بحرانی | OPEN | مقدار staging `max_active_offers=50` یا cache آن ممکن است به production نشت کند | authority Iran staging، environment guard و readback دو peer | preflight ثابت کند staging=50 و default/production=4 |
+| `TOPQ-C54` | بالا | OPEN | payload، error body، bot token، MTProto session و fixture ممکن است PII/secret افشا کنند | کمینه‌سازی payload، redaction، encryption/permission و secret rotation | secret scan، log review و دسترسی حداقلی |
+| `TOPQ-C55` | متوسط | OPEN | job permanent/ambiguous بدون ابزار pause، inspect، retry امن یا cancel عملیاتی گیر می‌کند | operator command audited با dry-run و dedupe guard | runbook exercise روی job مصنوعی |
+
+### 13.5 چالش‌های غیرفنی و عملیاتی
+
+| شناسه | شدت | وضعیت | چالش و اثر | تصمیم یا کنترل لازم | شاهد بسته‌شدن |
+| --- | --- | --- | --- | --- | --- |
+| `TOPQ-N01` | بحرانی | BLOCKER | تعریف «ثبت موفق» روشن است، اما SLO دیده‌شدن در کانال و سقف lag هنوز مشخص نیست | SLO publication/backlog و تعریف حالت breach | تأیید مالک محصول و alert threshold ثبت‌شده |
+| `TOPQ-N02` | بحرانی | BLOCKER | تعارض ظرفیت یک کانال با expiry دو دقیقه‌ای می‌تواند انتظار کاربر را نقض کند | انتخاب صریح یکی از چهار سیاست بخش 13.2 | ADR امضاشده و acceptance test متناظر |
+| `TOPQ-N03` | بالا | BLOCKER | متن موفقیت یکسان هنوز طبق خود roadmap نیازمند تأیید نهایی پیش از تغییر کد است | تأیید copy برای Bot و WebApp و failure واقعی DB | متن مصوب و snapshot تست UX |
+| `TOPQ-N04` | بالا | OPEN | کاربر نباید خطای داخلی ببیند، اما support باید offer منتشرنشده را قابل پیگیری بداند | شناسه داخلی، admin view و پاسخ پشتیبانی بدون افشای جزئیات | سناریوی support و زمان پاسخ مشخص |
+| `TOPQ-N05` | بحرانی | BLOCKER | owner alert، on-call و اختیار pause/resume مشخص نیست | RACI برای محصول، backend، عملیات و امنیت | نام roleها، escalation و زمان پاسخ |
+| `TOPQ-N06` | بالا | OPEN | ساخت و نگهداری ۸۰ حساب، channel و observer هزینه و کار عملیاتی دارد | بودجه، owner credential و برنامه rotation/recovery | inventory بدون secret و health check دوره‌ای |
+| `TOPQ-N07` | بالا | OPEN | نمونه‌برداری production حتی read-only ریسک حریم خصوصی و دسترسی بیش از نیاز دارد | query allowlist، anonymization و retention کوتاه | privacy review و artifact غیرهویتی |
+| `TOPQ-N08` | متوسط | OPEN | load ده‌دقیقه‌ای و endurance می‌تواند staging مشترک را برای تیم‌های دیگر غیرقابل‌استفاده کند | پنجره تست، رزرو محیط و اعلان شروع/پایان | تقویم اجرا و sign-off مسئول staging |
+| `TOPQ-N09` | متوسط | OPEN | raw evidence حجیم است و بدون retention/versioning قابل بازبینی نیست | قالب report، محل نگهداری، retention و checksum | artifact manifest قابل بازتولید |
+| `TOPQ-N10` | بالا | OPEN | اختیار go/no-go، stop test، rollback و production canary مبهم است | gate owner و stop conditions غیرقابل‌چشم‌پوشی | checklist امضاشده قبل از هر deploy |
+| `TOPQ-N11` | متوسط | DECIDED | scope creep به کانال دوم، batching، paid broadcast یا bot واسط | حفظ one-bot/one-channel تا تصمیم صریح جدید | review scope در هر ADR/PR |
+| `TOPQ-N12` | بالا | OPEN | رفتار و محدودیت Telegram تغییرپذیر است؛ interval امروز قرارداد دائمی نیست | owner بازبینی دوره‌ای docs و recalibration trigger | schedule و trigger پس از 429/تغییر API |
+| `TOPQ-N13` | بالا | OPEN | automation حساب‌های واقعی، flood یا session compromise می‌تواند حساب‌ها را محدود/مسدود کند | استفاده Test DC برای coverage، نرخ کنترل‌شده در main DC و review شرایط استفاده | risk acceptance و account safety runbook |
+| `TOPQ-N14` | متوسط | OPEN | اپراتور ممکن است ambiguous/permanent job را با retry دستی ناامن duplicate کند | آموزش و ابزار audited؛ ممنوعیت SQL update مستقیم | tabletop exercise و audit trail |
+| `TOPQ-N15` | بالا | OPEN | Test DC عمومی‌تر است، داده‌ها دوره‌ای پاک می‌شوند و flood limit می‌تواند سخت‌گیرانه‌تر باشد | عدم ذخیره داده مهم، bootstrap تکرارپذیر و جداسازی هدف correctness از rate calibration | rebuild کامل pool و اجرای smoke از صفر |
+| `TOPQ-N16` | متوسط | OPEN | cleanup هزاران پیام خود rate مصرف می‌کند و دور بعدی را آلوده می‌کند | cleanup خارج measurement با cooldown و owner | backlog صفر و cooldown evidence قبل از run بعدی |
+| `TOPQ-N17` | بالا | OPEN | production canary اجازه بار مصنوعی ندارد، پس بعضی failure modeها آنجا قابل اثبات نیستند | تعیین اینکه چه شواهد staging برای go-live کافی است و چه چیزی فقط monitor می‌شود | canary matrix و stop threshold |
+| `TOPQ-N18` | متوسط | OPEN | alert زیاد یا P3 backlog ممکن است alert fatigue بسازد | severity، aggregation و dedupe alert | تمرین incident با alert قابل‌اقدام |
+
+### 13.6 ADRهای اجباری پیش از Stage 3
+
+| ADR | موضوع | چالش‌های پوشش‌داده‌شده |
+| --- | --- | --- |
+| `TOPQ-ADR-01` | ظرفیت کانال، SLO publication و semantics expiry در backlog | `C21`, `N01`, `N02` |
+| `TOPQ-ADR-02` | schema، منبع حقیقت، dedupe و مرز atomic producer/sync | `C22`, `C23`, `C29`, `C38` |
+| `TOPQ-ADR-03` | timeout/crash ambiguity، lease و reconciliation | `C07`, `C24`, `C35`, `C55` |
+| `TOPQ-ADR-04` | scheduler دو‌سطحی، priority، P0 deadline و outage mode | `C10`, `C25`, `C26`, `C30`, `C37` |
+| `TOPQ-ADR-05` | inventory gateway، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41` |
+| `TOPQ-ADR-06` | RACI، copy نهایی، incident response و go/no-go | `N03`, `N05`, `N10`, `N14` |
+
+هر ADR باید حداقل شامل گزینه‌های ردشده، دلیل انتخاب، اثر روی داده و sync، failure mode، feature flag، migration، تست، observability و rollback باشد.
 
 ## 14. معیار پذیرش نهایی
 
+- پیش از شروع Stage 3، همه موارد `BLOCKER` به `DECIDED` تبدیل و ADRهای بخش 13.6 تأیید شده باشند.
+- هر چالش فنی و غیرفنی owner، stage هدف، تست یا شاهد پذیرش و rollback داشته باشد؛ مورد بدون شاهد «بسته» محسوب نمی‌شود.
+- ظرفیت/عمر آفر و معنای SLO publication به تصمیم صریح محصول رسیده باشد؛ backlog مورد انتظار نباید بعداً به‌عنوان باگ ناشناخته گزارش شود.
 - نرخ پذیرش حداقل سه آفر در ثانیه بدون ازدست‌رفتن رکورد صف تأیید شود.
 - هر آفر یک پیام مستقل داشته باشد و batching وجود نداشته باشد.
 - هیچ `429` به `FAILED` یا انقضای آفر منجر نشود.
@@ -466,14 +592,27 @@ goodput = SENT / wall_clock_time_including_cooldowns
 ## 15. منابع پایه
 
 - Telegram Bots FAQ: `https://core.telegram.org/bots/faq`
+- Telegram Bot API response envelope: `https://core.telegram.org/bots/api#making-requests`
 - Telegram Bot API `ResponseParameters.retry_after`: `https://core.telegram.org/bots/api#responseparameters`
+- Telegram Bot API `answerCallbackQuery`: `https://core.telegram.org/bots/api#answercallbackquery`
 - Telegram Bot API `editMessageText`: `https://core.telegram.org/bots/api#editmessagetext`
+- Telegram dedicated test environment: `https://core.telegram.org/bots/features#dedicated-test-environment`
+- Telegram Test DC accounts and data warning: `https://core.telegram.org/api/auth#test-accounts`
+- PostgreSQL `SKIP LOCKED` queue semantics: `https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE`
 - `models/offer_publication_state.py`
+- `models/telegram_notification_outbox.py`
 - `core/services/telegram_offer_publication_service.py`
 - `core/services/telegram_offer_channel_service.py`
 - `core/services/offer_publication_reconciliation_service.py`
 - `core/offer_publication_worker.py`
 - `core/telegram_notification_outbox_worker.py`
+- `core/telegram_admin_broadcast_worker.py`
+- `core/trade_delivery_worker.py`
 - `core/telegram_gateway.py`
+- `core/background_job_authority.py`
+- `core/sync_field_policy.py`
+- `core/events.py`
+- `api/routers/sync.py`
 - `bot/handlers/trade_create.py`
 - `api/routers/offers.py`
+- `run_bot.py`
