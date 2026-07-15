@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from datetime import datetime, timedelta, timezone
 import os
 import unittest
 
@@ -14,8 +15,12 @@ from core.writer_witness_control import (
     ACTION_ACQUIRE,
     WriterWitnessError,
     load_witness_snapshot,
+    persist_witness_rejection,
     transition_witness_state,
 )
+
+
+NOW = datetime(2026, 7, 15, 14, 0, tzinfo=timezone.utc)
 
 
 def test_database_url() -> str:
@@ -126,6 +131,71 @@ class WriterWitnessPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(durable.writer_epoch, 1)
         self.assertEqual(durable.holder_site, winner.state.holder_site)
         self.assertEqual(receipt_count, 1)
+
+    async def test_durable_rejection_blocks_delayed_acquisition_replay(self):
+        async with self.sessions() as session:
+            acquired = await transition_witness_state(
+                session,
+                action=ACTION_ACQUIRE,
+                requester_site="webapp_fi",
+                expected_epoch=0,
+                expected_lease_id=None,
+                request_id="postgres-fi-acquire",
+                operator="integration@example",
+                reason="initial term",
+                private_key_base64=self.private_key,
+                now=NOW,
+            )
+            await session.commit()
+
+        command = dict(
+            action=ACTION_ACQUIRE,
+            requester_site="webapp_ir",
+            expected_epoch=1,
+            expected_lease_id=acquired.state.lease_id,
+            request_id="postgres-delayed-ir",
+            operator="hmac:webapp_ir:ir-key",
+            reason="outage promotion",
+            private_key_base64=self.private_key,
+        )
+        async with self.sessions() as session:
+            try:
+                await transition_witness_state(
+                    session,
+                    **command,
+                    now=NOW + timedelta(seconds=10),
+                )
+            except WriterWitnessError as exc:
+                rejection = await persist_witness_rejection(
+                    session,
+                    action=command["action"],
+                    requester_site=command["requester_site"],
+                    expected_epoch=command["expected_epoch"],
+                    expected_lease_id=command["expected_lease_id"],
+                    request_id=command["request_id"],
+                    operator=command["operator"],
+                    reason=command["reason"],
+                    lease_duration_seconds=180,
+                    error=exc,
+                )
+                self.assertFalse(rejection.replayed)
+                await session.commit()
+            else:
+                self.fail("live FI lease must reject IR acquisition")
+
+        async with self.sessions() as session:
+            with self.assertRaises(WriterWitnessError) as replay:
+                await transition_witness_state(
+                    session,
+                    **command,
+                    now=NOW + timedelta(seconds=181),
+                )
+            await session.rollback()
+            durable = await load_witness_snapshot(session)
+
+        self.assertTrue(replay.exception.replayed)
+        self.assertEqual(durable.holder_site, "webapp_fi")
+        self.assertEqual(durable.writer_epoch, 1)
 
 
 if __name__ == "__main__":

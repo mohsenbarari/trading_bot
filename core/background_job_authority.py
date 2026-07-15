@@ -25,6 +25,7 @@ JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delive
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
 JOB_OTP_SMS_FALLBACK = "otp_sms_fallback"
+JOB_WRITER_WITNESS_RENEWAL = "writer_witness_renewal"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -40,6 +41,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_OFFER_TELEGRAM_PUBLICATION,
         JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
         JOB_OTP_SMS_FALLBACK,
+        JOB_WRITER_WITNESS_RENEWAL,
     }
 )
 
@@ -93,6 +95,24 @@ class BackgroundJobAuthorityError(RuntimeError):
 
 
 BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
+    JOB_WRITER_WITNESS_RENEWAL: BackgroundJobAuthorityEntry(
+        job_name=JOB_WRITER_WITNESS_RENEWAL,
+        mutated_tables=("webapp_writer_state", "webapp_writer_transitions"),
+        allowed_servers=(SERVER_IRAN,),
+        authority_rule=(
+            "active WebApp physical site only; renew the same witness epoch/lease through the "
+            "private authenticated control API and atomically import the signed proof locally"
+        ),
+        outage_behavior=(
+            "retry an ambiguous transport result with the same request id; if renewal cannot be "
+            "proved, local lease fencing stops WebApp-authoritative writes before expiry"
+        ),
+        sync_outbox_behavior=(
+            "writer control state and transition audit are site-local DR bookkeeping and must not "
+            "enter ordinary product sync"
+        ),
+        external_state=("Iran-reachable writer witness API",),
+    ),
     JOB_OFFER_EXPIRY: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_EXPIRY,
         mutated_tables=("offers",),

@@ -12,7 +12,7 @@ from uuid import uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.runtime_identity import WEBAPP_SITES
+from core.runtime_sites import WEBAPP_SITES
 from core.writer_witness_contract import sign_witness_lease_proof
 from models.webapp_writer_state import (
     WebappWriterWitnessReceipt,
@@ -29,6 +29,17 @@ WITNESS_COMMAND_VERSION = 1
 
 class WriterWitnessError(RuntimeError):
     """Raised when a witness request is stale, ambiguous, or unsafe."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "writer_witness_rejected",
+        replayed: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.replayed = replayed
 
 
 @dataclass(frozen=True)
@@ -51,6 +62,7 @@ class WitnessTransitionResult:
     def as_payload(self) -> dict[str, Any]:
         return {
             "contract_version": WITNESS_COMMAND_VERSION,
+            "accepted": True,
             "state": {
                 "holder_site": self.state.holder_site,
                 "writer_epoch": self.state.writer_epoch,
@@ -95,6 +107,13 @@ def witness_state_snapshot(state: WebappWriterWitnessState) -> WitnessStateSnaps
 def _result_from_payload(payload: dict[str, Any]) -> WitnessTransitionResult:
     if payload.get("contract_version") != WITNESS_COMMAND_VERSION:
         raise WriterWitnessError("stored witness receipt has an unsupported contract version")
+    if payload.get("accepted", True) is False:
+        error = payload.get("error") or {}
+        raise WriterWitnessError(
+            str(error.get("message") or "stored witness request was rejected"),
+            code=str(error.get("code") or "writer_witness_rejected"),
+            replayed=True,
+        )
     state = payload["state"]
     return WitnessTransitionResult(
         state=WitnessStateSnapshot(
@@ -136,7 +155,7 @@ async def _database_now(session: AsyncSession) -> datetime:
     return _utc(value)
 
 
-def _request_hash(
+def witness_command_request_hash(
     *,
     action: str,
     requester_site: str,
@@ -160,8 +179,7 @@ def _request_hash(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-async def transition_witness_state(
-    session: AsyncSession,
+def _normalized_command_values(
     *,
     action: str,
     requester_site: str,
@@ -170,10 +188,8 @@ async def transition_witness_state(
     request_id: str,
     operator: str,
     reason: str,
-    private_key_base64: str | None,
-    lease_duration_seconds: int = 180,
-    now: datetime | None = None,
-) -> WitnessTransitionResult:
+    lease_duration_seconds: int,
+) -> tuple[str, str, str, int, str]:
     if action not in WITNESS_ACTIONS:
         raise WriterWitnessError(f"unsupported witness action={action!r}")
     if requester_site not in WEBAPP_SITES:
@@ -188,8 +204,120 @@ async def transition_witness_state(
     duration = int(lease_duration_seconds)
     if duration < 30 or duration > 3600:
         raise WriterWitnessError("lease duration must be between 30 and 3600 seconds")
+    # Normalize the integer here so request hashing cannot disagree with the
+    # state comparison later in the transaction.
+    epoch = int(expected_epoch)
+    return request_id, operator, reason, duration, str(epoch)
 
-    request_hash = _request_hash(
+
+async def persist_witness_rejection(
+    session: AsyncSession,
+    *,
+    action: str,
+    requester_site: str,
+    expected_epoch: int,
+    expected_lease_id: str | None,
+    request_id: str,
+    operator: str,
+    reason: str,
+    lease_duration_seconds: int,
+    error: WriterWitnessError,
+) -> WriterWitnessError:
+    """Persist an authenticated state-dependent rejection as a one-shot command.
+
+    The caller must commit this transaction. Expected transition rejections do
+    not invalidate a SQLAlchemy transaction and occur before state mutation, so
+    recording the negative result closes the delayed-replay window without
+    altering witness ownership.
+    """
+
+    request_id, operator, reason, duration, _ = _normalized_command_values(
+        action=action,
+        requester_site=requester_site,
+        expected_epoch=expected_epoch,
+        expected_lease_id=expected_lease_id,
+        request_id=request_id,
+        operator=operator,
+        reason=reason,
+        lease_duration_seconds=lease_duration_seconds,
+    )
+    request_hash = witness_command_request_hash(
+        action=action,
+        requester_site=requester_site,
+        expected_epoch=expected_epoch,
+        expected_lease_id=expected_lease_id,
+        lease_duration_seconds=duration,
+        operator=operator,
+        reason=reason,
+    )
+    existing_receipt = await session.get(WebappWriterWitnessReceipt, request_id)
+    if existing_receipt is not None:
+        if existing_receipt.request_hash != request_hash:
+            return WriterWitnessError(
+                "request_id was already used with different parameters",
+                code="request_id_reused",
+                replayed=True,
+            )
+        try:
+            _result_from_payload(json.loads(existing_receipt.response_json))
+        except WriterWitnessError as stored:
+            return stored
+        return WriterWitnessError(
+            "request_id already completed successfully",
+            code="request_already_succeeded",
+            replayed=True,
+        )
+
+    transition_id = f"rejected:{uuid4()}"
+    response_json = json.dumps(
+        {
+            "contract_version": WITNESS_COMMAND_VERSION,
+            "accepted": False,
+            "error": {"code": error.code, "message": str(error)},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    session.add(
+        WebappWriterWitnessReceipt(
+            request_id=request_id,
+            request_hash=request_hash,
+            action=action,
+            transition_id=transition_id,
+            response_json=response_json,
+        )
+    )
+    await session.flush()
+    return error
+
+
+async def transition_witness_state(
+    session: AsyncSession,
+    *,
+    action: str,
+    requester_site: str,
+    expected_epoch: int,
+    expected_lease_id: str | None,
+    request_id: str,
+    operator: str,
+    reason: str,
+    private_key_base64: str | None,
+    lease_duration_seconds: int = 180,
+    now: datetime | None = None,
+) -> WitnessTransitionResult:
+    request_id, operator, reason, duration, _ = _normalized_command_values(
+        action=action,
+        requester_site=requester_site,
+        expected_epoch=expected_epoch,
+        expected_lease_id=expected_lease_id,
+        request_id=request_id,
+        operator=operator,
+        reason=reason,
+        lease_duration_seconds=lease_duration_seconds,
+    )
+
+    request_hash = witness_command_request_hash(
         action=action,
         requester_site=requester_site,
         expected_epoch=expected_epoch,

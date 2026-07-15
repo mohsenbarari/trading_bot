@@ -31,6 +31,24 @@ class Settings(BaseSettings):
     writer_witness_safety_margin_seconds: int = 15
     writer_witness_max_clock_skew_seconds: int = 5
     writer_witness_authoritative_site: str = "webapp_ir"
+    # Dedicated witness service and renewal transport. All remain disabled and
+    # unset until the three-site rollout gate is explicitly approved.
+    writer_witness_service_enabled: bool = False
+    writer_witness_database_url: str | None = None
+    writer_witness_product_database_user: str | None = None
+    writer_witness_require_distinct_database_identity: bool = True
+    writer_witness_service_webapp_fi_key_id: str | None = None
+    writer_witness_service_webapp_fi_secret: str | None = None
+    writer_witness_service_webapp_ir_key_id: str | None = None
+    writer_witness_service_webapp_ir_secret: str | None = None
+    writer_witness_internal_url: str | None = None
+    writer_witness_client_key_id: str | None = None
+    writer_witness_client_secret: str | None = None
+    writer_witness_auth_max_age_seconds: int = 15
+    writer_witness_http_timeout_seconds: float = 3.0
+    writer_witness_verify_tls: bool = True
+    writer_witness_ca_bundle: str | None = None
+    writer_witness_auto_renew_enabled: bool = False
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None

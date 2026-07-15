@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from core.runtime_identity import WEBAPP_SITES
+from core.runtime_sites import WEBAPP_SITES
 
 
 WITNESS_PROOF_VERSION = 1

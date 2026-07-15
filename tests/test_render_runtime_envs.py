@@ -35,6 +35,13 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "WRITER_WITNESS_SAFETY_MARGIN_SECONDS": "15",
             "WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS": "5",
             "WRITER_WITNESS_AUTHORITATIVE_SITE": "webapp_ir",
+            "WRITER_WITNESS_HTTP_TIMEOUT_SECONDS": "3.0",
+            "WRITER_WITNESS_AUTH_MAX_AGE_SECONDS": "15",
+            "IRAN_WRITER_WITNESS_INTERNAL_URL": "https://witness.internal",
+            "IRAN_WRITER_WITNESS_CLIENT_KEY_ID": "webapp-fi-v1",
+            "IRAN_WRITER_WITNESS_CLIENT_SECRET": "fi-secret-0123456789abcdef-0123456789abcdef",
+            "IRAN_WRITER_WITNESS_VERIFY_TLS": "true",
+            "IRAN_WRITER_WITNESS_CA_BUNDLE": "/run/secrets/witness-ca.pem",
             "CHANNEL_ID": "-100123",
             "CHANNEL_INVITE_LINK": "https://t.me/example",
             "SMSIR_API_KEY": "sms-key",
@@ -170,6 +177,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["ORIGIN_EXPECTED_MIGRATION_REVISION"], "d2e7f8a9b0c1")
         self.assertEqual(iran["WRITER_WITNESS_REQUIRED"], "false")
         self.assertEqual(iran["WRITER_WITNESS_PUBLIC_KEY"], "witness-public-key")
+        self.assertEqual(iran["WRITER_WITNESS_INTERNAL_URL"], "https://witness.internal")
+        self.assertEqual(iran["WRITER_WITNESS_CLIENT_KEY_ID"], "webapp-fi-v1")
+        self.assertEqual(
+            iran["WRITER_WITNESS_CLIENT_SECRET"],
+            "fi-secret-0123456789abcdef-0123456789abcdef",
+        )
+        self.assertEqual(foreign["WRITER_WITNESS_CLIENT_SECRET"], "")
+        self.assertNotIn("IRAN_WRITER_WITNESS_CLIENT_SECRET", iran)
         self.assertEqual(iran["RELEASE_SHA"], "release-sha")
         self.assertEqual(
             iran["OTP_DELIVERY_STATE_SECRET"],

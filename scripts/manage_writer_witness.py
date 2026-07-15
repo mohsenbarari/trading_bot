@@ -24,6 +24,7 @@ from core.writer_witness_control import (
     ACTION_RENEW,
     WriterWitnessError,
     load_witness_snapshot,
+    persist_witness_rejection,
     transition_witness_state,
 )
 from core.writer_witness_contract import WitnessProofError, witness_timing_configuration_is_safe
@@ -169,6 +170,21 @@ async def run(args: argparse.Namespace) -> dict:
                 lease_duration_seconds=duration,
             )
             await session.commit()
+        except WriterWitnessError as exc:
+            rejection = await persist_witness_rejection(
+                session,
+                action=args.action,
+                requester_site=args.requester_site,
+                expected_epoch=args.expected_epoch,
+                expected_lease_id=expected_lease_id,
+                request_id=args.request_id,
+                operator=args.operator,
+                reason=args.reason,
+                lease_duration_seconds=duration,
+                error=exc,
+            )
+            await session.commit()
+            raise rejection
         except Exception:
             await session.rollback()
             raise

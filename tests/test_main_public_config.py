@@ -191,8 +191,12 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
         ), patch.object(
             main.settings, "writer_witness_required", True
+        ), patch.object(
+            main.settings, "writer_witness_auto_renew_enabled", True
         ), patch(
             "main.witness_public_key_is_valid", return_value=True
+        ), patch(
+            "main.writer_witness_client_configuration_reasons", return_value=()
         ), patch.object(
             main.settings, "background_jobs_enabled", True
         ), patch(
@@ -222,8 +226,12 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
         ), patch.object(
             main.settings, "writer_witness_required", True
+        ), patch.object(
+            main.settings, "writer_witness_auto_renew_enabled", True
         ), patch(
             "main.witness_public_key_is_valid", return_value=True
+        ), patch(
+            "main.writer_witness_client_configuration_reasons", return_value=()
         ), patch.object(
             main.settings, "background_jobs_enabled", True
         ), patch(

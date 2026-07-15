@@ -19,6 +19,7 @@ from core.writer_witness_control import (
     ACTION_DRAIN,
     ACTION_RENEW,
     WriterWitnessError,
+    persist_witness_rejection,
     transition_witness_state,
 )
 from models.webapp_writer_state import WebappWriterWitnessReceipt
@@ -281,6 +282,63 @@ class WitnessStateMachineTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(replay.replayed)
         self.assertEqual(replay.proof, first.proof)
         self.assertEqual(replay.state.transition_id, first.state.transition_id)
+
+    async def test_rejected_command_receipt_blocks_delayed_replay_after_expiry(self):
+        private_key, _ = keypair()
+        state = vacant_state()
+        session = FakeWitnessSession()
+        with patch(
+            "core.writer_witness_control.load_witness_state",
+            new=AsyncMock(return_value=state),
+        ):
+            acquired = await transition_witness_state(
+                session,
+                action=ACTION_ACQUIRE,
+                requester_site="webapp_fi",
+                expected_epoch=0,
+                expected_lease_id=None,
+                request_id="initial-fi-term",
+                operator="operator@example",
+                reason="initial term",
+                private_key_base64=private_key,
+                now=NOW,
+            )
+            delayed_kwargs = dict(
+                action=ACTION_ACQUIRE,
+                requester_site="webapp_ir",
+                expected_epoch=1,
+                expected_lease_id=acquired.state.lease_id,
+                request_id="delayed-ir-acquire",
+                operator="hmac:webapp_ir:ir-key",
+                reason="outage promotion",
+                private_key_base64=private_key,
+                now=NOW + timedelta(seconds=10),
+            )
+            with self.assertRaises(WriterWitnessError) as first_rejection:
+                await transition_witness_state(session, **delayed_kwargs)
+            stored = await persist_witness_rejection(
+                session,
+                action=delayed_kwargs["action"],
+                requester_site=delayed_kwargs["requester_site"],
+                expected_epoch=delayed_kwargs["expected_epoch"],
+                expected_lease_id=delayed_kwargs["expected_lease_id"],
+                request_id=delayed_kwargs["request_id"],
+                operator=delayed_kwargs["operator"],
+                reason=delayed_kwargs["reason"],
+                lease_duration_seconds=180,
+                error=first_rejection.exception,
+            )
+            self.assertFalse(stored.replayed)
+
+            with self.assertRaises(WriterWitnessError) as replay_rejection:
+                await transition_witness_state(
+                    session,
+                    **{**delayed_kwargs, "now": NOW + timedelta(seconds=181)},
+                )
+
+        self.assertTrue(replay_rejection.exception.replayed)
+        self.assertEqual(state.holder_site, "webapp_fi")
+        self.assertEqual(state.writer_epoch, 1)
 
 
 if __name__ == "__main__":

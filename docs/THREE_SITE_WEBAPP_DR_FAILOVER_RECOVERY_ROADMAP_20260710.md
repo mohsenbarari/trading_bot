@@ -1150,8 +1150,9 @@ Exit criteria:
 ### Stage 4 - Writer Epoch And Fencing
 
 Status: source foundation in progress. Local durable fencing and the accepted
-witness/lease contract exist; the dedicated witness transport, automatic
-renewal, global three-database proof, and production enablement remain blocked.
+witness/lease contract and source-only authenticated transport/renewal exist;
+dedicated deployment, global three-database proof, and production enablement
+remain blocked.
 
 Deliverables:
 
@@ -1494,7 +1495,7 @@ The audit also found reusable foundations. They must not be mistaken for complet
 | T-001 | P0 | `logical_authority` and explicit `physical_site` now model `bot_fi`, `webapp_fi`, and `webapp_ir`, while legacy `server_mode` remains for compatibility. Runtime role is derived from durable local writer state. Event metadata, remaining tooling, metrics, and every deploy surface have not yet been migrated to the new identity. | An unconverted path can still treat logical Iran/WebApp authority as a physical host and route, authorize, or label work incorrectly. | Complete the identity inventory and migration; prove every write, event, job, metric, lock, CLI, and deployment surface records and validates the correct logical authority, physical site, runtime role, and epoch. |
 | T-002 | P0 | Additive migrations now provide local durable writer epoch/state, transition audit, optional signed-lease evidence, HTTP/startup/background preflight, and a SQL `before_commit` recheck. This protects a local database but does not yet bind every command/event/side effect to the global epoch or stop an old remote database by itself. | An unaudited path, external side effect, long-lived process, or independently active remote database can escape the local fence after promotion. | Complete the mutation/side-effect audit, carry and reject stale epochs at every destination, deploy the witness, and demonstrate simultaneous promotion against independent databases with exactly one accepted writer. |
 | T-003 | P0 | Main WebApp HTTP mutations, the known startup mutation, and policy-listed background jobs now consult physical site/local writer state and, when enabled, witness lease validity; the leader restarts when lease eligibility changes. Repair tools, every worker/route, and effects that can occur before commit still need a complete audit. | An uncovered worker, direct-origin path, repair command, or pre-commit external effect can write or act after the site's term is no longer valid. | Fence every HTTP/WebSocket mutation, startup mutation, recurring job, side-effect worker, repair process, and migration helper; prove no external effect can escape a stale or expired term. |
-| T-004 | P0 | The 2026-07-14 ADR selects an Iran-reachable durable witness with database-clock expiry, monotonic epochs, Ed25519 signed leases, no early takeover, and fail-closed ambiguity. Source state/receipt tables, acquire/renew/drain control, and concurrent PostgreSQL acquisition proof exist, but the witness is not a separate deployed service or failure domain and enforcement remains disabled. | Host compromise, missing renewal transport, key exposure, clock error, or relying on independent local witness copies can still prevent safe ownership proof or create an operational split-brain attempt. | Deploy a dedicated least-privilege witness process/API and key custody, add automatic renewal/refresh and clock evidence, then prove asymmetric partition, delayed packet, pause, restart, and concurrent acquisition behavior across independent site databases. |
+| T-004 | P0 | The accepted Iran-reachable database-clock witness now has a separately runnable minimal-settings API, isolated two-table database bootstrap, pairwise HMAC transport, durable accepted/rejected receipts, and automatic same-term renewal/local proof refresh in source. Ed25519 enforcement and all service/renewal flags remain disabled; no independent witness deployment, secure custody, clock evidence, or three-host proof exists. | Host compromise, unsafe deployment privileges, key exposure, clock error, or mistaking source/ASGI tests for an independent failure domain can still prevent safe ownership proof or create an operational split-brain attempt. | Provision and deploy the least-privilege private witness with approved custody and TLS/mTLS, add multi-vantage clock evidence, then prove asymmetric partition, delayed packet, pause, restart, lost response, and concurrent acquisition behavior across independent site databases. |
 | T-005 | P0 | models/change_log.py has one local integer id and one synced/verified state; core/sync_worker.py drains to one target URL and marks the row delivered after that peer succeeds. | Delivery to Bot-FI can incorrectly imply delivery to WebApp-IR, or vice versa; retention can delete an event still needed by one destination. | Implement immutable global event identity plus a per-destination delivery ledger, destination-specific ACKs, retry state, retention gates, and backlog metrics. |
 | T-006 | P0 | Receiver-applied transactions use is_sync and core/events.py intentionally suppresses new change-log creation for such writes. This prevents two-site echoes but also prevents WebApp-FI from relaying an original Bot-FI event to WebApp-IR through the current outbox. | WebApp-IR misses foreign-origin changes accumulated at WebApp-FI during a national outage, or relay is re-enabled naively and creates loops. | Implement preserved-origin relay: same event_id, origin site, origin sequence, authority, epoch, and payload hash; create only the missing destination delivery without generating a new business event. |
 | T-007 | P0 | Sync ordering uses the local change-log integer as source_sequence. The worker prioritizes table class before id, so a larger sequence can be sent before a smaller one, while the receiver can advance to the larger value without a durable missing-range record. Database sequences may also contain rollback gaps, and two physical WebApp databases can overlap. | A legitimate event is classified stale, a missing event is never requested, or different events occupy the same apparent sequence. | Define an emitted stream sequence independent of ordinary database id gaps, scope it by producer_site and epoch, persist gap ranges, and test priority reordering, rollback gaps, restore, promotion, and same-sequence/different-hash cases. |
@@ -1968,3 +1969,92 @@ only approved runtime value in this slice. The following are not delivered:
 Therefore T-004 is architecture-resolved but operationally open, Stage 4 is
 not complete, and this commit authorizes no production migration, deploy,
 WebApp-IR startup, or CDN mutation.
+
+## 39. Dedicated Witness Transport And Automatic Renewal Source - 2026-07-15
+
+### 39.1 Delivered source boundary
+
+This slice advances T-004 without changing a running environment:
+
+- `writer_witness_app:app` is a separately runnable private FastAPI process;
+- its minimal settings do not import the product `core.config`, so the process
+  does not require Telegram, JWT, Redis, product database, or WebApp secrets;
+- `deploy/writer-witness/001_initial.sql` creates only the witness schema,
+  singleton, command receipts, and schema-version marker;
+- startup requires explicit `webapp_ir` placement, a distinct database user,
+  safe lease timing, a `0600` Ed25519 key file whose public key matches, and
+  independent HMAC credentials for `webapp_fi` and `webapp_ir`;
+- signed requests bind version, physical site, key id, method, path, exact body
+  hash, database-clock-checked timestamp, and stable request id;
+- authenticated status and transition endpoints are separate from the public
+  WebApp application and expose no browser CORS or API documentation surface;
+- successful transitions and state-dependent rejections both persist durable
+  one-shot receipts. A rejected acquisition cannot later succeed merely
+  because the previous lease expired before a delayed replay arrived;
+- the active WebApp background leader can renew through the private client,
+  validate the Ed25519 proof, and atomically apply `lease_refresh` locally;
+- an ambiguous timeout retries the exact request id, while a partition never
+  extends local expiry and therefore converges to the existing fail-closed
+  safety deadline;
+- origin readiness now rejects witness enforcement when automatic renewal is
+  disabled.
+
+The public WebApp process receives only its site's pairwise HMAC client secret
+and the Ed25519 public key. The witness signing key and the other site's HMAC
+secret belong only to the separate witness process. The operational contract
+and stop conditions are in `docs/WRITER_WITNESS_SERVICE_RUNBOOK.md`.
+
+### 39.2 Verification evidence
+
+Focused tests cover exact successful replay, tampered/stale HMAC requests,
+site binding, durable negative receipts, delayed rejected acquisition after
+expiry, atomic proof import, stable request id after an ambiguous timeout,
+partition fail-closed behavior, background authority, process configuration
+isolation, origin readiness, and existing writer fencing behavior.
+
+The affected suite completed `95` tests: `91` passed and `4` PostgreSQL tests
+were intentionally skipped before the guarded database run. The complete checkout suite
+discovered `3,384` tests. Under the host's current registration feature flags
+it retained the known legacy registration/sync fixture failures (`48` failures,
+`11` errors, `67` skips). Turning only
+`REGISTRATION_SYNC_V2_ENABLED` off reproduced the previously documented
+baseline of `9` failures and `2` missing/host-dependent errors; none of those
+failures exercised the witness service, authentication, renewal, or fencing
+paths.
+
+The source also passes Python compilation, CLI help loading, runtime identity
+regression tests, environment rendering tests, sync-registry policy tests, and
+`git diff --check`. The dedicated `001` schema was applied to a disposable
+guard-named PostgreSQL database and two real PostgreSQL tests passed: concurrent
+FI/IR acquisition produced exactly one winner, and a durable rejected command
+remained rejected after lease expiry. The scratch database was then removed.
+Independent-host drills remain separate gates, and local PostgreSQL/ASGI tests
+are not substitutes for those drills.
+
+### 39.3 Remaining production blockers
+
+No witness process, database, key, credential, WebApp renewal flag, origin, or
+Arvan setting has been deployed or changed. Keep
+`WRITER_WITNESS_REQUIRED=false`,
+`WRITER_WITNESS_AUTO_RENEW_ENABLED=false`, and
+`WRITER_WITNESS_SERVICE_ENABLED=false` until all of these pass:
+
+1. provision the dedicated database with a migration identity and demonstrate
+   the runtime role has no DDL or product-table privileges;
+2. deploy the service on a private Iran-reachable TLS/mTLS path with fixed
+   ingress policy, process supervision, audit retention, backup, and restore;
+3. store/rotate the Ed25519 and pairwise HMAC secrets through approved custody
+   without ever mounting the signing key into a WebApp container;
+4. measure multi-vantage witness reachability and clock offset, then block
+   readiness when either exceeds the accepted bound;
+5. run deterministic independent-database concurrent acquisition, asymmetric
+   partition, delayed packet, witness restart, database pause, VM pause, clock
+   jump, and lost-response tests;
+6. finish stale-epoch binding at every command/event/side-effect destination,
+   plus sync, parity, file, readiness-evidence, recovery, and Arvan orchestration
+   stages;
+7. obtain the operator RACI/two-person approval and measured lease/RTO decision.
+
+Therefore the dedicated transport and renewal are source-complete, but T-004
+and Stage 4 remain operationally open. This slice authorizes no production
+migration, deployment, WebApp-IR startup, witness enablement, or CDN mutation.

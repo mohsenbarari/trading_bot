@@ -120,3 +120,20 @@ Before production enablement, later slices must add:
 6. operator RACI, two-person promotion approval, audit retention, and break-glass
    rules that still cannot bypass a live prior lease;
 7. measured lease/RTO tuning and repeated three-site staging drills.
+
+## Source Progress - 2026-07-15
+
+The next source slice adds the separately runnable `writer_witness_app:app`, a
+minimal configuration class that does not import product settings, a dedicated
+two-table PostgreSQL bootstrap, pairwise site-bound HMAC authentication, and
+automatic active-writer renewal with atomic local proof refresh. Successful
+commands and state-dependent rejected commands both receive durable receipts;
+this closes the case where a rejected acquisition packet is replayed only after
+the old lease expires. Ambiguous transport retries keep the exact request id.
+
+This is not a production deployment. Both `WRITER_WITNESS_REQUIRED` and
+`WRITER_WITNESS_AUTO_RENEW_ENABLED` remain false, origin readiness rejects an
+enabled witness without automatic renewal, and no CDN/origin setting changes.
+Items 1 and 2 above are source-complete but remain operationally open until the
+service is deployed with isolated credentials and proven against independent
+site databases. Items 3 through 7 remain production blockers.

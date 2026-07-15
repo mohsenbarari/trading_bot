@@ -70,6 +70,10 @@ from core.writer_fencing import (
     writer_fence_scope,
 )
 from core.writer_witness_contract import witness_public_key_is_valid
+from core.writer_witness_client import (
+    writer_witness_client_configuration_reasons,
+    writer_witness_renewal_loop,
+)
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -259,6 +263,8 @@ def _background_job_factories(writer_snapshot: WriterStateSnapshot | None = None
         ("trade_webapp_delivery", webapp_trade_delivery_loop),
         ("trade_telegram_delivery", telegram_trade_delivery_loop),
     ]
+    if settings.writer_witness_required and settings.writer_witness_auto_renew_enabled:
+        jobs.append(("writer_witness_renewal", writer_witness_renewal_loop))
     if registration_reconciliation_runtime_ready(settings):
         jobs.append(
             (
@@ -807,6 +813,10 @@ async def get_health_origin_ready(
         reasons.append("writer_witness_not_enforced")
     elif not witness_public_key_is_valid(settings.writer_witness_public_key):
         reasons.append("writer_witness_public_key_invalid")
+    if settings.writer_witness_required and not settings.writer_witness_auto_renew_enabled:
+        reasons.append("writer_witness_auto_renew_disabled")
+    if settings.writer_witness_required:
+        reasons.extend(writer_witness_client_configuration_reasons(RUNTIME_IDENTITY))
     database_ok, redis_ok, dependency_reasons = await _local_dependency_health(db)
     reasons.extend(dependency_reasons)
     try:
