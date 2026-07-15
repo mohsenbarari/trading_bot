@@ -2398,6 +2398,92 @@ describe('PublicProfile.vue', () => {
     expect(cursorCalls).toHaveLength(2)
   })
 
+  it('ignores an older history response after a newer filter request completes', async () => {
+    const fetchMock = vi.mocked(fetch)
+    let resolveBuy: ((response: Response) => void) | null = null
+    let resolveSell: ((response: Response) => void) | null = null
+    const historyRow = (id: number, tradeType: 'BUY' | 'SELL') => ({
+      id,
+      trade_number: id,
+      created_at: '2026-07-15T09:00:00Z',
+      quantity: 1,
+      commodity_name: 'سکه',
+      price: 100_000 + id,
+      trade_type: tradeType,
+      settlement_type: 'cash',
+      offer_user_id: 80,
+      offer_user_name: 'seller80',
+      responder_user_id: 50,
+      responder_user_name: 'owner50',
+    })
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      if (url === '/api/users-public/50') {
+        return Promise.resolve(makeResponse({
+          id: 50,
+          account_name: 'owner50',
+          avatar_file_id: null,
+          mobile_number: '09121112222',
+          address: 'قم',
+          created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+          trades_count: 2,
+          resolved_from_accountant_id: null,
+          highlight_accountant_user_id: null,
+          highlight_accountant_relation_display_name: null,
+          accountant_relations: [],
+        }))
+      }
+      if (url.startsWith('/api/trades/with/50/page?') && url.includes('trade_type=buy')) {
+        return new Promise<Response>((resolve) => { resolveBuy = resolve })
+      }
+      if (url.startsWith('/api/trades/with/50/page?') && url.includes('trade_type=sell')) {
+        return new Promise<Response>((resolve) => { resolveSell = resolve })
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const tradeTypeSelect = wrapper.findAll('.history-filter-field select')[1]!
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))!
+    await tradeTypeSelect.setValue('buy')
+    await applyButton.trigger('click')
+    await flushPromises()
+    await tradeTypeSelect.setValue('sell')
+    await applyButton.trigger('click')
+    await flushPromises()
+
+    if (!resolveSell || !resolveBuy) throw new Error('Expected both history requests')
+    ;(resolveSell as (response: Response) => void)(makeHistoryPage([historyRow(222, 'SELL')]))
+    await flushPromises()
+    expect(wrapper.text()).toContain('#222')
+
+    ;(resolveBuy as (response: Response) => void)(makeHistoryPage([historyRow(111, 'BUY')]))
+    await flushPromises()
+    expect(wrapper.text()).toContain('#222')
+    expect(wrapper.text()).not.toContain('#111')
+  })
+
   it('blocks invalid history date ranges before refetch or export', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({

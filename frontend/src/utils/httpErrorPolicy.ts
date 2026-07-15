@@ -88,13 +88,25 @@ function readPayloadDetail(payload: ErrorPayload | null): string | null {
     if (!payload) return null
     const detail = payload.detail
     if (typeof detail === 'string') return detail
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+        const nested = detail as ErrorPayload
+        return asString(nested.message) || asString(nested.detail) || asString(nested.error)
+    }
     if (Array.isArray(detail) && detail.length > 0) return 'اطلاعات واردشده معتبر نیست.'
     return asString(payload.message) || asString(payload.error)
 }
 
 function readPayloadErrorCode(payload: ErrorPayload | null): string | null {
     if (!payload) return null
-    return asString(payload.error_code) || asString(payload.code) || null
+    const detail = payload.detail
+    const nested = detail && typeof detail === 'object' && !Array.isArray(detail)
+        ? detail as ErrorPayload
+        : null
+    return asString(payload.error_code)
+        || asString(payload.code)
+        || asString(nested?.error_code)
+        || asString(nested?.code)
+        || null
 }
 
 async function parseErrorPayload(response: Response): Promise<{ payload: ErrorPayload | null; detail: string | null }> {

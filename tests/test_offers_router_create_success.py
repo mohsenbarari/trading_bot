@@ -170,6 +170,12 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.admission_fence_mock = admission_fence_patcher.start()
         self.addCleanup(admission_fence_patcher.stop)
+        router_admission_fence_patcher = patch(
+            "api.routers.offers.acquire_market_offer_admission_fence",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True)),
+        )
+        self.router_admission_fence_mock = router_admission_fence_patcher.start()
+        self.addCleanup(router_admission_fence_patcher.stop)
         quota_patcher = patch(
             "core.services.offer_creation_service._admit_local_offer_quota",
             new=AsyncMock(side_effect=bypass_local_offer_quota),
@@ -277,6 +283,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             viewer_customer_relation=None,
         )
         self.assertEqual(result, {"id": 77, "user_id": 5})
+        self.router_admission_fence_mock.assert_awaited_once_with(db)
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
 
     async def test_republish_rejects_ineligible_source_before_side_effects(self):

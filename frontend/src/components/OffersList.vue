@@ -51,23 +51,27 @@ interface TradeIntentState {
 }
 
 const TRADE_INTENT_STORAGE_PREFIX = 'market_trade_intents_v1';
+const TRADE_CONTENTION_BUSY_CODE = 'TRADE_CONTENTION_BUSY';
 const AMBIGUOUS_TRADE_MESSAGE = 'ارتباط با سرور قطع شد. اگر معامله ثبت شده باشد، تکرار همین درخواست معامله دوم نمی‌سازد.';
 const CONFLICTING_TRADE_INTENT_MESSAGE = 'نتیجه درخواست قبلی این لفظ هنوز مشخص نیست. ابتدا همان درخواست را دوباره ارسال کنید.';
 
 // Define Props
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   offers: any[];
   loading: boolean;
   limit?: number;
   expiryMinutes?: number;
   currentUserId?: number;
+  currentUserReady?: boolean;
   expiredLoading?: boolean;
   hasMoreExpired?: boolean;
   canLoadExpired?: boolean;
   activeLoading?: boolean;
   hasMoreActive?: boolean;
   activeLoadError?: string;
-}>();
+}>(), {
+  currentUserReady: true,
+});
 
 const emit = defineEmits<{
   (e: 'trade-completed'): void;
@@ -82,6 +86,10 @@ const tradingAmount = ref<number | null>(null);
 const tradeError = ref('');
 const tradeSuggestion = ref<TradeLotSuggestionState | null>(null);
 const cancelingOfferId = ref<number | null>(null);
+const tradeIdentityReady = computed(() => {
+  const currentUserId = Number(props.currentUserId);
+  return props.currentUserReady !== false && Number.isInteger(currentUserId) && currentUserId > 0;
+});
 const tradeIntents = new Map<string, TradeIntentState>();
 let activeTradeIntentStorageKey: string | null = null;
 let componentActive = true;
@@ -369,9 +377,21 @@ function hasConflictingTradeIntent(offerId: number, quantity: number): boolean {
   ));
 }
 
-function isAmbiguousTradeResponse(response: Response): boolean {
+function tradeResponseErrorCode(payload: any): string | null {
+  const code = payload?.error_code ?? payload?.code
+    ?? payload?.detail?.error_code ?? payload?.detail?.code;
+  return typeof code === 'string' && code.trim() ? code.trim() : null;
+}
+
+function isAmbiguousTradeResponse(response: Response, payload: any): boolean {
   const status = Number(response?.status);
-  return Number.isFinite(status) && (status >= 500 || status === 408 || status === 425 || status === 429);
+  return Number.isFinite(status) && (
+    status >= 500
+    || status === 408
+    || status === 425
+    || status === 429
+    || (status === 409 && tradeResponseErrorCode(payload) === TRADE_CONTENTION_BUSY_CODE)
+  );
 }
 
 function showTradeError(message: string) {
@@ -523,6 +543,10 @@ watch(now, () => {
 
 async function executeTrade(offerId: number, quantity: number) {
   if (tradingOfferId.value !== null) return;
+  if (!tradeIdentityReady.value) {
+    showTradeError('اطلاعات حساب در حال بارگذاری است. لطفاً چند لحظه دیگر تلاش کنید.');
+    return;
+  }
   if (hasConflictingTradeIntent(offerId, quantity)) {
     showTradeError(CONFLICTING_TRADE_INTENT_MESSAGE);
     return;
@@ -566,7 +590,7 @@ async function executeTrade(offerId: number, quantity: number) {
         clearTradeIntent(intent);
         return;
       }
-      if (isAmbiguousTradeResponse(response as Response)) {
+      if (isAmbiguousTradeResponse(response as Response, data)) {
         setTradeIntentStatus(intent, 'uncertain');
         showTradeError(AMBIGUOUS_TRADE_MESSAGE);
         return;
@@ -724,7 +748,7 @@ async function cancelOwnOffer(offerId: number) {
                 :side="offer.offer_type"
                 :pending="isPending(offer.id, amount)"
                 :busy="tradingOfferId === offer.id"
-                :disabled="tradingOfferId === offer.id"
+                :disabled="tradingOfferId === offer.id || !tradeIdentityReady"
                 @click="handleLotClick(offer.id, amount)"
               >
                 <Loader2 v-if="tradingOfferId === offer.id && tradingAmount === amount" class="inline animate-spin mr-1" :size="14" />

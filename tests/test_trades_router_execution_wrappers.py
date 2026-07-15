@@ -8,7 +8,9 @@ from fastapi.responses import JSONResponse
 
 from api.routers.trades import (
     InternalTradeExecuteRequest,
+    TRADE_CONTENTION_BUSY_CODE,
     TradeCreate,
+    _acquire_trade_contention_gate_dependency,
     create_trade,
     execute_trade_internal,
     _forward_trade_if_remote_home,
@@ -52,6 +54,23 @@ def make_request(body=b"{}", headers=None):
 
 
 class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_outer_contention_gate_uses_retryable_machine_code(self):
+        lease = SimpleNamespace(acquired=False)
+        with patch(
+            "api.routers.trades.try_acquire_trade_contention_gate",
+            new=AsyncMock(return_value=lease),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _acquire_trade_contention_gate_dependency(
+                    TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-1")
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(
+            exc_info.exception.detail["error_code"],
+            TRADE_CONTENTION_BUSY_CODE,
+        )
+
     async def test_create_trade_returns_forwarded_response_when_remote_home(self):
         trade_data = TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-1")
         background_tasks = BackgroundTasks()

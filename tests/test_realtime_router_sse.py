@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
@@ -86,7 +86,10 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
             {"type": "message", "channel": b"notifications:5", "data": b'{"event":"trade:created","data":{"safe": 9, "mobile_number": "0912"}}'},
         ])
 
-        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)):
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)), patch(
+            "api.routers.realtime._websocket_access_denial",
+            new=AsyncMock(return_value=None),
+        ):
             generator = event_generator(user_id=5)
             first = await generator.__anext__()
             with self.assertRaises(asyncio.CancelledError):
@@ -95,6 +98,25 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("event: trade:created", first)
         self.assertIn('"safe": 9', first)
         self.assertNotIn("mobile_number", first)
+
+    async def test_event_generator_stops_private_delivery_after_user_is_locked(self):
+        pubsub = FakePubSub([
+            {
+                "type": "message",
+                "channel": b"notifications:5",
+                "data": b'{"event":"trade:created","data":{"safe":9}}',
+            },
+        ])
+
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)), patch(
+            "api.routers.realtime._websocket_access_denial",
+            new=AsyncMock(return_value=(4003, "User is inactive")),
+        ):
+            generator = event_generator(user_id=5)
+            with self.assertRaises(StopAsyncIteration):
+                await generator.__anext__()
+
+        self.assertEqual(pubsub.unsubscribe_calls, 1)
 
     async def test_sse_stream_wraps_generator_with_expected_headers(self):
         response = await sse_stream(request=SimpleNamespace(), current_user=SimpleNamespace(id=7))

@@ -200,9 +200,22 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             notes=None,
         )
 
+        lock_order = []
+
+        async def acquire_fence(_db):
+            lock_order.append("market_fence")
+            return SimpleNamespace(is_open=True)
+
+        async def lock_source(*_args, **_kwargs):
+            lock_order.append("source_offer")
+            return source
+
         with patch(
             "api.routers.offers.lock_repeatable_offer",
-            new=AsyncMock(return_value=source),
+            new=AsyncMock(side_effect=lock_source),
+        ), patch(
+            "api.routers.offers.acquire_market_offer_admission_fence",
+            new=AsyncMock(side_effect=acquire_fence),
         ), patch(
             "api.routers.offers.check_user_limits",
             side_effect=[(True, None), (True, None)],
@@ -226,6 +239,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             exc_info.exception.detail,
             "شما حداکثر 5 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
         )
+        self.assertEqual(lock_order, ["market_fence", "source_offer"])
 
     async def test_republish_requires_source_public_identity(self):
         with patch("api.routers.offers.lock_repeatable_offer", new=AsyncMock()) as lock_mock:

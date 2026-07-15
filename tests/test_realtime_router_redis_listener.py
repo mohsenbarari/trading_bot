@@ -9,9 +9,13 @@ from api.routers.realtime import listen_redis_events
 class FakeWebSocket:
     def __init__(self):
         self.sent = []
+        self.close_calls = []
 
     async def send_json(self, payload):
         self.sent.append(payload)
+
+    async def close(self, code, reason):
+        self.close_calls.append((code, reason))
 
 
 class FailingWebSocket(FakeWebSocket):
@@ -65,6 +69,8 @@ class RealtimeRouterRedisListenerTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)), patch(
             "api.routers.realtime.asyncio.sleep", new=asyncio.sleep
+        ), patch(
+            "api.routers.realtime._websocket_access_denial", return_value=None
         ):
             await listen_redis_events(websocket, user_id=5)
 
@@ -81,6 +87,21 @@ class RealtimeRouterRedisListenerTests(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_listener_revalidates_access_before_private_delivery(self):
+        pubsub = FakePubSub([
+            {"type": "message", "channel": b"notifications:5", "data": b'{"event":"trade:created","data":{"id":9}}'},
+        ])
+        websocket = FakeWebSocket()
+
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)), patch(
+            "api.routers.realtime._websocket_access_denial",
+            return_value=(4003, "User is inactive"),
+        ):
+            await listen_redis_events(websocket, user_id=5, session_id="session-id")
+
+        self.assertEqual(websocket.sent, [])
+        self.assertEqual(websocket.close_calls, [(4003, "User is inactive")])
 
     async def test_listener_deduplicates_same_event_id_for_one_connection(self):
         duplicate = {

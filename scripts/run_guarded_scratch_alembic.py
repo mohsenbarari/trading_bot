@@ -18,7 +18,7 @@ from sqlalchemy.engine import URL, make_url
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRATCH_DATABASE_PATTERN = re.compile(
-    r"^(?:stage1_migration|stage1_counter|stage2_registration|stage3_registration|stage4_registration|market_stage7|market_stage9|market_stage10|market_stage11|market_stage12|market_stage13|market_stage15)_[a-z0-9_]+$"
+    r"^(?:stage1_migration|stage1_counter|stage2_registration|stage3_registration|stage4_registration|market_stage7|market_stage8|market_stage9|market_stage10|market_stage11|market_stage12|market_stage13|market_stage15)_[a-z0-9_]+$"
 )
 DENIED_DATABASE_NAMES = frozenset(
     {

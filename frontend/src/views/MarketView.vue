@@ -1077,6 +1077,7 @@ onUnmounted(() => {
           :loading="isLoading" 
           :expiry-minutes="tradingSettings.offer_expiry_minutes" 
           :current-user-id="currentUserId" 
+          :current-user-ready="currentUserLoaded"
           :active-loading="activeOffersLoading"
           :has-more-active="hasMoreActiveOffers"
           :active-load-error="activeOffersPaginationError || activeOffersError"

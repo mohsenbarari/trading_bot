@@ -31,7 +31,7 @@ def payload():
 
 
 class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
-    async def _forward(self, response_body):
+    async def _forward(self, response_body, *, request_payload=None):
         response = SimpleNamespace(
             status_code=200,
             json=lambda: response_body,
@@ -53,7 +53,10 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.offer_expiry_forwarding.log_trading_event",
         ) as log_event:
-            result = await forward_offer_expiry_to_home_server("foreign", payload())
+            result = await forward_offer_expiry_to_home_server(
+                "foreign",
+                request_payload or payload(),
+            )
         return result, client, log_event
 
     async def test_matching_receipt_ack_is_returned_without_legacy_warning(self):
@@ -72,21 +75,51 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
         events = [call.args[1] for call in log_event.call_args_list]
         self.assertNotIn("offer_expiry_forward.legacy_success_without_receipt_ack", events)
 
-    async def test_legacy_peer_success_stays_compatible_but_emits_rollout_warning(self):
+    async def test_command_sender_fails_closed_when_success_has_no_matching_receipt(self):
         result, _client, log_event = await self._forward(
             {"expired": True, "offer_id": 11}
         )
 
-        self.assertEqual(result, (200, {"expired": True, "offer_id": 11}))
+        self.assertEqual(result[0], 503)
         events = [call.args[1] for call in log_event.call_args_list]
-        self.assertIn("offer_expiry_forward.legacy_success_without_receipt_ack", events)
-        warning = next(
+        self.assertIn("offer_expiry_forward.receipt_ack_invalid", events)
+        failure = next(
             call
             for call in log_event.call_args_list
-            if call.args[1] == "offer_expiry_forward.legacy_success_without_receipt_ack"
+            if call.args[1] == "offer_expiry_forward.receipt_ack_invalid"
         )
-        self.assertNotIn("owner_user_id", warning.kwargs)
-        self.assertNotIn("actor_user_id", warning.kwargs)
+        self.assertEqual(failure.kwargs["result"], "failure")
+        self.assertFalse(failure.kwargs["receipt_ack_present"])
+        self.assertNotIn("owner_user_id", failure.kwargs)
+        self.assertNotIn("actor_user_id", failure.kwargs)
+
+    async def test_command_sender_fails_closed_when_receipt_ack_mismatches(self):
+        result, _client, log_event = await self._forward(
+            {"expired": True, "command_id": "different-command"}
+        )
+
+        self.assertEqual(result[0], 503)
+        failure = next(
+            call
+            for call in log_event.call_args_list
+            if call.args[1] == "offer_expiry_forward.receipt_ack_invalid"
+        )
+        self.assertTrue(failure.kwargs["receipt_ack_present"])
+
+    async def test_legacy_sender_without_command_identity_remains_compatible(self):
+        request_payload = payload()
+        request_payload.pop("command_id")
+        request_payload.pop("idempotency_key")
+        response_body = {"expired": True, "offer_id": 11}
+
+        result, _client, log_event = await self._forward(
+            response_body,
+            request_payload=request_payload,
+        )
+
+        self.assertEqual(result, (200, response_body))
+        events = [call.args[1] for call in log_event.call_args_list]
+        self.assertNotIn("offer_expiry_forward.receipt_ack_invalid", events)
 
 
 if __name__ == "__main__":

@@ -188,6 +188,7 @@ const historyCommodityOptionsLoaded = ref(false);
 const historyCounterpartyUserId = ref<number | null>(null);
 const historyCounterpartyOptions = ref<ProjectUserDirectoryEntry[]>([]);
 const historyCounterpartyOptionsLoading = ref(false);
+let historyRequestRevision = 0;
 const historyCounterpartyOptionsLoaded = ref(false);
 const historyCounterpartyError = ref('');
 const avatarBusy = ref(false);
@@ -1009,7 +1010,13 @@ function mergeTradeHistoryRows(current: MutualTradePreview[], incoming: MutualTr
 }
 
 async function loadMutualTrades(force = false, append = false) {
-  if (!profileData.value || isHistoryLoading.value || isHistoryLoadingMore.value) return;
+  if (!profileData.value) return;
+  if (append && (isHistoryLoading.value || isHistoryLoadingMore.value)) return;
+  if (!append && !force && (isHistoryLoading.value || isHistoryLoadingMore.value)) return;
+
+  const requestRevision = append
+    ? historyRequestRevision
+    : ++historyRequestRevision;
 
   const validationError = validateHistoryFilters();
   if (validationError) {
@@ -1017,10 +1024,15 @@ async function loadMutualTrades(force = false, append = false) {
     mutualTrades.value = [];
     historyNextCursor.value = null;
     historyHasMore.value = false;
+    if (!append) {
+      isHistoryLoading.value = false;
+      isHistoryLoadingMore.value = false;
+    }
     return;
   }
 
   const queryKey = buildHistoryQueryKey();
+  const requestEndpoint = buildTradeHistoryPageEndpoint();
   if (append && historyLoadedQueryKey.value !== queryKey) {
     await loadMutualTrades(true, false);
     return;
@@ -1035,6 +1047,7 @@ async function loadMutualTrades(force = false, append = false) {
     historyPaginationError.value = '';
   } else {
     isHistoryLoading.value = true;
+    isHistoryLoadingMore.value = false;
     historyError.value = '';
     historyPaginationError.value = '';
     historyNextCursor.value = null;
@@ -1047,9 +1060,11 @@ async function loadMutualTrades(force = false, append = false) {
     if (append && historyNextCursor.value) {
       params.set('cursor', historyNextCursor.value);
     }
-    const endpoint = `${buildTradeHistoryPageEndpoint()}?${params.toString()}`;
+    const endpoint = `${requestEndpoint}?${params.toString()}`;
     const response = await apiFetch(endpoint, { retryNetwork: false });
     const payload = await response.json().catch(() => null);
+    const requestIsStale = requestRevision !== historyRequestRevision;
+    if (requestIsStale) return;
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'خطا در دریافت تاریخچه معاملات'));
     }
@@ -1070,6 +1085,8 @@ async function loadMutualTrades(force = false, append = false) {
     historyHasMore.value = !Array.isArray(payload) && payload?.has_more === true;
     historyLoadedQueryKey.value = queryKey;
   } catch (e: any) {
+    const requestIsStale = requestRevision !== historyRequestRevision;
+    if (requestIsStale) return;
     console.error("Failed to load history", e);
     if (append) {
       historyPaginationError.value = e?.message === 'NetworkError'
@@ -1082,9 +1099,9 @@ async function loadMutualTrades(force = false, append = false) {
       mutualTrades.value = [];
     }
   } finally {
-    if (append) {
+    if (append && requestRevision === historyRequestRevision) {
       isHistoryLoadingMore.value = false;
-    } else {
+    } else if (!append && requestRevision === historyRequestRevision) {
       isHistoryLoading.value = false;
     }
   }

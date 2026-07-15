@@ -211,6 +211,7 @@ async function mountMarketView() {
             'loading',
             'expiryMinutes',
             'currentUserId',
+            'currentUserReady',
             'expiredLoading',
             'hasMoreExpired',
             'canLoadExpired',

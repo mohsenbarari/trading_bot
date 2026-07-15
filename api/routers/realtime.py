@@ -25,6 +25,7 @@ from core.market_presence import (
 )
 from core.metrics import record_websocket_publish_failure, set_active_websocket_connections
 from core.services.session_service import is_session_blacklisted
+from core.services.user_account_status_service import is_user_global_web_locked
 from core.production_test_isolation import should_block_webapp_user
 from models.session import UserSession
 from models.user import User
@@ -299,6 +300,33 @@ def verify_ws_token(token: str) -> Optional[tuple[int, Optional[str]]]:
         return None
 
 
+async def _websocket_access_denial(
+    user_id: int,
+    session_id: Optional[str],
+) -> tuple[int, str] | None:
+    """Revalidate WebApp access for both connection setup and private delivery."""
+    if session_id and await is_session_blacklisted(session_id):
+        return 4003, "Session has been revoked"
+
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if not user or user.is_deleted or is_user_global_web_locked(user):
+            return 4003, "User is inactive"
+        if await should_block_webapp_user(session, user):
+            return 1013, "WebApp temporarily unavailable"
+
+        if session_id:
+            try:
+                session_uuid = uuid.UUID(session_id)
+            except ValueError:
+                return 4003, "Invalid session"
+
+            active_session = await session.get(UserSession, session_uuid)
+            if not active_session or not active_session.is_active or active_session.user_id != user_id:
+                return 4003, "Session has been revoked"
+    return None
+
+
 # --- WebSocket Endpoint (Authenticated) ---
 @router.websocket("/ws")
 async def websocket_endpoint(
@@ -320,30 +348,10 @@ async def websocket_endpoint(
         return
     user_id, session_id = auth_result
 
-    if session_id and await is_session_blacklisted(session_id):
-        await websocket.close(code=4003, reason="Session has been revoked")
+    denial = await _websocket_access_denial(user_id, session_id)
+    if denial is not None:
+        await websocket.close(code=denial[0], reason=denial[1])
         return
-
-    async with AsyncSessionLocal() as session:
-        user = await session.get(User, user_id)
-        if not user or user.is_deleted:
-            await websocket.close(code=4003, reason="User is inactive")
-            return
-        if await should_block_webapp_user(session, user):
-            await websocket.close(code=1013, reason="WebApp temporarily unavailable")
-            return
-
-        if session_id:
-            try:
-                session_uuid = uuid.UUID(session_id)
-            except ValueError:
-                await websocket.close(code=4003, reason="Invalid session")
-                return
-
-            active_session = await session.get(UserSession, session_uuid)
-            if not active_session or not active_session.is_active or active_session.user_id != user_id:
-                await websocket.close(code=4003, reason="Session has been revoked")
-                return
     
     connection_id = uuid.uuid4().hex
     market_page_presence_active = False
@@ -352,12 +360,16 @@ async def websocket_endpoint(
     
     try:
         # شروع گوش دادن به Redis Pub/Sub در یک task جداگانه
-        redis_task = asyncio.create_task(listen_redis_events(websocket, user_id))
+        redis_task = asyncio.create_task(listen_redis_events(websocket, user_id, session_id))
         
         # گوش دادن به پیام‌های کلاینت (برای keep-alive)
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                denial = await _websocket_access_denial(user_id, session_id)
+                if denial is not None:
+                    await websocket.close(code=denial[0], reason=denial[1])
+                    break
                 market_page_presence_active = await _handle_client_message(
                     data,
                     user_id=user_id,
@@ -369,6 +381,10 @@ async def websocket_endpoint(
             except asyncio.TimeoutError:
                 # ارسال heartbeat
                 try:
+                    denial = await _websocket_access_denial(user_id, session_id)
+                    if denial is not None:
+                        await websocket.close(code=denial[0], reason=denial[1])
+                        break
                     await websocket.send_json({"type": "heartbeat"})
                 except:
                     break
@@ -382,7 +398,11 @@ async def websocket_endpoint(
         redis_task.cancel()
 
 
-async def listen_redis_events(websocket: WebSocket, user_id: int = None):
+async def listen_redis_events(
+    websocket: WebSocket,
+    user_id: int | None = None,
+    session_id: str | None = None,
+):
     """گوش دادن به رویدادهای Redis و ارسال به WebSocket"""
     logging.info(f"🔴 Redis listener started for WebSocket (user_id={user_id})")
     try:
@@ -417,6 +437,10 @@ async def listen_redis_events(websocket: WebSocket, user_id: int = None):
                         try:
                             # User-specific notifications channel has different format.
                             if channel.startswith("notifications:"):
+                                denial = await _websocket_access_denial(int(user_id), session_id)
+                                if denial is not None:
+                                    await websocket.close(code=denial[0], reason=denial[1])
+                                    break
                                 event_type = parsed_data.get("event", "notification")
                                 safe_data = sanitize_payload(parsed_data.get("data", {}))
                             else:
@@ -480,6 +504,9 @@ async def event_generator(user_id: int):
                         if not isinstance(parsed, dict):
                             raise ValueError("Realtime event payload must be an object")
                         if channel.startswith("notifications:"):
+                            denial = await _websocket_access_denial(user_id, None)
+                            if denial is not None:
+                                return
                             event_type = parsed.get("event", "notification")
                             safe = sanitize_payload(parsed.get("data", {}))
                             event_id = None

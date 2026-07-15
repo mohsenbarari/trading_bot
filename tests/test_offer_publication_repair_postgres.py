@@ -289,6 +289,96 @@ class OfferPublicationRepairPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["repaired"], 25)
         self.assertEqual(remaining_old, [])
 
+    async def test_due_retried_candidate_is_not_starved_by_new_failures(self):
+        old_ids = await self._seed_publication_candidates(
+            1,
+            created_offset=timedelta(hours=-1),
+            prefix="retried_due",
+        )
+        async with self.Session() as session:
+            state = (
+                await session.execute(
+                    select(OfferPublicationState).where(
+                        OfferPublicationState.offer_public_id == old_ids[0]
+                    )
+                )
+            ).scalar_one()
+            state.retry_count = 3
+            state.next_retry_at = utc_now() - timedelta(minutes=5)
+            await session.commit()
+
+        await self._seed_publication_candidates(
+            100,
+            created_offset=timedelta(0),
+            prefix="new_after_retry",
+        )
+
+        async def send(offer, _user):
+            return 2_000_000 + int(offer.id)
+
+        with patch(
+            "core.services.telegram_offer_publication_service.current_server",
+            return_value="foreign",
+        ):
+            async with self.Session() as session:
+                report = await reconciliation.reconcile_offer_publications(
+                    session,
+                    server_mode="foreign",
+                    dry_run=False,
+                    limit=1,
+                    send_offer_to_channel=send,
+                )
+
+        async with self.Session() as session:
+            old_offer = (
+                await session.execute(
+                    select(Offer).where(Offer.offer_public_id == old_ids[0])
+                )
+            ).scalar_one()
+        self.assertEqual(report["repaired"], 1)
+        self.assertIsNotNone(old_offer.channel_message_id)
+
+    async def test_due_retried_channel_state_is_not_starved_by_new_failures(self):
+        old_ids = await self._seed_channel_candidates(1)
+        async with self.Session() as session:
+            state = (
+                await session.execute(
+                    select(OfferPublicationState).where(
+                        OfferPublicationState.offer_public_id == old_ids[0]
+                    )
+                )
+            ).scalar_one()
+            offer = await session.get(Offer, state.offer_id)
+            worker._set_channel_state_attempt_count(
+                state,
+                3,
+                offer_version_id=offer.version_id,
+                next_retry_at=utc_now() - timedelta(minutes=5),
+            )
+            state.last_attempt_at = utc_now() - timedelta(minutes=10)
+            await session.commit()
+
+        await self._seed_channel_candidates(100)
+        apply_state = AsyncMock(
+            return_value=OfferChannelStateApplyResult(
+                ok=True,
+                response_class="2xx",
+                reason="ok",
+            )
+        )
+        with patch("core.offer_publication_worker.AsyncSessionLocal", self.Session), patch(
+            "core.offer_publication_worker.assert_background_job_authority"
+        ), patch(
+            "core.offer_publication_worker.apply_offer_channel_state_with_result",
+            new=apply_state,
+        ), patch("core.offer_publication_worker._channel_edit_spacing_seconds", return_value=0):
+            report = await worker.run_offer_channel_state_cycle(limit=1)
+
+        self.assertEqual(report.applied, 1)
+        self.assertEqual(apply_state.await_count, 1)
+        selected_offer = apply_state.await_args.args[0]
+        self.assertEqual(selected_offer.offer_public_id, old_ids[0])
+
     async def test_two_channel_workers_do_not_duplicate_provider_edit(self):
         await self._seed_channel_candidates(1)
         entered = asyncio.Event()

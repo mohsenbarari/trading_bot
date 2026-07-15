@@ -506,6 +506,81 @@ describe('OffersList.vue', () => {
     wrapper.unmount()
   })
 
+  it('keeps the exact trade intent after the coded temporary contention response', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        detail: {
+          error_code: 'TRADE_CONTENTION_BUSY',
+          message: 'این لفظ در حال معامله است.',
+        },
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 901 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    const wrapper = await mountOffersList({ offers: [buildTradeOffer({ id: 901 })] })
+
+    await confirmTrade(wrapper)
+    const firstBody = JSON.parse(String(apiFetchMock.mock.calls[0]![1].body))
+    expect(storedTradeIntents()[0]?.idempotencyKey).toBe(firstBody.idempotency_key)
+    expect(storedTradeIntents()[0]?.status).toBe('uncertain')
+
+    await confirmTrade(wrapper)
+    const secondBody = JSON.parse(String(apiFetchMock.mock.calls[1]![1].body))
+    expect(secondBody).toEqual(firstBody)
+    expect(storedTradeIntents()).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('keeps uncoded business conflicts definitive', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'مقدار درخواست معتبر نیست.' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 902 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    const wrapper = await mountOffersList({ offers: [buildTradeOffer({ id: 902 })] })
+
+    await confirmTrade(wrapper)
+    const firstBody = JSON.parse(String(apiFetchMock.mock.calls[0]![1].body))
+    expect(storedTradeIntents()).toEqual([])
+
+    await confirmTrade(wrapper)
+    const secondBody = JSON.parse(String(apiFetchMock.mock.calls[1]![1].body))
+    expect(secondBody.idempotency_key).not.toBe(firstBody.idempotency_key)
+    wrapper.unmount()
+  })
+
+  it('does not create a trade intent before the authenticated user identity is ready', async () => {
+    apiFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: 903 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const offer = buildTradeOffer({ id: 903 })
+    const wrapper = await mountOffersList({
+      offers: [offer],
+      currentUserId: undefined,
+      currentUserReady: false,
+    })
+
+    expect(wrapper.get('.trade-btn').attributes('disabled')).toBeDefined()
+    await confirmTrade(wrapper)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+    expect(sessionStorage.length).toBe(0)
+
+    await wrapper.setProps({ currentUserId: 77, currentUserReady: true })
+    await confirmTrade(wrapper)
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    expect(storedTradeIntents()).toEqual([])
+    wrapper.unmount()
+  })
+
   it('preserves the trade intent after an aborted request', async () => {
     apiFetchMock
       .mockRejectedValueOnce(new DOMException('request timed out', 'AbortError'))

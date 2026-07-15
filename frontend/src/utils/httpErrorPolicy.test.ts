@@ -35,6 +35,22 @@ describe('httpErrorPolicy', () => {
     expect(error.message).toBe('متن نامعتبر است')
   })
 
+  it('reads machine codes and messages from structured FastAPI details', async () => {
+    const error = await createHttpErrorFromResponse(jsonResponse({
+      detail: {
+        error_code: 'TRADE_CONTENTION_BUSY',
+        message: 'این لفظ در حال معامله است.',
+      },
+    }, 409), {
+      surface: 'market',
+      scope: 'action',
+      operation: 'submit',
+    })
+
+    expect(error.errorCode).toBe('TRADE_CONTENTION_BUSY')
+    expect(error.detail).toBe('این لفظ در حال معامله است.')
+  })
+
   it('hides unknown technical errors on list and panel surfaces', () => {
     expect(getUserFacingErrorMessage(new Error('socket hang up'), {
       surface: 'messenger',

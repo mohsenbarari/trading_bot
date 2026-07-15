@@ -119,13 +119,17 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
     ):
         log_trading_event(
             logger,
-            "offer_expiry_forward.legacy_success_without_receipt_ack",
-            level="warning",
+            "offer_expiry_forward.receipt_ack_invalid",
+            level="error",
             action="offer_expiry_forward",
-            result="success",
+            result="failure",
             status_code=response.status_code,
+            receipt_ack_present=bool(acknowledged_command_id),
             **log_context,
         )
+        return 503, {
+            "detail": "پاسخ سرور مرجع قابل تأیید نبود. لطفاً دوباره تلاش کنید."
+        }
 
     log_trading_event(
         logger,

@@ -80,6 +80,21 @@ class RealtimeRouterWebSocketGuardTests(unittest.IsolatedAsyncioTestCase):
             await websocket_endpoint(websocket, token="jwt")
         self.assertEqual(websocket.close_calls, [(4003, "Session has been revoked")])
 
+    async def test_websocket_endpoint_rejects_globally_web_locked_user(self):
+        websocket = FakeWebSocket()
+        user = SimpleNamespace(id=5, is_deleted=False)
+        with patch("api.routers.realtime.verify_ws_token", return_value=(5, None)), patch(
+            "api.routers.realtime.is_session_blacklisted", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.realtime.is_user_global_web_locked", return_value=True
+        ), patch(
+            "api.routers.realtime.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(user=user)),
+        ):
+            await websocket_endpoint(websocket, token="jwt")
+
+        self.assertEqual(websocket.close_calls, [(4003, "User is inactive")])
+
 
 if __name__ == "__main__":
     unittest.main()

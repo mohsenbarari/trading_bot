@@ -26,6 +26,7 @@ from core.utils import check_user_limits, to_jalali_str, utc_now_naive
 from core.services.market_transition_service import (
     MarketOfferAdmissionError,
     MarketOfferAdmissionClosedError,
+    acquire_market_offer_admission_fence,
     evaluate_current_market_schedule,
     register_market_offer_created,
 )
@@ -154,6 +155,34 @@ def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> No
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ACCOUNTANT_MARKET_BLOCKED_DETAIL,
         )
+
+
+async def _raise_market_offer_admission_rejection(
+    db: AsyncSession,
+    exc: MarketOfferAdmissionError,
+    *,
+    has_idempotency_key: bool,
+) -> None:
+    await db.rollback()
+    rejection_reason = (
+        "market_closed_at_final_admission"
+        if isinstance(exc, MarketOfferAdmissionClosedError)
+        else "market_admission_fence_unavailable"
+    )
+    log_trading_event(
+        logger,
+        "offer_create.final_admission_rejected",
+        action="offer_create",
+        result="rejected",
+        source_server=current_server(),
+        has_idempotency_key=has_idempotency_key,
+        reason=rejection_reason,
+        error_class=type(exc).__name__,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=MARKET_CLOSED_DETAIL,
+    ) from exc
 
 
 def build_offer_read_options(*, include_owner_identity: bool):
@@ -1167,6 +1196,9 @@ async def create_offer(
                 detail="شناسه عمومی لفظ قبلی برای انتشار مجدد الزامی است.",
             )
         try:
+            # Keep the declared order: market admission fence, owner quota lock,
+            # then offer rows. The creation service re-enters this xact lock.
+            await acquire_market_offer_admission_fence(db)
             republish_source = await lock_repeatable_offer(
                 db,
                 owner_user_id=owner_user.id,
@@ -1184,6 +1216,12 @@ async def create_offer(
                 is_wholesale=offer_data.is_wholesale,
                 lot_sizes=offer_data.lot_sizes,
                 notes=offer_data.notes,
+            )
+        except MarketOfferAdmissionError as exc:
+            await _raise_market_offer_admission_rejection(
+                db,
+                exc,
+                has_idempotency_key=bool(idempotency_key),
             )
         except OfferNotRepeatableError as exc:
             raise HTTPException(
@@ -1325,26 +1363,11 @@ async def create_offer(
         )
         new_offer = creation_outcome.offer
     except MarketOfferAdmissionError as exc:
-        await db.rollback()
-        rejection_reason = (
-            "market_closed_at_final_admission"
-            if isinstance(exc, MarketOfferAdmissionClosedError)
-            else "market_admission_fence_unavailable"
-        )
-        log_trading_event(
-            logger,
-            "offer_create.final_admission_rejected",
-            action="offer_create",
-            result="rejected",
-            source_server=current_server(),
+        await _raise_market_offer_admission_rejection(
+            db,
+            exc,
             has_idempotency_key=bool(idempotency_key),
-            reason=rejection_reason,
-            error_class=type(exc).__name__,
         )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=MARKET_CLOSED_DETAIL,
-        ) from exc
     except OfferCreationValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except OfferCreationLimitExceededError as exc:
