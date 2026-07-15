@@ -202,6 +202,21 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
         events = [call.args[1] for call in log_event.call_args_list]
         self.assertNotIn("offer_expiry_forward.receipt_ack_invalid", events)
 
+    async def test_legacy_sender_rejects_redirect_without_false_success(self):
+        request_payload = payload()
+        request_payload.pop("command_id")
+        request_payload.pop("idempotency_key")
+
+        result, _client, log_event = await self._forward(
+            {"expired": True, "offer_id": 11},
+            request_payload=request_payload,
+            status_code=302,
+        )
+
+        self.assertEqual(result[0], 503)
+        events = [call.args[1] for call in log_event.call_args_list]
+        self.assertIn("offer_expiry_forward.unexpected_success_status", events)
+
 
 if __name__ == "__main__":
     unittest.main()

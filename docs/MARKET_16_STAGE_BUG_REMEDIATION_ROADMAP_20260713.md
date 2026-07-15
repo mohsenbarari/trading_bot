@@ -1011,6 +1011,12 @@ retry شبکه‌ای هیچ‌گاه یک عملیات موفق را به failu
 - production همچنان flag را به‌صورت پیش‌فرض `false` دارد. rollout production باید همان ترتیب receiver-first و SHA parity را رعایت کند؛ rollback فوری با false کردن flag در هر دو peer و recreate سرویس‌های stateless انجام می‌شود.
 - rollback کد با revert commit runtime انجام می‌شود، اما receipt table و داده terminal تا پایان retry/retention window حذف نمی‌شوند. endpoint قدیمی additive باقی مانده و schema downgrade هنگام وجود caller جدید مجاز نیست.
 
+تصحیح نهایی قرارداد forwarding پس از بازبینی مستقل:
+
+- سخت‌گیری اولیه `2xx` فقط payloadهای دارای `command_id` را پوشش می‌داد. چون feature flag در production هنوز خاموش است، payload قدیمی بدون command identity مسیر فعال rollout است و یک پاسخ `3xx` می‌توانست در callerهای API و Bot به موفقیت کاذب تبدیل شود.
+- redirect اکنون مستقل از وجود command identity به `503` قابل retry نگاشت می‌شود. پاسخ سالم `200` در مسیر legacy و قرارداد کامل receipt در مسیر جدید بدون تغییر باقی می‌مانند.
+- تست مستقیم هر دو حالت command-bearing و legacy با پاسخ `302` را رد می‌کند؛ بنابراین کاربر دیگر درحالی‌که Offer روی home همچنان active است پیام موفقیت دریافت نمی‌کند.
+
 ---
 
 ## Stage ۱۲ - Pagination کامل بازار فعال (`MKT-05`)

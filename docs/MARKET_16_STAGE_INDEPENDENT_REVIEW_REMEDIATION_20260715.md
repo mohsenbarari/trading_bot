@@ -195,3 +195,34 @@ Both reviewers correctly retain the absence of exact-HEAD staging acceptance.
 That is release evidence still to be produced, not a newly discovered source
 defect. No merge, staging deployment or production deployment is authorized by
 this remediation record.
+
+## Final Follow-Up Review Of `8823ee81`
+
+Two independent reviews examined the third remediation commit:
+
+| Reviewer | Source report | SHA-256 |
+|---|---|---|
+| ChatGPT | `tmp/6-market-16-stage-final-independent-review-8823ee81.md` | `8ab9ba6bf797379df2cfac431124643edde6de356b1853a009522f5e371307b4` |
+| Claude | `tmp/claude/market-16-stage-final-rereview-8823ee81.md` | `4b1cebf8419bd22f7e4b34a6d30f94673f1654ebb07222f317679b638d69f891` |
+
+ChatGPT found no remaining source defect and retained exact-HEAD staging as an
+open release requirement. Claude independently reproduced the closed URL,
+test-count, lifecycle and receipt findings, then identified two follow-ups:
+
+1. A `3xx` response still escaped the strict-success guard when the sender had
+   no `command_id`. This is accepted as a real Low finding because production
+   currently defaults the receipt feature flag to false, so API and Bot callers
+   could convert the returned redirect into false user-visible success. The
+   redirect guard now applies to both legacy and command-bearing contracts,
+   while a healthy legacy `200` remains compatible.
+2. The standalone skip checker summed multiple unittest summaries while the
+   PostgreSQL runner required exactly one. This Info hardening is accepted;
+   missing, zero, multiple and positive-skip summaries now all fail closed.
+
+Claude also corrected its own stale Stage 9 re-raise. The accurate disposition
+is that the keyset/cursor wording was valid in an earlier revision, was already
+remediated by `805f9dcd`, and was incorrectly raised again at `ce880271`.
+
+The production scratch database remains a separately authorized operational
+cleanup item. This follow-up does not drop it and does not change the still-open
+exact-HEAD staging acceptance status.

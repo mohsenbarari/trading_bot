@@ -232,6 +232,9 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
         self.assertIsNone(skip_gate.executed_test_count("OK\n"))
         self.assertEqual(skip_gate.executed_test_count("Ran 0 tests\nOK\n"), 0)
         self.assertEqual(skip_gate.executed_test_count("Ran 2 tests\nOK\n"), 2)
+        self.assertIsNone(
+            skip_gate.executed_test_count("Ran 0 tests\nOK\nRan 2 tests\nOK\n")
+        )
         self.assertEqual(skip_gate.skipped_test_count("Ran 2 tests\nOK\n"), 0)
         self.assertEqual(
             skip_gate.skipped_test_count("Ran 2 tests\nOK (skipped=1)\n"),
@@ -240,7 +243,12 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "unittest.log"
-            for output in ("OK\n", "Ran 0 tests\nOK\n", "Ran 2 tests\nOK (skipped=1)\n"):
+            for output in (
+                "OK\n",
+                "Ran 0 tests\nOK\n",
+                "Ran 2 tests\nOK (skipped=1)\n",
+                "Ran 0 tests\nOK\nRan 2 tests\nOK\n",
+            ):
                 with self.subTest(output=output):
                     log_path.write_text(output, encoding="utf-8")
                     self.assertEqual(skip_gate.main([str(log_path)]), 2)

@@ -17,7 +17,7 @@ def skipped_test_count(output: str) -> int:
 
 def executed_test_count(output: str) -> int | None:
     counts = [int(match.group(1)) for match in TEST_COUNT_PATTERN.finditer(output)]
-    return sum(counts) if counts else None
+    return counts[0] if len(counts) == 1 else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,10 +29,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"required unittest log is missing: {path}")
         return 2
     output = path.read_text(encoding="utf-8", errors="replace")
-    executed = executed_test_count(output)
-    if executed is None:
+    test_counts = [int(match.group(1)) for match in TEST_COUNT_PATTERN.finditer(output)]
+    if not test_counts:
         print(f"required unittest proof has no test-count summary: {path}")
         return 2
+    if len(test_counts) != 1:
+        print(f"required unittest proof must contain exactly one test-count summary: {path}")
+        return 2
+    executed = test_counts[0]
     if executed <= 0:
         print(f"required unittest proof executed zero tests: {path}")
         return 2

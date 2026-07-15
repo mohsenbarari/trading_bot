@@ -157,7 +157,7 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
             "detail": "پاسخ سرور مرجع قابل تأیید نبود. لطفاً دوباره تلاش کنید."
         }
 
-    if expected_command_id and not response_is_success and response.status_code < 400:
+    if not response_is_success and response.status_code < 400:
         log_trading_event(
             logger,
             "offer_expiry_forward.unexpected_success_status",
