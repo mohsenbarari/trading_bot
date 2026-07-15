@@ -46,7 +46,11 @@ from core.sync_metadata import build_sync_metadata, build_sync_public_identity, 
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
 from core.sync_parity_observability import summarize_parity_comparison
-from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
+from core.sync_protocol import (
+    build_sync_protocol_metadata,
+    current_sync_registry_fingerprint,
+    validate_sync_protocol_metadata,
+)
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.security import constant_time_secret_equals
@@ -4545,6 +4549,10 @@ async def get_sync_health(
     payload = {
         "status": "ok",
         "server_mode": settings.server_mode,
+        "runtime_compatibility": {
+            "release_sha": settings.release_sha,
+            "registry_fingerprint": current_sync_registry_fingerprint(),
+        },
         "peer_server_url_configured": bool(default_peer_server_url()),
         "redis_ok": redis_ok,
         "unsynced_change_log_count": int(unsynced_count or 0),

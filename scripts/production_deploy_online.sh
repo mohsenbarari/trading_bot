@@ -8,6 +8,7 @@ RELEASE_ARTIFACT_RENDERER="$PROJECT_DIR/scripts/render_release_artifacts.py"
 DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"
 PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygiene.py"
 CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_change_log_source_sequence.py"
+TRADE_NUMBER_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_trade_number_sequence.py"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -430,6 +431,7 @@ IRAN_FRONTEND_URL=$iran_frontend_url
 PUBLIC_WEBAPP_URL=$iran_frontend_url
 FOREIGN_SERVER_ALIASES=$foreign_public_domain
 REQUIRE_WEB_PUSH=1
+REQUIRE_OFFER_EXPIRY_COMMAND_RECEIPTS=1
 ENV_BACKUP_DIR=/root/secure-envs/trading-bot/backups
 ALLOW_PROJECT_ENV_SOURCE=0
 
@@ -450,6 +452,7 @@ IRAN_ALLOW_RELEASE_BRANCH_DRIFT=0
 IRAN_SHARED_DATA_MODE=auto
 IRAN_SHARED_SEED_BATCH_SIZE=50
 IRAN_SHARED_RESET_CONFIRM=
+OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=1
 
 # --- Healthcheck ---
 IRAN_HEALTHCHECK_URL=https://$iran_app_domain/api/config
@@ -544,6 +547,7 @@ load_manifest() {
     IRAN_ALLOW_RELEASE_BRANCH_DRIFT="${IRAN_ALLOW_RELEASE_BRANCH_DRIFT:-0}"
     ALLOW_PROJECT_ENV_SOURCE="${ALLOW_PROJECT_ENV_SOURCE:-0}"
     REQUIRE_WEB_PUSH="${REQUIRE_WEB_PUSH:-0}"
+    REQUIRE_OFFER_EXPIRY_COMMAND_RECEIPTS="${REQUIRE_OFFER_EXPIRY_COMMAND_RECEIPTS:-1}"
     ENV_BACKUP_DIR="${ENV_BACKUP_DIR:-/root/secure-envs/trading-bot/backups}"
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
@@ -685,6 +689,31 @@ validate_runtime_identity_files() {
         guard_args+=(--allow-project-env-source)
     fi
     python3 "$DEPLOYMENT_SURFACE_GUARD" "${guard_args[@]}"
+    validate_offer_expiry_receipt_env_files
+    validate_runtime_release_sha_files
+}
+
+validate_offer_expiry_receipt_env_files() {
+    local foreign_value iran_value
+    foreign_value="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")"
+    iran_value="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")"
+
+    [[ -n "$foreign_value" ]] || die "Foreign runtime env is missing OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"
+    [[ -n "$iran_value" ]] || die "Iran runtime env is missing OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"
+    [[ "${foreign_value,,}" == "${iran_value,,}" ]] || die "Offer-expiry receipt rollout must have the same value on foreign and Iran runtimes"
+    if is_truthy "$REQUIRE_OFFER_EXPIRY_COMMAND_RECEIPTS" && ! is_truthy "$foreign_value"; then
+        die "Production requires OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=true on both runtimes"
+    fi
+}
+
+validate_runtime_release_sha_files() {
+    local expected_sha foreign_sha iran_sha
+    expected_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)"
+    foreign_sha="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "RELEASE_SHA")"
+    iran_sha="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "RELEASE_SHA")"
+
+    [[ "$foreign_sha" == "$expected_sha" ]] || die "Foreign runtime RELEASE_SHA does not match production HEAD"
+    [[ "$iran_sha" == "$expected_sha" ]] || die "Iran runtime RELEASE_SHA does not match production HEAD"
 }
 
 summarize_web_push_env_file() {
@@ -751,6 +780,8 @@ export_runtime_renderer_overrides() {
         REGISTRATION_SYNC_V2_ENABLED
         REGISTRATION_SYNC_ACCEPT_UNVERSIONED
         INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE
+        OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED
+        RELEASE_SHA
         DB_POOL_SIZE
         DB_MAX_OVERFLOW
         IRAN_DB_POOL_SIZE
@@ -904,6 +935,8 @@ ensure_production_release_git_ref() {
     local branch head_sha upstream upstream_sha
     branch="$(git -C "$LOCAL_PROJECT_DIR" symbolic-ref --short HEAD 2>/dev/null || true)"
     head_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short HEAD)"
+    RELEASE_SHA="$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)"
+    export RELEASE_SHA
 
     if [[ "$IRAN_ALLOW_NON_MAIN_RELEASE" == "1" ]]; then
         log "IRAN_ALLOW_NON_MAIN_RELEASE=1; allowing production release from branch ${branch:-detached} at $head_sha."
@@ -1054,6 +1087,7 @@ check_local() {
     [[ -f "$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template" ]] || die "Nginx template missing"
     [[ -f "$RELEASE_ARTIFACT_RENDERER" ]] || die "Release artifact renderer missing: $RELEASE_ARTIFACT_RENDERER"
     [[ -f "$CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER" ]] || die "Change-log source sequence aligner missing: $CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER"
+    [[ -f "$TRADE_NUMBER_SEQUENCE_ALIGNER" ]] || die "Trade-number sequence aligner missing: $TRADE_NUMBER_SEQUENCE_ALIGNER"
     validate_runtime_env_source_policy
     ensure_runtime_env_file
     render_release_artifacts
@@ -1938,7 +1972,65 @@ eval \"\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration pyt
 docker rm -f trading_bot_migration >/dev/null 2>&1 || true
 eval \"\$compose_cmd -f docker-compose.iran.yml up -d --no-deps \$wait_args app sync_worker\"
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\""
+    repair_registry_fingerprint_rollout_quarantine
     log "Iran deploy step complete"
+}
+
+local_runtime_compatibility() {
+    (
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD exec -T app python -c \
+            'import json; from core.config import settings; from core.sync_protocol import current_sync_registry_fingerprint; print(json.dumps({"release_sha": settings.release_sha, "registry_fingerprint": current_sync_registry_fingerprint()}, sort_keys=True))'
+    )
+}
+
+iran_runtime_compatibility() {
+    ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml exec -T app python -c 'import json; from core.config import settings; from core.sync_protocol import current_sync_registry_fingerprint; print(json.dumps({\"release_sha\": settings.release_sha, \"registry_fingerprint\": current_sync_registry_fingerprint()}, sort_keys=True))'"
+}
+
+repair_registry_fingerprint_rollout_quarantine() {
+    local foreign_runtime iran_runtime foreign_release iran_release foreign_registry iran_registry
+    for attempt in $(seq 1 60); do
+        foreign_runtime="$(local_runtime_compatibility 2>/dev/null || true)"
+        iran_runtime="$(iran_runtime_compatibility 2>/dev/null || true)"
+        if [[ -n "$foreign_runtime" && -n "$iran_runtime" ]]; then
+            break
+        fi
+        if [[ "$attempt" -eq 60 ]]; then
+            die "Could not read runtime compatibility from both production servers"
+        fi
+        sleep 2
+    done
+
+    foreign_release="$(printf '%s' "$foreign_runtime" | extract_json_field release_sha)"
+    iran_release="$(printf '%s' "$iran_runtime" | extract_json_field release_sha)"
+    foreign_registry="$(printf '%s' "$foreign_runtime" | extract_json_field registry_fingerprint)"
+    iran_registry="$(printf '%s' "$iran_runtime" | extract_json_field registry_fingerprint)"
+    [[ -n "$RELEASE_SHA" && "$foreign_release" == "$RELEASE_SHA" && "$iran_release" == "$RELEASE_SHA" ]] \
+        || die "Refusing sync-quarantine repair because production release SHAs are not identical"
+    [[ -n "$foreign_registry" && "$foreign_registry" == "$iran_registry" ]] \
+        || die "Refusing sync-quarantine repair because registry fingerprints are not identical"
+
+    log "Releasing only rollout registry-fingerprint quarantines after exact runtime compatibility verification"
+    (
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD run --rm --no-deps migration \
+            python scripts/repair_registry_fingerprint_quarantine.py repair \
+            --expected-release-sha "$RELEASE_SHA" \
+            --expected-registry-fingerprint "$foreign_registry" \
+            --confirm RELEASE_REGISTRY_FINGERPRINT_QUARANTINE
+    )
+    ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration \
+  python scripts/repair_registry_fingerprint_quarantine.py repair \
+  --expected-release-sha '$RELEASE_SHA' \
+  --expected-registry-fingerprint '$foreign_registry' \
+  --confirm RELEASE_REGISTRY_FINGERPRINT_QUARANTINE"
 }
 
 shell_quote() {
@@ -2239,8 +2331,24 @@ healthcheck() {
             sleep 5
         done
     fi
+    verify_no_sync_quarantines
     run_production_data_hygiene_checks
     log "Health checks passed"
+}
+
+verify_no_sync_quarantines() {
+    local foreign_count iran_count
+    foreign_count="$(
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD exec -T db sh -lc \
+            'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT COUNT(*) FROM change_log WHERE synced = false AND quarantined_at IS NOT NULL"'
+    )"
+    iran_count="$(ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml exec -T db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"SELECT COUNT(*) FROM change_log WHERE synced = false AND quarantined_at IS NOT NULL\"'")"
+    [[ "$foreign_count" == "0" ]] || die "Foreign sync still contains quarantined change-log rows: $foreign_count"
+    [[ "$iran_count" == "0" ]] || die "Iran sync still contains quarantined change-log rows: $iran_count"
 }
 
 run_production_data_hygiene_foreign() {

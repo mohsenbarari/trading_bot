@@ -52,6 +52,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "FOREIGN_SERVER_ALIASES": "sync-foreign.example.com,foreign-app",
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
+            "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
+            "RELEASE_SHA": "abc123release",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -122,6 +124,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["SERVER_MODE"], "iran")
         self.assertEqual(foreign["API_WORKERS"], "2")
         self.assertEqual(iran["API_WORKERS"], "4")
+        self.assertEqual(foreign["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
+        self.assertEqual(iran["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
+        self.assertEqual(foreign["RELEASE_SHA"], "abc123release")
+        self.assertEqual(iran["RELEASE_SHA"], "abc123release")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
         self.assertEqual(foreign["PUBLIC_WEBAPP_URL"], "https://app.gold-trade.ir")
@@ -250,6 +256,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("WEB_PUSH_VAPID_SUBJECT=mailto:ops@example.com", iran_lines)
             self.assertIn("WEB_PUSH_TTL_SECONDS=7200", iran_lines)
             self.assertIn("WEB_PUSH_TIMEOUT_SECONDS=7.5", iran_lines)
+            self.assertIn("OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=true", foreign_lines)
+            self.assertIn("OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=true", iran_lines)
+            self.assertIn("RELEASE_SHA=abc123release", foreign_lines)
+            self.assertIn("RELEASE_SHA=abc123release", iran_lines)
             self.assertIn("OTP_DELIVERY_STATE_SECRET=", foreign_lines)
             self.assertIn(
                 "OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
@@ -276,6 +286,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values.pop("WEB_PUSH_VAPID_SUBJECT")
         values.pop("WEB_PUSH_TTL_SECONDS")
         values.pop("WEB_PUSH_TIMEOUT_SECONDS")
+        values.pop("OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")
+        values.pop("RELEASE_SHA")
         values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_WARNING_RECEIVER"] = "Trading Bot Production Email"
@@ -304,6 +316,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["WEB_PUSH_VAPID_SUBJECT"], "")
         self.assertEqual(collected["WEB_PUSH_TTL_SECONDS"], "3600")
         self.assertEqual(collected["WEB_PUSH_TIMEOUT_SECONDS"], "5.0")
+        self.assertEqual(collected["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "false")
+        self.assertEqual(collected["RELEASE_SHA"], "")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
         self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")
