@@ -4820,6 +4820,25 @@ async def inspect_hot_offer_persistence(offer_id: int) -> HotOfferPersistenceSna
         )
 
 
+def build_bot_offer_text(
+    *,
+    owner_user_id: int,
+    commodity_name: str,
+    prefix: str,
+    quantity: int,
+    price: int,
+    offer_type: str,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
+) -> tuple[str, str]:
+    verb = "خ" if offer_type == "buy" else "ف"
+    marker = f"{prefix} bot hot {owner_user_id}"
+    lots_text = ""
+    if not is_wholesale and lot_sizes:
+        lots_text = " " + " ".join(str(item) for item in lot_sizes)
+    return f"{verb} ن {commodity_name} {quantity} عدد {price}{lots_text}: {marker}", marker
+
+
 async def create_bot_offer_with_dispatcher(
     *,
     harness: AiogramDispatcherHarness,
@@ -4833,12 +4852,16 @@ async def create_bot_offer_with_dispatcher(
     lot_sizes: list[int] | tuple[int, ...] | None = None,
     time_limit_buffer_minutes: int | None = None,
 ) -> int:
-    verb = "خ" if offer_type == "buy" else "ف"
-    marker = f"{prefix} bot hot {owner.user_id}"
-    lots_text = ""
-    if not is_wholesale and lot_sizes:
-        lots_text = " " + " ".join(str(item) for item in lot_sizes)
-    text_value = f"{verb} {commodity_name} {quantity} عدد {price}{lots_text}: {marker}"
+    text_value, marker = build_bot_offer_text(
+        owner_user_id=owner.user_id,
+        commodity_name=commodity_name,
+        prefix=prefix,
+        quantity=quantity,
+        price=price,
+        offer_type=offer_type,
+        is_wholesale=is_wholesale,
+        lot_sizes=lot_sizes,
+    )
     await harness.feed_private_text(telegram_id=owner.telegram_id, text_value=text_value)
     await harness.feed_private_callback(
         telegram_id=owner.telegram_id,

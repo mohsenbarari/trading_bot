@@ -10,6 +10,7 @@ from scripts.trading_core_probe_worker import (
     TradingProbeError,
     assert_race_barrier_lateness,
     assert_race_acceptance,
+    build_bot_offer_text,
     run_manual_expiry_race_command,
     set_prepare_barrier_command,
     run_time_expiry_race_command,
@@ -18,6 +19,31 @@ from scripts.trading_core_probe_worker import (
 
 
 class TradingCoreProbeWorkerTests(unittest.TestCase):
+    def test_bot_offer_matrix_uses_current_cash_settlement_prefix(self) -> None:
+        buy_text, buy_marker = build_bot_offer_text(
+            owner_user_id=17,
+            commodity_name="امام",
+            prefix="matrix_",
+            quantity=20,
+            price=176000,
+            offer_type="buy",
+        )
+        sell_text, sell_marker = build_bot_offer_text(
+            owner_user_id=18,
+            commodity_name="ربع",
+            prefix="matrix_",
+            quantity=40,
+            price=178000,
+            offer_type="sell",
+            is_wholesale=False,
+            lot_sizes=[30, 10],
+        )
+
+        self.assertEqual(buy_text, "خ ن امام 20 عدد 176000: matrix_ bot hot 17")
+        self.assertEqual(buy_marker, "matrix_ bot hot 17")
+        self.assertEqual(sell_text, "ف ن ربع 40 عدد 178000 30 10: matrix_ bot hot 18")
+        self.assertEqual(sell_marker, "matrix_ bot hot 18")
+
     def test_summarize_samples_reports_tail_latency(self) -> None:
         summary = summarize_samples([10.0, 20.0, 30.0, 40.0])
 
