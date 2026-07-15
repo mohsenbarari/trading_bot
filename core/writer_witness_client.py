@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -262,9 +262,36 @@ async def renew_local_writer_lease_once(
     request_id: str,
     identity: RuntimeIdentity | None = None,
     now: datetime | None = None,
+    session_factory: Callable[[], Any] | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    public_key_base64: str | None = None,
+    lease_duration_seconds: int | None = None,
+    safety_margin_seconds: int | None = None,
+    max_clock_skew_seconds: int | None = None,
 ) -> ValidatedWitnessLeaseProof:
     runtime_identity = identity or resolve_runtime_identity(settings)
-    async with AsyncSessionLocal() as session:
+    active_session_factory = session_factory or AsyncSessionLocal
+    active_lease_duration = int(
+        lease_duration_seconds
+        if lease_duration_seconds is not None
+        else settings.writer_witness_lease_duration_seconds
+    )
+    active_safety_margin = int(
+        safety_margin_seconds
+        if safety_margin_seconds is not None
+        else settings.writer_witness_safety_margin_seconds
+    )
+    active_max_clock_skew = int(
+        max_clock_skew_seconds
+        if max_clock_skew_seconds is not None
+        else settings.writer_witness_max_clock_skew_seconds
+    )
+    active_public_key = (
+        str(public_key_base64)
+        if public_key_base64 is not None
+        else str(settings.writer_witness_public_key or "")
+    )
+    async with active_session_factory() as session:
         snapshot = await load_writer_snapshot(session)
     if (
         snapshot.control_state != CONTROL_ACTIVE
@@ -283,27 +310,28 @@ async def renew_local_writer_lease_once(
         expected_lease_id=snapshot.witness_lease_id,
         request_id=request_id,
         reason="automatic active-writer lease renewal",
-        lease_duration_seconds=settings.writer_witness_lease_duration_seconds,
+        lease_duration_seconds=active_lease_duration,
         now=current,
+        client=http_client,
     )
     proof_payload = payload.get("proof")
     try:
         proof = validate_witness_lease_proof(
             proof_payload,
-            public_key_base64=str(settings.writer_witness_public_key or ""),
+            public_key_base64=active_public_key,
             expected_site=runtime_identity.physical_site,
             expected_epoch=snapshot.writer_epoch,
             now=current,
-            safety_margin_seconds=settings.writer_witness_safety_margin_seconds,
-            max_clock_skew_seconds=settings.writer_witness_max_clock_skew_seconds,
-            max_lifetime_seconds=settings.writer_witness_lease_duration_seconds,
+            safety_margin_seconds=active_safety_margin,
+            max_clock_skew_seconds=active_max_clock_skew,
+            max_lifetime_seconds=active_lease_duration,
         )
     except WitnessProofError as exc:
         raise WriterWitnessClientError(
             "writer witness returned an unusable signed lease proof",
             code="writer_witness_invalid_proof",
         ) from exc
-    async with AsyncSessionLocal() as session:
+    async with active_session_factory() as session:
         try:
             await transition_writer_state(
                 session,

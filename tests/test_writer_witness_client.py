@@ -177,9 +177,9 @@ class WriterWitnessRenewalTests(unittest.IsolatedAsyncioTestCase):
         }
         sessions = FakeSessionFactory()
         local_transition = AsyncMock()
+        injected_http_client = SimpleNamespace()
 
         with (
-            patch("core.writer_witness_client.AsyncSessionLocal", new=sessions),
             patch(
                 "core.writer_witness_client.load_writer_snapshot",
                 new=AsyncMock(return_value=snapshot),
@@ -188,17 +188,23 @@ class WriterWitnessRenewalTests(unittest.IsolatedAsyncioTestCase):
                 "core.writer_witness_client.transition_writer_state",
                 new=local_transition,
             ),
-            patch("core.writer_witness_client.settings.writer_witness_public_key", public_key),
         ):
             validated = await renew_local_writer_lease_once(
                 client=remote,
                 request_id="renew-request",
                 identity=IDENTITY,
                 now=NOW,
+                session_factory=sessions,
+                http_client=injected_http_client,
+                public_key_base64=public_key,
+                lease_duration_seconds=180,
+                safety_margin_seconds=15,
+                max_clock_skew_seconds=5,
             )
 
         self.assertEqual(validated.writer_epoch, 4)
         self.assertEqual(validated.lease_id, "lease-4")
+        self.assertIs(remote.transition.await_args.kwargs["client"], injected_http_client)
         local_transition.assert_awaited_once()
         kwargs = local_transition.await_args.kwargs
         self.assertEqual(kwargs["expected_epoch"], 4)
