@@ -48,6 +48,8 @@
 - ماتریس فنی خطاهای Bot API و transport نیز جداگانه تست می‌شود، اما منظور مالک محصول از «تمام پاسخ‌های Telegram» این ماتریس خطا نبود.
 - هر دور ترکیبی ده‌دقیقه‌ای شامل `1800` آفر معتبر به‌اضافه دقیقاً `400` تلاش نامعتبرِ تصادفی و تکرارپذیر است؛ در مجموع `2200` تلاش ثبت.
 - الگوی آفرهای معتبر از آمار و نمونه‌های پاک‌سازی‌شده جدول آفرهای production با دسترسی read-only ساخته می‌شود؛ شناسه کاربر، متن واقعی توضیحات، شناسه پیام و سایر داده‌های هویتی کپی نمی‌شوند.
+- فقط در دیتابیس ایزوله staging، مقدار `max_active_offers` از `4` به `50` افزایش می‌یابد تا به‌جای ساخت ده‌ها حساب اضافی، pool کوچک‌تر ولی واقعی Telegram استفاده شود.
+- مقدار پیش‌فرض کد، فایل عمومی تنظیمات و production روی `4` باقی می‌ماند؛ مقدار `50` باید از مرجع Iran staging ثبت، به foreign staging sync و در cache هر دو سمت تأیید شود.
 - داده و اجرای تلگرام همچنان تابع مرزبندی فعلی است: اجرای Telegram فقط روی سرور foreign انجام می‌شود.
 
 ## 3. اولویت قطعی پیام‌ها
@@ -366,6 +368,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 ### Stage 4 — deploy و آزمایش تکرارشونده staging
 
 - deploy فقط با مسیر استاندارد staging
+- ثبت `max_active_offers=50` فقط از مرجع مدیریتی Iran staging و تأیید sync/cache در foreign staging
 - تأیید recreate شدن `bot`, `foreign_app`, `sync_worker`, `foreign_sync_worker`
 - اجرای ماتریس intervalها
 - اجرای endurance و burst
@@ -417,6 +420,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C17` | P0 | DECIDED | دریافت واقعی همه پاسخ‌های طبیعی Telegram | catalog پاسخ کسب‌وکار، ارسال واقعی، observer سمت گیرنده و تطبیق ledger |
 | `TOPQ-C18` | P0 | DECIDED | نسبت بار معتبر و نامعتبر | `1800` آفر معتبر به‌اضافه `400` تلاش نامعتبر در هر دور ده‌دقیقه‌ای |
 | `TOPQ-C19` | P1 | DECIDED | استفاده امن از الگوی آفر production | sampler فقط‌خواندنی، حذف هویت و بازسازی payload برای staging |
+| `TOPQ-C20` | P0 | DECIDED | کاهش تعداد حساب‌های تست بدون تغییر production | `max_active_offers=50` فقط در staging، pool پایه ۲۵ حساب و guard عدم نشت به production |
 
 ## 14. معیار پذیرش نهایی
 
@@ -434,6 +438,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - تمام پاسخ‌های طبیعی Telegram که سناریوی کسب‌وکار تولید می‌کند واقعاً در مقصد آزمایشی دریافت و با event ledger تطبیق داده شوند.
 - خطاهای فنی Bot API و transport در ماتریس تاب‌آوری جداگانه به رفتار مورد انتظار نگاشت شوند.
 - fixture برگرفته از production فقط شامل الگوی غیرهویتی باشد و runner محیط staging هیچ اتصال مستقیمی به production نداشته باشد.
+- preflight مقدار `max_active_offers=50` را در هر دو سطح Iran/foreign staging تأیید کند و هم‌زمان ثابت بماند که default/production همچنان `4` است.
 - interval نهایی با چندین دور staging و گزارش goodput انتخاب شود.
 - backlog، سن قدیمی‌ترین پیام و زمان تخلیه قابل مشاهده باشند.
 - گزارش reconciliation خطاهای فعال را از خطاهای تاریخی جدا کند.

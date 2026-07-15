@@ -147,12 +147,22 @@ sampler فقط یک artifact غیرهویتی می‌سازد. اتصال produc
 
 ## 6. کاربران و محدودیت‌های کسب‌وکار
 
-با expiry دو دقیقه‌ای و حداکثر چهار آفر فعال برای هر کاربر، حدود ۳۶۰ آفر می‌تواند هم‌زمان فعال باشد. بنابراین:
+با expiry دو دقیقه‌ای حدود ۳۶۰ آفر می‌تواند هم‌زمان فعال باشد. برای کاهش تعداد حساب‌های آزمایشی، محدودیت فقط در staging به شکل زیر تنظیم می‌شود:
 
-- حداقل نظری ownerهای هم‌زمان `90` است.
-- baseline از `150` مالک منطقی staging استفاده می‌کند.
-- requesterها از ownerها جدا انتخاب می‌شوند و self-trade ممنوع است.
+```text
+staging max_active_offers = 50
+production/default max_active_offers = 4
+```
+
+- حداقل نظری ownerهای هم‌زمان با سقف ۵۰ برابر `ceil(360 / 50) = 8` است.
+- استفاده از فقط ۸ حساب، پاسخ‌های خصوصی را روی هر chat بیش از حد متراکم و غیرطبیعی می‌کند.
+- baseline از `25` حساب واقعی Telegram test استفاده می‌کند: `20` owner فعال و `5` حساب requester/admin-recipient کمکی.
+- همان ownerها می‌توانند روی آفر owner دیگری درخواست معامله بزنند، اما self-trade ممنوع است.
+- generator اجازه نمی‌دهد یک owner بیش از `45` آفر فعال داشته باشد؛ پنج ظرفیت آخر headroom پیک و تأخیر expiry است.
 - رفتار کاربران یکنواخت نیست: گروه کوچک پرتکرار، گروه متوسط و کاربران گهگاهی تعریف می‌شوند.
+- مقدار `50` از مسیر مدیریتی مرجع Iran staging ثبت می‌شود؛ update مستقیم foreign staging مجاز نیست.
+- اجرای تست تا وقتی sync و cache هر دو سمت Iran/foreign staging مقدار `50` را نشان ندهند شروع نمی‌شود.
+- default مدل و production نباید تغییر کنند و باید همچنان `4` گزارش شوند.
 - limitها و counterهای runtime پیش از هر دور فقط در staging بررسی و به وضعیت تکرارپذیر برگردانده می‌شوند.
 - هیچ شناسه یا حساب production برای ارسال پیام staging استفاده نمی‌شود.
 
@@ -395,6 +405,7 @@ goodput = terminally_delivered_jobs / total_wall_clock_including_cooldown_and_dr
 - هیچ تلاش نامعتبر Offer یا publication intent نسازد.
 - تمام quotaهای کالا، buy/sell، تسویه و شکل لات برقرار باشند.
 - هر شاخه پاسخ validation در response catalog حداقل یک receipt واقعی داشته باشد.
+- هیچ owner از سقف guard آزمایش یعنی `45` آفر فعال عبور نکند و هیچ پذیرش معتبر به‌علت quota کاربر رد نشود.
 
 ### 13.2 صحت کسب‌وکار
 
@@ -470,5 +481,7 @@ artifact خام دارای داده حساس commit نمی‌شود. فقط گز
 - پیاده‌سازی ledger و reconciliation مستقل
 - feature flag پیش‌فرض خاموش
 - تأیید bot/channel مستقل staging
-- تأیید runtime expiry دو دقیقه و limitهای کاربران
+- ثبت `max_active_offers=50` فقط در Iran staging و تأیید sync/cache آن در foreign staging
+- guard خودکار که default و production را همچنان `4` تأیید کند
+- تأیید runtime expiry دو دقیقه و سایر limitهای کاربران
 - تست محلی کامل پیش از اولین پیام زنده staging
