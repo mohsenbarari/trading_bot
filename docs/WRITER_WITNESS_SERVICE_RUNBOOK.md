@@ -102,8 +102,9 @@ activation:
   real VM reboot and returned automatically;
 - daily custom-format PostgreSQL backups are checksumed and retained for 30
   days. A real restore into a temporary database verified schema `001`, the
-  singleton, and receipt count before cleanup. These copies are currently
-  host-local and do not replace encrypted off-host backup;
+  singleton, and receipt count before cleanup. Each new local dump is also
+  encrypted with an off-host `age` recipient and uploaded to immutable Hetzner
+  Object Storage;
 - Python 3.12 dependencies are fully pinned in
   `deploy/writer-witness/requirements.lock`. A CPython 3.12 wheelhouse and its
   per-file `SHA256SUMS` are verified before offline installation because the
@@ -138,8 +139,46 @@ The repeatable deployment assets are:
   wheelhouse and checksums;
 - `scripts/provision_writer_witness_host.sh` for PostgreSQL, credentials, TLS,
   Nginx, systemd, SSH hardening, UFW, backup, restore drill, and final health;
+- `scripts/provision_writer_witness_object_storage.py` for dry-run-first bucket,
+  Object Lock, retention, private ACL, and least-privilege policy setup;
+- `scripts/configure_writer_witness_s3_backup.sh` for installing the write-only
+  encrypted backup path without copying a decryption identity to the Witness;
+- `scripts/run_writer_witness_offsite_restore_drill.sh` for downloading with
+  the off-host admin identity, verifying retention/checksum, decrypting outside
+  the Witness, and streaming into an isolated temporary restore database;
 - `scripts/smoke_writer_witness_client.py` for authenticated read-only status
   verification without printing client secrets.
+
+## Encrypted Off-Host Backup Evidence
+
+On 2026-07-15 the lower-cost Object Storage path was activated instead of a
+dedicated backup VM or Bot-FI volume:
+
+- private bucket `tb-witness-15352997-44732f4a35` is in HEL1 with versioning
+  enabled and default 90-day `COMPLIANCE` Object Lock;
+- a separate admin credential remains off the Witness; the credential installed
+  on the Witness is explicitly denied list, read, delete, retention, ACL,
+  policy, lifecycle, and bucket-control actions and can only upload under
+  `witness/`;
+- a live policy probe proved upload succeeds while list/read/delete return
+  access denied;
+- the `age` decryption identity remains off the Witness with mode `0600`; only
+  its public recipient is installed on the Iran host;
+- `writer-witness-offsite-backup.timer` runs daily after the local backup timer,
+  and a root-only marker prevents a successful dump from being uploaded again;
+- the first encrypted production-Witness dump was uploaded as
+  `witness/writer-witness-20260715T114726Z.dump.age`, received an S3 version ID,
+  and is locked in `COMPLIANCE` mode until
+  `2026-10-13T14:11:36.178523941Z`;
+- the end-to-end drill downloaded that exact object, matched its S3 metadata
+  SHA-256, verified its retention, authenticated the `age` payload, streamed it
+  to a temporary PostgreSQL database, and reproduced schema `001`, state
+  `webapp:0:vacant`, and zero receipts before cleanup.
+
+This closes encrypted off-host custody and a data-level restore. A full
+replacement-host rebuild/restore remains a separate operational drill. During
+an Iran-to-global outage the local 30-day copies continue; S3 upload catches up
+after connectivity returns.
 
 ## WebApp Client Settings
 
@@ -171,6 +210,6 @@ Do not issue the first lease, copy credentials into a WebApp runtime, or enable
 WebApp witness enforcement merely because the dark service is healthy.
 Production writer activation remains blocked until real-host directional
 partition/pause/delayed-packet tests, credential rotation and recovery,
-encrypted off-host backup/restore, operator approval policy, stale-epoch
-side-effect binding, sync/parity/file gates, and the higher-level
-recovery/Arvan orchestrator are complete.
+replacement-host recovery, operator approval policy, stale-epoch side-effect
+binding, sync/parity/file gates, and the higher-level recovery/Arvan
+orchestrator are complete.

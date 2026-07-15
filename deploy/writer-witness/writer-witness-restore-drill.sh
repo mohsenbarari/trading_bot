@@ -6,11 +6,11 @@ backup_path="${1:-}"
 if [[ -z "$backup_path" ]]; then
     backup_path="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'writer-witness-*.dump' -printf '%T@ %p\n' | sort -nr | awk 'NR == 1 {print $2}')"
 fi
-if [[ -z "$backup_path" || ! -f "$backup_path" ]]; then
+if [[ "$backup_path" != "-" && ( -z "$backup_path" || ! -f "$backup_path" ) ]]; then
     echo "writer witness restore drill requires an existing backup" >&2
     exit 2
 fi
-if [[ -f "$backup_path.sha256" ]]; then
+if [[ "$backup_path" != "-" && -f "$backup_path.sha256" ]]; then
     sha256sum --check "$backup_path.sha256"
 fi
 
@@ -22,11 +22,17 @@ cleanup() {
 trap cleanup EXIT
 
 runuser -u postgres -- createdb --template=template0 "$drill_database"
-runuser -u postgres -- pg_restore \
-    --exit-on-error \
-    --no-owner \
-    --no-privileges \
-    --dbname="$drill_database" <"$backup_path"
+restore_arguments=(
+    --exit-on-error
+    --no-owner
+    --no-privileges
+    --dbname="$drill_database"
+)
+if [[ "$backup_path" == "-" ]]; then
+    runuser -u postgres -- pg_restore "${restore_arguments[@]}"
+else
+    runuser -u postgres -- pg_restore "${restore_arguments[@]}" "$backup_path"
+fi
 
 version="$(runuser -u postgres -- psql -XAtqc \
     'SELECT version_num FROM writer_witness_schema_version' "$drill_database")"

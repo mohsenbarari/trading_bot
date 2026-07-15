@@ -1495,7 +1495,7 @@ The audit also found reusable foundations. They must not be mistaken for complet
 | T-001 | P0 | `logical_authority` and explicit `physical_site` now model `bot_fi`, `webapp_fi`, and `webapp_ir`, while legacy `server_mode` remains for compatibility. Runtime role is derived from durable local writer state. Event metadata, remaining tooling, metrics, and every deploy surface have not yet been migrated to the new identity. | An unconverted path can still treat logical Iran/WebApp authority as a physical host and route, authorize, or label work incorrectly. | Complete the identity inventory and migration; prove every write, event, job, metric, lock, CLI, and deployment surface records and validates the correct logical authority, physical site, runtime role, and epoch. |
 | T-002 | P0 | Additive migrations now provide local durable writer epoch/state, transition audit, optional signed-lease evidence, HTTP/startup/background preflight, and a SQL `before_commit` recheck. This protects a local database but does not yet bind every command/event/side effect to the global epoch or stop an old remote database by itself. | An unaudited path, external side effect, long-lived process, or independently active remote database can escape the local fence after promotion. | Complete the mutation/side-effect audit, carry and reject stale epochs at every destination, deploy the witness, and demonstrate simultaneous promotion against independent databases with exactly one accepted writer. |
 | T-003 | P0 | Main WebApp HTTP mutations, the known startup mutation, and policy-listed background jobs now consult physical site/local writer state and, when enabled, witness lease validity; the leader restarts when lease eligibility changes. Repair tools, every worker/route, and effects that can occur before commit still need a complete audit. | An uncovered worker, direct-origin path, repair command, or pre-commit external effect can write or act after the site's term is no longer valid. | Fence every HTTP/WebSocket mutation, startup mutation, recurring job, side-effect worker, repair process, and migration helper; prove no external effect can escape a stale or expired term. |
-| T-004 | P0 | The accepted Iran-reachable database-clock witness now has a separately runnable minimal-settings API, isolated two-table database bootstrap, pairwise HMAC transport, durable accepted/rejected receipts, and automatic same-term renewal/local proof refresh in source. A guarded four-PostgreSQL Docker drill now proves concurrent acquisition, asymmetric partition, delayed negative replay, lost response, service recreation, real witness-database pause/resume, local fail-closed expiry, and epoch-2 IR activation. Ed25519 enforcement and all service/renewal flags remain disabled; no independent witness deployment, secure custody, measured clock evidence, or independent-host proof exists. | Host compromise, unsafe deployment privileges, key exposure, clock error, or mistaking one-host container isolation for an independent physical failure domain can still prevent safe ownership proof or create an operational split-brain attempt. | Provision and deploy the least-privilege private witness with approved custody and TLS/mTLS, add multi-vantage clock evidence, then repeat the matrix across independent hosts including service/VM pause, host loss, clock jumps, and directional network faults. |
+| T-004 | P0 | The accepted database-clock witness is deployed dark on the independent Iran-reachable host with isolated PostgreSQL roles/schema, private TLS, fixed FI/IR ingress, pairwise HMAC, Ed25519 signing custody, measured multi-vantage clock evidence, reboot persistence, local backups, and a live encrypted immutable HEL1 Object Storage backup/restore. The guarded four-PostgreSQL drill proves concurrent acquisition, asymmetric partition, delayed negative replay, lost response, service/database recreation, local fail-closed expiry, and epoch-2 IR activation. All WebApp witness enforcement/renewal flags remain disabled. | A full replacement-host restore, credential rotation, and real independent-host directional fault matrix are still unproved; host compromise, clock jump, disk-full, unsafe operator action, or a network interleaving outside the container drill can still prevent safe ownership proof. | Rebuild a clean Witness from the immutable backup, drill credential rotation/revocation, then repeat concurrent acquire, lost response, delayed packet, process/DB/VM pause, host loss, clock jump, disk-full, and directional FI/IR faults across the real hosts before enabling any lease. |
 | T-005 | P0 | models/change_log.py has one local integer id and one synced/verified state; core/sync_worker.py drains to one target URL and marks the row delivered after that peer succeeds. | Delivery to Bot-FI can incorrectly imply delivery to WebApp-IR, or vice versa; retention can delete an event still needed by one destination. | Implement immutable global event identity plus a per-destination delivery ledger, destination-specific ACKs, retry state, retention gates, and backlog metrics. |
 | T-006 | P0 | Receiver-applied transactions use is_sync and core/events.py intentionally suppresses new change-log creation for such writes. This prevents two-site echoes but also prevents WebApp-FI from relaying an original Bot-FI event to WebApp-IR through the current outbox. | WebApp-IR misses foreign-origin changes accumulated at WebApp-FI during a national outage, or relay is re-enabled naively and creates loops. | Implement preserved-origin relay: same event_id, origin site, origin sequence, authority, epoch, and payload hash; create only the missing destination delivery without generating a new business event. |
 | T-007 | P0 | Sync ordering uses the local change-log integer as source_sequence. The worker prioritizes table class before id, so a larger sequence can be sent before a smaller one, while the receiver can advance to the larger value without a durable missing-range record. Database sequences may also contain rollback gaps, and two physical WebApp databases can overlap. | A legitimate event is classified stale, a missing event is never requested, or different events occupy the same apparent sequence. | Define an emitted stream sequence independent of ordinary database id gaps, scope it by producer_site and epoch, persist gap ranges, and test priority reordering, rollback gaps, restore, promotion, and same-sequence/different-hash cases. |
@@ -2174,8 +2174,8 @@ or failover.
 Before enabling either WebApp witness flag, the project still needs:
 
 1. an approved pairwise credential delivery and rotation/revocation procedure;
-2. encrypted off-host backup custody plus restore evidence after total Witness
-   host loss;
+2. a full replacement-host rebuild followed by restore from the now-verified
+   encrypted off-host backup;
 3. real-host concurrent acquire, lost-response, delayed-packet, asymmetric
    FI/IR partition, Witness process/DB/VM pause, disk-full, and clock-jump drills;
 4. a measured lease/RTO decision and two-person production transition policy;
@@ -2188,3 +2188,66 @@ Before enabling either WebApp witness flag, the project still needs:
 Until those gates close, the correct runtime state is a healthy dark Witness,
 active WebApp-FI as the only WebApp writer, stopped WebApp-IR application
 processes, and unchanged CDN routing.
+
+## 42. Immutable Encrypted Witness Backup - 2026-07-15
+
+### 42.1 Selected boundary
+
+Hetzner Object Storage in HEL1 was selected instead of allocating a dedicated
+backup VM or adding a 60 GiB Bot-FI volume. The bucket is private, versioned,
+and created with default 90-day `COMPLIANCE` Object Lock. This choice is a
+backup dependency only; it does not participate in writer election, request
+routing, WebApp synchronization, or Arvan failover.
+
+The published base cost at implementation time is `EUR 4.99/month` excluding
+VAT (`USD 5.99` for USD billing), charged hourly while at least one Bucket is
+active and capped at the monthly price. It includes up to 1 TB storage and
+1 TB egress at full-month usage; ingress and S3 operations are free. The
+current Witness objects are negligible relative to that quota, so the expected
+steady-state incremental cost is the base price and no Bot-FI volume was
+created. Pricing source: <https://www.hetzner.com/pressroom/object-storage/>.
+
+Two distinct S3 credentials are used. The admin credential and `age` decryption
+identity remain off the Witness. The credential copied to the Witness can only
+perform `s3:PutObject` under `witness/`; explicit policy denies object listing,
+read, delete, ACL, retention, lifecycle, policy, and bucket-control operations.
+The policy was tested with real requests, not inferred from a successful policy
+upload.
+
+The Witness creates its ordinary checksumed custom-format PostgreSQL dump,
+encrypts that file locally to the off-host public `age` recipient, uploads the
+ciphertext, and records a root-only idempotency marker only after S3 returns a
+version ID. The private decryption key never enters the Witness. If global
+connectivity is unavailable, the local 30-day backup remains and the off-host
+timer retries after connectivity returns.
+
+### 42.2 Executed evidence
+
+| Gate | Observed result |
+|---|---|
+| Bucket region and privacy | HEL1; private ACL; no anonymous or authenticated-public grant |
+| Immutability | versioning enabled; default and uploaded-object retention are `COMPLIANCE` for 90 days |
+| Uploader least privilege | upload under `witness/` succeeded; list, read, and delete were denied |
+| Credential separation | admin and uploader keys are distinct; only uploader key is on Witness |
+| Decryption custody | zero `AGE-SECRET-KEY` files under Witness configuration; recipient only |
+| Live upload | `witness/writer-witness-20260715T114726Z.dump.age`, 13,711 bytes, version ID returned |
+| Idempotency | immediate second service run reported `already_uploaded` and created no new version |
+| Object retention | locked until `2026-10-13T14:11:36.178523941Z` |
+| End-to-end restore | S3 checksum and retention verified, `age` authenticated, temporary restore passed with schema `001`, state `webapp:0:vacant`, zero receipts |
+| Runtime safety | Writer Witness stayed dark; epoch `0`; no WebApp flag, product process, CDN, or Arvan setting changed |
+
+Focused Writer Witness deployment/service tests passed before deployment. The
+Object Storage provisioning and restore helpers redact credentials and fail
+closed on an unexpected endpoint, region, bucket/key path, missing version ID,
+checksum mismatch, absent retention, unsafe file mode, or excessive object
+size.
+
+### 42.3 Remaining boundary
+
+This closes encrypted off-host custody and a data-level restore, but it is not
+yet proof of recovery after losing the entire Witness VM. The remaining backup
+gate is to provision a clean replacement host from the manifest-bound release,
+download the immutable object with the off-host admin identity, restore it, and
+repeat service/TLS/clock checks before granting any lease. Credential
+rotation/revocation and independent escrow access also remain operational
+procedures to drill.

@@ -104,8 +104,12 @@ class WriterWitnessServiceSettings(BaseSettings):
     writer_witness_public_key: str | None = None
     writer_witness_service_webapp_fi_key_id: str | None = None
     writer_witness_service_webapp_fi_secret: str | None = None
+    writer_witness_service_webapp_fi_previous_key_id: str | None = None
+    writer_witness_service_webapp_fi_previous_secret: str | None = None
     writer_witness_service_webapp_ir_key_id: str | None = None
     writer_witness_service_webapp_ir_secret: str | None = None
+    writer_witness_service_webapp_ir_previous_key_id: str | None = None
+    writer_witness_service_webapp_ir_previous_secret: str | None = None
     writer_witness_lease_duration_seconds: int = 180
     writer_witness_renew_interval_seconds: int = 30
     writer_witness_safety_margin_seconds: int = 15
@@ -223,26 +227,46 @@ def _service_credentials(
     configured = (
         (
             "webapp_fi",
+            "current",
             service_settings.writer_witness_service_webapp_fi_key_id,
             service_settings.writer_witness_service_webapp_fi_secret,
         ),
         (
             "webapp_ir",
+            "current",
             service_settings.writer_witness_service_webapp_ir_key_id,
             service_settings.writer_witness_service_webapp_ir_secret,
         ),
+        (
+            "webapp_fi",
+            "previous",
+            service_settings.writer_witness_service_webapp_fi_previous_key_id,
+            service_settings.writer_witness_service_webapp_fi_previous_secret,
+        ),
+        (
+            "webapp_ir",
+            "previous",
+            service_settings.writer_witness_service_webapp_ir_previous_key_id,
+            service_settings.writer_witness_service_webapp_ir_previous_secret,
+        ),
     )
     result: dict[str, WitnessClientCredential] = {}
-    for site, raw_key_id, raw_secret in configured:
+    used_secrets: set[str] = set()
+    for site, slot, raw_key_id, raw_secret in configured:
         key_id = str(raw_key_id or "").strip()
         secret = str(raw_secret or "")
+        if slot == "previous" and not key_id and not secret:
+            continue
         if not key_id or len(key_id) > 64 or len(secret.encode("utf-8")) < 32:
             raise WitnessServiceConfigurationError(
-                f"dedicated witness HMAC credential is missing or unsafe for {site}"
+                f"dedicated witness HMAC credential is missing or unsafe for {site}:{slot}"
             )
         if key_id in result:
             raise WitnessServiceConfigurationError("writer witness key ids must be unique")
+        if secret in used_secrets:
+            raise WitnessServiceConfigurationError("writer witness HMAC secrets must be unique")
         result[key_id] = WitnessClientCredential(key_id=key_id, site=site, secret=secret)
+        used_secrets.add(secret)
     return result
 
 

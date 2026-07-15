@@ -30,6 +30,8 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("writer_witness_app.py", manifest)
             self.assertIn("deploy/writer-witness/001_initial.sql", manifest)
             self.assertIn("deploy/writer-witness/requirements.lock", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-offsite-backup.sh", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-s3-put.py", manifest)
             self.assertNotIn(".env", "\n".join(manifest))
             self.assertFalse((release / "main.py").exists())
             imported = subprocess.run(
@@ -95,6 +97,49 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("writer_witness_restore_drill_", restore)
         self.assertIn("trap cleanup EXIT", restore)
         self.assertNotIn("WITNESS_DB_RUNTIME_PASSWORD", backup + restore)
+        self.assertIn('backup_path" == "-"', restore)
+
+    def test_offsite_s3_backup_keeps_decryption_identity_off_witness(self):
+        sender = (ROOT / "deploy/writer-witness/writer-witness-offsite-backup.sh").read_text()
+        uploader = (
+            ROOT / "deploy/writer-witness/writer-witness-s3-put.py"
+        ).read_text()
+        configure = (
+            ROOT / "scripts/configure_writer_witness_s3_backup.sh"
+        ).read_text()
+        service = (
+            ROOT / "deploy/writer-witness/writer-witness-offsite-backup.service"
+        ).read_text()
+        timer = (
+            ROOT / "deploy/writer-witness/writer-witness-offsite-backup.timer"
+        ).read_text()
+        self.assertIn("--recipients-file", sender)
+        self.assertNotIn("--identity", sender)
+        self.assertIn("writer-witness-s3-put", sender)
+        self.assertIn("MAX_BACKUP_AGE_SECONDS", sender)
+        self.assertIn('"PUT"', uploader)
+        self.assertNotIn('connection.request("GET"', uploader)
+        self.assertNotIn('connection.request("DELETE"', uploader)
+        self.assertIn("private_decryption_key_present\":false", configure)
+        self.assertNotIn("object-storage-admin.env", configure)
+        self.assertIn("ProtectSystem=strict", service)
+        self.assertIn("OnUnitInactiveSec=1h", timer)
+
+    def test_object_storage_provisioning_uses_enforced_explicit_denies(self):
+        provision = (
+            ROOT / "scripts/provision_writer_witness_object_storage.py"
+        ).read_text()
+        self.assertIn('"Mode") != "COMPLIANCE"', provision)
+        self.assertIn('xml_text(root, "Days") != "90"', provision)
+        self.assertIn('"s3:ListBucket"', provision)
+        self.assertIn('"s3:GetObject"', provision)
+        self.assertIn('"s3:DeleteObject"', provision)
+        self.assertNotIn('"NotAction"', provision)
+        self.assertIn("verify_uploader_boundary", provision)
+        self.assertIn("uploader unexpectedly listed", provision)
+        self.assertIn("uploader unexpectedly wrote outside witness prefix", provision)
+        self.assertIn("uploader unexpectedly read", provision)
+        self.assertIn("uploader unexpectedly deleted", provision)
 
     def test_authenticated_smoke_is_read_only_and_redacts_client_secret(self):
         smoke = (ROOT / "scripts/smoke_writer_witness_client.py").read_text()

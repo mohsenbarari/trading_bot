@@ -20,7 +20,8 @@ sha256sum "$target" >"$target.sha256"
 chmod 0600 "$target.sha256"
 
 find "$BACKUP_DIR" -maxdepth 1 -type f \
-    \( -name 'writer-witness-*.dump' -o -name 'writer-witness-*.dump.sha256' \) \
+    \( -name 'writer-witness-*.dump' -o -name 'writer-witness-*.dump.sha256' \
+       -o -name 'writer-witness-*.dump.offsite.json' \) \
     -mtime "+$RETENTION_DAYS" -delete
 
 echo "$target"

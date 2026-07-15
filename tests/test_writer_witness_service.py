@@ -28,6 +28,7 @@ from writer_witness_app import (
     WriterWitnessServiceRuntime,
     WriterWitnessServiceSettings,
     _build_runtime_from_settings,
+    _service_credentials,
     create_writer_witness_app,
 )
 
@@ -137,6 +138,43 @@ class SharedSessionFactory:
 
 
 class WriterWitnessAuthenticationTests(unittest.TestCase):
+    def test_service_credentials_allow_one_rotation_overlap_per_site(self):
+        previous_secret = "previous-fi-secret-0123456789abcdef-0123456789abcdef"
+        settings = WriterWitnessServiceSettings(
+            writer_witness_service_webapp_fi_key_id=FI_CREDENTIAL.key_id,
+            writer_witness_service_webapp_fi_secret=FI_CREDENTIAL.secret,
+            writer_witness_service_webapp_fi_previous_key_id="fi-control-v0",
+            writer_witness_service_webapp_fi_previous_secret=previous_secret,
+            writer_witness_service_webapp_ir_key_id=IR_CREDENTIAL.key_id,
+            writer_witness_service_webapp_ir_secret=IR_CREDENTIAL.secret,
+        )
+        credentials = _service_credentials(settings)
+        self.assertEqual(credentials["fi-control-v0"].site, "webapp_fi")
+        self.assertEqual(len(credentials), 3)
+
+        unsafe_cases = (
+            {"writer_witness_service_webapp_fi_previous_key_id": "fi-control-v0"},
+            {
+                "writer_witness_service_webapp_fi_previous_key_id": FI_CREDENTIAL.key_id,
+                "writer_witness_service_webapp_fi_previous_secret": previous_secret,
+            },
+            {
+                "writer_witness_service_webapp_fi_previous_key_id": "fi-control-v0",
+                "writer_witness_service_webapp_fi_previous_secret": IR_CREDENTIAL.secret,
+            },
+        )
+        common = {
+            "writer_witness_service_webapp_fi_key_id": FI_CREDENTIAL.key_id,
+            "writer_witness_service_webapp_fi_secret": FI_CREDENTIAL.secret,
+            "writer_witness_service_webapp_ir_key_id": IR_CREDENTIAL.key_id,
+            "writer_witness_service_webapp_ir_secret": IR_CREDENTIAL.secret,
+        }
+        for unsafe in unsafe_cases:
+            with self.subTest(unsafe=unsafe), self.assertRaises(
+                WitnessServiceConfigurationError
+            ):
+                _service_credentials(WriterWitnessServiceSettings(**common, **unsafe))
+
     def test_minimal_service_settings_enforce_distinct_database_identity(self):
         private_key, public_key = keypair()
         with tempfile.TemporaryDirectory() as tmpdir:

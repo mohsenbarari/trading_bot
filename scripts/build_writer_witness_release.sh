@@ -44,9 +44,13 @@ for source in \
     nginx.conf.template \
     writer-witness.service \
     writer-witness-backup.sh \
+    writer-witness-offsite-backup.sh \
+    writer-witness-s3-put.py \
     writer-witness-restore-drill.sh \
     writer-witness-backup.service \
-    writer-witness-backup.timer
+    writer-witness-backup.timer \
+    writer-witness-offsite-backup.service \
+    writer-witness-offsite-backup.timer
 do
     install -m 0644 \
         "$ROOT_DIR/deploy/writer-witness/$source" \
