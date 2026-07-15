@@ -420,7 +420,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C17` | P0 | DECIDED | دریافت واقعی همه پاسخ‌های طبیعی Telegram | catalog پاسخ کسب‌وکار، ارسال واقعی، observer سمت گیرنده و تطبیق ledger |
 | `TOPQ-C18` | P0 | DECIDED | نسبت بار معتبر و نامعتبر | `1800` آفر معتبر به‌اضافه `400` تلاش نامعتبر در هر دور ده‌دقیقه‌ای |
 | `TOPQ-C19` | P1 | DECIDED | استفاده امن از الگوی آفر production | sampler فقط‌خواندنی، حذف هویت و بازسازی payload برای staging |
-| `TOPQ-C20` | P0 | DECIDED | کاهش تعداد حساب‌های تست بدون تغییر production | `max_active_offers=50` فقط در staging، pool پایه ۲۵ حساب و guard عدم نشت به production |
+| `TOPQ-C20` | P0 | DECIDED | pool کاربری نزدیک‌تر به بازار بدون تغییر production | `max_active_offers=50` فقط در staging، pool پایه ۸۰ حساب و guard عدم نشت به production |
 
 ## 14. معیار پذیرش نهایی
 
