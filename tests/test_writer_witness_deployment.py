@@ -141,6 +141,26 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("uploader unexpectedly read", provision)
         self.assertIn("uploader unexpectedly deleted", provision)
 
+    def test_arvan_recovery_vps_provisioning_is_dry_run_first_and_key_only(self):
+        provision = (
+            ROOT / "scripts/provision_arvan_witness_recovery_vps.py"
+        ).read_text()
+        self.assertIn('parser.add_argument("--apply", action="store_true")', provision)
+        self.assertIn('parser.add_argument("--token-file"', provision)
+        self.assertIn('STATE_FILE = Path("/root/secure-envs/arvan/', provision)
+        self.assertIn("os.O_EXCL, 0o600", provision)
+        self.assertIn("PasswordAuthentication no", provision)
+        self.assertIn("KbdInteractiveAuthentication no", provision)
+        self.assertIn("PermitRootLogin prohibit-password", provision)
+        self.assertIn("ufw default deny incoming", provision)
+        self.assertIn("65.109.216.187/32", provision)
+        self.assertIn("65.109.220.59/32", provision)
+        self.assertIn("87.236.212.194/32", provision)
+        self.assertIn("validate_init_script(public_key)", provision)
+        self.assertIn('"port_to": "443"', provision)
+        self.assertIn('"password_printed": False', provision)
+        self.assertNotIn("ARVAN_API_KEY=", provision)
+
     def test_authenticated_smoke_is_read_only_and_redacts_client_secret(self):
         smoke = (ROOT / "scripts/smoke_writer_witness_client.py").read_text()
         self.assertIn('STATUS_PATH = "/v1/writer-witness/status"', smoke)

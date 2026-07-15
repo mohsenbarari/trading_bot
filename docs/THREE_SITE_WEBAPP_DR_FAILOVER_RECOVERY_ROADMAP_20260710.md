@@ -2251,3 +2251,62 @@ download the immutable object with the off-host admin identity, restore it, and
 repeat service/TLS/clock checks before granting any lease. Credential
 rotation/revocation and independent escrow access also remain operational
 procedures to drill.
+
+## 43. Replacement Witness VPS Provisioning Gate - 2026-07-15
+
+### 43.1 Approved immutable request
+
+The clean-host recovery drill is approved for one temporary Arvan Abrak in
+`ir-thr-fr1`: Ubuntu 24.04, plan `eco-2-2-0`, 2 vCPU, 2 GiB RAM, and 30 GiB
+disk. The live API quote at approval time was IRR 16,220 per hour and IRR
+11,679,000 per month. The host is drill-only and must not receive a writer
+lease, production WebApp flags, a CDN origin, or public application traffic.
+
+Provisioning is dry-run first and idempotent by fixed server name. The bootstrap
+delivers only the operator Ed25519 public key, disables password and interactive
+SSH authentication, permits SSH only from Bot-FI/control, and permits HTTPS
+only from WebApp-FI and WebApp-IR. Any API-generated bootstrap password is kept
+outside the repository in an owner-only state file and is never printed.
+
+### 43.2 Blocked live attempt and cost evidence
+
+The final preflight revalidated the region, quota, plan, image, default network,
+absence of an existing same-name server, and the API quote. The live create
+request was then rejected by Arvan with HTTP `403` because the current token
+lacks create permission. A post-attempt read-back again found no same-name
+server. Therefore no VPS, Security Group, SSH key, or billable resource was
+created and the replacement-host recovery drill has not started.
+
+The same token also cannot create a dedicated Security Group or manage panel
+SSH keys. The prepared fallback can add a deny-by-default host firewall during
+first boot, but using Arvan's broad default Security Group would reduce defense
+in depth and is accepted only as a temporary drill fallback after server-create
+authority exists. It is not the final production boundary.
+
+### 43.3 Mandatory API-key rotation and least-privilege closure
+
+The current Arvan API key must be replaced; this is scheduled work, not waived
+work. Rotation may be performed after the higher-priority recovery drill is
+unblocked, but it must complete before any production CDN failover automation
+or Witness activation. The replacement process is:
+
+1. create a dedicated operator/machine identity instead of reusing the current
+   general Arvan token;
+2. grant only the exact temporary lifecycle permissions needed to read plans,
+   images, networks, quota, servers, and Security Groups and to
+   create/read/delete the one recovery server and its dedicated firewall;
+3. store the new credential only in owner-only operator custody, never in Git,
+   a WebApp container, Writer Witness runtime, logs, or evidence bundles;
+4. repeat dry-run, create/read-back, dedicated-firewall verification, injected
+   public-key verification, and deletion/revocation drills;
+5. revoke the current token after the replacement credential and the existing
+   CDN control path have both passed read-back tests;
+6. retain only redacted key identifiers, permission manifests, timestamps, and
+   pass/fail evidence.
+
+Until either the token receives the required narrowly scoped IaaS create
+authority or the operator creates the approved VPS manually, Stage 43 remains
+blocked with zero new infrastructure cost. The next valid continuation point is
+to rerun `scripts/provision_arvan_witness_recovery_vps.py --apply`; it will
+refuse changed plan/image/quota assumptions and will not create a second
+same-name server.
