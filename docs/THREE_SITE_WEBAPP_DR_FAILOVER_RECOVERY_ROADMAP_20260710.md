@@ -2122,3 +2122,69 @@ clock-jump behavior, stale-epoch binding across all business effects, complete
 sync/parity/file recovery, signed readiness evidence, and controlled Arvan
 orchestration. Production witness flags, migrations, services, WebApp-IR, and
 CDN settings remain unchanged and disabled.
+
+## 41. Dedicated Iran-Reachable Dark Witness Deployment - 2026-07-15
+
+### 41.1 Deployed boundary
+
+The replacement VPS at `185.231.182.6` passed the network condition that the
+previous candidate could not satisfy: both WebApp-FI and WebApp-IR can reach it
+directly. A repeatable deployment layer now provisions a dedicated PostgreSQL
+16 database, least-privilege runtime identity, loopback-only single-worker
+Uvicorn process, private TLS Nginx endpoint, fixed-source UFW policy, key-only
+SSH, checksumed daily backups, and a destructive-isolated restore drill.
+
+The service is intentionally dark. Its singleton remains
+`webapp | no holder | epoch 0 | vacant`. No client credential or CA was added
+to a WebApp runtime, no `WRITER_WITNESS_REQUIRED` or automatic-renewal flag was
+enabled, no product migration ran, WebApp-IR remains stopped, and no Arvan
+record or origin policy changed.
+
+The deployment is reproducible from manifest-bound minimal source and a fully
+locked CPython 3.12 wheelhouse. The wheelhouse became operationally necessary
+when the Iran PyPI path returned no usable version for the pinned
+`cryptography` dependency. A multi-file transfer also arrived incomplete; both
+failures stopped before package/service activation because archive and
+per-wheel checksums are mandatory. The successful path used one checksumed
+archive and verified all 44 wheels on the destination before installation.
+
+### 41.2 Real-host evidence
+
+| Gate | Observed evidence |
+|---|---|
+| WebApp-FI to Witness TLS | `200`; Python 3.14 strict certificate validation passed after explicit CA/key-usage rotation |
+| WebApp-IR to Witness TLS | `200`; private CA and IP SAN validation passed |
+| Fixed ingress | FI and IR allowed; non-allowlisted source timed out on `443` |
+| HMAC separation | independent FI and IR signed read-only status calls returned `200`; unsigned calls returned `401` |
+| Clock safety | all three hosts reported synchronized NTP; measured offsets were about `-0.55s` and `-0.50s`, within the five-second bound |
+| Runtime isolation | PostgreSQL and Uvicorn listen only on loopback; Nginx is the sole `443` listener |
+| Database privilege | runtime role has no superuser, database-create, role-create, replication, or DDL authority |
+| Backup/restore | multiple checksumed backups created during drills; sampled restores reproduced schema `001` and vacant singleton |
+| Process restart | ready state returned and durable data remained unchanged |
+| Real VM reboot | PostgreSQL, Nginx, Witness, UFW, and backup timer returned active; state and backups persisted |
+| Secret boundary | signing key and pairwise HMAC credentials remained on Witness; no credential entered Git or a WebApp runtime |
+
+### 41.3 Remaining activation gates
+
+This closes the dedicated-host provisioning, private TLS, least-privilege,
+multi-vantage reachability/clock, process restart, VM reboot, and basic
+backup/restore portions of T-004. It does not authorize the first writer lease
+or failover.
+
+Before enabling either WebApp witness flag, the project still needs:
+
+1. an approved pairwise credential delivery and rotation/revocation procedure;
+2. encrypted off-host backup custody plus restore evidence after total Witness
+   host loss;
+3. real-host concurrent acquire, lost-response, delayed-packet, asymmetric
+   FI/IR partition, Witness process/DB/VM pause, disk-full, and clock-jump drills;
+4. a measured lease/RTO decision and two-person production transition policy;
+5. immutable writer epoch/site/transition provenance on every authoritative
+   event, command, outbox item, replay, and side-effect destination;
+6. complete sync lag, parity, file, recovery-barrier, and stable-connectivity
+   gates before switching Arvan;
+7. signed readiness evidence and the controlled Arvan state machine.
+
+Until those gates close, the correct runtime state is a healthy dark Witness,
+active WebApp-FI as the only WebApp writer, stopped WebApp-IR application
+processes, and unchanged CDN routing.

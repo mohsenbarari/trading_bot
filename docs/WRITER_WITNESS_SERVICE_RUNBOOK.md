@@ -1,6 +1,6 @@
 # Writer Witness Service Runbook
 
-Status: source and test foundation only; production deployment is not authorized
+Status: dedicated dark host deployed and verified; writer activation is not authorized
 
 ## Purpose And Boundary
 
@@ -25,7 +25,7 @@ expiry.
 
 ## Mandatory Isolation
 
-Before any staging deployment:
+For every deployment:
 
 1. Create a dedicated PostgreSQL database and apply
    `deploy/writer-witness/001_initial.sql` using a migration identity.
@@ -79,6 +79,68 @@ The service validates explicit `webapp_ir` placement, distinct database
 identity, key-file permissions, public/private key correspondence, pairwise
 credential strength, and safe lease timing before serving.
 
+## Current Dark Deployment Evidence
+
+On 2026-07-15 the dedicated Witness was deployed to the Iran-reachable host
+`185.231.182.6`. This is a dark control-plane deployment, not a writer
+activation:
+
+- PostgreSQL 16 listens only on loopback and uses separate migration and
+  runtime roles;
+- the runtime role can read the schema marker, read/update the singleton, and
+  read/insert receipts, but cannot create a database, role, schema, or table;
+- Uvicorn runs as the non-login `writer-witness` user on `127.0.0.1:8011` with
+  one worker and systemd hardening;
+- Nginx is the only `443` listener and admits only WebApp-FI
+  (`65.109.220.59`), WebApp-IR (`87.236.212.194`), and local health/smoke
+  traffic; UFW denies every other external source on `443`;
+- the private CA has explicit critical CA/key-signing constraints, and the
+  leaf has explicit non-CA, server-auth, key-usage, and IP SAN constraints;
+- SSH password and keyboard-interactive authentication are disabled. Both
+  `ubuntu` and `root` administration use the installed public key;
+- the service, PostgreSQL, Nginx, UFW, and the daily backup timer survived a
+  real VM reboot and returned automatically;
+- daily custom-format PostgreSQL backups are checksumed and retained for 30
+  days. A real restore into a temporary database verified schema `001`, the
+  singleton, and receipt count before cleanup. These copies are currently
+  host-local and do not replace encrypted off-host backup;
+- Python 3.12 dependencies are fully pinned in
+  `deploy/writer-witness/requirements.lock`. A CPython 3.12 wheelhouse and its
+  per-file `SHA256SUMS` are verified before offline installation because the
+  Iran path did not expose the pinned `cryptography` package reliably.
+
+Measured evidence after TLS rotation and reboot:
+
+| Probe | Result |
+|---|---|
+| WebApp-FI to `/health/ready` with private CA | `200`; about `0.48-0.67s` observed RTT |
+| WebApp-IR to `/health/ready` with private CA | `200`; about `0.03s` observed RTT |
+| Unauthenticated status from either allowed site | `401` |
+| Non-allowlisted Bot-FI/current operator source to `443` | connection timeout |
+| Signed read-only status with FI credential | `200`, vacant epoch `0` |
+| Signed read-only status with IR credential | `200`, vacant epoch `0` |
+| Approximate Witness clock offset observed from FI | about `-0.55s` |
+| Approximate Witness clock offset observed from IR | about `-0.50s` |
+| NTP status on FI, IR, and Witness | synchronized |
+| Process restart and VM reboot | service ready; state and backups preserved |
+
+No credential bundle was installed in a WebApp runtime. Pairwise credentials
+and the Ed25519 private signing key remain on the dedicated Witness host. The
+CA may be copied for read-only TLS probes, but the WebApp environment, product
+containers, origin routing, and Arvan configuration must remain unchanged
+until the activation gates below are approved.
+
+The repeatable deployment assets are:
+
+- `scripts/build_writer_witness_release.sh` for the minimal manifest-bound
+  source payload;
+- `scripts/build_writer_witness_wheelhouse.sh` for the locked CPython 3.12
+  wheelhouse and checksums;
+- `scripts/provision_writer_witness_host.sh` for PostgreSQL, credentials, TLS,
+  Nginx, systemd, SSH hardening, UFW, backup, restore drill, and final health;
+- `scripts/smoke_writer_witness_client.py` for authenticated read-only status
+  verification without printing client secrets.
+
 ## WebApp Client Settings
 
 Each WebApp site receives only its own pairwise credential:
@@ -95,7 +157,8 @@ WRITER_WITNESS_HTTP_TIMEOUT_SECONDS=3
 WRITER_WITNESS_AUTH_MAX_AGE_SECONDS=15
 ```
 
-Both enable flags remain false until independent-database staging drills pass.
+Both enable flags remain false until the real-host activation drills and
+operator gates pass.
 When later enabled, the active WebApp background leader renews every 30 seconds.
 An ambiguous network failure retries the exact same request id. A validated
 signed proof is then imported into local writer state in one transaction. If
@@ -104,8 +167,10 @@ stops authoritative writes at the safety deadline.
 
 ## Production Stop Conditions
 
-Do not enable the service or WebApp enforcement merely because unit tests pass.
-Production remains blocked until clock-offset evidence, private networking,
-credential rotation, process supervision, independent three-database
-partition/pause/delayed-packet tests, operator approval policy, and the higher
-level recovery/Arvan orchestrator are complete.
+Do not issue the first lease, copy credentials into a WebApp runtime, or enable
+WebApp witness enforcement merely because the dark service is healthy.
+Production writer activation remains blocked until real-host directional
+partition/pause/delayed-packet tests, credential rotation and recovery,
+encrypted off-host backup/restore, operator approval policy, stale-epoch
+side-effect binding, sync/parity/file gates, and the higher-level
+recovery/Arvan orchestrator are complete.

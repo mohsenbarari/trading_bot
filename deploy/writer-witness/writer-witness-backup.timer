@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Trading Bot WebApp Writer Witness backup
+
+[Timer]
+OnCalendar=*-*-* 02:17:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=writer-witness-backup.service
+
+[Install]
+WantedBy=timers.target

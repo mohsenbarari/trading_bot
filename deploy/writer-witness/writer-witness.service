@@ -1,0 +1,42 @@
+[Unit]
+Description=Trading Bot WebApp Writer Witness
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=writer-witness
+Group=writer-witness
+WorkingDirectory=/srv/trading-bot-witness/current
+EnvironmentFile=/etc/trading-bot-witness/runtime.env
+ExecStart=/opt/trading-bot-witness/venv/bin/uvicorn writer_witness_app:app --host 127.0.0.1 --port 8011 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+UMask=0077
+
+# The process is a private control-plane API. It needs only loopback network
+# access to local PostgreSQL and the loopback Nginx reverse proxy.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+ReadOnlyPaths=/srv/trading-bot-witness/current
+ReadOnlyPaths=/etc/trading-bot-witness
+
+[Install]
+WantedBy=multi-user.target

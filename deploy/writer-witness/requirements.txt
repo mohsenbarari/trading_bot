@@ -1,0 +1,6 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+sqlalchemy==2.0.31
+asyncpg==0.29.0
+pydantic-settings==2.3.4
+cryptography==41.0.7
