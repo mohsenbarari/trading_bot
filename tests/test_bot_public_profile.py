@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from bot.callbacks import ProfileTradePdfCallback
 from bot.utils.public_profile import (
+    PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK,
     _load_active_accountants_for_owner,
     build_bot_public_profile_keyboard,
     build_bot_public_profile_text,
@@ -241,6 +242,28 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(profile.display_name, "target")
         self.assertEqual(profile.accountants[0].display_name, "حسابدار ثبت‌شده")
 
+    async def test_load_bot_public_profile_marks_owners_own_profile(self):
+        target = SimpleNamespace(id=5, is_deleted=False, account_name="target")
+        viewer = SimpleNamespace(id=5, is_deleted=False, role=UserRole.STANDARD)
+
+        with patch("bot.utils.public_profile._load_user", new=AsyncMock(return_value=target)), patch(
+            "bot.utils.public_profile.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(side_effect=[None, None]),
+        ), patch(
+            "bot.utils.public_profile.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, None]),
+        ), patch(
+            "bot.utils.public_profile.attach_customer_management_names",
+            new=AsyncMock(),
+        ), patch(
+            "bot.utils.public_profile._load_active_accountants_for_owner",
+            new=AsyncMock(return_value=()),
+        ):
+            profile = await load_bot_public_profile(FakeDB(), viewer=viewer, target_user_id=5)
+
+        self.assertIsNotNone(profile)
+        self.assertTrue(profile.is_self)
+
     def test_profile_text_and_keyboard_are_minimal_and_use_three_month_pdf_callback(self):
         profile = BotPublicProfile(
             target_user=SimpleNamespace(id=5, mobile_number="0912", address="تهران"),
@@ -257,6 +280,56 @@ class BotPublicProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("حسابدار ثبت‌شده - 0913", text)
         callback_data = keyboard.inline_keyboard[0][0].callback_data
         self.assertEqual(callback_data, ProfileTradePdfCallback(target_user_id=5).pack())
+
+    def test_other_user_profile_links_to_observed_telegram_username(self):
+        profile = BotPublicProfile(
+            target_user=SimpleNamespace(id=5, username="@coin_owner"),
+            display_name="target",
+            accountants=(),
+        )
+
+        keyboard = build_bot_public_profile_keyboard(profile)
+
+        message_button = keyboard.inline_keyboard[1][0]
+        self.assertEqual(message_button.text, "💬 ارسال پیام")
+        self.assertEqual(message_button.url, "https://t.me/coin_owner")
+        self.assertIsNone(message_button.callback_data)
+
+    def test_unsafe_stored_username_cannot_change_telegram_url_structure(self):
+        profile = BotPublicProfile(
+            target_user=SimpleNamespace(id=5, username="owner/path"),
+            display_name="target",
+            accountants=(),
+        )
+
+        button = build_bot_public_profile_keyboard(profile).inline_keyboard[1][0]
+
+        self.assertEqual(button.url, "https://t.me/owner%2Fpath")
+
+    def test_missing_username_uses_non_navigation_status_button(self):
+        profile = BotPublicProfile(
+            target_user=SimpleNamespace(id=5, username=None),
+            display_name="target",
+            accountants=(),
+        )
+
+        button = build_bot_public_profile_keyboard(profile).inline_keyboard[1][0]
+
+        self.assertEqual(button.text, "⚠️ عدم شناسایی کاربر")
+        self.assertEqual(button.callback_data, PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK)
+        self.assertIsNone(button.url)
+
+    def test_send_message_button_is_hidden_on_own_profile(self):
+        profile = BotPublicProfile(
+            target_user=SimpleNamespace(id=5, username="coin_owner"),
+            display_name="target",
+            accountants=(),
+            is_self=True,
+        )
+
+        keyboard = build_bot_public_profile_keyboard(profile)
+
+        self.assertEqual(len(keyboard.inline_keyboard), 1)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -21,6 +22,9 @@ from models.customer_relation import CustomerRelation
 from models.user import User, UserRole
 
 
+PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK = "public_profile_username_unavailable"
+
+
 @dataclass(frozen=True, slots=True)
 class BotPublicProfileAccountant:
     display_name: str
@@ -32,6 +36,7 @@ class BotPublicProfile:
     target_user: User
     display_name: str
     accountants: tuple[BotPublicProfileAccountant, ...]
+    is_self: bool = False
 
 
 def _is_super_admin(user: User | object | None) -> bool:
@@ -187,6 +192,7 @@ async def load_bot_public_profile(
         target_user=target_user,
         display_name=display_name,
         accountants=accountants,
+        is_self=viewer.id == target_user.id,
     )
 
 
@@ -208,13 +214,35 @@ def build_bot_public_profile_text(profile: BotPublicProfile) -> str:
 
 
 def build_bot_public_profile_keyboard(profile: BotPublicProfile) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📄 معاملات ۳ ماه اخیر",
-                    callback_data=ProfileTradePdfCallback(target_user_id=profile.target_user.id).pack(),
-                )
-            ]
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="📄 معاملات ۳ ماه اخیر",
+                callback_data=ProfileTradePdfCallback(target_user_id=profile.target_user.id).pack(),
+            )
         ]
+    ]
+    if not profile.is_self:
+        raw_username = getattr(profile.target_user, "username", None)
+        username = str(raw_username or "").strip().lstrip("@").strip()
+        if username:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text="💬 ارسال پیام",
+                        url=f"https://t.me/{quote(username, safe='')}",
+                    )
+                ]
+            )
+        else:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text="⚠️ عدم شناسایی کاربر",
+                        callback_data=PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK,
+                    )
+                ]
+            )
+    return InlineKeyboardMarkup(
+        inline_keyboard=rows
     )

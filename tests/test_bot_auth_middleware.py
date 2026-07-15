@@ -119,6 +119,45 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(data['user'], user)
         handler.assert_awaited_once_with(event, data)
 
+    async def test_middleware_refreshes_observed_username_before_handler(self):
+        session = AsyncMock()
+        user = SimpleNamespace(id=42, telegram_id=10, username="old_owner")
+        refreshed_user = SimpleNamespace(id=42, telegram_id=10, username="new_owner")
+        session.execute = AsyncMock(return_value=_ExecuteResult(user))
+        middleware = auth_middleware.AuthMiddleware(
+            session_pool=MagicMock(return_value=_AsyncSessionContext(session))
+        )
+        handler = AsyncMock(return_value="allowed")
+
+        original_message = auth_middleware.Message
+        try:
+            auth_middleware.Message = FakeMessage
+            message = FakeMessage(10)
+            message.from_user.username = "new_owner"
+            data = {}
+            with patch.object(
+                auth_middleware,
+                "refresh_observed_telegram_username",
+                new=AsyncMock(return_value=refreshed_user),
+            ) as refresh_username, patch.object(
+                auth_middleware,
+                "direct_registration_runtime_ready",
+                return_value=False,
+            ):
+                result = await middleware(handler, message, data)
+        finally:
+            auth_middleware.Message = original_message
+
+        self.assertEqual(result, "allowed")
+        self.assertIs(data["user"], refreshed_user)
+        refresh_username.assert_awaited_once_with(
+            session,
+            user=user,
+            telegram_id=10,
+            observed_username="new_owner",
+        )
+        handler.assert_awaited_once_with(message, data)
+
     async def test_middleware_blocks_projected_user_until_registration_is_reconciled(self):
         session = AsyncMock()
         user = MagicMock(

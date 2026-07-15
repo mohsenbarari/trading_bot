@@ -268,6 +268,31 @@ class UserCounterSyncTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "foreign_user_write_authority_forbidden:address"):
                 registry[("User", "before_update")](None, _Connection(), user)
 
+    def test_v2_foreign_observed_username_update_is_allowed_and_emitted(self):
+        registry = {}
+        with patch("core.events.event.listens_for", side_effect=_capture_listeners(registry)):
+            events.setup_user_events()
+        user = _persisted_user()
+        user.username = "new_telegram_username"
+        connection = _Connection()
+
+        with patch("core.events.settings.registration_sync_v2_enabled", True), patch(
+            "core.events.settings.server_mode",
+            "foreign",
+        ), patch("core.events.log_change") as log_change:
+            registry[("User", "before_update")](None, connection, user)
+            registry[("User", "after_update")](None, connection, user)
+
+        log_change.assert_called_once()
+        table_name, operation, payload = (
+            log_change.call_args.args[1],
+            log_change.call_args.args[3],
+            log_change.call_args.args[4],
+        )
+        self.assertEqual((table_name, operation), ("users", "UPDATE"))
+        self.assertEqual(payload["username"], "new_telegram_username")
+        self.assertNotIn("address", payload)
+
     def test_v2_foreign_counter_reset_is_not_a_local_write_authority(self):
         registry = {}
         with patch("core.events.event.listens_for", side_effect=_capture_listeners(registry)):

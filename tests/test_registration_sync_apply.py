@@ -1152,6 +1152,7 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
                 "bot_onboarding_required_step": 2,
                 "bot_onboarding_completed_step": 1,
                 "last_seen_at": "2026-07-11T10:00:00",
+                "username": "new_owner",
                 "address": "must be ignored",
             },
             source_server="foreign",
@@ -1162,6 +1163,7 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("greatest", sql.lower())
         self.assertIn("bot_onboarding_required_step", sql)
         self.assertIn("bot_onboarding_completed_step", sql)
+        self.assertIn("username", sql)
         self.assertNotIn("address=", sql.replace(" ", ""))
         self.assertNotIn("sync_version=", sql.replace(" ", ""))
         self.assertIn("updated_at=users.updated_at", sql.replace(" ", "").lower())

@@ -27,6 +27,7 @@ from core.services.trade_history_export_service import (
 from core.utils import to_jalali_str
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 from bot.utils.public_profile import (
+    PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK,
     build_bot_public_profile_keyboard,
     build_bot_public_profile_text,
     load_bot_public_profile,
@@ -38,6 +39,14 @@ from bot.callbacks import (
 )
 
 router = Router()
+
+
+@router.callback_query(F.data == PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK)
+async def show_public_profile_username_unavailable(callback: types.CallbackQuery):
+    await callback.answer(
+        "نام کاربری تلگرام این کاربر شناسایی نشده است.",
+        show_alert=True,
+    )
 
 
 def _safe_history_filename_subject(value: object, fallback: str = "history") -> str:

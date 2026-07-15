@@ -73,7 +73,7 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
             {"bot_onboarding_completed_step", "trades_count", "unexpected"},
         )
 
-    def test_foreign_user_patch_keeps_only_monotonic_onboarding_and_last_seen(self):
+    def test_foreign_user_patch_keeps_observed_username_onboarding_and_last_seen(self):
         payload = {
             "id": 7,
             "sync_version": 8,
@@ -81,6 +81,7 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
             "bot_onboarding_completed_step": 1,
             "bot_onboarding_completed_at": "2026-07-11T10:00:00+00:00",
             "last_seen_at": "2026-07-11T10:01:00",
+            "username": "new_owner",
             "address": "must not apply",
             "telegram_id": 9988,
             "_sync_identity": self._identity(),
@@ -104,6 +105,7 @@ class RegistrationSyncPolicyTests(unittest.TestCase):
                 "bot_onboarding_completed_step",
                 "bot_onboarding_completed_at",
                 "last_seen_at",
+                "username",
                 "_sync_identity",
             },
         )
