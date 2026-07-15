@@ -32,6 +32,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("deploy/writer-witness/requirements.lock", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-offsite-backup.sh", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-s3-put.py", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-live-restore.sh", manifest)
             self.assertNotIn(".env", "\n".join(manifest))
             self.assertFalse((release / "main.py").exists())
             imported = subprocess.run(
@@ -73,6 +74,8 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("GRANT SELECT, INSERT ON webapp_writer_witness_receipts", script)
         self.assertIn("ufw allow from \"$WEBAPP_FI_SOURCE_IP\"", script)
         self.assertIn("ufw allow from \"$WEBAPP_IR_SOURCE_IP\"", script)
+        self.assertIn("ufw allow from \"$SSH_SOURCE_IP\"", script)
+        self.assertNotIn("ufw allow OpenSSH", script)
         self.assertIn('"webapp_flags_changed":false', script)
         self.assertIn('"cdn_changed":false', script)
         self.assertNotIn("WRITER_WITNESS_REQUIRED=true", script)
@@ -94,10 +97,32 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("runuser -u postgres -- pg_dump", backup)
         self.assertIn("sha256sum", backup)
         self.assertIn("runuser -u postgres -- pg_restore", restore)
+        self.assertIn('<"$backup_path"', restore)
         self.assertIn("writer_witness_restore_drill_", restore)
         self.assertIn("trap cleanup EXIT", restore)
         self.assertNotIn("WITNESS_DB_RUNTIME_PASSWORD", backup + restore)
         self.assertIn('backup_path" == "-"', restore)
+
+    def test_live_restore_is_explicit_guarded_and_keeps_rollback_database(self):
+        restore = (
+            ROOT / "deploy/writer-witness/writer-witness-live-restore.sh"
+        ).read_text()
+        runner = (
+            ROOT / "scripts/run_writer_witness_offsite_live_restore.sh"
+        ).read_text()
+        self.assertIn('"--apply-from-stdin"', restore)
+        self.assertIn("REQUIRED_CURRENT_STATE", restore)
+        self.assertIn("EXPECTED_STATE", restore)
+        self.assertIn("pg_restore --list", restore)
+        self.assertIn("candidate_database", restore)
+        self.assertIn("rollback_database", restore)
+        self.assertIn("restore_previous_database", restore)
+        self.assertIn("database_exists", restore)
+        self.assertIn("^writer_witness_[a-z]+_[0-9_]+$", restore)
+        self.assertNotIn("dropdb --if-exists writer_witness", restore)
+        self.assertIn('"--apply"', runner)
+        self.assertIn("download_writer_witness_s3_backup.py", runner)
+        self.assertIn("age --decrypt", runner)
 
     def test_offsite_s3_backup_keeps_decryption_identity_off_witness(self):
         sender = (ROOT / "deploy/writer-witness/writer-witness-offsite-backup.sh").read_text()

@@ -1495,7 +1495,7 @@ The audit also found reusable foundations. They must not be mistaken for complet
 | T-001 | P0 | `logical_authority` and explicit `physical_site` now model `bot_fi`, `webapp_fi`, and `webapp_ir`, while legacy `server_mode` remains for compatibility. Runtime role is derived from durable local writer state. Event metadata, remaining tooling, metrics, and every deploy surface have not yet been migrated to the new identity. | An unconverted path can still treat logical Iran/WebApp authority as a physical host and route, authorize, or label work incorrectly. | Complete the identity inventory and migration; prove every write, event, job, metric, lock, CLI, and deployment surface records and validates the correct logical authority, physical site, runtime role, and epoch. |
 | T-002 | P0 | Additive migrations now provide local durable writer epoch/state, transition audit, optional signed-lease evidence, HTTP/startup/background preflight, and a SQL `before_commit` recheck. This protects a local database but does not yet bind every command/event/side effect to the global epoch or stop an old remote database by itself. | An unaudited path, external side effect, long-lived process, or independently active remote database can escape the local fence after promotion. | Complete the mutation/side-effect audit, carry and reject stale epochs at every destination, deploy the witness, and demonstrate simultaneous promotion against independent databases with exactly one accepted writer. |
 | T-003 | P0 | Main WebApp HTTP mutations, the known startup mutation, and policy-listed background jobs now consult physical site/local writer state and, when enabled, witness lease validity; the leader restarts when lease eligibility changes. Repair tools, every worker/route, and effects that can occur before commit still need a complete audit. | An uncovered worker, direct-origin path, repair command, or pre-commit external effect can write or act after the site's term is no longer valid. | Fence every HTTP/WebSocket mutation, startup mutation, recurring job, side-effect worker, repair process, and migration helper; prove no external effect can escape a stale or expired term. |
-| T-004 | P0 | The accepted database-clock witness is deployed dark on the independent Iran-reachable host with isolated PostgreSQL roles/schema, private TLS, fixed FI/IR ingress, pairwise HMAC, Ed25519 signing custody, measured multi-vantage clock evidence, reboot persistence, local backups, and a live encrypted immutable HEL1 Object Storage backup/restore. The guarded four-PostgreSQL drill proves concurrent acquisition, asymmetric partition, delayed negative replay, lost response, service/database recreation, local fail-closed expiry, and epoch-2 IR activation. All WebApp witness enforcement/renewal flags remain disabled. | A full replacement-host restore, credential rotation, and real independent-host directional fault matrix are still unproved; host compromise, clock jump, disk-full, unsafe operator action, or a network interleaving outside the container drill can still prevent safe ownership proof. | Rebuild a clean Witness from the immutable backup, drill credential rotation/revocation, then repeat concurrent acquire, lost response, delayed packet, process/DB/VM pause, host loss, clock jump, disk-full, and directional FI/IR faults across the real hosts before enabling any lease. |
+| T-004 | P0 | The accepted database-clock witness remains dark on the independent Iran-reachable host with isolated PostgreSQL roles/schema, private TLS, fixed FI/IR ingress, pairwise HMAC, Ed25519 signing custody, measured clock evidence, reboot persistence, local backups, and encrypted immutable HEL1 custody. A second clean host at `185.206.95.94` was rebuilt from a checksumed manifest/wheelhouse, restored first into an isolated database and then into live through a validated candidate/rollback swap, rebooted, and revalidated as `webapp:0:vacant`. WebApp-FI authenticated TLS returned `200`, unsigned access returned `401`, and a non-allowlisted source timed out. The guarded four-PostgreSQL drill still proves concurrent acquisition, asymmetric partition, delayed negative replay, lost response, service/database recreation, local fail-closed expiry, and epoch-2 IR activation. All WebApp witness enforcement/renewal flags remain disabled. | Credential rotation, a live WebApp-IR-to-replacement TLS probe, and the real independent-host directional fault matrix are still unproved; host compromise, clock jump, disk-full, unsafe operator action, or a network interleaving outside the container drill can still prevent safe ownership proof. | Obtain an execution path on WebApp-IR and repeat authenticated TLS/clock checks to the replacement IP, drill credential rotation/revocation, then repeat concurrent acquire, lost response, delayed packet, process/DB/VM pause, host loss, clock jump, disk-full, and directional FI/IR faults across the real hosts before enabling any lease. |
 | T-005 | P0 | models/change_log.py has one local integer id and one synced/verified state; core/sync_worker.py drains to one target URL and marks the row delivered after that peer succeeds. | Delivery to Bot-FI can incorrectly imply delivery to WebApp-IR, or vice versa; retention can delete an event still needed by one destination. | Implement immutable global event identity plus a per-destination delivery ledger, destination-specific ACKs, retry state, retention gates, and backlog metrics. |
 | T-006 | P0 | Receiver-applied transactions use is_sync and core/events.py intentionally suppresses new change-log creation for such writes. This prevents two-site echoes but also prevents WebApp-FI from relaying an original Bot-FI event to WebApp-IR through the current outbox. | WebApp-IR misses foreign-origin changes accumulated at WebApp-FI during a national outage, or relay is re-enabled naively and creates loops. | Implement preserved-origin relay: same event_id, origin site, origin sequence, authority, epoch, and payload hash; create only the missing destination delivery without generating a new business event. |
 | T-007 | P0 | Sync ordering uses the local change-log integer as source_sequence. The worker prioritizes table class before id, so a larger sequence can be sent before a smaller one, while the receiver can advance to the larger value without a durable missing-range record. Database sequences may also contain rollback gaps, and two physical WebApp databases can overlap. | A legitimate event is classified stale, a missing event is never requested, or different events occupy the same apparent sequence. | Define an emitted stream sequence independent of ordinary database id gaps, scope it by producer_site and epoch, persist gap ranges, and test priority reordering, rollback gaps, restore, promotion, and same-sequence/different-hash cases. |
@@ -2244,13 +2244,16 @@ size.
 
 ### 42.3 Remaining boundary
 
-This closes encrypted off-host custody and a data-level restore, but it is not
-yet proof of recovery after losing the entire Witness VM. The remaining backup
-gate is to provision a clean replacement host from the manifest-bound release,
-download the immutable object with the off-host admin identity, restore it, and
-repeat service/TLS/clock checks before granting any lease. Credential
-rotation/revocation and independent escrow access also remain operational
-procedures to drill.
+Encrypted off-host custody, data-level restore, and clean replacement-host live
+restore are now proven. The immutable object was restored through a separately
+validated candidate database, swapped into the live name while preserving the
+fresh database as a no-connection rollback, and survived a real VM reboot.
+
+This does not authorize a lease. Authenticated replacement-host reachability
+was repeated from WebApp-FI, while the equivalent WebApp-IR probe remains open
+because SSH to that host refused the operator connection. Credential
+rotation/revocation, independent escrow access, real fault injection, and the
+decision to retain or retire either dark Witness host remain operational gates.
 
 ## 43. Replacement Witness VPS Provisioning Gate - 2026-07-15
 
@@ -2268,20 +2271,28 @@ SSH authentication, permits SSH only from Bot-FI/control, and permits HTTPS
 only from WebApp-FI and WebApp-IR. Any API-generated bootstrap password is kept
 outside the repository in an owner-only state file and is never printed.
 
-### 43.2 Blocked live attempt and cost evidence
+### 43.2 Initial API block and manual resolution
 
 The final preflight revalidated the region, quota, plan, image, default network,
 absence of an existing same-name server, and the API quote. The live create
 request was then rejected by Arvan with HTTP `403` because the current token
 lacks create permission. A post-attempt read-back again found no same-name
-server. Therefore no VPS, Security Group, SSH key, or billable resource was
-created and the replacement-host recovery drill has not started.
+server. Therefore that API operation created no VPS, Security Group, SSH key,
+or billable resource.
 
 The same token also cannot create a dedicated Security Group or manage panel
 SSH keys. The prepared fallback can add a deny-by-default host firewall during
 first boot, but using Arvan's broad default Security Group would reduce defense
 in depth and is accepted only as a temporary drill fallback after server-create
 authority exists. It is not the final production boundary.
+
+The operator then created a VPS manually and supplied `185.206.95.94`. Live
+host inspection confirmed Ubuntu 24.04, 2 vCPU, about 2 GiB RAM, and a 30 GiB
+disk. The existing read-only token did not return this IP from its visible
+server lists, so the provider region, resource-group ownership, and actual
+invoice cannot be independently asserted through that token. The earlier API
+quote is retained as planning evidence, not claimed as the verified bill for
+the manually created host.
 
 ### 43.3 Mandatory API-key rotation and least-privilege closure
 
@@ -2304,9 +2315,78 @@ or Witness activation. The replacement process is:
 6. retain only redacted key identifiers, permission manifests, timestamps, and
    pass/fail evidence.
 
-Until either the token receives the required narrowly scoped IaaS create
-authority or the operator creates the approved VPS manually, Stage 43 remains
-blocked with zero new infrastructure cost. The next valid continuation point is
-to rerun `scripts/provision_arvan_witness_recovery_vps.py --apply`; it will
-refuse changed plan/image/quota assumptions and will not create a second
-same-name server.
+Manual host creation unblocked the recovery drill without expanding the exposed
+token's authority. API-key rotation and a dedicated provider-level firewall
+remain open; the current token must not be elevated merely to reproduce a host
+that now exists. `scripts/provision_arvan_witness_recovery_vps.py` remains a
+dry-run-first reference for a future least-privilege lifecycle drill.
+
+## 44. Clean Replacement-Host Live Restore - 2026-07-15
+
+### 44.1 Host and deployment evidence
+
+The supplied bootstrap password was subject to an enforced first-login change.
+An operator Ed25519 key was installed and verified before password SSH was
+disabled. Root SSH now accepts keys only, and host UFW permits `22/tcp` only
+from Bot-FI/control `65.109.216.187`. HTTPS is permitted only from WebApp-FI
+`65.109.220.59` and WebApp-IR `87.236.212.194`; a control-host HTTPS attempt
+timed out after five seconds.
+
+One checksumed archive delivered a manifest-bound release and 44 fully locked
+CPython 3.12 wheels. Both the archive and every wheel were revalidated on the
+destination before installation. PostgreSQL 16 and Uvicorn listen only on
+loopback; Nginx is the only `443` listener. The active release is
+`20260715T1822Z-fe0f6d44-recovery3`.
+
+The drill exposed and closed two runbook defects before evidence was accepted:
+
+1. SSH was previously allowed broadly by UFW; provisioning now requires a
+   validated fixed `WRITER_WITNESS_SSH_SOURCE_IP` and has no generic OpenSSH
+   allow rule.
+2. The root-only `0600` backup could not be opened directly by `pg_restore`
+   running as PostgreSQL. The privileged shell now opens the file and passes
+   only its bytes to the unprivileged restore process.
+
+### 44.2 Immutable object and live database recovery
+
+The replacement host restored the compliance-locked object
+`witness/writer-witness-20260715T114726Z.dump.age` (13,711 bytes; ciphertext
+SHA-256 `d30388b018d0d0b6fa9aed809ec328ed60b0d27ccbb5ff6bb019573178d4688b`;
+retained until `2026-10-13T14:11:36.178523941Z`). The `age` identity remained
+off the Witness.
+
+The first restore used an isolated temporary database. The live restore then:
+
+1. required explicit `--apply`, exact current-state, expected-state, and receipt
+   count guards;
+2. restored as the least-privilege migration identity into a candidate database;
+3. verified schema `001`, state `webapp:0:vacant`, and zero receipts;
+4. stopped only the dark Witness service and swapped database names;
+5. preserved the former live database as
+   `writer_witness_rollback_20260715181340_16024` with connections disabled;
+6. returned the service ready and created a checksumed post-restore backup.
+
+A deliberate wrong-current-state run was rejected before candidate creation or
+service stop. Repeating that negative test after its cleanup-path correction
+left only the live and disabled rollback databases, with the live state and
+service unchanged.
+
+The runtime database role has neither database-create nor superuser, role-create,
+or replication authority. The live database and rollback both survived a real
+VM reboot; Writer Witness, Nginx, PostgreSQL, UFW, and the backup timer returned
+active, and state remained `webapp:0:vacant` with zero receipts.
+
+### 44.3 Network and activation boundary
+
+From WebApp-FI, authenticated TLS/HMAC status returned `200` with epoch `0` and
+vacant state; the same endpoint without authentication returned `401`. The
+temporary client credential and CA were held only under `/run`, removed after
+the smoke test, and were not persisted in WebApp-FI configuration. WebApp-FI
+production containers remained healthy. The original Witness at
+`185.231.182.6` also remained healthy and unchanged at `webapp:0:vacant`.
+
+WebApp-IR SSH currently refuses connections, so its authenticated TLS probe to
+the replacement host is not yet evidence-complete. The UFW rule exists, but a
+rule is not proof of end-to-end reachability. No credential was delivered to a
+WebApp runtime, no Witness lease was acquired, no WebApp flag was enabled, no
+old Witness was retired, and no CDN or Arvan routing setting changed.

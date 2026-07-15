@@ -46,6 +46,7 @@ for source in \
     writer-witness-backup.sh \
     writer-witness-offsite-backup.sh \
     writer-witness-s3-put.py \
+    writer-witness-live-restore.sh \
     writer-witness-restore-drill.sh \
     writer-witness-backup.service \
     writer-witness-backup.timer \

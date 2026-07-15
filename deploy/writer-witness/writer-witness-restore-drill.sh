@@ -31,7 +31,9 @@ restore_arguments=(
 if [[ "$backup_path" == "-" ]]; then
     runuser -u postgres -- pg_restore "${restore_arguments[@]}"
 else
-    runuser -u postgres -- pg_restore "${restore_arguments[@]}" "$backup_path"
+    # The backup is deliberately root-only. Open it in the privileged shell
+    # and pass only its bytes to pg_restore running as postgres.
+    runuser -u postgres -- pg_restore "${restore_arguments[@]}" <"$backup_path"
 fi
 
 version="$(runuser -u postgres -- psql -XAtqc \

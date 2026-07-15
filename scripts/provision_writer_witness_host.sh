@@ -10,13 +10,14 @@ SOURCE_DIR="${WRITER_WITNESS_SOURCE_DIR:-}"
 WITNESS_PUBLIC_IP="${WRITER_WITNESS_PUBLIC_IP:-}"
 WEBAPP_FI_SOURCE_IP="${WRITER_WITNESS_WEBAPP_FI_SOURCE_IP:-}"
 WEBAPP_IR_SOURCE_IP="${WRITER_WITNESS_WEBAPP_IR_SOURCE_IP:-}"
+SSH_SOURCE_IP="${WRITER_WITNESS_SSH_SOURCE_IP:-}"
 RELEASE_ID="${WRITER_WITNESS_RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 HARDEN_SSH="${WRITER_WITNESS_HARDEN_SSH:-false}"
 SSH_KEY_SOURCE_USER="${WRITER_WITNESS_SSH_KEY_SOURCE_USER:-ubuntu}"
 WHEELHOUSE="${WRITER_WITNESS_WHEELHOUSE:-}"
 ROTATE_TLS="${WRITER_WITNESS_ROTATE_TLS:-false}"
 
-for value_name in SOURCE_DIR WITNESS_PUBLIC_IP WEBAPP_FI_SOURCE_IP WEBAPP_IR_SOURCE_IP; do
+for value_name in SOURCE_DIR WITNESS_PUBLIC_IP WEBAPP_FI_SOURCE_IP WEBAPP_IR_SOURCE_IP SSH_SOURCE_IP; do
     value="${!value_name}"
     if [[ -z "$value" ]]; then
         echo "$value_name is required" >&2
@@ -45,7 +46,7 @@ if [[ -n "$WHEELHOUSE" ]]; then
         sha256sum --check SHA256SUMS
     )
 fi
-python3 - "$WITNESS_PUBLIC_IP" "$WEBAPP_FI_SOURCE_IP" "$WEBAPP_IR_SOURCE_IP" <<'PY'
+python3 - "$WITNESS_PUBLIC_IP" "$WEBAPP_FI_SOURCE_IP" "$WEBAPP_IR_SOURCE_IP" "$SSH_SOURCE_IP" <<'PY'
 from ipaddress import ip_address
 import sys
 for value in sys.argv[1:]:
@@ -340,6 +341,7 @@ rm -f /etc/nginx/sites-enabled/default
 
 install -m 0644 "$ASSET_DIR/writer-witness.service" /etc/systemd/system/writer-witness.service
 install -m 0755 "$ASSET_DIR/writer-witness-backup.sh" /usr/local/sbin/writer-witness-backup
+install -m 0755 "$ASSET_DIR/writer-witness-live-restore.sh" /usr/local/sbin/writer-witness-live-restore
 install -m 0755 "$ASSET_DIR/writer-witness-restore-drill.sh" /usr/local/sbin/writer-witness-restore-drill
 install -m 0644 "$ASSET_DIR/writer-witness-backup.service" /etc/systemd/system/writer-witness-backup.service
 install -m 0644 "$ASSET_DIR/writer-witness-backup.timer" /etc/systemd/system/writer-witness-backup.timer
@@ -377,7 +379,7 @@ fi
 
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow OpenSSH
+ufw allow from "$SSH_SOURCE_IP" to any port 22 proto tcp comment 'writer-witness-control-ssh'
 ufw allow from "$WEBAPP_FI_SOURCE_IP" to any port 443 proto tcp comment 'writer-witness-webapp-fi'
 ufw allow from "$WEBAPP_IR_SOURCE_IP" to any port 443 proto tcp comment 'writer-witness-webapp-ir'
 ufw --force enable
