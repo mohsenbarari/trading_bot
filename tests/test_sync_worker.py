@@ -510,6 +510,34 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry.quarantined_at, attempted_at)
         self.assertEqual(final_session.commit_count, 1)
 
+    async def test_registry_fingerprint_rollout_mismatch_never_quarantines(self):
+        attempted_at = datetime(2026, 7, 14, 8, 0, tzinfo=timezone.utc)
+        entry = SimpleNamespace(
+            delivery_attempt_count=sync_worker.SYNC_PEER_REJECTION_MAX_ATTEMPTS + 20,
+            last_delivery_error=None,
+            last_delivery_attempt_at=None,
+            next_delivery_attempt_at=None,
+            quarantined_at=None,
+        )
+        session = FakeDBSession(entry)
+        item = {"change_log_id": 89, "table": "offers", "id": 12}
+
+        with patch("core.db.AsyncSessionLocal", return_value=session):
+            state = await sync_worker.record_change_log_delivery_failure(
+                item,
+                reason="registry_fingerprint_mismatch",
+                now=attempted_at,
+            )
+
+        self.assertFalse(state.quarantined)
+        self.assertEqual(
+            state.next_attempt_at,
+            attempted_at + timedelta(seconds=sync_worker.SYNC_PEER_REJECTION_BACKOFF_SECONDS[-1]),
+        )
+        self.assertIsNone(entry.quarantined_at)
+        self.assertEqual(entry.last_delivery_error, "registry_fingerprint_mismatch")
+        self.assertEqual(session.commit_count, 1)
+
     async def test_offer_change_log_replay_uses_original_committed_payload(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)
         entry = SimpleNamespace(

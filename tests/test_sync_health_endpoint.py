@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.sync import get_sync_health, get_sync_parity_snapshot, record_sync_parity_status
+from core.sync_protocol import current_sync_registry_fingerprint
 
 
 PUBLICATION_SUMMARY = {
@@ -137,6 +138,13 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["server_mode"], "foreign")
+        self.assertEqual(
+            payload["runtime_compatibility"],
+            {
+                "release_sha": None,
+                "registry_fingerprint": current_sync_registry_fingerprint(),
+            },
+        )
         self.assertEqual(payload["unsynced_change_log_count"], 3)
         self.assertEqual(payload["quarantined_change_log_count"], 1)
         self.assertEqual(payload["redis_queues"], {"sync:outbound": 4, "sync:retry": 1})

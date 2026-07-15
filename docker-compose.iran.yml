@@ -109,7 +109,10 @@ services:
     image: trading_bot_base_iran
     logging: *default_logging
     container_name: trading_bot_migration
-    command: [ "python", "manage.py" ]
+    command:
+      - sh
+      - -c
+      - python manage.py && python scripts/align_trade_number_sequence.py
     environment:
       TZ: UTC
       DB_POOL_SIZE: ${DB_POOL_SIZE:-8}

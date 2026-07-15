@@ -59,6 +59,7 @@ SYNC_OUTBOUND_TABLE_PRIORITY = (
 SYNC_CHANGE_LOG_POLL_DRAIN_LIMIT = 100
 SYNC_PEER_REJECTION_MAX_ATTEMPTS = 5
 SYNC_PEER_REJECTION_BACKOFF_SECONDS = (1, 5, 15, 30)
+SYNC_TRANSIENT_PROTOCOL_REJECTION_REASONS = frozenset({"registry_fingerprint_mismatch"})
 
 
 class SyncDeliveryError(Exception):
@@ -395,7 +396,11 @@ async def record_change_log_delivery_failure(
             return None
 
         attempt_count = int(entry.delivery_attempt_count or 0) + 1
-        quarantined = attempt_count >= SYNC_PEER_REJECTION_MAX_ATTEMPTS
+        transient_protocol_rejection = str(reason or "") in SYNC_TRANSIENT_PROTOCOL_REJECTION_REASONS
+        quarantined = (
+            attempt_count >= SYNC_PEER_REJECTION_MAX_ATTEMPTS
+            and not transient_protocol_rejection
+        )
         next_attempt_at = None
         if not quarantined:
             delay_index = min(

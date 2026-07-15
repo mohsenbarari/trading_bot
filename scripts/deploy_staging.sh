@@ -614,7 +614,7 @@ wait_for_app_health() {
 
 start_sync_worker() {
     if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
-        compose --profile staging-bot up -d --build foreign_sync_worker
+        compose --profile staging-bot --profile staging-sync up -d --build sync_worker foreign_sync_worker
         return
     fi
     compose up -d --build sync_worker

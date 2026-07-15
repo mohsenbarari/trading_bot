@@ -516,7 +516,7 @@ deploy_iran() {
 # ==========================================
 deploy_foreign() {
     print_header "🌍 Deploying Foreign Server (local)"
-    local core_services=(db redis migration app bot sync_worker)
+    local core_services=(app bot sync_worker)
 
     cd "$PROJECT_DIR"
     ensure_local_host_timezone
@@ -535,6 +535,10 @@ deploy_foreign() {
 
     echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
     echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
+    echo "⏳ Starting stateful dependencies without recreating them..."
+    run_with_local_resource_guard "Foreign stateful dependencies startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --no-recreate --wait --wait-timeout 180 db redis"
+    echo "⏳ Running migrations and validating the trade-number sequence..."
+    run_with_local_resource_guard "Foreign database migration" bash -lc "$LOCAL_COMPOSE_CMD run --rm --no-deps migration"
     echo "⏳ Waiting for foreign core services to become ready..."
     run_with_local_resource_guard "Foreign core service startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --wait --wait-timeout 180 ${core_services[*]}"
 

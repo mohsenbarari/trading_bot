@@ -424,7 +424,10 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
         self.assertIn('start_sync_worker', staging_script)
         self.assertIn('compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker', staging_script)
-        self.assertIn('compose --profile staging-bot up -d --build foreign_sync_worker', staging_script)
+        self.assertIn(
+            'compose --profile staging-bot --profile staging-sync up -d --build sync_worker foreign_sync_worker',
+            staging_script,
+        )
         self.assertIn('SERVER_MODE: ${STAGING_MIGRATION_SERVER_MODE:-iran}', staging_compose)
         self.assertIn('python scripts/align_trade_number_sequence.py', staging_compose)
         self.assertIn('compose up -d --build sync_worker', staging_script)
@@ -505,6 +508,38 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
 
         self.assertNotIn('eval "\\$compose_cmd -f docker-compose.iran.yml up -d \\$wait_args"', production_script)
         self.assertNotIn('up -d --wait --wait-timeout 180"', legacy_script)
+
+    def test_production_deploys_align_trade_numbers_before_starting_apps(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+        legacy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')
+        foreign_compose = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+        iran_compose = (REPO_ROOT / 'docker-compose.iran.yml').read_text(encoding='utf-8')
+
+        self.assertIn('TRADE_NUMBER_SEQUENCE_ALIGNER=', production_script)
+        self.assertIn('Trade-number sequence aligner missing:', production_script)
+        self.assertIn('run --rm --no-deps migration', legacy_script)
+        foreign_deploy = legacy_script.split('deploy_foreign() {', 1)[1].split('\n}', 1)[0]
+        self.assertLess(
+            foreign_deploy.index('run --rm --no-deps migration'),
+            foreign_deploy.index('Foreign core service startup'),
+        )
+        self.assertIn('up -d --no-recreate --wait --wait-timeout 180 db redis', foreign_deploy)
+        for compose_source in (foreign_compose, iran_compose):
+            self.assertIn('python manage.py && python scripts/align_trade_number_sequence.py', compose_source)
+
+    def test_production_receipt_rollout_is_rendered_and_fail_closed(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+        production_example = (REPO_ROOT / 'deploy/production/online.env.example').read_text(encoding='utf-8')
+
+        self.assertIn('OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED', production_script)
+        self.assertIn('validate_offer_expiry_receipt_env_files', production_script)
+        self.assertIn('validate_runtime_release_sha_files', production_script)
+        self.assertIn('repair_registry_fingerprint_rollout_quarantine', production_script)
+        self.assertIn('Refusing sync-quarantine repair because production release SHAs are not identical', production_script)
+        self.assertIn('Refusing sync-quarantine repair because registry fingerprints are not identical', production_script)
+        self.assertIn('verify_no_sync_quarantines', production_script)
+        self.assertIn('REQUIRE_OFFER_EXPIRY_COMMAND_RECEIPTS=1', production_example)
+        self.assertIn('OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=1', production_example)
 
     def test_production_release_excludes_runtime_audit_files(self):
         production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
