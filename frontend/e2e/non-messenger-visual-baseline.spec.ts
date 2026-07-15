@@ -180,8 +180,8 @@ async function installApiMocks(page: Page) {
     if (path === '/api/auth/switchable-users') {
       return json([])
     }
-    if (path === '/api/offers/' && method === 'GET') {
-      return json([])
+    if (path === '/api/offers/page' && method === 'GET') {
+      return json({ items: [], next_cursor: null, has_more: false, page_size: 0 })
     }
     if (path === '/api/offers/my') {
       return json([])

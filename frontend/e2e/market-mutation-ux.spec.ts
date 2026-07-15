@@ -35,6 +35,10 @@ async function fulfillJson(route: Route, status: number, body: unknown) {
   })
 }
 
+function offerPage(items: unknown[]) {
+  return { items, next_cursor: null, has_more: false, page_size: items.length }
+}
+
 test.describe('Market mutation UX', () => {
   test('recent expired offers toggle stays clickable above the market FAB on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -86,8 +90,8 @@ test.describe('Market mutation UX', () => {
       if (url.pathname === '/api/admin-messages/market/current') {
         return fulfillJson(route, 200, null)
       }
-      if (url.pathname === '/api/offers/' && request.method() === 'GET') {
-        return fulfillJson(route, 200, [
+      if (url.pathname === '/api/offers/page' && request.method() === 'GET') {
+        return fulfillJson(route, 200, offerPage([
           {
             id: 901,
             user_id: 91,
@@ -140,9 +144,9 @@ test.describe('Market mutation UX', () => {
             customer_management_name: null,
             customer_tier: null,
           },
-        ])
+        ]))
       }
-      if (url.pathname === '/api/offers/my' && url.searchParams.get('status_filter') === 'expired') {
+      if (url.pathname === '/api/offers/my/repeatable') {
         return fulfillJson(route, 200, [
           {
             id: 8001,
@@ -189,9 +193,11 @@ test.describe('Market mutation UX', () => {
       const rect = node.getBoundingClientRect()
       return { top: rect.top, bottom: rect.bottom }
     }))
-    expect(filterRows).toHaveLength(2)
-    expect(Math.abs(filterRows[0]!.top - filterRows[1]!.top)).toBeLessThanOrEqual(1)
-    expect(Math.abs(filterRows[0]!.bottom - filterRows[1]!.bottom)).toBeLessThanOrEqual(1)
+    expect(filterRows).toHaveLength(3)
+    for (const row of filterRows.slice(1)) {
+      expect(Math.abs(filterRows[0]!.top - row.top)).toBeLessThanOrEqual(1)
+      expect(Math.abs(filterRows[0]!.bottom - row.bottom)).toBeLessThanOrEqual(1)
+    }
     const filterGroupStyles = await filterStrip.locator('[role="tablist"]').evaluateAll((nodes) => nodes.map((node) => {
       const style = window.getComputedStyle(node)
       return {
@@ -199,10 +205,12 @@ test.describe('Market mutation UX', () => {
         backgroundColor: style.backgroundColor,
       }
     }))
-    expect(filterGroupStyles).toEqual([
-      { borderTopWidth: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' },
-      { borderTopWidth: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' },
-    ])
+    expect(filterGroupStyles).toEqual(
+      Array.from({ length: 3 }, () => ({
+        borderTopWidth: '0px',
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+      })),
+    )
     await expect(page.locator('.ui-settlement-badge--cash')).toContainText('نقد حاضر')
     await expect(page.locator('.ui-settlement-badge--tomorrow')).toContainText('فردا')
     await expect(page.locator('.offer-header .ui-settlement-badge')).toHaveCount(2)
@@ -308,8 +316,8 @@ test.describe('Market mutation UX', () => {
           detail: 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.',
         })
       }
-      if (url.pathname === '/api/offers/' && method === 'GET') {
-        return fulfillJson(route, 200, [
+      if (url.pathname === '/api/offers/page' && method === 'GET') {
+        return fulfillJson(route, 200, offerPage([
           {
             id: 901,
             user_id: null,
@@ -335,7 +343,7 @@ test.describe('Market mutation UX', () => {
             customer_management_name: null,
             customer_tier: null,
           },
-        ])
+        ]))
       }
       if (url.pathname === '/api/trades/' && method === 'POST') {
         tradeExecuteCount += 1
