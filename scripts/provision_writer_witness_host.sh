@@ -341,6 +341,7 @@ rm -f /etc/nginx/sites-enabled/default
 
 install -m 0644 "$ASSET_DIR/writer-witness.service" /etc/systemd/system/writer-witness.service
 install -m 0755 "$ASSET_DIR/writer-witness-backup.sh" /usr/local/sbin/writer-witness-backup
+install -m 0755 "$ASSET_DIR/writer-witness-rotate-hmac.py" /usr/local/sbin/writer-witness-rotate-hmac
 install -m 0755 "$ASSET_DIR/writer-witness-live-restore.sh" /usr/local/sbin/writer-witness-live-restore
 install -m 0755 "$ASSET_DIR/writer-witness-restore-drill.sh" /usr/local/sbin/writer-witness-restore-drill
 install -m 0644 "$ASSET_DIR/writer-witness-backup.service" /etc/systemd/system/writer-witness-backup.service

@@ -143,6 +143,8 @@ The repeatable deployment assets are:
   Object Lock, retention, private ACL, and least-privilege policy setup;
 - `scripts/configure_writer_witness_s3_backup.sh` for installing the write-only
   encrypted backup path without copying a decryption identity to the Witness;
+- `deploy/writer-witness/writer-witness-rotate-hmac.py` for guarded one-site
+  overlap, revocation, rollback, and secret cleanup;
 - `scripts/run_writer_witness_offsite_restore_drill.sh` for downloading with
   the off-host admin identity, verifying retention/checksum, decrypting outside
   the Witness, and streaming into an isolated temporary restore database;
@@ -175,10 +177,11 @@ dedicated backup VM or Bot-FI volume:
   to a temporary PostgreSQL database, and reproduced schema `001`, state
   `webapp:0:vacant`, and zero receipts before cleanup.
 
-This closes encrypted off-host custody and a data-level restore. A full
-replacement-host rebuild/restore remains a separate operational drill. During
-an Iran-to-global outage the local 30-day copies continue; S3 upload catches up
-after connectivity returns.
+This closes encrypted off-host custody and a data-level restore. A clean
+replacement-host rebuild and guarded live restore was subsequently proven on
+`185.206.95.94`, including candidate validation, rollback preservation, and a
+real reboot. During an Iran-to-global outage the local 30-day copies continue;
+S3 upload catches up after connectivity returns.
 
 ## WebApp Client Settings
 
@@ -204,12 +207,38 @@ signed proof is then imported into local writer state in one transaction. If
 renewal cannot be proved, no local expiry is extended and ordinary fencing
 stops authoritative writes at the safety deadline.
 
+## Pairwise HMAC Rotation Procedure
+
+Rotate only one site at a time. Confirm the expected writer epoch and require a
+vacant Witness before starting. The helper refuses mismatched client/service
+material, unsafe file modes, an existing overlap, or an unexpected database
+state.
+
+```text
+writer-witness-rotate-hmac prepare --site webapp_fi --expected-epoch 0
+# Prove the old and new client materials both return HTTP 200 from WebApp-FI.
+writer-witness-rotate-hmac revoke --site webapp_fi --expected-epoch 0
+# Prove the new material returns 200 and the old material returns 401.
+writer-witness-rotate-hmac finish --site webapp_fi --expected-epoch 0
+```
+
+Repeat separately with `webapp_ir`. Before `finish`, use `rollback` if either
+the new credential or the source-site path fails. Never print or copy an env
+file into evidence; hold old/new probe material only in owner-only `/run`
+directories and remove it after each verification.
+
+On 2026-07-15 this procedure rotated FI and IR independently from `v1` to `v2`
+on replacement Witness `185.206.95.94`. Each overlap accepted old and new with
+HTTP `200`; after revocation the new key returned `200` and the old key returned
+`401` from the corresponding WebApp host. The Witness remained vacant at epoch
+`0`, no transition receipt was created, no previous slot remained, and no
+credential was persisted in a WebApp runtime.
+
 ## Production Stop Conditions
 
 Do not issue the first lease, copy credentials into a WebApp runtime, or enable
 WebApp witness enforcement merely because the dark service is healthy.
 Production writer activation remains blocked until real-host directional
-partition/pause/delayed-packet tests, credential rotation and recovery,
-replacement-host recovery, operator approval policy, stale-epoch side-effect
-binding, sync/parity/file gates, and the higher-level recovery/Arvan
-orchestrator are complete.
+partition/pause/delayed-packet tests, operator approval policy, stale-epoch
+side-effect binding, sync/parity/file gates, and the higher-level
+recovery/Arvan orchestrator are complete.

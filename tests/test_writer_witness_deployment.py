@@ -32,6 +32,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("deploy/writer-witness/requirements.lock", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-offsite-backup.sh", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-s3-put.py", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-rotate-hmac.py", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-live-restore.sh", manifest)
             self.assertNotIn(".env", "\n".join(manifest))
             self.assertFalse((release / "main.py").exists())
@@ -83,6 +84,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("PermitRootLogin prohibit-password", script)
         self.assertIn("PasswordAuthentication no", script)
         self.assertIn('WRITER_WITNESS_HARDEN_SSH:-false', script)
+        self.assertIn("writer-witness-rotate-hmac", script)
         self.assertIn("sha256sum --check SHA256SUMS", script)
         self.assertIn("--no-index --find-links", script)
         self.assertIn("basicConstraints=critical,CA:TRUE,pathlen:0", script)
@@ -90,6 +92,25 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("extendedKeyUsage=serverAuth", script)
         self.assertIn("WRITER_WITNESS_ROTATE_TLS:-false", script)
         self.assertIn("requirements.lock", script)
+
+    def test_hmac_rotation_is_overlap_first_fail_closed_and_reversible(self):
+        rotation = (
+            ROOT / "deploy/writer-witness/writer-witness-rotate-hmac.py"
+        ).read_text()
+        self.assertIn('"phase": "preparing"', rotation)
+        self.assertIn('metadata["phase"] = "prepared"', rotation)
+        self.assertIn('metadata["phase"] = "revoked"', rotation)
+        self.assertIn("runtime.env.before", rotation)
+        self.assertIn("runtime.env.overlap", rotation)
+        self.assertIn("client.env.before", rotation)
+        self.assertIn("_require_dark_state(expected_epoch)", rotation)
+        self.assertIn("_restart_and_verify()", rotation)
+        self.assertNotIn("print(new_secret", rotation)
+
+    def test_smoke_client_can_prove_revoked_credentials_return_401(self):
+        smoke = (ROOT / "scripts/smoke_writer_witness_client.py").read_text()
+        self.assertIn('choices=(200, 401)', smoke)
+        self.assertIn('if args.expect_http_status == 401:', smoke)
 
     def test_backup_and_restore_drill_do_not_require_runtime_credentials(self):
         backup = (ROOT / "deploy/writer-witness/writer-witness-backup.sh").read_text()

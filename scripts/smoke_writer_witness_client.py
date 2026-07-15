@@ -11,6 +11,7 @@ from pathlib import Path
 import ssl
 import time
 from urllib.parse import urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -52,6 +53,7 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--ca-bundle", type=Path, required=True)
     parser.add_argument("--site", choices=("webapp_fi", "webapp_ir"), required=True)
+    parser.add_argument("--expect-http-status", type=int, choices=(200, 401), default=200)
     parser.add_argument("--timeout", type=float, default=5.0)
     args = parser.parse_args()
 
@@ -86,12 +88,31 @@ def main() -> int:
         },
     )
     context = ssl.create_default_context(cafile=str(args.ca_bundle))
-    with urlopen(request, timeout=max(0.1, args.timeout), context=context) as response:
-        payload = json.loads(response.read())
-        status_code = response.status
+    try:
+        with urlopen(request, timeout=max(0.1, args.timeout), context=context) as response:
+            payload = json.loads(response.read())
+            status_code = response.status
+    except HTTPError as exc:
+        status_code = exc.code
+        payload = {}
+    if status_code != args.expect_http_status:
+        raise SystemExit(
+            f"writer witness smoke returned HTTP {status_code}, expected {args.expect_http_status}"
+        )
+    if args.expect_http_status == 401:
+        print(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "site": args.site,
+                    "http_status": status_code,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
     if (
-        status_code != 200
-        or payload.get("accepted") is not True
+        payload.get("accepted") is not True
         or payload.get("contract_version") != 1
         or payload.get("request_id") != request_id
     ):
