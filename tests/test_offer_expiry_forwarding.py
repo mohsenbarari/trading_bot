@@ -31,10 +31,22 @@ def payload():
 
 
 class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
-    async def _forward(self, response_body, *, request_payload=None):
+    async def _forward(
+        self,
+        response_body,
+        *,
+        request_payload=None,
+        status_code=200,
+        json_error=False,
+    ):
+        def response_json():
+            if json_error:
+                raise ValueError("invalid JSON")
+            return response_body
+
         response = SimpleNamespace(
-            status_code=200,
-            json=lambda: response_body,
+            status_code=status_code,
+            json=response_json,
             text="",
         )
         client = FakeClientContext(response)
@@ -64,6 +76,7 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
         result, client, log_event = await self._forward(
             {
                 "expired": True,
+                "offer_public_id": request_payload["offer_public_id"],
                 "command_id": request_payload["command_id"],
                 "outcome": "expired",
                 "replayed": False,
@@ -105,6 +118,47 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
             if call.args[1] == "offer_expiry_forward.receipt_ack_invalid"
         )
         self.assertTrue(failure.kwargs["receipt_ack_present"])
+
+    async def test_command_sender_fails_closed_on_non_json_success(self):
+        result, _client, log_event = await self._forward(
+            None,
+            json_error=True,
+        )
+
+        self.assertEqual(result[0], 503)
+        events = [call.args[1] for call in log_event.call_args_list]
+        self.assertIn("offer_expiry_forward.invalid_json_response", events)
+
+    async def test_command_sender_fails_closed_on_empty_204(self):
+        result, _client, _log_event = await self._forward(
+            None,
+            status_code=204,
+            json_error=True,
+        )
+
+        self.assertEqual(result[0], 503)
+
+    async def test_command_sender_requires_full_terminal_receipt_contract(self):
+        request_payload = payload()
+        base = {
+            "expired": True,
+            "offer_public_id": request_payload["offer_public_id"],
+            "command_id": request_payload["command_id"],
+            "outcome": "expired",
+            "replayed": False,
+        }
+        invalid_receipts = (
+            {key: value for key, value in base.items() if key != "outcome"},
+            {**base, "outcome": "unknown"},
+            {**base, "replayed": 0},
+            {**base, "expired": False},
+            {**base, "offer_public_id": "ofr_different_123456"},
+        )
+
+        for response_body in invalid_receipts:
+            with self.subTest(response_body=response_body):
+                result, _client, _log_event = await self._forward(response_body)
+                self.assertEqual(result[0], 503)
 
     async def test_legacy_sender_without_command_identity_remains_compatible(self):
         request_payload = payload()

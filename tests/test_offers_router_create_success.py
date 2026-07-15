@@ -184,6 +184,16 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(quota_patcher.stop)
 
     async def test_republish_creates_independent_offer_from_remaining_source(self):
+        lock_order = []
+
+        async def acquire_fence(_db):
+            lock_order.append("market_fence")
+            return SimpleNamespace(is_open=True)
+
+        async def lock_source(*_args, **_kwargs):
+            lock_order.append("source_offer")
+            return old_offer
+
         commodity = SimpleNamespace(id=1)
         old_offer = SimpleNamespace(
             id=99,
@@ -221,9 +231,10 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         current_user = make_user()
         settings = SimpleNamespace(max_active_offers=1)
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
+        self.router_admission_fence_mock.side_effect = acquire_fence
 
         with patch(
-            "api.routers.offers.lock_repeatable_offer", new=AsyncMock(return_value=old_offer)
+            "api.routers.offers.lock_repeatable_offer", new=AsyncMock(side_effect=lock_source)
         ), patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "api.routers.offers.get_trading_settings",
             return_value=settings,
@@ -284,13 +295,39 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result, {"id": 77, "user_id": 5})
         self.router_admission_fence_mock.assert_awaited_once_with(db)
+        self.assertEqual(lock_order, ["market_fence", "source_offer"])
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
 
     async def test_republish_rejects_ineligible_source_before_side_effects(self):
-        db = FakeDB(execute_results=[FakeExecuteResult(None)])
+        db = FakeDB(
+            get_results=[SimpleNamespace(id=1)],
+            execute_results=[FakeExecuteResult(None)],
+            scalar_results=[0],
+        )
         with patch(
             "api.routers.offers.lock_repeatable_offer",
             new=AsyncMock(side_effect=OfferNotRepeatableError("offer_ineligible")),
+        ), patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=5),
+        ), patch(
+            "core.cache.get_active_offer_count",
+            new=AsyncMock(return_value=0),
+        ), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch(
+            "core.services.trade_service.validate_price",
+            return_value=(True, None),
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await create_offer(
@@ -322,8 +359,36 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             lot_sizes=None,
             notes="urgent",
         )
-        db = FakeDB(execute_results=[FakeExecuteResult(None)])
-        with patch("api.routers.offers.lock_repeatable_offer", new=AsyncMock(return_value=source)):
+        db = FakeDB(
+            get_results=[SimpleNamespace(id=1)],
+            execute_results=[FakeExecuteResult(None)],
+            scalar_results=[0],
+        )
+        with patch(
+            "api.routers.offers.lock_repeatable_offer",
+            new=AsyncMock(return_value=source),
+        ), patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=5),
+        ), patch(
+            "core.cache.get_active_offer_count",
+            new=AsyncMock(return_value=0),
+        ), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch(
+            "core.services.trade_service.validate_price",
+            return_value=(True, None),
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ):
             with self.assertRaises(HTTPException) as exc_info:
                 await create_offer(
                     make_offer(

@@ -2,7 +2,7 @@
 
 ## وضعیت سند
 
-- وضعیت: بازگشایی‌شده برای remediation پس از بازبینی مستقل؛ ۱۶ finding اصلی در کد بسته شده‌اند، اما پذیرش نهایی staging برای HEAD جدید معتبر نیست
+- وضعیت: بازگشایی‌شده؛ remediation دو دور بازبینی مستقل در source اعمال شده، اما پذیرش نهایی staging برای HEAD جدید هنوز معتبر نیست
 - تاریخ ایجاد: ۲۰۲۶-۰۷-۱۳
 - آخرین بازبینی مستقل: ۲۰۲۶-۰۷-۱۵
 - baseline کشف و اعتبارسنجی findingها: `main@6dfde01f07bf7ae104e8a5dc4c1a8d075d1281a2`
@@ -54,6 +54,22 @@
 ## هدف
 
 رفع ۱۶ مشکل شناسایی‌شده بدون بازنویسی معماری بازار و بدون آسیب به رفتارهای تثبیت‌شده بات، WebApp، همگام‌سازی و مالکیت داده بین دو سرور.
+
+## بازبینی مستقل دوم پس از remediation - ۲۰۲۶-۰۷-۱۵
+
+گزارش‌های Claude و ChatGPT روی `805f9dcd` دوباره با source و test واقعی تطبیق داده شدند. تصمیم‌ها:
+
+- شکاف session revocation در SSE تأیید شد. `sid` همان bearer token اکنون به stream خصوصی منتقل و پیش از هر notification دوباره بررسی می‌شود؛ WebSocket و SSE از یک policy استفاده می‌کنند.
+- false-success پاسخ غیر JSON یا receipt ناقص Stage ۱۱ تأیید شد. هر پاسخ موفق command-bearing باید command، public identity، terminal outcome، `expired=true` و boolean بودن replay را اثبات کند؛ در غیر این صورت `503` قابل retry است. مسیر legacy بدون command identity برای rollout نسخه مختلط حفظ می‌شود.
+- silent skip تست واقعی Redis تأیید شد و workflow پس از اجرای Stage ۱۴ summary را جداگانه fail-closed بررسی می‌کند.
+- ایمنی runner PostgreSQL تقویت شد: فقط localhost/control DB، SHA و clean checkout، Redis DB 14 در دسترس، نام یکتای scratch، عدم reuse/drop دیتابیس ازقبل‌موجود، cleanup از اولین create و هنگام signal، URL عمومی هم‌هدف با scratch همان module و ثبت create/drop/final inventory.
+- طولانی‌شدن بازه global fence در republish تأیید شد. pre-checkهای read-only بیرون fence باقی می‌مانند و ترتیب mutation همچنان `market fence -> source row -> owner/quota -> insert/commit` است.
+- ادعای global quota/close هنگام partition همچنان رد می‌شود؛ قرارداد Stageهای ۴ و ۶ همان authoritative-home محلی و convergence موجود است.
+- PASS نهایی staging در گزارش Gemini صریحاً رد می‌شود: runtime قدیمی، mapping ناقص manifest و failure اجرای نخست two-server اجازه چنین نتیجه‌ای نمی‌دهند.
+- باقی‌ماندن ستون Stage ۵ فقط schema residue مستند است؛ migration اعمال‌شده بازنویسی نمی‌شود و cleanup فقط additive و پس از drain مجاز است.
+- persistence فراتر از `sessionStorage` برای intent معامله همچنان تصمیم محصولی جداگانه با expiry/logout/shared-device policy است و blocker قرارداد فعلی Stage ۲ نیست.
+
+این source remediation شواهد staging ناقص Stageهای ۵، ۱۰ و ۱۴ یا final acceptance روی HEAD جدید را جایگزین نمی‌کند.
 
 ## اصول غیرقابل تغییر
 

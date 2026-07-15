@@ -2,7 +2,7 @@
 """
 Real-time WebSocket and SSE for MiniApp - Instant Updates
 """
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, Query, status
 from fastapi.responses import StreamingResponse
 import redis.asyncio as redis
 import asyncio
@@ -29,7 +29,7 @@ from core.services.user_account_status_service import is_user_global_web_locked
 from core.production_test_isolation import should_block_webapp_user
 from models.session import UserSession
 from models.user import User
-from api.deps import get_current_user
+from api.deps import get_current_user, oauth2_scheme
 
 
 
@@ -472,7 +472,7 @@ async def listen_redis_events(
 
 
 # --- SSE Endpoint (Backup) ---
-async def event_generator(user_id: int):
+async def event_generator(user_id: int, session_id: str | None = None):
     """Generator برای SSE events"""
     async with redis.Redis(connection_pool=pool) as redis_client:
         pubsub = redis_client.pubsub()
@@ -504,7 +504,7 @@ async def event_generator(user_id: int):
                         if not isinstance(parsed, dict):
                             raise ValueError("Realtime event payload must be an object")
                         if channel.startswith("notifications:"):
-                            denial = await _websocket_access_denial(user_id, None)
+                            denial = await _websocket_access_denial(user_id, session_id)
                             if denial is not None:
                                 return
                             event_type = parsed.get("event", "notification")
@@ -534,10 +534,22 @@ async def event_generator(user_id: int):
 
 
 @router.get("/stream")
-async def sse_stream(request: Request, current_user: User = Depends(get_current_user)):
+async def sse_stream(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
+):
     """SSE endpoint (backup for browsers without WebSocket)"""
+    auth_result = verify_ws_token(token)
+    if auth_result is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    _token_subject, session_id = auth_result
     return StreamingResponse(
-        event_generator(current_user.id),
+        event_generator(current_user.id, session_id=session_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

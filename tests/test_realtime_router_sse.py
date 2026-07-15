@@ -118,11 +118,50 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pubsub.unsubscribe_calls, 1)
 
+    async def test_event_generator_stops_private_delivery_after_session_revocation(self):
+        session_id = "85f737c9-477b-47ca-a2b2-d069fdc6d094"
+        pubsub = FakePubSub([
+            {
+                "type": "message",
+                "channel": b"notifications:5",
+                "data": b'{"event":"trade:created","data":{"safe":9}}',
+            },
+        ])
+
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)), patch(
+            "api.routers.realtime.is_session_blacklisted",
+            new=AsyncMock(return_value=True),
+        ) as blacklist_mock:
+            generator = event_generator(user_id=5, session_id=session_id)
+            with self.assertRaises(StopAsyncIteration):
+                await generator.__anext__()
+
+        blacklist_mock.assert_awaited_once_with(session_id)
+        self.assertEqual(pubsub.unsubscribe_calls, 1)
+
     async def test_sse_stream_wraps_generator_with_expected_headers(self):
-        response = await sse_stream(request=SimpleNamespace(), current_user=SimpleNamespace(id=7))
+        session_id = "85f737c9-477b-47ca-a2b2-d069fdc6d094"
+
+        async def stream():
+            if False:
+                yield ""
+
+        with patch(
+            "api.routers.realtime.verify_ws_token",
+            return_value=(7, session_id),
+        ), patch(
+            "api.routers.realtime.event_generator",
+            return_value=stream(),
+        ) as generator_mock:
+            response = await sse_stream(
+                request=SimpleNamespace(),
+                current_user=SimpleNamespace(id=7),
+                token="signed-token",
+            )
         self.assertIsInstance(response, StreamingResponse)
         self.assertEqual(response.headers["Cache-Control"], "no-cache")
         self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+        generator_mock.assert_called_once_with(7, session_id=session_id)
 
     async def test_event_generator_tolerates_invalid_json_and_emits_heartbeat(self):
         pubsub = FakePubSub([

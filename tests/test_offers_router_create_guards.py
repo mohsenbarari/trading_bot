@@ -239,7 +239,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             exc_info.exception.detail,
             "شما حداکثر 5 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
         )
-        self.assertEqual(lock_order, ["market_fence", "source_offer"])
+        self.assertEqual(lock_order, [])
 
     async def test_republish_requires_source_public_identity(self):
         with patch("api.routers.offers.lock_repeatable_offer", new=AsyncMock()) as lock_mock:

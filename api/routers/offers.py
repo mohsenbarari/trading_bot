@@ -1195,39 +1195,6 @@ async def create_offer(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="شناسه عمومی لفظ قبلی برای انتشار مجدد الزامی است.",
             )
-        try:
-            # Keep the declared order: market admission fence, owner quota lock,
-            # then offer rows. The creation service re-enters this xact lock.
-            await acquire_market_offer_admission_fence(db)
-            republish_source = await lock_repeatable_offer(
-                db,
-                owner_user_id=owner_user.id,
-                offer_public_id=republish_source_public_id,
-                expected_local_id=offer_data.republished_from_id,
-                market_is_open=True,
-            )
-            ensure_republish_payload_matches_source(
-                republish_source,
-                offer_type=offer_data.offer_type,
-                settlement_type=offer_data.settlement_type,
-                commodity_id=offer_data.commodity_id,
-                quantity=offer_data.quantity,
-                price=offer_data.price,
-                is_wholesale=offer_data.is_wholesale,
-                lot_sizes=offer_data.lot_sizes,
-                notes=offer_data.notes,
-            )
-        except MarketOfferAdmissionError as exc:
-            await _raise_market_offer_admission_rejection(
-                db,
-                exc,
-                has_idempotency_key=bool(idempotency_key),
-            )
-        except OfferNotRepeatableError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="این لفظ دیگر قابل انتشار مجدد نیست. فهرست لفظ‌های اخیر را تازه‌سازی کنید.",
-            ) from exc
     
     # بررسی مسدودیت
     if owner_user.trading_restricted_until:
@@ -1344,6 +1311,41 @@ async def create_offer(
             },
         )
 
+    if republish_requested:
+        try:
+            # Keep the mutation order fence -> source row -> owner/quota row,
+            # but leave read-only validation outside the global fence.
+            await acquire_market_offer_admission_fence(db)
+            republish_source = await lock_repeatable_offer(
+                db,
+                owner_user_id=owner_user.id,
+                offer_public_id=republish_source_public_id,
+                expected_local_id=offer_data.republished_from_id,
+                market_is_open=True,
+            )
+            ensure_republish_payload_matches_source(
+                republish_source,
+                offer_type=offer_data.offer_type,
+                settlement_type=offer_data.settlement_type,
+                commodity_id=offer_data.commodity_id,
+                quantity=offer_data.quantity,
+                price=offer_data.price,
+                is_wholesale=offer_data.is_wholesale,
+                lot_sizes=offer_data.lot_sizes,
+                notes=offer_data.notes,
+            )
+        except MarketOfferAdmissionError as exc:
+            await _raise_market_offer_admission_rejection(
+                db,
+                exc,
+                has_idempotency_key=bool(idempotency_key),
+            )
+        except OfferNotRepeatableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="این لفظ دیگر قابل انتشار مجدد نیست. فهرست لفظ‌های اخیر را تازه‌سازی کنید.",
+            ) from exc
+
     try:
         creation_command = _build_webapp_offer_creation_command(
             offer_data,
@@ -1356,6 +1358,7 @@ async def create_offer(
         creation_outcome = await create_authoritative_offer_with_outcome(
             db,
             creation_command,
+            validate_market=not republish_requested,
             enforce_market_admission=True,
             quota_policy=OfferCreationQuotaPolicy(
                 max_active_offers=ts.max_active_offers,

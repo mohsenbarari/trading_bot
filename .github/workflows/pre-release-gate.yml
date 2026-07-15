@@ -91,7 +91,7 @@ jobs:
           MARKET_POSTGRES_GATE_REDIS_URL: redis://127.0.0.1:6379/14
           FRONTEND_URL: http://127.0.0.1:4173
           JWT_SECRET_KEY: ci_market_postgres_gate_secret
-        run: python3 scripts/run_market_postgres_gate.py
+        run: python3 scripts/run_market_postgres_gate.py --expected-sha "$(git rev-parse HEAD)"
 
       - name: Run real multi-worker Redis proof
         shell: bash
@@ -104,6 +104,7 @@ jobs:
         run: |
           set -o pipefail
           python3 -m unittest -v tests.test_realtime_multiworker_redis 2>&1 | tee tmp/market-realtime-redis-gate.log
+          python3 scripts/assert_no_unittest_skips.py tmp/market-realtime-redis-gate.log
 
       - name: Upload market datastore proof logs
         if: always()

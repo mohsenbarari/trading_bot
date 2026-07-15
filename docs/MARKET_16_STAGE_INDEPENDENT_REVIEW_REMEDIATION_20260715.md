@@ -101,3 +101,54 @@ The post-review source gate consists of:
 Final counts, exact commands, branch/commit identity, SHA-256 hashes, and raw
 logs belong in the post-review evidence package. Passing this source gate does
 not close the open staging evidence items above.
+
+## Second Independent Re-Review
+
+Two independent re-reviews examined `805f9dcd`:
+
+| Reviewer | Source report | SHA-256 |
+|---|---|---|
+| Claude | `tmp/claude/market-16-stage-postreview-remediation-805f9dcd-review.md` | `86a03c584e3850577d9425b02fcc9156d18bd5324eb112fc80d8302bd32eb947` |
+| ChatGPT | `tmp/chatgpt/market-16-stage-postreview-independent-rereview (1).md` | `f39c48d600c530e1adfda830983d147bc8da12710d96f1f9ab234b9bff872edf` |
+
+The following findings were independently reproduced and accepted:
+
+1. SSE revalidated user locks but did not carry the session identity needed to
+   detect revocation of an already-open stream.
+2. A command-bearing Stage 11 response could retain its `2xx` status after JSON
+   parsing failed, and a partially shaped receipt could pass command-id-only
+   acknowledgement.
+3. The Stage 14 workflow command returned success when its required Redis test
+   was skipped.
+4. The PostgreSQL gate could reuse/drop fixed-name databases, leave partial
+   creation behind, inherit generic application database URLs, and pass while
+   its declared Redis dependency was unreachable.
+5. The corrected Stage 5 lock order held the global admission fence across
+   read-only validation that did not need serialization.
+6. Gemini's final-staging PASS was inconsistent with the retained execution
+   limitation and failed first two-server driver summary.
+
+The source remediation now:
+
+- passes the bearer-token `sid` into SSE and tests revocation without mocking
+  the final access-decision helper;
+- requires the complete terminal receipt shape for command-bearing successful
+  expiry responses and maps malformed/empty success to retryable `503`;
+- keeps read-only republish checks outside the fence while retaining the fixed
+  mutation lock order;
+- makes the real Redis proof reject any positive unittest skip summary;
+- confines the PostgreSQL runner to a clean exact checkout and disposable
+  localhost services, uses run-unique scratch names, refuses pre-existing
+  databases, tracks only databases it created, cleans up from the first create
+  and on interruption, verifies Redis reachability, pins generic database URLs
+  per module, and records lifecycle evidence.
+
+ChatGPT's evidence-binding finding is accepted as an artifact issue rather than
+a runtime defect. The next evidence archive must include a Git bundle containing
+the merge base, pre-review commit, and final remediation commit; pushing is not
+required for independent object verification.
+
+The Stage 2 full-browser-context persistence and the already-applied Stage 5
+orphan column remain documented residuals, not regressions. The Stage 4/6
+global-partition proposals remain rejected because they change the accepted
+availability and authority model.

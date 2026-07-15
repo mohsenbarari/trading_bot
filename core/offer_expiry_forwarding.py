@@ -16,6 +16,8 @@ from core.trading_observability import log_trading_event, summarize_response_bod
 
 logger = logging.getLogger(__name__)
 
+OFFER_EXPIRY_RECEIPT_OUTCOMES = frozenset({"expired"})
+
 
 def _json_body(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
@@ -93,6 +95,8 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
         )
         return 503, {"detail": "ارتباط با سرور مرجع لفظ برقرار نشد. لطفاً دوباره تلاش کنید."}
 
+    expected_command_id = str(payload.get("command_id") or "").strip()
+    expected_offer_public_id = str(payload.get("offer_public_id") or "").strip()
     try:
         body = response.json()
     except ValueError:
@@ -106,16 +110,33 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
             **log_context,
             **summarize_response_body(response.text),
         )
+        if response.status_code < 400 and expected_command_id:
+            return 503, {
+                "detail": "پاسخ سرور مرجع قابل تأیید نبود. لطفاً دوباره تلاش کنید."
+            }
         return response.status_code, {"detail": "پاسخ نامعتبر از سرور مرجع لفظ"}
 
-    expected_command_id = str(payload.get("command_id") or "").strip()
     acknowledged_command_id = (
         str(body.get("command_id") or "").strip() if isinstance(body, dict) else ""
+    )
+    acknowledged_offer_public_id = (
+        str(body.get("offer_public_id") or "").strip() if isinstance(body, dict) else ""
+    )
+    acknowledged_outcome = (
+        str(body.get("outcome") or "").strip() if isinstance(body, dict) else ""
+    )
+    receipt_contract_valid = bool(
+        isinstance(body, dict)
+        and acknowledged_command_id == expected_command_id
+        and acknowledged_offer_public_id == expected_offer_public_id
+        and acknowledged_outcome in OFFER_EXPIRY_RECEIPT_OUTCOMES
+        and body.get("expired") is True
+        and type(body.get("replayed")) is bool
     )
     if (
         response.status_code < 400
         and expected_command_id
-        and acknowledged_command_id != expected_command_id
+        and not receipt_contract_valid
     ):
         log_trading_event(
             logger,
@@ -125,6 +146,7 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
             result="failure",
             status_code=response.status_code,
             receipt_ack_present=bool(acknowledged_command_id),
+            receipt_outcome_valid=acknowledged_outcome in OFFER_EXPIRY_RECEIPT_OUTCOMES,
             **log_context,
         )
         return 503, {
