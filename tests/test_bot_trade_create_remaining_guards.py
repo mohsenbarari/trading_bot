@@ -101,9 +101,10 @@ class BotTradeCreateSuggestionHelperTests(unittest.TestCase):
         self.assertIn("قیمت باید 5 یا 6 رقم باشد", single_price_hint)
 
         trade_indicator_hint = _get_offer_suggestion("خرید فروش ربع 30تا 75800", "خرید و فروش همزمان مجاز نیست")
-        self.assertIn("نوع معامله و تسویه باید فقط در ابتدای لفظ باشد", trade_indicator_hint)
+        self.assertIn("نوع معامله و تسویه باید یک بلوک کامل و فقط یک بار باشند", trade_indicator_hint)
+        self.assertIn("جای بلوک آزاد است", trade_indicator_hint)
 
-        invalid_prefix_hint = _get_offer_suggestion("خ امام 30تا 75800", "ابتدای لفظ نامعتبر است")
+        invalid_prefix_hint = _get_offer_suggestion("خ امام 30تا 75800", "نوع معامله و تسویه نامعتبر است")
         self.assertIn("نقد حاضر: `خ ن` یا `ف ن`", invalid_prefix_hint)
         self.assertIn("فردایی: `خ ن ف` یا `ف ن ف`", invalid_prefix_hint)
 

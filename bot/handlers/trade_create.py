@@ -1454,18 +1454,17 @@ async def handle_trade_cancel(callback: types.CallbackQuery, state: FSMContext, 
 
 def _get_offer_suggestion(original_text: str, error_message: str) -> str:
     """پیشنهاد فرمت صحیح بر اساس نوع خطا"""
-    import re
-
     # نمونه‌های صحیح
     examples = [
         "خ ن ربع 30تا 75800",
-        "فروش نقد فردا نیم 50عدد 758000",
-        "خرید نقد امام 40تا 87000: فقط نقدی",
-        "ف ن امام 30تا 75800 15 15"
+        "نیم 50عدد فروش نقد فردا 758000",
+        "امام 40تا 87000 خرید نقد: فقط نقدی",
+        "امام 30تا 75800 ف ن 15 15"
     ]
     
     hint = "💡 **فرمت صحیح:**\n"
-    hint += "`[خ ن/ف ن/خ ن ف/ف ن ف] [کالا] [تعداد]تا [قیمت]`\n\n"
+    hint += "`[کالا] [تعداد]تا [قیمت] + [خ ن/ف ن/خ ن ف/ف ن ف]`\n"
+    hint += "ترتیب بخش‌ها آزاد است.\n\n"
     
     # پیشنهادات بر اساس نوع خطا
     if "تعداد" in error_message:
@@ -1479,8 +1478,11 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
             hint += "📌 قیمت باید 5 یا 6 رقم باشد\n"
         hint += "مثال: `75800` یا `758000`\n"
     
-    elif "خرید" in error_message or "فروش" in error_message or "ابتدای لفظ" in error_message:
-        hint += "📌 نوع معامله و تسویه باید فقط در ابتدای لفظ باشد\n"
+    elif any(
+        marker in error_message
+        for marker in ("خرید", "فروش", "نوع معامله", "تسویه")
+    ):
+        hint += "📌 نوع معامله و تسویه باید یک بلوک کامل و فقط یک بار باشند؛ جای بلوک آزاد است\n"
         hint += "نقد حاضر: `خ ن` یا `ف ن`\n"
         hint += "فردایی: `خ ن ف` یا `ف ن ف`\n"
     
@@ -1738,7 +1740,7 @@ async def _prepare_text_offer(
 
 @router.message(StateFilter(None), F.text.func(has_trade_indicator))
 async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
-    """پردازش آفر متنی با پیشوند دقیق نوع معامله و تسویه."""
+    """پردازش آفر متنی با بلوک دقیق و جابه‌جاپذیر نوع معامله و تسویه."""
     if not user:
         return
 

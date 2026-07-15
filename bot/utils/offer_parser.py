@@ -38,19 +38,29 @@ PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
 ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 COMMODITY_BOUNDARY_CHARS = r'\u0600-\u06FF\u200C0-9'
 BAHAR_QUALIFIERS = {"ربع", "نیم"}
-INVALID_OFFER_PREFIX_MESSAGE = (
-    "❌ ابتدای لفظ نامعتبر است. از «خ ن»، «ف ن»، «خ ن ف»، «ف ن ف» "
-    "یا معادل کامل آن‌ها استفاده کنید"
+INVALID_OFFER_CONTEXT_MESSAGE = (
+    "❌ نوع معامله و تسویه نامعتبر است. از «خ ن»، «ف ن»، «خ ن ف»، «ف ن ف» "
+    "یا معادل کامل آن‌ها به‌صورت یک بلوک استفاده کنید"
 )
-OFFER_PREFIX_PATTERNS = (
-    (re.compile(r'^خرید\s+نقد\s+فردا(?=\s|$)'), "buy", SettlementType.TOMORROW.value),
-    (re.compile(r'^فروش\s+نقد\s+فردا(?=\s|$)'), "sell", SettlementType.TOMORROW.value),
-    (re.compile(r'^خ\s+ن\s+ف(?=\s|$)'), "buy", SettlementType.TOMORROW.value),
-    (re.compile(r'^ف\s+ن\s+ف(?=\s|$)'), "sell", SettlementType.TOMORROW.value),
-    (re.compile(r'^خرید\s+نقد(?=\s|$)'), "buy", SettlementType.CASH.value),
-    (re.compile(r'^فروش\s+نقد(?=\s|$)'), "sell", SettlementType.CASH.value),
-    (re.compile(r'^خ\s+ن(?=\s|$)'), "buy", SettlementType.CASH.value),
-    (re.compile(r'^ف\s+ن(?=\s|$)'), "sell", SettlementType.CASH.value),
+MULTIPLE_OFFER_CONTEXT_MESSAGE = "❌ نوع معامله و تسویه فقط یک بار در لفظ مجاز است"
+RESIDUAL_TRADE_MARKER_MESSAGE = (
+    "❌ نشانگر خرید یا فروش فقط داخل بلوک نوع معامله و تسویه مجاز است"
+)
+RESIDUAL_SETTLEMENT_MARKER_MESSAGE = (
+    "❌ نشانگر تسویه فقط داخل بلوک نوع معامله و تسویه مجاز است"
+)
+OFFER_CONTEXT_PATTERNS = (
+    (re.compile(r'(?<!\S)خرید\s+نقد\s+فردا(?=\s|$)'), "buy", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<!\S)فروش\s+نقد\s+فردا(?=\s|$)'), "sell", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<!\S)خ\s+ن\s+ف(?=\s|$)'), "buy", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<!\S)ف\s+ن\s+ف(?=\s|$)'), "sell", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<!\S)خرید\s+نقد(?=\s|$)'), "buy", SettlementType.CASH.value),
+    (re.compile(r'(?<!\S)فروش\s+نقد(?=\s|$)'), "sell", SettlementType.CASH.value),
+    (re.compile(r'(?<!\S)خ\s+ن(?=\s|$)'), "buy", SettlementType.CASH.value),
+    (re.compile(r'(?<!\S)ف\s+ن(?=\s|$)'), "sell", SettlementType.CASH.value),
+)
+RESIDUAL_SETTLEMENT_PATTERN = re.compile(
+    r'(?<!\S)(?:نقد|فردا|فردایی|ن)(?=\s|$)'
 )
 
 
@@ -179,29 +189,52 @@ def extract_trade_type(text: str) -> Tuple[Optional[str], Optional[str]]:
     return "sell", None
 
 
-def extract_offer_prefix(
+def _find_offer_context_matches(text: str) -> List[Tuple[int, int, str, str]]:
+    """Find non-overlapping exact trade/settlement blocks, preferring longer forms."""
+    matches: List[Tuple[int, int, str, str]] = []
+
+    for pattern, trade_type, settlement_type in OFFER_CONTEXT_PATTERNS:
+        for match in pattern.finditer(text):
+            start, end = match.span()
+            overlaps_existing = any(
+                start < existing_end and existing_start < end
+                for existing_start, existing_end, _, _ in matches
+            )
+            if overlaps_existing:
+                continue
+            matches.append((start, end, trade_type, settlement_type))
+
+    return sorted(matches, key=lambda item: item[0])
+
+
+def extract_offer_context(
     text: str,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Extract the exact side/settlement prefix and return the remaining offer text."""
+    """Extract one movable side/settlement block and return the remaining offer text."""
     normalized_text = ' '.join(text.split())
-    for pattern, trade_type, settlement_type in OFFER_PREFIX_PATTERNS:
-        match = pattern.match(normalized_text)
-        if match is None:
-            continue
+    context_matches = _find_offer_context_matches(normalized_text)
 
-        remaining_text = normalized_text[match.end():].strip()
-        if re.match(r'^(?:نقد|فردا|فردایی|ن|ف)(?=\s|$)', remaining_text):
-            return None, None, None, INVALID_OFFER_PREFIX_MESSAGE
+    if len(context_matches) > 1:
+        return None, None, None, MULTIPLE_OFFER_CONTEXT_MESSAGE
+
+    if context_matches:
+        start, end, trade_type, settlement_type = context_matches[0]
+        remaining_text = ' '.join(
+            f"{normalized_text[:start]} {normalized_text[end:]}".split()
+        )
 
         residual_trade_type, residual_error = extract_trade_type(remaining_text)
         if residual_trade_type is not None or residual_error is not None:
-            return None, None, None, "❌ نشانگر خرید یا فروش فقط در ابتدای لفظ مجاز است"
+            return None, None, None, RESIDUAL_TRADE_MARKER_MESSAGE
+
+        if RESIDUAL_SETTLEMENT_PATTERN.search(remaining_text):
+            return None, None, None, RESIDUAL_SETTLEMENT_MARKER_MESSAGE
 
         return trade_type, settlement_type, remaining_text, None
 
     trade_type, trade_error = extract_trade_type(normalized_text)
     if trade_type is not None or trade_error is not None:
-        return None, None, None, INVALID_OFFER_PREFIX_MESSAGE
+        return None, None, None, INVALID_OFFER_CONTEXT_MESSAGE
     return None, None, None, None
 
 
@@ -361,7 +394,7 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
     # نرمال‌سازی اعداد
     offer_text = normalize_digits(offer_text)
     
-    trade_type, settlement_type, clean_text, error = extract_offer_prefix(offer_text)
+    trade_type, settlement_type, clean_text, error = extract_offer_context(offer_text)
     if trade_type is None and error is None:
         return None, None  # این پیام لفظ نیست (مثل دکمه‌های کیبورد)
     
@@ -370,7 +403,7 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
     if not valid:
         return None, ParseError(char_error)
     
-    # اگر الگوی ابتدایی نامعتبر بود، برگردان
+    # اگر بلوک نوع معامله/تسویه نامعتبر بود، برگردان
     if error:
         return None, ParseError(error)
 

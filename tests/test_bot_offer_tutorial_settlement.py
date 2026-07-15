@@ -11,6 +11,9 @@ class BotOfferTutorialSettlementTests(unittest.TestCase):
         self.assertIn("ف ن ف", OFFER_TUTORIAL_TEXT)
         self.assertIn("خرید نقد فردا", OFFER_TUTORIAL_TEXT)
         self.assertIn("فروش نقد فردا", OFFER_TUTORIAL_TEXT)
+        self.assertIn("جای بلوک نوع معامله و تسویه آزاد است", OFFER_TUTORIAL_TEXT)
+        self.assertIn("فقط یک بار نوشته شوند", OFFER_TUTORIAL_TEXT)
+        self.assertIn("امام 30تا 85000 خرید نقد", OFFER_TUTORIAL_TEXT)
         self.assertIn("«خ» و «ف» به‌تنهایی معتبر نیستند", OFFER_TUTORIAL_TEXT)
 
 
