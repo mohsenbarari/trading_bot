@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 ADMIN_DATABASE = "postgres"
 SKIPPED_PATTERN = re.compile(r"(?:skipped=|\bskipped\s+)([1-9]\d*)")
+TEST_COUNT_PATTERN = re.compile(r"\bRan\s+(\d+)\s+tests?\b")
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 PROOF_SUITES = (
@@ -55,6 +56,8 @@ def _validate_admin_url(admin_url: str) -> URL:
         raise MarketPostgresGateSafetyError("admin URL parsing failed") from exc
     if parsed.get_backend_name() != "postgresql":
         raise MarketPostgresGateSafetyError("admin URL must use PostgreSQL")
+    if parsed.query:
+        raise MarketPostgresGateSafetyError("admin URL query parameters are forbidden")
     if str(parsed.host or "").lower() not in LOCAL_HOSTS:
         raise MarketPostgresGateSafetyError("admin URL must target localhost")
     if str(parsed.database or "").lower() != ADMIN_DATABASE:
@@ -191,6 +194,8 @@ def _validate_redis_url(redis_url: str) -> tuple[str, int]:
         raise MarketPostgresGateSafetyError("Redis URL scheme is invalid")
     if str(parsed.hostname or "").lower() not in LOCAL_HOSTS:
         raise MarketPostgresGateSafetyError("Redis URL must target localhost")
+    if parsed.params or parsed.query or parsed.fragment:
+        raise MarketPostgresGateSafetyError("Redis URL parameters are forbidden")
     if parsed.path != "/14":
         raise MarketPostgresGateSafetyError("Redis URL must target scratch DB 14")
     client = redis.Redis.from_url(
@@ -273,11 +278,15 @@ def _run_gate(
         )
         output = result.stdout + result.stderr
         output_parts.append(f"proof.module={module}\n{output}")
-        count_match = re.search(r"Ran\s+(\d+)\s+tests?", output)
-        if count_match:
-            total_tests += int(count_match.group(1))
         if result.returncode != 0:
             return int(result.returncode), "\n".join(output_parts)
+        test_counts = [
+            int(match.group(1)) for match in TEST_COUNT_PATTERN.finditer(output)
+        ]
+        if len(test_counts) != 1 or test_counts[0] <= 0:
+            output_parts.append(f"proof.test_count_rejected={module}")
+            return 2, "\n".join(output_parts)
+        total_tests += test_counts[0]
         if SKIPPED_PATTERN.search(output):
             output_parts.append(f"proof.skip_rejected={module}")
             return 2, "\n".join(output_parts)

@@ -851,6 +851,12 @@ workerهای ترمیم پیام کانال و نمایش stale هر بار batc
 - regression خانواده Offer برابر `165 passed, 9 skipped` و Telegram channel/publication برابر `18 passed` است. `compileall` و `git diff --check` نیز پاس شدند.
 - در اجرای گسترده sync، هشت failure ثبت شد: دو مورد در `test_sync_router_apply_item_success`، پنج مورد در `test_sync_router_receive_offer_publish` و یک مورد در `test_sync_guarantee_matrix`. هر هشت مورد با همان خروجی روی checkout موقت `main` بازتولید شدند و baseline قبلی‌اند؛ هیچ‌کدام از فایل‌های تغییرکرده Stage ۹ نیستند.
 
+تصحیح شواهد در بازبینی مستقل ۲۰۲۶-۰۷-۱۵:
+
+- برخلاف فایل `CLEANUP.md` قدیمی، پرس‌وجوی فقط‌خواندنی از PostgreSQL production نشان داد دیتابیس scratch مستقل `market_stage9_repair_test` با اندازه ۱۲ مگابایت و بدون اتصال فعال همچنان باقی مانده است. بررسی فقط‌خواندنی دوم وجود schema تست Stage ۹ و یک Offer آزمایشی را تأیید کرد.
+- این وضعیت به دیتابیس برنامه یا داده واقعی بازار آسیب نزده، اما ادعای «حذف و شمارش صفر» در artifact قدیمی صحیح نیست و نباید به‌عنوان مدرک cleanup استفاده شود.
+- حذف دیتابیس انجام نشده و تا دریافت مجوز صریح مالک production باز می‌ماند. runner جدید با نام یکتای هر اجرا، امتناع از دیتابیس ازپیش‌موجود، مالکیت محدود cleanup، مدیریت signal و inventory نهایی از تکرار این وضعیت جلوگیری می‌کند.
+
 شواهد staging دو سرور:
 
 - پنج سرویس روی میزبان خارج (`app`، `foreign_app`، `bot`، `sync_worker` و `foreign_sync_worker`) و دو سرویس روی میزبان staging ایران (`app` و `sync_worker`) با full `RELEASE_SHA=095d478b26c5afdb73cc3d454ea0b5e1c910ee15` اجرا شدند. checksum فایل runtime worker در هر هفت سرویس یکسان و Alembic هر دو دیتابیس برابر `d0b5e6f7a8c9` بود.

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import signal
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -20,6 +21,12 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
             "postgresql://market:secret@db.example/postgres",
             "postgresql://market:secret@127.0.0.1/trading_bot",
             "mysql://market:secret@127.0.0.1/postgres",
+            "postgresql://market:secret@127.0.0.1/postgres?host=db.example",
+            "postgresql://market:secret@127.0.0.1/postgres?hostaddr=192.0.2.10",
+            "postgresql://market:secret@127.0.0.1/postgres?port=5433",
+            "postgresql://market:secret@127.0.0.1/postgres?dbname=trading_bot",
+            "postgresql://market:secret@127.0.0.1/postgres?service=production",
+            "postgresql://market:secret@127.0.0.1/postgres?servicefile=/tmp/pg_service.conf",
         ):
             with self.subTest(unsafe=unsafe), self.assertRaises(
                 gate.MarketPostgresGateSafetyError
@@ -70,6 +77,8 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
         for unsafe in (
             "redis://redis.example/14",
             "redis://127.0.0.1:6379/0",
+            "redis://127.0.0.1:6379/14?db=0",
+            "redis://127.0.0.1:6379/14?unix_socket_path=/run/redis.sock",
         ):
             with self.subTest(unsafe=unsafe), self.assertRaises(
                 gate.MarketPostgresGateSafetyError
@@ -105,6 +114,67 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 2)
+        self.assertEqual(drop_mock.call_args.args[1], [created_database])
+
+    def test_preexisting_database_is_refused_without_cleanup_ownership(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (1,)
+        created: list[str] = []
+        evidence: list[str] = []
+
+        with patch.object(gate, "_connect", return_value=connection):
+            with self.assertRaisesRegex(
+                gate.MarketPostgresGateSafetyError,
+                "refusing pre-existing scratch database",
+            ):
+                gate._create_scratch_databases(
+                    "postgresql://market:secret@127.0.0.1/postgres",
+                    {"STAGE": "market_stage9_ci_existing_test"},
+                    created,
+                    evidence,
+                )
+
+        self.assertEqual(created, [])
+        self.assertEqual(evidence, [])
+        self.assertEqual(cursor.execute.call_count, 1)
+        connection.close.assert_called_once()
+
+    def test_signal_interrupt_cleans_only_databases_created_by_run(self):
+        created_database = "market_stage6_ci_signal_test"
+        installed_handlers: dict[int, object] = {}
+
+        def install_handler(signum, handler):
+            installed_handlers[signum] = handler
+
+        def interrupting_create(_admin, _databases, created, evidence):
+            created.append(created_database)
+            evidence.append(f"scratch.created={created_database}")
+            installed_handlers[signal.SIGTERM](signal.SIGTERM, None)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"MARKET_POSTGRES_GATE_REDIS_URL": "redis://127.0.0.1:6379/14"},
+            clear=False,
+        ), patch.object(gate.signal, "getsignal", return_value=signal.SIG_DFL), patch.object(
+            gate.signal, "signal", side_effect=install_handler
+        ), patch.object(gate, "_validate_admin_url"), patch.object(
+            gate, "_validate_checkout", return_value="a" * 40
+        ), patch.object(gate, "_validate_redis_url"), patch.object(
+            gate, "_create_scratch_databases", side_effect=interrupting_create
+        ), patch.object(gate, "_drop_scratch_databases") as drop_mock:
+            result = gate.main(
+                [
+                    "--admin-url",
+                    "postgresql://market:secret@127.0.0.1/postgres",
+                    "--expected-sha",
+                    "a" * 40,
+                    "--log-path",
+                    str(Path(directory) / "gate.log"),
+                ]
+            )
+
+        self.assertEqual(result, 128 + signal.SIGTERM)
         self.assertEqual(drop_mock.call_args.args[1], [created_database])
 
     def test_run_gate_pins_generic_database_per_module_and_rejects_skip(self):
@@ -159,11 +229,48 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
         self.assertEqual(result, 2)
 
     def test_required_unittest_log_rejects_positive_skip_summary(self):
+        self.assertIsNone(skip_gate.executed_test_count("OK\n"))
+        self.assertEqual(skip_gate.executed_test_count("Ran 0 tests\nOK\n"), 0)
+        self.assertEqual(skip_gate.executed_test_count("Ran 2 tests\nOK\n"), 2)
         self.assertEqual(skip_gate.skipped_test_count("Ran 2 tests\nOK\n"), 0)
         self.assertEqual(
             skip_gate.skipped_test_count("Ran 2 tests\nOK (skipped=1)\n"),
             1,
         )
+
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "unittest.log"
+            for output in ("OK\n", "Ran 0 tests\nOK\n", "Ran 2 tests\nOK (skipped=1)\n"):
+                with self.subTest(output=output):
+                    log_path.write_text(output, encoding="utf-8")
+                    self.assertEqual(skip_gate.main([str(log_path)]), 2)
+            log_path.write_text("Ran 2 tests\nOK\n", encoding="utf-8")
+            self.assertEqual(skip_gate.main([str(log_path)]), 0)
+
+    def test_run_gate_rejects_missing_or_zero_test_summary(self):
+        databases = gate._database_names("zero")
+        admin_url = "postgresql://market:secret@127.0.0.1:55432/postgres"
+        for output in ("OK\n", "Ran 0 tests\nOK\n"):
+            completed = SimpleNamespace(returncode=0, stdout=output, stderr="")
+            with self.subTest(output=output), patch.object(
+                gate,
+                "_validate_redis_url",
+                return_value=("127.0.0.1", 56379),
+            ), patch(
+                "scripts.run_market_postgres_gate.subprocess.run",
+                return_value=completed,
+            ):
+                result, proof = gate._run_gate(
+                    admin_url,
+                    databases,
+                    "redis://127.0.0.1:56379/14",
+                )
+
+            self.assertEqual(result, 2)
+            self.assertIn(
+                "proof.test_count_rejected=tests.test_market_offer_admission_postgres",
+                proof,
+            )
 
 
 if __name__ == "__main__":

@@ -2,7 +2,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
+from core.offer_expiry_forwarding import (
+    OFFER_EXPIRY_RECEIPT_OUTCOMES,
+    forward_offer_expiry_to_home_server,
+)
+from core.services.offer_expiry_command_receipt_service import OfferExpiryReceiptOutcome
 
 
 class FakeClientContext:
@@ -31,6 +35,12 @@ def payload():
 
 
 class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
+    def test_forwarding_outcomes_follow_receipt_enum(self):
+        self.assertEqual(
+            OFFER_EXPIRY_RECEIPT_OUTCOMES,
+            frozenset(outcome.value for outcome in OfferExpiryReceiptOutcome),
+        )
+
     async def _forward(
         self,
         response_body,
@@ -159,6 +169,23 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(response_body=response_body):
                 result, _client, _log_event = await self._forward(response_body)
                 self.assertEqual(result[0], 503)
+
+    async def test_command_sender_rejects_redirect_with_valid_receipt_shape(self):
+        request_payload = payload()
+        result, _client, log_event = await self._forward(
+            {
+                "expired": True,
+                "offer_public_id": request_payload["offer_public_id"],
+                "command_id": request_payload["command_id"],
+                "outcome": "expired",
+                "replayed": False,
+            },
+            status_code=302,
+        )
+
+        self.assertEqual(result[0], 503)
+        events = [call.args[1] for call in log_event.call_args_list]
+        self.assertIn("offer_expiry_forward.unexpected_success_status", events)
 
     async def test_legacy_sender_without_command_identity_remains_compatible(self):
         request_payload = payload()

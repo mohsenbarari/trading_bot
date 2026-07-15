@@ -152,3 +152,46 @@ The Stage 2 full-browser-context persistence and the already-applied Stage 5
 orphan column remain documented residuals, not regressions. The Stage 4/6
 global-partition proposals remain rejected because they change the accepted
 availability and authority model.
+
+## Final Independent Re-Review Of `ce880271`
+
+Two final reviews independently examined the exact Git-bundled commit:
+
+| Reviewer | Source report | SHA-256 |
+|---|---|---|
+| ChatGPT | `tmp/chatgpt/4-market-16-stage-final-independent-rereview-ce880271.md` | `bfd4352f0c158a0d9a4a03b8d2f74f59b154d48824a9e00736db1157b813ab6c` |
+| Claude | `tmp/claude/market-16-stage-final-rereview-ce880271.md` | `34559ca4aa5249b82aa358fe464d5ed2c8317365071fbbdec4ddf209cf962432` |
+
+The following findings were reproduced and accepted:
+
+1. The scratch runner accepted PostgreSQL and Redis query parameters capable
+   of overriding the hierarchically validated target. All query parameters are
+   now forbidden for these disposable local-service URLs, with regression
+   cases for PostgreSQL host, host address, port, database and service
+   selectors plus Redis database and Unix-socket selectors.
+2. A required unittest log could contain no test summary or `Ran 0 tests` and
+   still pass the skip-only assertion. Required Redis and per-module
+   PostgreSQL proofs now require a parseable positive test count as well as
+   zero skips.
+3. A command-bearing expiry redirect with a fully shaped receipt could be
+   classified as successful. Only a true `2xx` may acknowledge that command;
+   a `3xx` is mapped to retryable `503`.
+4. The forwarding allowlist duplicated the expiry outcome enum. It is now
+   derived from the receiver's enum and protected by a contract test.
+5. Pre-existing-database refusal and signal cleanup worked in live review but
+   lacked unit coverage. Both lifecycle contracts now have focused tests.
+6. The retained Stage 9 cleanup artifact was false: a read-only production
+   inventory found `market_stage9_repair_test` (12 MB, zero active sessions)
+   still present. A second read-only check found the expected Stage 9 scratch
+   schema and one test Offer. Deletion was not performed because destructive
+   production cleanup still requires explicit owner approval.
+
+Claude's remaining Stage 9 wording observation is rejected as stale. The
+tracked roadmap already defines the implementation as `due-only`, stable
+`oldest-first`, persistent retry metadata and exponential backoff; it does not
+retain the old keyset-cursor design claim.
+
+Both reviewers correctly retain the absence of exact-HEAD staging acceptance.
+That is release evidence still to be produced, not a newly discovered source
+defect. No merge, staging deployment or production deployment is authorized by
+this remediation record.

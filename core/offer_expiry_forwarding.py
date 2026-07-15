@@ -10,13 +10,16 @@ import httpx
 
 from core.config import settings
 from core.server_routing import current_server, normalize_server, peer_server_url_for
+from core.services.offer_expiry_command_receipt_service import OfferExpiryReceiptOutcome
 from core.trade_forwarding import sign_internal_payload
 from core.trading_observability import log_trading_event, summarize_response_body
 
 
 logger = logging.getLogger(__name__)
 
-OFFER_EXPIRY_RECEIPT_OUTCOMES = frozenset({"expired"})
+OFFER_EXPIRY_RECEIPT_OUTCOMES = frozenset(
+    outcome.value for outcome in OfferExpiryReceiptOutcome
+)
 
 
 def _json_body(payload: dict[str, Any]) -> str:
@@ -97,6 +100,7 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
 
     expected_command_id = str(payload.get("command_id") or "").strip()
     expected_offer_public_id = str(payload.get("offer_public_id") or "").strip()
+    response_is_success = 200 <= response.status_code < 300
     try:
         body = response.json()
     except ValueError:
@@ -134,7 +138,7 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
         and type(body.get("replayed")) is bool
     )
     if (
-        response.status_code < 400
+        response_is_success
         and expected_command_id
         and not receipt_contract_valid
     ):
@@ -153,11 +157,25 @@ async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[
             "detail": "پاسخ سرور مرجع قابل تأیید نبود. لطفاً دوباره تلاش کنید."
         }
 
+    if expected_command_id and not response_is_success and response.status_code < 400:
+        log_trading_event(
+            logger,
+            "offer_expiry_forward.unexpected_success_status",
+            level="error",
+            action="offer_expiry_forward",
+            result="failure",
+            status_code=response.status_code,
+            **log_context,
+        )
+        return 503, {
+            "detail": "پاسخ سرور مرجع قابل تأیید نبود. لطفاً دوباره تلاش کنید."
+        }
+
     log_trading_event(
         logger,
         "offer_expiry_forward.response",
         action="offer_expiry_forward",
-        result="success" if response.status_code < 400 else "denied",
+        result="success" if response_is_success else "denied",
         status_code=response.status_code,
         **log_context,
     )
