@@ -2335,8 +2335,8 @@ timed out after five seconds.
 One checksumed archive delivered a manifest-bound release and 44 fully locked
 CPython 3.12 wheels. Both the archive and every wheel were revalidated on the
 destination before installation. PostgreSQL 16 and Uvicorn listen only on
-loopback; Nginx is the only `443` listener. The active release is
-`20260715T1822Z-fe0f6d44-recovery3`.
+loopback; Nginx is the only `443` listener. The final active release is
+`20260715T1830Z-ee96f22e-recovery4`, built from commit `ee96f22e`.
 
 The drill exposed and closed two runbook defects before evidence was accepted:
 
