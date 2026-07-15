@@ -9,7 +9,7 @@
   - شاخه `candidate/admin-market-monitoring` مستقیماً از HEAD شاخه `main` ساخته شد.
   - فاصله `main...candidate/admin-market-monitoring` در لحظه ایجاد برابر `0/0` بود.
   - هیچ شاخه candidate قبلی در مبنای این شاخه merge نشده است.
-- وضعیت Roadmap: سناریوی محصول WebApp تأیید شده؛ Stage 0 در حال اجرا و `AMM-C01` و `AMM-C02` نهایی شده‌اند.
+- وضعیت Roadmap: سناریوی محصول WebApp تأیید شده؛ Stage 0 در حال اجرا و `AMM-C01` تا `AMM-C03` نهایی شده‌اند.
 - این سند مجوز deploy یا production release نیست.
 
 این Roadmap مسیر کامل ساخت قابلیت «رصد بازار» را از بستن چالش‌ها و قراردادهای محصول تا کدنویسی، تست، مستندسازی و اعتبارسنجی staging مشخص می‌کند. اجرای هر Stage فقط پس از بسته‌شدن معیارهای خروج Stage قبلی مجاز است.
@@ -137,7 +137,7 @@
 | --- | --- | --- | --- | --- |
 | `AMM-C01` | P0 | DECIDED | تعریف دقیق «همان آفرهای بازار» برای active و terminal rows بدون فیلتر | قرارداد feed، ترتیب، دسترسی به feed و رفتار rowهای معامله‌شده/منقضی |
 | `AMM-C02` | P0 | DECIDED | تعریف هویت آفر‌دهنده در سناریوهای کاربر عادی و مشتری، بدون نمایش actor داخلی | ماتریس identity آفر‌دهنده، context مشتری و label قطعی نمای سریع |
-| `AMM-C03` | P0 | OPEN | جلوگیری قطعی از نشت هویت به API و Realtime عمومی | read model و event channel مستقل admin-only با تست منفی |
+| `AMM-C03` | P0 | DECIDED | جلوگیری قطعی از نشت هویت به API و Realtime عمومی | read model مستقل admin-only، Realtime عمومی بدون هویت و refetch مدیریتی با تست منفی |
 | `AMM-C04` | P0 | OPEN | ماتریس مجوز مدیر میانی و مدیر ارشد برای دیدن و اقدام | جدول permission سمت backend و UI با حالت disabled/denied |
 | `AMM-C05` | P0 | OPEN | انقضای مدیریتی آفرهای Iran-home و foreign-home | command forwarding، idempotency، lock و side-effect contract |
 | `AMM-C06` | P0 | OPEN | تعریف مدل هشدار مشترک و تفاوت آن با notification ساده | schema/lifecycle/history/dedupe/retention contract |
