@@ -2512,7 +2512,21 @@ Five tests cover the new plan/preflight safety contract, read-only command
 surface, twelve-scenario catalog, secret-free artifact, and dirty/wrong-branch
 fail-closed behavior.
 
-The remaining action before fault injection is to commit this preparation on
-the feature branch and execute the read-only preflight from that clean SHA. A
-passing preflight still authorizes no RH scenario; the fault executor and exact
+Preparation was committed only on this feature branch as `9a34884c`; no `main`
+merge or history rewrite occurred. The read-only preflight then passed from
+that exact clean SHA with zero failed checks. The retained artifact records:
+
+- WebApp-FI release `2d7c114d`, healthy application/database/API, disabled
+  Witness flags, synchronized NTP, and direct Witness `443` reachability;
+- WebApp-IR application and sync worker stopped, database running, disabled
+  Witness flags, synchronized NTP, and direct Witness `443` reachability;
+- replacement Witness services ready, seven-percent disk usage,
+  `webapp:0:vacant`, zero receipts, the fresh backup, and one disabled rollback
+  database;
+- original Witness services ready, `webapp:0:vacant`, and zero receipts;
+- the focused 96-test source gate passing with two guarded PostgreSQL skips.
+
+The artifact secret scan found no password, HMAC/client secret, private key, or
+API key assignment. The runner now forces artifact mode `0600`. A passing
+preflight still authorizes no RH scenario; the fault executor and exact
 abort/rollback order must receive their own guarded review before `RH-001`.

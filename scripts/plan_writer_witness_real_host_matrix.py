@@ -366,6 +366,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         plan["status"] = "planned"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.chmod(0o600)
     print(
         json.dumps(
             {

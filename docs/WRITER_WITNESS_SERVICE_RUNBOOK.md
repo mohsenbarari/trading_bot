@@ -281,7 +281,8 @@ The preflight fails closed unless:
 The retained JSON artifact is written outside the repository under
 `/tmp/trading-bot-writer-witness-real-host-matrix/`. It contains commands,
 bounded stdout/stderr, release identifiers, and pass/fail evidence but no HMAC
-secret, private key, or client credential.
+secret, private key, or client credential. The runner forces the artifact to
+owner-only mode `0600`.
 
 This preflight deliberately does not integrate `main` in either direction. A
 pass authorizes only the dark-Witness control-plane fault matrix. It does not

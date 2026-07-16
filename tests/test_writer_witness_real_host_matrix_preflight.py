@@ -1,4 +1,5 @@
 import json
+import stat
 from pathlib import Path
 import subprocess
 import tempfile
@@ -77,6 +78,7 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
             self.assertNotIn("CLIENT_SECRET", rendered)
             self.assertNotIn("PRIVATE_KEY", rendered)
             self.assertEqual(payload["status"], "planned")
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
 
     def test_dirty_or_wrong_branch_blocks_before_remote_checks(self):
         plan = {
