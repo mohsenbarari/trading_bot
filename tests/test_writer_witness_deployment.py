@@ -37,6 +37,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("deploy/writer-witness/writer-witness-matrix-host-faults.sh", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-state-manifest.sh", manifest)
             self.assertIn("scripts/smoke_writer_witness_client.py", manifest)
+            self.assertIn("scripts/run_writer_witness_clock_jump_probe.py", manifest)
             self.assertNotIn(".env", "\n".join(manifest))
             self.assertFalse((release / "main.py").exists())
             imported = subprocess.run(
@@ -151,11 +152,22 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("WRITER_WITNESS_RESTORE_EXPECTED_BACKUP_SHA256", restore)
         self.assertIn("WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_MANIFEST_SHA256", restore)
         self.assertIn("WRITER_WITNESS_RESTORE_TEST_FAIL_AFTER", restore)
+        for failpoint in (
+            "input_validated", "candidate_created", "candidate_restored",
+            "candidate_validated", "grants_applied", "prepared",
+            "service_stopped", "current_disabled", "current_renamed",
+            "candidate_promoted", "candidate_enabled", "service_started",
+        ):
+            self.assertIn(f"maybe_fail {failpoint}", restore)
         self.assertIn("writer-witness-state-manifest", restore)
         self.assertIn("database_exists", restore)
-        self.assertIn("^writer_witness_[a-z]+_[0-9_]+$", restore)
+        self.assertIn("writer_witness_(candidate|rollback|failed)", restore)
+        self.assertIn("WRITER_WITNESS_RESTORE_OPERATION_TAG", restore)
         self.assertIn('"no-recovery-required"', restore)
-        self.assertIn('systemctl is-active --quiet "$SERVICE" && wait_ready', restore)
+        self.assertIn('systemctl is-active --quiet "$SERVICE"', restore)
+        self.assertIn('"$(manifest_hash writer_witness)" == "$guard_manifest"', restore)
+        self.assertIn('"$orphan_count" == 0 && "$enabled_aux" == 0', restore)
+        self.assertIn('systemctl stop "$SERVICE" || true', restore)
         self.assertNotIn("dropdb --if-exists writer_witness", restore)
         self.assertIn('"--apply"', runner)
         self.assertIn("download_writer_witness_s3_backup.py", runner)

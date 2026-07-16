@@ -273,12 +273,20 @@ The preflight fails closed unless:
 - WebApp-FI production is healthy and its Witness flags remain disabled;
 - WebApp-IR application and sync-worker writers remain stopped while its
   database is healthy;
+- no Witness client URL, key ID, or client secret is installed in either
+  WebApp application environment or container, and every Matrix secret path is
+  verified as tmpfs-backed;
 - both WebApp sites reach the exact replacement certificate on TCP `443` and
   unsigned status calls return `401`;
 - the replacement Witness is healthy, NTP-synchronized, below the disk guard,
   exactly `webapp:0:vacant`, and has zero receipts;
 - a checksumed backup is less than 24 hours old;
 - at least one connection-disabled rollback database exists;
+- no candidate/failed database, active restore/rotation/campaign journal,
+  replacement-restore temporary file, or connection-enabled auxiliary database
+  exists;
+- installed helper and systemd bytes, the running release directory, and the
+  effective Nginx/UFW allow/deny semantics match the frozen release;
 - the original Witness remains healthy, vacant, and unchanged.
 
 The run bundle pins controller, client, restore, rotation, fault-helper, Nginx,
@@ -337,24 +345,56 @@ the exact preflight and scenario:
 
 ```text
 WRITER_WITNESS_REAL_HOST_MATRIX_OBSERVER_CONFIRM=approve-one-dark-witness-scenario \
-make writer-witness-real-host-scenario-approve ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --observer <name> --incident-commander <different-name> --reason <change-id> --output /tmp/.../rh-001-approval.json'
+make writer-witness-real-host-scenario-approve ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --observer <name> --incident-commander <different-name> --reason <exact-incident-reason> --change-id <change-id> --out-of-band-console <provider-session> --alternate-communications <incident-bridge> --maintenance-window-start <timezone-aware-ISO-8601> --maintenance-window-end <timezone-aware-ISO-8601> --dpi-byte-budget <at-least-3276800> --restore-authorized-by <name> --output /tmp/.../rh-001-approval.json'
 ```
 
-Live execution then requires that approval, a distinct operator, and two exact
+The observer and incident commander sign that exact owner-only JSON with two
+different SSH signing keys in namespace `writer-witness-matrix`. The
+root-owned mode-`0600` allowed-signers file must map the two identities to
+different public keys. Rename the first generated `.sig` before producing the
+second one.
+
+Live execution then requires both signatures, the allowed-signers file, a
+third distinct operator, the exact approved reason/change ID, and two exact
 execution confirmations:
 
 ```text
 WRITER_WITNESS_REAL_HOST_MATRIX_CONFIRM=execute-dark-witness-real-host-matrix \
 WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO=RH-001 \
-make writer-witness-real-host-scenario-run ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --approval /tmp/.../rh-001-approval.json --operator <third-name> --reason <change-id>'
+make writer-witness-real-host-scenario-run ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --approval /tmp/.../rh-001-approval.json --observer-signature /secure/.../observer.sig --commander-signature /secure/.../commander.sig --allowed-signers /secure/.../allowed_signers --operator <third-name> --reason <exact-incident-reason> --change-id <change-id>'
 ```
 
-Every scenario receives a unique `wwm_*` ownership tag. Pairwise credentials
-exist only in controller-private temporary storage and WebApp `/run`; they are
-never installed in application containers or persistent WebApp configuration.
+Every approval nonce and preflight hash is consumed once. Every scenario
+receives a unique `wwm_*` ownership tag and unique scenario-only FI/IR HMAC
+keys. The replacement activates those keys only for the campaign; the original
+Witness is proved not to contain their key IDs. Controller/WebApp copies exist
+only in verified tmpfs and are never installed in application containers or
+persistent WebApp configuration. Cleanup restores the exact pre-scenario
+credential-bundle hash before reconnect/restore success is possible.
+
+The controller keeps an owner-safe descriptor-held `flock`, a local durable
+campaign journal, and a matching remote campaign marker. Intent is fsynced
+before each credential, firewall, restore, and fault mutation. SIGINT, SIGTERM,
+and SIGHUP enter the same cleanup path; SIGKILL leaves the durable journal dirty
+and blocks every later scenario. After the dead controller releases its kernel
+lock, reconcile only that journal from the exact clean commit:
+
+```text
+make writer-witness-real-host-scenario-recover ARGS='--campaign-journal /var/lib/trading-bot-witness-matrix/campaigns/wwm_<tag>.json'
+```
+
+Recovery stops requesters and sockets, revokes all scenario capabilities while
+isolation remains, retains evidence, resumes the dark runtime, removes scoped
+faults, restores the exact backup if needed, deletes only tag-owned auxiliary
+databases, proves the full baseline, and reruns the exact-SHA preflight. Any
+failed step leaves the journal dirty and does not authorize another scenario.
 
 Live restore keeps a mode-`0600` phase journal under
 `/var/lib/trading-bot-witness/restore-state`. Recovery locates the original and
 candidate databases by PostgreSQL OID, so a crash between a database rename and
 journal update remains unambiguous. The `--recover` action is idempotent, and
-RH-012 exercises all six guarded failure points before accepting the restore.
+RH-012 exercises twelve guarded failure points from initial journal creation
+through service restart before accepting the restore. RH-010 also uses a
+disposable tmpfs PostgreSQL on localhost to prove backward-clock lease theft is
+rejected, forward expiry advances the epoch once, and an old epoch cannot be
+revived; it never changes the live host clock or production database.

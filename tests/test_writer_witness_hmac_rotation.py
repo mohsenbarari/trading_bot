@@ -121,7 +121,7 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         self.assertNotIn("WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_SECRET", runtime)
         finished = rotation.finish("webapp_fi", self.state_root)
         self.assertEqual(finished["phase"], "finished")
-        self.assertFalse(self.state_root.exists())
+        self.assertFalse((self.state_root / "webapp_fi").exists())
 
     def test_rollback_restores_original_runtime_and_client(self):
         runtime_before = self.runtime.read_bytes()
@@ -142,6 +142,62 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
             handle.write(f"WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_SECRET={'p' * 64}\n")
         with self.assertRaisesRegex(rotation.RotationError, "already has an overlap"):
             rotation.prepare("webapp_fi", 0, self.runtime, self.client_dir, self.state_root)
+
+    def test_campaign_recovery_handles_ambiguous_preparing_and_revoked_phases(self):
+        for phase in ("preparing", "prepared", "revoked", "recovered"):
+            with self.subTest(phase=phase):
+                runtime_before = self.runtime.read_bytes()
+                client_path = self.client_dir / "webapp-fi.env"
+                client_before = client_path.read_bytes()
+                prepared = rotation.prepare(
+                    "webapp_fi",
+                    0,
+                    self.runtime,
+                    self.client_dir,
+                    self.state_root,
+                    campaign_tag="wwm_0123456789ab",
+                )
+                self.assertEqual(prepared["new_key_id"], "matrix-wwm_0123456789ab-fi")
+                if phase == "revoked":
+                    rotation.revoke("webapp_fi", 0, self.runtime, self.client_dir, self.state_root)
+                elif phase in {"preparing", "recovered"}:
+                    metadata_path = self.state_root / "webapp_fi" / "metadata.json"
+                    metadata = rotation._load_metadata(metadata_path)
+                    metadata["phase"] = phase
+                    rotation._write_metadata(metadata_path, metadata)
+                recovered = rotation.recover(
+                    "webapp_fi",
+                    0,
+                    "wwm_0123456789ab",
+                    self.runtime,
+                    self.client_dir,
+                    self.state_root,
+                )
+                self.assertEqual(recovered["phase"], "recovered")
+                self.assertEqual(self.runtime.read_bytes(), runtime_before)
+                self.assertEqual(client_path.read_bytes(), client_before)
+                self.assertFalse((self.state_root / "webapp_fi").exists())
+
+    def test_campaign_recovery_refuses_foreign_campaign_without_mutation(self):
+        rotation.prepare(
+            "webapp_ir",
+            0,
+            self.runtime,
+            self.client_dir,
+            self.state_root,
+            campaign_tag="wwm_0123456789ab",
+        )
+        runtime_before = self.runtime.read_bytes()
+        with self.assertRaisesRegex(rotation.RotationError, "different matrix campaign"):
+            rotation.recover(
+                "webapp_ir",
+                0,
+                "wwm_abcdef012345",
+                self.runtime,
+                self.client_dir,
+                self.state_root,
+            )
+        self.assertEqual(self.runtime.read_bytes(), runtime_before)
 
 
 class WriterWitnessSmokeExpectedStatusTests(unittest.TestCase):

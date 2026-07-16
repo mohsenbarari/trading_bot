@@ -6,16 +6,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+from http.client import HTTPSConnection
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import ssl
 import stat
 import time
-from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 
 STATUS_PATH = "/v1/writer-witness/status"
@@ -105,27 +105,48 @@ def request_payload(args: argparse.Namespace) -> bytes:
 
 
 def perform_http(
-    *, url: str, method: str, body: bytes, headers: dict[str, str], context, timeout: float
-) -> tuple[int, dict[str, object]]:
-    request = Request(url, data=body if method == "POST" else None, headers=headers, method=method)
+    *, parsed, path: str, method: str, body: bytes, headers: dict[str, str], context,
+    timeout: float, expected_cert_sha256: str, not_before_unix_ms: int | None,
+) -> tuple[int, dict[str, object], int, int]:
+    connection = HTTPSConnection(
+        parsed.hostname,
+        parsed.port or 443,
+        timeout=timeout,
+        context=context,
+    )
     try:
-        with urlopen(request, timeout=timeout, context=context) as response:
-            status_code = response.status
-            raw = response.read()
-    except HTTPError as exc:
-        status_code = exc.code
-        raw = exc.read()
+        connection.connect()
+        if connection.sock is None:
+            raise MatrixClientError("replacement Witness TLS socket is unavailable")
+        observed = hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest()
+        if not hmac.compare_digest(observed, expected_cert_sha256):
+            raise MatrixClientError("replacement Witness certificate fingerprint mismatch")
+        tls_ready_at_unix_ns = time.time_ns()
+        if not_before_unix_ms is not None:
+            delay = (not_before_unix_ms / 1000.0) - time.time()
+            if delay < -0.05 or delay > 10:
+                raise MatrixClientError("matrix synchronized-send deadline is unsafe after TLS readiness")
+            if delay > 0:
+                time.sleep(delay)
+        sent_at_unix_ns = time.time_ns()
+        connection.request(method, path, body=body if method == "POST" else None, headers=headers)
+        response = connection.getresponse()
+        status_code = response.status
+        raw = response.read()
+    finally:
+        connection.close()
     try:
         payload = json.loads(raw or b"{}")
     except json.JSONDecodeError as exc:
         raise MatrixClientError("Witness returned a non-JSON response") from exc
     if not isinstance(payload, dict):
         raise MatrixClientError("Witness returned an invalid response shape")
-    return status_code, payload
+    return status_code, payload, tls_ready_at_unix_ns, sent_at_unix_ns
 
 
 def fire_and_close(
-    *, parsed, path: str, body: bytes, headers: dict[str, str], context, timeout: float
+    *, parsed, path: str, body: bytes, headers: dict[str, str], context, timeout: float,
+    expected_cert_sha256: str,
 ) -> None:
     port = parsed.port or 443
     host_header = parsed.hostname if port == 443 else f"{parsed.hostname}:{port}"
@@ -141,6 +162,10 @@ def fire_and_close(
     raw_request = "\r\n".join(lines).encode("ascii") + body
     connection = socket.create_connection((parsed.hostname, port), timeout=timeout)
     tls = context.wrap_socket(connection, server_hostname=parsed.hostname)
+    observed = hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+    if not hmac.compare_digest(observed, expected_cert_sha256):
+        tls.close()
+        raise MatrixClientError("replacement Witness certificate fingerprint mismatch")
     tls.sendall(raw_request)
     descriptor = tls.detach()
     os.close(descriptor)
@@ -161,6 +186,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-lease-id")
     parser.add_argument("--reason")
     parser.add_argument("--lease-duration-seconds", type=int, default=30)
+    parser.add_argument("--expected-host", required=True)
+    parser.add_argument("--expected-port", type=int, default=443)
+    parser.add_argument("--expected-cert-sha256", required=True)
+    parser.add_argument("--not-before-unix-ms", type=int)
     return parser.parse_args()
 
 
@@ -181,6 +210,13 @@ def main() -> int:
         or parsed.fragment
     ):
         raise MatrixClientError("matrix client requires a root HTTPS Witness URL")
+    if (
+        parsed.hostname != args.expected_host
+        or (parsed.port or 443) != args.expected_port
+        or args.expected_port != 443
+        or not re.fullmatch(r"[0-9a-f]{64}", args.expected_cert_sha256)
+    ):
+        raise MatrixClientError("matrix client destination is not the pinned replacement Witness")
     if not key_id or len(key_id) > 64 or len(secret.encode("utf-8")) < 32:
         raise MatrixClientError("matrix client credential is invalid")
     if not args.ca_bundle.is_file():
@@ -209,6 +245,13 @@ def main() -> int:
         timestamp=timestamp,
     )
     context = ssl.create_default_context(cafile=str(args.ca_bundle))
+    if args.not_before_unix_ms is not None and args.command == "fire-and-close":
+        delay = (args.not_before_unix_ms / 1000.0) - time.time()
+        if delay < -0.5 or delay > 10:
+            raise MatrixClientError("matrix synchronized-send deadline is unsafe")
+        if delay > 0:
+            time.sleep(delay)
+    sent_at_unix_ns = time.time_ns()
     if args.command == "fire-and-close":
         fire_and_close(
             parsed=parsed,
@@ -217,6 +260,7 @@ def main() -> int:
             headers=headers,
             context=context,
             timeout=max(0.1, args.timeout),
+            expected_cert_sha256=args.expected_cert_sha256,
         )
         print(
             json.dumps(
@@ -225,19 +269,23 @@ def main() -> int:
                     "site": args.site,
                     "request_id": args.request_id,
                     "body_sha256": hashlib.sha256(body).hexdigest(),
+                    "sent_at_unix_ns": sent_at_unix_ns,
                 },
                 sort_keys=True,
             )
         )
         return 0
 
-    status_code, payload = perform_http(
-        url=f"{base_url}{path}",
+    status_code, payload, tls_ready_at_unix_ns, sent_at_unix_ns = perform_http(
+        parsed=parsed,
+        path=path,
         method=method,
         body=body,
         headers=headers,
         context=context,
         timeout=max(0.1, args.timeout),
+        expected_cert_sha256=args.expected_cert_sha256,
+        not_before_unix_ms=args.not_before_unix_ms,
     )
     expected = set(args.expect_http_status or (200,))
     if status_code not in expected:
@@ -258,6 +306,8 @@ def main() -> int:
                 "http_status": status_code,
                 "request_id": args.request_id,
                 "response": safe_payload,
+                "sent_at_unix_ns": sent_at_unix_ns,
+                "tls_ready_at_unix_ns": tls_ready_at_unix_ns,
             },
             sort_keys=True,
         )

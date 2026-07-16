@@ -5,31 +5,47 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "writer witness matrix host fault helper must run as root" >&2
     exit 2
 fi
-if [[ "${1:-}" != "disk-full" || "${2:-}" != "--tag" || "$#" -ne 3 ]]; then
-    echo "usage: writer-witness-matrix-host-faults disk-full --tag WWM_TAG" >&2
+action="${1:-}"
+if [[ "$action" != "disk-full" && "$action" != "clock-jump" ]] || \
+    [[ "${2:-}" != "--tag" || "$#" -ne 3 ]]; then
+    echo "usage: writer-witness-matrix-host-faults {disk-full|clock-jump} --tag WWM_TAG" >&2
     exit 2
 fi
 tag="$3"
-[[ "$tag" =~ ^wwm_[a-z0-9]{8,20}$ ]] || {
+[[ "$tag" =~ ^wwm_[0-9a-f]{12}$ ]] || {
     echo "unsafe matrix ownership tag" >&2
     exit 2
 }
 
-root="/run/$tag-disk"
+suffix="disk"
+port=55439
+listen_addresses=""
+if [[ "$action" == "clock-jump" ]]; then
+    suffix="clock"
+    port=55440
+    listen_addresses="127.0.0.1"
+fi
+root="/run/$tag-$suffix"
 data="$root/pgdata"
 socket_dir="$root/socket"
-port=55439
 bindir="$(pg_config --bindir)"
 postgres_pid=""
-error_log="/tmp/$tag-disk-full.expected-error.log"
+error_log="$root/disk-full.expected-error.log"
 
 cleanup() {
+    local status=$?
+    trap - EXIT
     set +e
     if [[ -n "$postgres_pid" ]]; then
-        runuser -u postgres -- "$bindir/pg_ctl" -D "$data" -m immediate stop >/dev/null 2>&1
+        runuser -u postgres -- "$bindir/pg_ctl" -D "$data" -m immediate stop >/dev/null 2>&1 || status=70
     fi
-    mountpoint -q "$root" && umount "$root"
-    rm -rf "$root" "$error_log"
+    if mountpoint -q "$root"; then
+        umount "$root" || status=70
+    fi
+    if ! mountpoint -q "$root"; then
+        rm -rf "$root"
+    fi
+    exit "$status"
 }
 trap cleanup EXIT
 
@@ -47,11 +63,30 @@ mount -t tmpfs -o size=96m,mode=0700,uid="$(id -u postgres)",gid="$(id -g postgr
 install -d -m 0700 -o postgres -g postgres "$data" "$socket_dir"
 runuser -u postgres -- "$bindir/initdb" -D "$data" --auth=trust --no-locale >/dev/null
 runuser -u postgres -- "$bindir/pg_ctl" -D "$data" \
-    -o "-p $port -k $socket_dir -c listen_addresses='' -c fsync=on -c full_page_writes=on" \
+    -o "-p $port -k $socket_dir -c listen_addresses='$listen_addresses' -c fsync=on -c full_page_writes=on" \
     -w start >/dev/null
 postgres_pid="$(head -1 "$data/postmaster.pid")"
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -f /srv/trading-bot-witness/current/deploy/writer-witness/001_initial.sql >/dev/null
+
+if [[ "$action" == "clock-jump" ]]; then
+    probe_output="$root/clock-probe.json"
+    runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
+        /srv/trading-bot-witness/current/scripts/run_writer_witness_clock_jump_probe.py \
+        --database-url "postgresql+asyncpg://postgres@127.0.0.1:$port/postgres" \
+        >"$probe_output"
+    python3 - "$probe_output" "$tag" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+if payload.get("status") != "passed" or payload.get("production_database_touched") is not False:
+    raise SystemExit("isolated PostgreSQL clock-jump probe did not pass safely")
+payload["tag"] = sys.argv[2]
+print(json.dumps(payload, sort_keys=True))
+PY
+    exit 0
+fi
 
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -c "CREATE TABLE matrix_disk_probe(id bigserial PRIMARY KEY, payload bytea NOT NULL);" \

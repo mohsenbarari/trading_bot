@@ -33,14 +33,14 @@ install -d -m 0700 -o root -g root "$BACKUP_DIR" "$STATE_ROOT" "$HISTORY_DIR"
 
 database_exists() {
     local database_name="$1"
-    [[ "$database_name" =~ ^writer_witness(_[a-z]+_[0-9_]+)?$ ]] || return 1
+    [[ "$database_name" =~ ^writer_witness(_(candidate|rollback|failed)_(wwm_[0-9a-f]{12}_)?[0-9_]+)?$ ]] || return 1
     runuser -u postgres -- psql -XAt postgres \
         -c "SELECT 1 FROM pg_database WHERE datname = '$database_name'" | grep -qx 1
 }
 
 database_oid() {
     local database_name="$1"
-    [[ "$database_name" =~ ^writer_witness(_[a-z]+_[0-9_]+)?$ ]] || return 1
+    [[ "$database_name" =~ ^writer_witness(_(candidate|rollback|failed)_(wwm_[0-9a-f]{12}_)?[0-9_]+)?$ ]] || return 1
     runuser -u postgres -- psql -XAt postgres \
         -c "SELECT oid FROM pg_database WHERE datname = '$database_name'"
 }
@@ -55,7 +55,7 @@ database_by_oid() {
 set_allow_connections() {
     local database_name="$1"
     local allowed="$2"
-    [[ "$database_name" =~ ^writer_witness(_[a-z]+_[0-9_]+)?$ ]] || return 1
+    [[ "$database_name" =~ ^writer_witness(_(candidate|rollback|failed)_(wwm_[0-9a-f]{12}_)?[0-9_]+)?$ ]] || return 1
     [[ "$allowed" == "true" || "$allowed" == "false" ]] || return 1
     runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 postgres \
         -c "ALTER DATABASE $database_name WITH ALLOW_CONNECTIONS $allowed;"
@@ -63,7 +63,7 @@ set_allow_connections() {
 
 terminate_database() {
     local database_name="$1"
-    [[ "$database_name" =~ ^writer_witness(_[a-z]+_[0-9_]+)?$ ]] || return 1
+    [[ "$database_name" =~ ^writer_witness(_(candidate|rollback|failed)_(wwm_[0-9a-f]{12}_)?[0-9_]+)?$ ]] || return 1
     runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 postgres \
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$database_name';" \
         >/dev/null
@@ -100,7 +100,7 @@ validate_loaded_journal() {
     [[ "${journal_version:-}" == "1" ]]
     [[ "${phase:-}" =~ ^[a-z_]+$ ]]
     for value in "$candidate_database" "$rollback_database" "$failed_database"; do
-        [[ "$value" =~ ^writer_witness_[a-z]+_[0-9_]+$ ]]
+        [[ "$value" =~ ^writer_witness_(candidate|rollback|failed)_(wwm_[0-9a-f]{12}_)?[0-9_]+$ ]]
     done
     [[ "$current_oid" =~ ^[0-9]+$ && "$candidate_oid" =~ ^[0-9]+$ ]]
     for value in "$required_current_state" "$expected_state"; do
@@ -163,6 +163,7 @@ archive_journal() {
     mv -f "$JOURNAL_PATH" "$target"
     chmod 0600 "$target"
     sync -f "$HISTORY_DIR"
+    sync -f "$STATE_ROOT"
 }
 
 maybe_fail() {
@@ -226,9 +227,13 @@ recover_from_journal() {
         echo "recovered writer witness did not become ready" >&2
         return 1
     }
-    [[ "$(state_value writer_witness)" == "$required_current_state" ]]
-    [[ "$(receipt_count writer_witness)" == "$required_current_receipts" ]]
-    [[ "$(manifest_hash writer_witness)" == "$required_current_manifest" ]]
+    if [[ "$(state_value writer_witness)" != "$required_current_state" \
+        || "$(receipt_count writer_witness)" != "$required_current_receipts" \
+        || "$(manifest_hash writer_witness)" != "$required_current_manifest" ]]; then
+        systemctl stop "$SERVICE" || true
+        echo "recovered writer witness failed its exact prior-state guard" >&2
+        return 1
+    fi
     write_journal recovered
     archive_journal recovered
 }
@@ -236,11 +241,26 @@ recover_from_journal() {
 if [[ "$mode" == "--recover" ]]; then
     [[ ! -t 0 ]] || true
     if [[ ! -e "$JOURNAL_PATH" ]]; then
-        if systemctl is-active --quiet "$SERVICE" && wait_ready; then
-            printf '%s\n' '{"status":"no-recovery-required","journal_present":false,"service_ready":true}'
+        guard_state="${WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_STATE:-}"
+        guard_receipts="${WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_RECEIPTS:-}"
+        guard_manifest="${WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_MANIFEST_SHA256:-}"
+        orphan_count="$(runuser -u postgres -- psql -XAt postgres -c \
+            "SELECT count(*) FROM pg_database WHERE datname LIKE 'writer_witness_candidate_%' OR datname LIKE 'writer_witness_failed_%'")"
+        enabled_aux="$(runuser -u postgres -- psql -XAt postgres -c \
+            "SELECT count(*) FROM pg_database WHERE datname<>'writer_witness' AND datname LIKE 'writer_witness_%' AND datallowconn")"
+        if [[ "$guard_state" =~ ^webapp:[0-9]+:[a-z_]+$ \
+            && "$guard_receipts" =~ ^[0-9]+$ \
+            && "$guard_manifest" =~ ^[0-9a-f]{64}$ ]] \
+            && systemctl is-active --quiet "$SERVICE" \
+            && wait_ready \
+            && [[ "$(state_value writer_witness)" == "$guard_state" ]] \
+            && [[ "$(receipt_count writer_witness)" == "$guard_receipts" ]] \
+            && [[ "$(manifest_hash writer_witness)" == "$guard_manifest" ]] \
+            && [[ "$orphan_count" == 0 && "$enabled_aux" == 0 ]]; then
+            printf '%s\n' '{"status":"no-recovery-required","journal_present":false,"service_ready":true,"full_manifest_verified":true}'
             exit 0
         fi
-        echo "writer witness has no restore journal and is not ready; refusing to infer recovery state" >&2
+        echo "writer witness has no restore journal but lacks or failed the exact recovery baseline" >&2
         exit 1
     fi
     recover_from_journal
@@ -279,7 +299,7 @@ for value in "$expected_manifest" "$expected_backup_sha256" "$required_current_m
     }
 done
 case "${WRITER_WITNESS_RESTORE_TEST_FAIL_AFTER:-}" in
-    ""|service_stopped|current_disabled|current_renamed|candidate_promoted|candidate_enabled|service_started) ;;
+    ""|input_validated|candidate_created|candidate_restored|candidate_validated|grants_applied|prepared|service_stopped|current_disabled|current_renamed|candidate_promoted|candidate_enabled|service_started) ;;
     *) echo "unsupported guarded restore failure point" >&2; exit 2 ;;
 esac
 
@@ -297,6 +317,14 @@ fi
 
 input_path="$(mktemp "$BACKUP_DIR/.replacement-restore.XXXXXXXX.dump")"
 suffix="$(date -u +%Y%m%d%H%M%S)_$$"
+operation_tag="${WRITER_WITNESS_RESTORE_OPERATION_TAG:-}"
+if [[ -n "$operation_tag" ]]; then
+    [[ "$operation_tag" =~ ^wwm_[0-9a-f]{12}$ ]] || {
+        echo "writer witness restore operation tag is unsafe" >&2
+        exit 2
+    }
+    suffix="${operation_tag}_${suffix}"
+fi
 candidate_database="writer_witness_candidate_$suffix"
 rollback_database="writer_witness_rollback_$suffix"
 failed_database="writer_witness_failed_$suffix"
@@ -342,11 +370,20 @@ if [[ "$(state_value writer_witness)" != "$required_current_state" \
     exit 1
 fi
 
+current_oid="$(database_oid writer_witness)"
+write_journal input_validated
+maybe_fail input_validated
+
 runuser -u postgres -- createdb --owner=writer_witness_migrator --template=template0 "$candidate_database"
+candidate_oid="$(database_oid "$candidate_database")"
+write_journal candidate_created
+maybe_fail candidate_created
 PGPASSWORD="$WITNESS_DB_MIGRATOR_PASSWORD" pg_restore \
     --exit-on-error --no-owner --no-privileges \
     --host=127.0.0.1 --username=writer_witness_migrator \
     --dbname="$candidate_database" "$input_path"
+write_journal candidate_restored
+maybe_fail candidate_restored
 
 candidate_version="$(runuser -u postgres -- psql -XAt "$candidate_database" -c \
     'SELECT version_num FROM writer_witness_schema_version')"
@@ -357,6 +394,8 @@ if [[ "$candidate_version" != "001" \
     echo "restored writer witness candidate failed full manifest guard" >&2
     exit 1
 fi
+write_journal candidate_validated
+maybe_fail candidate_validated
 
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 "$candidate_database" <<'SQL'
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -369,10 +408,10 @@ runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 postgres -v candidate="$candidat
 REVOKE ALL ON DATABASE :"candidate" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"candidate" TO writer_witness_migrator, writer_witness_runtime;
 SQL
-
-current_oid="$(database_oid writer_witness)"
-candidate_oid="$(database_oid "$candidate_database")"
+write_journal grants_applied
+maybe_fail grants_applied
 write_journal prepared
+maybe_fail prepared
 
 systemctl stop "$SERVICE"
 write_journal service_stopped

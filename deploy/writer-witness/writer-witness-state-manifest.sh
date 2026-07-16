@@ -20,7 +20,7 @@ while [[ "$#" -gt 0 ]]; do
     esac
 done
 
-if [[ ! "$database_name" =~ ^writer_witness(_[a-z]+_[0-9_]+)?$ ]]; then
+if [[ ! "$database_name" =~ ^writer_witness(_(candidate|rollback|failed)_(wwm_[0-9a-f]{12}_)?[0-9_]+)?$ ]]; then
     echo "unsafe writer witness database name" >&2
     exit 2
 fi

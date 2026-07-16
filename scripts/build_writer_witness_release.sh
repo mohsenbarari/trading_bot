@@ -25,6 +25,9 @@ install -m 0644 "$ROOT_DIR/writer_witness_app.py" "$DESTINATION/writer_witness_a
 install -m 0755 \
     "$ROOT_DIR/scripts/smoke_writer_witness_client.py" \
     "$DESTINATION/scripts/smoke_writer_witness_client.py"
+install -m 0755 \
+    "$ROOT_DIR/scripts/run_writer_witness_clock_jump_probe.py" \
+    "$DESTINATION/scripts/run_writer_witness_clock_jump_probe.py"
 
 for source in \
     __init__.py \

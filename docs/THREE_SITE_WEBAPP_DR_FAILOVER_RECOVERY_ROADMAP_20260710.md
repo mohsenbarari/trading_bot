@@ -2598,8 +2598,10 @@ Recovery compares live names to OIDs, making a crash before or after any journal
 write unambiguous. Prior live state is restored idempotently, retained candidates
 are connection-disabled, and completed/recovered journals are archived.
 
-RH-012 injects failure after service stop, current-database disable, current
-rename, candidate promotion, candidate enable, and service start. Each failure
+RH-012 injects failure after input validation, candidate creation/restore/
+validation, grant application, prepared journal, service stop,
+current-database disable, current rename, candidate promotion, candidate
+enable, and service start. Each failure
 must recover the exact pre-attempt manifest before one successful restore to the
 pinned epoch-zero manifest.
 
@@ -2613,8 +2615,47 @@ in logs. Exact requests can therefore replay across the overlap.
 
 These changes remove source-level pre-Matrix blockers but do not yet authorize
 RH-001. The updated release/helpers must be installed on the dark replacement
-Witness, the manifest helper must exist on the reference host, all six live
+Witness, the manifest helper must exist on the reference host, all twelve live
 restore failure points must pass on the epoch-zero target, and a new exact-SHA
 preflight artifact must pass. No merge with `main`, WebApp writer activation,
 product migration, Arvan change, or automatic reference-Witness use is
 authorized.
+
+### 47.5 Adversarial pre-Matrix blocker remediation
+
+The second external review round found additional controller-lifecycle,
+target-pinning, credential, restore, approval, and scenario-design blockers.
+The source boundary now addresses them without merging `main` or enabling a
+WebApp writer:
+
+- descriptor-held `flock` ownership prevents a failed competitor from deleting
+  another run's lock; a durable local/remote campaign identity is written
+  before side effects, signals enter unconditional cleanup, and an exact-commit
+  recovery mode reconciles SIGKILL or ambiguous SSH results;
+- every HTTP request validates the exact replacement IP, port, CA, and leaf
+  fingerprint on the same TLS connection that carries the signed request;
+- each campaign receives unique FI/IR HMAC key IDs and secrets, proves the
+  original Witness lacks those IDs, keeps copies only on verified tmpfs, and
+  recovers persistent rotation phases including lost `prepare`/`revoke`
+  responses;
+- cleanup discovers resources from the fsynced journal, proves no requester or
+  active socket remains, refuses restore while a partition cannot be removed,
+  restores the exact credential hash and database manifest, deletes only
+  tag-owned auxiliary databases after evidence retention, and reruns the full
+  exact-SHA preflight;
+- restore journals before candidate creation, covers twelve early/late
+  failpoints, rejects liveness-only no-journal recovery, stops the service if
+  recovered state validation fails, and fsyncs both archive directories;
+- observer and incident commander approvals require different SSH signing
+  keys, a distinct named operator, exact reason/change ID, one-time nonce,
+  one-time preflight, bounded validity/maintenance window, concrete console,
+  communications, restore identity, request ceiling, and enforced conservative
+  DPI byte budget;
+- RH-001 establishes both pinned TLS sessions before a common release instant
+  and retains readiness/send timing; RH-010 combines authentication-window
+  boundaries with an isolated PostgreSQL lease/epoch clock-jump probe.
+
+These are source-level remediations, not a claim that the Matrix has passed.
+The updated release and helpers must still be deployed to the dark replacement,
+all regression/source/live prerequisites must pass at the new exact commit, and
+the external reviewers must approve that exact diff before RH-001 starts.

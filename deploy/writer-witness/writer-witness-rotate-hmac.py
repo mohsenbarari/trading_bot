@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -121,13 +122,25 @@ def _copy_secret(source: Path, destination: Path) -> None:
 
 
 def _write_metadata(path: Path, metadata: dict[str, object]) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    with temporary.open("rb") as handle:
-        os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    directory_fd = os.open(path.parent, os.O_DIRECTORY)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            handle.write(json.dumps(metadata, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
+def _fsync_directory(path: Path) -> None:
+    directory_fd = os.open(path, os.O_DIRECTORY)
     try:
         os.fsync(directory_fd)
     finally:
@@ -237,9 +250,12 @@ def prepare(
     runtime_path: Path = RUNTIME_ENV,
     client_dir: Path = CLIENT_DIR,
     state_root: Path = STATE_ROOT,
+    campaign_tag: str | None = None,
 ) -> dict[str, object]:
     _require_root()
     _require_dark_state(expected_epoch)
+    if campaign_tag is not None and not re.fullmatch(r"wwm_[0-9a-f]{12}", campaign_tag):
+        raise RotationError("matrix campaign tag is invalid")
     key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
     rotation_dir = state_root / site
     if rotation_dir.exists():
@@ -253,13 +269,20 @@ def prepare(
         raise RotationError("the selected site already has an overlap credential")
     _validate_pair(runtime, client, key_name, secret_name)
     old_key_id = runtime[key_name]
-    new_key_id = _next_key_id(old_key_id)
+    new_key_id = (
+        f"matrix-{campaign_tag}-{site.removeprefix('webapp_')}"
+        if campaign_tag is not None
+        else _next_key_id(old_key_id)
+    )
+    if len(new_key_id) > 64:
+        raise RotationError("scenario key id exceeds the service limit")
     if new_key_id in runtime.values():
         raise RotationError("next key id collides with an existing setting")
     new_secret = secrets.token_hex(32)
 
     rotation_dir.mkdir(mode=0o700, parents=True)
     os.chmod(state_root, 0o700)
+    _fsync_directory(state_root)
     _copy_secret(runtime_path, rotation_dir / "runtime.env.before")
     _copy_secret(client_dir / client_name, rotation_dir / "client.env.before")
     metadata: dict[str, object] = {
@@ -268,6 +291,7 @@ def prepare(
         "old_key_id": old_key_id,
         "new_key_id": new_key_id,
         "phase": "preparing",
+        "campaign_tag": campaign_tag,
     }
     _write_metadata(rotation_dir / "metadata.json", metadata)
     try:
@@ -293,6 +317,7 @@ def prepare(
         _copy_secret(rotation_dir / "client.env.before", client_dir / client_name)
         _restart_and_verify()
         shutil.rmtree(rotation_dir)
+        _fsync_directory(state_root)
         raise
     metadata["phase"] = "prepared"
     _write_metadata(rotation_dir / "metadata.json", metadata)
@@ -372,6 +397,7 @@ def finish(site: str, state_root: Path = STATE_ROOT) -> dict[str, object]:
     if metadata.get("site") != site or metadata.get("phase") not in {
         "revoked",
         "rolled_back",
+        "recovered",
     }:
         raise RotationError("rotation cannot finish before revocation or rollback")
     result = {
@@ -381,28 +407,83 @@ def finish(site: str, state_root: Path = STATE_ROOT) -> dict[str, object]:
         "phase": "finished",
     }
     shutil.rmtree(rotation_dir)
-    if state_root.exists() and not any(state_root.iterdir()):
-        state_root.rmdir()
+    _fsync_directory(state_root)
     return result
+
+
+def recover(
+    site: str,
+    expected_epoch: int,
+    campaign_tag: str | None = None,
+    runtime_path: Path = RUNTIME_ENV,
+    client_dir: Path = CLIENT_DIR,
+    state_root: Path = STATE_ROOT,
+) -> dict[str, object]:
+    """Idempotently restore the pre-rotation credential after an ambiguous result."""
+
+    _require_root()
+    if campaign_tag is not None:
+        if not re.fullmatch(r"wwm_[0-9a-f]{12}", campaign_tag):
+            raise RotationError("matrix campaign tag is invalid")
+    else:
+        _require_dark_state(expected_epoch)
+    *_, client_name = _site_keys(site)
+    rotation_dir = state_root / site
+    if not rotation_dir.exists():
+        return {"site": site, "phase": "already_clean", "campaign_tag": campaign_tag}
+    metadata = _load_metadata(rotation_dir / "metadata.json")
+    if metadata.get("site") != site or metadata.get("phase") not in {
+        "preparing",
+        "prepared",
+        "revoked",
+        "rolled_back",
+        "recovered",
+    }:
+        raise RotationError("rotation state cannot be reconciled safely")
+    if campaign_tag is not None and metadata.get("campaign_tag") != campaign_tag:
+        raise RotationError("rotation belongs to a different matrix campaign")
+    before_runtime = rotation_dir / "runtime.env.before"
+    before_client = rotation_dir / "client.env.before"
+    if not before_runtime.is_file() or not before_client.is_file():
+        raise RotationError("rotation rollback material is incomplete")
+    _copy_secret(before_runtime, runtime_path)
+    _copy_secret(before_client, client_dir / client_name)
+    _restart_and_verify()
+    metadata["phase"] = "recovered"
+    _write_metadata(rotation_dir / "metadata.json", metadata)
+    shutil.rmtree(rotation_dir)
+    _fsync_directory(state_root)
+    return {"site": site, "phase": "recovered", "campaign_tag": campaign_tag}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "revoke", "rollback", "finish"))
+    parser.add_argument("action", choices=("prepare", "revoke", "rollback", "finish", "recover"))
     parser.add_argument("--site", choices=tuple(SITE_SETTINGS), required=True)
     parser.add_argument("--expected-epoch", type=int, required=True)
+    parser.add_argument("--campaign-tag")
     args = parser.parse_args()
+    STATE_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(STATE_ROOT, 0o700)
+    lock_path = STATE_ROOT / f".{args.site}.lock"
+    lock_descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
+        fcntl.flock(lock_descriptor, fcntl.LOCK_EX)
         if args.action == "prepare":
-            result = prepare(args.site, args.expected_epoch)
+            result = prepare(args.site, args.expected_epoch, campaign_tag=args.campaign_tag)
         elif args.action == "revoke":
             result = revoke(args.site, args.expected_epoch)
         elif args.action == "rollback":
             result = rollback(args.site, args.expected_epoch)
+        elif args.action == "recover":
+            result = recover(args.site, args.expected_epoch, args.campaign_tag)
         else:
             result = finish(args.site)
     except (OSError, subprocess.SubprocessError, RotationError) as exc:
         raise SystemExit(f"writer witness HMAC rotation failed: {exc}") from exc
+    finally:
+        fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
+        os.close(lock_descriptor)
     print(json.dumps(result, sort_keys=True))
     return 0
 

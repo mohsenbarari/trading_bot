@@ -4,6 +4,17 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# The source gate is hermetic: imports receive non-secret placeholders while
+# every real PostgreSQL test uses its separately guarded scratch database.
+export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://matrix_gate:matrix_gate@127.0.0.1:1/matrix_gate}"
+export SYNC_DATABASE_URL="${SYNC_DATABASE_URL:-postgresql://matrix_gate:matrix_gate@127.0.0.1:1/matrix_gate}"
+export POSTGRES_DB="${POSTGRES_DB:-matrix_gate}"
+export POSTGRES_USER="${POSTGRES_USER:-matrix_gate}"
+export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-matrix-gate-placeholder}"
+export FRONTEND_URL="${FRONTEND_URL:-https://matrix-gate.invalid}"
+export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:1/0}"
+export JWT_SECRET_KEY="${JWT_SECRET_KEY:-matrix-gate-placeholder-jwt-secret-32-bytes}"
+
 python3 -m unittest \
     tests.test_writer_witness \
     tests.test_writer_witness_client \
