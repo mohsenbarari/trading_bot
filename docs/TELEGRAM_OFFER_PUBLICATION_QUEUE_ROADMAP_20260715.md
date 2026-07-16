@@ -536,7 +536,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | --- | --- | --- | --- | --- | --- |
 | `TOPQ-N01` | بحرانی | BLOCKER | تعریف «ثبت موفق» روشن است، اما SLO دیده‌شدن در کانال و سقف lag هنوز مشخص نیست | SLO publication/backlog و تعریف حالت breach | تأیید مالک محصول و alert threshold ثبت‌شده |
 | `TOPQ-N02` | بحرانی | BLOCKER | تعارض ظرفیت یک کانال با expiry دو دقیقه‌ای می‌تواند انتظار کاربر را نقض کند | انتخاب صریح یکی از چهار سیاست بخش 13.2 | ADR امضاشده و acceptance test متناظر |
-| `TOPQ-N03` | بالا | BLOCKER | ادغام دو پیام Bot نباید اطلاعات، دکمه انقضا یا تفاوت copy مسیر legacy/text را از بین ببرد | یک پیام ترکیبی با success همان مسیر، متن «لفظ شما» و دکمه انقضا؛ WebApp بدون تغییر | تأیید نمونه متن، snapshot هر دو مسیر Bot و اثبات صفر `sendMessage` خصوصی دوم |
+| `TOPQ-N03` | بالا | DECIDED | ادغام دو پیام Bot نباید اطلاعات، دکمه انقضا یا تفاوت copy مسیر legacy/text را از بین ببرد | یک پیام ترکیبی با success همان مسیر، متن «لفظ شما» و دکمه انقضا؛ WebApp بدون تغییر | نمونه متن در `2026-07-16` تأیید شد؛ snapshot هر دو مسیر Bot و اثبات صفر `sendMessage` خصوصی دوم |
 | `TOPQ-N04` | بالا | OPEN | کاربر نباید خطای داخلی ببیند، اما support باید offer منتشرنشده را قابل پیگیری بداند | شناسه داخلی، admin view و پاسخ پشتیبانی بدون افشای جزئیات | سناریوی support و زمان پاسخ مشخص |
 | `TOPQ-N05` | بحرانی | BLOCKER | owner alert و on-call هنوز مشخص نیست؛ pause/resume نباید مسیر عادی تست باشد | runner با stop condition و circuit breaker خودکار؛ pause/resume فقط break-glass و با حفظ صف، به‌علاوه RACI محصول/backend/عملیات/امنیت | نام roleها، escalation، زمان پاسخ و تمرین pause/resume بدون گم‌شدن job |
 | `TOPQ-N06` | بالا | OPEN | ساخت و نگهداری ۸۰ حساب، channel و observer هزینه و کار عملیاتی دارد | بودجه، owner credential و برنامه rotation/recovery | inventory بدون secret و health check دوره‌ای |
@@ -576,7 +576,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - پس از export و checksum شواهد، تمام داده runtime ساخته‌شده با `run_id` از DB و cache هر دو staging peer و پیام‌های Telegram همان run پاک می‌شوند. cleanup از مسیر authority و API دامنه انجام و سپس sync/readback تأیید می‌شود؛ SQL حذف مستقیم بین دو peer مجاز نیست. کاربر، بات، کانال یا تنظیم pre-existing حذف نمی‌شود؛ اگر runner خودش کاربر آزمایشی ساخته باشد، همان کاربر نیز run-scoped و قابل حذف است.
 - artifact استاندارد هر run شامل `manifest.json`, `events.jsonl`, `errors.jsonl`, `reconciliation.json` و `summary.md` است. همه فایل‌ها `schema_version`, `run_id`, seed، commit، fingerprint محیط، config مؤثر، زمان UTC، شناسه job/dedupe، expected/actual و checksum دارند و token، PII و متن production در آن‌ها redacted است تا agentهای AI و انسان یک ورودی واحد و قابل بازتولید داشته باشند.
 
-نمونه copy ترکیبی پیشنهادی و نیازمند تأیید:
+نمونه copy ترکیبی تأییدشده در `2026-07-16`:
 
 ```text
 ✅ لفظ شما با موفقیت در کانال ارسال شد!
