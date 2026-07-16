@@ -580,6 +580,52 @@ async def release_unstarted_telegram_delivery_lease(
     return True
 
 
+async def defer_unstarted_telegram_delivery_lease(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    job_id: int,
+    worker_id: str,
+    lease_token: int,
+    retry_seconds: float,
+    reason: str,
+    now: datetime | None = None,
+) -> bool:
+    """Return an unstarted lease to the queue without recording an error.
+
+    Durable pacing is expected control flow, not a provider or worker failure.
+    The same lease fence used by dispatch protects this transition.
+    """
+    _require_foreign(current_server)
+    current_time = now or utc_now()
+    record = (
+        await db.execute(
+            select(TelegramDeliveryJobRecord)
+            .where(TelegramDeliveryJobRecord.id == int(job_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if record is None or (
+        _enum_value(record.state) != TelegramDeliveryState.LEASED.value
+        or record.worker_id != str(worker_id)
+        or int(record.lease_token or 0) != int(lease_token)
+        or record.dispatch_started_at is not None
+    ):
+        return False
+    record.state = TelegramDeliveryState.PENDING_RETRY
+    record.next_retry_at = current_time + timedelta(
+        seconds=max(0.001, float(retry_seconds))
+    )
+    record.worker_id = None
+    record.lease_until = None
+    record.last_error_class = None
+    record.last_error_message = None
+    record.outcome_reason = str(reason or "telegram_limiter_wait")[:160]
+    record.updated_at = current_time
+    await db.flush()
+    return True
+
+
 async def resolve_telegram_delivery_result(
     db: AsyncSession,
     *,

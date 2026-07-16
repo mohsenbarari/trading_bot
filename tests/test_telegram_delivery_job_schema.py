@@ -137,6 +137,21 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertFalse(fields["telegram_delivery_queue_worker_enabled"].default)
         self.assertFalse(fields["telegram_delivery_queue_cutover_ready"].default)
         self.assertFalse(fields["telegram_delivery_queue_channel_editor_enabled"].default)
+        self.assertIsNone(
+            fields["telegram_delivery_queue_channel_editor_bot_token"].default
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_bot_min_interval_seconds"].default,
+            0.035,
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_destination_min_interval_seconds"].default,
+            1.05,
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_rate_limit_probe_delay_seconds"].default,
+            0.1,
+        )
 
     def test_migration_is_additive_and_points_to_previous_head(self):
         source = Path(

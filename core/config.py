@@ -5,6 +5,7 @@
 این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -101,6 +102,7 @@ class Settings(BaseSettings):
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False
     telegram_delivery_queue_channel_editor_enabled: bool = False
+    telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
     telegram_delivery_queue_worker_batch_limit: int = 25
     telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
@@ -109,6 +111,11 @@ class Settings(BaseSettings):
     telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
     telegram_delivery_queue_retry_base_seconds: float = 1.0
     telegram_delivery_queue_retry_max_seconds: float = 300.0
+    telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
+    telegram_delivery_queue_destination_min_interval_seconds: float = 1.05
+    telegram_delivery_queue_rate_limit_probe_delay_seconds: float = 0.1
+    telegram_delivery_queue_global_rate_limit_window_seconds: float = 2.0
+    telegram_delivery_queue_limiter_key_ttl_seconds: int = 86400
     telegram_direct_registration_enabled: bool = False
     telegram_registration_reconciliation_enabled: bool = False
     telegram_login_otp_enabled: bool = False

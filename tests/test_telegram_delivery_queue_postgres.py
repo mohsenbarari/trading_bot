@@ -22,6 +22,10 @@ from core.telegram_delivery_queue_contract import (
     TelegramFreshnessDecision,
     TelegramFreshnessOutcome,
 )
+from core.telegram_delivery_queue_limiter import (
+    TelegramDeliveryDispatchAdmission,
+    TelegramDeliveryLimiterUnavailableError,
+)
 from core.telegram_gateway import TelegramGatewayResult
 from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueValidationError,
@@ -61,6 +65,28 @@ def _test_database_urls() -> tuple[str, str] | None:
 
 
 DATABASE_URLS = _test_database_urls()
+
+
+class _AllowLimiter:
+    async def acquire(self, _job, *, now):
+        return TelegramDeliveryDispatchAdmission(allowed=True)
+
+    async def observe(self, _job, _decision, *, now):
+        return None
+
+
+class _DenyLimiter(_AllowLimiter):
+    async def acquire(self, _job, *, now):
+        return TelegramDeliveryDispatchAdmission(
+            allowed=False,
+            retry_after_seconds=0.75,
+            wait_reason="destination_gate",
+        )
+
+
+class _UnavailableLimiter(_AllowLimiter):
+    async def acquire(self, _job, *, now):
+        raise TelegramDeliveryLimiterUnavailableError("synthetic_limiter_down")
 
 
 def _run_alembic(sync_url: str, *args: str) -> None:
@@ -828,6 +854,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 limit=1,
                 freshness_validator=freshness_validator,
                 gateway_call=gateway_call,
+                dispatch_limiter=_AllowLimiter(),
                 worker_id="worker-boundary-test",
             )
 
@@ -895,6 +922,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     limit=1,
                     freshness_validator=freshness_validator,
                     gateway_call=primary_gateway,
+                    dispatch_limiter=_AllowLimiter(),
                     worker_id="primary-lane-worker",
                     recover_leases=False,
                 ),
@@ -903,6 +931,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     limit=1,
                     freshness_validator=freshness_validator,
                     gateway_call=editor_gateway,
+                    dispatch_limiter=_AllowLimiter(),
                     worker_id="editor-lane-worker",
                     recover_leases=False,
                 ),
@@ -939,6 +968,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     limit=1,
                     freshness_validator=broken_validator,
                     gateway_call=AsyncMock(),
+                    dispatch_limiter=_AllowLimiter(),
                     worker_id="worker-validator-test",
                 )
 
@@ -948,6 +978,83 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(persisted.worker_id)
         self.assertIsNone(persisted.lease_until)
         self.assertIsNone(persisted.dispatch_started_at)
+
+    async def test_dispatch_limit_wait_defers_without_error_or_gateway_call(self):
+        enqueued = await self._enqueue("worker-limiter-wait")
+        gateway = AsyncMock()
+
+        async def freshness_validator(db, job, now):
+            return TelegramFreshnessDecision(TelegramFreshnessOutcome.SEND)
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ):
+            report = await run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
+                limit=1,
+                freshness_validator=freshness_validator,
+                gateway_call=gateway,
+                dispatch_limiter=_DenyLimiter(),
+                worker_id="worker-limiter-wait-test",
+            )
+
+        self.assertEqual(report.status_counts, {"limiter_wait": 1})
+        gateway.assert_not_awaited()
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+        self.assertEqual(persisted.state, TelegramDeliveryState.PENDING_RETRY)
+        self.assertIsNone(persisted.dispatch_started_at)
+        self.assertIsNone(persisted.worker_id)
+        self.assertIsNone(persisted.last_error_class)
+        self.assertEqual(
+            persisted.outcome_reason,
+            "telegram_limiter_wait:destination_gate",
+        )
+
+    async def test_limiter_failure_releases_lease_and_fails_closed_before_gateway(self):
+        enqueued = await self._enqueue("worker-limiter-unavailable")
+        gateway = AsyncMock()
+
+        async def freshness_validator(db, job, now):
+            return TelegramFreshnessDecision(TelegramFreshnessOutcome.SEND)
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ):
+            with self.assertRaisesRegex(
+                TelegramDeliveryLimiterUnavailableError,
+                "synthetic_limiter_down",
+            ):
+                await run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    limit=1,
+                    freshness_validator=freshness_validator,
+                    gateway_call=gateway,
+                    dispatch_limiter=_UnavailableLimiter(),
+                    worker_id="worker-limiter-unavailable-test",
+                )
+
+        gateway.assert_not_awaited()
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+        self.assertEqual(persisted.state, TelegramDeliveryState.PENDING_RETRY)
+        self.assertIsNone(persisted.dispatch_started_at)
+        self.assertIsNone(persisted.worker_id)
+        self.assertEqual(persisted.last_error_class, "PreDispatchError")
 
 
 if __name__ == "__main__":
