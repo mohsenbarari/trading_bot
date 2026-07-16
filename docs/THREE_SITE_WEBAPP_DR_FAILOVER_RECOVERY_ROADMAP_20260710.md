@@ -2528,5 +2528,10 @@ that exact clean SHA with zero failed checks. The retained artifact records:
 
 The artifact secret scan found no password, HMAC/client secret, private key, or
 API key assignment. The runner now forces artifact mode `0600`. A passing
-preflight still authorizes no RH scenario; the fault executor and exact
-abort/rollback order must receive their own guarded review before `RH-001`.
+preflight still authorizes no RH scenario. The plan now embeds nine immediate
+abort conditions, an eight-step rollback order, and a final success barrier.
+Network faults are removed before services are resumed; transient credentials
+are removed before guarded database restore; both Witness invariants and both
+WebApp boundaries are then re-proven before evidence closure. The next action
+is implementation and execution of the RH campaign itself, not another
+pre-matrix infrastructure mutation.

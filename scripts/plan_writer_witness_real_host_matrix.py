@@ -216,6 +216,71 @@ def scenario_catalog() -> list[dict[str, object]]:
     ]
 
 
+def abort_and_rollback_contract() -> dict[str, object]:
+    return {
+        "abort_conditions": [
+            "WebApp-FI app, database, Redis, sync worker, or API loses baseline health",
+            "WebApp-IR application or sync worker starts unexpectedly",
+            "either WebApp Witness enable flag becomes true",
+            "original rollback Witness changes from webapp:0:vacant or gains a receipt",
+            "a fault escapes the exact replacement-Witness IP, port, service, or isolated filesystem scope",
+            "replacement Witness state differs from the scenario's expected epoch, holder, lease, or receipt count",
+            "NTP is unsynchronized before a scenario that does not explicitly test clock behavior",
+            "backup checksum, rollback database, SSH access, or cleanup trap is unavailable",
+            "Arvan/CDN, public DNS, product database, or product container state changes",
+        ],
+        "ordered_steps": [
+            {
+                "order": 1,
+                "step_id": "remove_scoped_network_faults",
+                "requirement": "delete only the matrix-owned firewall/tc objects on FI, IR, and replacement Witness",
+            },
+            {
+                "order": 2,
+                "step_id": "resume_paused_runtime",
+                "requirement": "CONT/unpause and start replacement Witness PostgreSQL, service, Nginx, and NTP as applicable",
+            },
+            {
+                "order": 3,
+                "step_id": "remove_isolated_pressure",
+                "requirement": "unmount and delete only matrix-owned tmpfs/loop/time-namespace artifacts",
+            },
+            {
+                "order": 4,
+                "step_id": "remove_transient_credentials",
+                "requirement": "delete all matrix client material from WebApp /run paths before database restore",
+            },
+            {
+                "order": 5,
+                "step_id": "restore_vacant_baseline",
+                "requirement": "use the guarded live-restore path and the recorded checksumed epoch-0 backup on replacement Witness",
+            },
+            {
+                "order": 6,
+                "step_id": "verify_witness_invariants",
+                "requirement": "prove replacement and original Witness are ready, NTP-synchronized, webapp:0:vacant, and zero receipts",
+            },
+            {
+                "order": 7,
+                "step_id": "verify_webapp_invariants",
+                "requirement": "prove FI production health, IR writers stopped, flags disabled, and direct 443 paths restored",
+            },
+            {
+                "order": 8,
+                "step_id": "retain_failure_evidence",
+                "requirement": "mark the scenario failed, retain redacted evidence, and do not advance to the next RH id",
+            },
+        ],
+        "success_barrier": [
+            "every scenario-specific cleanup passes",
+            "the same baseline preflight passes again",
+            "replacement Witness is restored to webapp:0:vacant with zero receipts",
+            "original Witness remains byte-for-business-state unchanged",
+            "no transient credential, network rule, pause, mount, or clock override remains",
+        ],
+    }
+
+
 def git_metadata() -> dict[str, object]:
     def output(*command: str) -> str:
         return subprocess.run(
@@ -284,6 +349,7 @@ def build_plan(*, include_source_tests: bool = True) -> dict[str, object]:
             for spec in checks
         ],
         "matrix_scenarios_after_preflight": scenario_catalog(),
+        "abort_and_rollback": abort_and_rollback_contract(),
         "entry_criteria": [
             "all preflight checks pass on one retained artifact",
             "matrix Witness is vacant at epoch 0 with zero receipts",

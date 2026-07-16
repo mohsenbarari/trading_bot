@@ -289,3 +289,30 @@ pass authorizes only the dark-Witness control-plane fault matrix. It does not
 prove that the feature branch is compatible with the current product release,
 does not authorize a first lease, and does not permit production WebApp or
 Arvan/CDN mutation.
+
+### Mandatory abort and rollback order
+
+Every RH scenario must install a cleanup trap before its first fault. On any
+unexpected state, timeout, lost SSH path, production-health regression, scope
+escape, or assertion failure, stop the campaign and execute this exact order:
+
+1. Remove only matrix-owned firewall and traffic-control objects from FI, IR,
+   and the replacement Witness.
+2. Resume/unpause and start the replacement Witness database, application,
+   Nginx, and NTP components affected by that scenario.
+3. Remove only matrix-owned isolated filesystem, pressure, and time-namespace
+   artifacts.
+4. Delete every transient client credential and CA copy from WebApp `/run`
+   paths.
+5. Restore the replacement Witness through the guarded live-restore path from
+   the recorded checksumed `webapp:0:vacant` backup.
+6. Prove both Witness hosts are ready, NTP-synchronized,
+   `webapp:0:vacant`, and at zero receipts.
+7. Re-run FI production health and IR-standby checks and prove both direct
+   Witness paths and disabled flags.
+8. Retain redacted failure evidence and do not advance to the next RH scenario.
+
+The campaign may finish successfully only after the same full preflight passes
+again and no transient credential, network rule, pause, mount, or clock
+override remains. Original Witness must not be promoted automatically or used
+as a second writer during rollback.

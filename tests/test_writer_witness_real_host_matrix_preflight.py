@@ -65,6 +65,27 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         self.assertIn("clock skew", names)
         self.assertIn("restore exact vacant baseline", names)
 
+    def test_abort_contract_restores_faults_before_database_and_rechecks_webapps(self):
+        contract = preflight.abort_and_rollback_contract()
+        steps = contract["ordered_steps"]
+        self.assertEqual([step["order"] for step in steps], list(range(1, 9)))
+        ids = [step["step_id"] for step in steps]
+        self.assertLess(
+            ids.index("remove_scoped_network_faults"),
+            ids.index("restore_vacant_baseline"),
+        )
+        self.assertLess(
+            ids.index("remove_transient_credentials"),
+            ids.index("restore_vacant_baseline"),
+        )
+        self.assertLess(
+            ids.index("restore_vacant_baseline"),
+            ids.index("verify_webapp_invariants"),
+        )
+        aborts = "\n".join(contract["abort_conditions"])
+        self.assertIn("Arvan/CDN", aborts)
+        self.assertIn("original rollback Witness", aborts)
+
     def test_cli_plan_writes_no_secret_material(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "plan.json"
