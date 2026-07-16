@@ -410,7 +410,7 @@ async function verifyOtp() {
 
     if (data.status === 'registration_required' && data.registration_token) {
       clearBackStack()
-      router.push(`/register?registration_token=${encodeURIComponent(data.registration_token)}`)
+      router.replace(`/register?registration_token=${encodeURIComponent(data.registration_token)}`)
       return
     }
     

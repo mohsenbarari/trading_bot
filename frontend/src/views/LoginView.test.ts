@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const routerPushMock = vi.fn()
+const routerReplaceMock = vi.fn()
 const routeMock = { query: {} as Record<string, string> }
 const setupExpiryTimerMock = vi.fn()
 const apiFetchMock = vi.fn()
@@ -20,6 +21,7 @@ vi.mock('vue-router', () => ({
   useRoute: () => routeMock,
   useRouter: () => ({
     push: routerPushMock,
+    replace: routerReplaceMock,
   }),
 }))
 
@@ -59,6 +61,7 @@ describe('LoginView.vue', () => {
   beforeEach(() => {
     vi.resetModules()
     routerPushMock.mockReset()
+    routerReplaceMock.mockReset()
     routeMock.query = {}
     setupExpiryTimerMock.mockReset()
     apiFetchMock.mockReset()
@@ -180,7 +183,8 @@ describe('LoginView.vue', () => {
     await flushPromises()
 
     expect(clearBackStackMock).toHaveBeenCalled()
-    expect(routerPushMock).toHaveBeenCalledWith('/register?registration_token=REG-123')
+    expect(routerReplaceMock).toHaveBeenCalledWith('/register?registration_token=REG-123')
+    expect(routerPushMock).not.toHaveBeenCalled()
     expect(localStorage.getItem('auth_token')).toBeNull()
     wrapper.unmount()
   })
