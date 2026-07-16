@@ -118,6 +118,15 @@ def _display_name(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _origin_label(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "foreign":
+        return "بات"
+    if normalized == "iran":
+        return "وب اپ"
+    return normalized or "-"
+
+
 def _status_label(value: Any) -> str:
     normalized = _value(value).lower()
     if normalized == OfferStatus.ACTIVE.value:
@@ -129,6 +138,41 @@ def _status_label(value: Any) -> str:
     if normalized == OfferStatus.EXPIRED.value:
         return "منقضی"
     return normalized or "نامشخص"
+
+
+def build_channel_post_url(channel_id: Any, message_id: Any) -> str | None:
+    numeric_message_id = _positive_int(message_id)
+    if numeric_message_id is None:
+        return None
+    normalized_channel_id = str(channel_id or "").strip()
+    if normalized_channel_id.startswith("-100"):
+        internal_id = normalized_channel_id[4:]
+    elif normalized_channel_id.startswith("100"):
+        internal_id = normalized_channel_id[3:]
+    else:
+        internal_id = normalized_channel_id.lstrip("-")
+    if not internal_id:
+        return None
+    return f"https://t.me/c/{internal_id}/{numeric_message_id}"
+
+
+def build_monitoring_channel_reply_markup(offer: Any) -> dict[str, Any] | None:
+    post_url = build_channel_post_url(
+        getattr(settings, "channel_id", None),
+        getattr(offer, "channel_message_id", None),
+    )
+    if not post_url:
+        return None
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "مشاهده پست در کانال اصلی",
+                    "url": post_url,
+                }
+            ]
+        ]
+    }
 
 
 def _gateway_status_code(result: telegram_gateway.TelegramGatewayResult) -> int | None:
@@ -238,8 +282,8 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
         offer_summary,
         "",
         f"وضعیت: {_status_label(getattr(offer, 'status', None))}",
-        f"ارسال شده از: {getattr(offer, 'home_server', '') or '-'}",
-        f"نام کاربری آفر‌دهنده: {presenter.account_name or '-'}",
+        f"ارسال شده از: {_origin_label(getattr(offer, 'home_server', None))}",
+        f"نام کاربری لفظ دهنده: {presenter.account_name or '-'}",
         f"یوزرنیم تلگرام: {presenter.telegram_username}",
         f"موبایل: {presenter.mobile_number or '-'}",
         f"نقش: {presenter.role or '-'}",
@@ -358,6 +402,7 @@ async def apply_monitoring_channel_state_with_result(
     customer_owner = await load_customer_owner_for_offer(db, offer)
     presenter = build_monitoring_offer_presenter(getattr(offer, "user", None), customer_owner=customer_owner)
     text = build_monitoring_offer_message(offer, presenter)
+    reply_markup = build_monitoring_channel_reply_markup(offer)
     channel_id = _coerce_int(settings.telegram_monitoring_channel_id)
     message_id = _coerce_int(getattr(publication_state, "telegram_message_id", None))
     bot_token = settings.telegram_monitoring_bot_token
@@ -372,6 +417,7 @@ async def apply_monitoring_channel_state_with_result(
             text,
             timeout=timeout,
             bot_token=bot_token,
+            reply_markup=reply_markup,
             idempotency_key=(
                 f"offer-monitoring-edit:{getattr(offer, 'offer_public_id', '')}:"
                 f"{getattr(offer, 'version_id', '')}"
@@ -381,6 +427,7 @@ async def apply_monitoring_channel_state_with_result(
         result = await telegram_gateway.send_message(
             channel_id,
             text,
+            reply_markup=reply_markup,
             timeout=timeout,
             bot_token=bot_token,
             idempotency_key=f"offer-monitoring-send:{getattr(offer, 'offer_public_id', '')}",
