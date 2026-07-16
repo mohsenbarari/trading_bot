@@ -42,15 +42,16 @@ SENT_MONITORING_STATUSES = {
 @dataclass(frozen=True, slots=True)
 class MonitoringCustomerOwner:
     user_id: int | None
+    display_name: str
     telegram_username: str
-    masked_mobile: str
+    mobile_number: str
 
 
 @dataclass(frozen=True, slots=True)
 class MonitoringOfferPresenter:
     user_id: int | None
     telegram_username: str
-    masked_mobile: str
+    mobile_number: str
     role: str
     customer_owner: MonitoringCustomerOwner | None = None
 
@@ -107,11 +108,13 @@ def _username(value: Any) -> str:
     return f"@{normalized}" if normalized else ""
 
 
-def mask_mobile_number(value: Any) -> str:
+def normalize_mobile_number(value: Any) -> str:
     digits = "".join(ch for ch in str(value or "") if ch.isdigit())
-    if len(digits) < 7:
-        return ""
-    return f"{digits[:4]}***{digits[-4:]}"
+    return digits
+
+
+def _display_name(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _status_label(value: Any) -> str:
@@ -203,13 +206,17 @@ def build_monitoring_offer_presenter(
     if customer_owner is not None:
         owner = MonitoringCustomerOwner(
             user_id=_coerce_int(getattr(customer_owner, "id", None)),
+            display_name=(
+                _display_name(getattr(customer_owner, "full_name", None))
+                or _display_name(getattr(customer_owner, "account_name", None))
+            ),
             telegram_username=_username(getattr(customer_owner, "username", None)),
-            masked_mobile=mask_mobile_number(getattr(customer_owner, "mobile_number", None)),
+            mobile_number=normalize_mobile_number(getattr(customer_owner, "mobile_number", None)),
         )
     return MonitoringOfferPresenter(
         user_id=_coerce_int(getattr(user, "id", None)),
         telegram_username=_username(getattr(user, "username", None)),
-        masked_mobile=mask_mobile_number(getattr(user, "mobile_number", None)),
+        mobile_number=normalize_mobile_number(getattr(user, "mobile_number", None)),
         role=_value(getattr(user, "role", None)),
         customer_owner=owner,
     )
@@ -229,11 +236,9 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
         offer_summary,
         "",
         f"وضعیت: {_status_label(getattr(offer, 'status', None))}",
-        f"شناسه آفر: {getattr(offer, 'offer_public_id', '') or '-'}",
-        f"سرور مرجع: {getattr(offer, 'home_server', '') or '-'}",
-        f"ثبت‌کننده: #{presenter.user_id or '-'}",
+        f"ارسال شده از: {getattr(offer, 'home_server', '') or '-'}",
         f"یوزرنیم تلگرام: {presenter.telegram_username}",
-        f"موبایل: {presenter.masked_mobile or '-'}",
+        f"موبایل: {presenter.mobile_number or '-'}",
         f"نقش: {presenter.role or '-'}",
     ]
 
@@ -243,9 +248,10 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
             [
                 "",
                 "مالک مشتری:",
+                f"نام سرگروه: {owner.display_name or '-'}",
                 f"کاربر: #{owner.user_id or '-'}",
                 f"یوزرنیم تلگرام: {owner.telegram_username}",
-                f"موبایل: {owner.masked_mobile or '-'}",
+                f"موبایل: {owner.mobile_number or '-'}",
             ]
         )
 

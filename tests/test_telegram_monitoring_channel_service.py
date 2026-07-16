@@ -5,7 +5,7 @@ from unittest.mock import patch
 from core.services.telegram_monitoring_channel_service import (
     build_monitoring_offer_message,
     build_monitoring_offer_presenter,
-    mask_mobile_number,
+    normalize_mobile_number,
     monitoring_delivery_enabled,
     monitoring_enqueue_enabled,
 )
@@ -26,9 +26,10 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
             self.assertTrue(monitoring_enqueue_enabled())
             self.assertFalse(monitoring_delivery_enabled())
 
-    def test_mask_mobile_number_keeps_only_outer_digits(self):
-        self.assertEqual(mask_mobile_number("09122503501"), "0912***3501")
-        self.assertEqual(mask_mobile_number("bad"), "")
+    def test_normalize_mobile_number_keeps_full_digits(self):
+        self.assertEqual(normalize_mobile_number("09122503501"), "09122503501")
+        self.assertEqual(normalize_mobile_number("+98 912 250 3501"), "989122503501")
+        self.assertEqual(normalize_mobile_number("bad"), "")
 
     def test_monitoring_message_uses_telegram_username_without_project_names(self):
         user = SimpleNamespace(
@@ -39,7 +40,13 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
             account_name="internal_account",
             full_name="Sensitive Full Name",
         )
-        owner = SimpleNamespace(id=9, username=None, mobile_number="09370809280")
+        owner = SimpleNamespace(
+            id=9,
+            username=None,
+            mobile_number="09370809280",
+            full_name="سرگروه تست",
+            account_name="owner_account",
+        )
         offer = SimpleNamespace(
             offer_public_id="ofr_test",
             offer_type=SimpleNamespace(value="sell"),
@@ -57,10 +64,15 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
 
         self.assertIn("رصد بازار", message)
         self.assertIn("فروش ربع بهار 40 عدد فردا", message)
+        self.assertIn("ارسال شده از: foreign", message)
         self.assertIn("یوزرنیم تلگرام: @coin_user", message)
-        self.assertIn("موبایل: 0912***3501", message)
+        self.assertIn("موبایل: 09122503501", message)
         self.assertIn("مالک مشتری:", message)
+        self.assertIn("نام سرگروه: سرگروه تست", message)
         self.assertIn("یوزرنیم تلگرام: ", message)
+        self.assertNotIn("شناسه آفر:", message)
+        self.assertNotIn("ثبت‌کننده:", message)
+        self.assertNotIn("سرور مرجع:", message)
         self.assertNotIn("Sensitive Full Name", message)
         self.assertNotIn("internal_account", message)
 
