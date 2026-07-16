@@ -50,6 +50,7 @@ class MonitoringCustomerOwner:
 @dataclass(frozen=True, slots=True)
 class MonitoringOfferPresenter:
     user_id: int | None
+    account_name: str
     telegram_username: str
     mobile_number: str
     role: str
@@ -215,6 +216,7 @@ def build_monitoring_offer_presenter(
         )
     return MonitoringOfferPresenter(
         user_id=_coerce_int(getattr(user, "id", None)),
+        account_name=_display_name(getattr(user, "account_name", None)),
         telegram_username=_username(getattr(user, "username", None)),
         mobile_number=normalize_mobile_number(getattr(user, "mobile_number", None)),
         role=_value(getattr(user, "role", None)),
@@ -237,6 +239,7 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
         "",
         f"وضعیت: {_status_label(getattr(offer, 'status', None))}",
         f"ارسال شده از: {getattr(offer, 'home_server', '') or '-'}",
+        f"نام کاربری آفر‌دهنده: {presenter.account_name or '-'}",
         f"یوزرنیم تلگرام: {presenter.telegram_username}",
         f"موبایل: {presenter.mobile_number or '-'}",
         f"نقش: {presenter.role or '-'}",

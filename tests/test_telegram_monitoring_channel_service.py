@@ -65,6 +65,7 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
         self.assertIn("رصد بازار", message)
         self.assertIn("فروش ربع بهار 40 عدد فردا", message)
         self.assertIn("ارسال شده از: foreign", message)
+        self.assertIn("نام کاربری آفر‌دهنده: internal_account", message)
         self.assertIn("یوزرنیم تلگرام: @coin_user", message)
         self.assertIn("موبایل: 09122503501", message)
         self.assertIn("مالک مشتری:", message)
@@ -74,7 +75,6 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
         self.assertNotIn("ثبت‌کننده:", message)
         self.assertNotIn("سرور مرجع:", message)
         self.assertNotIn("Sensitive Full Name", message)
-        self.assertNotIn("internal_account", message)
 
 
 if __name__ == "__main__":
