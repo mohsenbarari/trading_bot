@@ -156,11 +156,12 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             return result
 
-    async def _claim(self, worker: str, *, now=None):
+    async def _claim(self, worker: str, *, now=None, bot_identity: str = "primary"):
         async with self.Session() as db:
             job = await claim_next_telegram_delivery_job(
                 db,
                 current_server="foreign",
+                bot_identity=bot_identity,
                 worker_id=worker,
                 request_timeout_seconds=10,
                 lease_seconds=30,
@@ -315,6 +316,77 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             await db.rollback()
 
+    async def test_claim_rejects_unknown_bot_lane_before_query(self):
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "telegram_bot_identity_not_allowlisted",
+            ):
+                await claim_next_telegram_delivery_job(
+                    db,
+                    current_server="foreign",
+                    bot_identity="unknown-lane",
+                    worker_id="worker-invalid-lane",
+                    request_timeout_seconds=10,
+                    lease_seconds=30,
+                )
+            await db.rollback()
+
+    async def test_editor_claim_lane_progresses_with_300_primary_and_100_editor_jobs(self):
+        async with self.Session() as db:
+            for index in range(300):
+                await enqueue_telegram_delivery_job(
+                    db,
+                    **self._enqueue_kwargs(f"hol-primary-{index}"),
+                )
+            for index in range(100):
+                await enqueue_telegram_delivery_job(
+                    db,
+                    **self._enqueue_kwargs(
+                        f"hol-editor-{index}",
+                        feeder=TelegramFeederKind.OFFER_EDIT,
+                        action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+                        destination="channel:market",
+                        destination_class=TelegramDestinationClass.CHANNEL,
+                        method="editMessageText",
+                        payload={
+                            "chat_id": -1001,
+                            "message_id": 10_000 + index,
+                            "text": "expired",
+                        },
+                        bot_identity="channel_editor",
+                    ),
+                )
+            await db.commit()
+
+        async with self.Session() as db:
+            claimed_editor_ids = []
+            for index in range(100):
+                job = await claim_next_telegram_delivery_job(
+                    db,
+                    current_server="foreign",
+                    bot_identity="channel_editor",
+                    worker_id=f"editor-worker-{index}",
+                    request_timeout_seconds=10,
+                    lease_seconds=30,
+                )
+                self.assertIsNotNone(job)
+                self.assertEqual(job.bot_identity, "channel_editor")
+                claimed_editor_ids.append(int(job.id))
+            await db.commit()
+
+        self.assertEqual(len(set(claimed_editor_ids)), 100)
+        async with self.Session() as db:
+            pending_primary = await db.scalar(
+                select(func.count())
+                .select_from(TelegramDeliveryJobRecord)
+                .where(
+                    TelegramDeliveryJobRecord.bot_identity == "primary",
+                    TelegramDeliveryJobRecord.state == TelegramDeliveryState.PENDING,
+                )
+            )
+        self.assertEqual(pending_primary, 300)
+
     async def test_database_constraint_rejects_editor_send_even_if_service_is_bypassed(self):
         enqueued = await self._enqueue("constraint-primary-send")
         async with self.Session() as db:
@@ -345,12 +417,37 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                 ).scalars()
             )
+            claim_index_columns = await db.scalar(
+                text(
+                    "SELECT array_agg(attribute.attname ORDER BY indexed_column.ordinality) "
+                    "FROM pg_index AS index_meta "
+                    "JOIN pg_class AS index_class ON index_class.oid = index_meta.indexrelid "
+                    "CROSS JOIN LATERAL unnest(index_meta.indkey) WITH ORDINALITY "
+                    "AS indexed_column(attnum, ordinality) "
+                    "JOIN pg_attribute AS attribute "
+                    "ON attribute.attrelid = index_meta.indrelid "
+                    "AND attribute.attnum = indexed_column.attnum "
+                    "WHERE index_class.relname = 'ix_telegram_delivery_jobs_claim'"
+                )
+            )
         self.assertEqual(dedupe_length, 1024)
         self.assertTrue(
             {
                 "ck_telegram_delivery_jobs_bot_identity",
                 "ck_telegram_delivery_jobs_editor_route",
             }.issubset(constraint_names)
+        )
+        self.assertEqual(
+            list(claim_index_columns or ()),
+            [
+                "bot_identity",
+                "priority",
+                "priority_rank",
+                "delivery_deadline_at",
+                "eligible_at",
+                "next_retry_at",
+                "enqueued_seq",
+            ],
         )
 
     async def test_claim_order_promotes_overdue_trade_without_overriding_callback(self):
@@ -390,6 +487,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             first_job = await claim_next_telegram_delivery_job(
                 first,
                 current_server="foreign",
+                bot_identity="primary",
                 worker_id="worker-first",
                 request_timeout_seconds=10,
                 lease_seconds=30,
@@ -398,6 +496,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             second_job = await claim_next_telegram_delivery_job(
                 second,
                 current_server="foreign",
+                bot_identity="primary",
                 worker_id="worker-second",
                 request_timeout_seconds=10,
                 lease_seconds=30,
@@ -725,6 +824,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             return_value=self._queue_runtime(),
         ):
             report = await run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
                 limit=1,
                 freshness_validator=freshness_validator,
                 gateway_call=gateway_call,
@@ -740,6 +840,82 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
         self.assertEqual(persisted.state, TelegramDeliveryState.SENT)
         self.assertEqual(persisted.telegram_message_id, 777)
+
+    async def test_primary_gateway_wait_does_not_block_editor_lane_cycle(self):
+        primary = await self._enqueue("lane-primary-slow")
+        editor = await self._enqueue(
+            "lane-editor-fast",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+            destination="channel:market",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            payload={"chat_id": -1001, "message_id": 81, "text": "expired"},
+            bot_identity="channel_editor",
+        )
+        primary_started = asyncio.Event()
+        editor_finished = asyncio.Event()
+
+        async def freshness_validator(db, job, now):
+            return TelegramFreshnessDecision(TelegramFreshnessOutcome.SEND)
+
+        async def primary_gateway(method, payload, **kwargs):
+            primary_started.set()
+            await asyncio.wait_for(editor_finished.wait(), timeout=2)
+            return TelegramGatewayResult(
+                ok=True,
+                method=method,
+                status_code=200,
+                response_json={"ok": True, "result": {"message_id": 8801}},
+            )
+
+        async def editor_gateway(method, payload, **kwargs):
+            await asyncio.wait_for(primary_started.wait(), timeout=2)
+            editor_finished.set()
+            return TelegramGatewayResult(
+                ok=True,
+                method=method,
+                status_code=200,
+                response_json={"ok": True, "result": True},
+            )
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ):
+            primary_report, editor_report = await asyncio.gather(
+                run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    limit=1,
+                    freshness_validator=freshness_validator,
+                    gateway_call=primary_gateway,
+                    worker_id="primary-lane-worker",
+                    recover_leases=False,
+                ),
+                run_telegram_delivery_queue_cycle(
+                    bot_identity="channel_editor",
+                    limit=1,
+                    freshness_validator=freshness_validator,
+                    gateway_call=editor_gateway,
+                    worker_id="editor-lane-worker",
+                    recover_leases=False,
+                ),
+            )
+
+        self.assertTrue(editor_finished.is_set())
+        self.assertEqual(primary_report.bot_identity, "primary")
+        self.assertEqual(editor_report.bot_identity, "channel_editor")
+        async with self.Session() as db:
+            persisted_primary = await db.get(TelegramDeliveryJobRecord, primary.job.id)
+            persisted_editor = await db.get(TelegramDeliveryJobRecord, editor.job.id)
+        self.assertEqual(persisted_primary.state, TelegramDeliveryState.SENT)
+        self.assertEqual(persisted_editor.state, TelegramDeliveryState.SENT)
 
     async def test_predispatch_validator_failure_releases_unstarted_lease(self):
         enqueued = await self._enqueue("worker-validator-failure")
@@ -759,6 +935,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "synthetic_revalidation_failure"):
                 await run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
                     limit=1,
                     freshness_validator=broken_validator,
                     gateway_call=AsyncMock(),

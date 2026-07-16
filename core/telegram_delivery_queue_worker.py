@@ -7,7 +7,7 @@ validator and a fake gateway while Stage 3 adapters and limiter are completed.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 import logging
@@ -27,7 +27,10 @@ from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from core.services.telegram_delivery_queue_service import (
+    SUPPORTED_TELEGRAM_BOT_IDENTITIES,
+    TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_DELIVERY_QUEUE_WORKER_ID,
+    TELEGRAM_PRIMARY_BOT_IDENTITY,
     apply_telegram_delivery_freshness_result,
     claim_next_telegram_delivery_job,
     mark_telegram_delivery_dispatch_started,
@@ -55,14 +58,20 @@ TelegramQueueFreshnessValidator = Callable[
     [AsyncSession, TelegramDeliveryJobRecord, datetime],
     Awaitable[TelegramFreshnessDecision],
 ]
-
-
 class TelegramDeliveryQueueImplementationIncompleteError(RuntimeError):
     """Refuses a claim when no authoritative pre-dispatch adapter is installed."""
 
 
 @dataclass(frozen=True, slots=True)
+class TelegramDeliveryQueueLaneSpec:
+    bot_identity: str
+    freshness_validator: TelegramQueueFreshnessValidator
+    gateway_call: TelegramQueueGatewayCall
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramDeliveryQueueCycleReport:
+    bot_identity: str
     processed_count: int
     recovered_count: int
     status_counts: dict[str, int]
@@ -77,9 +86,73 @@ def _assert_queue_runtime_owner() -> None:
         )
 
 
-def _worker_id() -> str:
+def _normalize_lane_identity(bot_identity: str) -> str:
+    lane_identity = str(bot_identity or "").strip()
+    if lane_identity not in SUPPORTED_TELEGRAM_BOT_IDENTITIES:
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "telegram_delivery_lane_not_allowlisted"
+        )
+    return lane_identity
+
+
+def configured_telegram_delivery_lane_identities() -> tuple[str, ...]:
+    identities = [TELEGRAM_PRIMARY_BOT_IDENTITY]
+    if bool(
+        getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)
+    ):
+        identities.append(TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY)
+    return tuple(identities)
+
+
+def build_telegram_delivery_queue_lane_specs(
+    *,
+    freshness_validators: Mapping[str, TelegramQueueFreshnessValidator] | None,
+    gateway_calls: Mapping[str, TelegramQueueGatewayCall] | None,
+    bot_identities: Sequence[str] | None = None,
+) -> tuple[TelegramDeliveryQueueLaneSpec, ...]:
+    configured_identities = (
+        configured_telegram_delivery_lane_identities()
+        if bot_identities is None
+        else tuple(bot_identities)
+    )
+    identities = tuple(
+        _normalize_lane_identity(identity)
+        for identity in configured_identities
+    )
+    if not identities or len(set(identities)) != len(identities):
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "telegram_delivery_lane_set_invalid"
+        )
+    validators = freshness_validators or {}
+    gateways = gateway_calls or {}
+    specs: list[TelegramDeliveryQueueLaneSpec] = []
+    for identity in identities:
+        validator = validators.get(identity)
+        gateway_call = gateways.get(identity)
+        if not callable(validator):
+            raise TelegramDeliveryQueueImplementationIncompleteError(
+                f"authoritative_freshness_validator_not_installed:{identity}"
+            )
+        if not callable(gateway_call):
+            raise TelegramDeliveryQueueImplementationIncompleteError(
+                f"telegram_lane_gateway_not_installed:{identity}"
+            )
+        specs.append(
+            TelegramDeliveryQueueLaneSpec(
+                bot_identity=identity,
+                freshness_validator=validator,
+                gateway_call=gateway_call,
+            )
+        )
+    return tuple(specs)
+
+
+def _worker_id(bot_identity: str) -> str:
     hostname = socket.gethostname().split(".", 1)[0][:48]
-    return f"{TELEGRAM_DELIVERY_QUEUE_WORKER_ID}:{hostname}:{os.getpid()}"[:128]
+    lane_identity = _normalize_lane_identity(bot_identity)
+    return (
+        f"{TELEGRAM_DELIVERY_QUEUE_WORKER_ID}:{lane_identity}:{hostname}:{os.getpid()}"
+    )[:128]
 
 
 def _worker_batch_limit(limit: int | None = None) -> int:
@@ -160,33 +233,41 @@ async def _release_after_predispatch_error(
 
 async def run_telegram_delivery_queue_cycle(
     *,
+    bot_identity: str,
     limit: int | None = None,
     freshness_validator: TelegramQueueFreshnessValidator | None = None,
-    gateway_call: TelegramQueueGatewayCall = telegram_gateway.post_telegram_method,
+    gateway_call: TelegramQueueGatewayCall | None = None,
     worker_id: str | None = None,
+    recover_leases: bool = True,
 ) -> TelegramDeliveryQueueCycleReport:
     """Run a bounded testable cycle without holding a DB transaction over HTTP."""
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
+    lane_identity = _normalize_lane_identity(bot_identity)
     if freshness_validator is None:
         # Refuse before lease recovery/claim so an incomplete adapter cannot
         # perturb queue state even when this function is called directly.
         raise TelegramDeliveryQueueImplementationIncompleteError(
-            "authoritative_freshness_validator_not_installed"
+            f"authoritative_freshness_validator_not_installed:{lane_identity}"
+        )
+    if gateway_call is None:
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            f"telegram_lane_gateway_not_installed:{lane_identity}"
         )
     validator = freshness_validator
 
-    active_worker_id = str(worker_id or _worker_id())
+    active_worker_id = str(worker_id or _worker_id(lane_identity))
     status_counts: dict[str, int] = {}
     stale_fence_count = 0
     processed_count = 0
-    recovered_count = await _recover_expired_leases()
+    recovered_count = await _recover_expired_leases() if recover_leases else 0
 
     for _ in range(_worker_batch_limit(limit)):
         async with AsyncSessionLocal() as db:
             job = await claim_next_telegram_delivery_job(
                 db,
                 current_server=current_server(),
+                bot_identity=lane_identity,
                 worker_id=active_worker_id,
                 request_timeout_seconds=_request_timeout_seconds(),
                 lease_seconds=_lease_seconds(),
@@ -298,6 +379,7 @@ async def run_telegram_delivery_queue_cycle(
         processed_count += 1
 
     return TelegramDeliveryQueueCycleReport(
+        bot_identity=lane_identity,
         processed_count=processed_count,
         recovered_count=recovered_count,
         status_counts=status_counts,
@@ -305,13 +387,16 @@ async def run_telegram_delivery_queue_cycle(
     )
 
 
-async def telegram_delivery_queue_loop() -> None:
+async def telegram_delivery_queue_lane_loop(
+    lane: TelegramDeliveryQueueLaneSpec,
+) -> None:
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
     logger.info(
-        "Shared Telegram delivery queue worker started",
+        "Telegram delivery execution lane started",
         extra={
-            "event": "telegram_delivery_queue_worker.started",
+            "event": "telegram_delivery_queue_lane.started",
+            "bot_role": lane.bot_identity,
             "interval_seconds": _worker_interval_seconds(),
             "batch_limit": _worker_batch_limit(),
         },
@@ -322,17 +407,22 @@ async def telegram_delivery_queue_loop() -> None:
         start_time = time.perf_counter()
         with job_context(JOB_TELEGRAM_DELIVERY_QUEUE, iteration=iteration) as run_id:
             try:
-                report = await run_telegram_delivery_queue_cycle()
-                if report.processed_count or report.recovered_count:
+                report = await run_telegram_delivery_queue_cycle(
+                    bot_identity=lane.bot_identity,
+                    freshness_validator=lane.freshness_validator,
+                    gateway_call=lane.gateway_call,
+                    recover_leases=False,
+                )
+                if report.processed_count:
                     logger.info(
-                        "Shared Telegram delivery queue cycle completed",
+                        "Telegram delivery lane cycle completed",
                         extra={
                             "event": "job.cycle.completed",
                             "job_name": JOB_TELEGRAM_DELIVERY_QUEUE,
+                            "bot_role": lane.bot_identity,
                             "run_id": run_id,
                             "iteration": iteration,
                             "processed_count": report.processed_count,
-                            "recovered_count": report.recovered_count,
                             "status_counts": report.status_counts,
                             "stale_fence_count": report.stale_fence_count,
                             "duration_ms": duration_ms_since(start_time),
@@ -340,10 +430,53 @@ async def telegram_delivery_queue_loop() -> None:
                     )
             except asyncio.CancelledError:
                 raise
+            except TelegramDeliveryQueueImplementationIncompleteError:
+                raise
             except Exception as exc:
                 _loop_errors.log(
                     logger,
-                    "Error in shared Telegram delivery queue loop: %s",
+                    "Error in Telegram delivery lane %s: %s",
+                    lane.bot_identity,
+                    exc,
+                    job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
+                    bot_role=lane.bot_identity,
+                    run_id=run_id,
+                    iteration=iteration,
+                    duration_ms=duration_ms_since(start_time),
+                )
+        await asyncio.sleep(_worker_interval_seconds())
+
+
+async def telegram_delivery_queue_recovery_loop() -> None:
+    assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
+    _assert_queue_runtime_owner()
+    iteration = 0
+    while True:
+        iteration += 1
+        start_time = time.perf_counter()
+        with job_context(JOB_TELEGRAM_DELIVERY_QUEUE, iteration=iteration) as run_id:
+            try:
+                recovered_count = await _recover_expired_leases()
+                if recovered_count:
+                    logger.info(
+                        "Telegram delivery lease recovery completed",
+                        extra={
+                            "event": "telegram_delivery_queue_recovery.completed",
+                            "job_name": JOB_TELEGRAM_DELIVERY_QUEUE,
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "recovered_count": recovered_count,
+                            "duration_ms": duration_ms_since(start_time),
+                        },
+                    )
+            except asyncio.CancelledError:
+                raise
+            except TelegramDeliveryQueueImplementationIncompleteError:
+                raise
+            except Exception as exc:
+                _loop_errors.log(
+                    logger,
+                    "Error in Telegram delivery lease recovery: %s",
                     exc,
                     job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
                     run_id=run_id,
@@ -351,3 +484,46 @@ async def telegram_delivery_queue_loop() -> None:
                     duration_ms=duration_ms_since(start_time),
                 )
         await asyncio.sleep(_worker_interval_seconds())
+
+
+async def telegram_delivery_queue_loop(
+    *,
+    freshness_validators: Mapping[str, TelegramQueueFreshnessValidator] | None = None,
+    gateway_calls: Mapping[str, TelegramQueueGatewayCall] | None = None,
+    bot_identities: Sequence[str] | None = None,
+) -> None:
+    """Supervise independent bot lanes under the single queue-v1 owner."""
+    assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
+    _assert_queue_runtime_owner()
+    lanes = build_telegram_delivery_queue_lane_specs(
+        freshness_validators=freshness_validators,
+        gateway_calls=gateway_calls,
+        bot_identities=bot_identities,
+    )
+    logger.info(
+        "Shared Telegram delivery queue supervisor started",
+        extra={
+            "event": "telegram_delivery_queue_worker.started",
+            "bot_roles": tuple(lane.bot_identity for lane in lanes),
+            "lane_count": len(lanes),
+        },
+    )
+    tasks = [
+        asyncio.create_task(
+            telegram_delivery_queue_lane_loop(lane),
+            name=f"telegram-delivery-lane:{lane.bot_identity}",
+        )
+        for lane in lanes
+    ]
+    tasks.append(
+        asyncio.create_task(
+            telegram_delivery_queue_recovery_loop(),
+            name="telegram-delivery-lease-recovery",
+        )
+    )
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

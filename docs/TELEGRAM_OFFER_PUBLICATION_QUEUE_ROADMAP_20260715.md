@@ -5,7 +5,7 @@
 - تاریخ ایجاد: `2026-07-15`
 - شاخه اختصاصی: `candidate/telegram-offer-publication-queue`
 - مبنای شاخه: `main@ca6348af`
-- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند. ممیزی closure در `2026-07-16` تمام تصمیم‌های اولیه challenge register را بست؛ شش ADR اولیه و قرارداد pure نهایی `M0` تا `M7` ابتدا با `44` تست قرارداد و `171` تست هدفمند/regression پاس شدند. همان روز ADR هفتم برای `channel_editor` پذیرفته و برش foundation مرحله ۳ ممیزی شد: پس از merge آخرین `main`، `316` تست unit/regression و `20` تست PostgreSQL واقعی، همراه upgrade→downgrade→upgrade migration پاس شدند. پیش از ادامه Stage 3، طراحی scheduler برای حذف head-of-line blocking بین ظرفیت primary و editor اصلاح شد: ownership و state machine یکی است، اما دو execution lane مستقل و work-conserving دارد. runtime صف همچنان code-disabled و Stage 3 هنوز کامل نیست؛ هیچ deploy انجام نشده و فعال‌شدن editor منوط به تکمیل کد و smoke/benchmark Stage 4 است.
+- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند. ممیزی closure در `2026-07-16` تمام تصمیم‌های اولیه challenge register را بست؛ شش ADR اولیه و قرارداد pure نهایی `M0` تا `M7` ابتدا با `44` تست قرارداد و `171` تست هدفمند/regression پاس شدند. همان روز ADR هفتم برای `channel_editor` پذیرفته و برش foundation مرحله ۳ ممیزی شد: پس از merge آخرین `main`، `316` تست unit/regression و `20` تست PostgreSQL واقعی، همراه upgrade→downgrade→upgrade migration پاس شدند. طراحی scheduler برای حذف head-of-line blocking بین ظرفیت primary و editor اصلاح و foundation دو execution lane مستقل و work-conserving آن پیاده شد؛ ownership و state machine همچنان یکی است. runtime صف هنوز code-disabled و Stage 3 کامل نیست؛ هیچ deploy انجام نشده و فعال‌شدن editor منوط به تکمیل limiter/adapterها و smoke/benchmark Stage 4 است.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -608,8 +608,12 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - `bot_identity` فقط roleهای `primary/channel_editor` را می‌پذیرد؛ route editor هم در service و هم constraint دیتابیس به editهای allowlisted کانال محدود و تغییر bot یک job موجود ممنوع شده است.
 - envelope ناقص HTTP 200 موفقیت محسوب نمی‌شود، dispatch marker هر fence تک‌مصرف است، raw destination مهاجرت‌یافته redacted می‌شود و direct cycle خارج ownership رسمی پیش از DB متوقف می‌شود.
 - credential resolver، canonical publisher identity در publication state، permission/fingerprint preflight، limiter چند credential، revalidation payload و feeder cutover باید در ادامه Stage 3 تکمیل شوند.
-- claim loop فعلی foundation هنوز قرارداد دو lane مستقل را پیاده نکرده است؛ این اصلاح معماری باید پیش از هر فعال‌سازی runtime انجام و با تست هم‌زمانی PostgreSQL/worker اثبات شود.
+- claim repository اکنون `bot_identity` را اجباری و allowlisted می‌کند و index آماده claim با `bot_identity` آغاز می‌شود؛ lane editor نمی‌تواند job primary را lease کند و برعکس.
+- supervisor واحد `queue-v1`، taskهای مستقل primary، editor و lease recovery را ایجاد می‌کند. batch، sleep، gateway wait و خطای یک lane در task lane دیگر barrier نمی‌سازد؛ adapter freshness و gateway هر lane صریح و اجباری است و نبود هرکدام پیش از DB fail-closed می‌شود.
+- editor یک feature flag مستقل با مقدار پیش‌فرض خاموش دارد. حتی با patch آزمایشی ownership، نبود adapter اختصاصی اجازه ساخت task یا side effect نمی‌دهد و gateway واقعی پیش‌فرض از worker حذف شده است.
+- تست pure و PostgreSQL واقعی با `300` job primary و `100` job editor، باقی‌ماندن هر `300` primary هنگام claim کامل editor و ادامه editor در زمان انتظار gateway primary را اثبات کردند. cooldown bot در قرارداد reference نیز per-identity شد و destination gate مشترک باقی ماند.
 - پس از merge آخرین `main`، `316` تست unit/regression و `20` تست PostgreSQL واقعی شامل enqueue هم‌زمان، `SKIP LOCKED`، route constraint، immutable routing، fencing، crash recovery، 429 خام و transaction boundary پاس شدند؛ migration نیز روی scratch واقعی full-upgrade، downgrade به `f1b6e7f8a9dc` و re-upgrade تا `f2c7d8e9a0bd` را پاس کرد.
+- برای برش دو lane، `248` تست unit/regression مرتبط و `23` تست PostgreSQL واقعی پاس شدند؛ مجموعه PostgreSQL شامل index فیزیکی lane-aware، claim فیلترشده، سناریوی `300/100` و هم‌زمانی gateway دو lane بود. migration اصلاح‌شده نیز روی scratch موقت واقعی downgrade به `f1b6e7f8a9dc` و re-upgrade تا `f2c7d8e9a0bd` را دوباره پاس کرد.
 - این foundation مجوز deploy یا شروع Stage 4 نیست و runtime عمداً غیرفعال باقی مانده است.
 
 ### Stage 4 — deploy و آزمایش تکرارشونده staging

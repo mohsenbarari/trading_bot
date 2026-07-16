@@ -350,6 +350,7 @@ class TelegramDeliveryJob:
     payload: dict[str, Any]
     action: TelegramDeliveryAction
     created_sequence: int
+    bot_identity: str = "primary"
     delivery_deadline_at: datetime | None = None
     eligible_at: datetime | None = None
     freshness_deadline_at: datetime | None = None
@@ -918,9 +919,9 @@ class InMemoryTelegramDeliveryQueue:
 
     jobs: dict[int, TelegramDeliveryJob] = field(default_factory=dict)
     destination_cooldowns: dict[str, datetime] = field(default_factory=dict)
-    bot_cooldown_until: datetime | None = None
-    bot_probe_not_before: datetime | None = None
-    _recent_429: dict[str, datetime] = field(default_factory=dict)
+    bot_cooldowns: dict[str, datetime] = field(default_factory=dict)
+    bot_probe_not_before: dict[str, datetime] = field(default_factory=dict)
+    _recent_429: dict[str, dict[str, datetime]] = field(default_factory=dict)
     _dedupe_index: dict[str, int] = field(default_factory=dict)
     _next_id: int = 1
     _next_sequence: int = 1
@@ -937,6 +938,7 @@ class InMemoryTelegramDeliveryQueue:
         destination_class: TelegramDestinationClass,
         method: str,
         payload: Mapping[str, Any],
+        bot_identity: str = "primary",
         delivery_deadline_at: datetime | None = None,
         eligible_at: datetime | None = None,
         freshness_deadline_at: datetime | None = None,
@@ -955,7 +957,8 @@ class InMemoryTelegramDeliveryQueue:
             if existing_id is not None:
                 existing = self.jobs[existing_id]
                 comparable = (
-                    existing.destination_class == destination_class
+                    existing.bot_identity == str(bot_identity)
+                    and existing.destination_class == destination_class
                     and existing.method == str(method)
                     and existing.payload == dict(payload)
                     and existing.delivery_deadline_at == delivery_deadline_at
@@ -979,6 +982,7 @@ class InMemoryTelegramDeliveryQueue:
                 payload=dict(payload),
                 action=action,
                 created_sequence=self._next_sequence,
+                bot_identity=str(bot_identity),
                 delivery_deadline_at=delivery_deadline_at,
                 eligible_at=eligible_at,
                 freshness_deadline_at=freshness_deadline_at,
@@ -997,19 +1001,26 @@ class InMemoryTelegramDeliveryQueue:
         worker_id: str,
         request_timeout_seconds: float,
         lease_seconds: float,
+        bot_identity: str = "primary",
     ) -> TelegramDeliveryJob | None:
         minimum = float(request_timeout_seconds) + MINIMUM_LEASE_MARGIN_SECONDS
         if float(lease_seconds) < minimum:
             raise ValueError("lease_must_cover_request_timeout_plus_margin")
+        lane_identity = str(bot_identity or "").strip()
+        if not lane_identity:
+            raise ValueError("bot_identity_required")
         async with self._lock:
-            if self.bot_cooldown_until is not None and self.bot_cooldown_until > now:
+            cooldown_until = self.bot_cooldowns.get(lane_identity)
+            if cooldown_until is not None and cooldown_until > now:
                 return None
-            if self.bot_probe_not_before is not None and self.bot_probe_not_before > now:
+            probe_not_before = self.bot_probe_not_before.get(lane_identity)
+            if probe_not_before is not None and probe_not_before > now:
                 return None
             ready = [
                 job
                 for job in self.jobs.values()
                 if job.state in CLAIMABLE_DELIVERY_STATES
+                and job.bot_identity == lane_identity
                 and (job.eligible_at is None or job.eligible_at <= now)
                 and (job.next_retry_at is None or job.next_retry_at <= now)
                 and self.destination_cooldowns.get(job.destination_key, now) <= now
@@ -1099,32 +1110,46 @@ class InMemoryTelegramDeliveryQueue:
 
             if decision.reason == "telegram_rate_limited":
                 window = timedelta(seconds=max(0.0, float(global_rate_limit_window_seconds)))
-                self._recent_429 = {
+                recent_429 = self._recent_429.setdefault(job.bot_identity, {})
+                recent_429 = {
                     destination: seen_at
-                    for destination, seen_at in self._recent_429.items()
+                    for destination, seen_at in recent_429.items()
                     if now - seen_at <= window
                 }
                 distinct_other = any(
                     destination != job.destination_key
-                    for destination in self._recent_429
+                    for destination in recent_429
                 )
-                self._recent_429[job.destination_key] = now
+                recent_429[job.destination_key] = now
+                self._recent_429[job.bot_identity] = recent_429
                 if distinct_other:
                     candidate = max(
-                        self.destination_cooldowns.values(),
+                        (
+                            self.destination_cooldowns[destination]
+                            for destination in recent_429
+                            if destination in self.destination_cooldowns
+                        ),
                         default=decision.destination_cooldown_until or now,
                     )
-                    if self.bot_cooldown_until is None or candidate > self.bot_cooldown_until:
-                        self.bot_cooldown_until = candidate
-                    self.bot_probe_not_before = None
-                    decision = replace(decision, bot_cooldown_until=self.bot_cooldown_until)
+                    current = self.bot_cooldowns.get(job.bot_identity)
+                    if current is None or candidate > current:
+                        self.bot_cooldowns[job.bot_identity] = candidate
+                    self.bot_probe_not_before.pop(job.bot_identity, None)
+                    decision = replace(
+                        decision,
+                        bot_cooldown_until=self.bot_cooldowns[job.bot_identity],
+                    )
                 else:
                     probe_at = now + timedelta(
                         seconds=max(0.0, float(rate_limit_probe_delay_seconds))
                     )
-                    if self.bot_probe_not_before is None or probe_at > self.bot_probe_not_before:
-                        self.bot_probe_not_before = probe_at
-                    decision = replace(decision, bot_probe_not_before=self.bot_probe_not_before)
+                    current = self.bot_probe_not_before.get(job.bot_identity)
+                    if current is None or probe_at > current:
+                        self.bot_probe_not_before[job.bot_identity] = probe_at
+                    decision = replace(
+                        decision,
+                        bot_probe_not_before=self.bot_probe_not_before[job.bot_identity],
+                    )
             return decision
 
     async def recover_expired_leases(self, *, now: datetime) -> list[int]:
@@ -1163,8 +1188,8 @@ class InMemoryTelegramDeliveryQueue:
 
     async def operator_resume_global(self, *, now: datetime) -> list[int]:
         async with self._lock:
-            self.bot_cooldown_until = None
-            self.bot_probe_not_before = None
+            self.bot_cooldowns.clear()
+            self.bot_probe_not_before.clear()
             self._recent_429.clear()
             resumed: list[int] = []
             for job in self.jobs.values():

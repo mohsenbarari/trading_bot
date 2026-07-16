@@ -222,7 +222,15 @@ def upgrade() -> None:
     op.create_index(
         "ix_telegram_delivery_jobs_claim",
         "telegram_delivery_jobs",
-        ["priority", "priority_rank", "delivery_deadline_at", "eligible_at", "next_retry_at", "enqueued_seq"],
+        [
+            "bot_identity",
+            "priority",
+            "priority_rank",
+            "delivery_deadline_at",
+            "eligible_at",
+            "next_retry_at",
+            "enqueued_seq",
+        ],
         unique=False,
         postgresql_where=sa.text("state IN ('pending', 'pending_retry')"),
     )

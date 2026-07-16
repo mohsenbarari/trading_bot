@@ -196,6 +196,7 @@ def _record_to_contract(record: TelegramDeliveryJobRecord) -> TelegramDeliveryJo
         payload=dict(record.payload or {}),
         action=TelegramDeliveryAction(_enum_value(record.action_kind)),
         created_sequence=int(record.enqueued_seq),
+        bot_identity=str(record.bot_identity),
         delivery_deadline_at=record.delivery_deadline_at,
         eligible_at=record.eligible_at,
         freshness_deadline_at=record.freshness_deadline_at,
@@ -389,12 +390,16 @@ async def claim_next_telegram_delivery_job(
     db: AsyncSession,
     *,
     current_server: str,
+    bot_identity: str,
     worker_id: str,
     request_timeout_seconds: float,
     lease_seconds: float,
     now: datetime | None = None,
 ) -> TelegramDeliveryJobRecord | None:
     _require_foreign(current_server)
+    lane_identity = str(bot_identity or "").strip()
+    if lane_identity not in SUPPORTED_TELEGRAM_BOT_IDENTITIES:
+        raise TelegramDeliveryQueueValidationError("telegram_bot_identity_not_allowlisted")
     if float(lease_seconds) < float(request_timeout_seconds) + MINIMUM_LEASE_MARGIN_SECONDS:
         raise TelegramDeliveryQueueValidationError("lease_must_cover_request_timeout_plus_margin")
     current_time = now or utc_now()
@@ -408,6 +413,7 @@ async def claim_next_telegram_delivery_job(
     stmt = (
         select(TelegramDeliveryJobRecord)
         .where(
+            TelegramDeliveryJobRecord.bot_identity == lane_identity,
             TelegramDeliveryJobRecord.state.in_(tuple(CLAIMABLE_DELIVERY_STATES)),
             or_(
                 TelegramDeliveryJobRecord.eligible_at.is_(None),

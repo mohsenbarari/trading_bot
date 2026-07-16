@@ -92,6 +92,23 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
                 "ix_telegram_delivery_jobs_run",
             }.issubset(index_names)
         )
+        claim_index = next(
+            index
+            for index in TelegramDeliveryJobRecord.__table__.indexes
+            if index.name == "ix_telegram_delivery_jobs_claim"
+        )
+        self.assertEqual(
+            tuple(column.name for column in claim_index.columns),
+            (
+                "bot_identity",
+                "priority",
+                "priority_rank",
+                "delivery_deadline_at",
+                "eligible_at",
+                "next_retry_at",
+                "enqueued_seq",
+            ),
+        )
         check_names = {
             constraint.name
             for constraint in TelegramDeliveryJobRecord.__table__.constraints
@@ -119,6 +136,7 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertEqual(fields["telegram_delivery_execution_owner"].default, "legacy")
         self.assertFalse(fields["telegram_delivery_queue_worker_enabled"].default)
         self.assertFalse(fields["telegram_delivery_queue_cutover_ready"].default)
+        self.assertFalse(fields["telegram_delivery_queue_channel_editor_enabled"].default)
 
     def test_migration_is_additive_and_points_to_previous_head(self):
         source = Path(

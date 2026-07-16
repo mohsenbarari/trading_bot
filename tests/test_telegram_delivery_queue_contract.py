@@ -93,6 +93,7 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         delivery_deadline_at: datetime | None = None,
         freshness_deadline_at: datetime | None = None,
         campaign_id: str | None = None,
+        bot_identity: str = "primary",
     ):
         job, created = await queue.enqueue(
             feeder=feeder,
@@ -103,6 +104,7 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
             destination_class=destination_class,
             method=method,
             payload={"text": key},
+            bot_identity=bot_identity,
             delivery_deadline_at=delivery_deadline_at,
             freshness_deadline_at=freshness_deadline_at,
             campaign_id=campaign_id,
@@ -116,13 +118,87 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         *,
         now: datetime = NOW,
         worker: str = "w1",
+        bot_identity: str = "primary",
     ):
         return await queue.claim_next(
             now=now,
             worker_id=worker,
             request_timeout_seconds=10,
             lease_seconds=25,
+            bot_identity=bot_identity,
         )
+
+    async def test_bot_lanes_are_work_conserving_under_300_to_100_backlog(self):
+        queue = InMemoryTelegramDeliveryQueue()
+        for index in range(300):
+            await self.enqueue(queue, f"primary-{index}")
+        for index in range(100):
+            await self.enqueue(
+                queue,
+                f"editor-{index}",
+                feeder=TelegramFeederKind.OFFER_EDIT,
+                action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+                destination=f"channel:market:{index}",
+                destination_class=TelegramDestinationClass.CHANNEL,
+                method="editMessageText",
+                bot_identity="channel_editor",
+            )
+
+        editor_claims = [
+            await self.claim(
+                queue,
+                worker=f"editor-worker-{index}",
+                bot_identity="channel_editor",
+            )
+            for index in range(100)
+        ]
+        self.assertTrue(all(job is not None for job in editor_claims))
+        self.assertTrue(all(job.bot_identity == "channel_editor" for job in editor_claims))
+        self.assertEqual(
+            sum(
+                job.state == TelegramDeliveryState.PENDING
+                and job.bot_identity == "primary"
+                for job in queue.jobs.values()
+            ),
+            300,
+        )
+
+    async def test_bot_wide_429_cooldown_does_not_pause_the_other_bot_lane(self):
+        queue = InMemoryTelegramDeliveryQueue()
+        first = await self.enqueue(queue, "primary-a", destination="channel:a")
+        second = await self.enqueue(queue, "primary-b", destination="channel:b")
+        editor = await self.enqueue(
+            queue,
+            "editor-c",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+            destination="channel:c",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            bot_identity="channel_editor",
+        )
+        await self.claim(queue)
+        await self.resolve(
+            queue,
+            first,
+            gateway_result(status_code=429, response_json={"parameters": {"retry_after": 7}}),
+        )
+        await self.claim(queue, now=NOW + timedelta(seconds=0.1), worker="primary-2")
+        await self.resolve(
+            queue,
+            second,
+            gateway_result(status_code=429, response_json={"parameters": {"retry_after": 3}}),
+            now=NOW + timedelta(seconds=0.1),
+            worker="primary-2",
+        )
+
+        claimed_editor = await self.claim(
+            queue,
+            now=NOW + timedelta(seconds=0.2),
+            worker="editor-1",
+            bot_identity="channel_editor",
+        )
+        self.assertIs(claimed_editor, editor)
 
     async def resolve(
         self,

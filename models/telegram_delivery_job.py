@@ -75,6 +75,7 @@ class TelegramDeliveryJobRecord(Base):
         ),
         Index(
             "ix_telegram_delivery_jobs_claim",
+            "bot_identity",
             "priority",
             "priority_rank",
             "delivery_deadline_at",

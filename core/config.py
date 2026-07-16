@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     telegram_delivery_execution_owner: str = "legacy"
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False
+    telegram_delivery_queue_channel_editor_enabled: bool = False
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
     telegram_delivery_queue_worker_batch_limit: int = 25
     telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
