@@ -59,6 +59,15 @@
 - `answerCallbackQuery`
 - تأیید ثبت، معامله یا انقضا
 - پاسخ عملیاتی که کاربر در همان لحظه منتظر آن است
+- هر اعلان معاملاتی خصوصی به هر یک از دو طرف که تا `5` ثانیه پس از commit معامله پاسخ موفق Telegram نگرفته باشد، به‌صورت مستقل از `P2` به `P0` ارتقا می‌یابد.
+
+ترتیب داخلی `P0`:
+
+1. callback و پاسخ تعاملی دارای deadline
+2. اعلان معاملاتی ارتقایافته پس از `5` ثانیه
+3. سایر پاسخ‌های P0 بر پایه FIFO
+
+«دریافت» در این قرارداد یعنی Bot API برای همان job پاسخ موفق `ok=true` و `message_id` داده باشد. Bot API خوانده‌شدن پیام روی دستگاه کاربر را گزارش نمی‌کند. `delivery_deadline_at` از `trade_committed_at + 5s` ساخته و فقط وقتی `now > delivery_deadline_at` باشد ارتقا انجام می‌شود. اگر پیام یک طرف ارسال شده و پیام طرف دیگر pending باشد، فقط job طرف دوم ارتقا می‌یابد. ارتقا به P0 اجازه عبور از `retry_after` یا cooldown Telegram را نمی‌دهد.
 
 ### `P1` — عملیات آفر در کانال
 
@@ -69,10 +78,37 @@
 3. پیام‌های حیاتی بازار، به‌خصوص بسته‌شدن بازار
 4. انتشار آفر جدید
 
+#### حالت ازدحام صف ادیت کانال
+
+این حالت فقط زمانی فعال می‌شود که بیش از `30` آفر یکتا، نه raw job، برای edit کانال pending و unsuperseded باشند. این قواعد فقط ترتیب انتخاب میان editهای کانال را تغییر می‌دهند و اولویت کلی P0 تا P3 یا جایگاه پیام‌های غیر-edit را تغییر نمی‌دهند.
+
+1. هر Offer فقط یک edit مؤثر دارد؛ editهای قدیمی همان Offer با آخرین state همگرا و supersede می‌شوند. coalescing نباید `first_edit_enqueued_at` را reset کند.
+2. تمام editهایی که حداکثر `5` دقیقه در صف بوده‌اند جلوتر از editهای stale قرار می‌گیرند.
+3. در هر bucket زمانی، آفر active و لات‌بندی‌شده‌ای که بخشی از آن معامله شده است بالاترین اولویت edit را دارد تا مقدار معامله‌شده و لات‌های دیگر قابل درخواست نباشند.
+4. بعد از آن، آفر کاملاً معامله‌شده برای متن نهایی و حذف دکمه‌ها قرار می‌گیرد.
+5. سپس سایر editها مانند انقضا یا لغو قرار می‌گیرند.
+6. در هر طبقه، Offer با `created_at` جدیدتر زودتر انتخاب می‌شود؛ زمان ساخت یا supersede شدن job نباید یک Offer قدیمی را ظاهراً جدید کند.
+7. edit با `now > first_edit_enqueued_at + 5m` به bucket انتهای صف منتقل می‌شود و در آن bucket نیز Offer جدیدتر جلوتر از Offer قدیمی‌تر است.
+8. وقتی تعداد آفرهای یکتای منتظر edit به `30` یا کمتر بازگشت، حالت ازدحام خاموش و ترتیب عادی P1 دوباره اعمال می‌شود.
+
+کلید مرتب‌سازی قطعی در حالت ازدحام:
+
+```text
+(
+  stale_bucket,          # 0 تا پنج دقیقه، 1 بیشتر از پنج دقیقه
+  edit_business_class,   # 0 active lot-partial، 1 traded-terminal، 2 سایر
+  offer_created_at DESC,
+  offer_public_id
+)
+```
+
+این سیاست عمداً FIFO صف edit را در حالت ازدحام کنار می‌گذارد. چون ورودی مداوم می‌تواند editهای قدیمی را برای همیشه عقب نگه دارد، Stage 3 به catch-up/reconciliation جدا در ظرفیت آزاد یا پس از بسته‌شدن بازار و alert برای stale backlog نیاز دارد؛ این مسیر حق ندارد ترتیب live edit را تغییر دهد.
+
 ### `P2` — اعلان‌های معاملاتی خصوصی
 
 - اطلاع‌رسانی به خریدار، فروشنده یا افراد مرتبط
 - اعلان‌های تراکنشی که کاربر منتظر پاسخ تعاملی آن‌ها نیست
+- فقط job نتیجه معامله برای خریدار و فروشنده پس از بیش از `5` ثانیه بدون پاسخ موفق Telegram، طبق قرارداد P0 ارتقا می‌یابد؛ اعلان سایر افراد مرتبط خودکار ارتقا نمی‌یابد.
 
 ### `P3` — اعلان‌های انبوه و کم‌فوریت
 
@@ -80,11 +116,11 @@
 - اعلان‌های عمومی
 - اعلان عضویت یا رویدادهای غیر فوری
 
-یادداشت `2026-07-16`: مالک محصول شرایط اولویت‌بندی جدیدی را در ادامه اعلام خواهد کرد؛ ترتیب این بخش تا ثبت و بررسی آن شرایط برای Stage 3 نهایی محسوب نمی‌شود.
+یادداشت `2026-07-16`: شرایط جدید ارتقای پنج‌ثانیه‌ای اعلان معامله و ازدحام edit ثبت شد. قرارداد catch-up برای جلوگیری از starvation editهای قدیمی هنوز باید پیش از Stage 3 بسته شود.
 
 قواعد مشترک:
 
-- در یک سطح اولویت، ترتیب FIFO رعایت می‌شود.
+- در یک سطح اولویت، ترتیب FIFO رعایت می‌شود؛ استثناها فقط ارتقای پنج‌ثانیه‌ای پیام معامله و حالت ازدحام edit کانال هستند.
 - `429` اولویت اصلی رکورد را تغییر نمی‌دهد.
 - هنگام cooldown مقصد، هیچ عملیات دیگری به همان مقصد ارسال نمی‌شود.
 - پس از cooldown، scheduler بالاترین اولویت آماده را انتخاب می‌کند؛ رکورد `429` همچنان pending و قابل retry باقی می‌ماند.
@@ -359,7 +395,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 #### نتیجه اجرای Stage 2 در `2026-07-15`
 
 - قرارداد pure و بدون side effect در `core/telegram_delivery_queue_contract.py` ایجاد شد تا مستقیماً مبنای adapter پایدار Stage 3 باشد.
-- اولویت `P0` تا `P3`، ترتیب داخلی `P1` و FIFO قطعی شد.
+- اولویت `P0` تا `P3`، ترتیب داخلی `P1` و FIFO در قرارداد اولیه قطعی شد. تصمیم‌های جدید `2026-07-16` ارتقای زمانی P2 به P0 و حالت non-FIFO ازدحام edit را اضافه کردند؛ قرارداد و تست Stage 2 باید پس از بسته‌شدن catch-up policy و پیش از Stage 3 بازنگری شوند.
 - `429` رکورد را pending نگه می‌دارد، `retry_after + safety_margin` را اعمال می‌کند و فقط lane همان مقصد را تا موعد retry می‌بندد.
 - `5xx` و خطاهای transport قابل retry با backoff محدود مدل شدند؛ خطای payload معیوب `400` terminal و `403` موجب pause مقصد می‌شود.
 - dedupe هم‌زمان، collision یک dedupe key با payload متفاوت، claim هم‌زمان، مالکیت lease، نتیجه دیررس worker قبلی و بازیابی پس از restart تست شدند.
@@ -479,7 +515,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C09` | فنی/عملیات | P0 | OPEN | انتخاب interval نهایی | آزمایش پرتکرار و goodput پایدار در بار ترکیبی |
 | `TOPQ-C10` | معماری | P0 | BLOCKER | scheduler مشترک در برابر مسیرهای مستقیم و workerها | inventory مالکیت و طرح حذف bypass پیش از تغییر producer |
 | `TOPQ-C11` | محصول/فنی | P1 | DECIDED | آفر terminal پیش از publication | بازخوانی وضعیت و تبدیل به DISABLED بدون ارسال stale |
-| `TOPQ-C12` | فنی/عملیات | P1 | OPEN | starvation و backlog غیرقابل‌مشاهده | metrics، aging policy و ظرفیت رزروشده |
+| `TOPQ-C12` | فنی/عملیات | P1 | BLOCKER | سیاست جدید newest-first و انتقال editهای بالای پنج دقیقه به انتهای صف می‌تواند starvation دائمی و backlog نامرئی بسازد | شمار distinct Offer، coalescing، stale metrics و catch-up/reconciliation خارج live ordering |
 | `TOPQ-C13` | عملیات | P1 | OPEN | reconciliation دقیق active/history | گزارش شناسه، علت، retry و تفکیک خطای تاریخی |
 | `TOPQ-C14` | تست | P1 | OPEN | پوشش تمام کالاها و حالات تجارت | acceptance matrix و fixture read-only production |
 | `TOPQ-C15` | معماری | P1 | DECIDED | مرز اجرای Telegram | foreign-only execution و عدم اجرای مستقیم روی Iran |
@@ -529,6 +565,8 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C54` | بالا | DECIDED | payload، error body، bot token، MTProto session و fixture ممکن است PII/secret افشا کنند | کمینه‌سازی payload، redaction، encryption/permission و secret rotation | secret scan، log review و دسترسی حداقلی |
 | `TOPQ-C55` | متوسط | OPEN | job permanent/ambiguous بدون ابزار pause، inspect، retry امن یا cancel عملیاتی گیر می‌کند | operator command audited با dry-run و dedupe guard | runbook exercise روی job مصنوعی |
 | `TOPQ-C56` | بحرانی | BLOCKER | retry بعد از `retry_after` ممکن است publication یا پیام عملیاتی منقضی و نادرست را دیرهنگام ارسال کند | revalidation اجباری درست پیش از dispatch و قرارداد freshness به تفکیک نوع job در بخش 13.8 | fault test با `retry_after` بزرگ‌تر از عمر آفر/درخواست و شمار صفر پیام stale |
+| `TOPQ-C57` | بالا | DECIDED | پیام نتیجه معامله یکی از دو طرف ممکن است در P2 بیش از پنج ثانیه معطل بماند | deadline از commit معامله، ارتقای مستقل هر recipient به P0 و حفظ `retry_after`/cooldown | تست یک طرف sent و طرف دیگر pending، مرز دقیق پنج ثانیه و صفر bypass محدودیت Telegram |
+| `TOPQ-C58` | بحرانی | BLOCKER | حالت ازدحام edit با newest-first و stale-tail ممکن است edit قدیمی را هرگز اجرا نکند یا raw job count آستانه را اشتباه فعال کند | آستانه بیش از ۳۰ Offer یکتا، یک edit مؤثر برای هر Offer و catch-up در ظرفیت آزاد/پس از بازار | تست ۳۰ در برابر ۳۱ Offer، coalescing چند edit و تخلیه نهایی تمام staleها |
 
 ### 13.5 چالش‌های غیرفنی و عملیاتی
 
@@ -560,7 +598,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-ADR-01` | ظرفیت کانال، SLO publication و semantics expiry در backlog | `C21`, `N01`, `N02` |
 | `TOPQ-ADR-02` | schema، منبع حقیقت، dedupe و مرز atomic producer/sync | `C22`, `C23`, `C29`, `C38` |
 | `TOPQ-ADR-03` | timeout/crash ambiguity، lease و reconciliation | `C07`, `C24`, `C35`, `C55` |
-| `TOPQ-ADR-04` | scheduler دو‌سطحی، priority، P0 deadline، freshness و outage mode | `C10`, `C25`, `C26`, `C30`, `C37`, `C56` |
+| `TOPQ-ADR-04` | scheduler دو‌سطحی، priority، P0 deadline، freshness، edit congestion و outage mode | `C10`, `C12`, `C25`, `C26`, `C30`, `C37`, `C56`, `C57`, `C58` |
 | `TOPQ-ADR-05` | inventory gateway، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41` |
 | `TOPQ-ADR-06` | RACI، copy نهایی، incident response و go/no-go | `N03`, `N05`, `N10`, `N14` |
 
@@ -668,6 +706,9 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 - هیچ `429` به `FAILED` یا انقضای زودهنگام آفر منجر نشود و هیچ publication یا دکمه عملیاتی stale پس از پایان عمر کسب‌وکار ارسال نشود.
 - همه retryها `retry_after` را رعایت کنند.
 - اولویت P0 تا P3 و ترتیب داخلی P1 در تست اثبات شود.
+- اعلان معاملاتی pending هر recipient در مرز پنج ثانیه به P0 ارتقا یابد، بدون اینکه `retry_after` یا cooldown را دور بزند.
+- حالت ازدحام edit فقط در `31` Offer یکتای pending فعال شود؛ active lot-partial سپس traded-terminal و سپس سایر editها را با newest-first انتخاب کند و تمام editهای بالای پنج دقیقه را در stale tail نگه دارد.
+- چند edit یک Offer به یک state نهایی coalesce شوند و catch-up ثابت کند پس از پایان بار هیچ stale edit دائمی باقی نمی‌ماند.
 - علامت terminal و حذف دکمه کانال یک API call باشند.
 - هیچ مسیر مستقیم send/edit کانال limiter را دور نزند.
 - هیچ duplicate کنترل‌نشده در restart، concurrency یا retry تولید نشود.
