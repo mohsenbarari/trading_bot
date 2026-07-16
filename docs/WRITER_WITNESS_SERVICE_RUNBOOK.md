@@ -242,3 +242,49 @@ Production writer activation remains blocked until real-host directional
 partition/pause/delayed-packet tests, operator approval policy, stale-epoch
 side-effect binding, sync/parity/file gates, and the higher-level
 recovery/Arvan orchestrator are complete.
+
+## Real-Host Matrix Preflight
+
+The real-host campaign uses replacement Witness `185.206.95.94` as the only
+fault-injection target. Original Witness `185.231.182.6` remains an unchanged
+rollback/reference host. WebApp-FI and WebApp-IR are production hosts, so the
+preflight and the later campaign must never stop, restart, reconfigure, or
+inject a broad network fault into their product services.
+
+Build the side-effect-free plan from the dedicated feature branch:
+
+```text
+make writer-witness-real-host-matrix-plan
+```
+
+Execute every read-only entry gate:
+
+```text
+make writer-witness-real-host-matrix-preflight
+```
+
+The preflight fails closed unless:
+
+- the checkout is clean and remains on
+  `feature/arvan-controlled-origin-failover`;
+- the focused Writer/Fencing/runtime source regression suite passes;
+- WebApp-FI production is healthy and its Witness flags remain disabled;
+- WebApp-IR application and sync-worker writers remain stopped while its
+  database is healthy;
+- both WebApp sites can reach the replacement Witness on TCP `443`;
+- the replacement Witness is healthy, NTP-synchronized, below the disk guard,
+  exactly `webapp:0:vacant`, and has zero receipts;
+- a checksumed backup is less than 24 hours old;
+- at least one connection-disabled rollback database exists;
+- the original Witness remains healthy, vacant, and unchanged.
+
+The retained JSON artifact is written outside the repository under
+`/tmp/trading-bot-writer-witness-real-host-matrix/`. It contains commands,
+bounded stdout/stderr, release identifiers, and pass/fail evidence but no HMAC
+secret, private key, or client credential.
+
+This preflight deliberately does not integrate `main` in either direction. A
+pass authorizes only the dark-Witness control-plane fault matrix. It does not
+prove that the feature branch is compatible with the current product release,
+does not authorize a first lease, and does not permit production WebApp or
+Arvan/CDN mutation.

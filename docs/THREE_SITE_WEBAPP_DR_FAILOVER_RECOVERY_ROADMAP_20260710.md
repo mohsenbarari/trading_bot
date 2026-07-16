@@ -2456,3 +2456,63 @@ or renewal flag, started no stopped WebApp-IR application process, changed no
 product database, and mutated no CDN or Arvan route. Credential rotation is no
 longer a T-004 blocker; the real-host directional fault matrix and the remaining
 higher-level architecture gates still block activation.
+
+## 46. Real-Host Matrix Preflight Preparation - 2026-07-16
+
+### 46.1 Branch and scope boundary
+
+The owner explicitly rejected merging this feature branch with `main` in
+either direction before the real-host fault campaign. The retained matrix scope
+is therefore the independently deployed dark Writer Witness control plane. No
+result from this campaign may be described as proof that the feature branch is
+integrated with the current production application release.
+
+`scripts/plan_writer_witness_real_host_matrix.py` now provides separate
+side-effect-free `plan` and read-only `preflight` modes. The runner is pinned to
+`feature/arvan-controlled-origin-failover`, refuses a dirty checkout, records
+that no `main` integration is authorized or claimed, and contains no execution
+path for Witness transitions, firewall faults, service stops, reboot, disk
+pressure, clock changes, WebApp flags, credentials, or Arvan mutations.
+
+The planned campaign contains twelve explicit `RH-*` scenarios covering
+concurrent acquisition, lost response, delayed replay, directional FI/IR
+partitions, service/database/VM faults, isolated disk-full, clone/time-namespace
+clock faults, key rotation during partition, and exact baseline restore. These
+are catalog entries only until the clean preflight passes and a separate
+fault-injection execution review is complete.
+
+### 46.2 Verified rollback baseline
+
+Replacement Witness `185.206.95.94` is the future matrix target. Original
+Witness `185.231.182.6` remains a healthy unchanged reference/rollback host.
+Both were observed NTP-synchronized, service-ready, `webapp:0:vacant`, schema
+`001`, and at zero receipts. The replacement host retained the disabled
+rollback database `writer_witness_rollback_20260715181340_16024`.
+
+Immediately before preparing the harness, a fresh local backup was created on
+the replacement host as
+`writer-witness-20260716T054228Z.dump`. Its SHA-256 was
+`dbf4c637041c576fc1977d0a8bd235a48ee5758b88f8a2d50f963edb1f9b7a1e`.
+The checksum passed and an isolated restore-smoke reproduced schema `001`,
+state `webapp:0:vacant`, and zero receipts; the live database remained vacant
+with zero receipts afterward.
+
+WebApp-FI remained healthy on its current production release with Witness
+flags disabled. WebApp-IR application and sync-worker containers remained
+stopped while its database stayed healthy. Both sites were NTP-synchronized
+and retained direct reachability to the dark replacement Witness on `443`.
+No lease, credential delivery, product-process start/stop, database mutation,
+or CDN change occurred.
+
+### 46.3 Source baseline and next gate
+
+The focused preflight source baseline passed 96 tests with two guarded
+PostgreSQL tests skipped because their separate scratch URL was not supplied.
+Five tests cover the new plan/preflight safety contract, read-only command
+surface, twelve-scenario catalog, secret-free artifact, and dirty/wrong-branch
+fail-closed behavior.
+
+The remaining action before fault injection is to commit this preparation on
+the feature branch and execute the read-only preflight from that clean SHA. A
+passing preflight still authorizes no RH scenario; the fault executor and exact
+abort/rollback order must receive their own guarded review before `RH-001`.
