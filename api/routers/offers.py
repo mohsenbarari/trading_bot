@@ -40,6 +40,7 @@ from core.services.telegram_offer_publication_service import (
     publish_offer_to_telegram_channel_once,
     telegram_offer_send_result_from_gateway,
 )
+from core.services.telegram_monitoring_channel_service import enqueue_offer_monitoring_publication
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
     customer_management_name_for_user_id,
@@ -1486,6 +1487,8 @@ async def create_offer(
     )
     if publish_result.message_id:
         new_offer.channel_message_id = publish_result.message_id
+    await enqueue_offer_monitoring_publication(db, new_offer)
+    if publish_result.message_id:
         await db.commit()
 
     log_trading_event(

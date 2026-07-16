@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     offer_publication_worker_max_rate_limit_cooldown_seconds: float = 120.0
     offer_publication_worker_retry_base_seconds: float = 5.0
     offer_publication_worker_retry_max_seconds: float = 300.0
+    telegram_monitoring_channel_enabled: bool = False
+    telegram_monitoring_bot_token: str | None = None
+    telegram_monitoring_channel_id: int | None = None
+    telegram_monitoring_worker_batch_limit: int = 25
     telegram_notification_outbox_worker_interval_seconds: float = 1.0
     telegram_notification_outbox_worker_batch_limit: int = 50
     telegram_notification_outbox_worker_lease_seconds: int = 30

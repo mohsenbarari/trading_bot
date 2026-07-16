@@ -19,6 +19,11 @@ from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.cross_server_recovery_service import active_publication_is_gated
 from core.services.offer_publication_reconciliation_service import reconcile_offer_publications
 from core.services.offer_publication_state_service import apply_publication_state_update
+from core.services.telegram_monitoring_channel_service import (
+    MONITORING_SURFACE,
+    apply_monitoring_channel_state_with_result,
+    monitoring_enabled,
+)
 from core.services.telegram_offer_channel_service import apply_offer_channel_state_with_result
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
@@ -88,6 +93,18 @@ class OfferChannelStateBacklog:
     due: int = 0
     oldest_age_seconds: float | None = None
     oldest_due_age_seconds: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OfferMonitoringChannelCycleReport:
+    processed: int
+    applied: int
+    failed: int
+    skipped: int
+    rate_limited: int = 0
+    cooldown_seconds: float = 0.0
+    response_counts: tuple[tuple[str, int], ...] = ()
+    backlog_total: int = 0
 
 
 def _worker_interval_seconds() -> float:
@@ -684,6 +701,181 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
     )
 
 
+def _monitoring_worker_batch_limit(limit: int | None = None) -> int:
+    if limit is not None:
+        return max(1, int(limit))
+    return max(1, int(getattr(settings, "telegram_monitoring_worker_batch_limit", _worker_batch_limit())))
+
+
+def _monitoring_state_due_condition(state: Any, *, now: datetime):
+    return or_(
+        state.status == OfferPublicationStatus.PENDING,
+        and_(
+            state.status == OfferPublicationStatus.FAILED,
+            or_(state.next_retry_at.is_(None), state.next_retry_at <= now),
+        ),
+        and_(
+            state.status.in_(
+                [
+                    OfferPublicationStatus.SENT,
+                    OfferPublicationStatus.VISIBLE,
+                    OfferPublicationStatus.DISABLED,
+                ]
+            ),
+            or_(state.offer_version_id.is_(None), state.offer_version_id != Offer.version_id),
+        ),
+    )
+
+
+async def _load_monitoring_channel_candidates(
+    db: Any,
+    *,
+    limit: int,
+    now: datetime | None = None,
+) -> list[tuple[OfferPublicationState, Offer]]:
+    current_time = now or utc_now()
+    stmt = (
+        select(OfferPublicationState, Offer)
+        .join(Offer, Offer.offer_public_id == OfferPublicationState.offer_public_id)
+        .options(selectinload(Offer.user), selectinload(Offer.commodity))
+        .where(
+            OfferPublicationState.surface == MONITORING_SURFACE,
+            or_(OfferPublicationState.archived.is_(False), OfferPublicationState.archived.is_(None)),
+            or_(Offer.archived.is_(False), Offer.archived.is_(None)),
+            _monitoring_state_due_condition(OfferPublicationState, now=current_time),
+        )
+        .order_by(
+            func.coalesce(
+                OfferPublicationState.next_retry_at,
+                OfferPublicationState.last_attempt_at,
+                OfferPublicationState.created_at,
+            ).asc(),
+            OfferPublicationState.id.asc(),
+        )
+        .limit(max(int(limit or 1), 1))
+    )
+    result = await db.execute(stmt)
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def _monitoring_channel_backlog(db: Any, *, now: datetime | None = None) -> int:
+    current_time = now or utc_now()
+    result = await db.execute(
+        select(func.count(OfferPublicationState.id))
+        .join(Offer, Offer.offer_public_id == OfferPublicationState.offer_public_id)
+        .where(
+            OfferPublicationState.surface == MONITORING_SURFACE,
+            or_(OfferPublicationState.archived.is_(False), OfferPublicationState.archived.is_(None)),
+            or_(Offer.archived.is_(False), Offer.archived.is_(None)),
+            _monitoring_state_due_condition(OfferPublicationState, now=current_time),
+        )
+    )
+    return max(0, _coerce_int(result.scalar()) or 0)
+
+
+def _schedule_monitoring_retry(
+    state: OfferPublicationState,
+    result: Any,
+    *,
+    now: datetime,
+) -> float:
+    current_metadata = getattr(state, "state_metadata", None)
+    previous_attempts = (
+        _coerce_int(current_metadata.get("monitoring_attempt_count"))
+        if isinstance(current_metadata, Mapping)
+        else 0
+    )
+    attempt_count = max(0, previous_attempts or 0) + 1
+    delay = _channel_state_retry_delay_seconds(
+        attempt_count,
+        retry_after_seconds=_coerce_int(getattr(result, "retry_after_seconds", None)),
+    )
+    metadata = dict(getattr(state, "state_metadata", None) or {})
+    metadata["monitoring_attempt_count"] = attempt_count
+    state.state_metadata = metadata
+    state.last_attempt_at = now
+    state.next_retry_at = now + timedelta(seconds=delay)
+    return delay
+
+
+def _clear_monitoring_retry(state: OfferPublicationState) -> None:
+    metadata = dict(getattr(state, "state_metadata", None) or {})
+    metadata.pop("monitoring_attempt_count", None)
+    state.state_metadata = metadata or None
+    state.next_retry_at = None
+
+
+async def run_offer_monitoring_channel_cycle(*, limit: int | None = None) -> OfferMonitoringChannelCycleReport:
+    """Send or edit private admin monitoring-channel projections for already enqueued offers."""
+    assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
+    if not monitoring_enabled():
+        return OfferMonitoringChannelCycleReport(
+            processed=0,
+            applied=0,
+            failed=0,
+            skipped=0,
+            response_counts=(("disabled", 1),),
+        )
+
+    processed = 0
+    applied = 0
+    failed = 0
+    skipped = 0
+    rate_limited = 0
+    cooldown_seconds = 0.0
+    response_counts: dict[str, int] = {}
+    backlog_total = 0
+
+    async with AsyncSessionLocal() as db:
+        candidates = await _load_monitoring_channel_candidates(
+            db,
+            limit=_monitoring_worker_batch_limit(limit),
+        )
+        for index, (state, offer) in enumerate(candidates):
+            processed += 1
+            result = await apply_monitoring_channel_state_with_result(
+                db,
+                offer,
+                publication_state=state,
+                timeout=5,
+            )
+            response_counts[result.response_class] = response_counts.get(result.response_class, 0) + 1
+            if result.ok:
+                applied += 1
+                _clear_monitoring_retry(state)
+            elif result.response_class == "skipped":
+                skipped += 1
+                _schedule_monitoring_retry(state, result, now=utc_now())
+            else:
+                failed += 1
+                delay = _schedule_monitoring_retry(state, result, now=utc_now())
+                cooldown_seconds = max(cooldown_seconds, delay)
+                if result.response_class == "429":
+                    rate_limited += 1
+                    cooldown_seconds = max(cooldown_seconds, _rate_limit_cooldown_seconds(result.retry_after_seconds))
+
+            await db.commit()
+            if result.response_class == "429":
+                break
+            if index < len(candidates) - 1:
+                spacing_seconds = _channel_send_spacing_seconds()
+                if spacing_seconds > 0:
+                    await asyncio.sleep(spacing_seconds)
+
+        backlog_total = await _monitoring_channel_backlog(db)
+
+    return OfferMonitoringChannelCycleReport(
+        processed=processed,
+        applied=applied,
+        failed=failed,
+        skipped=skipped,
+        rate_limited=rate_limited,
+        cooldown_seconds=cooldown_seconds,
+        response_counts=tuple(sorted(response_counts.items())),
+        backlog_total=backlog_total,
+    )
+
+
 async def offer_telegram_publication_loop() -> None:
     assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
     logger.info(
@@ -704,7 +896,13 @@ async def offer_telegram_publication_loop() -> None:
             try:
                 report = await run_offer_telegram_publication_cycle()
                 channel_state_report = await run_offer_channel_state_cycle()
-                sleep_seconds = max(sleep_seconds, report.cooldown_seconds, channel_state_report.cooldown_seconds)
+                monitoring_report = await run_offer_monitoring_channel_cycle()
+                sleep_seconds = max(
+                    sleep_seconds,
+                    report.cooldown_seconds,
+                    channel_state_report.cooldown_seconds,
+                    monitoring_report.cooldown_seconds,
+                )
                 if (
                     report.processed
                     or report.repaired
@@ -713,6 +911,9 @@ async def offer_telegram_publication_loop() -> None:
                     or channel_state_report.processed
                     or channel_state_report.applied
                     or channel_state_report.failed
+                    or monitoring_report.processed
+                    or monitoring_report.applied
+                    or monitoring_report.failed
                 ):
                     logger.info(
                         "Offer Telegram publication worker cycle completed",
@@ -757,6 +958,14 @@ async def offer_telegram_publication_loop() -> None:
                             "channel_state_backlog_oldest_due_age_seconds": (
                                 channel_state_report.backlog_oldest_due_age_seconds
                             ),
+                            "monitoring_channel_processed": monitoring_report.processed,
+                            "monitoring_channel_applied": monitoring_report.applied,
+                            "monitoring_channel_failed": monitoring_report.failed,
+                            "monitoring_channel_skipped": monitoring_report.skipped,
+                            "monitoring_channel_rate_limited": monitoring_report.rate_limited,
+                            "monitoring_channel_cooldown_seconds": monitoring_report.cooldown_seconds,
+                            "monitoring_channel_response_counts": dict(monitoring_report.response_counts),
+                            "monitoring_channel_backlog_total": monitoring_report.backlog_total,
                             "duration_ms": duration_ms_since(start_time),
                         },
                     )

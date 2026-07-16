@@ -46,6 +46,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.services.telegram_monitoring_channel_service import enqueue_offer_monitoring_publication
 from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
 from core.utils import to_jalali_str, check_user_limits
 from bot.handlers.trade_utils import (
@@ -1173,6 +1174,7 @@ async def _handle_trade_confirm_core(
                         send_offer_to_channel=send_created_offer_to_channel,
                         raise_send_errors=True,
                     )
+                    await enqueue_offer_monitoring_publication(session, offer)
                     await session.commit()
                     break
                 except StaleDataError:

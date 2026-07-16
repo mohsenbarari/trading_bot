@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core import offer_publication_worker as worker
+from core.services.telegram_monitoring_channel_service import MonitoringChannelApplyResult
 from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
 from core.utils import utc_now
 from models.offer import OfferStatus, OfferType
@@ -159,6 +160,53 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(kwargs["allow_active_publication"])
         self.assertEqual(result.status, "gated")
         self.assertEqual(result.gated, 1)
+
+    async def test_monitoring_channel_cycle_processes_only_enqueued_states(self):
+        fake_db = FakeDB()
+        offer = make_offer(
+            id=41,
+            offer_public_id="ofr_41",
+            status=OfferStatus.ACTIVE,
+            remaining_quantity=50,
+            version_id=1,
+            channel_message_id=None,
+        )
+        state = make_state(
+            offer,
+            surface=OfferPublicationSurface.TELEGRAM_MONITORING_CHANNEL,
+            status=OfferPublicationStatus.PENDING,
+            offer_version_id=None,
+            telegram_message_id=None,
+        )
+
+        with patch("core.offer_publication_worker.assert_background_job_authority"), patch(
+            "core.offer_publication_worker.monitoring_enabled", return_value=True
+        ), patch(
+            "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
+        ), patch(
+            "core.offer_publication_worker._load_monitoring_channel_candidates",
+            new=AsyncMock(return_value=[(state, offer)]),
+        ) as load_candidates, patch(
+            "core.offer_publication_worker._monitoring_channel_backlog", new=AsyncMock(return_value=0)
+        ), patch(
+            "core.offer_publication_worker.apply_monitoring_channel_state_with_result",
+            new=AsyncMock(return_value=MonitoringChannelApplyResult(ok=True, response_class="2xx", reason="ok")),
+        ) as apply_state, patch(
+            "core.offer_publication_worker._channel_send_spacing_seconds", return_value=0
+        ):
+            report = await worker.run_offer_monitoring_channel_cycle(limit=5)
+
+        load_candidates.assert_awaited_once()
+        apply_state.assert_awaited_once_with(
+            fake_db,
+            offer,
+            publication_state=state,
+            timeout=5,
+        )
+        self.assertEqual(report.processed, 1)
+        self.assertEqual(report.applied, 1)
+        self.assertEqual(report.failed, 0)
+        self.assertEqual(fake_db.commit.await_count, 1)
 
     async def _run_channel_cycle(self, candidates, apply_result, *, limit=None, lock_result=True):
         fake_db = FakeDB()

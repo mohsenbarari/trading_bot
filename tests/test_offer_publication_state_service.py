@@ -59,6 +59,17 @@ class OfferPublicationStateServiceTests(unittest.TestCase):
         self.assertEqual(state.status, OfferPublicationStatus.PENDING)
         self.assertEqual(state.dedupe_key, "offer-publication:webapp_market:ofr_8")
 
+    def test_monitoring_channel_publication_state_uses_foreign_owner_surface(self):
+        state = build_offer_publication_state(
+            make_offer(),
+            OfferPublicationSurface.TELEGRAM_MONITORING_CHANNEL,
+            now=datetime(2026, 1, 2, 12, 0, 0),
+        )
+
+        self.assertEqual(state.publication_owner_server, "foreign")
+        self.assertEqual(state.status, OfferPublicationStatus.PENDING)
+        self.assertEqual(state.dedupe_key, "offer-publication:telegram_monitoring_channel:ofr_8")
+
     def test_terminal_offer_converts_active_publication_update_to_disabled(self):
         now = datetime(2026, 1, 2, 12, 0, 0)
         state = build_offer_publication_state(make_offer(status="active", version_id=3), "telegram_channel", now=now)

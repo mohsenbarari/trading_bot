@@ -28,6 +28,7 @@ def _enum_values(enum_cls):
 
 class OfferPublicationSurface(str, enum.Enum):
     TELEGRAM_CHANNEL = "telegram_channel"
+    TELEGRAM_MONITORING_CHANNEL = "telegram_monitoring_channel"
     WEBAPP_MARKET = "webapp_market"
 
 

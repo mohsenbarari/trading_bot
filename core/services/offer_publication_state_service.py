@@ -52,7 +52,10 @@ def normalize_offer_status(value: Any) -> str:
 
 def publication_owner_server_for_surface(surface: Any) -> str:
     normalized = normalize_publication_surface(surface)
-    if normalized == OfferPublicationSurface.TELEGRAM_CHANNEL:
+    if normalized in {
+        OfferPublicationSurface.TELEGRAM_CHANNEL,
+        OfferPublicationSurface.TELEGRAM_MONITORING_CHANNEL,
+    }:
         return "foreign"
     if normalized == OfferPublicationSurface.WEBAPP_MARKET:
         return "iran"
