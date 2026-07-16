@@ -33,8 +33,8 @@
 - هر آفر یک پیام مستقل در کانال دارد.
 - انتشار دسته‌ای چند آفر در یک پیام رد شده است.
 - ثبت آفر از اجرای side effect تلگرام جدا می‌شود.
-- پس از ثبت پایدار آفر، کاربر دقیقاً رفتار فعلی هر سطح روی `main` را می‌بیند و از صف، `429` یا retry مطلع نمی‌شود؛ قرار نیست یک متن موفقیت جدید و مشترک به همه مسیرها تحمیل شود.
-- در Bot، copy فعلی همان مسیر حفظ می‌شود: مسیر legacy متن `✅ لفظ شما با موفقیت در کانال ارسال شد!`، مسیر آفر متنی متن `✅ لفظ شما با موفقیت در کانال منتشر شد!` و سپس پیش‌نمایش خصوصی فعلی با دکمه انقضا را نمایش می‌دهند. در WebApp نیز رفتار فعلی یعنی بستن preview، پاک‌کردن draft و refresh بازار بدون success toast جدید حفظ می‌شود.
+- پس از ثبت پایدار آفر، کاربر از صف، `429` یا retry مطلع نمی‌شود. WebApp همان رفتار فعلی `main` یعنی بستن preview، پاک‌کردن draft و refresh بازار بدون success toast جدید را حفظ می‌کند.
+- در Bot، اطلاعات دو پیام فعلی با یکدیگر ادغام می‌شوند: همان پیام preview/تأیید با یک `editMessageText` به متن موفقیت همان مسیر به‌اضافه بلوک «لفظ شما» و دکمه انقضا تبدیل می‌شود و `bot.send_message` خصوصی دوم حذف خواهد شد. `answerCallbackQuery` همچنان درخواست جدا و ضروری P0 است؛ بنابراین عملیات محتوایی از دو به یک و پیام قابل‌مشاهده نهایی از دو به یک کاهش می‌یابد.
 - خطای موقت تلگرام نباید آفر فعال را منقضی کند.
 - پاسخ `429` هرگز publication را `FAILED` نمی‌کند.
 - پیام دریافت‌کننده `429` در صف می‌ماند و پس از `retry_after` به‌اضافه حاشیه کوچک اطمینان دوباره ارسال می‌شود.
@@ -79,6 +79,8 @@
 - broadcastهای مدیریتی
 - اعلان‌های عمومی
 - اعلان عضویت یا رویدادهای غیر فوری
+
+یادداشت `2026-07-16`: مالک محصول شرایط اولویت‌بندی جدیدی را در ادامه اعلام خواهد کرد؛ ترتیب این بخش تا ثبت و بررسی آن شرایط برای Stage 3 نهایی محسوب نمی‌شود.
 
 قواعد مشترک:
 
@@ -468,7 +470,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | --- | --- | --- | --- | --- | --- |
 | `TOPQ-C01` | محصول | P0 | DECIDED | یک بات، یک کانال و یک پیام مستقل برای هر آفر | حفظ معماری بدون batching یا کانال اضافه |
 | `TOPQ-C02` | فنی | P0 | DECIDED | پذیرش پایدار آفر مستقل از Telegram side effect | تراکنش Offer + intent پایدار |
-| `TOPQ-C03` | UX | P0 | DECIDED | تجربه عادی کاربر در خطای موقت Telegram | حفظ دقیق رفتار فعلی هر مسیر روی `main` و عدم نمایش queue/error؛ بدون copy مشترک جدید |
+| `TOPQ-C03` | UX | P0 | DECIDED | تجربه عادی کاربر در خطای موقت Telegram و مصرف دو عملیات محتوایی private | ادغام success و «لفظ شما» در یک edit با دکمه انقضا، حفظ رفتار WebApp و عدم نمایش queue/error |
 | `TOPQ-C04` | محصول/فنی | P0 | DECIDED | اولویت پیام‌ها | P0 تا P3 و ترتیب داخلی P1 مطابق این سند |
 | `TOPQ-C05` | فنی | P0 | DECIDED | رفتار `429` | pending، cooldown طبق retry_after و retry بدون fail |
 | `TOPQ-C06` | فنی | P0 | DECIDED | کاهش دو edit terminal به یک API call | متن نهایی و حذف دکمه در یک editMessageText |
@@ -511,7 +513,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C38` | بالا | OPEN | sync worker ممکن است statusهای execution را loop کند یا lease foreign را overwrite کند | field policy shared intent/local lease، receiver guard و natural-key upsert | sync parity و bidirectional replay tests |
 | `TOPQ-C39` | بالا | OPEN | workerهای publication، trade، broadcast و notification semantics retry متفاوت دارند | migration map برای ادغام یا adapter؛ هر job فقط یک consumer owner | ownership matrix و تست نبود claim متقاطع |
 | `TOPQ-C40` | بالا | OPEN | worker جدید باید در background authority، startup/shutdown و feature flag درست ثبت شود | flag پیش‌فرض خاموش، foreign-only guard و graceful cancellation | startup surface tests و task recreation evidence |
-| `TOPQ-C41` | بحرانی | OPEN | gateway ممکن است `HTTP 200 + ok=false` را success ببیند، connection pooling ندارد و Test endpoint hardcode است | parse envelope `ok/result/error`, client مشترک lifecycle-safe و base URL allowlisted | contract tests envelope/body/TLS و smoke Test Bot API |
+| `TOPQ-C41` | بحرانی | DECIDED | gateway ممکن است `HTTP 200 + ok=false` را success ببیند، connection pooling ندارد و Test endpoint hardcode است | parse envelope `ok/result/error`, client مشترک lifecycle-safe و mode محدود `main/test` با URL allowlisted | contract tests envelope/body/TLS و smoke Test Bot API |
 | `TOPQ-C42` | بالا | OPEN | truncation فعلی `retry_after` و safety margin ناسازگار با قرارداد مالک محصول است | ذخیره مقدار خام، cap فقط با alert و config جدا برای safety margin | تست retry_after بزرگ/مفقود و زمان‌بندی دقیق |
 | `TOPQ-C43` | متوسط | OPEN | backlog و audit rowها باعث رشد table/index، bloat و query degradation می‌شوند | retention/archival، index partial و vacuum capacity plan | load test چندبرابر horizon و size/query SLO |
 | `TOPQ-C44` | بالا | OPEN | metrics process-local، high-cardinality یا حاوی PII می‌تواند alert را گم یا داده را افشا کند | metrics مشترک کم‌کاردینال، hash identity و ledger امن | dashboard/alert test و privacy review |
@@ -534,7 +536,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | --- | --- | --- | --- | --- | --- |
 | `TOPQ-N01` | بحرانی | BLOCKER | تعریف «ثبت موفق» روشن است، اما SLO دیده‌شدن در کانال و سقف lag هنوز مشخص نیست | SLO publication/backlog و تعریف حالت breach | تأیید مالک محصول و alert threshold ثبت‌شده |
 | `TOPQ-N02` | بحرانی | BLOCKER | تعارض ظرفیت یک کانال با expiry دو دقیقه‌ای می‌تواند انتظار کاربر را نقض کند | انتخاب صریح یکی از چهار سیاست بخش 13.2 | ADR امضاشده و acceptance test متناظر |
-| `TOPQ-N03` | بالا | DECIDED | تغییر UX موفقیت می‌تواند رفتار آشنای Bot و WebApp را عوض کند | حفظ دقیق رفتار فعلی هر سطح روی `main`؛ بدون پیام یا toast جدید و بدون نمایش خطای Telegram پس از commit | snapshot رفتار legacy Bot، text Bot و WebApp در برابر `main` |
+| `TOPQ-N03` | بالا | BLOCKER | ادغام دو پیام Bot نباید اطلاعات، دکمه انقضا یا تفاوت copy مسیر legacy/text را از بین ببرد | یک پیام ترکیبی با success همان مسیر، متن «لفظ شما» و دکمه انقضا؛ WebApp بدون تغییر | تأیید نمونه متن، snapshot هر دو مسیر Bot و اثبات صفر `sendMessage` خصوصی دوم |
 | `TOPQ-N04` | بالا | OPEN | کاربر نباید خطای داخلی ببیند، اما support باید offer منتشرنشده را قابل پیگیری بداند | شناسه داخلی، admin view و پاسخ پشتیبانی بدون افشای جزئیات | سناریوی support و زمان پاسخ مشخص |
 | `TOPQ-N05` | بحرانی | BLOCKER | owner alert و on-call هنوز مشخص نیست؛ pause/resume نباید مسیر عادی تست باشد | runner با stop condition و circuit breaker خودکار؛ pause/resume فقط break-glass و با حفظ صف، به‌علاوه RACI محصول/backend/عملیات/امنیت | نام roleها، escalation، زمان پاسخ و تمرین pause/resume بدون گم‌شدن job |
 | `TOPQ-N06` | بالا | OPEN | ساخت و نگهداری ۸۰ حساب، channel و observer هزینه و کار عملیاتی دارد | بودجه، owner credential و برنامه rotation/recovery | inventory بدون secret و health check دوره‌ای |
@@ -566,13 +568,27 @@ goodput = SENT / wall_clock_time_including_cooldowns
 
 ### 13.7 تصمیم‌های دور نخست حل چالش‌ها — `2026-07-16`
 
-- رفتار موفقیت کاربر باید snapshot دقیق `main` باشد؛ هیچ copy یا toast مشترک جدید ساخته نمی‌شود. تفاوت فقط داخلی است: پس از commit پایدار، خطای Telegram به کاربر نشت نمی‌کند.
+- WebApp باید snapshot دقیق `main` بماند. در Bot، محتوای success و preview فعلی در یک پیام ادغام می‌شود: یک `editMessageText` همراه inline keyboard انقضا جای `editMessageText + sendMessage` را می‌گیرد؛ `answerCallbackQuery` همچنان جدا اجرا می‌شود. متن نهایی ترکیبی پیش از کدنویسی باید توسط مالک محصول تأیید شود.
 - حد staging از `50` به `10` اصلاح شد و production/default روی `4` می‌ماند.
 - علامت terminal و حذف دکمه یک `editMessageText`، کنترل foreign-only، نبود intent برای ورودی نامعتبر، sampler غیرهویتی production، fault adapter، migration preflight و redaction تأیید شدند.
 - runner نباید برای اجرای عادی به pause/resume نیاز داشته باشد. stop condition و circuit breaker خودکار اجرای ناسالم را متوقف می‌کنند؛ pause/resume فقط ابزار break-glass است و در حالت pause claim جدید متوقف، in-flight محدود تکمیل و تمام jobها پایدار می‌مانند.
 - staging از بات و کانال موجود و متصل خود استفاده می‌کند. preflight باید fingerprint هر دو را قبل از اولین side effect با allowlist staging تطبیق دهد.
 - پس از export و checksum شواهد، تمام داده runtime ساخته‌شده با `run_id` از DB و cache هر دو staging peer و پیام‌های Telegram همان run پاک می‌شوند. cleanup از مسیر authority و API دامنه انجام و سپس sync/readback تأیید می‌شود؛ SQL حذف مستقیم بین دو peer مجاز نیست. کاربر، بات، کانال یا تنظیم pre-existing حذف نمی‌شود؛ اگر runner خودش کاربر آزمایشی ساخته باشد، همان کاربر نیز run-scoped و قابل حذف است.
 - artifact استاندارد هر run شامل `manifest.json`, `events.jsonl`, `errors.jsonl`, `reconciliation.json` و `summary.md` است. همه فایل‌ها `schema_version`, `run_id`, seed، commit، fingerprint محیط، config مؤثر، زمان UTC، شناسه job/dedupe، expected/actual و checksum دارند و token، PII و متن production در آن‌ها redacted است تا agentهای AI و انسان یک ورودی واحد و قابل بازتولید داشته باشند.
+
+نمونه copy ترکیبی پیشنهادی و نیازمند تأیید:
+
+```text
+✅ لفظ شما با موفقیت در کانال ارسال شد!
+
+لفظ شما:
+
+{متن کامل آفر}
+
+[❌ منقضی کردن]
+```
+
+در مسیر آفر متنی فقط جمله اول مطابق copy فعلی به `✅ لفظ شما با موفقیت در کانال منتشر شد!` تغییر می‌کند. دکمه بخشی از inline keyboard همان پیام است، نه متن پیام. طول نهایی باید در بیشینه payload تست شود و از محدودیت `editMessageText` عبور نکند.
 
 ### 13.8 قرارداد freshness پس از `retry_after` — `TOPQ-C56`
 
@@ -622,7 +638,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 
 ### 13.10 توضیح چالش gateway — `TOPQ-C41`
 
-این چالش سه نقص مستقل ولی محدود در gateway فعلی دارد و هنوز منتظر تصمیم مالک محصول است:
+این چالش سه نقص مستقل ولی محدود در gateway فعلی دارد و راه‌حل آن در `2026-07-16` توسط مالک محصول تأیید شد:
 
 1. تابع فعلی هر `HTTP 200` را موفق می‌داند، حتی اگر Telegram یا fault adapter بدنه `{"ok": false}` برگرداند. قرارداد رسمی Bot API فیلد `ok` را مرجع می‌داند؛ بنابراین gateway باید ابتدا envelope را parse و بعد نتیجه را تعیین کند.
 2. مسیر async برای هر پیام یک `httpx.AsyncClient` جدید می‌سازد. در بار بالا، connection و TLS مرتب از نو ساخته می‌شوند و احتمال timeout و مصرف resource بیشتر می‌شود. پیشنهاد، یک client مشترک با connection pool، timeoutهای جدا و lifecycle روشن startup/shutdown است.
@@ -635,7 +651,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 این پیشنهاد هنوز تصمیم قطعی نیست:
 
 1. پیش از production، حداقل ده اجرای کامل ده‌دقیقه‌ای با seedهای متفاوت در چند پنجره زمانی و یک endurance شصت‌دقیقه‌ای در staging انجام شود. نقض critical باید صفر باشد.
-2. worker ابتدا ۲۴ ساعت در production به‌صورت shadow و بدون side effect، ترتیب و lag فرضی را ثبت کند.
+2. پیش از تحویل مالکیت، یک shadow planner/auditor ایزوله برای یک چرخه کامل بازار و حداکثر ۲۴ ساعت در production اجرا شود. این جزء صف قابل‌ارسال نیست، job آن هرگز قابل promote نیست و فقط intent فرضی، priority، eligibility، payload hash، sync delay و lag را با side effect واقعی مسیر فعلی مقایسه می‌کند.
 3. چون فقط یک کانال داریم، canary درصدی بین direct sender و queue ممنوع است. مالکیت ارسال باید اتمیک و برای کل کانال در یک پنجره کم‌ترافیک منتقل شود.
 4. پس از فعال‌سازی، بازه‌های کنترل ۳۰ دقیقه، ۲ ساعت و ۲۴ ساعت اجرا شوند و فقط ترافیک طبیعی production مشاهده شود؛ بار مصنوعی ممنوع است.
 5. مشاهده حتی یک duplicate، انتشار آفر stale، مقصد production/staging اشتباه، از‌دست‌رفتن job یا اختلاف قطعی DB/sync موجب stop خودکار می‌شود. عبور backlog، P0 latency یا oldest-job از SLO مصوب نیز stop condition است.
@@ -646,7 +662,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 - پیش از شروع Stage 3، همه موارد `BLOCKER` به `DECIDED` تبدیل و ADRهای بخش 13.6 تأیید شده باشند.
 - هر چالش فنی و غیرفنی owner، stage هدف، تست یا شاهد پذیرش و rollback داشته باشد؛ مورد بدون شاهد «بسته» محسوب نمی‌شود.
 - ظرفیت/عمر آفر و معنای SLO publication به تصمیم صریح محصول رسیده باشد؛ backlog مورد انتظار نباید بعداً به‌عنوان باگ ناشناخته گزارش شود.
-- رفتار legacy Bot، text Bot و WebApp با snapshot رفتار فعلی `main` یکسان باشد و خطای Telegram پس از commit هیچ copy جدیدی به کاربر نشان ندهد.
+- WebApp با snapshot رفتار فعلی `main` یکسان باشد؛ در Bot هر مسیر فقط یک پیام ترکیبی موفقیت/«لفظ شما» با دکمه انقضا داشته باشد، `sendMessage` خصوصی دوم صفر باشد و خطای Telegram پس از commit هیچ copy غیرعادی به کاربر نشان ندهد.
 - نرخ پذیرش حداقل سه آفر در ثانیه بدون ازدست‌رفتن رکورد صف تأیید شود.
 - هر آفر یک پیام مستقل داشته باشد و batching وجود نداشته باشد.
 - هیچ `429` به `FAILED` یا انقضای زودهنگام آفر منجر نشود و هیچ publication یا دکمه عملیاتی stale پس از پایان عمر کسب‌وکار ارسال نشود.
