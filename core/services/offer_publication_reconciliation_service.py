@@ -389,18 +389,24 @@ async def publication_observability_summary(
             db,
             """
             SELECT COUNT(*)
-            FROM offer_publication_states
-            WHERE surface = 'telegram_channel'
-              AND status = 'failed'
+            FROM offers o
+            JOIN offer_publication_states ps
+              ON ps.offer_public_id = o.offer_public_id
+             AND ps.surface = 'telegram_channel'
+            WHERE o.status = 'ACTIVE'
+              AND ps.status = 'failed'
             """,
         ),
         "lagged_telegram_publication": await _count_scalar(
             db,
             """
             SELECT COUNT(*)
-            FROM offer_publication_states
-            WHERE surface = 'telegram_channel'
-              AND status = 'lagged'
+            FROM offers o
+            JOIN offer_publication_states ps
+              ON ps.offer_public_id = o.offer_public_id
+             AND ps.surface = 'telegram_channel'
+            WHERE o.status = 'ACTIVE'
+              AND ps.status = 'lagged'
             """,
         ),
         "legacy_telegram_message_without_state": await _count_scalar(

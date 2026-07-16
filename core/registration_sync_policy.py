@@ -74,6 +74,9 @@ USER_SYNC_IDENTITY_FIELDS = frozenset(
 )
 USER_SYNC_FOREIGN_FIELDS = frozenset(
     {
+        # Iran may seed this during account linking; the foreign bot refreshes
+        # it from Telegram on later interactions.
+        "username",
         "bot_onboarding_required_step",
         "bot_onboarding_completed_step",
         "bot_onboarding_completed_at",

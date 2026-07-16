@@ -2289,6 +2289,8 @@ async def _apply_versioned_user_patch(
     where_clause = User.id == target_user_id
 
     if source == SERVER_FOREIGN:
+        if "username" in data:
+            values["username"] = data["username"]
         for field_name in ("bot_onboarding_required_step", "bot_onboarding_completed_step"):
             if field_name in data:
                 values[field_name] = sa_func.greatest(

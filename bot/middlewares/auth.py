@@ -21,6 +21,9 @@ from core.services.telegram_registration_intent_service import (
 )
 from core.registration_feature_policy import direct_registration_runtime_ready
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access
+from core.services.telegram_username_observation_service import (
+    refresh_observed_telegram_username,
+)
 from models.user import User
 
 
@@ -59,6 +62,15 @@ class AuthMiddleware(BaseMiddleware):
             user = (await session.execute(
                 select(User).where(User.telegram_id == user_telegram_obj.id, User.is_deleted == False)
             )).scalar_one_or_none()
+
+            observed_username = getattr(user_telegram_obj, "username", None)
+            if user is not None and (observed_username is None or isinstance(observed_username, str)):
+                user = await refresh_observed_telegram_username(
+                    session,
+                    user=user,
+                    telegram_id=user_telegram_obj.id,
+                    observed_username=observed_username,
+                )
             
             # آبجکت کاربر دیتابیس (که ممکن است None باشد) را به data اضافه می‌کنیم
             # تا در تمام handler ها در دسترس باشد.

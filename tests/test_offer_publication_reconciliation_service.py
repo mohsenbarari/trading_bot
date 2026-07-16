@@ -545,6 +545,27 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         self.assertIn("o.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')", observed_sql)
         self.assertNotIn("o.status = 'active'", observed_sql)
 
+    async def test_publication_summary_counts_only_active_failed_telegram_findings(self):
+        db = FakeSummaryDB(
+            FakeSummaryResult(rows=[("telegram_channel", "failed", 5)]),
+            FakeSummaryResult(scalar_value=0),
+            FakeSummaryResult(scalar_value=0),
+            FakeSummaryResult(scalar_value=0),
+            FakeSummaryResult(scalar_value=0),
+            FakeSummaryResult(scalar_value=0),
+            FakeSummaryResult(scalar_value=0),
+            FakeSummaryResult(scalar_value=0),
+        )
+
+        summary = await service.publication_observability_summary(db, server_mode="foreign")
+
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(summary["state_counts"]["telegram_channel"]["failed"], 5)
+        self.assertEqual(summary["finding_counts"]["failed_telegram_publication"], 0)
+        observed_sql = "\n".join(db.statements)
+        self.assertIn("ps.status = 'failed'", observed_sql)
+        self.assertIn("o.status = 'ACTIVE'", observed_sql)
+
 
 if __name__ == "__main__":
     unittest.main()

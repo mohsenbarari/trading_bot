@@ -2,7 +2,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_history import change_history_months, show_mutual_trade_history, show_my_trade_history, show_trade_history
+from bot.handlers.trade_history import (
+    change_history_months,
+    show_mutual_trade_history,
+    show_my_trade_history,
+    show_public_profile_username_unavailable,
+    show_trade_history,
+)
 
 
 class FakeState:
@@ -22,6 +28,16 @@ class FakeBadRequest(Exception):
 
 
 class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_public_profile_username_explains_unavailable_action(self):
+        callback = make_callback()
+
+        await show_public_profile_username_unavailable(callback)
+
+        callback.answer.assert_awaited_once_with(
+            "نام کاربری تلگرام این کاربر شناسایی نشده است.",
+            show_alert=True,
+        )
+
     async def test_show_my_trade_history_and_change_history_months_paths(self):
         message = SimpleNamespace(answer=AsyncMock())
         state = FakeState()
