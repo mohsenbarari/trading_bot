@@ -63,7 +63,8 @@ for required in \
     "$ASSET_DIR/requirements.txt" \
     "$ASSET_DIR/requirements.lock" \
     "$ASSET_DIR/nginx.conf.template" \
-    "$ASSET_DIR/writer-witness.service"
+    "$ASSET_DIR/writer-witness.service" \
+    "$SOURCE_DIR/scripts/smoke_writer_witness_client.py"
 do
     if [[ ! -f "$required" ]]; then
         echo "missing release artifact: $required" >&2
@@ -114,6 +115,7 @@ fi
 install -d -m 0755 -o root -g root /opt/trading-bot-witness /srv/trading-bot-witness/releases
 install -d -m 0750 -o root -g writer-witness /etc/trading-bot-witness
 install -d -m 0700 -o root -g root /etc/trading-bot-witness/tls /root/writer-witness-client-material
+install -d -m 0700 -o root -g root /var/lib/trading-bot-witness/hmac-rotation
 install -d -m 0700 -o root -g root /var/backups/trading-bot-witness
 
 release_dir="/srv/trading-bot-witness/releases/$RELEASE_ID"
@@ -343,7 +345,10 @@ install -m 0644 "$ASSET_DIR/writer-witness.service" /etc/systemd/system/writer-w
 install -m 0755 "$ASSET_DIR/writer-witness-backup.sh" /usr/local/sbin/writer-witness-backup
 install -m 0755 "$ASSET_DIR/writer-witness-rotate-hmac.py" /usr/local/sbin/writer-witness-rotate-hmac
 install -m 0755 "$ASSET_DIR/writer-witness-live-restore.sh" /usr/local/sbin/writer-witness-live-restore
+install -m 0755 "$ASSET_DIR/writer-witness-matrix-host-faults.sh" /usr/local/sbin/writer-witness-matrix-host-faults
+install -m 0755 "$ASSET_DIR/writer-witness-state-manifest.sh" /usr/local/sbin/writer-witness-state-manifest
 install -m 0755 "$ASSET_DIR/writer-witness-restore-drill.sh" /usr/local/sbin/writer-witness-restore-drill
+install -m 0755 "$SOURCE_DIR/scripts/smoke_writer_witness_client.py" /usr/local/sbin/writer-witness-smoke-client
 install -m 0644 "$ASSET_DIR/writer-witness-backup.service" /etc/systemd/system/writer-witness-backup.service
 install -m 0644 "$ASSET_DIR/writer-witness-backup.timer" /etc/systemd/system/writer-witness-backup.timer
 

@@ -260,23 +260,31 @@ make writer-witness-real-host-matrix-plan
 Execute every read-only entry gate:
 
 ```text
-make writer-witness-real-host-matrix-preflight
+make writer-witness-real-host-matrix-preflight ARGS='--expected-commit <exact-40-character-sha>'
 ```
 
 The preflight fails closed unless:
 
-- the checkout is clean and remains on
-  `feature/arvan-controlled-origin-failover`;
-- the focused Writer/Fencing/runtime source regression suite passes;
+- the checkout is clean, remains on
+  `feature/arvan-controlled-origin-failover`, and exactly matches the explicitly
+  pinned commit;
+- the focused Writer/Fencing/runtime source regression suite passes with zero
+  skips, including four real-PostgreSQL tests and the four-database drill;
 - WebApp-FI production is healthy and its Witness flags remain disabled;
 - WebApp-IR application and sync-worker writers remain stopped while its
   database is healthy;
-- both WebApp sites can reach the replacement Witness on TCP `443`;
+- both WebApp sites reach the exact replacement certificate on TCP `443` and
+  unsigned status calls return `401`;
 - the replacement Witness is healthy, NTP-synchronized, below the disk guard,
   exactly `webapp:0:vacant`, and has zero receipts;
 - a checksumed backup is less than 24 hours old;
 - at least one connection-disabled rollback database exists;
 - the original Witness remains healthy, vacant, and unchanged.
+
+The run bundle pins controller, client, restore, rotation, fault-helper, Nginx,
+and minimal Witness-release hashes. The replacement Witness must also return
+authenticated status `200` for both pairwise credentials, unsigned `401`, a
+certificate with at least seven days remaining, and the exact release hash.
 
 The retained JSON artifact is written outside the repository under
 `/tmp/trading-bot-writer-witness-real-host-matrix/`. It contains commands,
@@ -296,23 +304,57 @@ Every RH scenario must install a cleanup trap before its first fault. On any
 unexpected state, timeout, lost SSH path, production-health regression, scope
 escape, or assertion failure, stop the campaign and execute this exact order:
 
-1. Remove only matrix-owned firewall and traffic-control objects from FI, IR,
-   and the replacement Witness.
-2. Resume/unpause and start the replacement Witness database, application,
-   Nginx, and NTP components affected by that scenario.
-3. Remove only matrix-owned isolated filesystem, pressure, and time-namespace
-   artifacts.
-4. Delete every transient client credential and CA copy from WebApp `/run`
-   paths.
-5. Restore the replacement Witness through the guarded live-restore path from
-   the recorded checksumed `webapp:0:vacant` backup.
-6. Prove both Witness hosts are ready, NTP-synchronized,
-   `webapp:0:vacant`, and at zero receipts.
-7. Re-run FI production health and IR-standby checks and prove both direct
-   Witness paths and disabled flags.
-8. Retain redacted failure evidence and do not advance to the next RH scenario.
+1. While isolation remains active, stop and join all Matrix requesters and
+   prove that no retry process remains.
+2. Delete/revoke transient credentials and overlap capability before
+   reconnecting a path.
+3. Capture, redact, hash, and retain pre-recovery evidence before restoration.
+4. Resume only affected replacement-Witness process/PostgreSQL/Nginx services.
+5. Remove only Matrix-owned isolated filesystem and pressure artifacts.
+6. Remove Matrix-owned firewall/traffic-control objects only after requesters
+   and capabilities are gone.
+7. Restore through the journaled, OID-aware live restore from the pinned
+   checksum and full epoch-zero manifest.
+8. Prove both Witness manifests, FI health, stopped IR writers, disabled flags,
+   restored paths, and absence of hidden Matrix resources.
 
 The campaign may finish successfully only after the same full preflight passes
 again and no transient credential, network rule, pause, mount, or clock
 override remains. Original Witness must not be promoted automatically or used
 as a second writer during rollback.
+
+### One-scenario execution
+
+The executor deliberately has no `--all` mode. Render one scenario first:
+
+```text
+make writer-witness-real-host-scenario-plan ARGS='--scenario RH-001 --expected-commit <sha>'
+```
+
+The independent observer first binds out-of-band console, alternate
+communications, maintenance window, DPI budget, and restore authorization to
+the exact preflight and scenario:
+
+```text
+WRITER_WITNESS_REAL_HOST_MATRIX_OBSERVER_CONFIRM=approve-one-dark-witness-scenario \
+make writer-witness-real-host-scenario-approve ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --observer <name> --incident-commander <different-name> --reason <change-id> --output /tmp/.../rh-001-approval.json'
+```
+
+Live execution then requires that approval, a distinct operator, and two exact
+execution confirmations:
+
+```text
+WRITER_WITNESS_REAL_HOST_MATRIX_CONFIRM=execute-dark-witness-real-host-matrix \
+WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO=RH-001 \
+make writer-witness-real-host-scenario-run ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --approval /tmp/.../rh-001-approval.json --operator <third-name> --reason <change-id>'
+```
+
+Every scenario receives a unique `wwm_*` ownership tag. Pairwise credentials
+exist only in controller-private temporary storage and WebApp `/run`; they are
+never installed in application containers or persistent WebApp configuration.
+
+Live restore keeps a mode-`0600` phase journal under
+`/var/lib/trading-bot-witness/restore-state`. Recovery locates the original and
+candidate databases by PostgreSQL OID, so a crash between a database rename and
+journal update remains unambiguous. The `--recover` action is idempotent, and
+RH-012 exercises all six guarded failure points before accepting the restore.

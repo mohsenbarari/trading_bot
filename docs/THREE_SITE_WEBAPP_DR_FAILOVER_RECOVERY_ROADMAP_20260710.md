@@ -2421,8 +2421,10 @@ overlap slot, and a monotonically incremented key generation.
 generates a distinct new secret, atomically changes the root-only runtime and
 client material, and restarts/readiness-checks the service. A failed restart
 restores the original files. `revoke` removes only the verified previous slot;
-a failed restart restores the overlap state. Root-only rollback material lives
-under `/run`, metadata contains key IDs but no secrets, and `finish` removes the
+a failed restart restores the overlap state. The original implementation put
+root-only rollback material under `/run`; Section 47 supersedes that
+crash-unsafe choice with persistent, atomically written state. Metadata contains
+key IDs but no secrets, and `finish` removes the
 rotation state only after revocation or rollback.
 
 The installed helper on the replacement Witness matched the repository SHA-256
@@ -2535,3 +2537,84 @@ are removed before guarded database restore; both Witness invariants and both
 WebApp boundaries are then re-proven before evidence closure. The next action
 is implementation and execution of the RH campaign itself, not another
 pre-matrix infrastructure mutation.
+
+## 47. External Review Remediation Before the Real-Host Matrix - 2026-07-16
+
+Four independent external reviews agreed that the Writer Witness foundation
+could continue, but RH-001 must not start from the catalog-only preflight and
+rollback contract. This section supersedes the execution and rollback
+conclusions at the end of Section 46; its historical evidence remains intact.
+
+### 47.1 Zero-skip and frozen-source entry gate
+
+Preflight now requires an explicitly supplied exact commit and records a hash
+bundle for the controller, ephemeral client, restore, rotation, host-fault
+helper, Nginx template, Compose drill, service code, and minimal Witness release
+manifest. It rejects a dirty/different checkout or a replacement Witness whose
+deployed release manifest differs from the frozen bundle.
+
+The default-skipped PostgreSQL suites moved out of the permissive unittest path.
+A dedicated guarded Compose database named
+`stage4_registration_writerfence_matrix` receives both local-writer and
+dedicated-Witness schemas. The gate requires exactly four tests, fails on any
+skip, and is followed by the four-database pause/recovery drill. Its first local
+execution passed 108 focused tests, all four PostgreSQL tests with zero skips,
+and the complete four-database drill.
+
+Preflight additionally records effective flags from env files and container
+environments, certificate fingerprints observed from FI and IR, authenticated
+FI/IR status `200`, unsigned `401`, certificate expiry, Nginx/firewall hashes,
+complete state-manifest hashes, exact backup checksum, and absence of unfinished
+rotation/restore state.
+
+### 47.2 Executable one-scenario controller
+
+`scripts/run_writer_witness_real_host_matrix.py` replaces the inert catalog as
+the execution boundary. All RH-001 through RH-012 IDs have concrete handlers.
+There is intentionally no all-scenarios mode: one process accepts one exact
+scenario, one fresh passing preflight, distinct named operator, abort observer,
+and incident commander, one reason, an exact commit, a preflight-bound observer
+approval, and matching execution confirmations.
+
+The controller creates a unique `wwm_*` ownership tag, stages pairwise material
+only in controller-private temporary storage and WebApp `/run`, hashes every
+command, retains mode-`0600` JSONL evidence, and executes cleanup after any
+assertion failure. Network isolation remains until requesters are joined and
+transient capability is removed. Evidence is captured before database restore;
+then paused components, isolated pressure, tagged network faults, the exact
+backup, and both Witness/WebApp baselines are handled in dependency order.
+
+The real-host handlers cover concurrent acquisition, durable positive/negative
+replay, directional nft partitions, service/PostgreSQL stop/pause/restart,
+replacement-host reboot, isolated tmpfs-backed PostgreSQL disk-full, client
+clock-window boundaries, HMAC overlap/revocation, and restore fault injection.
+
+### 47.3 Crash-safe restore and credential rotation
+
+Live restore validates the exact backup checksum and a canonical full-state
+manifest, not only epoch/status and receipt count. A durable mode-`0600` phase
+journal records original and candidate PostgreSQL OIDs before the first rename.
+Recovery compares live names to OIDs, making a crash before or after any journal
+write unambiguous. Prior live state is restored idempotently, retained candidates
+are connection-disabled, and completed/recovered journals are archived.
+
+RH-012 injects failure after service stop, current-database disable, current
+rename, candidate promotion, candidate enable, and service start. Each failure
+must recover the exact pre-attempt manifest before one successful restore to the
+pinned epoch-zero manifest.
+
+HMAC rotation state moved to
+`/var/lib/trading-bot-witness/hmac-rotation`; secret copies and metadata use
+atomic replace plus fsync. Durable request identity now binds to the
+authenticated physical site rather than rotating key ID, while key ID remains
+in logs. Exact requests can therefore replay across the overlap.
+
+### 47.4 Remaining execution boundary
+
+These changes remove source-level pre-Matrix blockers but do not yet authorize
+RH-001. The updated release/helpers must be installed on the dark replacement
+Witness, the manifest helper must exist on the reference host, all six live
+restore failure points must pass on the epoch-zero target, and a new exact-SHA
+preflight artifact must pass. No merge with `main`, WebApp writer activation,
+product migration, Arvan change, or automatic reference-Witness use is
+authorized.

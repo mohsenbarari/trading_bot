@@ -65,22 +65,17 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         self.assertIn("clock skew", names)
         self.assertIn("restore exact vacant baseline", names)
 
-    def test_abort_contract_restores_faults_before_database_and_rechecks_webapps(self):
+    def test_abort_contract_stops_requesters_and_retains_evidence_before_reconnect(self):
         contract = preflight.abort_and_rollback_contract()
         steps = contract["ordered_steps"]
         self.assertEqual([step["order"] for step in steps], list(range(1, 9)))
         ids = [step["step_id"] for step in steps]
-        self.assertLess(
-            ids.index("remove_scoped_network_faults"),
-            ids.index("restore_vacant_baseline"),
-        )
-        self.assertLess(
-            ids.index("remove_transient_credentials"),
-            ids.index("restore_vacant_baseline"),
-        )
+        self.assertLess(ids.index("stop_and_join_requesters"), ids.index("remove_scoped_network_faults"))
+        self.assertLess(ids.index("revoke_transient_capability"), ids.index("remove_scoped_network_faults"))
+        self.assertLess(ids.index("retain_pre_recovery_evidence"), ids.index("restore_vacant_baseline"))
         self.assertLess(
             ids.index("restore_vacant_baseline"),
-            ids.index("verify_webapp_invariants"),
+            ids.index("verify_complete_baseline"),
         )
         aborts = "\n".join(contract["abort_conditions"])
         self.assertIn("Arvan/CDN", aborts)

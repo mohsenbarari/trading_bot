@@ -18,7 +18,7 @@ from urllib.request import urlopen
 
 RUNTIME_ENV = Path("/etc/trading-bot-witness/runtime.env")
 CLIENT_DIR = Path("/root/writer-witness-client-material")
-STATE_ROOT = Path("/run/writer-witness-hmac-rotation")
+STATE_ROOT = Path("/var/lib/trading-bot-witness/hmac-rotation")
 SITE_SETTINGS = {
     "webapp_fi": ("FI", "webapp-fi.env"),
     "webapp_ir": ("IR", "webapp-ir.env"),
@@ -95,15 +95,43 @@ def _atomic_update_env(
 
 def _copy_secret(source: Path, destination: Path) -> None:
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
-    os.chmod(destination, 0o600)
+    os.chmod(destination.parent, 0o700)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.copy-",
+        dir=destination.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with source.open("rb") as source_handle, os.fdopen(descriptor, "wb") as target_handle:
+            descriptor = -1
+            shutil.copyfileobj(source_handle, target_handle)
+            target_handle.flush()
+            os.fsync(target_handle.fileno())
+        os.replace(temporary, destination)
+        directory_fd = os.open(destination.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def _write_metadata(path: Path, metadata: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8")
     os.chmod(temporary, 0o600)
+    with temporary.open("rb") as handle:
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def _load_metadata(path: Path) -> dict[str, object]:

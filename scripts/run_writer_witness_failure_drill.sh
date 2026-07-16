@@ -18,7 +18,8 @@ cleanup() {
 trap cleanup EXIT
 
 compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-compose up --detach --wait bot_db webapp_fi_db webapp_ir_db witness_db
+compose up --detach --wait bot_db webapp_fi_db webapp_ir_db witness_db postgres_gate_db
+compose run --rm --no-deps runner python scripts/run_writer_witness_postgres_gate.py
 compose run --rm --no-deps runner python scripts/run_writer_witness_failure_drill.py core
 compose pause witness_db
 compose run --rm --no-deps runner python scripts/run_writer_witness_failure_drill.py pause

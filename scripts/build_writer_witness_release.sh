@@ -16,8 +16,15 @@ if [[ -e "$DESTINATION" && -n "$(find "$DESTINATION" -mindepth 1 -maxdepth 1 -pr
     exit 2
 fi
 
-install -d -m 0755 "$DESTINATION/core" "$DESTINATION/models" "$DESTINATION/deploy/writer-witness"
+install -d -m 0755 \
+    "$DESTINATION/core" \
+    "$DESTINATION/models" \
+    "$DESTINATION/deploy/writer-witness" \
+    "$DESTINATION/scripts"
 install -m 0644 "$ROOT_DIR/writer_witness_app.py" "$DESTINATION/writer_witness_app.py"
+install -m 0755 \
+    "$ROOT_DIR/scripts/smoke_writer_witness_client.py" \
+    "$DESTINATION/scripts/smoke_writer_witness_client.py"
 
 for source in \
     __init__.py \
@@ -48,6 +55,8 @@ for source in \
     writer-witness-s3-put.py \
     writer-witness-rotate-hmac.py \
     writer-witness-live-restore.sh \
+    writer-witness-matrix-host-faults.sh \
+    writer-witness-state-manifest.sh \
     writer-witness-restore-drill.sh \
     writer-witness-backup.service \
     writer-witness-backup.timer \

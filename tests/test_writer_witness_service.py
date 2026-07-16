@@ -44,6 +44,11 @@ IR_CREDENTIAL = WitnessClientCredential(
     site="webapp_ir",
     secret="ir-secret-0123456789abcdef-0123456789abcdef",
 )
+FI_PREVIOUS_CREDENTIAL = WitnessClientCredential(
+    key_id="fi-control-v0",
+    site="webapp_fi",
+    secret="fi-previous-0123456789abcdef-0123456789abcdef",
+)
 
 
 def keypair() -> tuple[str, str]:
@@ -283,6 +288,7 @@ class WriterWitnessServiceTests(unittest.IsolatedAsyncioTestCase):
             private_key_base64=self.private_key,
             credentials={
                 FI_CREDENTIAL.key_id: FI_CREDENTIAL,
+                FI_PREVIOUS_CREDENTIAL.key_id: FI_PREVIOUS_CREDENTIAL,
                 IR_CREDENTIAL.key_id: IR_CREDENTIAL,
             },
             clock=self.clock,
@@ -389,6 +395,21 @@ class WriterWitnessServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(replay_rejection.json()["replayed"])
         self.assertEqual(self.state.holder_site, "webapp_fi")
         self.assertEqual(self.state.writer_epoch, 1)
+
+    async def test_exact_rejection_replays_across_rotation_key_ids(self):
+        body = command_body(
+            action="acquire",
+            epoch=99,
+            lease_id=None,
+            request_id="rotation-overlap-replay",
+            reason="prove durable request identity ignores key generation",
+        )
+        first = await self._post(FI_PREVIOUS_CREDENTIAL, body, timestamp=NOW)
+        replay = await self._post(FI_CREDENTIAL, body, timestamp=NOW)
+        self.assertEqual(first.status_code, 409)
+        self.assertFalse(first.json()["replayed"])
+        self.assertEqual(replay.status_code, 409)
+        self.assertTrue(replay.json()["replayed"])
 
 
 if __name__ == "__main__":

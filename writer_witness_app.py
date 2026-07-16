@@ -457,7 +457,11 @@ def create_writer_witness_app(
                     raise WitnessAuthenticationError(
                         "signed request id does not match the command body"
                     )
-                operator = f"hmac:{caller.site}:{caller.key_id}"
+                # Credential generations rotate, but the durable business
+                # request belongs to the authenticated physical site.  Keep
+                # key identity in logs without making exact overlap retries
+                # collide with their own persisted receipt.
+                operator = f"hmac:{caller.site}"
                 try:
                     result = await transition_witness_state(
                         session,
@@ -496,6 +500,7 @@ def create_writer_witness_app(
                             "event": "writer_witness.transition.rejected",
                             "request_id": command.request_id,
                             "requester_site": caller.site,
+                            "credential_key_id": caller.key_id,
                             "action": command.action,
                             "error_code": rejection.code,
                             "replayed": rejection.replayed,
@@ -537,6 +542,7 @@ def create_writer_witness_app(
                 "event": "writer_witness.transition.accepted",
                 "request_id": command.request_id,
                 "requester_site": caller.site,
+                "credential_key_id": caller.key_id,
                 "action": command.action,
                 "writer_epoch": result.state.writer_epoch,
                 "lease_id": result.state.lease_id,

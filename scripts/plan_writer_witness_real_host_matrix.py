@@ -13,10 +13,11 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import subprocess
-import sys
+import tempfile
 from typing import Sequence
 
 
@@ -30,21 +31,21 @@ ROLLBACK_WITNESS = "185.231.182.6"
 SCHEMA_VERSION = "writer_witness_real_host_matrix_preflight_v1"
 
 
-SOURCE_TESTS = (
-    "tests.test_writer_witness",
-    "tests.test_writer_witness_client",
-    "tests.test_writer_witness_deployment",
-    "tests.test_writer_witness_hmac_rotation",
-    "tests.test_writer_witness_postgres",
-    "tests.test_writer_witness_service",
-    "tests.test_webapp_writer_control",
-    "tests.test_writer_fencing",
-    "tests.test_runtime_identity",
-    "tests.test_background_job_authority",
-    "tests.test_render_runtime_envs",
-    "tests.test_main_lifespan",
-    "tests.test_main_public_config",
-    "tests.test_arvan_origin_switch",
+SOURCE_GATE = ROOT / "scripts/run_writer_witness_preflight_source_gate.sh"
+PINNED_SOURCE_PATHS = (
+    "scripts/plan_writer_witness_real_host_matrix.py",
+    "scripts/run_writer_witness_preflight_source_gate.sh",
+    "scripts/run_writer_witness_failure_drill.sh",
+    "scripts/run_writer_witness_postgres_gate.py",
+    "scripts/run_writer_witness_real_host_matrix.py",
+    "scripts/writer_witness_matrix_client.py",
+    "writer_witness_app.py",
+    "deploy/writer-witness-drill/docker-compose.yml",
+    "deploy/writer-witness/writer-witness-live-restore.sh",
+    "deploy/writer-witness/writer-witness-matrix-host-faults.sh",
+    "deploy/writer-witness/writer-witness-rotate-hmac.py",
+    "deploy/writer-witness/writer-witness-state-manifest.sh",
+    "deploy/writer-witness/nginx.conf.template",
 )
 
 
@@ -76,7 +77,22 @@ def ssh_command(host: str, script: str, *, port: int = 22) -> tuple[str, ...]:
     return tuple(command)
 
 
-def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
+def remote_check_specs(
+    *,
+    include_source_tests: bool = True,
+    expected_commit: str | None = None,
+) -> list[CheckSpec]:
+    expected_commit = str(expected_commit or "").strip()
+    if not expected_commit:
+        expected_commit = subprocess.run(
+            ("git", "rev-parse", "HEAD"),
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    if len(expected_commit) != 40 or any(char not in "0123456789abcdef" for char in expected_commit):
+        raise ValueError("expected_commit must be one lowercase 40-character Git SHA")
     specs = [
         CheckSpec(
             "git_branch_clean",
@@ -84,7 +100,8 @@ def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
                 "bash",
                 "-lc",
                 "test \"$(git branch --show-current)\" = "
-                f"\"{EXPECTED_BRANCH}\" && test -z \"$(git status --porcelain)\" "
+                f"\"{EXPECTED_BRANCH}\" && test \"$(git rev-parse HEAD)\" = \"{expected_commit}\" "
+                "&& test -z \"$(git status --porcelain)\" "
                 "&& git diff --check && printf 'branch=%s\\nhead=%s\\nclean=yes\\n' "
                 "\"$(git branch --show-current)\" \"$(git rev-parse HEAD)\"",
             ),
@@ -102,13 +119,24 @@ def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
                 "test \"$(docker inspect -f '{{.State.Health.Status}}' trading_bot_app)\" = healthy; "
                 "test \"$(docker inspect -f '{{.State.Health.Status}}' trading_bot_db)\" = healthy; "
                 "curl -fsS http://127.0.0.1:8000/api/config >/dev/null; "
-                "if grep -Eqs '^(WRITER_WITNESS_REQUIRED|WRITER_WITNESS_AUTO_RENEW_ENABLED|WRITER_WITNESS_SERVICE_ENABLED)=true$' "
-                "/srv/trading-bot/current/.env; then exit 41; fi; "
+                "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' "
+                "/srv/trading-bot/current/.env; docker inspect trading_bot_app --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}' | sed -n "
+                "'/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
+                "| awk -F= '{v=tolower($2); gsub(/[[:space:]]/,\"\",v); "
+                "if (v ~ /^(1|true|yes|on)$/) found=1} END {exit found ? 0 : 1}'; then exit 41; fi; "
                 f"timeout 5 bash -c '</dev/tcp/{MATRIX_WITNESS}/443'; "
+                f"cert=$(timeout 8 openssl s_client -connect {MATRIX_WITNESS}:443 "
+                "-servername writer-witness.internal </dev/null 2>/dev/null "
+                "| openssl x509 -outform DER | sha256sum | awk '{print $1}'); "
+                "test ${#cert} -eq 64; "
+                f"unsigned=$(curl -k -sS -o /dev/null -w '%{{http_code}}' https://{MATRIX_WITNESS}/v1/writer-witness/status); "
+                "test \"$unsigned\" = 401; "
                 "release=$(docker inspect trading_bot_app --format '{{range .Config.Env}}{{println .}}{{end}}' "
                 "| sed -n 's/^RELEASE_SHA=//p' | head -1); test -n \"$release\"; "
                 "echo ntp=yes; echo app=healthy; echo db=healthy; echo api=200; "
-                "echo witness_flags_enabled=no; echo witness_tcp_443=reachable; echo release_sha=$release",
+                "echo witness_flags_enabled=no; echo witness_tcp_443=reachable; "
+                "echo witness_unsigned_status=401; echo witness_cert_sha256=$cert; echo release_sha=$release",
             ),
             "webapp_fi",
         ),
@@ -129,11 +157,22 @@ def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
                 "test \"$(docker inspect -f '{{.State.Status}}' \"$sync\")\" != running; "
                 "test \"$(docker inspect -f '{{.State.Status}}' \"$db\")\" = running; "
                 "test \"$(docker inspect -f '{{.State.Health.Status}}' \"$db\")\" = healthy; "
-                "if grep -Eqs '^(WRITER_WITNESS_REQUIRED|WRITER_WITNESS_AUTO_RENEW_ENABLED|WRITER_WITNESS_SERVICE_ENABLED)=true$' "
-                "/srv/trading-bot/current/.env; then exit 42; fi; "
+                "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' "
+                "/srv/trading-bot/current/.env; docker inspect \"$app\" --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}' | sed -n "
+                "'/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
+                "| awk -F= '{v=tolower($2); gsub(/[[:space:]]/,\"\",v); "
+                "if (v ~ /^(1|true|yes|on)$/) found=1} END {exit found ? 0 : 1}'; then exit 42; fi; "
                 f"timeout 5 bash -c '</dev/tcp/{MATRIX_WITNESS}/443'; "
+                f"cert=$(timeout 8 openssl s_client -connect {MATRIX_WITNESS}:443 "
+                "-servername writer-witness.internal </dev/null 2>/dev/null "
+                "| openssl x509 -outform DER | sha256sum | awk '{print $1}'); "
+                "test ${#cert} -eq 64; "
+                f"unsigned=$(curl -k -sS -o /dev/null -w '%{{http_code}}' https://{MATRIX_WITNESS}/v1/writer-witness/status); "
+                "test \"$unsigned\" = 401; "
                 "echo ntp=yes; echo app=stopped; echo sync_worker=stopped; echo db=running; "
-                "echo witness_flags_enabled=no; echo witness_tcp_443=reachable",
+                "echo witness_flags_enabled=no; echo witness_tcp_443=reachable; "
+                "echo witness_unsigned_status=401; echo witness_cert_sha256=$cert",
                 port=WEBAPP_IR_SSH_PORT,
             ),
             "webapp_ir",
@@ -157,14 +196,36 @@ def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
                 "latest=$(find /var/backups/trading-bot-witness -maxdepth 1 -type f -name 'writer-witness-*.dump' "
                 "-printf '%T@|%p\\n' | sort -nr | head -1 | cut -d'|' -f2-); test -n \"$latest\"; "
                 "sha256sum --check \"$latest.sha256\" >/dev/null; "
+                "backup_sha=$(awk '{print $1}' \"$latest.sha256\"); test ${#backup_sha} -eq 64; "
                 "age=$(( $(date +%s) - $(stat -c %Y \"$latest\") )); test \"$age\" -le 86400; "
                 "rollbacks=$(runuser -u postgres -- psql -XAt -d postgres -c "
                 "\"SELECT count(*) FROM pg_database WHERE datname LIKE 'writer_witness_rollback_%' AND NOT datallowconn;\"); "
-                "test \"$rollbacks\" -ge 1; test ! -e /run/writer-witness-hmac-rotation; "
+                "test \"$rollbacks\" -ge 1; "
+                "test ! -e /var/lib/trading-bot-witness/hmac-rotation/webapp_fi; "
+                "test ! -e /var/lib/trading-bot-witness/hmac-rotation/webapp_ir; "
+                "test ! -e /var/lib/trading-bot-witness/restore-state/active.env; "
+                "cert=$(openssl x509 -in /etc/trading-bot-witness/tls/server.crt -outform DER "
+                "| sha256sum | awk '{print $1}'); test ${#cert} -eq 64; "
+                "cert_end=$(date -d \"$(openssl x509 -in /etc/trading-bot-witness/tls/server.crt "
+                "-noout -enddate | cut -d= -f2-)\" +%s); test \"$cert_end\" -gt $(( $(date +%s) + 604800 )); "
+                "for site in webapp_fi webapp_ir; do short=${site#webapp_}; "
+                "/usr/local/sbin/writer-witness-smoke-client "
+                "--env-file /root/writer-witness-client-material/webapp-$short.env "
+                "--ca-bundle /etc/trading-bot-witness/tls/ca.crt --site \"$site\" >/dev/null; done; "
+                "unsigned=$(curl --cacert /etc/trading-bot-witness/tls/ca.crt -sS -o /dev/null "
+                f"-w '%{{http_code}}' https://{MATRIX_WITNESS}/v1/writer-witness/status); test \"$unsigned\" = 401; "
+                "manifest=$(/usr/local/sbin/writer-witness-state-manifest); test ${#manifest} -eq 64; "
+                "nginx_sha=$(nginx -T 2>/dev/null | sha256sum | awk '{print $1}'); "
+                "firewall_sha=$(nft list ruleset | sha256sum | awk '{print $1}'); "
+                "release_manifest_sha=$(sha256sum /srv/trading-bot-witness/current/release-manifest.json | awk '{print $1}'); "
                 "used=$(df -P / | awk 'NR==2 {gsub(/%/,\"\",$5); print $5}'); test \"$used\" -lt 80; "
                 "echo ntp=yes; echo services=active; echo ready=200; echo state=$state; echo receipts=$receipts; "
-                "echo backup=$(basename \"$latest\"); echo backup_age_seconds=$age; "
-                "echo rollback_databases=$rollbacks; echo disk_used_percent=$used; echo rotation_state=absent",
+                "echo backup=$(basename \"$latest\"); echo backup_sha256=$backup_sha; echo backup_age_seconds=$age; "
+                "echo rollback_databases=$rollbacks; echo disk_used_percent=$used; echo rotation_state=absent; "
+                "echo restore_state=absent; echo signed_status_fi=200; echo signed_status_ir=200; "
+                "echo unsigned_status=401; echo cert_sha256=$cert; echo cert_not_after_epoch=$cert_end; "
+                "echo manifest_sha256=$manifest; echo nginx_sha256=$nginx_sha; echo firewall_sha256=$firewall_sha; "
+                "echo release_manifest_sha256=$release_manifest_sha",
             ),
             "matrix_witness",
         ),
@@ -182,7 +243,11 @@ def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
                 "receipts=$(runuser -u postgres -- psql -XAt -d writer_witness -c "
                 "\"SELECT count(*) FROM webapp_writer_witness_receipts;\"); "
                 "test \"$state\" = webapp:0:vacant; test \"$receipts\" = 0; "
-                "echo ntp=yes; echo services=active; echo ready=200; echo state=$state; echo receipts=$receipts",
+                "manifest=$(/usr/local/sbin/writer-witness-state-manifest); test ${#manifest} -eq 64; "
+                "cert=$(openssl x509 -in /etc/trading-bot-witness/tls/server.crt -outform DER "
+                "| sha256sum | awk '{print $1}'); test ${#cert} -eq 64; "
+                "echo ntp=yes; echo services=active; echo ready=200; echo state=$state; "
+                "echo receipts=$receipts; echo manifest_sha256=$manifest; echo cert_sha256=$cert",
             ),
             "rollback_witness",
         ),
@@ -192,7 +257,7 @@ def remote_check_specs(*, include_source_tests: bool = True) -> list[CheckSpec]:
             1,
             CheckSpec(
                 "source_regression_gate",
-                (sys.executable, "-m", "unittest", *SOURCE_TESTS),
+                ("bash", str(SOURCE_GATE)),
                 "control",
             ),
         )
@@ -232,43 +297,43 @@ def abort_and_rollback_contract() -> dict[str, object]:
         "ordered_steps": [
             {
                 "order": 1,
-                "step_id": "remove_scoped_network_faults",
-                "requirement": "delete only the matrix-owned firewall/tc objects on FI, IR, and replacement Witness",
+                "step_id": "stop_and_join_requesters",
+                "requirement": "while isolation remains active, stop every matrix requester and prove no retry process or socket remains",
             },
             {
                 "order": 2,
-                "step_id": "resume_paused_runtime",
-                "requirement": "CONT/unpause and start replacement Witness PostgreSQL, service, Nginx, and NTP as applicable",
+                "step_id": "revoke_transient_capability",
+                "requirement": "remove every transient client credential and revoke scenario-only overlap capability before reconnecting any path",
             },
             {
                 "order": 3,
-                "step_id": "remove_isolated_pressure",
-                "requirement": "unmount and delete only matrix-owned tmpfs/loop/time-namespace artifacts",
+                "step_id": "retain_pre_recovery_evidence",
+                "requirement": "capture, redact, hash, and copy scenario evidence to the controller before restoring the database",
             },
             {
                 "order": 4,
-                "step_id": "remove_transient_credentials",
-                "requirement": "delete all matrix client material from WebApp /run paths before database restore",
+                "step_id": "resume_paused_runtime",
+                "requirement": "CONT/unpause and start only replacement Witness PostgreSQL, service, Nginx, and NTP components affected by the scenario",
             },
             {
                 "order": 5,
-                "step_id": "restore_vacant_baseline",
-                "requirement": "use the guarded live-restore path and the recorded checksumed epoch-0 backup on replacement Witness",
+                "step_id": "remove_isolated_pressure",
+                "requirement": "unmount and delete only matrix-owned tmpfs, loop, and clone artifacts",
             },
             {
                 "order": 6,
-                "step_id": "verify_witness_invariants",
-                "requirement": "prove replacement and original Witness are ready, NTP-synchronized, webapp:0:vacant, and zero receipts",
+                "step_id": "remove_scoped_network_faults",
+                "requirement": "delete only matrix-owned firewall/tc objects after all requesters and capabilities are gone",
             },
             {
                 "order": 7,
-                "step_id": "verify_webapp_invariants",
-                "requirement": "prove FI production health, IR writers stopped, flags disabled, and direct 443 paths restored",
+                "step_id": "restore_vacant_baseline",
+                "requirement": "use the journaled live-restore path and the pinned checksumed full-manifest epoch-0 backup on replacement Witness",
             },
             {
                 "order": 8,
-                "step_id": "retain_failure_evidence",
-                "requirement": "mark the scenario failed, retain redacted evidence, and do not advance to the next RH id",
+                "step_id": "verify_complete_baseline",
+                "requirement": "prove both Witness manifests, FI health, IR stopped writers, disabled flags, restored paths, no hidden resources, and retained failure status",
             },
         ],
         "success_barrier": [
@@ -281,7 +346,7 @@ def abort_and_rollback_contract() -> dict[str, object]:
     }
 
 
-def git_metadata() -> dict[str, object]:
+def git_metadata(expected_commit: str | None = None) -> dict[str, object]:
     def output(*command: str) -> str:
         return subprocess.run(
             command,
@@ -292,23 +357,67 @@ def git_metadata() -> dict[str, object]:
         ).stdout.strip()
 
     branch = output("git", "branch", "--show-current")
+    head = output("git", "rev-parse", "HEAD")
+    pinned = str(expected_commit or head).strip()
+    if len(pinned) != 40 or any(char not in "0123456789abcdef" for char in pinned):
+        raise ValueError("expected_commit must be one lowercase 40-character Git SHA")
     return {
         "branch": branch,
-        "head": output("git", "rev-parse", "HEAD"),
+        "head": head,
         "clean": output("git", "status", "--porcelain") == "",
         "expected_branch": EXPECTED_BRANCH,
+        "expected_commit": pinned,
+        "exact_commit_matches": head == pinned,
         "main_merge_authorized": False,
         "main_integration_claimed": False,
     }
 
 
-def build_plan(*, include_source_tests: bool = True) -> dict[str, object]:
-    checks = remote_check_specs(include_source_tests=include_source_tests)
+def source_manifest() -> dict[str, str]:
+    result: dict[str, str] = {}
+    for relative in PINNED_SOURCE_PATHS:
+        path = ROOT / relative
+        if not path.is_file():
+            raise RuntimeError(f"matrix source artifact is missing: {relative}")
+        result[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
+def witness_release_manifest_sha256() -> str:
+    with tempfile.TemporaryDirectory(prefix="writer-witness-matrix-release-") as parent:
+        destination = Path(parent) / "release"
+        subprocess.check_call(
+            ("bash", str(ROOT / "scripts/build_writer_witness_release.sh"), str(destination)),
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return hashlib.sha256((destination / "release-manifest.json").read_bytes()).hexdigest()
+
+
+def build_plan(
+    *,
+    include_source_tests: bool = True,
+    expected_commit: str | None = None,
+) -> dict[str, object]:
+    git = git_metadata(expected_commit)
+    checks = remote_check_specs(
+        include_source_tests=include_source_tests,
+        expected_commit=str(git["expected_commit"]),
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": utc_now(),
         "scope": "dark_writer_witness_control_plane_only",
-        "git": git_metadata(),
+        "git": git,
+        "run_bundle": {
+            "expected_commit": git["expected_commit"],
+            "source_sha256": source_manifest(),
+            "witness_release_manifest_sha256": witness_release_manifest_sha256(),
+            "source_gate_requires_zero_skips": True,
+            "source_gate_requires_guarded_postgres_tests": 4,
+            "source_gate_requires_four_database_drill": True,
+        },
         "hosts": {
             "webapp_fi": {"host": WEBAPP_FI, "production_mutation_allowed": False},
             "webapp_ir": {"host": WEBAPP_IR, "ssh_port": WEBAPP_IR_SSH_PORT, "production_mutation_allowed": False},
@@ -368,17 +477,40 @@ def bounded_output(value: str, limit: int = 12000) -> str:
     return value[-limit:]
 
 
+def parse_key_value_output(value: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        key, separator, item = line.partition("=")
+        if (
+            separator
+            and key
+            and all(character.isalnum() or character == "_" for character in key)
+        ):
+            parsed[key] = item.strip()
+    return parsed
+
+
 def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
     git_info = plan["git"]
     if not isinstance(git_info, dict):
         raise RuntimeError("invalid git metadata")
-    if git_info.get("branch") != EXPECTED_BRANCH or not git_info.get("clean"):
+    if (
+        git_info.get("branch") != EXPECTED_BRANCH
+        or not git_info.get("clean")
+        or git_info.get("head") != git_info.get("expected_commit")
+    ):
         plan["status"] = "blocked_git_baseline"
+        return plan, 2
+
+    bundle = plan.get("run_bundle")
+    if not isinstance(bundle, dict) or bundle.get("source_sha256") != source_manifest():
+        plan["status"] = "blocked_source_bundle_drift"
         return plan, 2
 
     results: list[dict[str, object]] = []
     failed: list[str] = []
-    for spec in remote_check_specs():
+    for spec in remote_check_specs(expected_commit=str(git_info["expected_commit"])):
         completed = subprocess.run(
             spec.command,
             cwd=ROOT,
@@ -398,7 +530,41 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
                 "stderr": bounded_output(completed.stderr),
             }
         )
+    parsed = {
+        result["check_id"]: parse_key_value_output(str(result.get("stdout") or ""))
+        for result in results
+    }
+    matrix_certificate = parsed.get("matrix_witness_dark_baseline", {}).get("cert_sha256")
+    for check_id in ("webapp_fi_baseline", "webapp_ir_standby_baseline"):
+        if not matrix_certificate or parsed.get(check_id, {}).get("witness_cert_sha256") != matrix_certificate:
+            failed.append(f"{check_id}_certificate_identity")
+    matrix_manifest = parsed.get("matrix_witness_dark_baseline", {}).get("manifest_sha256")
+    rollback_manifest = parsed.get("rollback_witness_baseline", {}).get("manifest_sha256")
+    if not matrix_manifest or not rollback_manifest:
+        failed.append("witness_baseline_manifest_missing")
+    expected_release_manifest = bundle.get("witness_release_manifest_sha256")
+    if (
+        not expected_release_manifest
+        or parsed.get("matrix_witness_dark_baseline", {}).get("release_manifest_sha256")
+        != expected_release_manifest
+    ):
+        failed.append("matrix_witness_release_manifest_mismatch")
+    source_stdout = str(
+        next(
+            (item.get("stdout") for item in results if item.get("check_id") == "source_regression_gate"),
+            "",
+        )
+        or ""
+    )
+    if (
+        '"guarded_postgres_tests":4' not in source_stdout
+        or '"skipped":0' not in source_stdout
+        or '"four_database_drill":true' not in source_stdout
+    ):
+        failed.append("source_regression_gate_zero_skip_contract")
+    failed = list(dict.fromkeys(failed))
     plan["preflight_results"] = results
+    plan["observed_baseline"] = parsed
     plan["failed_checks"] = failed
     plan["status"] = "preflight_passed" if not failed else "preflight_failed"
     return plan, 0 if not failed else 1
@@ -417,6 +583,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Plan-only convenience for unit tests; executed preflight always runs source tests.",
     )
+    parser.add_argument(
+        "--expected-commit",
+        help="Exact 40-character feature-branch commit authorized for this run bundle.",
+    )
     return parser.parse_args(argv)
 
 
@@ -424,7 +594,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.mode == "preflight" and args.skip_source_tests:
         raise SystemExit("--skip-source-tests is not allowed in preflight mode")
-    plan = build_plan(include_source_tests=not args.skip_source_tests)
+    if args.mode == "preflight" and not args.expected_commit:
+        raise SystemExit("--expected-commit is mandatory in preflight mode")
+    plan = build_plan(
+        include_source_tests=not args.skip_source_tests,
+        expected_commit=args.expected_commit,
+    )
     exit_code = 0
     if args.mode == "preflight":
         plan, exit_code = execute_preflight(plan)
