@@ -5,7 +5,7 @@
 - تاریخ ایجاد: `2026-07-15`
 - شاخه اختصاصی: `candidate/telegram-offer-publication-queue`
 - مبنای شاخه: `main@ca6348af`
-- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند. ممیزی closure در `2026-07-16` تمام تصمیم‌های اولیه challenge register را بست؛ شش ADR اولیه و قرارداد pure نهایی `M0` تا `M7` ابتدا با `44` تست قرارداد و `171` تست هدفمند/regression پاس شدند. همان روز ADR هفتم برای `channel_editor` پذیرفته و برش foundation مرحله ۳ ممیزی شد: `223` تست unit/regression و `20` تست PostgreSQL واقعی، همراه upgrade→downgrade→upgrade migration پاس شدند. runtime صف همچنان code-disabled و Stage 3 هنوز کامل نیست؛ هیچ deploy انجام نشده و فعال‌شدن editor منوط به تکمیل کد و smoke/benchmark Stage 4 است.
+- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند. ممیزی closure در `2026-07-16` تمام تصمیم‌های اولیه challenge register را بست؛ شش ADR اولیه و قرارداد pure نهایی `M0` تا `M7` ابتدا با `44` تست قرارداد و `171` تست هدفمند/regression پاس شدند. همان روز ADR هفتم برای `channel_editor` پذیرفته و برش foundation مرحله ۳ ممیزی شد: پس از merge آخرین `main`، `316` تست unit/regression و `20` تست PostgreSQL واقعی، همراه upgrade→downgrade→upgrade migration پاس شدند. runtime صف همچنان code-disabled و Stage 3 هنوز کامل نیست؛ هیچ deploy انجام نشده و فعال‌شدن editor منوط به تکمیل کد و smoke/benchmark Stage 4 است.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -599,7 +599,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - `bot_identity` فقط roleهای `primary/channel_editor` را می‌پذیرد؛ route editor هم در service و هم constraint دیتابیس به editهای allowlisted کانال محدود و تغییر bot یک job موجود ممنوع شده است.
 - envelope ناقص HTTP 200 موفقیت محسوب نمی‌شود، dispatch marker هر fence تک‌مصرف است، raw destination مهاجرت‌یافته redacted می‌شود و direct cycle خارج ownership رسمی پیش از DB متوقف می‌شود.
 - credential resolver، canonical publisher identity در publication state، permission/fingerprint preflight، limiter چند credential، revalidation payload و feeder cutover باید در ادامه Stage 3 تکمیل شوند.
-- `223` تست unit/regression و `20` تست PostgreSQL واقعی شامل enqueue هم‌زمان، `SKIP LOCKED`، route constraint، immutable routing، fencing، crash recovery، 429 خام و transaction boundary پاس شدند؛ migration نیز روی scratch واقعی full-upgrade، downgrade به `f1b6e7f8a9dc` و re-upgrade تا `f2c7d8e9a0bd` را پاس کرد.
+- پس از merge آخرین `main`، `316` تست unit/regression و `20` تست PostgreSQL واقعی شامل enqueue هم‌زمان، `SKIP LOCKED`، route constraint، immutable routing، fencing، crash recovery، 429 خام و transaction boundary پاس شدند؛ migration نیز روی scratch واقعی full-upgrade، downgrade به `f1b6e7f8a9dc` و re-upgrade تا `f2c7d8e9a0bd` را پاس کرد.
 - این foundation مجوز deploy یا شروع Stage 4 نیست و runtime عمداً غیرفعال باقی مانده است.
 
 ### Stage 4 — deploy و آزمایش تکرارشونده staging
