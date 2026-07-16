@@ -5,7 +5,7 @@
 - تاریخ ایجاد: `2026-07-15`
 - شاخه اختصاصی: `candidate/telegram-offer-publication-queue`
 - مبنای شاخه: `main@ca6348af`
-- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند و قرارداد اجرایی اولیه Stage 2 پاس شده است؛ قرارداد جدید اولویت اصلی `M0` تا `M7`، شش صف تابع و پایداری کیبورد در `2026-07-16` تأیید شد. ممیزی closure در `2026-07-16` تمام تصمیم‌های challenge register را بست و تعارض‌های سند را تعیین تکلیف کرد. قرارداد pure و تست‌های Stage 2 باید پیش از Stage 3 مطابق تصمیم‌های نهایی بازنویسی و دوباره اجرا شوند. worker پایدار و اتصال runtime هنوز ساخته نشده‌اند.
+- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند. ممیزی closure در `2026-07-16` تمام تصمیم‌های challenge register را بست؛ شش ADR پذیرفته‌شده استخراج شدند و قرارداد pure نهایی `M0` تا `M7`، شش feeder، handoff، freshness، fairness و keyboard با `44` تست قرارداد و `171` تست هدفمند/regression پاس شد. گیت فنی Stage 2/2.5 پاس است؛ worker پایدار، migration و اتصال runtime Stage 3 هنوز ساخته نشده‌اند.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -500,6 +500,19 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - `18` تست قرارداد جدید و در مجموع `125` تست هدفمند همراه regressionهای publication، expiry، channel edit و notification outbox فعلی پاس شدند.
 - قرارداد صف‌های تابع پس از اجرای اولیه Stage 2 ثبت شد؛ بنابراین تست‌های handoff، شش feeder، priority transfer، keyboard/anchor و dependency مستقل publish/edit باید پیش از Stage 3 به قرارداد pure و مجموعه تست Stage 2 افزوده و دوباره پاس شوند.
 
+#### نتیجه بازاجرای Stage 2 در `2026-07-16`
+
+- قرارداد pure از چهار اولویت قدیمی به `M0` تا `M7` و ترتیب درون‌سطحی قطعی بازنویسی شد؛ ارتقای مستقل هر recipient معامله در مرز پنج ثانیه تست شد.
+- ماتریس internal rank هر شش feeder، dedupe identity نسخه‌دار، handoff بازیاب‌پذیر پس از crash و feedback یکتای child/main تست شد.
+- feeder edit، newest-first بر `offer.created_at`، حفظ `first_enqueued_at` در coalescing، reclassification partial-to-terminal، dependency بر message id و catch-up یک‌به‌بیست تست شد.
+- feeder broadcast با یک in-flight هر campaign، سقف کلی دو campaign، round-robin، توقف مستقل retryable و circuit-break سراسری تست شد.
+- `retry_after` خام و بدون cap، safety margin، probe مقصد دوم، cooldown سراسری پس از 429 دوم، lease با margin پانزده‌ثانیه‌ای، heartbeat و fencing تست شد.
+- جدول پاسخ Telegram به‌صورت method/destination-aware شامل `ok=false` در HTTP 200، no-op edit، `400/401/403/404/409/418/429/5xx`، transport، method mismatch و send بدون message id تست شد.
+- freshness برای callback، publication، partial/terminal edit، اعلان معامله، admin TTL و cleanup allowlist و نیز قرارداد `AMBIGUOUS_UNRESOLVED` بدون retry کور تست شد.
+- پیام success Bot با یک `editMessageText` و دکمه انقضا، terminal edit ترکیبی، حفظ anchor و بازگرداندن منوی persistent در success/error/cancel/timeout به قرارداد pure افزوده شد.
+- `44` تست قرارداد جدید و در مجموع `171` تست هدفمند شامل workerهای publication/notification/trade، reconciliation، channel edit و expiry پاس شدند.
+- اولین اجرای regression بدون env استاندارد پیش از collection متوقف شد؛ اجرای نهایی با env مصنوعی `test` و بدون اتصال production پاس شد. تست PostgreSQL واقعی و staging جزو Stage 3/4 باقی می‌مانند.
+
 مرز این مرحله:
 
 - `core/offer_publication_worker.py` و `core/telegram_notification_outbox_worker.py` همچنان worker صف مشترک نیستند.
@@ -702,12 +715,12 @@ goodput = SENT / wall_clock_time_including_cooldowns
 
 | ADR | موضوع | چالش‌های پوشش‌داده‌شده |
 | --- | --- | --- |
-| `TOPQ-ADR-01` | ظرفیت کانال، SLO publication و semantics expiry در backlog | `C21`, `N01`, `N02` |
-| `TOPQ-ADR-02` | schema، منبع حقیقت، dedupe و مرز atomic producer/sync | `C22`, `C23`, `C29`, `C38` |
-| `TOPQ-ADR-03` | timeout/crash ambiguity، lease و reconciliation | `C07`, `C24`, `C35`, `C55` |
-| `TOPQ-ADR-04` | scheduler دو‌سطحی، priority، `M0` deadline، freshness، edit ordering/catch-up و outage mode | `C10`, `C12`, `C25`, `C26`, `C30`, `C37`, `C56`, `C57`, `C58` |
-| `TOPQ-ADR-05` | inventory gateway، topology صف‌های تابع، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41`, `C59`, `C60` |
-| `TOPQ-ADR-06` | RACI، copy نهایی، keyboard/anchor UX، incident response و go/no-go | `C61`, `N03`, `N05`, `N10`, `N14` |
+| [TOPQ-ADR-01](adr/TOPQ-ADR-01-capacity-slo-expiry.md) | ظرفیت کانال، SLO publication و semantics expiry در backlog | `C21`, `N01`, `N02` |
+| [TOPQ-ADR-02](adr/TOPQ-ADR-02-queue-source-sync.md) | schema، منبع حقیقت، dedupe و مرز atomic producer/sync | `C22`, `C23`, `C29`, `C38` |
+| [TOPQ-ADR-03](adr/TOPQ-ADR-03-ambiguity-lease-reconciliation.md) | timeout/crash ambiguity، lease و reconciliation | `C07`, `C24`, `C35`, `C55` |
+| [TOPQ-ADR-04](adr/TOPQ-ADR-04-scheduler-freshness-outage.md) | scheduler دو‌سطحی، priority، `M0` deadline، freshness، edit ordering/catch-up و outage mode | `C10`, `C12`, `C25`, `C26`, `C30`, `C37`, `C56`, `C57`, `C58` |
+| [TOPQ-ADR-05](adr/TOPQ-ADR-05-worker-ownership-rollout.md) | inventory gateway، topology صف‌های تابع، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41`, `C59`, `C60` |
+| [TOPQ-ADR-06](adr/TOPQ-ADR-06-operations-ux-go-live.md) | RACI، copy نهایی، keyboard/anchor UX، incident response و go/no-go | `C61`, `N03`, `N05`, `N10`, `N14` |
 
 هر ADR باید حداقل شامل گزینه‌های ردشده، دلیل انتخاب، اثر روی داده و sync، failure mode، feature flag، migration، تست، observability و rollback باشد.
 
@@ -851,7 +864,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 
 ## 14. معیار پذیرش نهایی
 
-- پیش از شروع Stage 3، تصمیم‌های بخش 13.12 به ADRهای بخش 13.6 استخراج، قرارداد pure با `M0` تا `M7` بازنویسی و تمام تست‌های Stage 2 دوباره پاس شده باشند.
+- پیش از شروع Stage 3، تصمیم‌های بخش 13.12 به ADRهای بخش 13.6 استخراج، قرارداد pure با `M0` تا `M7` بازنویسی و تمام تست‌های Stage 2 دوباره پاس شده باشند. این گیت در `2026-07-16` با شش ADR، `44` تست قرارداد و `171` تست هدفمند پاس شد.
 - هر چالش فنی و غیرفنی owner، stage هدف، تست یا شاهد پذیرش و rollback داشته باشد؛ مورد بدون شاهد «بسته» محسوب نمی‌شود.
 - ظرفیت/عمر آفر و معنای SLO publication به تصمیم صریح محصول رسیده باشد؛ backlog مورد انتظار نباید بعداً به‌عنوان باگ ناشناخته گزارش شود.
 - WebApp با snapshot رفتار فعلی `main` یکسان باشد؛ در Bot هر مسیر فقط یک پیام ترکیبی موفقیت/«لفظ شما» با دکمه انقضا داشته باشد، `sendMessage` خصوصی دوم صفر باشد و خطای Telegram پس از commit هیچ copy غیرعادی به کاربر نشان ندهد.
