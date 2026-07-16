@@ -362,6 +362,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "Workers must execute only on foreign; synced rows on Iran are visibility/audit data only."
         ),
     ),
+    "telegram_delivery_jobs": _entry(
+        "telegram_delivery_jobs",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram execution owner",
+        "never cross-sync execution leases, attempts, payloads, or provider results",
+        "Foreign-only Telegram delivery execution and audit",
+        notes=(
+            "Domain intent syncs through its authoritative table. This execution table is local to foreign "
+            "and must never be copied to Iran."
+        ),
+    ),
     "trading_settings": _entry(
         "trading_settings",
         SyncPolicy.SYNC,

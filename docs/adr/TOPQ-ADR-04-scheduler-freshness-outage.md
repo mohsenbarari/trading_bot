@@ -13,7 +13,7 @@
 - stale edit بالای پنج دقیقه در stale bucket همان طبقه است. پس از هر ۲۰ edit تازه، یک stale واجد ارسال رزرو می‌شود؛ priority اصلی تغییر نمی‌کند.
 - `M6/M7` فقط ظرفیت باقی‌مانده می‌گیرند. عبور max-age alert/SLO breach است، نه priority inversion.
 - 429 مقدار خام `retry_after + safety_margin` را بدون cap اعمال می‌کند. safety margin اولیه `100ms` است و interval/safety فقط با Stage 4 تنظیم می‌شوند.
-- limiter bot و destination دارد: 429 ابتدا مقصد را می‌بندد؛ یک probe کنترل‌شده مقصد دیگر مجاز است و 429 مقصد دوم در پنجره دوثانیه‌ای cooldown سراسری می‌سازد.
+- limiter برای هر `bot_identity` بودجه token جدا و برای destination بودجه مشترک دارد: 429 ابتدا token/lane مقصد را می‌بندد؛ probe فقط مطابق state machine کنترل‌شده مجاز است. editor دوم تا پایان Stage 4 حق مستقل فرض‌کردن ظرفیت همان کانال را ندارد.
 - هر retry پس از claim و بلافاصله قبل از side effect revalidate می‌شود. payload یا دکمه stale به `SUPERSEDED/EXPIRED_INTERACTION` می‌رود.
 
 ## گزینه‌های ردشده
@@ -33,7 +33,7 @@ priority، internal rank، deadline، eligibility، `next_retry_at` خام، fre
 
 ## تست و observability
 
-تست matrix تمام priorityها، promotion پنج‌ثانیه‌ای، coalescing/reclassification، catch-up یک‌به‌بیست، 429 چندمقصد، retry_after بزرگ، freshness و outageهای DB/Redis/Telegram الزامی است. metric به تفکیک priority/method/destination-class کم‌کاردینال است.
+تست matrix تمام priorityها، promotion پنج‌ثانیه‌ای، coalescing/reclassification، catch-up یک‌به‌بیست، 429 چندمقصد/چند bot role، retry_after بزرگ، freshness و outageهای DB/Redis/Telegram الزامی است. metric به تفکیک bot role/priority/method/destination-class کم‌کاردینال است.
 
 ## feature flag و rollback
 

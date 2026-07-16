@@ -1,13 +1,13 @@
 # TOPQ-ADR-01 — ظرفیت کانال، SLO و expiry
 
-- وضعیت: Accepted
+- وضعیت: Accepted؛ بند تعداد بات با `TOPQ-ADR-07` اصلاح شده است
 - تاریخ: `2026-07-16`
 - owner: Product + Backend + Operations
 - چالش‌ها: `TOPQ-C21`, `TOPQ-N01`, `TOPQ-N02`
 
 ## تصمیم
 
-- معماری یک بات/یک کانال و یک پیام مستقل برای هر آفر حفظ می‌شود.
+- معماری یک کانال و یک پیام مستقل برای هر آفر حفظ می‌شود. execution چند credential فقط طبق `TOPQ-ADR-07` مجاز است: primary ناشر و editor صرفاً ویرایشگر همان کانال.
 - پذیرش هدف `3 valid offer/s` و expiry فعلی دو دقیقه‌ای تغییر نمی‌کند.
 - pending بودن publication عمر آفر را تمدید و admission را محدود نمی‌کند.
 - deadline انتشار `expires_at - 5s` است. آفر terminal یا عبورکرده از deadline بدون ارسال stale به `SUPERSEDED/DISABLED` می‌رود.
@@ -18,7 +18,7 @@
 
 - تمدید expiry تا پس از publication: تازگی قیمت و semantics بازار را عوض می‌کند.
 - backpressure یا رد آفر معتبر برای جبران کانال: هدف پذیرش را نقض می‌کند.
-- batching، کانال دوم، بات دوم یا paid broadcast: خارج از scope قطعی محصول است.
+- batching، کانال دوم، publisher دوم یا paid broadcast خارج از scope قطعی محصول است؛ editor دومِ بدون حق انتشار فقط طبق `TOPQ-ADR-07` مجاز است.
 - انتشار دیرهنگام آفر terminal: از نظر کسب‌وکار نادرست است.
 
 ## داده، migration و sync

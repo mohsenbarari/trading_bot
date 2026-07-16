@@ -688,11 +688,11 @@ def apply_gateway_result(
             TelegramDeliveryOutcome.QUARANTINED,
             reason="telegram_method_mismatch",
         )
-    envelope_says_failure = (
+    envelope_ok = (
         isinstance(result.response_json, Mapping)
-        and result.response_json.get("ok") is False
+        and result.response_json.get("ok") is True
     )
-    if result.ok and not envelope_says_failure:
+    if result.ok and envelope_ok:
         if job.method == "sendMessage" and result.message_id is None:
             job.state = TelegramDeliveryState.AMBIGUOUS
             return TelegramDeliveryDecision(
@@ -811,6 +811,21 @@ def apply_gateway_result(
         return TelegramDeliveryDecision(
             TelegramDeliveryOutcome.AMBIGUOUS,
             reason="telegram_send_result_ambiguous",
+        )
+
+    if status_code is not None and 200 <= status_code <= 299:
+        delay = _bounded_backoff_seconds(
+            job.attempt_count,
+            base_seconds=retry_base_seconds,
+            max_seconds=retry_max_seconds,
+        )
+        retry_at = now + timedelta(seconds=delay)
+        job.state = TelegramDeliveryState.PENDING_RETRY
+        job.next_retry_at = retry_at
+        return TelegramDeliveryDecision(
+            TelegramDeliveryOutcome.RETRY_PENDING,
+            next_retry_at=retry_at,
+            reason="telegram_success_envelope_invalid",
         )
 
     if (

@@ -11,6 +11,7 @@ from core.background_job_authority import (
     JOB_SYNC_WORKER,
     JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
     JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
+    JOB_TELEGRAM_DELIVERY_QUEUE,
     JOB_TRADE_TELEGRAM_DELIVERY,
     JOB_TRADE_WEBAPP_DELIVERY,
     JOB_USER_ACCOUNT_STATUS,
@@ -106,6 +107,7 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertTrue(check_background_job_authority(JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY, server_mode="foreign").ok)
         self.assertTrue(check_background_job_authority(JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY, server_mode="foreign").ok)
         self.assertTrue(check_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION, server_mode="foreign").ok)
+        self.assertTrue(check_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE, server_mode="foreign").ok)
         self.assertTrue(check_background_job_authority(JOB_OTP_SMS_FALLBACK, server_mode="iran").ok)
 
     def test_unknown_jobs_fail_closed_when_filtering_factories(self):
@@ -177,6 +179,15 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertEqual(offer_publication.allowed_servers, ("foreign",))
         self.assertIn("offer_publication_states", offer_publication.mutated_tables)
         self.assertIn("Telegram Bot API", offer_publication.external_state)
+        queue = entries[JOB_TELEGRAM_DELIVERY_QUEUE]
+        self.assertEqual(queue.allowed_servers, ("foreign",))
+        self.assertEqual(queue.mutated_tables, ("telegram_delivery_jobs",))
+        self.assertTrue(queue.local_runtime)
+        self.assertIn("Telegram Bot API", queue.external_state)
+        self.assertEqual(
+            get_sync_registry_entry("telegram_delivery_jobs").policy,
+            SyncPolicy.NO_SYNC,
+        )
 
     def test_current_server_is_used_when_server_mode_is_not_explicit(self):
         with patch("core.background_job_authority.current_server", return_value="foreign"):

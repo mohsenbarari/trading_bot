@@ -31,6 +31,13 @@ from core.offer_publication_worker import offer_telegram_publication_loop
 from core.telegram_admin_broadcast_worker import telegram_admin_broadcast_delivery_loop
 from core.telegram_notification_outbox_worker import telegram_notification_outbox_delivery_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop
+from core.telegram_delivery_queue_worker import telegram_delivery_queue_loop
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeDecision,
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 
 # Configure logging
 configure_logging("bot")
@@ -39,6 +46,30 @@ logger = logging.getLogger(__name__)
 
 class BotRuntimeSurfaceError(RuntimeError):
     """Raised when the Telegram bot entrypoint is started on a forbidden surface."""
+
+
+def telegram_execution_worker_factories(
+    runtime: TelegramDeliveryRuntimeDecision,
+):
+    """Return exactly one ownership set without creating coroutine objects."""
+    if runtime.mode == TelegramDeliveryRuntimeMode.LEGACY:
+        if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+            raise TelegramDeliveryRuntimeConfigurationError(
+                "inconsistent_legacy_runtime_decision"
+            )
+        return (
+            offer_telegram_publication_loop,
+            telegram_trade_delivery_loop,
+            telegram_admin_broadcast_delivery_loop,
+            telegram_notification_outbox_delivery_loop,
+        )
+    if runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
+        if runtime.legacy_workers_enabled or not runtime.queue_worker_enabled:
+            raise TelegramDeliveryRuntimeConfigurationError(
+                "inconsistent_queue_runtime_decision"
+            )
+        return (telegram_delivery_queue_loop,)
+    raise TelegramDeliveryRuntimeConfigurationError("unknown_runtime_decision_mode")
 
 
 def _configured_service_name() -> str:
@@ -75,6 +106,7 @@ def assert_bot_runtime_surface() -> None:
 
 async def main():
     assert_bot_runtime_surface()
+    telegram_runtime = configured_telegram_delivery_runtime()
 
     # Initialize Database
     await init_db()
@@ -118,31 +150,19 @@ async def main():
 
     logger.info("🤖 Bot started...")
     suggestion_sync_task = asyncio.create_task(listen_trade_suggestion_events(bot))
-    offer_publication_task = asyncio.create_task(offer_telegram_publication_loop())
-    telegram_delivery_task = asyncio.create_task(telegram_trade_delivery_loop())
-    telegram_admin_broadcast_task = asyncio.create_task(telegram_admin_broadcast_delivery_loop())
-    telegram_notification_outbox_task = asyncio.create_task(telegram_notification_outbox_delivery_loop())
+    telegram_execution_tasks = [
+        asyncio.create_task(worker_factory())
+        for worker_factory in telegram_execution_worker_factories(telegram_runtime)
+    ]
+    runtime_tasks = [suggestion_sync_task, *telegram_execution_tasks]
     try:
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Bot error: {e}")
     finally:
-        for task in (
-            suggestion_sync_task,
-            offer_publication_task,
-            telegram_delivery_task,
-            telegram_admin_broadcast_task,
-            telegram_notification_outbox_task,
-        ):
+        for task in runtime_tasks:
             task.cancel()
-        await asyncio.gather(
-            suggestion_sync_task,
-            offer_publication_task,
-            telegram_delivery_task,
-            telegram_admin_broadcast_task,
-            telegram_notification_outbox_task,
-            return_exceptions=True,
-        )
+        await asyncio.gather(*runtime_tasks, return_exceptions=True)
         await bot.session.close()
 
 if __name__ == "__main__":

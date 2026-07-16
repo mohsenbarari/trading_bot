@@ -22,13 +22,13 @@
 
 - `max_active_offers=10` فقط Iran staging، sync/readback foreign و default/production برابر ۴ است.
 - fixture production فقط sampler read-only، non-PII و artifact پاک‌سازی‌شده است؛ runner staging اتصال production ندارد.
-- pool هشتادحسابی و جریان کامل E2E فقط Test DC است. main-DC staging برای کالیبراسیون از bot/channel و مقصدهای allowlisted با workload replay استفاده می‌کند.
+- pool هشتادحسابی و جریان کامل E2E فقط Test DC است. main-DC staging برای کالیبراسیون از primary/editor/channel و مقصدهای allowlisted با workload replay استفاده می‌کند؛ هر دو token از production متمایز و در artifact redacted هستند.
 - artifactها AI-readable، redacted و checksumدارند؛ cleanup پس از export فقط برای `run_id` و خارج measurement است.
 - terminal jobها ۳۰ روز hot، payload/error خام redacted هفت روز، aggregate غیرهویتی ۱۸۰ روز و unresolved تا سی روز پس از resolution نگهداری می‌شوند.
 
 ## go-live و stop condition
 
-حداقل ده دور ده‌دقیقه‌ای و یک endurance شصت‌دقیقه‌ای staging بدون critical breach لازم است. سپس shadow planner حداکثر ۲۴ ساعت بدون send اجرا می‌شود. duplicate، stale publish، مقصد اشتباه، job گم‌شده، sync mismatch یا عبور SLO stop فوری است. production deploy فقط با دستور صریح جداگانه مجاز است.
+حداقل ده دور ده‌دقیقه‌ای و یک endurance شصت‌دقیقه‌ای staging بدون critical breach لازم است. پیش از آن smoke cross-bot edit، readback مجوز editor و benchmark A/B طبق `TOPQ-ADR-07` باید پاس شوند. سپس shadow planner حداکثر ۲۴ ساعت بدون send اجرا می‌شود. duplicate، stale publish، مقصد/credential اشتباه، fallback ناخواسته، job گم‌شده، sync mismatch یا عبور SLO stop فوری است. production deploy فقط با دستور صریح جداگانه مجاز است.
 
 ## گزینه‌های ردشده
 

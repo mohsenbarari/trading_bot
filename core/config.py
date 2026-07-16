@@ -96,6 +96,18 @@ class Settings(BaseSettings):
     telegram_notification_outbox_worker_lease_seconds: int = 30
     telegram_notification_outbox_worker_recover_limit: int = 100
     telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
+    # Shared Telegram queue rollout controls. Defaults preserve legacy ownership.
+    telegram_delivery_execution_owner: str = "legacy"
+    telegram_delivery_queue_worker_enabled: bool = False
+    telegram_delivery_queue_cutover_ready: bool = False
+    telegram_delivery_queue_worker_interval_seconds: float = 1.0
+    telegram_delivery_queue_worker_batch_limit: int = 25
+    telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_lease_seconds: float = 30.0
+    telegram_delivery_queue_worker_recover_limit: int = 100
+    telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
+    telegram_delivery_queue_retry_base_seconds: float = 1.0
+    telegram_delivery_queue_retry_max_seconds: float = 300.0
     telegram_direct_registration_enabled: bool = False
     telegram_registration_reconciliation_enabled: bool = False
     telegram_login_otp_enabled: bool = False

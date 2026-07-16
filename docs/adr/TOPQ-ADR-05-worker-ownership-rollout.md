@@ -14,18 +14,20 @@
 - broadcast یک in-flight برای هر campaign و حداکثر دو campaign `M6` هم‌زمان دارد؛ round-robin بر `last_released_at` است. retryable/ambiguous همان campaign و خطای bot/gateway همه campaignها را متوقف می‌کند.
 - gateway envelope `ok` را مرجع می‌داند، client مشترک lifecycle-safe دارد و فقط modeهای allowlisted `main/test` را می‌پذیرد.
 - runtime worker فقط روی foreign و پشت flag پیش‌فرض خاموش شروع می‌شود. CI/static guard تمام call siteهای مستقیم غیرمجاز را رد می‌کند.
+- چند credential به معنی چند execution owner نیست: main queue بر اساس `bot_identity` credential allowlisted را انتخاب می‌کند؛ editor دوم worker/API poller مستقل ندارد و فقط editهای کانال مصوب `TOPQ-ADR-07` را اجرا می‌کند.
 
 ## rollout
 
 1. migration افزایشی و code سازگار با flag خاموش روی هر دو peer.
 2. بازنویسی pure contract و تست mixed-version.
-3. shadow planner غیرقابل‌promote حداکثر ۲۴ ساعت بدون send.
-4. توقف producer/direct owner قدیمی در نقطه اتمیک و انتقال کل کانال به `queue-v1`؛ canary درصدی ممنوع.
-5. کنترل‌های production در ۳۰ دقیقه، ۲ ساعت و ۲۴ ساعت فقط با ترافیک طبیعی.
+3. smoke و benchmark editor در staging با flag مستقل خاموش در production.
+4. shadow planner غیرقابل‌promote حداکثر ۲۴ ساعت بدون send.
+5. توقف producer/direct owner قدیمی در نقطه اتمیک و انتقال کل کانال به `queue-v1`؛ canary درصدی ممنوع.
+6. فعال‌سازی editor فقط پس از گیت `TOPQ-ADR-07` و کنترل‌های production در ۳۰ دقیقه، ۲ ساعت و ۲۴ ساعت با ترافیک طبیعی.
 
 ## گزینه‌های ردشده
 
-- دو execution owner هم‌زمان، bulk enqueue بزرگ feeder، retry فنی در child، worker روی Iran و canary درصدی direct/queue.
+- دو execution owner هم‌زمان، poller/API مستقل editor، bulk enqueue بزرگ feeder، retry فنی در child، worker روی Iran و canary درصدی direct/queue.
 
 ## اثر بر داده، sync و failure mode
 

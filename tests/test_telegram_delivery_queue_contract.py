@@ -716,6 +716,27 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
         self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
 
+    async def test_http_200_without_valid_success_envelope_never_counts_as_edit_success(self):
+        queue = InMemoryTelegramDeliveryQueue()
+        job = await self.enqueue(
+            queue,
+            "malformed-edit-success",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+            destination="channel:offers",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+        )
+        await self.claim(queue)
+        decision = await self.resolve(
+            queue,
+            job,
+            gateway_result(ok=True, method="editMessageText", status_code=200),
+        )
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
+        self.assertEqual(decision.reason, "telegram_success_envelope_invalid")
+        self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
+
     async def test_inconsistent_gateway_ok_true_cannot_override_envelope_failure(self):
         queue = InMemoryTelegramDeliveryQueue()
         job = await self.enqueue(queue, "defensive-envelope")

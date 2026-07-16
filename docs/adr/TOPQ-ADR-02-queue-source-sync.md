@@ -11,6 +11,7 @@
 - `offer_publication_states` نگاشت canonical آفر به bot/destination/message و projection publication است؛ `offers.channel_message_id` فقط mirror سازگاری است.
 - outboxها و stateهای فعلی پس از cutover feeder هستند و Bot API یا retry فنی ندارند.
 - dedupe identity برابر `feeder_kind + source_natural_id + source_version + action_kind + destination_identity` است.
+- `bot_identity` routing immutable job است، ولی token/secret در صف ذخیره نمی‌شود؛ هر identity فقط به credential allowlisted foreign نگاشت می‌شود.
 - mutation دامنه و intent روی home server در یک تراکنش ثبت می‌شوند. intent durable sync و main job فقط روی foreign به‌صورت اتمیک یا با outbox بازیاب‌پذیر ساخته می‌شود.
 - lease، worker id، attempt، cooldown و Telegram result local-only foreign هستند و به Iran sync نمی‌شوند.
 - ترتیب اصلی پس از priority/deadline از `enqueued_seq` افزایشی foreign استفاده می‌کند؛ ساعت و ID محلی دو peer FIFO مشترک نمی‌سازد.
@@ -24,7 +25,7 @@
 
 ## schema و migration
 
-migration افزایشی شامل job identity، source identity/version، destination، method، template version، priority، deadline/eligibility، sequence، state، lease fencing، attempts، provider result و timestamps است. unique constraint روی dedupe identity و partial index claim روی state/priority/eligibility/sequence الزامی است. حذف جدول legacy در این Roadmap مجاز نیست.
+migration افزایشی شامل job identity، source identity/version، `bot_identity`، destination، method، template version، priority، deadline/eligibility، sequence، state، lease fencing، attempts، provider result و timestamps است. unique constraint روی dedupe identity، partial index claim روی state/priority/eligibility/sequence و index routing بر bot/destination/state الزامی است. حذف جدول legacy در این Roadmap مجاز نیست.
 
 ## failure mode و کنترل
 

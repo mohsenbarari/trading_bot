@@ -61,6 +61,7 @@ from .telegram_notification_outbox import (
     TelegramNotificationOutbox,
     TelegramNotificationOutboxStatus,
 )
+from .telegram_delivery_job import TelegramDeliveryJobRecord
 from .chat import Chat
 from .chat_member import ChatMember
 from .message import Message
@@ -140,6 +141,7 @@ __all__ = [
     "TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES",
     "TelegramNotificationOutbox",
     "TelegramNotificationOutboxStatus",
+    "TelegramDeliveryJobRecord",
     # Generic Chat
     "Chat",
     "ChatMember",
