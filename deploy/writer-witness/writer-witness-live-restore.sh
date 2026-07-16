@@ -235,6 +235,14 @@ recover_from_journal() {
 
 if [[ "$mode" == "--recover" ]]; then
     [[ ! -t 0 ]] || true
+    if [[ ! -e "$JOURNAL_PATH" ]]; then
+        if systemctl is-active --quiet "$SERVICE" && wait_ready; then
+            printf '%s\n' '{"status":"no-recovery-required","journal_present":false,"service_ready":true}'
+            exit 0
+        fi
+        echo "writer witness has no restore journal and is not ready; refusing to infer recovery state" >&2
+        exit 1
+    fi
     recover_from_journal
     printf '%s\n' '{"status":"recovered-previous-live-database","journal_archived":true}'
     exit 0

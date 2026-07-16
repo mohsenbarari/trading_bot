@@ -154,6 +154,8 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("writer-witness-state-manifest", restore)
         self.assertIn("database_exists", restore)
         self.assertIn("^writer_witness_[a-z]+_[0-9_]+$", restore)
+        self.assertIn('"no-recovery-required"', restore)
+        self.assertIn('systemctl is-active --quiet "$SERVICE" && wait_ready', restore)
         self.assertNotIn("dropdb --if-exists writer_witness", restore)
         self.assertIn('"--apply"', runner)
         self.assertIn("download_writer_witness_s3_backup.py", runner)
