@@ -5,7 +5,7 @@
 - تاریخ ایجاد: `2026-07-15`
 - شاخه اختصاصی: `candidate/telegram-offer-publication-queue`
 - مبنای شاخه: `main@ca6348af`
-- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند و قرارداد اجرایی اولیه Stage 2 پاس شده است؛ افزونه تست صف‌های تابع که در `2026-07-16` تعریف شد هنوز باید پیش از Stage 3 پیاده و دوباره اجرا شود. ممیزی فنی/غیرفنی Stage 2.5 در `2026-07-15` challenge register را ایجاد کرد و تصمیم‌های دور نخست و قرارداد صف‌های تابع در `2026-07-16` ثبت شدند؛ Stage 3 تا تبدیل همه موارد `BLOCKER` به تصمیم ثبت‌شده مجاز نیست. worker پایدار و اتصال runtime هنوز ساخته نشده‌اند.
+- وضعیت Roadmap: Stage 0 و Stage 1 ثبت شده‌اند و قرارداد اجرایی اولیه Stage 2 پاس شده است؛ قرارداد جدید اولویت اصلی `M0` تا `M7`، شش صف تابع و پایداری کیبورد در `2026-07-16` تأیید شد و تست‌های Stage 2 باید پیش از Stage 3 مطابق آن بازنویسی و دوباره اجرا شوند. ممیزی فنی/غیرفنی Stage 2.5 در `2026-07-15` challenge register را ایجاد کرد؛ Stage 3 تا تبدیل همه موارد `BLOCKER` به تصمیم ثبت‌شده مجاز نیست. worker پایدار و اتصال runtime هنوز ساخته نشده‌اند.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -34,7 +34,7 @@
 - انتشار دسته‌ای چند آفر در یک پیام رد شده است.
 - ثبت آفر از اجرای side effect تلگرام جدا می‌شود.
 - پس از ثبت پایدار آفر، کاربر از صف، `429` یا retry مطلع نمی‌شود. WebApp همان رفتار فعلی `main` یعنی بستن preview، پاک‌کردن draft و refresh بازار بدون success toast جدید را حفظ می‌کند.
-- در Bot، اطلاعات دو پیام فعلی با یکدیگر ادغام می‌شوند: همان پیام preview/تأیید با یک `editMessageText` به متن موفقیت همان مسیر به‌اضافه بلوک «لفظ شما» و دکمه انقضا تبدیل می‌شود و `bot.send_message` خصوصی دوم حذف خواهد شد. `answerCallbackQuery` همچنان درخواست جدا و ضروری P0 است؛ بنابراین عملیات محتوایی از دو به یک و پیام قابل‌مشاهده نهایی از دو به یک کاهش می‌یابد.
+- در Bot، اطلاعات دو پیام فعلی با یکدیگر ادغام می‌شوند: همان پیام preview/تأیید با یک `editMessageText` به متن موفقیت همان مسیر به‌اضافه بلوک «لفظ شما» و دکمه انقضا تبدیل می‌شود و `bot.send_message` خصوصی دوم حذف خواهد شد. `answerCallbackQuery` همچنان درخواست جدا و ضروری `M0` است؛ بنابراین عملیات محتوایی از دو به یک و پیام قابل‌مشاهده نهایی از دو به یک کاهش می‌یابد.
 - خطای موقت تلگرام نباید آفر فعال را منقضی کند.
 - پاسخ `429` هرگز publication را `FAILED` نمی‌کند.
 - پیام دریافت‌کننده `429` در صف می‌ماند و پس از `retry_after` به‌اضافه حاشیه کوچک اطمینان دوباره ارسال می‌شود.
@@ -43,9 +43,12 @@
 - ارسال پیام، ویرایش متن و ویرایش دکمه‌های کانال از یک سهم مشترک مقصد استفاده می‌کنند.
 - علامت معامله/انقضا و حذف دکمه‌های همان پیام باید با یک درخواست `editMessageText` انجام شوند.
 - حذف دکمه پیش‌نمایش خصوصی کاربر یک عملیات جدا در گفت‌وگوی خصوصی است و از سهم اختصاصی کانال مصرف نمی‌کند.
-- صف اصلی تنها مالک اجرای Bot API، limiter، cooldown، retry فنی و اولویت نهایی `P0` تا `P3` است. صف‌های دامنه‌ای موجود یا آینده فقط به‌عنوان صف تابع/feeder تصمیم می‌گیرند کدام کار منطقی آماده ورود به صف اصلی است و حق ارسال مستقیم به Telegram ندارند.
+- صف اصلی تنها مالک اجرای Bot API، limiter، cooldown، retry فنی و اولویت نهایی `M0` تا `M7` است. صف‌های دامنه‌ای موجود یا آینده فقط به‌عنوان صف تابع/feeder تصمیم می‌گیرند کدام کار منطقی آماده ورود به صف اصلی است و حق ارسال مستقیم به Telegram ندارند.
 - صف گیرندگان broadcast مدیریتی حفظ، ولی worker مستقیم آن به feeder تبدیل می‌شود. در شروع هر broadcast فقط یک گیرنده به‌صورت in-flight به صف اصلی آزاد می‌شود؛ پیشروی پس از نتیجه terminal مجاز، و توقف روی retryable، ambiguous یا خطای عمومی campaign انجام می‌شود.
-- انتشار و edit پیام کانال آفر دو صف مستقل و رقیب نخواهند بود؛ یک صف تابع «عملیات کانال آفر» وابستگی publish/edit، نسخه آفر، supersession و coalescing را مدیریت می‌کند و زیرصف edit همان اولویت داخلی بخش `P1` را اعمال می‌کند.
+- ثبت/انتشار آفر و edit آفرهای موجود در کانال دو صف تابع مستقل‌اند. استقلال آن‌ها dependency را حذف نمی‌کند: edit تا وجود `channel_message_id` واجد ارسال نیست و اگر آفر پیش از انتشار terminal شود، انتشار فعال و edit میانی هر دو با وضعیت نهایی supersede می‌شوند.
+- ترتیب داخلی شش صف تابع در بخش ۳ همیشه فعال است و فقط به حالت ازدحام بیش از ۳۰ آفر محدود نمی‌شود.
+- ترتیب `M0` تأییدشده عبارت است از callback و کد ورود deadlineدار، سپس اعلان معامله عبورکرده از پنج ثانیه و سپس انتشار آفر جدید.
+- برای کاربر ثبت‌نام‌شده، بات نباید با حذف پیام یا `ReplyKeyboardRemove` او را مجبور کند برای بازیابی منوی اصلی دوباره `/start` بفرستد. پیام‌های بات، به‌خصوص پیام لنگر، تا حد امکان حفظ می‌شوند؛ کیبورد موقت ثبت‌نام/اتصال حساب در پایان جریان با منوی اصلی persistent جایگزین می‌شود. این تصمیم شامل inline keyboard آفر که باید در معامله/انقضا حذف شود نیست.
 - داده production فقط به‌صورت read-only برای انتخاب fixture و ترکیب بار استفاده می‌شود؛ تست نباید production را mutate کند.
 - تمام پاسخ‌های طبیعی Telegram که در اثر آفر صحیح، آفر ناصحیح، معامله، رقابت، انقضا و پیام مدیریتی به کاربر یا کانال می‌رسند باید واقعاً از Telegram آزمایشی ارسال، در مقصد دریافت و با ledger تطبیق داده شوند؛ mock به‌تنهایی مدرک این معیار نیست.
 - ماتریس فنی خطاهای Bot API و transport نیز جداگانه تست می‌شود، اما منظور مالک محصول از «تمام پاسخ‌های Telegram» این ماتریس خطا نبود.
@@ -55,79 +58,118 @@
 - مقدار پیش‌فرض کد، فایل عمومی تنظیمات و production روی `4` باقی می‌ماند؛ مقدار `10` باید از مرجع Iran staging ثبت، به foreign staging sync و در cache هر دو سمت تأیید شود.
 - داده و اجرای تلگرام همچنان تابع مرزبندی فعلی است: اجرای Telegram فقط روی سرور foreign انجام می‌شود.
 
-## 3. اولویت قطعی پیام‌ها
+## 3. اولویت قطعی صف اصلی و صف‌های تابع
 
-### `P0` — پاسخ تعاملی کاربر
+عدد کمتر در هر دو سطح به معنی اولویت بالاتر است. اولویت داخلی فقط مشخص می‌کند هر صف تابع کدام کار آماده خود را معرفی کند؛ اولویت `M0` تا `M7` ترتیب نهایی صف اصلی را تعیین می‌کند.
 
-- `answerCallbackQuery`
-- تأیید ثبت، معامله یا انقضا
-- پاسخ عملیاتی که کاربر در همان لحظه منتظر آن است
-- هر اعلان معاملاتی خصوصی به هر یک از دو طرف که تا `5` ثانیه پس از commit معامله پاسخ موفق Telegram نگرفته باشد، به‌صورت مستقل از `P2` به `P0` ارتقا می‌یابد.
+### 3.1 اولویت صف اصلی
 
-ترتیب داخلی `P0`:
+| اولویت | ترتیب میان کارهای هم‌سطح |
+| --- | --- |
+| `M0` | callback و کد ورود deadlineدار؛ اعلان معامله عبورکرده از پنج ثانیه؛ انتشار آفر جدید |
+| `M1` | تبدیل preview به پیام موفقیت؛ اعلان عادی دو طرف معامله پیش از پنج ثانیه؛ پاسخ آفر نامعتبر/بازار بسته/محدودیت؛ سایر پاسخ‌های فوری بات |
+| `M2` | edit آفر لات‌بندی‌شده فعال با معامله جزئی؛ اعلان عضویت کاربر جدید |
+| `M3` | edit آفر کاملاً معامله‌شده |
+| `M4` | اعلان باز/بسته‌شدن بازار؛ edit آفر منقضی؛ edit آفر لغوشده؛ حذف دکمه‌ای که اقدام نامعتبر را ممکن می‌کند |
+| `M5` | اعمال/رفع محدودیت یا مسدودیت، فعال/غیرفعال/حذف حساب و اعلان فردی سیستمی |
+| `M6` | broadcast مدیریتی، اعلان عمومی و پیام غیرضروری بازار |
+| `M7` | حذف پیام موقت و cleanup صرفاً ظاهری |
 
-1. callback و پاسخ تعاملی دارای deadline
-2. اعلان معاملاتی ارتقایافته پس از `5` ثانیه
-3. سایر پاسخ‌های P0 بر پایه FIFO
+در یک ردیف، ترتیب صریح جدول مقدم است؛ بعد deadline و سپس زمان ورود/FIFO ملاک است. صف اصلی کار را از head آماده صف‌های تابع pull می‌کند و feeder حق ندارد تعداد بزرگی job را یک‌جا وارد main کند.
 
-«دریافت» در این قرارداد یعنی Bot API برای همان job پاسخ موفق `ok=true` و `message_id` داده باشد. Bot API خوانده‌شدن پیام روی دستگاه کاربر را گزارش نمی‌کند. `delivery_deadline_at` از `trade_committed_at + 5s` ساخته و فقط وقتی `now > delivery_deadline_at` باشد ارتقا انجام می‌شود. اگر پیام یک طرف ارسال شده و پیام طرف دیگر pending باشد، فقط job طرف دوم ارتقا می‌یابد. ارتقا به P0 اجازه عبور از `retry_after` یا cooldown Telegram را نمی‌دهد.
+«دریافت» اعلان معامله یعنی Bot API برای همان job پاسخ موفق `ok=true` داده باشد. `delivery_deadline_at = trade_committed_at + 5s` است و فقط پیام هر گیرنده که هنوز پاسخ موفق نگرفته از `M1` به `M0` ارتقا می‌یابد. این ارتقا `retry_after` یا cooldown مقصد را دور نمی‌زند.
 
-### `P1` — عملیات آفر در کانال
+### 3.2 صف تابع ثبت و کنترل آفر
 
-ترتیب داخلی `P1`:
+| داخلی | کار | اصلی |
+| ---: | --- | --- |
+| `0` | انتشار آفر تأییدشده Bot یا WebApp در کانال | `M0` |
+| `1` | تبدیل preview به پیام موفقیت همراه «لفظ شما» و دکمه انقضا | `M1` |
+| `2` | پاسخ آفر نامعتبر، بازار بسته یا عبور از محدودیت آفر فعال | `M1` |
+| `3` | پاسخ فوری درخواست انقضا | مستقیم `M0` |
+| `4` | حذف دکمه انقضا از preview خصوصی | `M4` |
+| `5` | پاسخ درخواست تکراری یا آفر دیگر فعال‌نیست | `M1` |
+| `6` | repair/reconciliation موارد نامشخص | `M6` |
 
-1. نهایی‌کردن آفر: تکمیل، انقضا، لغو، ثبت علامت نهایی و حذف دکمه‌ها
-2. به‌روزرسانی معامله جزئی و مقادیر قابل معامله
-3. پیام‌های حیاتی بازار، به‌خصوص بسته‌شدن بازار
-4. انتشار آفر جدید
+پاسخ callback منتظر نوبت feeder نمی‌ماند. شکست side effect تلگرام پس از commit آفر، متن غیرعادی صف یا retry به کاربر نشان نمی‌دهد.
 
-#### حالت ازدحام صف ادیت کانال
+### 3.3 صف تابع ویرایش آفرهای کانال
 
-این حالت فقط زمانی فعال می‌شود که بیش از `30` آفر یکتا، نه raw job، برای edit کانال pending و unsuperseded باشند. این قواعد فقط ترتیب انتخاب میان editهای کانال را تغییر می‌دهند و اولویت کلی P0 تا P3 یا جایگاه پیام‌های غیر-edit را تغییر نمی‌دهند.
+| داخلی | کار | اصلی |
+| ---: | --- | --- |
+| `0` | جدیدترین آفر لات‌بندی‌شده active که بخشی از آن معامله شده | `M2` |
+| `1` | جدیدترین آفر کاملاً معامله‌شده | `M3` |
+| `2` | جدیدترین آفر منقضی‌شده | `M4` |
+| `3` | جدیدترین آفر لغوشده یا غیرفعال‌شده | `M4` |
+| `4` | سایر اصلاحات مقدار، متن یا دکمه آفر active | `M5` |
+| `5` | edit ترمیمی و reconciliation | `M6` |
 
-1. هر Offer فقط یک edit مؤثر دارد؛ editهای قدیمی همان Offer با آخرین state همگرا و supersede می‌شوند. coalescing نباید `first_edit_enqueued_at` را reset کند.
-2. تمام editهایی که حداکثر `5` دقیقه در صف بوده‌اند جلوتر از editهای stale قرار می‌گیرند.
-3. در هر bucket زمانی، آفر active و لات‌بندی‌شده‌ای که بخشی از آن معامله شده است بالاترین اولویت edit را دارد تا مقدار معامله‌شده و لات‌های دیگر قابل درخواست نباشند.
-4. بعد از آن، آفر کاملاً معامله‌شده برای متن نهایی و حذف دکمه‌ها قرار می‌گیرد.
-5. سپس سایر editها مانند انقضا یا لغو قرار می‌گیرند.
-6. در هر طبقه، Offer با `created_at` جدیدتر زودتر انتخاب می‌شود؛ زمان ساخت یا supersede شدن job نباید یک Offer قدیمی را ظاهراً جدید کند.
-7. edit با `now > first_edit_enqueued_at + 5m` به bucket انتهای صف منتقل می‌شود و در آن bucket نیز Offer جدیدتر جلوتر از Offer قدیمی‌تر است.
-8. وقتی تعداد آفرهای یکتای منتظر edit به `30` یا کمتر بازگشت، حالت ازدحام خاموش و ترتیب عادی P1 دوباره اعمال می‌شود.
+قواعد این صف همیشه فعال‌اند:
 
-کلید مرتب‌سازی قطعی در حالت ازدحام:
+1. «جدیدترین» بر اساس `offer.created_at` است، نه زمان ساخت یا supersede شدن job.
+2. هر Offer فقط یک edit مؤثر دارد؛ coalescing نباید `first_edit_enqueued_at` را reset کند.
+3. اگر آفر ردیف داخلی `0` پیش از dispatch کاملاً معامله شود، edit جزئی حذف و با edit ردیف `1` جایگزین می‌شود.
+4. edit بدون `channel_message_id` ارسال نمی‌شود و تا تعیین تکلیف publication وابسته می‌ماند.
+5. edit با سن بیش از پنج دقیقه در stale bucket انتهای همان طبقه قرار می‌گیرد؛ newest-first در هر bucket حفظ می‌شود.
+6. چون newest-first می‌تواند starvation بسازد، سهم catch-up باید در Stage 2/4 آزمایش و با شواهد staging تعیین شود؛ تا آن زمان `TOPQ-C58` بسته نیست.
 
-```text
-(
-  stale_bucket,          # 0 تا پنج دقیقه، 1 بیشتر از پنج دقیقه
-  edit_business_class,   # 0 active lot-partial، 1 traded-terminal، 2 سایر
-  offer_created_at DESC,
-  offer_public_id
-)
-```
+### 3.4 صف تابع پیام‌های معاملاتی و درخواست معامله
 
-این سیاست عمداً FIFO صف edit را در حالت ازدحام کنار می‌گذارد. چون ورودی مداوم می‌تواند editهای قدیمی را برای همیشه عقب نگه دارد، Stage 3 به catch-up/reconciliation جدا در ظرفیت آزاد یا پس از بسته‌شدن بازار و alert برای stale backlog نیاز دارد؛ این مسیر حق ندارد ترتیب live edit را تغییر دهد.
+| داخلی | کار | اصلی |
+| ---: | --- | --- |
+| `0` | اعلان نتیجه برای خریدار و فروشنده | `M1` و پس از پنج ثانیه مستقل به `M0` |
+| `1` | پاسخ فوری تأیید، رد یا رقابت درخواست | callback در `M0`، پیام عادی در `M1` |
+| `2` | پیشنهاد لات یا مقدار جایگزین | `M1` |
+| `3` | پاسخ عدم دسترسی به درخواست‌کننده بازنده | `M1` |
+| `4` | اصلاح/حذف دکمه پیشنهاد خصوصی قدیمی | `M4` |
+| `5` | سایر اعلان‌های معاملاتی غیرضروری | `M5` |
 
-### `P2` — اعلان‌های معاملاتی خصوصی
+دو پیام نتیجه معامله هم‌زمان eligible و مستقل‌اند؛ موفقیت یا شکست یک طرف، طرف دیگر را block نمی‌کند.
 
-- اطلاع‌رسانی به خریدار، فروشنده یا افراد مرتبط
-- اعلان‌های تراکنشی که کاربر منتظر پاسخ تعاملی آن‌ها نیست
-- فقط job نتیجه معامله برای خریدار و فروشنده پس از بیش از `5` ثانیه بدون پاسخ موفق Telegram، طبق قرارداد P0 ارتقا می‌یابد؛ اعلان سایر افراد مرتبط خودکار ارتقا نمی‌یابد.
+### 3.5 صف تابع پیام‌های مدیریتی و سیستمی
 
-### `P3` — اعلان‌های انبوه و کم‌فوریت
+| داخلی | کار | اصلی |
+| ---: | --- | --- |
+| `0` | اعلان عضویت کاربر جدید | `M2` |
+| `1` | محدودیت/مسدودیت/رفع آن و فعال/غیرفعال/حذف حساب | `M5` |
+| `2` | پیام فوری مدیر برای یک کاربر مشخص | `M5` |
+| `3` | broadcast دستی مدیر | `M6` |
+| `4` | اعلان عمومی یا سیستمی غیر فوری | `M6` |
+| `5` | گزارش یا یادآوری کم‌اهمیت | `M7` |
 
-- broadcastهای مدیریتی
-- اعلان‌های عمومی
-- اعلان عضویت یا رویدادهای غیر فوری
+هر campaign، از جمله fan-out عضویت کاربر جدید، ابتدا فقط یک گیرنده in-flight دارد. fairness و سقف کلی campaignهای هم‌زمان در `TOPQ-C59` نهایی می‌شود.
 
-یادداشت `2026-07-16`: شرایط جدید ارتقای پنج‌ثانیه‌ای اعلان معامله و ازدحام edit ثبت شد. قرارداد catch-up برای جلوگیری از starvation editهای قدیمی هنوز باید پیش از Stage 3 بسته شود.
+### 3.6 صف تابع اعلان وضعیت بازار
 
-قواعد مشترک:
+| داخلی | کار | اصلی |
+| ---: | --- | --- |
+| `0` | باز یا بسته‌شدن بازار | `M4` |
+| `1` | اصلاح اعلان وضعیت جاری | `M4` |
+| `2` | یادآوری یا اعلان عمومی زمان‌بندی | `M6` |
+| `3` | اعلان stale و ناسازگار با وضعیت جاری | ارسال نمی‌شود |
 
-- در یک سطح اولویت، ترتیب FIFO رعایت می‌شود؛ استثناها فقط ارتقای پنج‌ثانیه‌ای پیام معامله و حالت ازدحام edit کانال هستند.
-- `429` اولویت اصلی رکورد را تغییر نمی‌دهد.
-- هنگام cooldown مقصد، هیچ عملیات دیگری به همان مقصد ارسال نمی‌شود.
-- پس از cooldown، scheduler بالاترین اولویت آماده را انتخاب می‌کند؛ رکورد `429` همچنان pending و قابل retry باقی می‌ماند.
-- `P3` فقط از ظرفیت باقی‌مانده استفاده می‌کند و نباید `P0` یا `P1` را عقب بیندازد.
+در `M4` اعلان وضعیت بازار پیش از edit انقضا انتخاب می‌شود تا پیام بسته‌شدن پشت موج editها نماند.
+
+### 3.7 صف تابع عملیات زمان‌دار بات
+
+فقط کارهای رسیده به `due_at` eligible هستند:
+
+| داخلی | کار | اصلی |
+| ---: | --- | --- |
+| `0` | حذف دکمه‌ای که اقدام نامعتبر ایجاد می‌کند | `M4` |
+| `1` | عملیات زمان‌دار امنیتی یا حساب | `M5` |
+| `2` | اعلان تأخیری رفع محدودیت پس از revalidation | `M5` |
+| `3` | حذف پیام خطا یا پیام موقت | `M7` |
+| `4` | cleanup صرفاً ظاهری | `M7` |
+
+### 3.8 ورودی‌های مستقیم صف اصلی و قواعد مشترک
+
+- کد ورود، callback deadlineدار و پاسخ تعاملی فوری مستقیماً وارد `M0` می‌شوند.
+- onboarding، اتصال حساب، منو و پاسخ فوری غیر deadlineدار وارد `M1` می‌شوند.
+- reconciliation/ambiguous یک control plane است و صف ارسال جدا محسوب نمی‌شود.
+- `429` اولویت را تغییر نمی‌دهد؛ همان job با `retry_after + safety_margin` می‌ماند.
+- cooldown یک مقصد، مقصد آماده دیگر را block نمی‌کند.
+- صف تابع retry فنی، limiter یا Bot API call مستقل ندارد.
 
 ## 4. تجربه کاربر
 
@@ -147,12 +189,22 @@
 - mutation انقضا در دیتابیس پیام تلگرامی محسوب نمی‌شود.
 - حذف دکمه پیش‌نمایش خصوصی کاربر یک `editMessageReplyMarkup` در private chat است.
 - پاسخ کوتاه callback یک عملیات `answerCallbackQuery` جداست و پیام ماندگار جدید نیست.
-- به‌روزرسانی پیام کانال یک عملیات مستقل `P1` است.
+- به‌روزرسانی پیام کانال یک عملیات مستقل `M4` است.
 
 ### انقضای خودکار
 
 - عملیات خصوصی کاربر وجود ندارد.
 - فقط وضعیت دیتابیس و یک عملیات ترکیبی کانال برای علامت انقضا و حذف دکمه‌ها ثبت می‌شود.
+
+### پایداری منوی اصلی و پیام لنگر
+
+- هدف این نیست که Telegram نتواند کیبورد را به انتخاب کاربر جمع کند؛ هدف این است که کاربر ثبت‌نام‌شده برای بازیابی منوی بات مجبور به ارسال دوباره `/start` نباشد.
+- پیام‌های بات به‌صورت پیش‌فرض حذف نمی‌شوند. حذف خودکار فقط با علت محصولی روشن، TTL و مالکیت مشخص مجاز است.
+- پیام لنگر تا وقتی همان لنگر فعال است حذف نمی‌شود و جایگزینی لنگر باید ابتدا منوی جایگزین را پایدار کند و سپس در صورت نیاز پیام قبلی را تعیین تکلیف کند.
+- در مسیرهای authenticated، ارسال `ReplyKeyboardRemove` بدون جایگزینی فوری با کیبورد persistent ممنوع است.
+- کیبوردهای موقت ثبت‌نام یا اتصال حساب می‌توانند محتوای context-specific داشته باشند، اما پایان موفق، خطا، cancel و timeout جریان باید منوی persistent مناسب نقش کاربر را بازگرداند.
+- inline keyboard آفر، معامله و پیشنهاد از این قاعده مستثناست و هنگام انقضا، معامله یا از‌دست‌رفتن اعتبار باید حذف شود.
+- `is_persistent=True` درخواست نمایش پایدار به Telegram client است؛ برنامه تضمین نمی‌کند کاربر یا client هرگز کیبورد را به‌صورت دستی جمع نکند.
 
 ## 5. وضعیت فعلی کد
 
@@ -212,7 +264,7 @@ scheduler دو سطح محدودیت دارد:
 
 ### 6.5 صف اصلی و صف‌های تابع دامنه‌ای
 
-صف اصلی Telegram تنها execution plane است: claim نهایی، اولویت `P0` تا `P3`، بودجه bot/destination، اجرای Bot API، `retry_after`، خطاهای transport، lease ارسال و ثبت پاسخ Telegram فقط در این لایه انجام می‌شوند.
+صف اصلی Telegram تنها execution plane است: claim نهایی، اولویت `M0` تا `M7`، بودجه bot/destination، اجرای Bot API، `retry_after`، خطاهای transport، lease ارسال و ثبت پاسخ Telegram فقط در این لایه انجام می‌شوند.
 
 صف تابع یک scheduler دوم Telegram نیست. این صف فقط منبع حقیقت و coordinator دامنه است و مسئول انتخاب business-ready job، ترتیب یا همگرایی داخلی، freshness، dependency، fan-out و مشاهده نتیجه صف اصلی است. هیچ صف تابعی حق sleep برای نرخ Telegram، retry فنی مستقل یا تماس مستقیم با Bot API ندارد.
 
@@ -226,15 +278,16 @@ scheduler دو سطح محدودیت دارد:
 6. cancel/pause صف تابع job درحال‌ارسال را بدون قرارداد cancellation/fencing از صف اصلی حذف نمی‌کند.
 7. fairness میان چند صف تابع و چند campaign در scheduler اصلی اعمال می‌شود؛ priority داخلی صف تابع حق عبور از priority اصلی را ندارد.
 
-توپولوژی اولیه:
+توپولوژی قطعی:
 
 | صف تابع | نقش داخلی | نحوه ورود به صف اصلی | وضعیت تصمیم |
 | --- | --- | --- | --- |
-| عملیات کانال آفر | publish، partial edit، terminal edit، dependency بر `message_id`، coalescing و اولویت اختصاصی edit | فقط آخرین عملیات business-ready با `P1` | DECIDED |
-| گیرندگان broadcast مدیریتی | fan-out گیرندگان، pause/cancel campaign، پیشروی و گزارش نتیجه | ابتدا پنجره یک in-flight برای هر broadcast با `P3` | DECIDED؛ قرارداد fairness چند broadcast هنوز در `C59` باز است |
-| اعلان‌های Telegram معامله | fan-out مستقل دو طرف، deadline هر گیرنده و وضعیت مرکب معامله | هر دو گیرنده بدون انتظار برای یکدیگر با `P2`؛ بعد از deadline همان job در main به `P0` ارتقا می‌یابد | کاندید الزامی بررسی در `C60` |
-| notification outbox عمومی | نگهداری intent و freshness اعلان‌های غیرمعامله‌ای | adapter ساده به `P2/P3`؛ بدون اولویت یا retry Telegram مستقل | کاندید الزامی بررسی در `C60` |
-| حذف‌های زمان‌دار و cleanup بات | `due_at`، cancel و coalescing حذف یک پیام | یک `deleteMessage` آماده با `P3`، مگر cleanup تعاملی دارای deadline | کاندید بعدی؛ خارج از هسته انتشار آفر تا تکمیل inventory |
+| ثبت و کنترل آفر | publication، success preview، validation response و فرمان انقضا | مطابق بخش 3.2، از `M0` تا `M6` | DECIDED |
+| ویرایش آفرهای کانال | partial/terminal edit، dependency بر `message_id`، coalescing و newest-first | مطابق بخش 3.3، از `M2` تا `M6` | DECIDED؛ catch-up در `C58` باز است |
+| پیام معامله و درخواست | fan-out مستقل دو طرف، deadline هر گیرنده، پیشنهاد جایگزین و private edit | مطابق بخش 3.4؛ اعلان نتیجه `M1` و پس از deadline مستقل به `M0` | DECIDED |
+| پیام مدیریتی و سیستمی | fan-out، پیام حساب، pause/cancel campaign و گزارش نتیجه | مطابق بخش 3.5، از `M2` تا `M7` | DECIDED؛ fairness چند campaign در `C59` باز است |
+| اعلان وضعیت بازار | transition، freshness و suppression اعلان stale | مطابق بخش 3.6، `M4` یا `M6` | DECIDED |
+| عملیات زمان‌دار بات | `due_at`، cancel، revalidation و coalescing حذف/edit | مطابق بخش 3.7، `M4`, `M5` یا `M7` | DECIDED |
 
 reconciliation/ambiguous یک control plane است، نه صف تابع ارسال؛ فقط با شاهد قطعی job موجود را resolve یا دوباره eligible می‌کند. `answerCallbackQuery` و پاسخ‌های تعاملی deadlineدار نیز مستقیماً وارد صف اصلی می‌شوند تا hop اضافی نسازند.
 
@@ -414,7 +467,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 ### Stage 2 — تست‌های قطعی قبل از side effect واقعی
 
 - unit test state machine صف
-- تست اولویت P0 تا P3
+- تست اولویت اصلی `M0` تا `M7`، ترتیب انتقال میان feederها و تمام اولویت‌های داخلی بخش ۳
 - تست `429/retry_after`
 - تست idempotency و concurrency
 - تست ادغام terminal edit
@@ -422,14 +475,15 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - تست عدم انقضای آفر روی خطای موقت
 - تست قرارداد handoff صف تابع به صف اصلی: dedupe، crash میان دو صف، بازتاب نتیجه و نبود retry دوگانه
 - تست پنجره یک in-flight برای broadcast مدیریتی و رفتار `sent/skipped/retryable/ambiguous/systemic`
-- تست dependency و coalescing صف عملیات کانال آفر تا edit هرگز پیش از publish یا با نسخه superseded آزاد نشود
+- تست استقلال همراه dependency صف ثبت آفر و صف edit تا edit هرگز پیش از publish یا با نسخه superseded آزاد نشود
+- تست پایداری منوی کاربر ثبت‌نام‌شده، حفظ پیام لنگر و بازگشت کیبورد اصلی پس از success/error/cancel/timeout جریان موقت
 
 معیار خروج: تمام failure injectionها بدون پیام گم‌شده و duplicate کنترل‌نشده پاس شوند.
 
 #### نتیجه اجرای Stage 2 در `2026-07-15`
 
 - قرارداد pure و بدون side effect در `core/telegram_delivery_queue_contract.py` ایجاد شد تا مستقیماً مبنای adapter پایدار Stage 3 باشد.
-- اولویت `P0` تا `P3`، ترتیب داخلی `P1` و FIFO در قرارداد اولیه قطعی شد. تصمیم‌های جدید `2026-07-16` ارتقای زمانی P2 به P0 و حالت non-FIFO ازدحام edit را اضافه کردند؛ قرارداد و تست Stage 2 باید پس از بسته‌شدن catch-up policy و پیش از Stage 3 بازنگری شوند.
+- اولویت قدیمی `P0` تا `P3` و ترتیب داخلی `P1` در قرارداد اولیه تست شد، اما تصمیم قطعی جدید `M0` تا `M7`، شش feeder، newest-first همیشگی و ارتقای `M1 -> M0` اعلان معامله آن قرارداد را supersede کرده است؛ قرارداد pure و تست Stage 2 باید پیش از Stage 3 بازنویسی و دوباره اجرا شوند.
 - `429` رکورد را pending نگه می‌دارد، `retry_after + safety_margin` را اعمال می‌کند و فقط lane همان مقصد را تا موعد retry می‌بندد.
 - `5xx` و خطاهای transport قابل retry با backoff محدود مدل شدند؛ خطای payload معیوب `400` terminal و `403` موجب pause مقصد می‌شود.
 - dedupe هم‌زمان، collision یک dedupe key با payload متفاوت، claim هم‌زمان، مالکیت lease، نتیجه دیررس worker قبلی و بازیابی پس از restart تست شدند.
@@ -437,13 +491,13 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - قرارداد terminal edit دقیقاً یک `editMessageText` با متن نهایی و `reply_markup={"inline_keyboard": []}` تولید می‌کند.
 - تصمیم‌های خطای موقت هیچ mutation برای Offer برنمی‌گردانند؛ اتصال این اصل به مسیر واقعی ثبت آفر در Stage 3 انجام می‌شود.
 - `18` تست قرارداد جدید و در مجموع `125` تست هدفمند همراه regressionهای publication، expiry، channel edit و notification outbox فعلی پاس شدند.
-- قرارداد صف‌های تابع پس از اجرای اولیه Stage 2 ثبت شد؛ بنابراین تست‌های handoff، feeder broadcast و coordinator عملیات کانال که در فهرست بالا اضافه شده‌اند باید پیش از Stage 3 به قرارداد pure و مجموعه تست Stage 2 افزوده و دوباره پاس شوند.
+- قرارداد صف‌های تابع پس از اجرای اولیه Stage 2 ثبت شد؛ بنابراین تست‌های handoff، شش feeder، priority transfer، keyboard/anchor و dependency مستقل publish/edit باید پیش از Stage 3 به قرارداد pure و مجموعه تست Stage 2 افزوده و دوباره پاس شوند.
 
 مرز این مرحله:
 
 - `core/offer_publication_worker.py` و `core/telegram_notification_outbox_worker.py` همچنان worker صف مشترک نیستند.
 - هنوز جدول/مدل صف مشترک، migration، PostgreSQL claim با `SKIP LOCKED`، limiter توزیع‌شده، feature flag، startup task و جایگزینی مسیرهای مستقیم Telegram ساخته نشده است.
-- بررسی schema نشان داد `offer_publication_states` فقط publication آفر و `telegram_notification_outbox` فقط پیام خصوصی را مدل می‌کنند؛ هیچ‌کدام به‌تنهایی method/payload عمومی، P0 تا P3، ترتیب داخلی P1 و cooldown مشترک مقصد را با قرارداد کامل نگه نمی‌دارند. Stage 3 باید adapter پایدار و migration حداقلی را بر همین اساس اضافه کند.
+- بررسی schema نشان داد `offer_publication_states` فقط publication آفر و `telegram_notification_outbox` فقط پیام خصوصی را مدل می‌کنند؛ هیچ‌کدام به‌تنهایی method/payload عمومی، `M0` تا `M7`، feeder identity/internal rank و cooldown مشترک مقصد را با قرارداد کامل نگه نمی‌دارند. Stage 3 باید adapter پایدار و migration حداقلی را بر همین اساس اضافه کند.
 
 ### Stage 2.5 — ممیزی چالش‌ها و گیت پیش از کدنویسی worker
 
@@ -454,7 +508,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - ثبت چالش‌های فنی و غیرفنی با failure mode، کنترل پیشگیرانه و شاهد بسته‌شدن
 - تفکیک blockerهای قبل از کدنویسی از مواردی که در Stage 3 یا Stage 4 قابل حل‌اند
 - ثبت ADR برای ظرفیت/عمر آفر، منبع حقیقت صف، مرز Iran/foreign، timeout مبهم، limiter و rollout نسخه مختلط
-- تعیین SLOهای تجربه کاربر، زمان publication، backlog، P0 callback و incident response
+- تعیین SLOهای تجربه کاربر، زمان publication، backlog، callback `M0` و incident response
 - تعیین owner عملیاتی، مسیر escalation، مجوز go/no-go و نگهداری حساب‌ها و credentialهای staging
 - افزودن تست یا preflight متناظر برای هر چالش قابل‌آزمایش
 - ثبت topology و ownership matrix صف‌های تابع، سیاست handoff، سقف in-flight، fairness و رفتار pause/cancel/restart برای هر feeder
@@ -477,8 +531,10 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - تکمیل reconciliation و metrics
 - ساخت adapter/feeder صف‌های تابع روی صف اصلی و حذف Bot API call، limiter و retry مستقل از workerهای تابع
 - تبدیل worker broadcast مدیریتی به coordinator گیرندگان با handoff پایدار، پنجره in-flight و feedback نتیجه صف اصلی
-- ساخت coordinator عملیات کانال آفر برای publish/edit و اعمال dependency، supersession، coalescing و ترتیب داخلی edit پیش از enqueue به صف اصلی
+- ساخت feeder مستقل ثبت/کنترل آفر و feeder مستقل edit کانال همراه dependency بر publication، supersession، coalescing و ترتیب newest-first پیش از enqueue به صف اصلی
 - تعیین تکلیف `trade_delivery_worker` و `telegram_notification_outbox_worker` مطابق ownership matrix: feeder/adaptor یا producer مستقیم صف اصلی، با فقط یک consumer owner برای هر job
+- اتصال feeder اعلان وضعیت بازار و عملیات زمان‌دار به main و حذف sleep-taskهای حافظه‌ای برای cleanupهای تحت قرارداد
+- اعمال سیاست authenticated keyboard/anchor بدون تغییر امنیت یا اعتبارسنجی server-side جریان ثبت‌نام و اتصال حساب
 
 معیار خروج: تست‌های هدفمند، integration و regression پاس، feature flag پیش‌فرض خاموش، و inventory runtime ثابت کند هیچ worker تابعی Telegram را مستقیم صدا نمی‌زند و هر side effect فقط یک consumer owner دارد.
 
@@ -547,7 +603,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C01` | محصول | P0 | DECIDED | یک بات، یک کانال و یک پیام مستقل برای هر آفر | حفظ معماری بدون batching یا کانال اضافه |
 | `TOPQ-C02` | فنی | P0 | DECIDED | پذیرش پایدار آفر مستقل از Telegram side effect | تراکنش Offer + intent پایدار |
 | `TOPQ-C03` | UX | P0 | DECIDED | تجربه عادی کاربر در خطای موقت Telegram و مصرف دو عملیات محتوایی private | ادغام success و «لفظ شما» در یک edit با دکمه انقضا، حفظ رفتار WebApp و عدم نمایش queue/error |
-| `TOPQ-C04` | محصول/فنی | P0 | DECIDED | اولویت پیام‌ها | P0 تا P3 و ترتیب داخلی P1 مطابق این سند |
+| `TOPQ-C04` | محصول/فنی | P0 | DECIDED | اولویت پیام‌ها | `M0` تا `M7`، ترتیب انتقال feederها و اولویت داخلی شش صف مطابق بخش ۳ |
 | `TOPQ-C05` | فنی | P0 | DECIDED | رفتار `429` | pending، cooldown طبق retry_after و retry بدون fail |
 | `TOPQ-C06` | فنی | P0 | DECIDED | کاهش دو edit terminal به یک API call | متن نهایی و حذف دکمه در یک editMessageText |
 | `TOPQ-C07` | فنی | P0 | BLOCKER | timeout با نتیجه نامشخص و نبود exactly-once در Bot API | ADR جلوگیری از retry کور، وضعیت AMBIGUOUS و reconciliation قابل‌اثبات |
@@ -555,7 +611,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C09` | فنی/عملیات | P0 | OPEN | انتخاب interval نهایی | آزمایش پرتکرار و goodput پایدار در بار ترکیبی |
 | `TOPQ-C10` | معماری | P0 | BLOCKER | scheduler مشترک در برابر مسیرهای مستقیم و workerها | inventory مالکیت و طرح حذف bypass پیش از تغییر producer |
 | `TOPQ-C11` | محصول/فنی | P1 | DECIDED | آفر terminal پیش از publication | بازخوانی وضعیت و تبدیل به DISABLED بدون ارسال stale |
-| `TOPQ-C12` | فنی/عملیات | P1 | BLOCKER | سیاست جدید newest-first و انتقال editهای بالای پنج دقیقه به انتهای صف می‌تواند starvation دائمی و backlog نامرئی بسازد | شمار distinct Offer، coalescing، stale metrics و catch-up/reconciliation خارج live ordering |
+| `TOPQ-C12` | فنی/عملیات | P1 | BLOCKER | سیاست newest-first همیشگی و انتقال editهای بالای پنج دقیقه به انتهای صف می‌تواند starvation دائمی و backlog نامرئی بسازد | شمار distinct Offer، coalescing، stale metrics و catch-up/reconciliation با سهمی که در staging تعیین می‌شود |
 | `TOPQ-C13` | عملیات | P1 | OPEN | reconciliation دقیق active/history | گزارش شناسه، علت، retry و تفکیک خطای تاریخی |
 | `TOPQ-C14` | تست | P1 | OPEN | پوشش تمام کالاها و حالات تجارت | acceptance matrix و fixture read-only production |
 | `TOPQ-C15` | معماری | P1 | DECIDED | مرز اجرای Telegram | foreign-only execution و عدم اجرای مستقیم روی Iran |
@@ -574,11 +630,11 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C23` | بحرانی | BLOCKER | Offer روی home server ثبت می‌شود ولی Telegram فقط foreign اجرا می‌شود؛ intent ممکن است بین commit و sync گم یا دیر برسد | ثبت Offer و intent در یک تراکنش محلی و sync durable بر پایه natural identity | تست قطع peer پس از commit و تحویل دقیق پس از recovery |
 | `TOPQ-C24` | بحرانی | BLOCKER | crash بعد از پذیرش Telegram و قبل از ثبت `message_id` می‌تواند duplicate یا پیام گم‌شده بسازد | قرارداد AMBIGUOUS، timeout/lease fencing و reconciliation؛ idempotency key داخلی تضمین Telegram نیست | fault test در مرز send/commit بدون retry کور |
 | `TOPQ-C25` | بحرانی | BLOCKER | scope پاسخ `429` صریحاً global یا chat-local اعلام نمی‌شود؛ pause فقط مقصد ممکن است storm را به مقصدهای دیگر منتقل کند | limiter دو‌سطحی bot/destination با رفتار محافظه‌کارانه و probe کنترل‌شده | تست 429 هم‌زمان چند مقصد و اثبات نبود retry storm |
-| `TOPQ-C26` | بحرانی | BLOCKER | `answerCallbackQuery` زمان‌حساس است و queue طولانی progress bar کاربر را باز نگه می‌دارد یا query را stale می‌کند | SLO جدا برای P0، deadline/TTL و terminalization بدون retry دیرهنگام | p95/p99 callback latency و تست query-too-old |
+| `TOPQ-C26` | بحرانی | BLOCKER | `answerCallbackQuery` زمان‌حساس است و queue طولانی progress bar کاربر را باز نگه می‌دارد یا query را stale می‌کند | SLO جدا برای `M0`، deadline/TTL و terminalization بدون retry دیرهنگام | p95/p99 callback latency و تست query-too-old |
 | `TOPQ-C27` | بحرانی | BLOCKER | صدها call site مستقیم aiogram/raw HTTP می‌توانند scheduler را دور بزنند | inventory machine-readable، gateway اجباری و static guard در CI | صفر call site غیرمجاز در allowlist و تست runtime bypass |
 | `TOPQ-C28` | بحرانی | BLOCKER | نسخه مختلط: producer قدیمی مستقیم می‌فرستد و producer/worker جدید همان event را enqueue می‌کند | rollout دو‌فازی با ownership flag و producer/consumer compatibility matrix | تست mixed-version و شمار دقیق یک side effect |
 | `TOPQ-C29` | بالا | OPEN | FIFO با ID محلی یا timestamp بین Iran/foreign و در clock skew پایدار نیست | ترتیب پایدار با source identity/sequence و tie-breaker قطعی | property test reorder/sync delay/clock skew |
-| `TOPQ-C30` | بالا | OPEN | strict priority می‌تواند P2/P3 یا حتی publication جدید P1 را برای همیشه گرسنه کند | aging، reserved capacity و max-wait per class بدون شکستن P0/P1 | endurance با backlog و max-age هر priority |
+| `TOPQ-C30` | بالا | OPEN | strict priority `M0` تا `M7` می‌تواند کلاس‌های پایین یا stale edit را برای همیشه گرسنه کند | aging، reserved/catch-up capacity و max-wait per class بدون شکستن deadlineهای `M0` | endurance با backlog و max-age هر priority/feeder |
 | `TOPQ-C31` | بالا | OPEN | publish، partial edit و terminal edit یک Offer ممکن است out-of-order یا هم‌زمان شوند | dependency/supersession و coalescing بر پایه offer version | تست publish→partial→terminal با تمام reorderها |
 | `TOPQ-C32` | بالا | OPEN | snapshot payload stale می‌شود؛ rebuild کامل نیز ممکن است به داده sync‌نشده یا حذف‌شده وابسته باشد | قرارداد hybrid: identity + immutable snapshot + rebuild از آخرین state معتبر | تست تغییر قیمت/لات/status قبل از claim |
 | `TOPQ-C33` | بالا | OPEN | message ID در Offer و publication state می‌تواند ناسازگار، مفقود یا متعلق به مقصد اشتباه باشد | canonical message identity و validation chat/message before edit | reconciliation دو منبع و fault message-not-found |
@@ -600,15 +656,16 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C49` | بالا | OPEN | observer ممکن است update را از دست بدهد و delivery سالم را missing گزارش کند | offset/session checkpoint، receiver dedupe و سه‌جانبه sender/API/receiver ledger | restart observer test بدون gap/duplicate |
 | `TOPQ-C50` | بالا | DECIDED | تولید زنده 401/403 یا خراب‌کردن token/channel می‌تواند محیط staging را مختل کند | fault adapter برای خطاهای مخرب و جداسازی natural-response run | test matrix با عدم تغییر credential زنده |
 | `TOPQ-C51` | بحرانی | DECIDED | migration graph یا head دو دیتابیس ممکن است متفاوت باشد و rollback schema pendingها را orphan کند | preflight graph/head، migration additive و rollback forward-compatible | upgrade/downgrade scratch + head equality هر دو staging DB |
-| `TOPQ-C52` | بالا | OPEN | load generator خود می‌تواند bottleneck شود یا burst طبیعی را صاف کند؛ تعداد job بسیار بیشتر از تعداد Offer است | seed/trace replay، barrier concurrency و ledger مشتقات P0-P3 | generator self-metrics و تطبیق دقیق expected/actual |
+| `TOPQ-C52` | بالا | OPEN | load generator خود می‌تواند bottleneck شود یا burst طبیعی را صاف کند؛ تعداد job بسیار بیشتر از تعداد Offer است | seed/trace replay، barrier concurrency و ledger مشتقات `M0` تا `M7` و شش feeder | generator self-metrics و تطبیق دقیق expected/actual |
 | `TOPQ-C53` | بحرانی | DECIDED | مقدار staging `max_active_offers=10` یا cache آن ممکن است به production نشت کند | authority Iran staging، environment guard و readback دو peer | preflight ثابت کند staging=10 و default/production=4 |
 | `TOPQ-C54` | بالا | DECIDED | payload، error body، bot token، MTProto session و fixture ممکن است PII/secret افشا کنند | کمینه‌سازی payload، redaction، encryption/permission و secret rotation | secret scan، log review و دسترسی حداقلی |
 | `TOPQ-C55` | متوسط | OPEN | job permanent/ambiguous بدون ابزار pause، inspect، retry امن یا cancel عملیاتی گیر می‌کند | operator command audited با dry-run و dedupe guard | runbook exercise روی job مصنوعی |
 | `TOPQ-C56` | بحرانی | BLOCKER | retry بعد از `retry_after` ممکن است publication یا پیام عملیاتی منقضی و نادرست را دیرهنگام ارسال کند | revalidation اجباری درست پیش از dispatch و قرارداد freshness به تفکیک نوع job در بخش 13.8 | fault test با `retry_after` بزرگ‌تر از عمر آفر/درخواست و شمار صفر پیام stale |
-| `TOPQ-C57` | بالا | DECIDED | پیام نتیجه معامله یکی از دو طرف ممکن است در P2 بیش از پنج ثانیه معطل بماند | deadline از commit معامله، ارتقای مستقل هر recipient به P0 و حفظ `retry_after`/cooldown | تست یک طرف sent و طرف دیگر pending، مرز دقیق پنج ثانیه و صفر bypass محدودیت Telegram |
-| `TOPQ-C58` | بحرانی | BLOCKER | حالت ازدحام edit با newest-first و stale-tail ممکن است edit قدیمی را هرگز اجرا نکند یا raw job count آستانه را اشتباه فعال کند | آستانه بیش از ۳۰ Offer یکتا، یک edit مؤثر برای هر Offer و catch-up در ظرفیت آزاد/پس از بازار | تست ۳۰ در برابر ۳۱ Offer، coalescing چند edit و تخلیه نهایی تمام staleها |
+| `TOPQ-C57` | بالا | DECIDED | پیام نتیجه معامله یکی از دو طرف ممکن است در `M1` بیش از پنج ثانیه معطل بماند | deadline از commit معامله، ارتقای مستقل هر recipient به `M0` و حفظ `retry_after`/cooldown | تست یک طرف sent و طرف دیگر pending، مرز دقیق پنج ثانیه و صفر bypass محدودیت Telegram |
+| `TOPQ-C58` | بحرانی | BLOCKER | newest-first همیشگی و stale-tail ممکن است edit قدیمی را هرگز اجرا نکند | یک edit مؤثر برای هر Offer و catch-up سهم‌بندی‌شده که عددش با staging انتخاب می‌شود | coalescing چند edit، reclassification partial-to-terminal و تخلیه نهایی تمام staleها زیر بار پیوسته |
 | `TOPQ-C59` | بحرانی | BLOCKER | صف broadcast مدیریتی اکنون همه receiptها را می‌سازد اما worker آن‌ها را با batch و limiter مستقل مستقیماً به Telegram می‌فرستد؛ اتصال ساده می‌تواند duplicate، توقف دائمی روی کاربر blocked یا بی‌عدالتی میان چند campaign بسازد | تبدیل worker به feeder، dedupe handoff، پنجره اولیه یک in-flight برای هر broadcast، پیشروی روی terminal مجاز، توقف روی retryable/ambiguous و circuit-break روی خطای عمومی؛ تعیین سقف کلی و fairness چند broadcast | fault/concurrency test برای crash در handoff، blocked user، `429`، ambiguous، خطای token/payload، pause/resume و چند campaign هم‌زمان با شمار دقیق یک ارسال |
-| `TOPQ-C60` | بحرانی | BLOCKER | صف‌های تابع ممکن است priority، retry، lease یا status را با صف اصلی دو بار اعمال کنند؛ همچنین serialization نامناسب می‌تواند اعلان دو طرف معامله را پشت هم نگه دارد | قرارداد مشترک child/main بخش 6.5، topology/ownership matrix و سیاست اختصاصی fan-out/in-flight/freshness برای هر feeder؛ retry فنی و Bot API فقط در main | contract test برای handoff/feedback/cancel/restart و acceptance matrix عملیات آفر، دو طرف معامله، notification outbox و broadcast بدون job گم‌شده یا تکراری |
+| `TOPQ-C60` | بحرانی | BLOCKER | شش صف تابع ممکن است internal rank، main priority، retry، lease یا status را دو بار اعمال کنند؛ serialization نامناسب نیز می‌تواند اعلان دو طرف معامله یا پاسخ فوری را نگه دارد | قرارداد مشترک child/main بخش 6.5، priority-transfer matrix بخش ۳ و سیاست اختصاصی fan-out/in-flight/freshness؛ retry فنی و Bot API فقط در main | contract test handoff/feedback/cancel/restart برای هر شش feeder و ورودی‌های مستقیم بدون job گم‌شده یا تکراری |
+| `TOPQ-C61` | بالا | DECIDED | حذف خودکار پیام، حذف لنگر یا `ReplyKeyboardRemove` در مسیر authenticated می‌تواند منوی کاربر را ناپدید و او را مجبور به `/start` کند | حفظ پیام‌ها تا حد امکان، ممنوعیت حذف لنگر فعال، جایگزینی context keyboard با منوی persistent در تمام خروجی‌های جریان و عدم تعمیم این قاعده به inline keyboardهای منقضی | تست success/error/cancel/timeout و restart برای ثبت‌نام/اتصال حساب/منو؛ کاربر authenticated بدون `/start` منوی مناسب را بازیابد |
 
 ### 13.5 چالش‌های غیرفنی و عملیاتی
 
@@ -631,7 +688,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-N15` | بالا | DECIDED | Test DC عمومی‌تر است، داده‌ها دوره‌ای پاک می‌شوند و flood limit می‌تواند سخت‌گیرانه‌تر باشد | عدم ذخیره داده مهم، bootstrap تکرارپذیر و جداسازی هدف correctness از rate calibration | rebuild کامل pool و اجرای smoke از صفر |
 | `TOPQ-N16` | متوسط | DECIDED | cleanup هزاران پیام خود rate مصرف می‌کند و دور بعدی را آلوده می‌کند | cleanup همه داده‌ها و پیام‌های ساخته‌شده همان `run_id` خارج measurement و پس از export شواهد؛ حفظ فقط گزارش غیرهویتی | شمار صفر داده runtime متعلق به run و cooldown evidence قبل از run بعدی |
 | `TOPQ-N17` | بالا | OPEN | production canary اجازه بار مصنوعی ندارد، پس بعضی failure modeها آنجا قابل اثبات نیستند | تعیین اینکه چه شواهد staging برای go-live کافی است و چه چیزی فقط monitor می‌شود | canary matrix و stop threshold |
-| `TOPQ-N18` | متوسط | DECIDED | alert زیاد یا P3 backlog ممکن است alert fatigue بسازد | severity، aggregation و dedupe alert | تمرین incident با alert قابل‌اقدام |
+| `TOPQ-N18` | متوسط | DECIDED | alert زیاد یا backlog اولویت‌های `M6/M7` ممکن است alert fatigue بسازد | severity، aggregation و dedupe alert | تمرین incident با alert قابل‌اقدام |
 
 ### 13.6 ADRهای اجباری پیش از Stage 3
 
@@ -640,9 +697,9 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-ADR-01` | ظرفیت کانال، SLO publication و semantics expiry در backlog | `C21`, `N01`, `N02` |
 | `TOPQ-ADR-02` | schema، منبع حقیقت، dedupe و مرز atomic producer/sync | `C22`, `C23`, `C29`, `C38` |
 | `TOPQ-ADR-03` | timeout/crash ambiguity، lease و reconciliation | `C07`, `C24`, `C35`, `C55` |
-| `TOPQ-ADR-04` | scheduler دو‌سطحی، priority، P0 deadline، freshness، edit congestion و outage mode | `C10`, `C12`, `C25`, `C26`, `C30`, `C37`, `C56`, `C57`, `C58` |
+| `TOPQ-ADR-04` | scheduler دو‌سطحی، priority، `M0` deadline، freshness، edit ordering/catch-up و outage mode | `C10`, `C12`, `C25`, `C26`, `C30`, `C37`, `C56`, `C57`, `C58` |
 | `TOPQ-ADR-05` | inventory gateway، topology صف‌های تابع، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41`, `C59`, `C60` |
-| `TOPQ-ADR-06` | RACI، copy نهایی، incident response و go/no-go | `N03`, `N05`, `N10`, `N14` |
+| `TOPQ-ADR-06` | RACI، copy نهایی، keyboard/anchor UX، incident response و go/no-go | `C61`, `N03`, `N05`, `N10`, `N14` |
 
 هر ADR باید حداقل شامل گزینه‌های ردشده، دلیل انتخاب، اثر روی داده و sync، failure mode، feature flag، migration، تست، observability و rollback باشد.
 
@@ -655,7 +712,10 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - staging از بات و کانال موجود و متصل خود استفاده می‌کند. preflight باید fingerprint هر دو را قبل از اولین side effect با allowlist staging تطبیق دهد.
 - پس از export و checksum شواهد، تمام داده runtime ساخته‌شده با `run_id` از DB و cache هر دو staging peer و پیام‌های Telegram همان run پاک می‌شوند. cleanup از مسیر authority و API دامنه انجام و سپس sync/readback تأیید می‌شود؛ SQL حذف مستقیم بین دو peer مجاز نیست. کاربر، بات، کانال یا تنظیم pre-existing حذف نمی‌شود؛ اگر runner خودش کاربر آزمایشی ساخته باشد، همان کاربر نیز run-scoped و قابل حذف است.
 - artifact استاندارد هر run شامل `manifest.json`, `events.jsonl`, `errors.jsonl`, `reconciliation.json` و `summary.md` است. همه فایل‌ها `schema_version`, `run_id`, seed، commit، fingerprint محیط، config مؤثر، زمان UTC، شناسه job/dedupe، expected/actual و checksum دارند و token، PII و متن production در آن‌ها redacted است تا agentهای AI و انسان یک ورودی واحد و قابل بازتولید داشته باشند.
-- صف اصلی Telegram execution plane یکتا است و صف‌های دامنه‌ای فقط feeder/coordinator آن هستند. broadcast مدیریتی با یک in-flight اولیه به main متصل می‌شود و عملیات publish/edit کانال آفر در یک coordinator دامنه‌ای واحد قرار می‌گیرند تا ترتیب، dependency و coalescing قبل از ورود به main حل شود. topology نهایی trade و notification outbox و fairness چند broadcast در `C59/C60` باید پیش از Stage 3 بسته شود.
+- صف اصلی Telegram execution plane یکتا با اولویت `M0` تا `M7` است و صف‌های دامنه‌ای فقط feeder/coordinator آن هستند. شش feeder قطعی شامل ثبت/کنترل آفر، edit کانال، معامله/درخواست، مدیریتی/سیستمی، وضعیت بازار و عملیات زمان‌دار است. publish و edit صف‌های مستقل ولی دارای dependency هستند؛ fairness/catch-up و handoff در `C58/C59/C60` باید پیش از Stage 3 بسته شوند.
+- ترتیب داخلی صف edit همیشه فعال است: active lot-partial، traded، expired، cancelled، سایر اصلاحات و repair؛ آفر partial که پیش از dispatch کامل شود به طبقه traded reclassify می‌شود. newest-first بر `offer.created_at` تکیه دارد.
+- ترتیب `M0` به‌طور صریح callback/OTP deadlineدار، اعلان معامله عبورکرده از پنج ثانیه و سپس publication آفر است. اعلان نتیجه معامله ابتدا `M1` است و فقط recipient ارسال‌نشده مستقل ارتقا می‌یابد.
+- برای کاربر authenticated، پیام و به‌خصوص anchor تا حد امکان حذف نمی‌شود و بات نباید او را برای بازگرداندن منو مجبور به `/start` کند. context keyboard در پایان success/error/cancel/timeout با منوی persistent جایگزین می‌شود؛ inline keyboardهای business-stale همچنان حذف می‌شوند.
 
 نمونه copy ترکیبی تأییدشده در `2026-07-16`:
 
@@ -677,7 +737,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 
 | نوع job | رفتار پس از پایان `retry_after` | اگر دیگر معتبر نبود |
 | --- | --- | --- |
-| `answerCallbackQuery` و پاسخ تعاملی P0 | فقط تا deadline کوتاه همان تعامل قابل retry است | پس از deadline ارسال نمی‌شود، به `EXPIRED_INTERACTION` می‌رود و breach ثبت می‌شود |
+| `answerCallbackQuery` و پاسخ تعاملی `M0` | فقط تا deadline کوتاه همان تعامل قابل retry است | پس از deadline ارسال نمی‌شود، به `EXPIRED_INTERACTION` می‌رود و breach ثبت می‌شود |
 | انتشار آفر جدید در کانال | Offer، status، version و `expires_at` دوباره خوانده می‌شوند | آفر terminal یا منقضی `SUPERSEDED` می‌شود و هرگز دیرهنگام منتشر نمی‌شود |
 | edit معامله جزئی آفر | آخرین مقدار باقی‌مانده و version بازسازی می‌شود | اگر آفر terminal شده باشد، edit جزئی supersede و terminal edit جایگزین می‌شود |
 | edit نهایی معامله، انقضا یا لغو | اگر پیام کانال وجود دارد، آخرین متن terminal و حذف دکمه دوباره اعمال می‌شود | اگر آفر هرگز منتشر نشده یا پیام قطعاً وجود ندارد، job با شاهد به no-op نهایی تبدیل می‌شود |
@@ -735,7 +795,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 2. پیش از تحویل مالکیت، یک shadow planner/auditor ایزوله برای یک چرخه کامل بازار و حداکثر ۲۴ ساعت در production اجرا شود. این جزء صف قابل‌ارسال نیست، job آن هرگز قابل promote نیست و فقط intent فرضی، priority، eligibility، payload hash، sync delay و lag را با side effect واقعی مسیر فعلی مقایسه می‌کند.
 3. چون فقط یک کانال داریم، canary درصدی بین direct sender و queue ممنوع است. مالکیت ارسال باید اتمیک و برای کل کانال در یک پنجره کم‌ترافیک منتقل شود.
 4. پس از فعال‌سازی، بازه‌های کنترل ۳۰ دقیقه، ۲ ساعت و ۲۴ ساعت اجرا شوند و فقط ترافیک طبیعی production مشاهده شود؛ بار مصنوعی ممنوع است.
-5. مشاهده حتی یک duplicate، انتشار آفر stale، مقصد production/staging اشتباه، از‌دست‌رفتن job یا اختلاف قطعی DB/sync موجب stop خودکار می‌شود. عبور backlog، P0 latency یا oldest-job از SLO مصوب نیز stop condition است.
+5. مشاهده حتی یک duplicate، انتشار آفر stale، مقصد production/staging اشتباه، از‌دست‌رفتن job یا اختلاف قطعی DB/sync موجب stop خودکار می‌شود. عبور backlog، `M0` latency یا oldest-job از SLO مصوب نیز stop condition است.
 6. rollback نباید pending و ambiguous را رها و direct sender را فوراً روشن کند؛ ابتدا claim متوقف، jobهای in-flight و ambiguous reconcile و سپس ownership با runbook اتمیک برگردانده می‌شود.
 
 ## 14. معیار پذیرش نهایی
@@ -748,9 +808,10 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 - هر آفر یک پیام مستقل داشته باشد و batching وجود نداشته باشد.
 - هیچ `429` به `FAILED` یا انقضای زودهنگام آفر منجر نشود و هیچ publication یا دکمه عملیاتی stale پس از پایان عمر کسب‌وکار ارسال نشود.
 - همه retryها `retry_after` را رعایت کنند.
-- اولویت P0 تا P3 و ترتیب داخلی P1 در تست اثبات شود.
-- اعلان معاملاتی pending هر recipient در مرز پنج ثانیه به P0 ارتقا یابد، بدون اینکه `retry_after` یا cooldown را دور بزند.
-- حالت ازدحام edit فقط در `31` Offer یکتای pending فعال شود؛ active lot-partial سپس traded-terminal و سپس سایر editها را با newest-first انتخاب کند و تمام editهای بالای پنج دقیقه را در stale tail نگه دارد.
+- اولویت `M0` تا `M7`، ترتیب انتقال feederها و تمام رتبه‌های داخلی بخش ۳ در تست اثبات شود.
+- اعلان معاملاتی pending هر recipient در مرز پنج ثانیه از `M1` به `M0` ارتقا یابد، بدون اینکه `retry_after` یا cooldown را دور بزند.
+- ترتیب edit در تمام عمق‌های صف فعال باشد؛ active lot-partial، traded، expired، cancelled و سایر editها را با newest-first انتخاب و editهای بالای پنج دقیقه را در stale tail نگه دارد.
+- آفر partial که پیش از dispatch کامل می‌شود هیچ edit جزئی stale نسازد و فقط terminal edit متناظر را نگه دارد.
 - چند edit یک Offer به یک state نهایی coalesce شوند و catch-up ثابت کند پس از پایان بار هیچ stale edit دائمی باقی نمی‌ماند.
 - علامت terminal و حذف دکمه کانال یک API call باشند.
 - هیچ مسیر مستقیم send/edit کانال limiter را دور نزند.
@@ -765,6 +826,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 - interval نهایی با چندین دور staging و گزارش goodput انتخاب شود.
 - backlog، سن قدیمی‌ترین پیام و زمان تخلیه قابل مشاهده باشند.
 - گزارش reconciliation خطاهای فعال را از خطاهای تاریخی جدا کند.
+- هیچ مسیر authenticated برای بازیابی منوی اصلی به `/start` وابسته نباشد؛ anchor فعال خودکار حذف نشود و تمام خروجی‌های success/error/cancel/timeout جریان موقت، کیبورد persistent مناسب را بازگردانند.
 - artifactهای AI-readable پیش از cleanup export و checksum شوند و سپس هیچ داده runtime یا پیام Telegram متعلق به `run_id` در staging باقی نماند.
 - هیچ داده یا کانال production در آزمایش staging تغییر نکند.
 - production deploy فقط در Stage جدا و با دستور صریح انجام شود.
@@ -776,6 +838,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 - Telegram Bot API `ResponseParameters.retry_after`: `https://core.telegram.org/bots/api#responseparameters`
 - Telegram Bot API `answerCallbackQuery`: `https://core.telegram.org/bots/api#answercallbackquery`
 - Telegram Bot API `editMessageText`: `https://core.telegram.org/bots/api#editmessagetext`
+- Telegram reply keyboard persistence: `https://core.telegram.org/constructor/replyKeyboardMarkup`
 - Telegram dedicated test environment: `https://core.telegram.org/bots/features#dedicated-test-environment`
 - Telegram Test DC accounts and data warning: `https://core.telegram.org/api/auth#test-accounts`
 - PostgreSQL `SKIP LOCKED` queue semantics: `https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE`
@@ -786,6 +849,8 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 - `core/services/offer_publication_reconciliation_service.py`
 - `core/offer_publication_worker.py`
 - `core/telegram_notification_outbox_worker.py`
+- `bot/keyboards.py`
+- `bot/message_manager.py`
 - `core/telegram_admin_broadcast_worker.py`
 - `core/trade_delivery_worker.py`
 - `core/telegram_gateway.py`
