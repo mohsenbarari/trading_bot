@@ -264,6 +264,7 @@ async def edit_message_text(
     message_id: int,
     text: str,
     *,
+    parse_mode: Optional[str] = None,
     reply_markup: Any = _MISSING,
     timeout: float = 10,
     bot_token: Optional[str] = None,
@@ -274,6 +275,8 @@ async def edit_message_text(
         "message_id": message_id,
         "text": text,
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     if reply_markup is not _MISSING:
         payload["reply_markup"] = reply_markup
     return await post_telegram_method(

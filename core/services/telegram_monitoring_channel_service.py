@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from html import escape
 from typing import Any
 
 from sqlalchemy import and_, select
@@ -116,6 +117,10 @@ def normalize_mobile_number(value: Any) -> str:
 
 def _display_name(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _html(value: Any) -> str:
+    return escape(str(value or ""), quote=False)
 
 
 def _origin_label(value: Any) -> str:
@@ -277,35 +282,36 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
         quantity=_coerce_int(getattr(offer, "quantity", None)) or 0,
         price=_coerce_int(getattr(offer, "price", None)) or 0,
     )
-    lines = [
-        "رصد بازار",
-        offer_summary,
-        "",
-        f"وضعیت: {_status_label(getattr(offer, 'status', None))}",
-        f"ارسال شده از: {_origin_label(getattr(offer, 'home_server', None))}",
-        f"نام کاربری لفظ دهنده: {presenter.account_name or '-'}",
-        f"یوزرنیم تلگرام: {presenter.telegram_username}",
-        f"موبایل: {presenter.mobile_number or '-'}",
-        f"نقش: {presenter.role or '-'}",
+    visible_lines = [
+        _html(offer_summary),
+    ]
+    notes = str(getattr(offer, "notes", None) or "").strip()
+    if notes:
+        visible_lines.append(f"توضیحات: {_html(notes)}")
+    visible_lines.append(f"لفظ دهنده: {_html(presenter.account_name or '-')}")
+
+    details_lines = [
+        f"وضعیت: {_html(_status_label(getattr(offer, 'status', None)))}",
+        f"ارسال شده از: {_html(_origin_label(getattr(offer, 'home_server', None)))}",
+        f"یوزرنیم تلگرام: {_html(presenter.telegram_username)}",
+        f"موبایل: {_html(presenter.mobile_number or '-')}",
+        f"نقش: {_html(presenter.role or '-')}",
     ]
 
     if presenter.customer_owner is not None:
         owner = presenter.customer_owner
-        lines.extend(
+        details_lines.extend(
             [
                 "",
                 "مالک مشتری:",
-                f"نام سرگروه: {owner.display_name or '-'}",
-                f"کاربر: #{owner.user_id or '-'}",
-                f"یوزرنیم تلگرام: {owner.telegram_username}",
-                f"موبایل: {owner.mobile_number or '-'}",
+                f"نام سرگروه: {_html(owner.display_name or '-')}",
+                f"کاربر: #{_html(owner.user_id or '-')}",
+                f"یوزرنیم تلگرام: {_html(owner.telegram_username)}",
+                f"موبایل: {_html(owner.mobile_number or '-')}",
             ]
         )
 
-    notes = str(getattr(offer, "notes", None) or "").strip()
-    if notes:
-        lines.extend(["", f"توضیحات: {notes}"])
-    return "\n".join(lines)
+    return "\n".join(visible_lines) + "\n<blockquote expandable>" + "\n".join(details_lines) + "</blockquote>"
 
 
 async def load_customer_owner_for_offer(db: AsyncSession, offer: Offer) -> Any | None:
@@ -415,6 +421,7 @@ async def apply_monitoring_channel_state_with_result(
             channel_id,
             message_id,
             text,
+            parse_mode="HTML",
             timeout=timeout,
             bot_token=bot_token,
             reply_markup=reply_markup,
@@ -427,6 +434,7 @@ async def apply_monitoring_channel_state_with_result(
         result = await telegram_gateway.send_message(
             channel_id,
             text,
+            parse_mode="HTML",
             reply_markup=reply_markup,
             timeout=timeout,
             bot_token=bot_token,

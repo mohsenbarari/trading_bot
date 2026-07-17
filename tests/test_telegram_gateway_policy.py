@@ -66,6 +66,29 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
             {"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
         )
 
+    async def test_edit_message_text_includes_parse_mode(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await telegram_gateway.edit_message_text(
+                9,
+                42,
+                "hello",
+                parse_mode="HTML",
+                bot_token="token",
+                idempotency_key="offer-monitoring-edit:9",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(client.post.await_args.args[0], "https://api.telegram.org/bottoken/editMessageText")
+        self.assertEqual(
+            client.post.await_args.kwargs["json"],
+            {"chat_id": 9, "message_id": 42, "text": "hello", "parse_mode": "HTML"},
+        )
+
     async def test_missing_token_returns_failed_result_without_http_call(self):
         with patch("core.telegram_gateway.current_server", return_value="foreign"), patch.object(
             telegram_gateway.settings, "bot_token", None

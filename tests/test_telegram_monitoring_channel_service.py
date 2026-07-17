@@ -92,10 +92,10 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
         presenter = build_monitoring_offer_presenter(user, customer_owner=owner)
         message = build_monitoring_offer_message(offer, presenter)
 
-        self.assertIn("رصد بازار", message)
         self.assertIn("فروش ربع بهار 40 عدد فردا", message)
+        self.assertIn("لفظ دهنده: internal_account", message)
+        self.assertIn("<blockquote expandable>", message)
         self.assertIn("ارسال شده از: بات", message)
-        self.assertIn("نام کاربری لفظ دهنده: internal_account", message)
         self.assertIn("یوزرنیم تلگرام: @coin_user", message)
         self.assertIn("موبایل: 09122503501", message)
         self.assertIn("مالک مشتری:", message)
@@ -105,6 +105,8 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
         self.assertNotIn("ثبت‌کننده:", message)
         self.assertNotIn("سرور مرجع:", message)
         self.assertNotIn("آفر‌دهنده", message)
+        self.assertNotIn("نام کاربری لفظ دهنده", message)
+        self.assertNotIn("رصد بازار", message)
         self.assertNotIn("Sensitive Full Name", message)
 
     def test_monitoring_message_maps_iran_origin_to_webapp(self):
@@ -131,6 +133,34 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
         message = build_monitoring_offer_message(offer, presenter)
 
         self.assertIn("ارسال شده از: وب اپ", message)
+
+    def test_monitoring_message_escapes_html_in_visible_and_expandable_parts(self):
+        offer = SimpleNamespace(
+            offer_type=SimpleNamespace(value="buy"),
+            settlement_type=SimpleNamespace(value="cash"),
+            commodity=SimpleNamespace(name="امام <x>"),
+            quantity=1,
+            price=100,
+            status=SimpleNamespace(value="active"),
+            home_server="iran",
+            notes="A & B",
+        )
+        presenter = build_monitoring_offer_presenter(
+            SimpleNamespace(
+                id=1,
+                account_name="user <bad>",
+                username="tg&name",
+                mobile_number="09120000000",
+                role=SimpleNamespace(value="عادی"),
+            )
+        )
+
+        message = build_monitoring_offer_message(offer, presenter)
+
+        self.assertIn("امام &lt;x&gt;", message)
+        self.assertIn("توضیحات: A &amp; B", message)
+        self.assertIn("لفظ دهنده: user &lt;bad&gt;", message)
+        self.assertIn("@tg&amp;name", message)
 
 
 if __name__ == "__main__":
