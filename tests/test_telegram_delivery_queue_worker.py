@@ -2,8 +2,14 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from core import telegram_delivery_queue_worker as worker
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
 from core.telegram_delivery_queue_limiter import TelegramDeliveryDispatchAdmission
+from core.telegram_delivery_preflight import (
+    TelegramDeliveryPreflightFailedError,
+    TelegramDeliveryPreflightIdentityReport,
+    TelegramDeliveryPreflightReport,
+)
 from core.telegram_delivery_queue_worker import (
     TelegramDeliveryQueueImplementationIncompleteError,
     build_telegram_delivery_queue_lane_specs,
@@ -41,6 +47,24 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             primary_token="test-primary-token",
             editor_enabled=editor,
             editor_token="test-editor-token" if editor else None,
+        )
+
+    @staticmethod
+    def _preflight_report(*identities):
+        return TelegramDeliveryPreflightReport(
+            approved_bot_identities=tuple(identities),
+            channel_fingerprint="test-channel-fingerprint",
+            identities=tuple(
+                TelegramDeliveryPreflightIdentityReport(
+                    bot_identity=identity,
+                    credential_fingerprint=f"credential-{identity}",
+                    bot_fingerprint=f"bot-{identity}",
+                    channel_fingerprint="test-channel-fingerprint",
+                    member_status="administrator",
+                    effective_permissions=("can_manage_chat",),
+                )
+                for identity in identities
+            ),
         )
 
     async def test_cycle_without_authoritative_freshness_adapter_refuses_before_db_touch(self):
@@ -220,7 +244,10 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             return_value=self._queue_runtime(),
         ), patch(
             "core.telegram_delivery_queue_worker.asyncio.create_task"
-        ) as create_task:
+        ) as create_task, patch(
+            "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
+            new=AsyncMock(),
+        ) as preflight:
             with self.assertRaisesRegex(
                 TelegramDeliveryQueueImplementationIncompleteError,
                 "authoritative_freshness_validator_not_installed:primary",
@@ -232,6 +259,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         create_task.assert_not_called()
+        preflight.assert_not_awaited()
 
     async def test_supervisor_starts_primary_editor_and_recovery_as_independent_tasks(self):
         started_lanes: set[str] = set()
@@ -251,6 +279,8 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.Event().wait()
 
         validator = AsyncMock()
+        credentials = self._credentials(editor=True)
+        preflight_report = self._preflight_report("primary", "channel_editor")
         with patch(
             "core.telegram_delivery_queue_worker.assert_background_job_authority"
         ), patch(
@@ -262,14 +292,17 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
             side_effect=recovery_loop,
-        ):
+        ), patch(
+            "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
+            new=AsyncMock(return_value=preflight_report),
+        ) as preflight:
             supervisor = asyncio.create_task(
                 telegram_delivery_queue_loop(
                     freshness_validators={
                         "primary": validator,
                         "channel_editor": validator,
                     },
-                    credential_registry=self._credentials(editor=True),
+                    credential_registry=credentials,
                     dispatch_limiter=_AllowLimiter(),
                     bot_identities=("primary", "channel_editor"),
                 )
@@ -277,6 +310,10 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(all_started.wait(), timeout=1)
             self.assertEqual(started_lanes, {"primary", "channel_editor"})
             self.assertTrue(recovery_started.is_set())
+            preflight.assert_awaited_once_with(
+                settings=worker.settings,
+                credential_registry=credentials,
+            )
             supervisor.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await supervisor
@@ -320,6 +357,54 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         create_task.assert_not_called()
+
+    async def test_supervisor_refuses_failed_or_mismatched_preflight_before_task_creation(self):
+        validator = AsyncMock()
+        credentials = self._credentials()
+        cases = (
+            (
+                TelegramDeliveryPreflightFailedError("synthetic_preflight_failure"),
+                TelegramDeliveryPreflightFailedError,
+                "synthetic_preflight_failure",
+            ),
+            (
+                self._preflight_report("primary", "channel_editor"),
+                TelegramDeliveryQueueImplementationIncompleteError,
+                "telegram_delivery_preflight_lane_mismatch",
+            ),
+        )
+        for preflight_value, error_class, reason in cases:
+            with self.subTest(reason=reason), patch(
+                "core.telegram_delivery_queue_worker.assert_background_job_authority"
+            ), patch(
+                "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+                return_value=self._queue_runtime(),
+            ), patch(
+                "core.telegram_delivery_queue_worker.asyncio.create_task"
+            ) as create_task, patch(
+                "core.telegram_delivery_queue_worker.AsyncSessionLocal"
+            ) as session_factory:
+                preflight = AsyncMock(
+                    side_effect=preflight_value
+                    if isinstance(preflight_value, Exception)
+                    else None,
+                    return_value=None
+                    if isinstance(preflight_value, Exception)
+                    else preflight_value,
+                )
+                with patch(
+                    "core.telegram_delivery_queue_worker."
+                    "run_configured_telegram_delivery_preflight",
+                    new=preflight,
+                ), self.assertRaisesRegex(error_class, reason):
+                    await telegram_delivery_queue_loop(
+                        freshness_validators={"primary": validator},
+                        credential_registry=credentials,
+                        dispatch_limiter=_AllowLimiter(),
+                        bot_identities=("primary",),
+                    )
+            create_task.assert_not_called()
+            session_factory.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -106,27 +106,28 @@ class TelegramDeliveryCredentialRegistry:
         }
 
     def build_gateway_calls(self) -> dict[str, Any]:
-        calls: dict[str, Any] = {}
-        for identity in self.bot_identities:
-            credential = self.resolve(identity)
-
+        def bind(credential: TelegramDeliveryCredential):
             async def call(
                 method,
                 payload,
                 *,
                 timeout=10,
                 idempotency_key=None,
-                _credential=credential,
             ):
                 return await telegram_gateway.post_telegram_method(
                     method,
                     payload,
                     timeout=timeout,
-                    bot_token=_credential.token,
+                    bot_token=credential.token,
                     idempotency_key=idempotency_key,
                 )
 
-            calls[identity] = call
+            return call
+
+        calls: dict[str, Any] = {}
+        for identity in self.bot_identities:
+            credential = self.resolve(identity)
+            calls[identity] = bind(credential)
         return calls
 
 

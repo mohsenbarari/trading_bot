@@ -140,6 +140,21 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertIsNone(
             fields["telegram_delivery_queue_channel_editor_bot_token"].default
         )
+        self.assertIsNone(
+            fields["telegram_delivery_queue_expected_primary_bot_id"].default
+        )
+        self.assertIsNone(
+            fields[
+                "telegram_delivery_queue_expected_channel_editor_bot_id"
+            ].default
+        )
+        self.assertIsNone(
+            fields["telegram_delivery_queue_expected_channel_id"].default
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_preflight_timeout_seconds"].default,
+            10.0,
+        )
         self.assertEqual(
             fields["telegram_delivery_queue_bot_min_interval_seconds"].default,
             0.035,

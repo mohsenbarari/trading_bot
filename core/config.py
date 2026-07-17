@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     telegram_delivery_queue_cutover_ready: bool = False
     telegram_delivery_queue_channel_editor_enabled: bool = False
     telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
+    telegram_delivery_queue_expected_primary_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_id: int | None = None
+    telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
     telegram_delivery_queue_worker_batch_limit: int = 25
     telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0

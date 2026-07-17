@@ -3,7 +3,7 @@
 The lifecycle guard currently refuses production cutover at the code level.
 Tests may exercise this worker only with an explicit authoritative freshness
 validator, credential-bound gateway, and durable dispatch limiter. Remaining
-Stage 3 preflight, freshness, and feeder work keeps runtime capability false.
+Stage 3 freshness and feeder work keeps runtime capability false.
 """
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ from core.telegram_delivery_queue_limiter import (
     TelegramDeliveryLimiterUnavailableError,
 )
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_delivery_preflight import run_configured_telegram_delivery_preflight
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -604,12 +605,48 @@ async def telegram_delivery_queue_loop(
         dispatch_limiter=dispatch_limiter,
         bot_identities=bot_identities,
     )
+    preflight_report = await run_configured_telegram_delivery_preflight(
+        settings=settings,
+        credential_registry=credential_registry,
+    )
+    lane_identities = tuple(lane.bot_identity for lane in lanes)
+    report_identity_roles = tuple(
+        identity.bot_identity for identity in preflight_report.identities
+    )
+    if (
+        preflight_report.approved_bot_identities != lane_identities
+        or report_identity_roles != lane_identities
+    ):
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "telegram_delivery_preflight_lane_mismatch"
+        )
+    logger.info(
+        "Telegram delivery preflight approved",
+        extra={
+            "event": "telegram_delivery_queue_preflight.approved",
+            "bot_roles": lane_identities,
+            "channel_fingerprint": preflight_report.channel_fingerprint,
+            "bot_fingerprints": {
+                identity.bot_identity: identity.bot_fingerprint
+                for identity in preflight_report.identities
+            },
+            "credential_fingerprints": {
+                identity.bot_identity: identity.credential_fingerprint
+                for identity in preflight_report.identities
+            },
+            "permission_readback": {
+                identity.bot_identity: identity.effective_permissions
+                for identity in preflight_report.identities
+            },
+        },
+    )
     logger.info(
         "Shared Telegram delivery queue supervisor started",
         extra={
             "event": "telegram_delivery_queue_worker.started",
-            "bot_roles": tuple(lane.bot_identity for lane in lanes),
+            "bot_roles": lane_identities,
             "lane_count": len(lanes),
+            "channel_fingerprint": preflight_report.channel_fingerprint,
         },
     )
     tasks = [

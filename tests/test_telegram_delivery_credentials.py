@@ -85,6 +85,12 @@ class TelegramDeliveryCredentialRegistryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(gateway.await_args_list[0].kwargs["bot_token"], "primary-token")
         self.assertEqual(gateway.await_args_list[1].kwargs["bot_token"], "editor-token")
+        with self.assertRaises(TypeError):
+            await calls["primary"](
+                "getMe",
+                {},
+                _credential=registry.resolve("channel_editor"),
+            )
 
     def test_unknown_identity_and_missing_primary_fail_closed(self):
         with self.assertRaisesRegex(
