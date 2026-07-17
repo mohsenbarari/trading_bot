@@ -14,7 +14,8 @@ class BotPanelAdminMenuTests(unittest.IsolatedAsyncioTestCase):
 
         message = SimpleNamespace(bot=SimpleNamespace(), chat=SimpleNamespace(id=10), answer=AsyncMock(return_value=SimpleNamespace(message_id=66)))
         with patch("bot.handlers.panel.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
-            "bot.handlers.panel.get_admin_panel_keyboard", return_value="KB"
+            "bot.handlers.panel.build_admin_panel_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.panel.set_anchor") as set_anchor:
             await show_admin_panel_and_change_keyboard(message, state=SimpleNamespace(), user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
 

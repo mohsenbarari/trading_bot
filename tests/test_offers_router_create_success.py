@@ -235,7 +235,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.offers.lock_repeatable_offer", new=AsyncMock(side_effect=lock_source)
-        ), patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+        ) as lock_source_mock, patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "api.routers.offers.get_trading_settings",
             return_value=settings,
         ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
@@ -296,6 +296,10 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"id": 77, "user_id": 5})
         self.router_admission_fence_mock.assert_awaited_once_with(db)
         self.assertEqual(lock_order, ["market_fence", "source_offer"])
+        self.assertEqual(
+            lock_source_mock.await_args.kwargs["replacement_home_server"],
+            "iran",
+        )
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
 
     async def test_republish_rejects_ineligible_source_before_side_effects(self):

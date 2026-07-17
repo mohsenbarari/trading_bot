@@ -83,6 +83,20 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn("source.republished_offer_public_id = replacement.offer_public_id", migration)
         self.assertIn("unique=True", migration)
 
+    def test_offer_republish_per_home_migration_replaces_global_unique_index(self):
+        migration = (
+            REPO_ROOT / "migrations/versions/f2c7d8e9a0b1_allow_offer_republish_per_home.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('down_revision = "f1b6e7f8a9dc"', migration)
+        self.assertIn('op.drop_index(OLD_INDEX, table_name="offers")', migration)
+        self.assertIn(
+            '["republished_from_offer_public_id", "home_server"]',
+            migration,
+        )
+        self.assertIn("unique=True", migration)
+        self.assertIn("must not discard either independent offer", migration)
+
     def test_new_offer_public_id_backfills_cannot_use_independent_random_values(self):
         allowed_legacy_random_backfills = {
             'a6b7c8d9e0f1_add_offer_public_id.py',

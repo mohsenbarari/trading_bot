@@ -16,10 +16,11 @@ from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation, InvitationKind
 from models.trade import Trade
-from bot.keyboards import (
-    get_user_panel_keyboard, 
-    get_admin_panel_keyboard, 
-    get_persistent_menu_keyboard,
+from bot.repeat_offer import (
+    build_admin_panel_navigation_keyboard,
+    build_persistent_navigation_keyboard,
+    build_user_panel_navigation_keyboard,
+    is_bot_repeat_offer_button_text,
 )
 from bot.message_manager import (
     set_anchor, 
@@ -118,6 +119,13 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
     if not text:
         return False
 
+    if is_bot_repeat_offer_button_text(text):
+        from bot.handlers.trade_create import handle_repeat_offer_button
+
+        await state.clear()
+        await handle_repeat_offer_button(message, state, user, message.bot)
+        return True
+
     from bot.handlers.admin import start_invitation_creation
     from bot.handlers.admin_broadcast import ADMIN_BROADCAST_BUTTON_TEXT, start_telegram_admin_broadcast
     from bot.handlers.admin_commodities import handle_manage_commodities
@@ -183,8 +191,8 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         anchor_msg = await message.answer(
             "👤 **پنل کاربر**\n\nگزینه مورد نظر را انتخاب کنید:",
             parse_mode="Markdown",
-            reply_markup=get_user_panel_keyboard(
-                user.role,
+            reply_markup=await build_user_panel_navigation_keyboard(
+                user,
                 standard_actions=True,
                 show_support=show_support,
             ),
@@ -210,7 +218,7 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
     anchor_msg = await message.answer(
         profile_text, 
         parse_mode="Markdown",
-        reply_markup=get_user_panel_keyboard(user.role)
+        reply_markup=await build_user_panel_navigation_keyboard(user)
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
 
@@ -225,7 +233,7 @@ async def show_admin_panel_and_change_keyboard(message: types.Message, state: FS
     
     anchor_msg = await message.answer(
         "وارد پنل مدیریت شدید.",
-        reply_markup=get_admin_panel_keyboard(user.role)
+        reply_markup=await build_admin_panel_navigation_keyboard(user)
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
 
@@ -1230,8 +1238,8 @@ async def handle_back_to_main_menu(message: types.Message, state: FSMContext, us
     
     anchor_msg = await message.answer(
         "به منوی اصلی بازگشتید.",
-        reply_markup=get_persistent_menu_keyboard(
-            user.role,
+        reply_markup=await build_persistent_navigation_keyboard(
+            user,
             user_facing_webapp_url(settings_obj=settings),
         )
     )

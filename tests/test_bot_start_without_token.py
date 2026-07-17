@@ -91,7 +91,8 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=44, full_name="Ali", account_name="ali_44", role="standard")
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
-            "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+            "bot.handlers.start.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ) as menu_mock, patch(
             "bot.handlers.link_account.build_channel_access_text",
             new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+start_token"),
@@ -102,7 +103,7 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
             await handle_start_without_token(message, state=SimpleNamespace(), user=user)
 
         delete_anchor.assert_awaited_once()
-        menu_mock.assert_called_once()
+        menu_mock.assert_awaited_once()
         self.assertEqual(
             message.answer.await_args.args[0],
             "حساب شما فعال است. از لینک‌های زیر برای ورود استفاده کنید:\n\n"
@@ -123,7 +124,8 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=45, full_name="Reza", account_name="reza_45", role="standard")
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+            "bot.handlers.start.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ), patch(
             "bot.handlers.link_account.build_channel_access_text",
             new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+deep_token"),
@@ -151,7 +153,8 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
             "bot.handlers.start._direct_registration_runtime_ready", return_value=False
         ), patch(
-            "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+            "bot.handlers.start.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ), patch(
             "bot.handlers.link_account.build_channel_access_text",
             new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+invite_again"),

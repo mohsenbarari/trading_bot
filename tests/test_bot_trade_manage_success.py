@@ -39,7 +39,10 @@ class FakeSessionFactory:
 
 
 def make_callback():
-    return SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_reply_markup=AsyncMock()))
+    return SimpleNamespace(
+        answer=AsyncMock(),
+        message=SimpleNamespace(edit_reply_markup=AsyncMock(), answer=AsyncMock()),
+    )
 
 
 class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
@@ -65,7 +68,10 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
             "core.services.offer_expiry_service.current_server",
             return_value="foreign",
-        ), patch("bot.handlers.trade_manage.apply_offer_channel_state", new=AsyncMock()) as apply_offer_channel_state:
+        ), patch("bot.handlers.trade_manage.apply_offer_channel_state", new=AsyncMock()) as apply_offer_channel_state, patch(
+            "bot.handlers.trade_manage.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="MENU"),
+        ):
             await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=SimpleNamespace(id=4), bot=bot)
 
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
@@ -77,7 +83,9 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final_session.commits, 1)
         apply_offer_channel_state.assert_awaited_once_with(offer, reason="manual_expire", timeout=10)
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
-        callback.answer.assert_awaited_with("✅ لفظ شما منقضی شد")
+        callback.answer.assert_awaited_with()
+        callback.message.answer.assert_awaited_once()
+        self.assertEqual(callback.message.answer.await_args.kwargs["reply_markup"], "MENU")
 
     async def test_handle_expire_offer_logs_channel_markup_failures_and_keeps_success_flow(self):
         offer = SimpleNamespace(id=5, user_id=4, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=77)
@@ -97,11 +105,15 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.trade_manage.apply_offer_channel_state",
             new=AsyncMock(side_effect=RuntimeError("edit failed")),
-        ), patch("bot.handlers.trade_manage.logger") as logger:
+        ), patch("bot.handlers.trade_manage.logger") as logger, patch(
+            "bot.handlers.trade_manage.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="MENU"),
+        ):
             await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=SimpleNamespace(id=4), bot=bot)
 
         logger.debug.assert_called_once()
-        callback.answer.assert_awaited_with("✅ لفظ شما منقضی شد")
+        callback.answer.assert_awaited_with()
+        callback.message.answer.assert_awaited_once()
 
 
 if __name__ == "__main__":

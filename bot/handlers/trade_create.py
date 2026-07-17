@@ -5,10 +5,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 from typing import Optional
 from datetime import datetime
+from uuid import uuid4
 
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
@@ -26,9 +28,17 @@ from core.services.offer_creation_service import (
     OfferCreationQuotaUnavailableError,
     create_authoritative_offer_with_outcome,
 )
-from core.services.market_transition_service import MarketOfferAdmissionError
+from core.services.market_transition_service import (
+    MarketOfferAdmissionError,
+    acquire_market_offer_admission_fence,
+)
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
-from core.server_routing import current_server
+from core.server_routing import SERVER_FOREIGN, current_server
+from core.services.offer_republish_service import (
+    OfferNotRepeatableError,
+    ensure_republish_payload_matches_source,
+    lock_repeatable_offer,
+)
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
@@ -70,6 +80,11 @@ from bot.callbacks import (
     TextOfferActionCallback,
     TradeWizardActionCallback,
     TradeWizardEditCallback,
+)
+from bot.repeat_offer import (
+    BOT_REPEAT_OFFER_BUTTON_PREFIX,
+    build_persistent_navigation_keyboard,
+    load_latest_bot_repeat_offer_candidate,
 )
 
 
@@ -123,6 +138,12 @@ async def _canonical_commodity_name_from_session(session, commodity_id: object, 
 
 
 async def _expire_offer_after_publication_failure(session, offer: Offer, user_id: int) -> None:
+    if (
+        getattr(offer, "republished_from_offer_public_id", None)
+        and str(getattr(offer, "home_server", "") or "").strip().lower() == SERVER_FOREIGN
+    ):
+        # A failed Telegram publication must not consume the bot-side repeat slot.
+        offer.republished_from_offer_public_id = None
     await expire_offer_authoritatively(
         session,
         offer,
@@ -1011,6 +1032,11 @@ async def _handle_trade_confirm_core(
     is_wholesale = data.get("is_wholesale", True)
     lot_sizes = data.get("lot_sizes")
     notes = data.get("notes")
+    republish_source_public_id = str(
+        data.get("republished_from_offer_public_id") or ""
+    ).strip()
+    republish_source_local_id = data.get("republished_from_offer_id")
+    republish_idempotency_key = str(data.get("republish_idempotency_key") or "").strip()
 
     price_warning = None
     async with AsyncSessionLocal() as session:
@@ -1058,6 +1084,27 @@ async def _handle_trade_confirm_core(
 
     try:
         async with AsyncSessionLocal() as session:
+            if republish_source_public_id:
+                await acquire_market_offer_admission_fence(session)
+                republish_source = await lock_repeatable_offer(
+                    session,
+                    owner_user_id=user.id,
+                    offer_public_id=republish_source_public_id,
+                    expected_local_id=republish_source_local_id,
+                    market_is_open=True,
+                    replacement_home_server=SERVER_FOREIGN,
+                )
+                ensure_republish_payload_matches_source(
+                    republish_source,
+                    offer_type=trade_type,
+                    settlement_type=settlement_type,
+                    commodity_id=commodity_id,
+                    quantity=quantity,
+                    price=price,
+                    is_wholesale=is_wholesale,
+                    lot_sizes=lot_sizes,
+                    notes=notes,
+                )
             creation_outcome = await create_authoritative_offer_with_outcome(
                 session,
                 OfferCreationCommand(
@@ -1076,7 +1123,10 @@ async def _handle_trade_confirm_core(
                     original_lot_sizes=lot_sizes,
                     notes=notes,
                     status=OfferStatus.ACTIVE,
+                    idempotency_key=republish_idempotency_key or None,
+                    republished_from_offer_public_id=republish_source_public_id or None,
                 ),
+                validate_market=not bool(republish_source_public_id),
                 enforce_market_admission=True,
                 quota_policy=OfferCreationQuotaPolicy(
                     max_active_offers=ts.max_active_offers,
@@ -1243,6 +1293,37 @@ async def _handle_trade_confirm_core(
                 ]
             ),
         )
+    except OfferNotRepeatableError as exc:
+        logger.info(
+            "Telegram repeat-offer source became ineligible",
+            extra={
+                "event": "telegram.repeat_offer.ineligible",
+                "user_id": getattr(user, "id", None),
+                "source_offer_public_id": republish_source_public_id or None,
+                "reason": exc.reason,
+            },
+        )
+        await callback.message.edit_text(
+            "این لفظ دیگر قابل تکرار نیست. منو را دوباره باز کنید."
+        )
+    except IntegrityError as exc:
+        logger.warning(
+            "Telegram repeat-offer uniqueness conflict",
+            exc_info=exc,
+            extra={
+                "event": "telegram.repeat_offer.uniqueness_conflict",
+                "user_id": getattr(user, "id", None),
+                "source_offer_public_id": republish_source_public_id or None,
+            },
+        )
+        if republish_source_public_id:
+            await callback.message.edit_text(
+                "این لفظ قبلاً از طریق بات تکرار شده است."
+            )
+        else:
+            await callback.message.edit_text(
+                f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید."
+            )
     except MarketOfferAdmissionError as exc:
         logger.info(
             "Offer creation rejected at final market admission",
@@ -1736,6 +1817,66 @@ async def _prepare_text_offer(
     )
     await state.set_state(Trade.awaiting_text_confirm)
     return True
+
+
+@router.message(StateFilter(None), F.text.startswith(BOT_REPEAT_OFFER_BUTTON_PREFIX))
+async def handle_repeat_offer_button(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User],
+    bot: Optional[Bot] = None,
+):
+    """Prepare the latest eligible source through the normal text-offer flow."""
+    if not user:
+        return
+
+    try:
+        async with AsyncSessionLocal() as session:
+            candidate = await load_latest_bot_repeat_offer_candidate(
+                session,
+                owner_user_id=user.id,
+            )
+    except Exception:
+        logger.warning(
+            "Failed to resolve Telegram repeat-offer button",
+            exc_info=True,
+            extra={
+                "event": "telegram.repeat_offer.resolve_failed",
+                "user_id": user.id,
+            },
+        )
+        candidate = None
+
+    if candidate is None or (message.text or "").strip() != candidate.button_text:
+        from core.public_webapp_url import user_facing_webapp_url
+
+        await state.clear()
+        await message.answer(
+            "این لفظ دیگر قابل تکرار نیست. منو با آخرین وضعیت به‌روزرسانی شد.",
+            reply_markup=await build_persistent_navigation_keyboard(
+                user,
+                user_facing_webapp_url(settings_obj=settings),
+            ),
+        )
+        return
+
+    await state.clear()
+    prepared = await _prepare_text_offer(
+        message,
+        state,
+        user,
+        candidate.draft_text,
+        edit_response=False,
+        wizard_source=False,
+    )
+    if not prepared:
+        return
+
+    await state.update_data(
+        republished_from_offer_public_id=candidate.source_offer_public_id,
+        republished_from_offer_id=candidate.source_offer_id,
+        republish_idempotency_key=f"bot-repeat:{uuid4().hex}",
+    )
 
 
 @router.message(StateFilter(None), F.text.func(has_trade_indicator))

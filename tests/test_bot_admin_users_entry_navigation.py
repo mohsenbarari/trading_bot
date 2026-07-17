@@ -111,7 +111,8 @@ class BotAdminUsersEntryNavigationTests(unittest.IsolatedAsyncioTestCase):
         )
         state = SimpleNamespace(update_data=AsyncMock())
         with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()) as delete_mock, patch(
-            "bot.handlers.admin_users.get_users_management_keyboard", return_value="KB"
+            "bot.handlers.admin_users.build_users_management_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ):
             await handle_users_menu(message, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
         delete_mock.assert_awaited_once_with(message)
@@ -189,7 +190,8 @@ class BotAdminUsersEntryNavigationTests(unittest.IsolatedAsyncioTestCase):
         )
         state = SimpleNamespace(get_data=AsyncMock(return_value={"anchor_id": 11, "users_menu_id": 12}), clear=AsyncMock())
         with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()) as delete_mock, patch(
-            "bot.handlers.admin_users.get_admin_panel_keyboard", return_value="KB"
+            "bot.handlers.admin_users.build_admin_panel_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.admin_users.asyncio.create_task", side_effect=consume_task) as create_task_mock:
             await handle_back_to_admin(message, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
         delete_mock.assert_awaited_once_with(message)

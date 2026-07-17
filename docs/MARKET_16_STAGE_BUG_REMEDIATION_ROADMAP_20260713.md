@@ -539,7 +539,7 @@ Audit فقط‌خواندنی production پیش از تغییر:
 
 - race نهایی create با transition بسته‌شدن بازار عمداً برای Stage ۶ باقی است و Stage ۵ آن را پنهان یا بازنویسی نمی‌کند.
 - exact replay با idempotency key یکسان و payload متفاوت finding مستقل Stage ۱۵ است. UI برای هر intent key تازه می‌سازد و unique provenance در Stage ۵ از child دوم جلوگیری می‌کند، اما قرارداد conflict کامل در Stage ۱۵ بسته می‌شود.
-- republish فعلی فقط WebApp است. افزودن دکمه مشابه در بات بدون طراحی uniqueness بین دو home مجاز نیست.
+- قرارداد اولیه Stage ۵ فقط WebApp را پوشش می‌داد. افزونه بات در ۲۰۲۶-۰۷-۱۷ یکتایی provenance را به `(republished_from_offer_public_id, home_server)` ارتقا داد: یک child مستقل Iran-home از WebApp و یک child مستقل foreign-home از بات مجاز است، اما هر home برای هر source فقط یک child می‌سازد.
 - rollback کد با revert commit `783374e9` و بازگشت frontend انجام می‌شود. ستون child-owned، جدول receipt قبلی و merge migration additive در rollback فوری حذف نمی‌شوند.
 
 ---

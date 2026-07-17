@@ -22,6 +22,7 @@ from bot.keyboards import (
     get_commodity_fsm_cancel_keyboard,
     get_admin_panel_keyboard 
 )
+from bot.repeat_offer import build_admin_panel_navigation_keyboard
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -58,6 +59,7 @@ async def _return_to_admin_panel(
     message: types.Message | types.CallbackQuery,
     state: FSMContext,
     bot: Bot,
+    user: Optional[User] = None,
     user_role: Optional[UserRole] = None,
 ):
     """
@@ -89,7 +91,11 @@ async def _return_to_admin_panel(
     return_msg = await bot.send_message(
         chat_id=chat_id,
         text="...بازگشت به پنل مدیریت",
-        reply_markup=get_admin_panel_keyboard(user_role)
+        reply_markup=(
+            await build_admin_panel_navigation_keyboard(user)
+            if user is not None
+            else get_admin_panel_keyboard(user_role)
+        ),
     )
     
     # --- ذخیره ID لنگر جدید ---
@@ -235,7 +241,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
 
     if not account_name or not mobile_number:
         error_msg = await callback.message.answer("خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.")
-        await _return_to_admin_panel(callback, state, bot, user.role)
+        await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
         return
 
     requester_identity = InvitationRequesterIdentity(
@@ -260,7 +266,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
         status_code, result = await forward_standard_invitation_to_iran(payload)
     except Exception:
         await callback.message.answer("❌ خطای سیستمی در ارتباط با سرور ایران.")
-        await _return_to_admin_panel(callback, state, bot, user.role)
+        await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
         await callback.answer()
         return
     if status_code >= 400 or not isinstance(result, dict):
@@ -285,12 +291,17 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
                 reply_markup=None,
             )
             
-    await _return_to_admin_panel(callback, state, bot, user.role)
+    await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
     await callback.answer()
 
 # --- هندلر لغو عملیات ---
 @router.callback_query(F.data == "comm_fsm_cancel", StateFilter(InvitationCreation))
-async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+async def cancel_invitation_creation(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    user: Optional[User] = None,
+):
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     inviter_role = _deserialize_user_role(data.get("inviter_role"))
@@ -305,5 +316,11 @@ async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMCo
 
     cancel_msg = await callback.message.answer("عملیات لغو شد.")
     
-    await _return_to_admin_panel(callback, state, bot, inviter_role)
+    await _return_to_admin_panel(
+        callback,
+        state,
+        bot,
+        user=user,
+        user_role=inviter_role,
+    )
     await callback.answer("لغو شد")

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from core.offer_settlement import settlement_type_value
+from core.server_routing import KNOWN_SERVERS
 from core.services.market_transition_service import (
     evaluate_current_market_schedule,
     get_market_runtime_state,
@@ -81,9 +82,17 @@ def repeatable_offer_conditions(
     *,
     owner_user_id: int,
     window: OfferRepeatWindow,
+    replacement_home_server: str,
 ) -> Sequence[object]:
     replacement = aliased(Offer)
     terminal_at = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+    replacement_conditions = [
+        replacement.republished_from_offer_public_id == Offer.offer_public_id,
+    ]
+    normalized_replacement_home = str(replacement_home_server or "").strip().lower()
+    if normalized_replacement_home not in KNOWN_SERVERS:
+        raise ValueError("replacement_home_server must be 'iran' or 'foreign'")
+    replacement_conditions.append(replacement.home_server == normalized_replacement_home)
     return (
         Offer.user_id == owner_user_id,
         Offer.status == OfferStatus.EXPIRED,
@@ -94,9 +103,7 @@ def repeatable_offer_conditions(
         func.coalesce(Offer.remaining_quantity, Offer.quantity) > 0,
         or_(Offer.archived.is_(False), Offer.archived.is_(None)),
         Offer.republished_offer_id.is_(None),
-        ~select(replacement.id)
-        .where(replacement.republished_from_offer_public_id == Offer.offer_public_id)
-        .exists(),
+        ~select(replacement.id).where(*replacement_conditions).exists(),
     )
 
 
@@ -107,6 +114,7 @@ async def list_repeatable_offers(
     limit: int = 3,
     since_hours: int = 1,
     options: Sequence[object] = (),
+    replacement_home_server: str,
 ) -> list[Offer]:
     window = await load_offer_repeat_window(db, since_hours=since_hours)
     if window is None:
@@ -116,7 +124,13 @@ async def list_repeatable_offers(
     stmt = (
         select(Offer)
         .options(*options)
-        .where(*repeatable_offer_conditions(owner_user_id=owner_user_id, window=window))
+        .where(
+            *repeatable_offer_conditions(
+                owner_user_id=owner_user_id,
+                window=window,
+                replacement_home_server=replacement_home_server,
+            )
+        )
         .order_by(terminal_at.desc(), Offer.created_at.desc())
         .limit(limit)
     )
@@ -131,6 +145,7 @@ async def lock_repeatable_offer(
     expected_local_id: int | None,
     market_is_open: bool,
     since_hours: int = 1,
+    replacement_home_server: str,
 ) -> Offer:
     window = await load_offer_repeat_window(
         db,
@@ -144,7 +159,11 @@ async def lock_repeatable_offer(
         select(Offer)
         .where(
             Offer.offer_public_id == offer_public_id,
-            *repeatable_offer_conditions(owner_user_id=owner_user_id, window=window),
+            *repeatable_offer_conditions(
+                owner_user_id=owner_user_id,
+                window=window,
+                replacement_home_server=replacement_home_server,
+            ),
         )
         .with_for_update()
     )

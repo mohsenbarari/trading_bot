@@ -116,7 +116,7 @@ from models.offer_request import OfferRequest
 from models.trade import Trade, TradeStatus
 from models.commodity import Commodity
 from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
-from core.server_routing import current_server, is_remote_home, normalize_server
+from core.server_routing import SERVER_IRAN, current_server, is_remote_home, normalize_server
 
 
 logger = logging.getLogger(__name__)
@@ -1322,6 +1322,7 @@ async def create_offer(
                 offer_public_id=republish_source_public_id,
                 expected_local_id=offer_data.republished_from_id,
                 market_is_open=True,
+                replacement_home_server=SERVER_IRAN,
             )
             ensure_republish_payload_matches_source(
                 republish_source,
@@ -1958,6 +1959,7 @@ async def get_my_repeatable_offers(
         limit=limit,
         since_hours=1,
         options=build_offer_read_options(include_owner_identity=False),
+        replacement_home_server=SERVER_IRAN,
     )
     if not offers:
         return []

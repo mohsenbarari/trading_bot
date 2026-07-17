@@ -29,6 +29,8 @@ from core.services.offer_expiry_limits import OfferManualExpireLimitError, enfor
 from core.services.offer_expiry_gate import try_acquire_offer_expiry_gate
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from bot.callbacks import ExpireOfferCallback
+from bot.repeat_offer import build_persistent_navigation_keyboard
+from core.public_webapp_url import user_facing_webapp_url
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +178,13 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
 
             # حذف دکمه از پیام کاربر
             await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.answer("✅ لفظ شما منقضی شد")
+            await callback.answer()
+            await callback.message.answer(
+                "✅ لفظ شما منقضی شد.",
+                reply_markup=await build_persistent_navigation_keyboard(
+                    user,
+                    user_facing_webapp_url(settings_obj=settings),
+                ),
+            )
     finally:
         await lease.release()
