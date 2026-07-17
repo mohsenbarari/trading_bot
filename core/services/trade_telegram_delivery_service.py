@@ -27,6 +27,11 @@ from core.services.trade_notification_audience_service import (
     TELEGRAM_CHANNEL,
     build_trade_completion_notification_audience,
 )
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import utc_now
 from models.trade import Trade
 from models.trade_delivery_receipt import (
@@ -45,6 +50,7 @@ TELEGRAM_TRADE_DELIVERY_WORKER_ID = "telegram-trade-delivery"
 TELEGRAM_DELIVERY_STATUS_SENT = "sent"
 TELEGRAM_DELIVERY_STATUS_ALREADY_SENT = "already_sent"
 TELEGRAM_DELIVERY_STATUS_QUEUED_FOR_FOREIGN = "queued_for_foreign"
+TELEGRAM_DELIVERY_STATUS_QUEUED_FOR_MAIN_QUEUE = "queued_for_main_queue"
 TELEGRAM_DELIVERY_STATUS_CLAIM_BUSY = "claim_busy"
 TELEGRAM_DELIVERY_STATUS_TERMINAL_PRESERVED = "terminal_preserved"
 TELEGRAM_DELIVERY_STATUS_NOT_REQUIRED = "not_required"
@@ -158,6 +164,18 @@ def _is_terminal(receipt: TradeDeliveryReceipt | Any | None) -> bool:
 
 def _normalize_current_server(value: str | None) -> str:
     return str(value or "").strip().lower()
+
+
+def _telegram_delivery_runtime_mode() -> TelegramDeliveryRuntimeMode:
+    return configured_telegram_delivery_runtime().mode
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_trade_telegram_direct_sender_is_not_runtime_owner"
+        )
 
 
 def _sanitize_error_message(value: Any, *, max_length: int = 500) -> str | None:
@@ -432,6 +450,10 @@ async def deliver_claimed_telegram_receipt(
             receipt=receipt,
             reason="telegram_foreign_only",
         )
+
+    # This is the final legacy side-effect boundary. It must remain guarded even
+    # when a caller bypasses the worker or producer helpers during cutover.
+    _assert_legacy_direct_delivery_owner()
 
     current_time = now or utc_now()
     if _enum_value(getattr(receipt, "channel", None)) != TradeDeliveryChannel.TELEGRAM.value:
@@ -781,6 +803,23 @@ async def deliver_telegram_trade_notification(
             reason=getattr(receipt, "reason", None),
         )
 
+    if _telegram_delivery_runtime_mode() == TelegramDeliveryRuntimeMode.QUEUE_V1:
+        # The receipt is the durable producer intent. The queue feeder performs
+        # the job+ownership-marker handoff atomically in its own transaction.
+        # No direct claim, retry clock, limiter, or Telegram call is allowed here.
+        await _commit_if_requested(db, commit)
+        return TelegramTradeDeliveryResult(
+            status=TELEGRAM_DELIVERY_STATUS_QUEUED_FOR_MAIN_QUEUE,
+            trade_number=normalized_trade_number,
+            recipient_user_id=normalized_recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=TELEGRAM_DESTINATION_SERVER,
+            receipt=receipt,
+            receipt_created=upsert_result.created,
+            receipt_changed=upsert_result.changed,
+            reason="telegram_trade_result_waiting_for_main_queue_handoff",
+        )
+
     claimed_receipt = await claim_receipt_by_identity_for_delivery(
         db,
         event_type=TRADE_COMPLETED_EVENT_TYPE,
@@ -845,6 +884,8 @@ async def claim_and_deliver_next_telegram_receipt(
             destination_server=TELEGRAM_DESTINATION_SERVER,
             reason="telegram_foreign_only",
         )
+
+    _assert_legacy_direct_delivery_owner()
 
     current_time = now or utc_now()
     receipt = await claim_next_receipt_for_delivery(

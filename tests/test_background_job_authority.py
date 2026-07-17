@@ -181,7 +181,10 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertIn("Telegram Bot API", offer_publication.external_state)
         queue = entries[JOB_TELEGRAM_DELIVERY_QUEUE]
         self.assertEqual(queue.allowed_servers, ("foreign",))
-        self.assertEqual(queue.mutated_tables, ("telegram_delivery_jobs",))
+        self.assertEqual(
+            queue.mutated_tables,
+            ("telegram_delivery_jobs", "trade_delivery_receipts"),
+        )
         self.assertTrue(queue.local_runtime)
         self.assertIn("Telegram Bot API", queue.external_state)
         self.assertEqual(

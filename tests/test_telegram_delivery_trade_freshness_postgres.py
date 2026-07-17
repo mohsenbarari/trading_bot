@@ -27,6 +27,9 @@ from core.telegram_delivery_trade_freshness import (
     trade_result_source_natural_id,
     validate_trade_result_telegram_delivery_freshness,
 )
+from core.telegram_delivery_trade_result_binding import (
+    trade_result_queue_receipt_worker_id,
+)
 from models.commodity import Commodity
 from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import (
@@ -111,7 +114,7 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
         }
 
     async def _enqueue_trade_result(self, db, receipt, user):
-        return await enqueue_telegram_delivery_job(
+        result = await enqueue_telegram_delivery_job(
             db,
             current_server="foreign",
             feeder=TelegramFeederKind.TRADE,
@@ -131,6 +134,11 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
             ),
             run_id="trade-freshness-postgres",
         )
+        receipt.worker_id = trade_result_queue_receipt_worker_id(
+            int(result.job.id)
+        )
+        await db.flush()
+        return result
 
     async def test_two_recipients_are_independent_and_overdue_pending_result_is_m0(self):
         committed_at = datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc)

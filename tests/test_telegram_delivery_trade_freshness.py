@@ -16,6 +16,9 @@ from core.telegram_delivery_queue_contract import (
     TelegramFeederKind,
     TelegramFreshnessOutcome,
 )
+from core.telegram_delivery_trade_result_binding import (
+    trade_result_queue_receipt_worker_id,
+)
 from models.trade import TradeStatus
 from models.trade_delivery_receipt import (
     TradeDeliveryChannel,
@@ -50,6 +53,7 @@ def make_receipt(**overrides):
         "channel": TradeDeliveryChannel.TELEGRAM,
         "destination_server": "foreign",
         "status": TradeDeliveryReceiptStatus.PENDING,
+        "worker_id": trade_result_queue_receipt_worker_id(801),
         "telegram_message_id": None,
         "next_retry_at": None,
         "event_created_at": COMMITTED_AT,
@@ -96,6 +100,7 @@ def make_job(*, receipt=None, user=None, **overrides):
     payload = freshness.build_trade_result_delivery_payload(receipt, user)
     _, payload_hash = canonical_telegram_delivery_payload(payload)
     data = {
+        "id": 801,
         "action_kind": TelegramDeliveryAction.TRADE_RESULT,
         "feeder_kind": TelegramFeederKind.TRADE,
         "destination_class": TelegramDestinationClass.PRIVATE,
@@ -211,6 +216,27 @@ class TelegramDeliveryTradeFreshnessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
                 self.assertEqual(decision.reason, "trade_freshness_current")
 
+    async def test_active_receipt_must_be_owned_by_the_exact_queue_job(self):
+        receipt = make_receipt(worker_id=None)
+        decision = await self.decide(
+            make_job(receipt=receipt),
+            receipt=receipt,
+        )
+        wrong_job = make_receipt(
+            worker_id=trade_result_queue_receipt_worker_id(802)
+        )
+        wrong = await self.decide(
+            make_job(receipt=wrong_job),
+            receipt=wrong_job,
+        )
+
+        for item in (decision, wrong):
+            self.assertEqual(item.outcome, TelegramFreshnessOutcome.QUARANTINED)
+            self.assertEqual(
+                item.reason,
+                "trade_freshness_receipt_queue_owner_mismatch",
+            )
+
     async def test_retry_pending_receipt_honors_existing_retry_after_window(self):
         receipt = make_receipt(
             status=TradeDeliveryReceiptStatus.RETRY_PENDING,
@@ -245,6 +271,25 @@ class TelegramDeliveryTradeFreshnessTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
+
+    async def test_existing_opposite_server_outage_policy_is_preserved(self):
+        receipt = make_receipt(
+            audit_payload={
+                **make_receipt().audit_payload,
+                "offer_home_server": "iran",
+            }
+        )
+        decision = await self.decide(
+            make_job(receipt=receipt),
+            receipt=receipt,
+            now=COMMITTED_AT + timedelta(seconds=121),
+        )
+
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
+        self.assertEqual(
+            decision.reason,
+            "trade_freshness_expired_after_outage",
+        )
 
     async def test_deadline_must_be_exact_and_freshness_ttl_is_forbidden(self):
         receipt = make_receipt()

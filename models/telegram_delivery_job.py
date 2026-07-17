@@ -104,6 +104,60 @@ class TelegramDeliveryJobRecord(Base):
             "state",
             "next_retry_at",
         ),
+        Index(
+            "ix_telegram_delivery_jobs_destination_gate",
+            "destination_key",
+            "state",
+            "next_retry_at",
+            "id",
+            postgresql_where=text(
+                "(dispatch_started_at IS NOT NULL AND state IN "
+                "('leased', 'ambiguous', 'ambiguous_unresolved', "
+                "'pending_reconcile')) OR "
+                "(state = 'pending_retry' AND "
+                "outcome_reason = 'telegram_rate_limited' AND "
+                "next_retry_at IS NOT NULL) OR "
+                "state = 'blocked_destination'"
+            ),
+        ),
+        Index(
+            "ix_telegram_delivery_jobs_hard_pause_gate",
+            "state",
+            "bot_identity",
+            "destination_key",
+            "id",
+            postgresql_where=text(
+                "state IN ('blocked_destination', 'blocked_bot', "
+                "'blocked_gateway')"
+            ),
+        ),
+        Index(
+            "ix_telegram_delivery_jobs_bot_cooldown",
+            "bot_identity",
+            "bot_cooldown_until",
+            "id",
+            postgresql_where=text("bot_cooldown_until IS NOT NULL"),
+        ),
+        Index(
+            "ix_telegram_delivery_jobs_recent_rate_limit",
+            "bot_identity",
+            "last_rate_limited_at",
+            "destination_key",
+            "id",
+            postgresql_where=text("last_rate_limited_at IS NOT NULL"),
+        ),
+        Index(
+            "ix_telegram_delivery_jobs_bot_probe_gate",
+            "bot_identity",
+            "state",
+            "lease_until",
+            "id",
+            postgresql_where=text(
+                "rate_limit_probe = true AND dispatch_started_at IS NOT NULL AND "
+                "state IN ('leased', 'ambiguous', 'ambiguous_unresolved', "
+                "'pending_reconcile')"
+            ),
+        ),
         Index("ix_telegram_delivery_jobs_run", "run_id", "state"),
     )
 
@@ -155,11 +209,20 @@ class TelegramDeliveryJobRecord(Base):
     lease_token = Column(BigInteger, nullable=False, default=0, server_default=text("0"))
     lease_until = Column(DateTime(timezone=True), nullable=True)
     dispatch_started_at = Column(DateTime(timezone=True), nullable=True)
+    rate_limit_probe = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
     provider_ok = Column(Boolean, nullable=True)
     provider_status_code = Column(Integer, nullable=True)
     provider_error_code = Column(Integer, nullable=True)
     provider_response = Column(JSON, nullable=True)
     last_retry_after_seconds = Column(BigInteger, nullable=True)
+    last_rate_limited_at = Column(DateTime(timezone=True), nullable=True)
+    last_rate_limit_until = Column(DateTime(timezone=True), nullable=True)
+    bot_cooldown_until = Column(DateTime(timezone=True), nullable=True)
     last_error_class = Column(String(120), nullable=True)
     last_error_message = Column(Text, nullable=True)
     outcome_reason = Column(String(160), nullable=True)

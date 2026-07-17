@@ -522,6 +522,8 @@ def build_claim_receipt_statement(
         TradeDeliveryReceipt.status.in_(
             [TradeDeliveryReceiptStatus.PENDING, TradeDeliveryReceiptStatus.RETRY_PENDING]
         ),
+        TradeDeliveryReceipt.worker_id.is_(None),
+        TradeDeliveryReceipt.lease_until.is_(None),
         or_(
             TradeDeliveryReceipt.next_retry_at.is_(None),
             TradeDeliveryReceipt.next_retry_at <= current_time,
@@ -563,6 +565,8 @@ def build_claim_receipt_by_identity_statement(
             TradeDeliveryReceipt.status.in_(
                 [TradeDeliveryReceiptStatus.PENDING, TradeDeliveryReceiptStatus.RETRY_PENDING]
             ),
+            TradeDeliveryReceipt.worker_id.is_(None),
+            TradeDeliveryReceipt.lease_until.is_(None),
             or_(
                 TradeDeliveryReceipt.next_retry_at.is_(None),
                 TradeDeliveryReceipt.next_retry_at <= current_time,

@@ -6,14 +6,14 @@ is held open while calling Telegram.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import case, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +80,24 @@ class TelegramDeliveryQueueValidationError(ValueError):
     """Raised before inserting malformed or currently unsupported work."""
 
 
+class TelegramDeliveryDispatchDeferredError(RuntimeError):
+    """Defers a dispatch behind durable destination/bot/gateway evidence."""
+
+    def __init__(
+        self,
+        *,
+        retry_after_seconds: float,
+        reason: str,
+        cooldown_until: datetime | None = None,
+        scope: str = "destination",
+    ) -> None:
+        self.retry_after_seconds = max(0.1, float(retry_after_seconds))
+        self.reason = str(reason or "durable_dispatch_gate")[:96]
+        self.cooldown_until = cooldown_until
+        self.scope = str(scope or "destination")
+        super().__init__(self.reason)
+
+
 @dataclass(frozen=True, slots=True)
 class TelegramDeliveryEnqueueResult:
     job: TelegramDeliveryJobRecord
@@ -94,9 +112,291 @@ class TelegramDeliveryLeaseRecoveryReport:
     job_ids: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class TelegramLimiterEvidence:
+    job_id: int
+    bot_identity: str
+    destination_key: str
+    state: TelegramDeliveryState
+    outcome_reason: str | None
+    next_retry_at: datetime | None
+    bot_cooldown_until: datetime | None
+    rate_limit_probe: bool
+    lease_until: datetime | None
+    observed_at: datetime
+
+
+TelegramFreshnessFeedback = Callable[
+    [AsyncSession, TelegramDeliveryJobRecord, TelegramFreshnessDecision, datetime],
+    Awaitable[None],
+]
+TelegramDeliveryResultFeedback = Callable[
+    [AsyncSession, TelegramDeliveryJobRecord, TelegramDeliveryDecision, datetime],
+    Awaitable[None],
+]
+TelegramDispatchGuard = Callable[
+    [AsyncSession, TelegramDeliveryJobRecord, datetime],
+    Awaitable[None],
+]
+
+
+_DURABLE_UNRESOLVED_DESTINATION_STATES = (
+    TelegramDeliveryState.AMBIGUOUS,
+    TelegramDeliveryState.AMBIGUOUS_UNRESOLVED,
+    TelegramDeliveryState.PENDING_RECONCILE,
+)
+
+
+def _dispatch_scope_advisory_key(scope: str) -> int:
+    return int.from_bytes(
+        hashlib.sha256(
+            f"telegram-delivery-dispatch:{scope}".encode("utf-8")
+        ).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+
+
+async def _acquire_dispatch_scope_locks(
+    db: AsyncSession,
+    *,
+    record: TelegramDeliveryJobRecord,
+) -> None:
+    """Serialize result persistence and final markers in a fixed order."""
+    for scope in (
+        "gateway",
+        f"bot:{record.bot_identity}",
+        f"destination:{record.destination_key}",
+    ):
+        await db.execute(
+            select(func.pg_advisory_xact_lock(_dispatch_scope_advisory_key(scope)))
+        )
+
+
+def _is_trade_result_job(record: TelegramDeliveryJobRecord) -> bool:
+    return _enum_value(record.action_kind) == TelegramDeliveryAction.TRADE_RESULT.value
+
+
+def _require_trade_result_callback(
+    record: TelegramDeliveryJobRecord,
+    callback: Any,
+    *,
+    reason: str,
+) -> None:
+    if _is_trade_result_job(record) and not callable(callback):
+        raise TelegramDeliveryQueueValidationError(reason)
+
+
 def _require_foreign(current_server: str) -> None:
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         raise TelegramDeliveryQueueSurfaceError("telegram_delivery_jobs_are_foreign_local")
+
+
+async def _assert_durable_dispatch_gate(
+    db: AsyncSession,
+    *,
+    record: TelegramDeliveryJobRecord,
+    now: datetime,
+) -> None:
+    """Close provider-result/Redis observation crash windows in PostgreSQL.
+
+    Redis remains the high-throughput cadence/cooldown mechanism. This guard is
+    the durable final boundary for destination in-flight/429/ambiguous work,
+    bot-wide cooldowns, and hard destination/bot/gateway pauses.
+    """
+    # Result persistence acquires the same locks. Therefore a marker either
+    # linearizes before a newly known pause, or waits and observes its commit.
+    await _acquire_dispatch_scope_locks(db, record=record)
+
+    blockers = list(
+        (
+            await db.execute(
+                select(TelegramDeliveryJobRecord)
+                .where(
+                    TelegramDeliveryJobRecord.id != int(record.id),
+                    or_(
+                        and_(
+                            TelegramDeliveryJobRecord.destination_key
+                            == str(record.destination_key),
+                            or_(
+                                and_(
+                                    TelegramDeliveryJobRecord.state
+                                    == TelegramDeliveryState.LEASED,
+                                    TelegramDeliveryJobRecord.dispatch_started_at.is_not(
+                                        None
+                                    ),
+                                ),
+                                and_(
+                                    TelegramDeliveryJobRecord.state
+                                    == TelegramDeliveryState.PENDING_RETRY,
+                                    TelegramDeliveryJobRecord.outcome_reason
+                                    == "telegram_rate_limited",
+                                    TelegramDeliveryJobRecord.next_retry_at.is_not(None),
+                                    TelegramDeliveryJobRecord.next_retry_at > now,
+                                ),
+                                and_(
+                                    TelegramDeliveryJobRecord.state.in_(
+                                        _DURABLE_UNRESOLVED_DESTINATION_STATES
+                                    ),
+                                    TelegramDeliveryJobRecord.dispatch_started_at.is_not(
+                                        None
+                                    ),
+                                ),
+                                TelegramDeliveryJobRecord.state
+                                == TelegramDeliveryState.BLOCKED_DESTINATION,
+                            ),
+                        ),
+                        and_(
+                            TelegramDeliveryJobRecord.bot_identity
+                            == str(record.bot_identity),
+                            TelegramDeliveryJobRecord.state
+                            == TelegramDeliveryState.BLOCKED_BOT,
+                        ),
+                        TelegramDeliveryJobRecord.state
+                        == TelegramDeliveryState.BLOCKED_GATEWAY,
+                        and_(
+                            TelegramDeliveryJobRecord.bot_identity
+                            == str(record.bot_identity),
+                            TelegramDeliveryJobRecord.bot_cooldown_until.is_not(None),
+                            TelegramDeliveryJobRecord.bot_cooldown_until > now,
+                        ),
+                        and_(
+                            TelegramDeliveryJobRecord.bot_identity
+                            == str(record.bot_identity),
+                            TelegramDeliveryJobRecord.rate_limit_probe.is_(True),
+                            TelegramDeliveryJobRecord.dispatch_started_at.is_not(None),
+                            TelegramDeliveryJobRecord.state.in_(
+                                (
+                                    TelegramDeliveryState.LEASED,
+                                    *_DURABLE_UNRESOLVED_DESTINATION_STATES,
+                                )
+                            ),
+                        ),
+                    ),
+                )
+                .order_by(TelegramDeliveryJobRecord.id.asc())
+            )
+        ).scalars()
+    )
+    if not blockers:
+        return
+
+    retry_until = now + timedelta(seconds=0.1)
+    reason_state = TelegramDeliveryState.LEASED
+    reason_scope = "destination"
+    for blocker in blockers:
+        blocker_state = TelegramDeliveryState(_enum_value(blocker.state))
+        candidate_until = now + timedelta(seconds=30.0)
+        candidate_reason = blocker_state.value
+        candidate_scope = "destination"
+        if blocker_state == TelegramDeliveryState.BLOCKED_BOT:
+            candidate_scope = "bot"
+        elif blocker_state == TelegramDeliveryState.BLOCKED_GATEWAY:
+            candidate_scope = "gateway"
+        if blocker.rate_limit_probe:
+            candidate_reason = "bot_probe_inflight"
+            candidate_scope = "bot"
+        if (
+            blocker_state == TelegramDeliveryState.PENDING_RETRY
+            and blocker.next_retry_at is not None
+        ):
+            candidate_until = blocker.next_retry_at
+        elif (
+            blocker_state == TelegramDeliveryState.LEASED
+            and blocker.lease_until is not None
+            and blocker.lease_until > now
+        ):
+            candidate_until = blocker.lease_until
+        elif blocker_state == TelegramDeliveryState.LEASED:
+            candidate_until = now + timedelta(seconds=1.0)
+        if (
+            blocker.bot_identity == record.bot_identity
+            and blocker.bot_cooldown_until is not None
+            and blocker.bot_cooldown_until > candidate_until
+        ):
+            candidate_until = blocker.bot_cooldown_until
+            candidate_reason = "bot_cooldown"
+            candidate_scope = "bot"
+        if candidate_until > retry_until:
+            retry_until = candidate_until
+            reason_state = candidate_reason
+            reason_scope = candidate_scope
+
+    raise TelegramDeliveryDispatchDeferredError(
+        retry_after_seconds=max(0.1, (retry_until - now).total_seconds()),
+        reason=f"durable_dispatch_gate:{getattr(reason_state, 'value', reason_state)}",
+        cooldown_until=retry_until,
+        scope=reason_scope,
+    )
+
+
+async def load_active_telegram_limiter_evidence(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    now: datetime | None = None,
+) -> tuple[TelegramLimiterEvidence, ...]:
+    """Return committed cooldown/pause evidence rebuilt before claims."""
+    _require_foreign(current_server)
+    current_time = now or utc_now()
+    records = list(
+        (
+            await db.execute(
+                select(TelegramDeliveryJobRecord)
+                .where(
+                    or_(
+                        and_(
+                            TelegramDeliveryJobRecord.state
+                            == TelegramDeliveryState.PENDING_RETRY,
+                            TelegramDeliveryJobRecord.outcome_reason
+                            == "telegram_rate_limited",
+                            TelegramDeliveryJobRecord.next_retry_at.is_not(None),
+                            TelegramDeliveryJobRecord.next_retry_at
+                            > current_time,
+                        ),
+                        TelegramDeliveryJobRecord.state.in_(
+                            (
+                                TelegramDeliveryState.BLOCKED_DESTINATION,
+                                TelegramDeliveryState.BLOCKED_BOT,
+                                TelegramDeliveryState.BLOCKED_GATEWAY,
+                            )
+                        ),
+                        TelegramDeliveryJobRecord.bot_cooldown_until
+                        > current_time,
+                        and_(
+                            TelegramDeliveryJobRecord.rate_limit_probe.is_(True),
+                            TelegramDeliveryJobRecord.dispatch_started_at.is_not(None),
+                            TelegramDeliveryJobRecord.state.in_(
+                                (
+                                    TelegramDeliveryState.LEASED,
+                                    *_DURABLE_UNRESOLVED_DESTINATION_STATES,
+                                )
+                            ),
+                        ),
+                    )
+                )
+                .order_by(
+                    TelegramDeliveryJobRecord.updated_at.asc(),
+                    TelegramDeliveryJobRecord.id.asc(),
+                )
+            )
+        ).scalars()
+    )
+    return tuple(
+        TelegramLimiterEvidence(
+            job_id=int(record.id),
+            bot_identity=str(record.bot_identity),
+            destination_key=str(record.destination_key),
+            state=TelegramDeliveryState(_enum_value(record.state)),
+            outcome_reason=record.outcome_reason,
+            next_retry_at=record.next_retry_at,
+            bot_cooldown_until=record.bot_cooldown_until,
+            rate_limit_probe=bool(record.rate_limit_probe),
+            lease_until=record.lease_until,
+            observed_at=record.updated_at or current_time,
+        )
+        for record in records
+    )
 
 
 def _enum_value(value: Any) -> str:
@@ -462,6 +762,8 @@ async def mark_telegram_delivery_dispatch_started(
     job_id: int,
     worker_id: str,
     lease_token: int,
+    dispatch_guard: TelegramDispatchGuard | None = None,
+    rate_limit_probe: bool = False,
     now: datetime | None = None,
 ) -> bool:
     _require_foreign(current_server)
@@ -482,8 +784,31 @@ async def mark_telegram_delivery_dispatch_started(
         or record.dispatch_started_at is not None
     ):
         return False
-    record.dispatch_started_at = current_time
-    record.updated_at = current_time
+    await _assert_durable_dispatch_gate(
+        db,
+        record=record,
+        now=current_time,
+    )
+    # Advisory-scope contention and the authoritative dispatch guard may take
+    # long enough for an otherwise valid lease to expire. Sample the clock
+    # again at the actual local linearization boundary; an expired fence must
+    # never be followed by a Telegram side effect.
+    dispatch_linearized_at = max(current_time, utc_now())
+    if record.lease_until is None or record.lease_until <= dispatch_linearized_at:
+        return False
+    _require_trade_result_callback(
+        record,
+        dispatch_guard,
+        reason="trade_result_dispatch_guard_required",
+    )
+    if dispatch_guard is not None:
+        await dispatch_guard(db, record, dispatch_linearized_at)
+        dispatch_linearized_at = max(dispatch_linearized_at, utc_now())
+        if record.lease_until is None or record.lease_until <= dispatch_linearized_at:
+            return False
+    record.dispatch_started_at = dispatch_linearized_at
+    record.rate_limit_probe = bool(rate_limit_probe)
+    record.updated_at = dispatch_linearized_at
     await db.flush()
     return True
 
@@ -496,6 +821,7 @@ async def apply_telegram_delivery_freshness_result(
     worker_id: str,
     lease_token: int,
     decision: TelegramFreshnessDecision,
+    feedback: TelegramFreshnessFeedback | None = None,
     dependency_retry_seconds: float = 1.0,
     now: datetime | None = None,
 ) -> bool:
@@ -520,6 +846,11 @@ async def apply_telegram_delivery_freshness_result(
         or int(record.lease_token or 0) != int(lease_token)
     ):
         return False
+    _require_trade_result_callback(
+        record,
+        feedback,
+        reason="trade_result_freshness_feedback_required",
+    )
     contract_job = _record_to_contract(record)
     apply_freshness_decision(contract_job, decision)
     if (
@@ -546,6 +877,8 @@ async def apply_telegram_delivery_freshness_result(
     record.updated_at = current_time
     if TelegramDeliveryState(_enum_value(record.state)) in FINAL_DELIVERY_STATES:
         record.terminal_at = current_time
+    if feedback is not None:
+        await feedback(db, record, decision, current_time)
     await db.flush()
     return False
 
@@ -634,6 +967,75 @@ async def defer_unstarted_telegram_delivery_lease(
     return True
 
 
+async def _persist_durable_rate_limit_evidence(
+    db: AsyncSession,
+    *,
+    record: TelegramDeliveryJobRecord,
+    decision: TelegramDeliveryDecision,
+    provider_result_at: datetime,
+    linearized_at: datetime,
+    global_rate_limit_window_seconds: float,
+) -> TelegramDeliveryDecision:
+    """Persist both recent 429 evidence and any derived bot-wide deadline."""
+    if (
+        decision.reason != "telegram_rate_limited"
+        or decision.destination_cooldown_until is None
+    ):
+        return decision
+
+    destination_deadline = decision.destination_cooldown_until
+    record.last_rate_limited_at = linearized_at
+    record.last_rate_limit_until = destination_deadline
+    window_seconds = max(0.001, float(global_rate_limit_window_seconds))
+    window_start = linearized_at - timedelta(seconds=window_seconds)
+    prior_records = list(
+        (
+            await db.execute(
+                select(TelegramDeliveryJobRecord)
+                .where(
+                    TelegramDeliveryJobRecord.id != int(record.id),
+                    TelegramDeliveryJobRecord.bot_identity
+                    == str(record.bot_identity),
+                    TelegramDeliveryJobRecord.destination_key
+                    != str(record.destination_key),
+                    TelegramDeliveryJobRecord.last_rate_limited_at.is_not(None),
+                    TelegramDeliveryJobRecord.last_rate_limited_at >= window_start,
+                    TelegramDeliveryJobRecord.last_rate_limited_at <= linearized_at,
+                    TelegramDeliveryJobRecord.last_rate_limit_until.is_not(None),
+                )
+                .order_by(
+                    TelegramDeliveryJobRecord.last_rate_limited_at.desc(),
+                    TelegramDeliveryJobRecord.id.desc(),
+                )
+            )
+        ).scalars()
+    )
+
+    bot_deadlines = [
+        deadline
+        for prior in prior_records
+        for deadline in (prior.last_rate_limit_until, prior.bot_cooldown_until)
+        if deadline is not None
+    ]
+    if (
+        record.bot_cooldown_until is not None
+        and record.bot_cooldown_until > provider_result_at
+    ):
+        bot_deadlines.append(record.bot_cooldown_until)
+    if not prior_records and not bot_deadlines:
+        return decision
+
+    bot_cooldown_until = max([destination_deadline, *bot_deadlines])
+    record.bot_cooldown_until = bot_cooldown_until
+    if record.next_retry_at is None or record.next_retry_at < bot_cooldown_until:
+        record.next_retry_at = bot_cooldown_until
+    return replace(
+        decision,
+        next_retry_at=record.next_retry_at,
+        bot_cooldown_until=bot_cooldown_until,
+    )
+
+
 async def resolve_telegram_delivery_result(
     db: AsyncSession,
     *,
@@ -645,6 +1047,8 @@ async def resolve_telegram_delivery_result(
     retry_after_safety_seconds: float,
     retry_base_seconds: float,
     retry_max_seconds: float,
+    global_rate_limit_window_seconds: float = 2.0,
+    feedback: TelegramDeliveryResultFeedback | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryDecision:
     _require_foreign(current_server)
@@ -667,6 +1071,14 @@ async def resolve_telegram_delivery_result(
             reason="stale_or_missing_lease",
         )
 
+    _require_trade_result_callback(
+        record,
+        feedback,
+        reason="trade_result_delivery_feedback_required",
+    )
+    await _acquire_dispatch_scope_locks(db, record=record)
+    result_linearized_at = utc_now()
+
     contract_job = _record_to_contract(record)
     decision = apply_gateway_result(
         contract_job,
@@ -688,12 +1100,23 @@ async def resolve_telegram_delivery_result(
     record.provider_error_code = _provider_error_code(result)
     record.provider_response = _sanitized_provider_response(result)
     record.last_retry_after_seconds = _raw_retry_after(result)
+    record.rate_limit_probe = False
+    decision = await _persist_durable_rate_limit_evidence(
+        db,
+        record=record,
+        decision=decision,
+        provider_result_at=current_time,
+        linearized_at=result_linearized_at,
+        global_rate_limit_window_seconds=global_rate_limit_window_seconds,
+    )
     record.outcome_reason = decision.reason
-    record.updated_at = current_time
+    record.updated_at = max(current_time, result_linearized_at)
     if contract_job.state in {TelegramDeliveryState.SENT, TelegramDeliveryState.SENT_NOOP}:
         record.sent_at = current_time
     if contract_job.state in FINAL_DELIVERY_STATES:
         record.terminal_at = current_time
+    if feedback is not None:
+        await feedback(db, record, decision, current_time)
     await db.flush()
     return decision
 

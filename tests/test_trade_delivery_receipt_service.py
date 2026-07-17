@@ -313,6 +313,8 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("channel = 'webapp'", compiled)
         self.assertIn("status IN ('pending', 'retry_pending')", compiled)
         self.assertIn("next_retry_at IS NULL", compiled)
+        self.assertIn("worker_id IS NULL", compiled)
+        self.assertIn("lease_until IS NULL", compiled)
         self.assertNotIn("status IN ('processing'", compiled)
 
     def test_atomic_claim_by_identity_scopes_exact_webapp_receipt(self):
@@ -333,6 +335,8 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trade_number = 10025", compiled)
         self.assertIn("recipient_user_id = 7", compiled)
         self.assertIn("channel = 'webapp'", compiled)
+        self.assertIn("worker_id IS NULL", compiled)
+        self.assertIn("lease_until IS NULL", compiled)
         self.assertIn("destination_server = 'iran'", compiled)
         self.assertIn("status IN ('pending', 'retry_pending')", compiled)
 

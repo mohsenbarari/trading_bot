@@ -65,6 +65,16 @@ class TelegramDeliveryPreflightFailedError(RuntimeError):
     """Raised when Telegram readback does not match the approved environment."""
 
 
+class TelegramDeliveryPreflightRateLimitedError(
+    TelegramDeliveryPreflightFailedError
+):
+    """Carries Telegram's authoritative preflight retry delay without provider text."""
+
+    def __init__(self, reason: str, *, retry_after_seconds: float) -> None:
+        super().__init__(reason)
+        self.retry_after_seconds = retry_after_seconds
+
+
 @dataclass(frozen=True, slots=True)
 class TelegramDeliveryPreflightIdentityReport:
     bot_identity: str
@@ -138,6 +148,25 @@ def _result_payload(
         raise TelegramDeliveryPreflightFailedError(
             f"telegram_preflight_readback_failed:{role}:{method}"
         ) from exc
+    if (
+        result_method == method
+        and status_code == 429
+        and not result_ok
+        and isinstance(body, Mapping)
+        and body.get("error_code") == 429
+        and isinstance(body.get("parameters"), Mapping)
+    ):
+        raw_retry_after = body["parameters"].get("retry_after")
+        if not isinstance(raw_retry_after, bool):
+            try:
+                retry_after = float(raw_retry_after)
+            except (TypeError, ValueError, OverflowError):
+                retry_after = 0.0
+            if math.isfinite(retry_after) and retry_after > 0:
+                raise TelegramDeliveryPreflightRateLimitedError(
+                    f"telegram_preflight_rate_limited:{role}:{method}",
+                    retry_after_seconds=retry_after,
+                )
     if (
         result_method != method
         or status_code != 200
@@ -258,6 +287,8 @@ async def run_telegram_delivery_preflight(
     expected_editor_bot_id: Any = None,
     timeout_seconds: float = 10.0,
     gateway_calls: Mapping[str, TelegramPreflightGatewayCall] | None = None,
+    bot_identities: tuple[str, ...] | None = None,
+    identity_only_bot_identities: tuple[str, ...] = (),
 ) -> TelegramDeliveryPreflightReport:
     configured_channel_id = _nonzero_chat_id(
         channel_id,
@@ -290,6 +321,24 @@ async def run_telegram_delivery_preflight(
         raise TelegramDeliveryPreflightConfigurationError(
             "telegram_preflight_credential_roles_mismatch"
         )
+    selected_roles = expected_roles if bot_identities is None else tuple(bot_identities)
+    if (
+        not selected_roles
+        or len(set(selected_roles)) != len(selected_roles)
+        or any(role not in expected_ids for role in selected_roles)
+    ):
+        raise TelegramDeliveryPreflightConfigurationError(
+            "telegram_preflight_selected_roles_invalid"
+        )
+    identity_only_roles = tuple(identity_only_bot_identities)
+    if (
+        len(set(identity_only_roles)) != len(identity_only_roles)
+        or any(role not in selected_roles for role in identity_only_roles)
+        or any(role != TELEGRAM_PRIMARY_BOT_IDENTITY for role in identity_only_roles)
+    ):
+        raise TelegramDeliveryPreflightConfigurationError(
+            "telegram_preflight_identity_only_roles_invalid"
+        )
     timeout = float(timeout_seconds)
     if not math.isfinite(timeout) or timeout <= 0:
         raise TelegramDeliveryPreflightConfigurationError(
@@ -311,7 +360,8 @@ async def run_telegram_delivery_preflight(
     channel_fingerprint = _fingerprint("channel", approved_channel_id)
     identity_reports: list[TelegramDeliveryPreflightIdentityReport] = []
     actual_bot_ids: set[int] = set()
-    for role, expected_bot_id in expected_ids.items():
+    for role in selected_roles:
+        expected_bot_id = expected_ids[role]
         call = calls[role]
         bot = await _readback(
             call,
@@ -330,6 +380,20 @@ async def run_telegram_delivery_preflight(
                 "telegram_preflight_duplicate_bot_identity"
             )
         actual_bot_ids.add(actual_bot_id)
+
+        if role in identity_only_roles:
+            credential = credential_registry.resolve(role)
+            identity_reports.append(
+                TelegramDeliveryPreflightIdentityReport(
+                    bot_identity=role,
+                    credential_fingerprint=credential.fingerprint,
+                    bot_fingerprint=_fingerprint("bot", actual_bot_id),
+                    channel_fingerprint=channel_fingerprint,
+                    member_status="durable_destination_pause",
+                    effective_permissions=(),
+                )
+            )
+            continue
 
         chat = await _readback(
             call,
@@ -384,7 +448,7 @@ async def run_telegram_delivery_preflight(
         )
 
     return TelegramDeliveryPreflightReport(
-        approved_bot_identities=expected_roles,
+        approved_bot_identities=selected_roles,
         channel_fingerprint=channel_fingerprint,
         identities=tuple(identity_reports),
     )
@@ -394,6 +458,8 @@ async def run_configured_telegram_delivery_preflight(
     *,
     settings: Any,
     credential_registry: TelegramDeliveryCredentialRegistry,
+    bot_identities: tuple[str, ...] | None = None,
+    identity_only_bot_identities: tuple[str, ...] = (),
 ) -> TelegramDeliveryPreflightReport:
     editor_enabled = bool(
         getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)
@@ -422,4 +488,6 @@ async def run_configured_telegram_delivery_preflight(
             "telegram_delivery_queue_preflight_timeout_seconds",
             10.0,
         ),
+        bot_identities=bot_identities,
+        identity_only_bot_identities=identity_only_bot_identities,
     )

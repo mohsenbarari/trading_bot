@@ -28,6 +28,12 @@ class TradeDeliveryWorkerTests(unittest.IsolatedAsyncioTestCase):
         result_empty = SimpleNamespace(status=worker.WEBAPP_DELIVERY_STATUS_NO_RECEIPT)
 
         with patch("core.trade_delivery_worker.assert_background_job_authority") as authority_mock, patch(
+            "core.trade_delivery_worker.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                legacy_workers_enabled=True,
+                queue_worker_enabled=False,
+            ),
+        ), patch(
             "core.trade_delivery_worker.AsyncSessionLocal",
             side_effect=[FakeSessionContext(session) for session in sessions],
         ), patch(
@@ -76,6 +82,27 @@ class TradeDeliveryWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.processed_count, 0)
         self.assertEqual(report.recovered_lease_count, 0)
         self.assertEqual(report.status_counts[worker.TELEGRAM_DELIVERY_STATUS_NO_RECEIPT], 1)
+
+    async def test_telegram_cycle_refuses_queue_ownership_before_database_touch(self):
+        with patch(
+            "core.trade_delivery_worker.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                legacy_workers_enabled=False,
+                queue_worker_enabled=True,
+            ),
+        ), patch(
+            "core.trade_delivery_worker.AsyncSessionLocal"
+        ) as session_factory, patch(
+            "core.trade_delivery_worker.assert_background_job_authority"
+        ) as authority_mock:
+            with self.assertRaisesRegex(
+                worker.TelegramDeliveryRuntimeConfigurationError,
+                "legacy_telegram_worker_is_not_runtime_owner",
+            ):
+                await worker.run_telegram_trade_delivery_cycle(limit=1)
+
+        session_factory.assert_not_called()
+        authority_mock.assert_not_called()
 
 
 if __name__ == "__main__":

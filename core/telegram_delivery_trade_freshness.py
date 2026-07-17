@@ -19,6 +19,7 @@ from core.services.telegram_delivery_queue_service import (
 from core.services.trade_delivery_receipt_service import (
     TELEGRAM_DESTINATION_SERVER,
     TRADE_COMPLETED_EVENT_TYPE,
+    classify_receipt_outage_for_delivery,
     trade_completed_receipt_dedupe_key,
 )
 from core.telegram_delivery_queue_contract import (
@@ -27,6 +28,9 @@ from core.telegram_delivery_queue_contract import (
     TelegramFeederKind,
     TelegramFreshnessDecision,
     TelegramFreshnessOutcome,
+)
+from core.telegram_delivery_trade_result_binding import (
+    trade_result_receipt_is_bound_to_job,
 )
 from models.trade import Trade, TradeStatus
 from models.trade_delivery_receipt import (
@@ -158,7 +162,9 @@ def _trade_result_source_natural_id_from_message(
     return source_identity
 
 
-def _receipt_dedupe_from_source_natural_id(source_natural_id: Any) -> str | None:
+def trade_result_receipt_dedupe_from_source_natural_id(
+    source_natural_id: Any,
+) -> str | None:
     identity = str(source_natural_id or "").strip()
     if _TRADE_RESULT_SOURCE_SNAPSHOT_SEPARATOR not in identity:
         return None
@@ -468,7 +474,9 @@ async def validate_trade_result_telegram_delivery_freshness(
     source_natural_id = str(job.source_natural_id or "").strip()
     if not source_natural_id:
         return _quarantined("trade_freshness_source_identity_missing")
-    receipt_dedupe = _receipt_dedupe_from_source_natural_id(source_natural_id)
+    receipt_dedupe = trade_result_receipt_dedupe_from_source_natural_id(
+        source_natural_id
+    )
     if receipt_dedupe is None:
         return _quarantined("trade_freshness_source_identity_invalid")
     receipt = await _load_receipt(db, dedupe_key=receipt_dedupe)
@@ -506,6 +514,11 @@ async def validate_trade_result_telegram_delivery_freshness(
         )
     if status not in _ACTIVE_RECEIPT_STATUSES:
         return _quarantined("trade_freshness_receipt_status_invalid")
+    job_id = _strict_positive_int(getattr(job, "id", None))
+    if job_id is None:
+        return _quarantined("trade_freshness_job_identity_invalid")
+    if not trade_result_receipt_is_bound_to_job(receipt, job_id):
+        return _quarantined("trade_freshness_receipt_queue_owner_mismatch")
     if status == TradeDeliveryReceiptStatus.RETRY_PENDING.value:
         next_retry_at = getattr(receipt, "next_retry_at", None)
         if not isinstance(next_retry_at, datetime):
@@ -515,6 +528,13 @@ async def validate_trade_result_telegram_delivery_freshness(
                 TelegramFreshnessOutcome.WAIT_DEPENDENCY,
                 reason="trade_freshness_receipt_retry_not_due",
             )
+
+    outage = classify_receipt_outage_for_delivery(receipt, now=now)
+    if outage.should_skip_remote_delivery:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="trade_freshness_expired_after_outage",
+        )
 
     trade_number = int(receipt.trade_number)
     trade = await _load_trade(db, trade_number=trade_number)

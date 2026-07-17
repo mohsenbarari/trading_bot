@@ -24,6 +24,8 @@ class _FakeRedis:
 
     async def eval(self, *args):
         self.eval_calls.append(args)
+        if not self.eval_results:
+            return 0
         result = self.eval_results.pop(0)
         if isinstance(result, Exception):
             raise result
@@ -39,7 +41,11 @@ class _FakeRedis:
 
 
 def _job(*, bot="primary", destination="channel:-100123"):
-    return SimpleNamespace(bot_identity=bot, destination_key=destination)
+    return SimpleNamespace(
+        id=f"{bot}:{destination}",
+        bot_identity=bot,
+        destination_key=destination,
+    )
 
 
 def _limiter(redis):
@@ -49,6 +55,7 @@ def _limiter(redis):
         destination_min_interval_seconds=1.05,
         rate_limit_probe_delay_seconds=0.1,
         global_rate_limit_window_seconds=2.0,
+        rate_limit_probe_lease_seconds=30.0,
         key_ttl_seconds=60,
     )
 
@@ -137,6 +144,99 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
         ttl_ms = int(redis.eval_calls[0][-1])
         self.assertGreaterEqual(ttl_ms, 1_000_000_000 + 60_000)
 
+    async def test_explicit_bot_cooldown_is_atomic_with_destination_set_max(self):
+        now = utc_now()
+        destination_until = now + timedelta(seconds=5)
+        bot_until = now + timedelta(seconds=127)
+        redis = _FakeRedis([2, int(bot_until.timestamp() * 1000)])
+        limiter = _limiter(redis)
+
+        await limiter.observe(
+            _job(bot="primary", destination="channel:atomic-bot-cooldown"),
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.RETRY_PENDING,
+                reason="telegram_rate_limited",
+                destination_cooldown_until=destination_until,
+                bot_cooldown_until=bot_until,
+            ),
+            now=now,
+        )
+
+        self.assertEqual(len(redis.eval_calls), 1)
+        call = redis.eval_calls[0]
+        script = call[0]
+        self.assertEqual(call[1], 5)
+        self.assertIn("local function set_max", script)
+        self.assertIn("set_max(KEYS[1], retry_until_ms, ttl_ms)", script)
+        self.assertIn("set_max(KEYS[2], durable_bot_until_ms, ttl_ms)", script)
+        self.assertEqual(call[8], int(destination_until.timestamp() * 1000))
+        self.assertEqual(call[12], int(bot_until.timestamp() * 1000))
+        self.assertGreaterEqual(
+            int(call[14]),
+            int((bot_until - now).total_seconds() * 1000) + 60_000,
+        )
+        self.assertEqual(redis.set_calls, [])
+
+    async def test_cancelled_probe_compare_and_sets_owner_and_rearms_requirement(self):
+        redis = _FakeRedis(1)
+        limiter = _limiter(redis)
+        await limiter.observe(
+            _job(bot="primary", destination="private:cancelled-probe"),
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.ALREADY_RESOLVED,
+                reason="rate_limit_probe_cancelled_before_dispatch",
+            ),
+            now=utc_now(),
+        )
+
+        self.assertEqual(len(redis.eval_calls), 1)
+        call = redis.eval_calls[0]
+        self.assertEqual(call[1], 2)
+        self.assertIn("redis.call('get', KEYS[1]) == ARGV[1]", call[0])
+        self.assertIn("redis.call('set', KEYS[2], 'required'", call[0])
+        self.assertIn(":probe-inflight", call[2])
+        self.assertIn(":probe-required", call[3])
+
+    async def test_recent_429_script_excludes_future_observations(self):
+        now = utc_now()
+        redis = _FakeRedis([1, int(now.timestamp() * 1000)])
+        limiter = _limiter(redis)
+        await limiter.observe(
+            _job(),
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.RETRY_PENDING,
+                reason="telegram_rate_limited",
+                destination_cooldown_until=now + timedelta(seconds=5),
+            ),
+            now=now,
+        )
+        self.assertIn(
+            "seen_at <= now_ms and now_ms - seen_at <= window_ms",
+            redis.eval_calls[0][0],
+        )
+
+    async def test_preflight_prepare_waits_for_probe_owner_then_retires_requirement(self):
+        redis = _FakeRedis(0, 1)
+        limiter = _limiter(redis)
+
+        self.assertFalse(await limiter.prepare_preflight("primary"))
+        self.assertTrue(await limiter.prepare_preflight("primary"))
+        self.assertEqual(len(redis.eval_calls), 2)
+        for call in redis.eval_calls:
+            self.assertEqual(call[1], 3)
+            self.assertIn(":probe-inflight", call[2])
+            self.assertIn(":probe-required", call[3])
+            self.assertIn(":next", call[4])
+            self.assertIsInstance(call[5], int)
+            self.assertIn("redis.call('exists', KEYS[1])", call[0])
+            self.assertIn("bot_next > tonumber(ARGV[1])", call[0])
+
+        gate_redis = _FakeRedis(0, 1)
+        gate_limiter = _limiter(gate_redis)
+        self.assertFalse(await gate_limiter.preflight_gate_open("primary"))
+        self.assertTrue(await gate_limiter.preflight_gate_open("primary"))
+        self.assertIn("or redis.call('exists', KEYS[2])", gate_redis.eval_calls[0][0])
+
     async def test_cadence_key_ttl_cannot_be_configured_shorter_than_interval(self):
         now = utc_now()
         redis = _FakeRedis([1, int(now.timestamp() * 1000), 0])
@@ -146,12 +246,13 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
             destination_min_interval_seconds=1_000.0,
             rate_limit_probe_delay_seconds=0.1,
             global_rate_limit_window_seconds=2.0,
+            rate_limit_probe_lease_seconds=30.0,
             key_ttl_seconds=1,
         )
 
         await limiter.acquire(_job(), now=now)
 
-        ttl_ms = int(redis.eval_calls[0][-1])
+        ttl_ms = int(redis.eval_calls[0][12])
         self.assertGreaterEqual(ttl_ms, 1_000_000 + 60_000)
 
     async def test_pause_outcomes_write_only_the_scoped_block_key(self):
@@ -210,6 +311,7 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
             ("destination_min_interval_seconds", -1),
             ("rate_limit_probe_delay_seconds", float("nan")),
             ("global_rate_limit_window_seconds", float("inf")),
+            ("rate_limit_probe_lease_seconds", 0),
         ):
             values = {
                 "redis": _FakeRedis(),
@@ -217,6 +319,7 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
                 "destination_min_interval_seconds": 1.05,
                 "rate_limit_probe_delay_seconds": 0.1,
                 "global_rate_limit_window_seconds": 2.0,
+                "rate_limit_probe_lease_seconds": 30.0,
             }
             values[name] = value
             with self.subTest(name=name), self.assertRaisesRegex(
@@ -241,6 +344,7 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(limiter.destination_min_interval_seconds, 1.1)
         self.assertEqual(limiter.rate_limit_probe_delay_seconds, 0.2)
         self.assertEqual(limiter.global_rate_limit_window_seconds, 3.0)
+        self.assertEqual(limiter.rate_limit_probe_lease_seconds, 30.0)
         self.assertEqual(limiter.key_ttl_seconds, 900)
 
 

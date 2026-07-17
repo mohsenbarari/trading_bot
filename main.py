@@ -32,6 +32,7 @@ from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop, webapp_trade_delivery_loop
+from core.telegram_delivery_runtime_policy import configured_telegram_delivery_runtime
 from core.telegram_registration_reconciliation_worker import (
     telegram_registration_reconciliation_loop,
 )
@@ -215,8 +216,10 @@ def _background_job_factories():
         ("session_expiry", session_expiry_loop),
         ("user_account_status", user_account_status_loop),
         ("trade_webapp_delivery", webapp_trade_delivery_loop),
-        ("trade_telegram_delivery", telegram_trade_delivery_loop),
     ]
+    telegram_runtime = configured_telegram_delivery_runtime()
+    if telegram_runtime.legacy_workers_enabled:
+        jobs.append(("trade_telegram_delivery", telegram_trade_delivery_loop))
     if registration_reconciliation_runtime_ready(settings):
         jobs.append(
             (

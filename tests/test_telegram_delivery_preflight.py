@@ -6,6 +6,7 @@ from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistr
 from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightConfigurationError,
     TelegramDeliveryPreflightFailedError,
+    TelegramDeliveryPreflightRateLimitedError,
     run_configured_telegram_delivery_preflight,
     run_telegram_delivery_preflight,
 )
@@ -181,6 +182,74 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
             report.identities[1].bot_fingerprint,
         )
 
+    async def test_identity_only_primary_preflight_skips_blocked_channel_calls(self):
+        primary = _ReadbackGateway(role="primary", bot_id=PRIMARY_BOT_ID)
+        editor = _ReadbackGateway(
+            role="channel_editor",
+            bot_id=EDITOR_BOT_ID,
+        )
+        report = await run_telegram_delivery_preflight(
+            credential_registry=_registry(editor=True),
+            channel_id=CHANNEL_ID,
+            expected_channel_id=CHANNEL_ID,
+            expected_primary_bot_id=PRIMARY_BOT_ID,
+            editor_enabled=True,
+            expected_editor_bot_id=EDITOR_BOT_ID,
+            gateway_calls={"primary": primary, "channel_editor": editor},
+            bot_identities=("primary",),
+            identity_only_bot_identities=("primary",),
+        )
+
+        self.assertEqual(report.approved_bot_identities, ("primary",))
+        self.assertEqual([call[0] for call in primary.calls], ["getMe"])
+        self.assertEqual(editor.calls, [])
+        self.assertEqual(report.identities[0].member_status, "durable_destination_pause")
+        self.assertEqual(report.identities[0].effective_permissions, ())
+
+    async def test_invalid_selected_or_identity_only_roles_fail_before_network(self):
+        cases = (
+            {
+                "bot_identities": ("primary", "primary"),
+                "identity_only_bot_identities": (),
+                "reason": "selected_roles_invalid",
+            },
+            {
+                "bot_identities": ("primary", "channel_editor"),
+                "identity_only_bot_identities": ("channel_editor",),
+                "reason": "identity_only_roles_invalid",
+            },
+            {
+                "bot_identities": ("primary",),
+                "identity_only_bot_identities": ("channel_editor",),
+                "reason": "identity_only_roles_invalid",
+            },
+        )
+        for case in cases:
+            primary = _ReadbackGateway(role="primary", bot_id=PRIMARY_BOT_ID)
+            editor = _ReadbackGateway(
+                role="channel_editor",
+                bot_id=EDITOR_BOT_ID,
+            )
+            with self.subTest(reason=case["reason"]), self.assertRaisesRegex(
+                TelegramDeliveryPreflightConfigurationError,
+                case["reason"],
+            ):
+                await run_telegram_delivery_preflight(
+                    credential_registry=_registry(editor=True),
+                    channel_id=CHANNEL_ID,
+                    expected_channel_id=CHANNEL_ID,
+                    expected_primary_bot_id=PRIMARY_BOT_ID,
+                    editor_enabled=True,
+                    expected_editor_bot_id=EDITOR_BOT_ID,
+                    gateway_calls={"primary": primary, "channel_editor": editor},
+                    bot_identities=case["bot_identities"],
+                    identity_only_bot_identities=case[
+                        "identity_only_bot_identities"
+                    ],
+                )
+            self.assertEqual(primary.calls, [])
+            self.assertEqual(editor.calls, [])
+
     async def test_registry_binds_each_preflight_readback_to_its_exact_token(self):
         primary_gateway = _ReadbackGateway(
             role="primary",
@@ -319,6 +388,34 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
             rendered = str(captured.exception)
             self.assertNotIn("sensitive provider text", rendered)
             self.assertNotIn("token-and-target-detail", rendered)
+
+    async def test_provider_429_exposes_only_authoritative_retry_after(self):
+        rate_limited = TelegramGatewayResult(
+            ok=False,
+            method="getMe",
+            status_code=429,
+            response_json={
+                "ok": False,
+                "error_code": 429,
+                "description": "sensitive provider text",
+                "parameters": {"retry_after": 127},
+            },
+        )
+        gateway = _ReadbackGateway(
+            role="primary",
+            bot_id=PRIMARY_BOT_ID,
+            override_results={"getMe": rate_limited},
+        )
+
+        with self.assertRaises(TelegramDeliveryPreflightRateLimitedError) as captured:
+            await _run(primary=gateway)
+
+        self.assertEqual(captured.exception.retry_after_seconds, 127.0)
+        self.assertEqual(
+            str(captured.exception),
+            "telegram_preflight_rate_limited:primary:getMe",
+        )
+        self.assertNotIn("sensitive provider text", str(captured.exception))
 
     async def test_wrong_bot_channel_or_member_identity_is_rejected(self):
         cases = (

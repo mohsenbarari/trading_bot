@@ -40,7 +40,11 @@ VALIDATED_REDIS_URL = _validated_test_redis_url()
 
 
 def _job(bot: str, destination: str):
-    return SimpleNamespace(bot_identity=bot, destination_key=destination)
+    return SimpleNamespace(
+        id=f"{bot}:{destination}",
+        bot_identity=bot,
+        destination_key=destination,
+    )
 
 
 def _rate_limited(until):
@@ -66,6 +70,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             destination_min_interval_seconds=1.0,
             rate_limit_probe_delay_seconds=0.1,
             global_rate_limit_window_seconds=2.0,
+            rate_limit_probe_lease_seconds=30.0,
             key_ttl_seconds=60,
             namespace="telegram:delivery:stage3-test",
         )
@@ -153,6 +158,35 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(primary_global.retry_after_seconds, 2.97)
         self.assertTrue(editor_still_independent.allowed)
 
+    async def test_explicit_bot_cooldown_applies_with_empty_recent_429_history(self):
+        now = utc_now()
+        job = _job("primary", "channel:durable-bot-cooldown")
+        self.assertEqual(await self.redis.keys("*:recent-429"), [])
+
+        await self.limiter.observe(
+            job,
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.RETRY_PENDING,
+                reason="telegram_rate_limited",
+                destination_cooldown_until=now + timedelta(seconds=2),
+                bot_cooldown_until=now + timedelta(seconds=5),
+            ),
+            now=now,
+        )
+
+        primary = await self.limiter.acquire(
+            _job("primary", "private:unrelated-after-restart"),
+            now=now,
+        )
+        editor = await self.limiter.acquire(
+            _job("channel_editor", "private:editor-after-restart"),
+            now=now,
+        )
+        self.assertFalse(primary.allowed)
+        self.assertEqual(primary.wait_reason, "bot_lane")
+        self.assertGreaterEqual(primary.retry_after_seconds, 4.99)
+        self.assertTrue(editor.allowed)
+
     async def test_429_destination_cooldown_is_shared_across_bot_identities(self):
         now = utc_now()
         shared = "channel:shared-rate-limit"
@@ -165,6 +199,288 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(primary.allowed)
         self.assertEqual(primary.wait_reason, "destination_gate")
         self.assertGreaterEqual(primary.retry_after_seconds, 3.99)
+
+    async def test_first_429_allows_exactly_one_probe_until_its_result(self):
+        now = utc_now()
+        await self.limiter.observe(
+            _job("primary", "channel:probe-source"),
+            _rate_limited(now + timedelta(seconds=5)),
+            now=now,
+        )
+
+        probe_time = now + timedelta(milliseconds=110)
+        candidates = [
+            _job("primary", f"private:probe-candidate-{index}")
+            for index in range(50)
+        ]
+        admissions = await asyncio.gather(
+            *(self.limiter.acquire(job, now=probe_time) for job in candidates)
+        )
+        self.assertEqual(sum(item.allowed for item in admissions), 1)
+        allowed_index = next(
+            index for index, item in enumerate(admissions) if item.allowed
+        )
+        self.assertTrue(admissions[allowed_index].is_rate_limit_probe)
+        self.assertEqual(
+            {item.wait_reason for item in admissions if not item.allowed},
+            {"bot_probe_inflight"},
+        )
+
+        still_waiting = await self.limiter.acquire(
+            _job("primary", "private:probe-still-waiting"),
+            now=probe_time + timedelta(seconds=1),
+        )
+        self.assertFalse(still_waiting.allowed)
+        self.assertEqual(still_waiting.wait_reason, "bot_probe_inflight")
+
+        await self.limiter.observe(
+            candidates[allowed_index],
+            TelegramDeliveryDecision(
+                outcome=TelegramDeliveryOutcome.SENT,
+                reason="sent",
+            ),
+            now=probe_time + timedelta(seconds=1),
+        )
+        after_result = await self.limiter.acquire(
+            _job("primary", "private:probe-after-result"),
+            now=probe_time + timedelta(seconds=1, milliseconds=10),
+        )
+        self.assertTrue(after_result.allowed)
+        self.assertFalse(after_result.is_rate_limit_probe)
+
+    async def test_cancelled_probe_is_rearmed_and_only_owner_can_release_it(self):
+        now = utc_now()
+        await self.limiter.observe(
+            _job("primary", "channel:cancelled-probe-source"),
+            _rate_limited(now + timedelta(seconds=5)),
+            now=now,
+        )
+        first_probe_job = _job("primary", "private:cancelled-probe-owner")
+        first_probe = await self.limiter.acquire(
+            first_probe_job,
+            now=now + timedelta(milliseconds=110),
+        )
+        self.assertTrue(first_probe.allowed)
+        self.assertTrue(first_probe.is_rate_limit_probe)
+
+        cancellation = TelegramDeliveryDecision(
+            outcome=TelegramDeliveryOutcome.ALREADY_RESOLVED,
+            reason="rate_limit_probe_cancelled_before_dispatch",
+        )
+        await self.limiter.observe(
+            _job("primary", "private:not-the-probe-owner"),
+            cancellation,
+            now=now + timedelta(milliseconds=310),
+        )
+        still_owned = await self.limiter.acquire(
+            _job("primary", "private:still-blocked-by-owner"),
+            now=now + timedelta(milliseconds=320),
+        )
+        self.assertFalse(still_owned.allowed)
+        self.assertEqual(still_owned.wait_reason, "bot_probe_inflight")
+
+        await self.limiter.observe(
+            first_probe_job,
+            cancellation,
+            now=now + timedelta(milliseconds=330),
+        )
+        candidates = [
+            _job("primary", f"private:replacement-probe-{index}")
+            for index in range(30)
+        ]
+        admissions = await asyncio.gather(
+            *(
+                self.limiter.acquire(
+                    job,
+                    now=now + timedelta(milliseconds=340),
+                )
+                for job in candidates
+            )
+        )
+        self.assertEqual(sum(item.allowed for item in admissions), 1)
+        replacement = next(item for item in admissions if item.allowed)
+        self.assertTrue(replacement.is_rate_limit_probe)
+        self.assertEqual(
+            {item.wait_reason for item in admissions if not item.allowed},
+            {"bot_probe_inflight"},
+        )
+
+    async def test_expired_probe_lease_elects_exactly_one_replacement_probe(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.02,
+            destination_min_interval_seconds=0.02,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=2.0,
+            rate_limit_probe_lease_seconds=0.05,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:stage3-probe-expiry-test",
+        )
+        now = utc_now()
+        await limiter.observe(
+            _job("primary", "channel:probe-expiry-source"),
+            _rate_limited(now + timedelta(seconds=2)),
+            now=now,
+        )
+        owner = await limiter.acquire(
+            _job("primary", "private:probe-expiry-owner"),
+            now=now + timedelta(milliseconds=20),
+        )
+        self.assertTrue(owner.allowed)
+        self.assertTrue(owner.is_rate_limit_probe)
+
+        await asyncio.sleep(0.08)
+        replacement_time = utc_now()
+        candidates = [
+            _job("primary", f"private:probe-expiry-replacement-{index}")
+            for index in range(30)
+        ]
+        admissions = await asyncio.gather(
+            *(limiter.acquire(job, now=replacement_time) for job in candidates)
+        )
+        self.assertEqual(sum(item.allowed for item in admissions), 1)
+        self.assertTrue(next(item for item in admissions if item.allowed).is_rate_limit_probe)
+        self.assertEqual(
+            {item.wait_reason for item in admissions if not item.allowed},
+            {"bot_probe_inflight"},
+        )
+
+    async def test_preflight_prepare_never_bypasses_inflight_probe(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.02,
+            destination_min_interval_seconds=0.02,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=2.0,
+            rate_limit_probe_lease_seconds=0.05,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:stage3-preflight-probe-test",
+        )
+        now = utc_now()
+        await limiter.observe(
+            _job("primary", "channel:preflight-probe-source"),
+            _rate_limited(now + timedelta(seconds=2)),
+            now=now,
+        )
+        probe = await limiter.acquire(
+            _job("primary", "private:preflight-probe-owner"),
+            now=now + timedelta(milliseconds=20),
+        )
+        self.assertTrue(probe.is_rate_limit_probe)
+        self.assertFalse(await limiter.prepare_preflight("primary"))
+        self.assertFalse(await limiter.preflight_gate_open("primary"))
+
+        await asyncio.sleep(0.08)
+        self.assertFalse(await limiter.preflight_gate_open("primary"))
+        self.assertTrue(await limiter.prepare_preflight("primary"))
+        self.assertTrue(await limiter.preflight_gate_open("primary"))
+        after_prepare = await limiter.acquire(
+            _job("primary", "private:preflight-after-expiry"),
+            now=utc_now(),
+        )
+        self.assertTrue(after_prepare.allowed)
+        self.assertFalse(after_prepare.is_rate_limit_probe)
+
+    async def test_preflight_prepare_never_bypasses_active_bot_cooldown(self):
+        limiter = RedisTelegramDeliveryLimiter(
+            redis=self.redis,
+            bot_min_interval_seconds=0.02,
+            destination_min_interval_seconds=0.02,
+            rate_limit_probe_delay_seconds=0.01,
+            global_rate_limit_window_seconds=2.0,
+            rate_limit_probe_lease_seconds=0.05,
+            key_ttl_seconds=60,
+            namespace="telegram:delivery:stage3-preflight-cooldown-test",
+        )
+        await limiter.extend_bot_cooldown(
+            "primary",
+            until=utc_now() + timedelta(seconds=0.06),
+        )
+
+        self.assertFalse(await limiter.prepare_preflight("primary"))
+        await asyncio.sleep(0.08)
+        self.assertTrue(await limiter.prepare_preflight("primary"))
+        self.assertTrue(await limiter.preflight_gate_open("primary"))
+
+    async def test_probe_429_creates_bot_cooldown_and_keeps_other_bot_independent(self):
+        now = utc_now()
+        await self.limiter.observe(
+            _job("primary", "channel:probe-429-source"),
+            _rate_limited(now + timedelta(seconds=2)),
+            now=now,
+        )
+        probe_job = _job("primary", "private:probe-429-destination")
+        probe_time = now + timedelta(milliseconds=110)
+        probe = await self.limiter.acquire(probe_job, now=probe_time)
+        self.assertTrue(probe.allowed)
+        self.assertTrue(probe.is_rate_limit_probe)
+
+        await self.limiter.observe(
+            probe_job,
+            _rate_limited(now + timedelta(seconds=5)),
+            now=probe_time + timedelta(milliseconds=10),
+        )
+        primary = await self.limiter.acquire(
+            _job("primary", "private:blocked-after-probe-429"),
+            now=probe_time + timedelta(milliseconds=20),
+        )
+        editor = await self.limiter.acquire(
+            _job("channel_editor", "private:independent-after-probe-429"),
+            now=probe_time + timedelta(milliseconds=20),
+        )
+        self.assertFalse(primary.allowed)
+        self.assertEqual(primary.wait_reason, "bot_lane")
+        self.assertGreater(primary.retry_after_seconds, 4.8)
+        self.assertTrue(editor.allowed)
+
+    async def test_durable_replay_extension_is_idempotent_monotonic_and_scoped(self):
+        now = utc_now()
+        destination = "channel:rehydrated-rate-limit"
+        job = _job("primary", destination)
+        await self.limiter.extend_destination_cooldown(
+            job,
+            until=now + timedelta(seconds=127.1),
+        )
+        await self.limiter.extend_destination_cooldown(
+            job,
+            until=now + timedelta(seconds=10),
+        )
+
+        shared_destination = await self.limiter.acquire(
+            _job("channel_editor", destination),
+            now=now,
+        )
+        unrelated_destination = await self.limiter.acquire(
+            _job("channel_editor", "channel:rehydrated-unrelated"),
+            now=now,
+        )
+        self.assertFalse(shared_destination.allowed)
+        self.assertEqual(shared_destination.wait_reason, "destination_gate")
+        self.assertGreaterEqual(shared_destination.retry_after_seconds, 127.09)
+        self.assertTrue(unrelated_destination.allowed)
+
+    async def test_bot_replay_extension_is_idempotent_monotonic_and_bot_scoped(self):
+        now = utc_now()
+        maximum = now + timedelta(seconds=127.1)
+        await self.limiter.extend_bot_cooldown("primary", until=maximum)
+        await self.limiter.extend_bot_cooldown(
+            "primary",
+            until=now + timedelta(seconds=10),
+        )
+        await self.limiter.extend_bot_cooldown("primary", until=maximum)
+
+        primary = await self.limiter.acquire(
+            _job("primary", "private:bot-replay-primary"),
+            now=now,
+        )
+        editor = await self.limiter.acquire(
+            _job("channel_editor", "private:bot-replay-editor"),
+            now=now,
+        )
+        self.assertFalse(primary.allowed)
+        self.assertEqual(primary.wait_reason, "bot_lane")
+        self.assertGreaterEqual(primary.retry_after_seconds, 127.09)
+        self.assertTrue(editor.allowed)
 
     async def test_bot_destination_and_gateway_pauses_require_scoped_resume(self):
         now = utc_now()

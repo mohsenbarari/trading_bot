@@ -40,11 +40,15 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
             "lease_token",
             "lease_until",
             "dispatch_started_at",
+            "rate_limit_probe",
             "provider_ok",
             "provider_status_code",
             "provider_error_code",
             "provider_response",
             "last_retry_after_seconds",
+            "last_rate_limited_at",
+            "last_rate_limit_until",
+            "bot_cooldown_until",
             "last_error_class",
             "last_error_message",
             "outcome_reason",
@@ -89,6 +93,11 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
                 "ix_telegram_delivery_jobs_source",
                 "ix_telegram_delivery_jobs_campaign",
                 "ix_telegram_delivery_jobs_bot_destination_state",
+                "ix_telegram_delivery_jobs_destination_gate",
+                "ix_telegram_delivery_jobs_hard_pause_gate",
+                "ix_telegram_delivery_jobs_bot_cooldown",
+                "ix_telegram_delivery_jobs_recent_rate_limit",
+                "ix_telegram_delivery_jobs_bot_probe_gate",
                 "ix_telegram_delivery_jobs_run",
             }.issubset(index_names)
         )
@@ -181,6 +190,43 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertNotIn('drop_table("offers")', source)
         self.assertNotIn('drop_table("offer_publication_states")', source)
         self.assertNotIn('drop_table("telegram_notification_outbox")', source)
+
+    def test_destination_gate_index_migration_is_additive_and_reversible(self):
+        source = Path(
+            "migrations/versions/"
+            "f4e9a0b1c2df_add_telegram_destination_gate_index.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f3d8e9a0b1ce"',
+            source,
+        )
+        self.assertIn(
+            '"ix_telegram_delivery_jobs_destination_gate"',
+            source,
+        )
+        self.assertIn("telegram_rate_limited", source)
+        self.assertIn("postgresql_where", source)
+        self.assertNotIn("drop_table", source)
+
+    def test_bot_cooldown_evidence_migration_is_additive_and_reversible(self):
+        source = Path(
+            "migrations/versions/"
+            "f5e0b1c2d3ea_add_telegram_bot_cooldown_evidence.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f4e9a0b1c2df"',
+            source,
+        )
+        self.assertIn('"last_rate_limited_at"', source)
+        self.assertIn('"last_rate_limit_until"', source)
+        self.assertIn('"bot_cooldown_until"', source)
+        self.assertIn('"rate_limit_probe"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_hard_pause_gate"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_bot_cooldown"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_recent_rate_limit"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_bot_probe_gate"', source)
+        self.assertIn("postgresql_where", source)
+        self.assertNotIn("drop_table", source)
 
 
 if __name__ == "__main__":
