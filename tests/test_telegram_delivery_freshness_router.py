@@ -14,9 +14,11 @@ from core.telegram_delivery_freshness_router import (
     market_freshness_routes,
     offer_freshness_routes,
     required_freshness_actions_for_lane,
+    trade_result_freshness_routes,
 )
 from core.telegram_delivery_market_freshness import MARKET_NOTICE_FRESHNESS_ACTIONS
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
+from core.telegram_delivery_trade_freshness import TRADE_RESULT_FRESHNESS_ACTIONS
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramFreshnessDecision,
@@ -94,6 +96,29 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
             - OFFER_FRESHNESS_ACTIONS
             - MARKET_NOTICE_FRESHNESS_ACTIONS,
         )
+
+    def test_trade_result_route_reduces_primary_gap_without_covering_other_trade_actions(self):
+        validator = send_validator()
+        routes = offer_freshness_routes(validator)
+        routes.update(market_freshness_routes(validator))
+        routes.update(trade_result_freshness_routes(validator))
+        registry = TelegramDeliveryFreshnessRegistry(routes)
+
+        primary = registry.coverage("primary")
+
+        self.assertEqual(
+            set(primary.configured_actions),
+            OFFER_FRESHNESS_ACTIONS
+            | MARKET_NOTICE_FRESHNESS_ACTIONS
+            | TRADE_RESULT_FRESHNESS_ACTIONS,
+        )
+        for action in (
+            TelegramDeliveryAction.TRADE_RESPONSE,
+            TelegramDeliveryAction.TRADE_ALTERNATIVE,
+            TelegramDeliveryAction.TRADE_UNAVAILABLE,
+            TelegramDeliveryAction.TRADE_NONCRITICAL,
+        ):
+            self.assertIn(action, primary.missing_actions)
 
     def test_incomplete_lane_refuses_router_construction(self):
         registry = TelegramDeliveryFreshnessRegistry(
@@ -217,6 +242,11 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryFreshnessRegistry(
                 {TelegramDeliveryAction.GENERAL_IMMEDIATE: None}
             )
+        with self.assertRaisesRegex(
+            TelegramDeliveryFreshnessRoutingError,
+            "telegram_trade_result_freshness_validator_invalid",
+        ):
+            trade_result_freshness_routes(None)
         with self.assertRaisesRegex(
             TelegramDeliveryFreshnessRoutingError,
             "telegram_market_freshness_validator_invalid",
