@@ -6,9 +6,9 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     exit 2
 fi
 action="${1:-}"
-if [[ "$action" != "disk-full" && "$action" != "clock-jump" ]] || \
+if [[ "$action" != "disk-full" && "$action" != "clock-jump" && "$action" != "recover" ]] || \
     [[ "${2:-}" != "--tag" || "$#" -ne 3 ]]; then
-    echo "usage: writer-witness-matrix-host-faults {disk-full|clock-jump} --tag WWM_TAG" >&2
+    echo "usage: writer-witness-matrix-host-faults {disk-full|clock-jump|recover} --tag WWM_TAG" >&2
     exit 2
 fi
 tag="$3"
@@ -16,14 +16,21 @@ tag="$3"
     echo "unsafe matrix ownership tag" >&2
     exit 2
 }
+state_helper="/usr/local/sbin/writer-witness-matrix-host-fault-state"
+[[ -x "$state_helper" ]] || {
+    echo "durable host-fault recovery helper is unavailable" >&2
+    exit 1
+}
+if [[ "$action" == "recover" ]]; then
+    "$state_helper" recover --tag "$tag" --caller-pid "$$"
+    exit 0
+fi
 
 suffix="disk"
 port=55439
-listen_addresses=""
 if [[ "$action" == "clock-jump" ]]; then
     suffix="clock"
     port=55440
-    listen_addresses="127.0.0.1"
 fi
 root="/run/$tag-$suffix"
 data="$root/pgdata"
@@ -36,54 +43,264 @@ cleanup() {
     local status=$?
     trap - EXIT
     set +e
-    if [[ -n "$postgres_pid" ]]; then
-        runuser -u postgres -- "$bindir/pg_ctl" -D "$data" -m immediate stop >/dev/null 2>&1 || status=70
-    fi
-    if mountpoint -q "$root"; then
-        umount "$root" || status=70
-    fi
-    if ! mountpoint -q "$root"; then
-        rm -rf "$root"
-    fi
+    "$state_helper" recover --tag "$tag" --kind "$suffix" --caller-pid "$$" || status=70
     exit "$status"
 }
-trap cleanup EXIT
 
-[[ ! -e "$root" ]] || {
-    echo "matrix disk-full path already exists" >&2
-    exit 1
+process_start_ticks() {
+    python3 - "$1" <<'PY'
+from pathlib import Path
+import sys
+
+raw = Path(f"/proc/{int(sys.argv[1])}/stat").read_text(encoding="ascii")
+end = raw.rfind(")")
+fields = raw[end + 2:].split()
+if end < 0 or len(fields) < 20:
+    raise SystemExit("cannot attest process start ticks")
+print(fields[19])
+PY
 }
-if ss -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
+
+database_inventory_sha256() {
+    LC_ALL=C runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 postgres <<'SQL' | sha256sum | awk '{print $1}'
+SELECT json_build_object(
+    'name', datname,
+    'allow_connections', datallowconn,
+    'connection_limit', datconnlimit,
+    'is_template', datistemplate,
+    'owner', pg_get_userbyid(datdba)
+)::text
+FROM pg_database
+ORDER BY datname;
+SQL
+}
+
+credential_bundle_sha256() {
+    sha256sum \
+        /etc/trading-bot-witness/runtime.env \
+        /root/writer-witness-client-material/webapp-fi.env \
+        /root/writer-witness-client-material/webapp-ir.env \
+        /root/writer-witness-client-material/witness-ca.crt \
+        | sha256sum | awk '{print $1}'
+}
+
+capture_production_state() {
+    local destination="$1"
+    local manifest inventory credentials system_identifier app_pid app_ticks
+    local production_data production_postgres_pid production_postgres_ticks
+    manifest="$(/usr/local/sbin/writer-witness-state-manifest)"
+    inventory="$(database_inventory_sha256)"
+    credentials="$(credential_bundle_sha256)"
+    system_identifier="$(runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 \
+        -d writer_witness -c 'SELECT system_identifier::text FROM pg_control_system()')"
+    app_pid="$(systemctl show -p MainPID --value writer-witness.service)"
+    [[ "$app_pid" =~ ^[0-9]+$ && "$app_pid" -gt 1 ]]
+    app_ticks="$(process_start_ticks "$app_pid")"
+    production_data="$(runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 \
+        -d writer_witness -c 'SHOW data_directory')"
+    [[ "$production_data" == /* && -f "$production_data/postmaster.pid" ]]
+    production_postgres_pid="$(head -1 "$production_data/postmaster.pid")"
+    [[ "$production_postgres_pid" =~ ^[0-9]+$ && "$production_postgres_pid" -gt 1 ]]
+    production_postgres_ticks="$(process_start_ticks "$production_postgres_pid")"
+    if grep -Fq '/faketime/libfaketime.so' "/proc/$app_pid/maps" || \
+        grep -Fq '/faketime/libfaketime.so' "/proc/$production_postgres_pid/maps"; then
+        echo "libfaketime escaped into a production process" >&2
+        return 1
+    fi
+    [[ "$manifest" =~ ^[0-9a-f]{64}$ ]]
+    [[ "$inventory" =~ ^[0-9a-f]{64}$ ]]
+    [[ "$credentials" =~ ^[0-9a-f]{64}$ ]]
+    [[ "$system_identifier" =~ ^[0-9]+$ ]]
+    printf '{"manifest_sha256":"%s","database_inventory_sha256":"%s","credential_bundle_sha256":"%s","system_identifier":"%s","writer_service_pid":%s,"writer_service_start_ticks":%s,"postgres_pid":%s,"postgres_start_ticks":%s,"libfaketime_loaded":false}\n' \
+        "$manifest" "$inventory" "$credentials" "$system_identifier" \
+        "$app_pid" "$app_ticks" "$production_postgres_pid" "$production_postgres_ticks" \
+        >"$destination"
+    chmod 0600 "$destination"
+}
+
+if ss -H -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
     echo "isolated PostgreSQL port is already in use" >&2
     exit 1
 fi
+"$state_helper" claim --tag "$tag" --kind "$suffix" --helper-pid "$$"
+trap cleanup EXIT
 install -d -m 0700 -o postgres -g postgres "$root"
 mount -t tmpfs -o size=96m,mode=0700,uid="$(id -u postgres)",gid="$(id -g postgres)" \
     "$tag" "$root"
+"$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" --phase mounted
 install -d -m 0700 -o postgres -g postgres "$data" "$socket_dir"
-runuser -u postgres -- "$bindir/initdb" -D "$data" --auth=trust --no-locale >/dev/null
-runuser -u postgres -- "$bindir/pg_ctl" -D "$data" \
-    -o "-p $port -k $socket_dir -c listen_addresses='$listen_addresses' -c fsync=on -c full_page_writes=on" \
-    -w start >/dev/null
-postgres_pid="$(head -1 "$data/postmaster.pid")"
+runuser -u postgres -- "$bindir/initdb" -D "$data" \
+    --auth-local=peer --auth-host=reject --no-locale >/dev/null
+"$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" --phase initialized
+
+postgres_program="$bindir/postgres"
+postgres_start_program="$postgres_program"
+postgres_options="-p $port -k $socket_dir -c listen_addresses='' -c fsync=on -c full_page_writes=on"
+faketime_library=""
+faketime_library_sha256=""
+clock_control_file=""
+if [[ "$action" == "clock-jump" ]]; then
+    mapfile -t faketime_candidates < <(
+        dpkg-query -L libfaketime 2>/dev/null \
+            | grep -E '/faketime/libfaketime\.so\.1$' \
+            | sort -u
+    )
+    [[ "${#faketime_candidates[@]}" -eq 1 ]] || {
+        echo "exactly one packaged libfaketime library is required" >&2
+        exit 1
+    }
+    faketime_library="$(realpath -e "${faketime_candidates[0]}")"
+    [[ "$faketime_library" == /usr/lib/* || "$faketime_library" == /lib/* ]]
+    [[ -f "$faketime_library" && ! -L "$faketime_library" ]]
+    [[ "$(stat -c '%u:%a' "$faketime_library")" == 0:* ]]
+    [[ "$((8#$(stat -c '%a' "$faketime_library") & 8#022))" -eq 0 ]]
+    faketime_library_sha256="$(sha256sum "$faketime_library" | awk '{print $1}')"
+    [[ "$faketime_library_sha256" =~ ^[0-9a-f]{64}$ ]]
+    clock_control_file="$root/faketime.rc"
+    install -m 0600 -o postgres -g postgres /dev/null "$clock_control_file"
+    printf '+0\n' >"$clock_control_file"
+    chown postgres:postgres "$clock_control_file"
+    chmod 0600 "$clock_control_file"
+    postgres_start_program="$root/postgres-faketime"
+    sed \
+        -e "s|__FAKETIME_LIBRARY__|$faketime_library|g" \
+        -e "s|__CLOCK_CONTROL_FILE__|$clock_control_file|g" \
+        -e "s|__POSTGRES_PROGRAM__|$postgres_program|g" \
+        /dev/stdin >"$postgres_start_program" <<'EOF'
+#!/bin/sh
+exec env -u FAKETIME \
+    LD_PRELOAD=__FAKETIME_LIBRARY__ \
+    FAKETIME_TIMESTAMP_FILE=__CLOCK_CONTROL_FILE__ \
+    FAKETIME_NO_CACHE=1 \
+    FAKETIME_DISABLE_SHM=1 \
+    FAKETIME_DONT_FAKE_MONOTONIC=1 \
+    FAKETIME_DONT_RESET=1 \
+    __POSTGRES_PROGRAM__ "$@"
+EOF
+    chown postgres:postgres "$postgres_start_program"
+    chmod 0700 "$postgres_start_program"
+fi
+
+start_isolated_postgres() {
+    runuser -u postgres -- "$bindir/pg_ctl" -D "$data" \
+        -l "$root/postgresql.log" \
+        -o "$postgres_options" \
+        -p "$postgres_start_program" \
+        -w start >/dev/null
+    postgres_pid="$(head -1 "$data/postmaster.pid")"
+    [[ "$postgres_pid" =~ ^[0-9]+$ && "$postgres_pid" -gt 1 ]]
+    "$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+        --phase postgres_started --postgres-pid "$postgres_pid"
+}
+
+stop_isolated_postgres() {
+    runuser -u postgres -- "$bindir/pg_ctl" -D "$data" -m fast -w stop >/dev/null
+}
+
+start_isolated_postgres
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -f /srv/trading-bot-witness/current/deploy/writer-witness/001_initial.sql >/dev/null
+"$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+    --phase running --postgres-pid "$postgres_pid"
 
 if [[ "$action" == "clock-jump" ]]; then
-    probe_output="$root/clock-probe.json"
+    production_before="$root/production-before.json"
+    production_after="$root/production-after.json"
+    phase_one="$root/clock-phase-one.json"
+    phase_two="$root/clock-phase-two.json"
+    capture_production_state "$production_before"
+    production_system_identifier="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["system_identifier"])' "$production_before")"
+    first_postgres_pid="$postgres_pid"
+    first_postgres_ticks="$(process_start_ticks "$postgres_pid")"
     runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
         /srv/trading-bot-witness/current/scripts/run_writer_witness_clock_jump_probe.py \
-        --database-url "postgresql+asyncpg://postgres@127.0.0.1:$port/postgres" \
-        >"$probe_output"
-    python3 - "$probe_output" "$tag" <<'PY'
+        --phase phase-one \
+        --tag "$tag" \
+        --socket-dir "$socket_dir" \
+        --data-dir "$data" \
+        --clock-control-file "$clock_control_file" \
+        --postmaster-pid "$postgres_pid" \
+        --faketime-library "$faketime_library" \
+        --faketime-library-sha256 "$faketime_library_sha256" \
+        --production-system-identifier "$production_system_identifier" \
+        >"$phase_one"
+    stop_isolated_postgres
+    start_isolated_postgres
+    second_postgres_pid="$postgres_pid"
+    second_postgres_ticks="$(process_start_ticks "$postgres_pid")"
+    if [[ "$first_postgres_pid:$first_postgres_ticks" == "$second_postgres_pid:$second_postgres_ticks" ]]; then
+        echo "isolated PostgreSQL restart identity did not change" >&2
+        exit 1
+    fi
+    "$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+        --phase running --postgres-pid "$postgres_pid"
+    runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
+        /srv/trading-bot-witness/current/scripts/run_writer_witness_clock_jump_probe.py \
+        --phase phase-two \
+        --tag "$tag" \
+        --socket-dir "$socket_dir" \
+        --data-dir "$data" \
+        --clock-control-file "$clock_control_file" \
+        --postmaster-pid "$postgres_pid" \
+        --faketime-library "$faketime_library" \
+        --faketime-library-sha256 "$faketime_library_sha256" \
+        --production-system-identifier "$production_system_identifier" \
+        >"$phase_two"
+    if ss -H -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
+        echo "isolated PostgreSQL unexpectedly exposed a TCP listener" >&2
+        exit 1
+    fi
+    capture_production_state "$production_after"
+    cmp --silent "$production_before" "$production_after" || {
+        echo "production Witness state changed during the isolated clock probe" >&2
+        exit 1
+    }
+    "$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+        --phase completed --postgres-pid "$postgres_pid"
+    python3 - "$phase_one" "$phase_two" "$production_before" "$production_after" \
+        "$tag" "$faketime_library" "$faketime_library_sha256" \
+        "$first_postgres_pid" "$first_postgres_ticks" \
+        "$second_postgres_pid" "$second_postgres_ticks" <<'PY'
 import json
+from pathlib import Path
 import sys
 
-payload = json.load(open(sys.argv[1], encoding="utf-8"))
-if payload.get("status") != "passed" or payload.get("production_database_touched") is not False:
-    raise SystemExit("isolated PostgreSQL clock-jump probe did not pass safely")
-payload["tag"] = sys.argv[2]
-print(json.dumps(payload, sort_keys=True))
+phase_one = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+phase_two = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+production_before = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+production_after = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+if phase_one.get("status") != "phase_one_passed" or phase_two.get("status") != "passed":
+    raise SystemExit("real database-clock probe phases did not both pass")
+for payload in (phase_one, phase_two):
+    isolation = payload.get("isolation", {})
+    if (
+        payload.get("production_clock_path") != "SELECT clock_timestamp()"
+        or payload.get("synthetic_time_argument_used") is not False
+        or isolation.get("unix_socket_transport") is not True
+        or isolation.get("listen_addresses") != ""
+        or isolation.get("libfaketime_loaded") is not True
+    ):
+        raise SystemExit("real database-clock/isolation evidence is incomplete")
+if phase_one["isolation"]["system_identifier"] != phase_two["isolation"]["system_identifier"]:
+    raise SystemExit("disposable PostgreSQL identity changed across restart")
+if production_before != production_after:
+    raise SystemExit("production state evidence changed during the clock probe")
+result = dict(phase_two)
+result.update(
+    tag=sys.argv[5],
+    libfaketime_library=sys.argv[6],
+    libfaketime_library_sha256=sys.argv[7],
+    phase_one=phase_one,
+    production_before=production_before,
+    production_after=production_after,
+    production_state_unchanged=True,
+    production_processes_never_loaded_libfaketime=True,
+    disposable_postgres_restart={
+        "before": {"pid": int(sys.argv[8]), "start_ticks": int(sys.argv[9])},
+        "after": {"pid": int(sys.argv[10]), "start_ticks": int(sys.argv[11])},
+    },
+)
+print(json.dumps(result, sort_keys=True))
 PY
     exit 0
 fi

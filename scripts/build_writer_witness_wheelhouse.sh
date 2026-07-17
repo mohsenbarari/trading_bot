@@ -12,6 +12,11 @@ if [[ -e "$DESTINATION" && -n "$(find "$DESTINATION" -mindepth 1 -maxdepth 1 -pr
     exit 2
 fi
 install -d -m 0755 "$DESTINATION"
+BOUND_MANIFEST="$ROOT_DIR/deploy/writer-witness/wheelhouse.sha256"
+if [[ ! -f "$BOUND_MANIFEST" ]]; then
+    echo "bound Writer Witness wheelhouse manifest is missing" >&2
+    exit 2
+fi
 
 python3 -m pip download \
     --disable-pip-version-check \
@@ -20,11 +25,13 @@ python3 -m pip download \
     --python-version 3.12 \
     --implementation cp \
     --abi cp312 \
+    --no-deps \
     --dest "$DESTINATION" \
     --requirement "$ROOT_DIR/deploy/writer-witness/requirements.lock"
 
-(
-    cd "$DESTINATION"
-    sha256sum ./*.whl >SHA256SUMS
-)
+python3 "$ROOT_DIR/scripts/verify_writer_witness_wheelhouse.py" \
+    --wheelhouse "$DESTINATION" \
+    --manifest "$BOUND_MANIFEST" \
+    --expected-uid "$(id -u)" \
+    >/dev/null
 echo "$DESTINATION"

@@ -1,25 +1,199 @@
 import hashlib
+import fcntl
 import json
+import os
 from pathlib import Path
+import runpy
+import signal
 import subprocess
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+ACTIVATION_HELPER = ROOT / "deploy/writer-witness/writer-witness-activation.py"
+ACTIVATION_MANAGED_FILES = tuple(runpy.run_path(str(ACTIVATION_HELPER))["MANAGED_FILES"])
 
 
 class WriterWitnessDeploymentTests(unittest.TestCase):
+    def _activation_run(
+        self,
+        root: Path,
+        command: str,
+        *,
+        release_id: str | None = None,
+        kill_after: str | None = None,
+    ) -> subprocess.CompletedProcess:
+        arguments = ["python3", str(ACTIVATION_HELPER), "--root", str(root), command]
+        if release_id is not None:
+            if command == "begin":
+                arguments.extend(
+                    [
+                        "--release-id",
+                        release_id,
+                        "--release-dir",
+                        f"/srv/trading-bot-witness/releases/{release_id}",
+                        "--venv-dir",
+                        f"/opt/trading-bot-witness/venvs/{release_id}",
+                        "--activation-dir",
+                        f"/opt/trading-bot-witness/activations/{release_id}",
+                    ]
+                )
+            else:
+                arguments.extend(["--release-id", release_id])
+        environment = {
+            **os.environ,
+            "WRITER_WITNESS_ACTIVATION_TEST_MODE": "1",
+        }
+        if kill_after is not None:
+            environment.update(
+                {
+                    "WRITER_WITNESS_ACTIVATION_ALLOW_FAILPOINTS": "1",
+                    "WRITER_WITNESS_ACTIVATION_KILL_AFTER": kill_after,
+                }
+            )
+        return subprocess.run(
+            arguments,
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+
+    def _prepare_activation_host(self, root: Path, release_id: str) -> dict[str, Path]:
+        for relative, mode in (
+            ("etc/trading-bot-witness", 0o750),
+            ("root/writer-witness-client-material", 0o700),
+            ("etc/nginx/sites-available", 0o755),
+            ("etc/nginx/sites-enabled", 0o755),
+            ("etc/systemd/system", 0o755),
+            ("usr/local/sbin", 0o755),
+            ("opt/trading-bot-witness/activations", 0o755),
+            ("opt/trading-bot-witness/venvs", 0o755),
+            ("srv/trading-bot-witness/releases", 0o755),
+        ):
+            path = root / relative
+            path.mkdir(parents=True, exist_ok=True)
+            path.chmod(mode)
+
+        old_release = root / "srv/trading-bot-witness/releases/legacy"
+        old_release.mkdir(mode=0o755)
+        (old_release / "generation").write_text("legacy\n", encoding="utf-8")
+        current = root / "srv/trading-bot-witness/current"
+        current.symlink_to(old_release)
+        old_venv = root / "opt/trading-bot-witness/venv"
+        (old_venv / "bin").mkdir(parents=True)
+        (old_venv / "bin/python").write_text("legacy-python\n", encoding="utf-8")
+
+        for item in ACTIVATION_MANAGED_FILES:
+            destination = root / item.destination.lstrip("/")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(f"old:{item.candidate}\n", encoding="utf-8")
+            destination.chmod(item.mode)
+        nginx_enabled = root / "etc/nginx/sites-enabled/writer-witness"
+        nginx_enabled.symlink_to(root / "etc/nginx/sites-available/writer-witness")
+        nginx_default = root / "etc/nginx/sites-enabled/default"
+        nginx_default.write_text("legacy default\n", encoding="utf-8")
+
+        release = root / f"srv/trading-bot-witness/releases/{release_id}"
+        venv = root / f"opt/trading-bot-witness/venvs/{release_id}"
+        activation = root / f"opt/trading-bot-witness/activations/{release_id}"
+        return {
+            "old_release": old_release,
+            "old_venv": old_venv,
+            "release": release,
+            "venv": venv,
+            "activation": activation,
+        }
+
+    def _begin_and_stage_activation(self, root: Path, release_id: str) -> Path:
+        begun = self._activation_run(root, "begin", release_id=release_id)
+        self.assertEqual(begun.returncode, 0, begun.stderr)
+        candidates = Path(begun.stdout.strip())
+        self.assertTrue(candidates.is_dir())
+        release = root / f"srv/trading-bot-witness/releases/{release_id}"
+        venv = root / f"opt/trading-bot-witness/venvs/{release_id}"
+        activation = root / f"opt/trading-bot-witness/activations/{release_id}"
+        release.mkdir(mode=0o755)
+        venv.mkdir(mode=0o755)
+        activation.mkdir(mode=0o755)
+        (release / "generation").write_text(f"{release_id}\n", encoding="utf-8")
+        (venv / "python").write_text(f"python:{release_id}\n", encoding="utf-8")
+        (activation / "release").symlink_to(release)
+        (activation / "venv").symlink_to(venv)
+        for item in ACTIVATION_MANAGED_FILES:
+            candidate = candidates / item.candidate
+            candidate.write_text(f"new:{release_id}:{item.candidate}\n", encoding="utf-8")
+            candidate.chmod(item.mode)
+        return candidates
+
+    def _build_release(self, destination: Path) -> str:
+        # The release root itself is part of the production metadata contract.
+        # TemporaryDirectory defaults to 0700, while canonical releases are 0755.
+        destination.chmod(0o755)
+        subprocess.run(
+            ["bash", str(ROOT / "scripts/build_writer_witness_release.sh"), str(destination)],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return hashlib.sha256((destination / "release-manifest.json").read_bytes()).hexdigest()
+
+    def _verify_release(self, release: Path, expected_manifest_sha256: str):
+        return subprocess.run(
+            [
+                "python3",
+                str(ROOT / "scripts/verify_writer_witness_release.py"),
+                "--release-root",
+                str(release),
+                "--expected-manifest-sha256",
+                expected_manifest_sha256,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+
+    def _run_restore_input_primitive(
+        self,
+        *,
+        state_root: Path,
+        backup_root: Path,
+        action: str,
+        payload: bytes = b"",
+        kill_after: str | None = None,
+        fail_after: str | None = None,
+    ):
+        expected_sha256 = hashlib.sha256(payload).hexdigest()
+        environment = {
+            **os.environ,
+            "WRITER_WITNESS_RESTORE_INTERNAL_TEST_MODE": "1",
+            "WRITER_WITNESS_RESTORE_TEST_STATE_ROOT": str(state_root),
+            "WRITER_WITNESS_RESTORE_TEST_BACKUP_DIR": str(backup_root),
+            "WRITER_WITNESS_RESTORE_TEST_ACTION": action,
+            "WRITER_WITNESS_RESTORE_TEST_EXPECTED_SHA256": expected_sha256,
+        }
+        if kill_after:
+            environment["WRITER_WITNESS_RESTORE_TEST_KILL_AFTER"] = kill_after
+        if fail_after:
+            environment["WRITER_WITNESS_RESTORE_TEST_FAIL_AFTER"] = fail_after
+        return subprocess.run(
+            [
+                "bash",
+                str(ROOT / "deploy/writer-witness/writer-witness-live-restore.sh"),
+                "--test-input-primitive",
+            ],
+            cwd=ROOT,
+            env=environment,
+            input=payload,
+            capture_output=True,
+        )
+
     def test_release_builder_emits_minimal_importable_integrity_checked_payload(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-release-") as destination:
-            subprocess.run(
-                ["bash", str(ROOT / "scripts/build_writer_witness_release.sh"), destination],
-                cwd=ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
             release = Path(destination)
+            expected_manifest_sha256 = self._build_release(release)
             manifest = json.loads((release / "release-manifest.json").read_text())
             actual = {
                 path.relative_to(release).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -30,16 +204,36 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("writer_witness_app.py", manifest)
             self.assertIn("deploy/writer-witness/001_initial.sql", manifest)
             self.assertIn("deploy/writer-witness/requirements.lock", manifest)
+            self.assertIn("deploy/writer-witness/python-runtime.json", manifest)
+            self.assertIn("deploy/writer-witness/nftables-policy.json", manifest)
+            self.assertIn("deploy/writer-witness/wheelhouse.sha256", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-activation.py", manifest)
+            self.assertIn(
+                "deploy/writer-witness/writer-witness-activation-recovery.service",
+                manifest,
+            )
             self.assertIn("deploy/writer-witness/writer-witness-offsite-backup.sh", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-s3-put.py", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-rotate-hmac.py", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-live-restore.sh", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-matrix-campaign.py", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-matrix-host-faults.sh", manifest)
+            self.assertIn("deploy/writer-witness/writer-witness-matrix-host-fault-state.py", manifest)
             self.assertIn("deploy/writer-witness/writer-witness-state-manifest.sh", manifest)
             self.assertIn("scripts/smoke_writer_witness_client.py", manifest)
             self.assertIn("scripts/run_writer_witness_clock_jump_probe.py", manifest)
+            self.assertIn("scripts/verify_writer_witness_release.py", manifest)
+            self.assertIn("scripts/verify_writer_witness_runtime.py", manifest)
+            self.assertIn("scripts/verify_writer_witness_runtime_provenance.py", manifest)
+            self.assertIn("scripts/verify_writer_witness_wheelhouse.py", manifest)
+            self.assertIn("scripts/verify_writer_witness_nftables.py", manifest)
+            self.assertIn("scripts/render_writer_witness_credentials.py", manifest)
             self.assertNotIn(".env", "\n".join(manifest))
             self.assertFalse((release / "main.py").exists())
+            verified = self._verify_release(release, expected_manifest_sha256)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            self.assertIn("release_manifest_attested=yes", verified.stdout)
+            self.assertIn(f"release_manifest_entries={len(manifest)}", verified.stdout)
             imported = subprocess.run(
                 [
                     "python3",
@@ -53,14 +247,76 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             )
             self.assertEqual(imported.stdout.strip(), "WebApp Writer Witness")
 
+    def test_release_attestation_rejects_a_changed_manifested_file(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-release-") as destination:
+            release = Path(destination)
+            expected_manifest_sha256 = self._build_release(release)
+            (release / "writer_witness_app.py").write_text("tampered\n", encoding="utf-8")
+            verified = self._verify_release(release, expected_manifest_sha256)
+            self.assertNotEqual(verified.returncode, 0)
+            self.assertIn("release file hash mismatch: writer_witness_app.py", verified.stderr)
+
+    def test_release_attestation_rejects_missing_and_extra_files(self):
+        for mutation, expected_error in (
+            (lambda release: (release / "writer_witness_app.py").unlink(), "missing manifested files"),
+            (lambda release: (release / "unexpected.txt").write_text("drift\n"), "unmanifested files"),
+        ):
+            with self.subTest(expected_error=expected_error):
+                with tempfile.TemporaryDirectory(prefix="writer-witness-release-") as destination:
+                    release = Path(destination)
+                    expected_manifest_sha256 = self._build_release(release)
+                    mutation(release)
+                    verified = self._verify_release(release, expected_manifest_sha256)
+                    self.assertNotEqual(verified.returncode, 0)
+                    self.assertIn(expected_error, verified.stderr)
+
+    def test_release_attestation_rejects_unmanifested_directory_and_symlink(self):
+        for mutation, expected_error in (
+            (lambda release: (release / "unexpected").mkdir(), "unmanifested directories"),
+            (
+                lambda release: (release / "unexpected-link").symlink_to("writer_witness_app.py"),
+                "contains a symlink",
+            ),
+        ):
+            with self.subTest(expected_error=expected_error):
+                with tempfile.TemporaryDirectory(prefix="writer-witness-release-") as destination:
+                    release = Path(destination)
+                    expected_manifest_sha256 = self._build_release(release)
+                    mutation(release)
+                    verified = self._verify_release(release, expected_manifest_sha256)
+                    self.assertNotEqual(verified.returncode, 0)
+                    self.assertIn(expected_error, verified.stderr)
+
+    def test_release_attestation_rejects_a_manifest_not_bound_to_the_build(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-release-") as destination:
+            release = Path(destination)
+            expected_manifest_sha256 = self._build_release(release)
+            manifest_path = release / "release-manifest.json"
+            manifest_path.write_text(manifest_path.read_text() + "\n", encoding="utf-8")
+            verified = self._verify_release(release, expected_manifest_sha256)
+            self.assertNotEqual(verified.returncode, 0)
+            self.assertIn("does not match the expected build manifest", verified.stderr)
+
     def test_systemd_unit_is_single_worker_loopback_and_hardened(self):
         unit = (ROOT / "deploy/writer-witness/writer-witness.service").read_text()
+        recovery = (
+            ROOT
+            / "deploy/writer-witness/writer-witness-activation-recovery.service"
+        ).read_text()
         self.assertIn("User=writer-witness", unit)
         self.assertIn("--host 127.0.0.1 --port 8011 --workers 1", unit)
         self.assertIn("EnvironmentFile=/etc/trading-bot-witness/runtime.env", unit)
+        self.assertIn("WorkingDirectory=/opt/trading-bot-witness/active/release", unit)
+        self.assertIn("ExecStart=/opt/trading-bot-witness/active/venv/bin/uvicorn", unit)
         self.assertIn("NoNewPrivileges=true", unit)
         self.assertIn("ProtectSystem=strict", unit)
         self.assertNotIn("0.0.0.0", unit)
+        self.assertIn("Before=nginx.service writer-witness.service", recovery)
+        self.assertIn("RequiredBy=nginx.service writer-witness.service", recovery)
+        self.assertIn(
+            "ExecStart=/usr/local/sbin/writer-witness-activation recover-boot",
+            recovery,
+        )
 
     def test_nginx_exposes_only_fixed_private_control_paths(self):
         config = (ROOT / "deploy/writer-witness/nginx.conf.template").read_text()
@@ -89,23 +345,516 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("PasswordAuthentication no", script)
         self.assertIn('WRITER_WITNESS_HARDEN_SSH:-false', script)
         self.assertIn("writer-witness-rotate-hmac", script)
-        self.assertIn("sha256sum --check SHA256SUMS", script)
-        self.assertIn("--no-index --find-links", script)
+        self.assertIn("writer-witness-matrix-host-fault-state", script)
+        self.assertIn("writer-witness-matrix-campaign", script)
+        self.assertIn("writer-witness-offsite-backup", script)
+        self.assertIn("writer-witness-s3-put", script)
+        self.assertIn("matrix-campaign/authorization-intents", script)
+        self.assertIn("matrix-campaign/authorizations", script)
+        self.assertIn("libfaketime", script)
+        self.assertIn("verify_writer_witness_wheelhouse.py", script)
+        self.assertIn("wheelhouse.sha256", script)
+        self.assertIn("--no-index", script)
+        self.assertIn('--find-links "$WHEELHOUSE"', script)
+        self.assertIn("--no-compile", script)
+        self.assertIn('"$expected_python_path" -I -S -B -X utf8', script)
+        self.assertIn('-m venv --without-pip "$venv_dir"', script)
+        self.assertIn("pip-24.0-py3-none-any.whl", script)
+        self.assertIn("runpy.run_module", script)
+        self.assertIn(
+            '"$venv_dir/bin/python" -I -B -X utf8 -X pycache_prefix=/dev/null -c',
+            script,
+        )
+        self.assertIn("include-system-site-packages = false", script)
+        self.assertNotIn("PIP_CONFIG_FILE=", script)
+        self.assertLess(
+            script.index("runtime_attestation_before_check="),
+            script.index('sys.argv=["pip","check"]'),
+        )
+        self.assertNotIn('"$venv_dir/bin/python" -m pip check', script)
+        self.assertIn("/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin", script)
+        self.assertIn("-I -S -B -X utf8 -X pycache_prefix=/dev/null", script)
+        self.assertIn("--system-only", script)
+        self.assertIn("--system-runtime-manifest", script)
+        self.assertIn("--expected-system-runtime-manifest-sha256", script)
+        self.assertIn('"schema_version": "writer_witness_runtime_provenance_v2"', script)
         self.assertIn("basicConstraints=critical,CA:TRUE,pathlen:0", script)
         self.assertIn("keyUsage=critical,keyCertSign,cRLSign", script)
         self.assertIn("extendedKeyUsage=serverAuth", script)
+        self.assertIn(
+            '- "$private_key_file" "$public_key_file" <<\'PY\'',
+            script,
+        )
         self.assertIn("WRITER_WITNESS_ROTATE_TLS:-false", script)
         self.assertIn("requirements.lock", script)
+        self.assertIn("WRITER_WITNESS_EXPECTED_MANIFEST_SHA256", script)
+        self.assertIn("--expected-uid 0", script)
+        self.assertIn("--expected-gid 0", script)
+        self.assertIn('bootstrap_attest_release "$release_dir"', script)
+        self.assertIn('SOURCE_DIR="$release_dir"', script)
+        self.assertIn("verify_writer_witness_runtime.py", script)
+        self.assertIn("--runtime-prefix", script)
+        self.assertIn('"$venv_dir/bin/python" -I -S', script)
+        self.assertIn("verify_writer_witness_runtime_provenance.py", script)
+        self.assertIn("runtime-provenance.json", script)
+        self.assertIn("os.fchmod(descriptor, 0o644)", script)
+        self.assertIn("verify_writer_witness_nftables.py", script)
+        self.assertIn("nftables-policy.json", script)
+        self.assertIn("nft -j list ruleset", script)
+        self.assertIn(
+            '"$release_dir/scripts/verify_writer_witness_nftables.py"',
+            script,
+        )
+        self.assertIn("/opt/trading-bot-witness/venvs/$RELEASE_ID", script)
+        self.assertIn("/opt/trading-bot-witness/activations", script)
+        self.assertIn("/opt/trading-bot-witness/active/release", script)
+        self.assertIn("/opt/trading-bot-witness/active/venv", script)
+        self.assertIn("assert_no_writer_witness_systemd_dropins", script)
+        self.assertIn("fsync_trees", script)
+        self.assertIn('fsync_trees "$release_dir" "$venv_dir" "$activation_dir"', script)
+        self.assertIn("atomic_install_file", script)
+        self.assertIn("writer-witness-activation-recovery.service", script)
+        self.assertIn("rollback_activation_transaction", script)
+        self.assertIn("activation_exit_guard", script)
+        self.assertIn("trap 'activation_exit_guard $?' EXIT", script)
+        self.assertIn("trap 'rollback_activation_transaction 129' HUP", script)
+        self.assertIn("writer-witness-activation begin", script)
+        self.assertIn("writer-witness-activation publish", script)
+        self.assertIn("writer-witness-activation commit", script)
+        self.assertIn("writer-witness-activation recover", script)
+        self.assertLess(
+            script.index("activation_transaction_open=true"),
+            script.index('activation_candidates="$(/usr/local/sbin/writer-witness-activation begin'),
+        )
+        self.assertIn('--runtime-env "$activation_candidates/runtime.env"', script)
+        self.assertIn('nginx_target="$activation_candidates/nginx-writer-witness"', script)
+        self.assertIn("render_writer_witness_credentials.py", script)
+        self.assertEqual(
+            script.count(
+                '"$release_dir/scripts/render_writer_witness_credentials.py"'
+            ),
+            4,
+        )
+        self.assertIn("--mode initialize-bootstrap", script)
+        self.assertIn("--mode database-env", script)
+        self.assertIn("--mode prepare", script)
+        self.assertIn("--mode finalize", script)
+        self.assertIn('--rotation-lock-fd "$rotation_lock_fd"', script)
+        self.assertIn("flock -n \"$rotation_lock_fd\"", script)
+        self.assertNotIn('source "$secrets_file"', script)
+        self.assertNotIn("WITNESS_FI_HMAC_SECRET", script)
+        self.assertNotIn("WITNESS_IR_HMAC_SECRET", script)
+        self.assertLess(
+            script.index("flock -n \"$rotation_lock_fd\""),
+            script.index("writer-witness-activation begin"),
+        )
+        self.assertLess(
+            script.index("--mode prepare"),
+            script.index("writer-witness-activation publish"),
+        )
+        self.assertLess(
+            script.index("writer-witness-activation commit"),
+            script.index("--mode finalize"),
+        )
+        self.assertIn("systemctl show -p FragmentPath", script)
+        self.assertIn("systemctl show -p DropInPaths", script)
+        self.assertIn("MemoryDenyWriteExecute:yes", script)
+        self.assertLess(
+            script.index("nft -j list ruleset"),
+            script.index("writer-witness-activation publish"),
+        )
+        self.assertLess(
+            script.index("systemctl stop writer-witness.service"),
+            script.index("writer-witness-activation publish"),
+        )
+        self.assertLess(
+            script.index("writer-witness-activation publish"),
+            script.index("systemctl show -p FragmentPath"),
+        )
+        self.assertNotIn('cat >/etc/trading-bot-witness/runtime.env', script)
+        self.assertNotIn('>"/etc/nginx/sites-available/writer-witness"', script)
+        self.assertIn('/var/lib/trading-bot-witness/restore-state', script)
+        self.assertIn('root / ".campaign.lock"', script)
+
+    def test_activation_initial_migration_commits_one_code_runtime_generation(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-") as directory:
+            root = Path(directory)
+            release_id = "release-one"
+            paths = self._prepare_activation_host(root, release_id)
+            self._begin_and_stage_activation(root, release_id)
+
+            published = self._activation_run(root, "publish", release_id=release_id)
+            self.assertEqual(published.returncode, 0, published.stderr)
+            active = root / "opt/trading-bot-witness/active"
+            current = root / "srv/trading-bot-witness/current"
+            compatibility_venv = root / "opt/trading-bot-witness/venv"
+            self.assertEqual(active.resolve(), paths["activation"].resolve())
+            self.assertEqual(current.resolve(), paths["release"].resolve())
+            self.assertEqual(compatibility_venv.resolve(), paths["venv"].resolve())
+            legacy_activation = (
+                root
+                / f"opt/trading-bot-witness/activations/legacy-before-{release_id}"
+            )
+            self.assertEqual(
+                (legacy_activation / "release").resolve(), paths["old_release"].resolve()
+            )
+            self.assertIn("legacy-before", str((legacy_activation / "venv").resolve()))
+            for item in ACTIVATION_MANAGED_FILES:
+                destination = root / item.destination.lstrip("/")
+                self.assertEqual(
+                    destination.read_text(encoding="utf-8"),
+                    f"new:{release_id}:{item.candidate}\n",
+                )
+
+            committed = self._activation_run(root, "commit", release_id=release_id)
+            self.assertEqual(committed.returncode, 0, committed.stderr)
+            self.assertFalse(
+                (root / "var/lib/trading-bot-witness/activation-state/active.json").exists()
+            )
+            repeated = self._activation_run(root, "recover")
+            self.assertEqual(repeated.returncode, 0, repeated.stderr)
+            self.assertIn("activation_recovered=no", repeated.stdout)
+            self.assertEqual(active.resolve(), paths["activation"].resolve())
+
+    def test_activation_initial_sigkill_failpoints_recover_and_allow_same_release_retry(self):
+        for kill_after in (
+            "begin_journal",
+            "legacy_venv_moved",
+            "legacy_activation_fsynced",
+            "legacy_active_switched",
+            "candidates_published",
+            "new_active_switched",
+            "activation_published",
+        ):
+            with self.subTest(kill_after=kill_after):
+                with tempfile.TemporaryDirectory(
+                    prefix="writer-witness-activation-kill-"
+                ) as directory:
+                    root = Path(directory)
+                    release_id = "retry-release"
+                    paths = self._prepare_activation_host(root, release_id)
+                    if kill_after == "begin_journal":
+                        killed = self._activation_run(
+                            root,
+                            "begin",
+                            release_id=release_id,
+                            kill_after=kill_after,
+                        )
+                    else:
+                        self._begin_and_stage_activation(root, release_id)
+                        killed = self._activation_run(
+                            root,
+                            "publish",
+                            release_id=release_id,
+                            kill_after=kill_after,
+                        )
+                    self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+
+                    recovered = self._activation_run(root, "recover")
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    repeated = self._activation_run(root, "recover")
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr)
+                    self.assertIn("activation_recovered=no", repeated.stdout)
+                    active = root / "opt/trading-bot-witness/active"
+                    if kill_after == "begin_journal":
+                        self.assertFalse(active.exists())
+                        self.assertEqual(
+                            (root / "srv/trading-bot-witness/current").resolve(),
+                            paths["old_release"].resolve(),
+                        )
+                    else:
+                        self.assertIn("legacy-before", str(active.resolve()))
+                        self.assertEqual(
+                            (root / "srv/trading-bot-witness/current").resolve(),
+                            paths["old_release"].resolve(),
+                        )
+                    for item in ACTIVATION_MANAGED_FILES:
+                        destination = root / item.destination.lstrip("/")
+                        self.assertEqual(
+                            destination.read_text(encoding="utf-8"),
+                            f"old:{item.candidate}\n",
+                        )
+                    self.assertFalse(paths["release"].exists())
+                    self.assertFalse(paths["venv"].exists())
+                    self.assertFalse(paths["activation"].exists())
+
+                    # Cleanup is ownership-bound, so the exact release id is reusable.
+                    retried = self._activation_run(root, "begin", release_id=release_id)
+                    self.assertEqual(retried.returncode, 0, retried.stderr)
+                    cleaned = self._activation_run(root, "recover")
+                    self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
+
+    def test_activation_subsequent_sigkill_rolls_back_exact_previous_pair(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-next-") as directory:
+            root = Path(directory)
+            first = "release-one"
+            first_paths = self._prepare_activation_host(root, first)
+            self._begin_and_stage_activation(root, first)
+            self.assertEqual(
+                self._activation_run(root, "publish", release_id=first).returncode, 0
+            )
+            self.assertEqual(
+                self._activation_run(root, "commit", release_id=first).returncode, 0
+            )
+
+            second = "release-two"
+            second_release = root / f"srv/trading-bot-witness/releases/{second}"
+            second_venv = root / f"opt/trading-bot-witness/venvs/{second}"
+            second_activation = root / f"opt/trading-bot-witness/activations/{second}"
+            self._begin_and_stage_activation(root, second)
+            killed = self._activation_run(
+                root,
+                "publish",
+                release_id=second,
+                kill_after="new_active_switched",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+            recovered = self._activation_run(root, "recover")
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertEqual(
+                (root / "opt/trading-bot-witness/active").resolve(),
+                first_paths["activation"].resolve(),
+            )
+            self.assertEqual(
+                (root / "srv/trading-bot-witness/current").resolve(),
+                first_paths["release"].resolve(),
+            )
+            self.assertEqual(
+                (root / "opt/trading-bot-witness/venv").resolve(),
+                first_paths["venv"].resolve(),
+            )
+            for item in ACTIVATION_MANAGED_FILES:
+                destination = root / item.destination.lstrip("/")
+                self.assertEqual(
+                    destination.read_text(encoding="utf-8"),
+                    f"new:{first}:{item.candidate}\n",
+                )
+            self.assertFalse(second_release.exists())
+            self.assertFalse(second_venv.exists())
+            self.assertFalse(second_activation.exists())
+
+    def test_activation_recovery_itself_is_repeatable_across_sigkill(self):
+        for rollback_kill in ("rollback_active_switched", "rollback_restored"):
+            with self.subTest(rollback_kill=rollback_kill):
+                with tempfile.TemporaryDirectory(
+                    prefix="writer-witness-activation-recovery-kill-"
+                ) as directory:
+                    root = Path(directory)
+                    release_id = "failed-release"
+                    paths = self._prepare_activation_host(root, release_id)
+                    self._begin_and_stage_activation(root, release_id)
+                    killed_publish = self._activation_run(
+                        root,
+                        "publish",
+                        release_id=release_id,
+                        kill_after="new_active_switched",
+                    )
+                    self.assertEqual(killed_publish.returncode, -signal.SIGKILL)
+                    killed_recovery = self._activation_run(
+                        root, "recover", kill_after=rollback_kill
+                    )
+                    self.assertEqual(killed_recovery.returncode, -signal.SIGKILL)
+                    recovered = self._activation_run(root, "recover")
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    repeated = self._activation_run(root, "recover")
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr)
+                    self.assertIn("activation_recovered=no", repeated.stdout)
+                    self.assertEqual(
+                        (root / "srv/trading-bot-witness/current").resolve(),
+                        paths["old_release"].resolve(),
+                    )
+                    self.assertFalse(paths["release"].exists())
+                    self.assertFalse(paths["venv"].exists())
+                    self.assertFalse(paths["activation"].exists())
+
+    def test_activation_commit_marker_survives_sigkill_without_rolling_back(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-commit-") as directory:
+            root = Path(directory)
+            release_id = "committed-release"
+            paths = self._prepare_activation_host(root, release_id)
+            self._begin_and_stage_activation(root, release_id)
+            published = self._activation_run(root, "publish", release_id=release_id)
+            self.assertEqual(published.returncode, 0, published.stderr)
+            killed = self._activation_run(
+                root,
+                "commit",
+                release_id=release_id,
+                kill_after="commit_recorded",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL)
+            recovered = self._activation_run(root, "recover")
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertIn("activation_recovered=no", recovered.stdout)
+            self.assertEqual(
+                (root / "opt/trading-bot-witness/active").resolve(),
+                paths["activation"].resolve(),
+            )
+            for item in ACTIVATION_MANAGED_FILES:
+                destination = root / item.destination.lstrip("/")
+                self.assertEqual(
+                    destination.read_text(encoding="utf-8"),
+                    f"new:{release_id}:{item.candidate}\n",
+                )
+
+    def test_activation_boot_recovery_defers_only_while_live_provision_lock_is_held(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-boot-") as directory:
+            root = Path(directory)
+            release_id = "boot-recovery"
+            paths = self._prepare_activation_host(root, release_id)
+            self._begin_and_stage_activation(root, release_id)
+            killed = self._activation_run(
+                root,
+                "publish",
+                release_id=release_id,
+                kill_after="new_active_switched",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL)
+            provision_lock = (
+                root / "var/lib/trading-bot-witness/activation-state/.provision.lock"
+            )
+            provision_lock.touch(mode=0o600, exist_ok=True)
+            descriptor = os.open(provision_lock, os.O_RDWR)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                deferred = self._activation_run(root, "recover-boot")
+                self.assertEqual(deferred.returncode, 0, deferred.stderr)
+                self.assertIn("deferred-live-provision", deferred.stdout)
+                self.assertEqual(
+                    (root / "opt/trading-bot-witness/active").resolve(),
+                    paths["activation"].resolve(),
+                )
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                os.close(descriptor)
+            recovered = self._activation_run(root, "recover-boot")
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertIn("activation_recovered=yes", recovered.stdout)
+            self.assertEqual(
+                (root / "srv/trading-bot-witness/current").resolve(),
+                paths["old_release"].resolve(),
+            )
+
+    def test_activation_never_claims_or_cleans_a_preexisting_release_path(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-owned-") as directory:
+            root = Path(directory)
+            release_id = "already-present"
+            paths = self._prepare_activation_host(root, release_id)
+            paths["release"].mkdir(mode=0o755)
+            sentinel = paths["release"] / "must-remain"
+            sentinel.write_text("unowned\n", encoding="utf-8")
+            begun = self._activation_run(root, "begin", release_id=release_id)
+            self.assertNotEqual(begun.returncode, 0)
+            self.assertIn("predates activation intent", begun.stderr)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "unowned\n")
+            recovered = self._activation_run(root, "recover")
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "unowned\n")
+
+    def test_activation_never_claims_a_preexisting_legacy_migration_path(self):
+        for relative in (
+            "opt/trading-bot-witness/activations/legacy-before-already-present",
+            "opt/trading-bot-witness/venvs/legacy-before-already-present",
+        ):
+            with self.subTest(relative=relative):
+                with tempfile.TemporaryDirectory(
+                    prefix="writer-witness-activation-legacy-owned-"
+                ) as directory:
+                    root = Path(directory)
+                    release_id = "already-present"
+                    self._prepare_activation_host(root, release_id)
+                    unowned = root / relative
+                    unowned.mkdir(mode=0o755)
+                    sentinel = unowned / "must-remain"
+                    sentinel.write_text("unowned legacy\n", encoding="utf-8")
+
+                    begun = self._activation_run(root, "begin", release_id=release_id)
+
+                    self.assertNotEqual(begun.returncode, 0)
+                    self.assertIn("legacy migration path predates", begun.stderr)
+                    self.assertEqual(
+                        sentinel.read_text(encoding="utf-8"), "unowned legacy\n"
+                    )
+                    recovered = self._activation_run(root, "recover")
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    self.assertEqual(
+                        sentinel.read_text(encoding="utf-8"), "unowned legacy\n"
+                    )
+
+    def test_activation_recovery_removes_only_journal_owned_temporaries(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-temp-") as directory:
+            root = Path(directory)
+            release_id = "temporary-cleanup"
+            self._prepare_activation_host(root, release_id)
+            self._begin_and_stage_activation(root, release_id)
+            killed = self._activation_run(
+                root,
+                "publish",
+                release_id=release_id,
+                kill_after="new_active_switched",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL)
+            journal_path = (
+                root / "var/lib/trading-bot-witness/activation-state/active.json"
+            )
+            operation_id = json.loads(journal_path.read_text())["operation_id"]
+            runtime_parent = root / "etc/trading-bot-witness"
+            owned = runtime_parent / (
+                f".runtime.env.activation-{operation_id}-{'a' * 32}"
+            )
+            owned.write_text("owned interrupted bytes\n", encoding="utf-8")
+            owned.chmod(0o600)
+            recovered = self._activation_run(root, "recover")
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertFalse(owned.exists())
+
+            state = root / "var/lib/trading-bot-witness/activation-state"
+            orphan = state / "operations" / ("b" * 32)
+            orphan.mkdir(mode=0o700)
+            (orphan / "secret").write_text("orphan\n", encoding="utf-8")
+            cleaned = self._activation_run(root, "recover")
+            self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
+            self.assertFalse(orphan.exists())
+
+    def test_clock_jump_fault_is_disposable_socket_only_and_never_changes_host_time(self):
+        helper = (
+            ROOT / "deploy/writer-witness/writer-witness-matrix-host-faults.sh"
+        ).read_text(encoding="utf-8")
+        runner = (
+            ROOT / "scripts/run_writer_witness_real_host_matrix.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("FAKETIME_TIMESTAMP_FILE", helper)
+        self.assertIn("FAKETIME_DONT_FAKE_MONOTONIC=1", helper)
+        self.assertIn("--auth-local=peer --auth-host=reject", helper)
+        self.assertIn("listen_addresses=''", helper)
+        self.assertIn("production-before.json", helper)
+        self.assertIn("production_state_unchanged", helper)
+        self.assertIn('"synthetic_time_argument_used": False', runner)
+        self.assertNotIn("--database-url", helper)
+        for forbidden in (
+            "date -s",
+            "timedatectl set-",
+            "hwclock",
+            "chronyc makestep",
+            "CAP_SYS_TIME",
+        ):
+            self.assertNotIn(forbidden, helper)
 
     def test_hmac_rotation_is_overlap_first_fail_closed_and_reversible(self):
         rotation = (
             ROOT / "deploy/writer-witness/writer-witness-rotate-hmac.py"
         ).read_text()
-        self.assertIn('"phase": "preparing"', rotation)
+        self.assertIn('metadata["phase"] = "preparing"', rotation)
         self.assertIn('metadata["phase"] = "prepared"', rotation)
         self.assertIn('metadata["phase"] = "revoked"', rotation)
-        self.assertIn("runtime.env.before", rotation)
-        self.assertIn("runtime.env.overlap", rotation)
+        self.assertIn("runtime-site.env.before", rotation)
+        self.assertIn("runtime-site.env.overlap", rotation)
+        self.assertIn("_snapshot_runtime_scope", rotation)
+        self.assertIn("_restore_runtime_scope", rotation)
+        self.assertIn('STATE_ROOT / ".runtime.lock"', rotation)
+        self.assertIn("RENAME_NOREPLACE", rotation)
+        self.assertIn("_delete_owned_state_directory", rotation)
+        self.assertIn("_cleanup_and_attest_operation_temps", rotation)
+        self.assertIn('"--leave-service-stopped"', rotation)
         self.assertIn("client.env.before", rotation)
         self.assertIn("_require_dark_state(expected_epoch)", rotation)
         self.assertIn("_restart_and_verify()", rotation)
@@ -168,12 +917,343 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn('"$(manifest_hash writer_witness)" == "$guard_manifest"', restore)
         self.assertIn('"$orphan_count" == 0 && "$enabled_aux" == 0', restore)
         self.assertIn('systemctl stop "$SERVICE" || true', restore)
+        self.assertIn("candidate_oid_from_operation", restore)
+        self.assertIn("TEMPLATE template0 OID $candidate_oid", restore)
+        self.assertIn('"$expected_oid" == 0 || "$observed_oid" != "$expected_oid"', restore)
+        self.assertIn('DROP DATABASE $database_name', restore)
         self.assertNotIn("dropdb --if-exists writer_witness", restore)
         self.assertIn('"--apply"', runner)
         self.assertIn("download_writer_witness_s3_backup.py", runner)
         self.assertIn("age --decrypt", runner)
         self.assertIn("EXPECTED_MANIFEST_SHA256", runner)
         self.assertIn("EXPECTED_BACKUP_SHA256", runner)
+
+    def test_live_restore_input_intent_survives_real_kill_points_and_recovers(self):
+        payload = b"owned restore input\n" * 64
+        for kill_point, input_state in (
+            ("intent_recorded", "absent"),
+            ("input_opened", "empty"),
+            ("input_fsynced", "complete"),
+            ("input_deleted", "absent"),
+            ("journal_moved", "absent"),
+        ):
+            with self.subTest(kill_point=kill_point):
+                with tempfile.TemporaryDirectory(prefix="restore-input-") as directory:
+                    root = Path(directory)
+                    state_root = root / "state"
+                    backup_root = root / "backups"
+                    killed = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="apply",
+                        payload=payload,
+                        kill_after=kill_point,
+                    )
+                    self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+                    journal = state_root / "active.env"
+                    if kill_point == "journal_moved":
+                        self.assertFalse(journal.exists())
+                    else:
+                        self.assertTrue(journal.is_file())
+                        journal_text = journal.read_text(encoding="utf-8")
+                        self.assertIn("journal_version=3", journal_text)
+                        self.assertRegex(
+                            journal_text,
+                            r"(?m)^operation_id=[0-9a-f]{32}$",
+                        )
+                    inputs = list(backup_root.glob(".replacement-restore.*.dump"))
+                    if input_state == "absent":
+                        self.assertEqual(inputs, [])
+                    elif input_state == "empty":
+                        self.assertEqual(len(inputs), 1)
+                        self.assertEqual(inputs[0].stat().st_size, 0)
+                        self.assertLessEqual(journal.stat().st_mtime_ns, inputs[0].stat().st_mtime_ns)
+                    else:
+                        self.assertEqual(len(inputs), 1)
+                        self.assertEqual(inputs[0].read_bytes(), payload)
+                        self.assertLessEqual(journal.stat().st_mtime_ns, inputs[0].stat().st_mtime_ns)
+
+                    recovered = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="recover",
+                    )
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    self.assertFalse(journal.exists())
+                    self.assertEqual(
+                        list(backup_root.glob(".replacement-restore.*.dump")), []
+                    )
+                    self.assertEqual(len(list((state_root / "history").glob("*.env"))), 1)
+                    repeated = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="recover",
+                    )
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr)
+
+    def test_live_restore_serializes_every_operation_with_a_nonblocking_directory_lock(self):
+        with tempfile.TemporaryDirectory(prefix="restore-lock-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            state_root.mkdir(mode=0o700)
+            backup_root.mkdir(mode=0o700)
+            descriptor = os.open(state_root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                blocked = self._run_restore_input_primitive(
+                    state_root=state_root,
+                    backup_root=backup_root,
+                    action="recover",
+                )
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                os.close(descriptor)
+
+            self.assertEqual(blocked.returncode, 75, blocked.stderr)
+            self.assertIn(b"already active", blocked.stderr)
+            self.assertFalse((state_root / "active.env").exists())
+
+    def test_live_restore_initial_journal_publication_never_replaces_an_active_intent(self):
+        with tempfile.TemporaryDirectory(prefix="restore-no-replace-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            first = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="apply",
+                payload=b"first operation",
+                kill_after="intent_recorded",
+            )
+            self.assertEqual(first.returncode, -signal.SIGKILL, first.stderr)
+            journal = state_root / "active.env"
+            original_journal = journal.read_bytes()
+
+            competing = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="apply",
+                payload=b"competing operation",
+            )
+
+            self.assertNotEqual(competing.returncode, 0)
+            self.assertEqual(journal.read_bytes(), original_journal)
+            self.assertEqual(
+                list(backup_root.glob(".replacement-restore.*.dump")), []
+            )
+            recovered = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="recover",
+            )
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+
+    def test_live_restore_reconciles_only_owned_journal_temps_after_real_sigkill(self):
+        payload = b"journal temp crash recovery\n" * 32
+        for kill_point, expected_active, expected_temp_links in (
+            ("intent_recorded_journal_temp_fsynced", False, 1),
+            ("intent_recorded_journal_linked", True, 2),
+            ("input_validated_journal_temp_fsynced", True, 1),
+            ("input_validated_journal_replaced", True, 0),
+        ):
+            with self.subTest(kill_point=kill_point):
+                with tempfile.TemporaryDirectory(prefix="restore-journal-temp-") as directory:
+                    root = Path(directory)
+                    state_root = root / "state"
+                    backup_root = root / "backups"
+                    killed = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="apply",
+                        payload=payload,
+                        kill_after=kill_point,
+                    )
+                    self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+                    journal = state_root / "active.env"
+                    self.assertEqual(journal.exists(), expected_active)
+                    temps = list(state_root.glob(".active.*.env"))
+                    if expected_temp_links:
+                        self.assertEqual(len(temps), 1)
+                        self.assertEqual(temps[0].stat().st_nlink, expected_temp_links)
+                        if expected_active and expected_temp_links == 2:
+                            self.assertTrue(os.path.samefile(temps[0], journal))
+                    else:
+                        self.assertEqual(temps, [])
+
+                    recovered = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="recover",
+                    )
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    self.assertFalse(journal.exists())
+                    self.assertEqual(list(state_root.glob(".active.*.env")), [])
+                    self.assertEqual(
+                        list(backup_root.glob(".replacement-restore.*.dump")), []
+                    )
+                    repeated = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="recover",
+                    )
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr)
+
+    def test_live_restore_preserves_an_unowned_or_malformed_journal_temp(self):
+        with tempfile.TemporaryDirectory(prefix="restore-foreign-temp-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            state_root.mkdir(mode=0o700)
+            backup_root.mkdir(mode=0o700)
+            foreign = state_root / f".active.{'a' * 32}.ABCDEFGH.env"
+            foreign.write_text("not an owned restore journal\n", encoding="utf-8")
+            foreign.chmod(0o600)
+
+            recovered = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="recover",
+            )
+
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn(b"not safely owned", recovered.stderr)
+            self.assertEqual(foreign.read_text(), "not an owned restore journal\n")
+
+    def test_all_live_restore_database_failpoints_are_true_sigkill_and_recover_repeats(self):
+        failpoints = (
+            "input_validated", "candidate_created", "candidate_restored",
+            "candidate_validated", "grants_applied", "prepared",
+            "service_stopped", "current_disabled", "current_renamed",
+            "candidate_promoted", "candidate_enabled", "service_started",
+        )
+        for failpoint in failpoints:
+            with self.subTest(failpoint=failpoint):
+                with tempfile.TemporaryDirectory(prefix="restore-failpoint-") as directory:
+                    root = Path(directory)
+                    state_root = root / "state"
+                    backup_root = root / "backups"
+                    killed = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="failpoint",
+                        fail_after=failpoint,
+                    )
+                    self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+                    recovered = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="recover",
+                    )
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    repeated = self._run_restore_input_primitive(
+                        state_root=state_root,
+                        backup_root=backup_root,
+                        action="recover",
+                    )
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr)
+
+    def test_live_restore_refuses_unjournaled_orphan_input_without_deleting_it(self):
+        with tempfile.TemporaryDirectory(prefix="restore-input-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            backup_root.mkdir(mode=0o700)
+            orphan = backup_root / ".replacement-restore.20990101000000_999.dump"
+            orphan.write_bytes(b"ambiguous orphan")
+            orphan.chmod(0o600)
+
+            recovered = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="recover",
+            )
+
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn(b"unowned restore input", recovered.stderr)
+            self.assertEqual(orphan.read_bytes(), b"ambiguous orphan")
+
+    def test_live_restore_refuses_ambiguous_owned_input_without_deleting_it(self):
+        payload = b"restore input that must remain untouched"
+        with tempfile.TemporaryDirectory(prefix="restore-input-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            killed = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="apply",
+                payload=payload,
+                kill_after="input_fsynced",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+            [owned_input] = list(backup_root.glob(".replacement-restore.*.dump"))
+            sentinel = root / "sentinel.dump"
+            sentinel.write_bytes(b"do not delete")
+            owned_input.unlink()
+            owned_input.symlink_to(sentinel)
+
+            recovered = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="recover",
+            )
+
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn(b"ownership is ambiguous", recovered.stderr)
+            self.assertTrue(owned_input.is_symlink())
+            self.assertEqual(sentinel.read_bytes(), b"do not delete")
+            self.assertTrue((state_root / "active.env").is_file())
+
+    def test_live_restore_refuses_input_outside_exact_active_journal_ownership(self):
+        payload = b"exact journal-owned restore input"
+        with tempfile.TemporaryDirectory(prefix="restore-input-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            killed = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="apply",
+                payload=payload,
+                kill_after="input_fsynced",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+            owned_inputs = list(backup_root.glob(".replacement-restore.*.dump"))
+            self.assertEqual(len(owned_inputs), 1)
+            foreign_input = backup_root / ".replacement-restore.20990101000000_999.dump"
+            foreign_input.write_bytes(b"not journal owned")
+            foreign_input.chmod(0o600)
+
+            recovered = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="recover",
+            )
+
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn(b"outside the exact active journal", recovered.stderr)
+            self.assertEqual(owned_inputs[0].read_bytes(), payload)
+            self.assertEqual(foreign_input.read_bytes(), b"not journal owned")
+            self.assertTrue((state_root / "active.env").is_file())
+
+    def test_live_restore_refuses_a_dangling_journal_symlink(self):
+        with tempfile.TemporaryDirectory(prefix="restore-input-") as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            backup_root = root / "backups"
+            state_root.mkdir(mode=0o700)
+            (state_root / "active.env").symlink_to(root / "missing-journal")
+
+            recovered = self._run_restore_input_primitive(
+                state_root=state_root,
+                backup_root=backup_root,
+                action="recover",
+            )
+
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn(b"journal is missing or unsafe", recovered.stderr)
+            self.assertTrue((state_root / "active.env").is_symlink())
 
     def test_offsite_s3_backup_keeps_decryption_identity_off_witness(self):
         sender = (ROOT / "deploy/writer-witness/writer-witness-offsite-backup.sh").read_text()

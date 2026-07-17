@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import errno
 import fcntl
 import hashlib
 import json
@@ -16,6 +18,7 @@ import re
 import signal
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -36,15 +39,44 @@ CONFIRM_VALUE = "execute-dark-witness-real-host-matrix"
 SCENARIO_CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO"
 OBSERVER_CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_OBSERVER_CONFIRM"
 OBSERVER_CONFIRM_VALUE = "approve-one-dark-witness-scenario"
-DEFAULT_ARTIFACT_ROOT = Path("/tmp/trading-bot-writer-witness-real-host-matrix/runs")
-LOCK_PATH = Path("/tmp/trading-bot-writer-witness-real-host-matrix/active.lock")
+DEFAULT_CONTROLLER_ROOT = Path("/var/lib/trading-bot-witness-matrix")
+DEFAULT_ARTIFACT_ROOT = DEFAULT_CONTROLLER_ROOT / "runs"
+LOCK_PATH = DEFAULT_CONTROLLER_ROOT / "active.lock"
 DEFAULT_CAMPAIGN_ROOT = Path("/var/lib/trading-bot-witness-matrix/campaigns")
+DEFAULT_SECRET_ROOT = Path("/run/writer-witness-matrix-controller")
+TRUSTED_ALLOWED_SIGNERS = Path("/etc/trading-bot-witness-matrix/allowed_signers")
 REMOTE_CAMPAIGN_ROOT = "/var/lib/trading-bot-witness/matrix-campaign"
+ROLLBACK_STATE_MANIFEST_SHA256 = (
+    "0be506962c48d6e19b9f13b8e8f4f5961fade0d4a852de0dcea9d2819a7d61a7"
+)
 CONTROL_REQUEST_BYTES_UPPER_BOUND = 32_768
+MAX_CONTROL_REQUESTS = 100
+MAX_SCENARIO_SECONDS = 900
+ABORT_MONITOR_INTERVAL_SECONDS = 10.0
+SSH_MASTER_BYTES_UPPER_BOUND = 131_072
+SSH_COMMAND_BYTES_UPPER_BOUND = 32_768
+SSH_COMMAND_PAYLOAD_MAX = 65_536
+SCP_SESSION_BYTES_UPPER_BOUND = 65_536
+SCP_FILE_BYTES_MAX = 1_048_576
+MAX_SCENARIO_TRANSPORT_OPERATIONS = 1_024
+CLEANUP_TRANSPORT_BYTES_RESERVE = 16 * 1024 * 1024
+MAX_CLEANUP_TRANSPORT_OPERATIONS = 512
+MIN_DPI_BYTE_BUDGET = 64 * 1024 * 1024
+REQUIRED_PREFLIGHT_CHECK_IDS = frozenset(
+    {
+        "git_branch_clean",
+        "source_regression_gate",
+        "webapp_fi_baseline",
+        "webapp_ir_standby_baseline",
+        "matrix_witness_dark_baseline",
+        "rollback_witness_baseline",
+    }
+)
 CLEANUP_STEP_IDS = (
     "stop_and_join_requesters",
-    "revoke_transient_capability",
     "retain_pre_recovery_evidence",
+    "recover_active_live_restore",
+    "revoke_transient_capability",
     "resume_paused_runtime",
     "remove_isolated_pressure",
     "remove_scoped_network_faults",
@@ -99,6 +131,21 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def rollback_manifest_helper_guard() -> str:
+    helper = "/usr/local/sbin/writer-witness-state-manifest"
+    return (
+        f"helper={shlex.quote(helper)}; test -f \"$helper\"; test ! -L \"$helper\"; "
+        "test \"$(stat -c %u \"$helper\")\" = 0; "
+        "test \"$(stat -c %g \"$helper\")\" = 0; "
+        "test \"$(stat -c %a \"$helper\")\" = 755; "
+        "test \"$(stat -c %h \"$helper\")\" = 1; "
+        "before=$(stat -c '%d:%i:%s:%Y:%Z' \"$helper\"); "
+        "test \"$(sha256sum \"$helper\" | awk '{print $1}')\" = "
+        f"{ROLLBACK_STATE_MANIFEST_SHA256}; "
+        "test \"$(stat -c '%d:%i:%s:%Y:%Z' \"$helper\")\" = \"$before\""
+    )
+
+
 def safe_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -109,6 +156,105 @@ def safe_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def parse_json_bytes(raw: bytes, *, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MatrixError(f"{label} is not valid UTF-8 JSON") from exc
+    if not isinstance(payload, dict):
+        raise MatrixError(f"{label} must be a JSON object")
+    return payload
+
+
+def secure_directory(path: Path, *, create: bool = True) -> Path:
+    """Return an owner-only real directory without following a final symlink."""
+
+    if create:
+        try:
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except OSError as exc:
+            raise MatrixError(f"cannot create secure Matrix directory: {path}") from exc
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise MatrixError(f"secure Matrix directory is missing: {path}") from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise MatrixError(f"Matrix directory must be real, owner-controlled, and mode 0700: {path}")
+    return path
+
+
+def secure_durable_child_directory(root: Path, name: str) -> Path:
+    """Create one fixed owner-only child and durably anchor its directory entry."""
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", name):
+        raise MatrixError("secure Matrix child directory name is invalid")
+    secure_directory(root)
+    child = root / name
+    created = False
+    try:
+        child.mkdir(mode=0o700)
+        created = True
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise MatrixError(f"cannot create secure Matrix directory: {child}") from exc
+    secure_directory(child, create=False)
+    if created:
+        fsync_directory(child)
+        fsync_directory(root)
+    return child
+
+
+def read_secure_regular(path: Path, *, label: str, max_bytes: int = 1_048_576) -> bytes:
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise MatrixError(f"cannot securely open {label}: {path}") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
+            or metadata.st_nlink != 1
+            or metadata.st_size < 1
+            or metadata.st_size > max_bytes
+        ):
+            raise MatrixError(f"{label} must be one owner-only regular file")
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 65_536))
+            if not chunk:
+                raise MatrixError(f"{label} changed during its immutable read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+        if (
+            after.st_dev != metadata.st_dev
+            or after.st_ino != metadata.st_ino
+            or after.st_size != metadata.st_size
+            or after.st_mtime_ns != metadata.st_mtime_ns
+            or after.st_ctime_ns != metadata.st_ctime_ns
+            or after.st_uid != metadata.st_uid
+            or after.st_gid != metadata.st_gid
+            or after.st_mode != metadata.st_mode
+            or after.st_nlink != metadata.st_nlink
+        ):
+            raise MatrixError(f"{label} changed during its immutable read")
+        return raw
+    finally:
+        os.close(descriptor)
+
+
 def fsync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -117,61 +263,138 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def rename_noreplace(source: Path, destination: Path) -> None:
+    """Atomically publish a complete inode without replacing prior evidence."""
+
+    try:
+        function = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as exc:
+        raise MatrixError("renameat2 is required for durable Matrix publication") from exc
+    function.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    function.restype = ctypes.c_int
+    if function(-100, os.fsencode(source), -100, os.fsencode(destination), 1) == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise FileExistsError(error_number, os.strerror(error_number), destination)
+    raise OSError(error_number, os.strerror(error_number), destination)
+
+
+def direct_durable_child(path: Path, root: Path, *, label: str) -> Path:
+    """Require one canonical, non-hidden direct child below a trusted root."""
+
+    if not path.is_absolute() or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}", path.name
+    ):
+        raise MatrixError(f"{label} is not a safe absolute durable path")
+    try:
+        root_real = root.resolve(strict=True)
+        parent_real = path.parent.resolve(strict=True)
+    except OSError as exc:
+        raise MatrixError(f"{label} durable parent is unavailable") from exc
+    if path.parent != root or parent_real != root_real or path != root / path.name:
+        raise MatrixError(f"{label} must be one canonical direct child of its durable root")
+    if path.exists() or path.is_symlink():
+        try:
+            if path.resolve(strict=True) != path:
+                raise MatrixError(f"{label} must not traverse a symlink")
+        except OSError as exc:
+            raise MatrixError(f"{label} cannot be resolved safely") from exc
+    return path
+
+
 class CampaignJournal:
     """Durable controller intent, written before every remote side effect."""
 
     def __init__(self, path: Path, payload: dict[str, Any], *, create: bool) -> None:
         self.path = path
         self.payload = payload
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.path.parent, 0o700)
+        self._lock = threading.RLock()
+        secure_directory(self.path.parent)
         if create:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            self._create_atomically()
+
+    def _create_atomically(self) -> None:
+        """Publish a complete first journal inode; never expose an empty final file."""
+
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{self.path.name}.create-",
+            suffix=".tmp",
+            dir=self.path.parent,
+        )
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, 0o600)
+            raw = (
+                json.dumps(self.payload, ensure_ascii=False, sort_keys=True, indent=2)
+                + "\n"
+            ).encode("utf-8")
+            offset = 0
+            while offset < len(raw):
+                offset += os.write(descriptor, raw[offset:])
+            os.fsync(descriptor)
             os.close(descriptor)
-            self.flush()
+            descriptor = -1
+            rename_noreplace(temporary, self.path)
+            fsync_directory(self.path.parent)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            temporary.unlink(missing_ok=True)
 
     @classmethod
     def load(cls, path: Path) -> "CampaignJournal":
-        payload = safe_json(path)
+        payload = parse_json_bytes(
+            read_secure_regular(path, label="campaign journal"),
+            label="campaign journal",
+        )
         if payload.get("schema_version") != RUNNER_SCHEMA:
             raise MatrixError("campaign journal schema is invalid")
         return cls(path, payload, create=False)
 
     def flush(self) -> None:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
-        )
-        os.close(descriptor)
-        temporary = Path(temporary_name)
-        try:
-            temporary.write_text(
-                json.dumps(self.payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-                encoding="utf-8",
+        with self._lock:
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
             )
-            os.chmod(temporary, 0o600)
-            with temporary.open("rb") as handle:
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
-            fsync_directory(self.path.parent)
-        finally:
-            temporary.unlink(missing_ok=True)
+            os.close(descriptor)
+            temporary = Path(temporary_name)
+            try:
+                temporary.write_text(
+                    json.dumps(self.payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                os.chmod(temporary, 0o600)
+                with temporary.open("rb") as handle:
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.path)
+                fsync_directory(self.path.parent)
+            finally:
+                temporary.unlink(missing_ok=True)
 
     def update(self, **fields: Any) -> None:
-        self.payload.update(fields)
-        self.payload["updated_at"] = utc_now()
-        self.flush()
+        with self._lock:
+            self.payload.update(fields)
+            self.payload["updated_at"] = utc_now()
+            self.flush()
 
     def claim(self, resource: str, value: str) -> None:
-        resources = self.payload.setdefault("resources", {})
-        if not isinstance(resources, dict):
-            raise MatrixError("campaign journal resources are invalid")
-        values = resources.setdefault(resource, [])
-        if not isinstance(values, list):
-            raise MatrixError("campaign journal resource list is invalid")
-        if value not in values:
-            values.append(value)
-            values.sort()
-        self.update(status="active", dirty=True)
+        with self._lock:
+            resources = self.payload.setdefault("resources", {})
+            if not isinstance(resources, dict):
+                raise MatrixError("campaign journal resources are invalid")
+            values = resources.setdefault(resource, [])
+            if not isinstance(values, list):
+                raise MatrixError("campaign journal resource list is invalid")
+            if value not in values:
+                values.append(value)
+            self.update(status="active", dirty=True)
 
     def values(self, resource: str) -> set[str]:
         resources = self.payload.get("resources")
@@ -180,11 +403,29 @@ class CampaignJournal:
 
 
 def assert_no_dirty_campaigns(root: Path) -> None:
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(root, 0o700)
+    secure_directory(root)
+    stale_temps = tuple(root.glob(".wwm_*.json.*.tmp"))
+    for path in stale_temps:
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink not in {1, 2}
+        ):
+            raise MatrixError(f"unrecognized Matrix journal temporary state: {path.name}")
+        path.unlink()
+    if stale_temps:
+        fsync_directory(root)
     dirty: list[str] = []
     for path in sorted(root.glob("*.json")):
-        payload = safe_json(path)
+        payload = parse_json_bytes(
+            read_secure_regular(path, label="campaign journal"),
+            label="campaign journal",
+        )
         if payload.get("dirty") is True or payload.get("status") in {"active", "failed", "recovering"}:
             dirty.append(path.name)
     if dirty:
@@ -223,11 +464,16 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
     try:
         generated_at = datetime.fromisoformat(
             str(payload.get("generated_at")).replace("Z", "+00:00")
-        )
-    except ValueError as exc:
-        raise MatrixError("preflight artifact timestamp is invalid") from exc
+        ).astimezone(timezone.utc)
+        completed_at = datetime.fromisoformat(
+            str(payload.get("completed_at")).replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+    except (TypeError, ValueError) as exc:
+        raise MatrixError("preflight artifact timestamps are invalid") from exc
+    if completed_at < generated_at:
+        raise MatrixError("preflight completion predates plan generation")
     age_seconds = (
-        datetime.now(timezone.utc) - generated_at.astimezone(timezone.utc)
+        datetime.now(timezone.utc) - completed_at
     ).total_seconds()
     if age_seconds < -30 or age_seconds > 300:
         raise MatrixError("preflight artifact is outside the five-minute execution window")
@@ -240,6 +486,33 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
         raise MatrixError("preflight artifact is not pinned to the current exact commit")
     if bundle.get("expected_commit") != expected_head:
         raise MatrixError("preflight run bundle commit mismatch")
+    expected_python_runtime = safe_json(ROOT / "deploy/writer-witness/python-runtime.json")
+    expected_nftables_policy = safe_json(ROOT / "deploy/writer-witness/nftables-policy.json")
+    expected_file_hashes = {
+        "requirements_lock_sha256": hashlib.sha256(
+            (ROOT / "deploy/writer-witness/requirements.lock").read_bytes()
+        ).hexdigest(),
+        "wheelhouse_manifest_sha256": hashlib.sha256(
+            (ROOT / "deploy/writer-witness/wheelhouse.sha256").read_bytes()
+        ).hexdigest(),
+    }
+    if not re.fullmatch(r"[0-9a-f]{64}", str(bundle.get("source_sha256", ""))):
+        raise MatrixError("preflight run bundle source identity is invalid")
+    if bundle.get("python_runtime") != expected_python_runtime:
+        raise MatrixError("preflight run bundle Python runtime binding drifted")
+    if bundle.get("nftables_policy") != expected_nftables_policy:
+        raise MatrixError("preflight run bundle nftables binding drifted")
+    for key, expected in expected_file_hashes.items():
+        if bundle.get(key) != expected:
+            raise MatrixError(f"preflight run bundle {key} drifted")
+    if (
+        bundle.get("source_gate_requires_zero_skips") is not True
+        or bundle.get("source_gate_requires_guarded_postgres_tests") != 4
+        or bundle.get("source_gate_requires_four_database_drill") is not True
+        or bundle.get("expected_active_campaign_tag") is not None
+        or bundle.get("expected_active_campaign_scenario") is not None
+    ):
+        raise MatrixError("preflight run bundle safety contract is incomplete")
     if payload.get("failed_checks"):
         raise MatrixError("preflight artifact contains failed checks")
     required = {
@@ -256,7 +529,13 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
         raise MatrixError("replacement Witness baseline is not epoch-zero vacant")
     if rollback.get("state") != "webapp:0:vacant" or rollback.get("receipts") != "0":
         raise MatrixError("original Witness baseline is not epoch-zero vacant")
-    for key in ("manifest_sha256", "cert_sha256", "backup_sha256", "credential_bundle_sha256"):
+    for key in (
+        "manifest_sha256",
+        "cert_sha256",
+        "backup_sha256",
+        "credential_bundle_sha256",
+        "database_inventory_sha256",
+    ):
         if not re.fullmatch(r"[0-9a-f]{64}", str(matrix.get(key, ""))):
             raise MatrixError(f"replacement Witness baseline has invalid {key}")
     for key in ("manifest_sha256", "cert_sha256"):
@@ -264,6 +543,10 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
             raise MatrixError(f"original Witness baseline has invalid {key}")
     if matrix.get("cert_sha256") == rollback.get("cert_sha256"):
         raise MatrixError("replacement and original Witness TLS identities are not distinct")
+    if bundle.get("witness_release_manifest_sha256") != matrix.get(
+        "release_manifest_sha256"
+    ):
+        raise MatrixError("preflight release manifest is not bound to the observed generation")
     if not re.fullmatch(r"writer-witness-[0-9]{8}T[0-9]{6}Z\.dump", str(matrix.get("backup", ""))):
         raise MatrixError("replacement Witness baseline backup identity is invalid")
     required_markers = {
@@ -277,17 +560,33 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
         },
         "matrix_witness_dark_baseline": {
             "installed_helpers_match": "yes", "running_release_match": "yes",
+            "release_manifest_attested": "yes", "release_metadata_attested": "yes",
+            "effective_unit_attested": "yes", "system_runtime_attested": "yes",
+            "runtime_attested": "yes",
+            "runtime_provenance_attested": "yes", "offsite_upload_attested": "yes",
             "network_policy_semantics_match": "yes", "connection_enabled_aux_databases": "0",
             "orphan_candidate_failed_databases": "0", "campaign_state": "absent",
+            "nftables_policy_sha256": str(expected_nftables_policy["policy_sha256"]),
         },
+        "rollback_witness_baseline": {"rollback_helper_attested": "yes"},
     }
     for role, markers in required_markers.items():
         if any(str(baseline[role].get(key)) != value for key, value in markers.items()):
             raise MatrixError(f"preflight baseline lacks a required current marker for {role}")
-    source = next(
-        (item for item in payload.get("preflight_results", []) if item.get("check_id") == "source_regression_gate"),
-        None,
-    )
+    results = payload.get("preflight_results")
+    if not isinstance(results, list) or not all(isinstance(item, dict) for item in results):
+        raise MatrixError("preflight result inventory is invalid")
+    indexed: dict[str, dict[str, Any]] = {}
+    for item in results:
+        check_id = str(item.get("check_id") or "")
+        if not check_id or check_id in indexed:
+            raise MatrixError("preflight result inventory contains a missing or duplicate check")
+        if item.get("status") != "passed" or item.get("return_code") != 0:
+            raise MatrixError(f"preflight check did not pass: {check_id}")
+        indexed[check_id] = item
+    if set(indexed) != REQUIRED_PREFLIGHT_CHECK_IDS:
+        raise MatrixError("preflight result inventory does not match the closed required checks")
+    source = indexed["source_regression_gate"]
     source_output = str((source or {}).get("stdout") or "")
     for marker in ('"guarded_postgres_tests":4', '"skipped":0', '"four_database_drill":true'):
         if marker not in source_output:
@@ -309,6 +608,7 @@ def validate_approval(
     reason: str,
     change_id: str,
     expected_restore_sha256: str,
+    expected_allowed_signers_sha256: str,
 ) -> tuple[str, str]:
     if payload.get("schema_version") != APPROVAL_SCHEMA or payload.get("status") != "approved":
         raise MatrixError("independent observer approval is missing or invalid")
@@ -327,6 +627,8 @@ def validate_approval(
         raise MatrixError("execution change ID must exactly match the approval")
     if payload.get("max_control_requests") != 100:
         raise MatrixError("approval request budget is invalid")
+    if payload.get("max_scenario_seconds") != MAX_SCENARIO_SECONDS:
+        raise MatrixError("approval scenario runtime bound is invalid")
     if not re.fullmatch(r"[0-9a-f]{32}", str(payload.get("authorization_nonce") or "")):
         raise MatrixError("approval authorization nonce is invalid")
     if not all(
@@ -370,46 +672,63 @@ def validate_approval(
             raise MatrixError(f"approval lacks concrete {field}")
     if (
         not isinstance(payload.get("dpi_byte_budget"), int)
-        or payload["dpi_byte_budget"] < CONTROL_REQUEST_BYTES_UPPER_BOUND * 100
+        or payload["dpi_byte_budget"] < MIN_DPI_BYTE_BUDGET
     ):
-        raise MatrixError("approval DPI byte budget is invalid")
+        raise MatrixError("approval all-transport DPI byte budget is invalid")
     if not str(payload.get("restore_authorized_by") or "").strip():
         raise MatrixError("approval lacks a named restore authorizer")
     if payload.get("restore_backup_sha256") != expected_restore_sha256:
         raise MatrixError("approval is not bound to the pinned restore backup")
+    if payload.get("allowed_signers_sha256") != expected_allowed_signers_sha256:
+        raise MatrixError("approval is not bound to the trusted signer policy")
     return observer, commander
 
 
 def verify_approval_signature(
-    approval_path: Path,
-    signature_path: Path,
+    approval_raw: bytes,
+    signature_raw: bytes,
     *,
     identity: str,
-    allowed_signers: Path,
+    allowed_signers_raw: bytes,
 ) -> None:
-    if not signature_path.is_file() or not allowed_signers.is_file():
-        raise MatrixError("approval signature or allowed-signers file is missing")
-    if allowed_signers.stat().st_mode & 0o022 or allowed_signers.stat().st_uid != os.geteuid():
-        raise MatrixError("allowed-signers file must be owner-controlled and not group/world writable")
-    completed = subprocess.run(
-        [
-            "ssh-keygen", "-Y", "verify", "-f", str(allowed_signers),
-            "-I", identity, "-n", "writer-witness-matrix", "-s", str(signature_path),
-        ],
-        input=approval_path.read_bytes(),
-        capture_output=True,
-    )
-    if completed.returncode != 0:
-        raise MatrixError(f"approval signature verification failed for {identity}")
+    descriptors: list[int] = []
+    try:
+        for name, raw in (("allowed-signers", allowed_signers_raw), ("signature", signature_raw)):
+            if not hasattr(os, "memfd_create"):
+                raise MatrixError("immutable in-memory signature verification requires memfd_create")
+            descriptor = os.memfd_create(f"writer-witness-{name}", flags=0)
+            descriptors.append(descriptor)
+            if os.write(descriptor, raw) != len(raw):
+                raise MatrixError(f"failed to stage immutable {name} bytes")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+        completed = subprocess.run(
+            [
+                "ssh-keygen", "-Y", "verify", "-f", f"/proc/self/fd/{descriptors[0]}",
+                "-I", identity, "-n", "writer-witness-matrix",
+                "-s", f"/proc/self/fd/{descriptors[1]}",
+            ],
+            input=approval_raw,
+            capture_output=True,
+            pass_fds=tuple(descriptors),
+        )
+        if completed.returncode != 0:
+            raise MatrixError(f"approval signature verification failed for {identity}")
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
 
 
 def assert_independent_signer_keys(
-    allowed_signers: Path,
+    allowed_signers_raw: bytes,
     observer: str,
     incident_commander: str,
 ) -> None:
     identities = {observer: set(), incident_commander: set()}
-    for raw_line in allowed_signers.read_text(encoding="utf-8").splitlines():
+    try:
+        rendered = allowed_signers_raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MatrixError("trusted signer policy is not UTF-8") from exc
+    for raw_line in rendered.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -429,9 +748,7 @@ def assert_independent_signer_keys(
 
 def consume_approval(payload: dict[str, Any], root: Path) -> Path:
     nonce = str(payload["authorization_nonce"])
-    consumed = root / "consumed-approvals"
-    consumed.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(consumed, 0o700)
+    consumed = secure_durable_child_directory(root, "consumed-approvals")
     path = consumed / nonce
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -448,9 +765,7 @@ def consume_approval(payload: dict[str, Any], root: Path) -> Path:
 def consume_preflight(preflight_sha256: str, scenario: str, root: Path) -> Path:
     if not re.fullmatch(r"[0-9a-f]{64}", preflight_sha256) or scenario not in SCENARIOS:
         raise MatrixError("preflight consumption identity is invalid")
-    consumed = root / "consumed-preflights"
-    consumed.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(consumed, 0o700)
+    consumed = secure_durable_child_directory(root, "consumed-preflights")
     path = consumed / preflight_sha256
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -478,7 +793,7 @@ class Controller:
         baseline: dict[str, dict[str, str]],
         artifact_dir: Path,
         campaign_root: Path = DEFAULT_CAMPAIGN_ROOT,
-        dpi_byte_budget: int = 3_276_800,
+        dpi_byte_budget: int = MIN_DPI_BYTE_BUDGET,
         tag: str | None = None,
         existing_journal: CampaignJournal | None = None,
     ) -> None:
@@ -498,9 +813,7 @@ class Controller:
         self.artifact_dir = artifact_dir
         self.events_path = artifact_dir / "events.jsonl"
         self.summary_path = artifact_dir / "summary.json"
-        secret_parent = Path(os.getenv("WRITER_WITNESS_MATRIX_SECRET_ROOT", "/run/writer-witness-matrix-controller"))
-        secret_parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(secret_parent, 0o700)
+        secret_parent = secure_directory(DEFAULT_SECRET_ROOT)
         filesystem = subprocess.run(
             ["findmnt", "-n", "-o", "FSTYPE", "-T", str(secret_parent)],
             check=True,
@@ -509,8 +822,15 @@ class Controller:
         ).stdout.strip()
         if filesystem != "tmpfs":
             raise MatrixError("controller Matrix secrets require a verified tmpfs path")
-        self.local_secret_root = Path(tempfile.mkdtemp(prefix=f"{self.tag}-", dir=secret_parent))
-        os.chmod(self.local_secret_root, 0o700)
+        self.local_secret_root = secret_parent / self.tag
+        if existing_journal is None:
+            try:
+                self.local_secret_root.mkdir(mode=0o700)
+            except FileExistsError as exc:
+                raise MatrixError("stale deterministic Matrix secret directory requires recovery") from exc
+        else:
+            self.local_secret_root.mkdir(mode=0o700, exist_ok=True)
+        secure_directory(self.local_secret_root, create=False)
         self._event_lock = threading.Lock()
         self._budget_lock = threading.Lock()
         self.evidence_failed = False
@@ -522,12 +842,19 @@ class Controller:
         self.rotation_sites: set[str] = set()
         self.control_requests = 0
         self.control_bytes_upper_bound = 0
+        self.transport_operations = 0
+        self.transport_bytes_upper_bound = 0
+        self.cleanup_transport_operations = 0
+        self.cleanup_transport_bytes_upper_bound = 0
+        self._transport_master_roles: set[str] = set()
         self.dpi_byte_budget = int(dpi_byte_budget)
-        if self.dpi_byte_budget <= 0:
-            raise MatrixError("campaign DPI byte budget is invalid")
+        if self.dpi_byte_budget < MIN_DPI_BYTE_BUDGET:
+            raise MatrixError("campaign DPI byte budget is below the closed transport minimum")
         self.started_at = utc_now()
+        self._scenario_deadline = time.monotonic() + MAX_SCENARIO_SECONDS
         self.remote_campaign_claimed = False
         self.remote_campaign_conflict = False
+        self.remote_campaign_ambiguous = False
         self._abort_event = threading.Event()
         self._abort_reason: str | None = None
         self._monitor_thread: threading.Thread | None = None
@@ -539,6 +866,8 @@ class Controller:
                 {
                     "schema_version": RUNNER_SCHEMA,
                     "status": "active",
+                    "lifecycle_phase": "controller_created",
+                    "remote_campaign_protocol": "atomic-helper-v1",
                     "dirty": True,
                     "tag": self.tag,
                     "scenario": scenario,
@@ -548,6 +877,13 @@ class Controller:
                     "incident_commander": incident_commander,
                     "reason": reason,
                     "dpi_byte_budget": self.dpi_byte_budget,
+                    "max_scenario_seconds": MAX_SCENARIO_SECONDS,
+                    "control_requests": 0,
+                    "control_bytes_upper_bound": 0,
+                    "transport_operations": 0,
+                    "transport_bytes_upper_bound": 0,
+                    "cleanup_transport_operations": 0,
+                    "cleanup_transport_bytes_upper_bound": 0,
                     "created_at": self.started_at,
                     "updated_at": self.started_at,
                     "artifact_dir": str(artifact_dir),
@@ -564,8 +900,57 @@ class Controller:
             self.witness_mutated = bool(self.journal.payload.get("witness_mutated"))
             self.remote_campaign_claimed = bool(self.journal.payload.get("remote_campaign_claimed"))
             self.remote_campaign_conflict = bool(self.journal.payload.get("remote_campaign_conflict"))
+            self.remote_campaign_ambiguous = bool(self.journal.payload.get("remote_campaign_ambiguous"))
+            claim_state = str(self.journal.payload.get("remote_campaign_claim_state") or "")
+            if (
+                not self.remote_campaign_claimed
+                and not self.remote_campaign_conflict
+                and claim_state
+                in {
+                    "claiming",
+                    "ambiguous_retrying",
+                    "ambiguous",
+                    "lost_or_foreign",
+                }
+            ):
+                # A hard kill can land after the remote atomic claim but before
+                # the local success bit. Repeating the exact idempotent claim is
+                # the only safe reconciliation path.
+                self.remote_campaign_ambiguous = True
+            for attribute in (
+                "control_requests",
+                "control_bytes_upper_bound",
+                "transport_operations",
+                "transport_bytes_upper_bound",
+                "cleanup_transport_operations",
+                "cleanup_transport_bytes_upper_bound",
+            ):
+                value = self.journal.payload.get(attribute, 0)
+                if not isinstance(value, int) or value < 0:
+                    raise MatrixError(f"campaign journal has invalid {attribute}")
+                setattr(self, attribute, value)
+            if self.journal.payload.get("max_scenario_seconds") != MAX_SCENARIO_SECONDS:
+                raise MatrixError("campaign journal runtime bound drifted")
+            try:
+                created_at = datetime.fromisoformat(
+                    str(self.journal.payload.get("created_at") or "").replace("Z", "+00:00")
+                )
+                if created_at.tzinfo is None:
+                    raise ValueError("timezone is required")
+            except (TypeError, ValueError) as exc:
+                raise MatrixError("campaign journal has an invalid bounded start time") from exc
+            now = datetime.now(timezone.utc)
+            if created_at > now + timedelta(seconds=30):
+                raise MatrixError("campaign journal start time is in the future")
+            elapsed = max(0.0, (now - created_at).total_seconds())
+            self.started_at = created_at.astimezone(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+            self._scenario_deadline = time.monotonic() + max(
+                0.0, MAX_SCENARIO_SECONDS - elapsed
+            )
 
-    def event(self, event: str, **fields: Any) -> None:
+    def event(self, event: str, **fields: Any) -> bool:
         payload = {
             "schema_version": RUNNER_SCHEMA,
             "at": utc_now(),
@@ -577,20 +962,103 @@ class Controller:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
         try:
             with self._event_lock:
-                descriptor = os.open(self.events_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+                flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                descriptor = os.open(self.events_path, flags, 0o600)
                 try:
+                    metadata = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISREG(metadata.st_mode)
+                        or metadata.st_uid != os.geteuid()
+                        or stat.S_IMODE(metadata.st_mode) != 0o600
+                        or metadata.st_nlink != 1
+                    ):
+                        raise OSError("Matrix evidence path is not one owner-only regular file")
                     raw = encoded.encode("utf-8")
                     if os.write(descriptor, raw) != len(raw):
                         raise OSError("short Matrix evidence write")
                     os.fsync(descriptor)
                 finally:
                     os.close(descriptor)
+            return True
         except OSError:
             self.evidence_failed = True
+            return False
 
     def raise_if_abort_requested(self) -> None:
         if self._abort_reason is not None:
             raise MatrixAbort(self._abort_reason)
+        if not self._cleanup_mode and time.monotonic() > getattr(
+            self, "_scenario_deadline", float("inf")
+        ):
+            self._abort_reason = "Matrix scenario exceeded its approved 900-second runtime"
+            raise MatrixAbort(self._abort_reason)
+
+    def _reserve_transport_budget(
+        self,
+        *,
+        role: str,
+        kind: str,
+        payload_bytes: int,
+        transfer_bytes: int = 0,
+        force_master_reservation: bool = False,
+    ) -> int:
+        if role not in HOSTS:
+            raise MatrixError("transport budget role is invalid")
+        if kind not in {"ssh", "scp"}:
+            raise MatrixError("transport budget kind is invalid")
+        if payload_bytes < 0 or payload_bytes > SSH_COMMAND_PAYLOAD_MAX:
+            raise MatrixError("transport command exceeds its closed payload bound")
+        if transfer_bytes < 0 or transfer_bytes > SCP_FILE_BYTES_MAX:
+            raise MatrixError("transport file exceeds its closed transfer bound")
+        base = SSH_COMMAND_BYTES_UPPER_BOUND if kind == "ssh" else SCP_SESSION_BYTES_UPPER_BOUND
+        reserve_master = force_master_reservation or role not in self._transport_master_roles
+        amount = base + payload_bytes + transfer_bytes
+        if reserve_master:
+            amount += SSH_MASTER_BYTES_UPPER_BOUND
+        with self._budget_lock:
+            if self._cleanup_mode:
+                next_operations = self.cleanup_transport_operations + 1
+                next_bytes = self.cleanup_transport_bytes_upper_bound + amount
+                if (
+                    next_operations > MAX_CLEANUP_TRANSPORT_OPERATIONS
+                    or next_bytes > CLEANUP_TRANSPORT_BYTES_RESERVE
+                ):
+                    raise MatrixError("cleanup exceeded its pre-authorized transport reserve")
+                self.cleanup_transport_operations = next_operations
+                self.cleanup_transport_bytes_upper_bound = next_bytes
+            else:
+                next_operations = self.transport_operations + 1
+                next_bytes = self.transport_bytes_upper_bound + amount
+                non_cleanup_ceiling = self.dpi_byte_budget - CLEANUP_TRANSPORT_BYTES_RESERVE
+                if (
+                    next_operations > MAX_SCENARIO_TRANSPORT_OPERATIONS
+                    or self.control_bytes_upper_bound + next_bytes > non_cleanup_ceiling
+                ):
+                    raise MatrixError("scenario exceeded its approved all-transport DPI budget")
+                self.transport_operations = next_operations
+                self.transport_bytes_upper_bound = next_bytes
+            self.journal.update(
+                control_requests=self.control_requests,
+                control_bytes_upper_bound=self.control_bytes_upper_bound,
+                transport_operations=self.transport_operations,
+                transport_bytes_upper_bound=self.transport_bytes_upper_bound,
+                cleanup_transport_operations=self.cleanup_transport_operations,
+                cleanup_transport_bytes_upper_bound=self.cleanup_transport_bytes_upper_bound,
+                dirty=True,
+            )
+        return amount
+
+    def _mark_transport_master(self, role: str) -> None:
+        """Record a reusable SSH master only after a successful transport operation."""
+        with self._budget_lock:
+            self._transport_master_roles.add(role)
+
+    def _forget_transport_master(self, role: str) -> None:
+        """Force the next operation to reserve a fresh SSH handshake."""
+        with self._budget_lock:
+            self._transport_master_roles.discard(role)
 
     def _abort_probe(self) -> None:
         true_pattern = "^(1|true|t|yes|y|on)$"
@@ -637,6 +1105,8 @@ class Controller:
             (
                 "rollback_witness",
                 "set -Eeuo pipefail; "
+                + rollback_manifest_helper_guard()
+                + "; "
                 "test \"$(timedatectl show -p NTPSynchronized --value)\" = yes; "
                 "test \"$(/usr/local/sbin/writer-witness-state-manifest)\" = "
                 f"{shlex.quote(self.baseline['rollback_witness_baseline']['manifest_sha256'])}; "
@@ -644,6 +1114,11 @@ class Controller:
             ),
         )
         for role, command in probes:
+            self._reserve_transport_budget(
+                role=role,
+                kind="ssh",
+                payload_bytes=len(command.encode("utf-8")),
+            )
             completed = subprocess.run(
                 self.ssh_args(HOSTS[role], command),
                 cwd=ROOT,
@@ -652,7 +1127,9 @@ class Controller:
                 timeout=8,
             )
             if completed.returncode != 0:
+                self._forget_transport_master(role)
                 raise MatrixAbort(f"continuous abort probe failed for {role}")
+            self._mark_transport_master(role)
 
     def _monitor_loop(self) -> None:
         while not self._abort_event.is_set():
@@ -663,7 +1140,7 @@ class Controller:
                 self.event("abort_monitor.failed", reason=self._abort_reason)
                 self._abort_event.set()
                 return
-            self._abort_event.wait(2.0)
+            self._abort_event.wait(ABORT_MONITOR_INTERVAL_SECONDS)
 
     def start_abort_monitor(self) -> None:
         self._abort_probe()
@@ -701,29 +1178,258 @@ class Controller:
             self.witness_mutated = True
             self.journal.update(witness_mutated=True, status="active", dirty=True)
 
-    def claim_remote_campaign(self) -> None:
-        self.claim("remote_campaign", self.tag)
-        command = (
-            f"set -Eeuo pipefail; root={REMOTE_CAMPAIGN_ROOT}; active=$root/active; "
-            "install -d -m 0700 -o root -g root \"$root\"; "
-            "if mkdir -m 0700 \"$active\" 2>/dev/null; then "
-            f"printf '%s\\n' {shlex.quote(self.tag)} >\"$active/tag\"; chmod 0600 \"$active/tag\"; sync -f \"$active/tag\"; sync -f \"$root\"; "
-            f"else current=$(cat \"$active/tag\" 2>/dev/null || true); "
-            f"test \"$current\" = {shlex.quote(self.tag)} || exit 73; fi"
-        )
+    def remote_campaign_command(
+        self,
+        operation: str,
+        *,
+        expect: str | None = None,
+        authorization_nonce: str | None = None,
+        preflight_sha256: str | None = None,
+    ) -> str:
+        arguments = [
+            "/usr/local/sbin/writer-witness-matrix-campaign",
+            operation,
+            "--tag",
+            self.tag,
+            "--expected-commit",
+            self.expected_head,
+            "--scenario",
+            self.scenario,
+        ]
+        if expect is not None:
+            arguments.extend(("--expect", expect))
+        if authorization_nonce is not None:
+            arguments.extend(("--authorization-nonce", authorization_nonce))
+        if preflight_sha256 is not None:
+            arguments.extend(("--preflight-sha256", preflight_sha256))
+        return " ".join(shlex.quote(item) for item in arguments)
+
+    def inspect_remote_campaign(self, label: str) -> str:
         completed = self.remote(
-            "matrix_witness", "claim_remote_campaign", command, check=False
+            "matrix_witness",
+            label,
+            self.remote_campaign_command("inspect"),
+            check=False,
         )
-        if completed.returncode == 73:
-            self.remote_campaign_conflict = True
-            self.journal.update(remote_campaign_conflict=True, remote_campaign_claimed=False)
-            raise MatrixError("a different controller owns the replacement Witness campaign lease")
         if completed.returncode != 0:
+            raise MatrixError("replacement Witness campaign inspection failed")
+        lines = [line for line in completed.stdout.splitlines() if line.strip()]
+        if len(lines) != 1:
+            raise MatrixError("replacement Witness campaign inspection is not one exact record")
+        try:
+            payload = json.loads(lines[0])
+        except json.JSONDecodeError as exc:
+            raise MatrixError("replacement Witness campaign inspection is invalid JSON") from exc
+        expected_identity = {
+            "tag": self.tag,
+            "expected_commit": self.expected_head,
+            "scenario": self.scenario,
+        }
+        if (
+            not isinstance(payload, dict)
+            or payload.get("status") != "inspected"
+            or any(payload.get(key) != value for key, value in expected_identity.items())
+        ):
+            raise MatrixError("replacement Witness campaign inspection identity is invalid")
+        state = payload.get("state")
+        active_relation = payload.get("active_relation")
+        release_relation = payload.get("release_relation")
+        valid_relations = {"absent", "exact", "foreign"}
+        valid_states = {
+            "active_exact",
+            "active_foreign",
+            "released_exact",
+            "released_foreign",
+            "absent",
+        }
+        if (
+            state not in valid_states
+            or active_relation not in valid_relations
+            or release_relation not in valid_relations
+        ):
+            raise MatrixError("replacement Witness campaign inspection classification is invalid")
+        if (
+            (state == "active_exact" and active_relation != "exact")
+            or (state == "active_foreign" and active_relation != "foreign")
+            or (state == "released_exact" and release_relation != "exact")
+            or (state == "released_foreign" and release_relation != "foreign")
+            or (
+                state == "absent"
+                and (active_relation != "absent" or release_relation != "absent")
+            )
+        ):
+            raise MatrixError("replacement Witness campaign inspection is internally inconsistent")
+        self.journal.update(remote_campaign_inspection_state=state, dirty=True)
+        return str(state)
+
+    def mark_remote_campaign_ambiguous(self, state: str, *, conflict: bool = False) -> None:
+        self.remote_campaign_claimed = False
+        self.remote_campaign_ambiguous = not conflict
+        self.remote_campaign_conflict = conflict
+        self.journal.update(
+            remote_campaign_claimed=False,
+            remote_campaign_ambiguous=not conflict,
+            remote_campaign_conflict=conflict,
+            remote_campaign_claim_state=state,
+            dirty=True,
+        )
+
+    def claim_remote_campaign(self) -> None:
+        self.journal.update(
+            lifecycle_phase="remote_claim_intent",
+            remote_campaign_claim_state="claiming",
+            dirty=True,
+        )
+        self.claim("remote_campaign", self.tag)
+        command = self.remote_campaign_command("claim")
+        try:
+            for attempt in (1, 2):
+                try:
+                    completed = self.remote(
+                        "matrix_witness",
+                        f"claim_remote_campaign_attempt_{attempt}",
+                        command,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    self.journal.update(
+                        remote_campaign_claim_state="ambiguous_retrying",
+                        remote_campaign_ambiguous=True,
+                        dirty=True,
+                    )
+                    continue
+                if completed.returncode == 0:
+                    break
+            inspected_state = self.inspect_remote_campaign(
+                "inspect_claimed_remote_campaign"
+            )
+        except Exception as exc:
+            self.mark_remote_campaign_ambiguous("ambiguous")
+            raise MatrixError("replacement Witness campaign ownership is ambiguous") from exc
+        if inspected_state != "active_exact":
+            if inspected_state in {
+                "active_foreign",
+                "released_exact",
+                "released_foreign",
+            }:
+                self.mark_remote_campaign_ambiguous(
+                    inspected_state,
+                    conflict=True,
+                )
+                raise MatrixError("replacement Witness campaign is owned by foreign or stale state")
+            self.mark_remote_campaign_ambiguous("ambiguous")
             raise MatrixError("replacement Witness campaign ownership is ambiguous")
         self.remote_campaign_claimed = True
-        self.journal.update(remote_campaign_claimed=True)
+        self.remote_campaign_ambiguous = False
+        self.remote_campaign_conflict = False
+        self.journal.update(
+            lifecycle_phase="remote_claimed",
+            remote_campaign_claimed=True,
+            remote_campaign_ambiguous=False,
+            remote_campaign_conflict=False,
+            remote_campaign_claim_state="owned",
+            dirty=True,
+        )
+
+    def assert_remote_campaign_owned(self) -> None:
+        try:
+            inspected_state = self.inspect_remote_campaign(
+                "verify_remote_campaign_ownership"
+            )
+        except Exception as exc:
+            self.mark_remote_campaign_ambiguous("lost_or_foreign")
+            raise MatrixError("replacement Witness campaign ownership is not proven") from exc
+        if inspected_state != "active_exact":
+            self.mark_remote_campaign_ambiguous(
+                inspected_state,
+                conflict=inspected_state != "absent",
+            )
+            raise MatrixError("replacement Witness campaign ownership is not proven")
+        self.remote_campaign_claimed = True
+        self.remote_campaign_ambiguous = False
+        self.journal.update(
+            remote_campaign_claimed=True,
+            remote_campaign_ambiguous=False,
+            remote_campaign_claim_state="owned",
+            dirty=True,
+        )
+
+    def assert_remote_campaign_released(self) -> None:
+        try:
+            inspected_state = self.inspect_remote_campaign(
+                "verify_remote_campaign_release_tombstone"
+            )
+        except Exception as exc:
+            self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
+            raise MatrixError("replacement Witness campaign release tombstone is not proven") from exc
+        if inspected_state != "released_exact":
+            self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
+            raise MatrixError("replacement Witness campaign release tombstone is not proven")
+        self.remote_campaign_claimed = False
+        self.remote_campaign_ambiguous = False
+        self.journal.update(
+            remote_campaign_claimed=False,
+            remote_campaign_ambiguous=False,
+            remote_campaign_release_state="released",
+            dirty=True,
+        )
+
+    def consume_remote_authorization(self, authorization_nonce: str, preflight_sha256: str) -> None:
+        if not re.fullmatch(r"[0-9a-f]{32}", authorization_nonce):
+            raise MatrixError("remote approval consumption nonce is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", preflight_sha256):
+            raise MatrixError("remote preflight consumption hash is invalid")
+        self.journal.update(
+            lifecycle_phase="remote_authorization_intent",
+            remote_authorization_consumption="pending",
+            dirty=True,
+        )
+        command = self.remote_campaign_command(
+            "consume",
+            authorization_nonce=authorization_nonce,
+            preflight_sha256=preflight_sha256,
+        )
+        completed: subprocess.CompletedProcess[str] | None = None
+        try:
+            for attempt in (1, 2):
+                try:
+                    candidate = self.remote(
+                        "matrix_witness",
+                        f"consume_remote_approval_and_preflight_attempt_{attempt}",
+                        command,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    self.journal.update(
+                        remote_authorization_consumption="ambiguous_retrying",
+                        dirty=True,
+                    )
+                    continue
+                if candidate.returncode == 0:
+                    completed = candidate
+                    break
+            asserted = self.remote(
+                "matrix_witness",
+                "assert_remote_campaign_after_authorization",
+                self.remote_campaign_command("assert", expect="active"),
+                check=False,
+            )
+        except Exception as exc:
+            self.journal.update(remote_authorization_consumption="ambiguous", dirty=True)
+            raise MatrixError("remote approval/preflight consumption is ambiguous") from exc
+        if completed is None or asserted.returncode != 0:
+            self.journal.update(remote_authorization_consumption="ambiguous", dirty=True)
+            raise MatrixError("remote approval/preflight consumption is ambiguous")
+        self.journal.update(
+            lifecycle_phase="remote_authorization_consumed",
+            remote_authorization_consumption="consumed",
+            remote_approval_nonce=authorization_nonce,
+            remote_preflight_sha256=preflight_sha256,
+            dirty=True,
+        )
 
     def critical_precheck(self) -> None:
+        self.assert_remote_campaign_owned()
         true_pattern = "^(1|true|t|yes|y|on)$"
         self.remote(
             "webapp_fi",
@@ -773,8 +1479,11 @@ class Controller:
         self.remote(
             "matrix_witness",
             "critical_precheck_witness",
-            f"set -Eeuo pipefail; test ! -e {REMOTE_CAMPAIGN_ROOT}/active; "
+            "set -Eeuo pipefail; "
             "test ! -e /var/lib/trading-bot-witness/restore-state/active.env; "
+            "test ! -L /var/lib/trading-bot-witness/restore-state/active.env; "
+            "test -z \"$(find /var/lib/trading-bot-witness/restore-state -mindepth 1 -maxdepth 1 "
+            "-name '.active.*.env' -print -quit)\"; "
             "test ! -e /var/lib/trading-bot-witness/hmac-rotation/webapp_fi; "
             "test ! -e /var/lib/trading-bot-witness/hmac-rotation/webapp_ir",
         )
@@ -783,31 +1492,66 @@ class Controller:
     def release_remote_campaign(self) -> None:
         if not self.remote_campaign_claimed and self.tag not in self.journal.values("remote_campaign"):
             return
-        command = (
-            f"set -Eeuo pipefail; active={REMOTE_CAMPAIGN_ROOT}/active; "
-            "if test ! -d \"$active\"; then exit 0; fi; "
-            f"test \"$(cat \"$active/tag\")\" = {shlex.quote(self.tag)}; "
-            "rm -f \"$active/tag\"; rmdir \"$active\"; "
-            f"sync -f {REMOTE_CAMPAIGN_ROOT}"
-        )
-        self.remote("matrix_witness", "release_remote_campaign", command)
+        command = self.remote_campaign_command("release")
+        try:
+            for attempt in (1, 2):
+                try:
+                    completed = self.remote(
+                        "matrix_witness",
+                        f"release_remote_campaign_attempt_{attempt}",
+                        command,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    self.journal.update(
+                        remote_campaign_release_state="ambiguous_retrying",
+                        dirty=True,
+                    )
+                    continue
+                if completed.returncode == 0:
+                    break
+            inspected_state = self.inspect_remote_campaign(
+                "inspect_released_remote_campaign"
+            )
+        except Exception as exc:
+            self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
+            raise MatrixError("replacement Witness campaign release is ambiguous") from exc
+        if inspected_state != "released_exact":
+            self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
+            raise MatrixError("replacement Witness campaign release is ambiguous")
         self.remote_campaign_claimed = False
-        self.journal.update(remote_campaign_claimed=False)
+        self.remote_campaign_ambiguous = False
+        self.journal.update(
+            lifecycle_phase="remote_campaign_released",
+            remote_campaign_claimed=False,
+            remote_campaign_ambiguous=False,
+            remote_campaign_release_state="released",
+            dirty=True,
+        )
 
-    @staticmethod
-    def ssh_args(host: Host, command: str) -> list[str]:
+    def _ssh_control_path(self, host: Host) -> Path:
+        identity = hashlib.sha256(f"{host.address}:{host.port}".encode()).hexdigest()[:16]
+        return self.local_secret_root / f"ssh-{identity}.sock"
+
+    def ssh_args(self, host: Host, command: str) -> list[str]:
         args = [
             "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
             "-o", "StrictHostKeyChecking=yes",
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=30",
+            "-o", f"ControlPath={self._ssh_control_path(host)}",
         ]
         if host.port != 22:
             args.extend(("-p", str(host.port)))
         args.extend((f"root@{host.address}", command))
         return args
 
-    @staticmethod
-    def scp_args(host: Host, source: str, destination: str, *, from_remote: bool) -> list[str]:
-        args = ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes"]
+    def scp_args(self, host: Host, source: str, destination: str, *, from_remote: bool) -> list[str]:
+        args = [
+            "scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+            "-o", "StrictHostKeyChecking=yes", "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=30", "-o", f"ControlPath={self._ssh_control_path(host)}",
+        ]
         if host.port != 22:
             args.extend(("-P", str(host.port)))
         if from_remote:
@@ -824,17 +1568,50 @@ class Controller:
         timeout: int = 30,
         check: bool = True,
         record_output: bool = True,
+        transport_role: str | None = None,
+        transport_kind: str | None = None,
+        transport_payload_bytes: int = 0,
+        transport_file_bytes: int = 0,
     ) -> subprocess.CompletedProcess[str]:
         if not self._cleanup_mode:
             self.raise_if_abort_requested()
-        self.event("command.start", name=name, command_sha256=hashlib.sha256("\0".join(args).encode()).hexdigest())
+        intent_recorded = self.event(
+            "command.start",
+            name=name,
+            command_sha256=hashlib.sha256("\0".join(args).encode()).hexdigest(),
+        )
+        if not intent_recorded and not self._cleanup_mode:
+            raise MatrixError("command refused because its evidence intent could not be persisted")
+        if transport_role is not None:
+            if transport_kind is None:
+                raise MatrixError("transport command is missing its budget kind")
+            self._reserve_transport_budget(
+                role=transport_role,
+                kind=transport_kind,
+                payload_bytes=transport_payload_bytes,
+                transfer_bytes=transport_file_bytes,
+            )
         completed = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+        if transport_role is not None:
+            if completed.returncode == 0:
+                self._mark_transport_master(transport_role)
+            else:
+                # A non-zero SSH/SCP result can be a remote-command error or a
+                # dead multiplexed transport. Conservatively forget the master
+                # so the next attempt reserves a complete handshake again.
+                self._forget_transport_master(transport_role)
         stdout = self.redact_command_output(completed.stdout[-12000:]) if record_output else "[redacted transient transfer]"
         stderr = self.redact_command_output(completed.stderr[-12000:]) if record_output else "[redacted transient transfer]"
-        self.event(
+        completion_recorded = self.event(
             "command.end", name=name, return_code=completed.returncode,
             stdout=stdout, stderr=stderr,
         )
+        if not completion_recorded and not self._cleanup_mode:
+            raise MatrixError(
+                "command outcome is ambiguous because its evidence result could not be persisted"
+            )
+        if self.secret_output_detected and not self._cleanup_mode:
+            raise MatrixError("command output contained Matrix secret material and was redacted")
         if check and completed.returncode != 0:
             raise MatrixError(f"{name} failed with exit code {completed.returncode}")
         if not self._cleanup_mode:
@@ -867,23 +1644,46 @@ class Controller:
         timeout: int = 30,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        return self.command(name, self.ssh_args(HOSTS[role], command), timeout=timeout, check=check)
+        return self.command(
+            name,
+            self.ssh_args(HOSTS[role], command),
+            timeout=timeout,
+            check=check,
+            transport_role=role,
+            transport_kind="ssh",
+            transport_payload_bytes=len(command.encode("utf-8")),
+        )
 
     def transfer_from(self, role: str, remote_path: str, local_path: Path, name: str) -> None:
+        if len(remote_path.encode("utf-8")) > SSH_COMMAND_PAYLOAD_MAX:
+            raise MatrixError("remote transfer path exceeds its closed bound")
         self.command(
             name,
             self.scp_args(HOSTS[role], remote_path, str(local_path), from_remote=True),
             timeout=30,
             record_output=False,
+            transport_role=role,
+            transport_kind="scp",
+            transport_payload_bytes=len(remote_path.encode("utf-8")),
+            transport_file_bytes=SCP_FILE_BYTES_MAX,
         )
         os.chmod(local_path, 0o600)
+        if local_path.stat().st_size > SCP_FILE_BYTES_MAX:
+            raise MatrixError("remote transfer exceeded its reserved file bound")
 
     def transfer_to(self, role: str, local_path: Path, remote_path: str, name: str) -> None:
+        transfer_bytes = local_path.stat().st_size
+        if transfer_bytes > SCP_FILE_BYTES_MAX:
+            raise MatrixError("local transfer exceeds its closed file bound")
         self.command(
             name,
             self.scp_args(HOSTS[role], str(local_path), remote_path, from_remote=False),
             timeout=30,
             record_output=False,
+            transport_role=role,
+            transport_kind="scp",
+            transport_payload_bytes=len(remote_path.encode("utf-8")),
+            transport_file_bytes=transfer_bytes,
         )
 
     def stage_site(
@@ -1005,12 +1805,32 @@ class Controller:
         timeout: int = 15,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any] | None]:
         with self._budget_lock:
-            self.control_requests += 1
-            if self.control_requests > 100:
+            next_requests = self.control_requests + 1
+            next_bytes = self.control_bytes_upper_bound + CONTROL_REQUEST_BYTES_UPPER_BOUND
+            if next_requests > MAX_CONTROL_REQUESTS:
                 raise MatrixError("scenario exceeded the approved 100-request control-plane budget")
-            self.control_bytes_upper_bound += CONTROL_REQUEST_BYTES_UPPER_BOUND
-            if self.control_bytes_upper_bound > self.dpi_byte_budget:
-                raise MatrixError("scenario exceeded its approved conservative DPI byte budget")
+            if self._cleanup_mode:
+                if (
+                    self.cleanup_transport_bytes_upper_bound + CONTROL_REQUEST_BYTES_UPPER_BOUND
+                    > CLEANUP_TRANSPORT_BYTES_RESERVE
+                ):
+                    raise MatrixError("cleanup exceeded its pre-authorized transport reserve")
+                self.cleanup_transport_bytes_upper_bound += CONTROL_REQUEST_BYTES_UPPER_BOUND
+            elif next_bytes + self.transport_bytes_upper_bound > (
+                self.dpi_byte_budget - CLEANUP_TRANSPORT_BYTES_RESERVE
+            ):
+                raise MatrixError("scenario exceeded its approved all-transport DPI budget")
+            self.control_requests = next_requests
+            self.control_bytes_upper_bound = next_bytes
+            self.journal.update(
+                control_requests=self.control_requests,
+                control_bytes_upper_bound=self.control_bytes_upper_bound,
+                transport_operations=self.transport_operations,
+                transport_bytes_upper_bound=self.transport_bytes_upper_bound,
+                cleanup_transport_operations=self.cleanup_transport_operations,
+                cleanup_transport_bytes_upper_bound=self.cleanup_transport_bytes_upper_bound,
+                dirty=True,
+            )
         parts = [
             "python3", f"{self.remote_root}/client.py", command,
             "--env-file", f"{self.remote_root}/{env_name}",
@@ -1074,6 +1894,8 @@ class Controller:
     def witness_state(self, role: str = "matrix_witness") -> dict[str, Any]:
         command = (
             "set -Eeuo pipefail; "
+            + (rollback_manifest_helper_guard() + "; " if role == "rollback_witness" else "")
+            +
             "state=$(runuser -u postgres -- psql -XAt writer_witness -c \"SELECT json_build_object(" 
             "'holder_site',holder_site,'writer_epoch',writer_epoch,'lease_id',lease_id," 
             "'lease_status',lease_status,'issued_at',issued_at,'expires_at',expires_at," 
@@ -1098,6 +1920,18 @@ class Controller:
         if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
             raise MatrixError("Witness database inventory is invalid")
         return payload
+
+    @staticmethod
+    def database_inventory_sha256(inventory: list[dict[str, Any]]) -> str:
+        try:
+            rendered = "\n".join(
+                f"{item['name']}:{int(item['oid'])}:"
+                f"{'true' if item['allow_connections'] is True else 'false'}"
+                for item in sorted(inventory, key=lambda value: str(value["name"]))
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MatrixError("Witness database inventory cannot be attested") from exc
+        return hashlib.sha256(rendered.encode()).hexdigest()
 
     def credential_bundle_sha256(self) -> str:
         completed = self.remote(
@@ -1159,14 +1993,16 @@ class Controller:
         if completed.returncode == 0:
             raise MatrixError(f"{site} unexpectedly reached the Witness during its partition")
 
-    def run_scenario(self) -> None:
+    def run_scenario(self, *, authorization_nonce: str, preflight_sha256: str) -> None:
         handler = getattr(self, f"scenario_{self.scenario.replace('-', '_')}", None)
         if handler is None:
             raise MatrixError(f"scenario handler is missing for {self.scenario}")
-        self.critical_precheck()
-        initial_inventory = self.database_inventory()
-        self.journal.update(initial_database_inventory=initial_inventory)
         self.claim_remote_campaign()
+        self.attest_initial_database_inventory()
+        self.consume_remote_authorization(authorization_nonce, preflight_sha256)
+
+        self.critical_precheck()
+        self.journal.update(lifecycle_phase="scenario_executing", dirty=True)
         self.event("scenario.start", steps=list(SCENARIOS[self.scenario]))
         self.start_abort_monitor()
         try:
@@ -1175,6 +2011,21 @@ class Controller:
         finally:
             self.stop_abort_monitor()
         self.event("scenario.assertions_passed")
+
+    def attest_initial_database_inventory(self) -> None:
+        initial_inventory = self.database_inventory()
+        expected_inventory_sha256 = str(
+            self.baseline["matrix_witness_dark_baseline"].get(
+                "database_inventory_sha256", ""
+            )
+        )
+        if self.database_inventory_sha256(initial_inventory) != expected_inventory_sha256:
+            raise MatrixError("replacement Witness database inventory drifted after preflight")
+        self.journal.update(
+            initial_database_inventory=initial_inventory,
+            lifecycle_phase="initial_inventory_attested",
+            dirty=True,
+        )
 
     def scenario_RH_001(self) -> None:
         self.stage_site("webapp_fi")
@@ -1332,14 +2183,29 @@ class Controller:
 
     def wait_for_ssh_after_reboot(self) -> None:
         saw_down = False
+        role = "matrix_witness"
+        self._forget_transport_master(role)
+        control_path = self._ssh_control_path(HOSTS[role])
+        try:
+            control_path.unlink()
+        except FileNotFoundError:
+            pass
         for _ in range(36):
+            command = "true"
+            self._reserve_transport_budget(
+                role=role,
+                kind="ssh",
+                payload_bytes=len(command.encode("utf-8")),
+                force_master_reservation=True,
+            )
             completed = subprocess.run(
-                self.ssh_args(HOSTS["matrix_witness"], "true"),
+                self.ssh_args(HOSTS[role], command),
                 cwd=ROOT, capture_output=True, text=True, timeout=12,
             )
             if completed.returncode != 0:
                 saw_down = True
             elif saw_down:
+                self._mark_transport_master(role)
                 self.event("reboot.ssh_restored")
                 return
             self.interruptible_sleep(5)
@@ -1393,15 +2259,48 @@ class Controller:
             raise MatrixError("isolated clock-jump helper did not return valid JSON") from exc
         required = {
             "status": "passed",
+            "scenario": "isolated-postgresql-real-database-clock-jump",
+            "production_clock_path": "SELECT clock_timestamp()",
+            "synthetic_time_argument_used": False,
             "backward_clock_steal_rejected": True,
+            "postgres_restart_persistence_proved": True,
             "forward_expiry_acquire_epoch": 2,
             "old_epoch_revival_rejected": True,
             "final_holder_site": "webapp_ir",
             "final_writer_epoch": 2,
-            "production_database_touched": False,
+            "production_state_unchanged": True,
+            "production_processes_never_loaded_libfaketime": True,
         }
         if any(result.get(key) != value for key, value in required.items()):
             raise MatrixError("isolated clock-jump probe did not prove the lease/epoch contract")
+        before = result.get("production_before")
+        after = result.get("production_after")
+        isolation = result.get("isolation")
+        restart = result.get("disposable_postgres_restart")
+        if (
+            not isinstance(before, dict)
+            or before != after
+            or not isinstance(isolation, dict)
+            or isolation.get("unix_socket_transport") is not True
+            or isolation.get("listen_addresses") != ""
+            or isolation.get("libfaketime_loaded") is not True
+            or not isinstance(restart, dict)
+            or restart.get("before") == restart.get("after")
+        ):
+            raise MatrixError("isolated clock-jump evidence did not prove its production boundary")
+        production_fields = {
+            "manifest_sha256",
+            "database_inventory_sha256",
+            "credential_bundle_sha256",
+            "system_identifier",
+            "writer_service_pid",
+            "writer_service_start_ticks",
+            "postgres_pid",
+            "postgres_start_ticks",
+            "libfaketime_loaded",
+        }
+        if set(before) != production_fields or before.get("libfaketime_loaded") is not False:
+            raise MatrixError("production clock-jump attestation is incomplete")
         current = self.witness_state()
         if current["manifest_sha256"] != self.baseline["matrix_witness_dark_baseline"]["manifest_sha256"]:
             raise MatrixError("isolated clock-jump scenario touched the production Witness database")
@@ -1443,6 +2342,16 @@ class Controller:
     def restore_once(self, *, fail_after: str | None = None, expect_failure: bool = False) -> None:
         baseline = self.baseline["matrix_witness_dark_baseline"]
         current = self.witness_state()
+        inventory_before = self.database_inventory()
+        live_before = [item for item in inventory_before if item.get("name") == "writer_witness"]
+        if (
+            len(live_before) != 1
+            or not isinstance(live_before[0].get("oid"), int)
+            or int(live_before[0]["oid"]) <= 0
+            or live_before[0].get("allow_connections") is not True
+        ):
+            raise MatrixError("restore cannot bind the current live database OID")
+        live_oid_before = int(live_before[0]["oid"])
         backup = str(baseline["backup"])
         if not re.fullmatch(r"writer-witness-[0-9]{8}T[0-9]{6}Z\.dump", backup):
             raise MatrixError("pinned restore backup filename is unsafe")
@@ -1472,10 +2381,46 @@ class Controller:
         if expect_failure:
             if completed.returncode == 0:
                 raise MatrixError(f"restore fault point {fail_after} unexpectedly succeeded")
+            recover_environment = {
+                "WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_STATE": environment[
+                    "WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_STATE"
+                ],
+                "WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_RECEIPTS": environment[
+                    "WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_RECEIPTS"
+                ],
+                "WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_MANIFEST_SHA256": environment[
+                    "WRITER_WITNESS_RESTORE_REQUIRED_CURRENT_MANIFEST_SHA256"
+                ],
+            }
+            recover_command = (
+                "set -Eeuo pipefail; env "
+                + " ".join(
+                    f"{key}={shlex.quote(str(value))}"
+                    for key, value in sorted(recover_environment.items())
+                )
+                + " /usr/local/sbin/writer-witness-live-restore --recover; "
+                "test ! -e /var/lib/trading-bot-witness/restore-state/active.env; "
+                "test ! -L /var/lib/trading-bot-witness/restore-state/active.env; "
+                "test -z \"$(find /var/lib/trading-bot-witness/restore-state "
+                "-mindepth 1 -maxdepth 1 -name '.active.*.env' -print -quit)\"; "
+                "test -z \"$(find /var/backups/trading-bot-witness -mindepth 1 -maxdepth 1 "
+                "-name '.replacement-restore.*.dump' -print -quit)\"; "
+                "test \"$(systemctl is-active writer-witness.service)\" = active"
+            )
+            self.remote(
+                "matrix_witness",
+                f"recover_hard_killed_restore_{fail_after}",
+                recover_command,
+                timeout=180,
+            )
             recovered = self.witness_state()
             if recovered != current:
                 raise MatrixError(f"restore recovery after {fail_after} did not preserve the prior OID state")
             inventory = self.database_inventory()
+            if inventory != inventory_before:
+                raise MatrixError(
+                    f"restore recovery after {fail_after} changed the exact database inventory"
+                )
             unsafe = [
                 item for item in inventory
                 if item.get("name") != "writer_witness" and item.get("allow_connections") is not False
@@ -1483,6 +2428,27 @@ class Controller:
             if unsafe:
                 raise MatrixError(f"restore recovery left an auxiliary database enabled: {unsafe}")
             self.event("restore.failpoint_recovered", fail_after=fail_after, database_inventory=inventory)
+            return
+
+        result = parse_last_json(completed.stdout)
+        rollback_database = str(result.get("rollback_database") or "")
+        if (
+            result.get("status") != "restored-live-dark"
+            or not re.fullmatch(
+                rf"writer_witness_rollback_{re.escape(self.tag)}_[0-9_]+",
+                rollback_database,
+            )
+        ):
+            raise MatrixError("successful restore did not return an owned rollback identity")
+        inventory_after = self.database_inventory()
+        rollback = [item for item in inventory_after if item.get("name") == rollback_database]
+        if (
+            len(rollback) != 1
+            or rollback[0].get("oid") != live_oid_before
+            or rollback[0].get("allow_connections") is not False
+        ):
+            raise MatrixError("successful restore rollback database lacks exact OID ownership")
+        self.claim("restore_owned_databases", f"{rollback_database}:{live_oid_before}")
 
     def scenario_RH_012(self) -> None:
         self.stage_site("webapp_fi")
@@ -1503,7 +2469,12 @@ class Controller:
     def capture_pre_recovery(self) -> None:
         for role in ("matrix_witness", "rollback_witness", "webapp_fi", "webapp_ir"):
             witness_manifest = (
-                "/usr/local/sbin/writer-witness-state-manifest --json; "
+                (
+                    rollback_manifest_helper_guard()
+                    + "; /usr/local/sbin/writer-witness-state-manifest --json; "
+                    if role == "rollback_witness"
+                    else "/usr/local/sbin/writer-witness-state-manifest --json; "
+                )
                 if role in {"matrix_witness", "rollback_witness"}
                 else ""
             )
@@ -1536,6 +2507,7 @@ class Controller:
             self.remote(
                 site,
                 f"stop_requesters_{site}",
+                "set -Eeuo pipefail; "
                 f"pids=$(pgrep -f {shlex.quote(pattern)} || true); "
                 "test -z \"$pids\" || kill $pids; "
                 "for i in $(seq 1 20); do pgrep -f "
@@ -1551,12 +2523,57 @@ class Controller:
         for site in sorted(sites):
             command = (
                 "set -Eeuo pipefail; "
-                f"if test -f /var/lib/trading-bot-witness/hmac-rotation/{site}/metadata.json; then "
-                f"/usr/local/sbin/writer-witness-rotate-hmac recover --site {site} --expected-epoch 0 --campaign-tag {self.tag}; fi; "
-                f"test ! -e /var/lib/trading-bot-witness/hmac-rotation/{site}"
+                "systemctl stop writer-witness.service; "
+                "state=$(systemctl is-active writer-witness.service || true); "
+                "test \"$state\" = inactive -o \"$state\" = failed; "
+                f"/usr/local/sbin/writer-witness-rotate-hmac recover --leave-service-stopped "
+                f"--site {site} --expected-epoch 0 --campaign-tag {self.tag}; "
+                "state=$(systemctl is-active writer-witness.service || true); "
+                "test \"$state\" = inactive -o \"$state\" = failed; "
+                f"test ! -e /var/lib/trading-bot-witness/hmac-rotation/{site}; "
+                f"test -z \"$(find /var/lib/trading-bot-witness/hmac-rotation -maxdepth 1 "
+                f"-name '.{site}.prepare-*' -print -quit)\"; "
+                f"test -z \"$(find /var/lib/trading-bot-witness/hmac-rotation -maxdepth 1 "
+                f"-name '.rotation-delete-{site}-*' -print -quit)\""
             )
             self.remote("matrix_witness", f"recover_hmac_rotation_{site}", command)
             self.rotation_sites.discard(site)
+        if sites:
+            self.remote(
+                "matrix_witness",
+                "attest_hmac_rotation_root_clean",
+                "set -Eeuo pipefail; root=/var/lib/trading-bot-witness/hmac-rotation; "
+                "test -d \"$root\"; test ! -L \"$root\"; "
+                "test \"$(stat -c %u \"$root\")\" = 0; "
+                "test \"$(stat -c %a \"$root\")\" = 700; "
+                "test -f \"$root/.runtime.lock\"; test ! -L \"$root/.runtime.lock\"; "
+                "test \"$(stat -c %u \"$root/.runtime.lock\")\" = 0; "
+                "test \"$(stat -c %a \"$root/.runtime.lock\")\" = 600; "
+                "test \"$(stat -c %h \"$root/.runtime.lock\")\" = 1; "
+                "flock -n \"$root/.runtime.lock\" -c true; "
+                "test -z \"$(find \"$root\" -mindepth 1 -maxdepth 1 "
+                "! -name '.runtime.lock' -print -quit)\"",
+            )
+
+    def recover_active_live_restore(self) -> None:
+        self.remote(
+            "matrix_witness",
+            "recover_active_live_restore_journal",
+            "set -Eeuo pipefail; "
+            "journal=/var/lib/trading-bot-witness/restore-state/active.env; "
+            "journal_temp=$(find /var/lib/trading-bot-witness/restore-state -mindepth 1 -maxdepth 1 "
+            "-name '.active.*.env' -print -quit); "
+            "orphan=$(find /var/backups/trading-bot-witness -mindepth 1 -maxdepth 1 "
+            "-name '.replacement-restore.*.dump' -print -quit); "
+            "if test -e \"$journal\" || test -L \"$journal\" || test -n \"$journal_temp\" || test -n \"$orphan\"; then "
+            "/usr/local/sbin/writer-witness-live-restore --recover; fi; "
+            "test ! -e \"$journal\"; test ! -L \"$journal\"; "
+            "test -z \"$(find /var/lib/trading-bot-witness/restore-state -mindepth 1 -maxdepth 1 "
+            "-name '.active.*.env' -print -quit)\"; "
+            "test -z \"$(find /var/backups/trading-bot-witness -mindepth 1 -maxdepth 1 "
+            "-name '.replacement-restore.*.dump' -print -quit)\"",
+            timeout=180,
+        )
 
     def resume_witness_runtime(self) -> None:
         self.remote(
@@ -1574,9 +2591,13 @@ class Controller:
     def remove_isolated_pressure(self) -> None:
         self.remote(
             "matrix_witness", "remove_isolated_pressure",
-            f"set +e; for root in /run/{self.tag}-disk /run/{self.tag}-clock; do "
-            "test ! -d \"$root\" || { mountpoint -q \"$root\" && umount \"$root\" || true; rm -rf \"$root\"; }; "
-            "test ! -e \"$root\" || exit 1; done",
+            "set -Eeuo pipefail; "
+            f"/usr/local/sbin/writer-witness-matrix-host-faults recover --tag {self.tag}; "
+            f"for root in /run/{self.tag}-disk /run/{self.tag}-clock; do "
+            "test ! -e \"$root\"; ! mountpoint -q \"$root\"; done; "
+            f"for state in /var/lib/trading-bot-witness/matrix-host-faults/{self.tag}-disk "
+            f"/var/lib/trading-bot-witness/matrix-host-faults/{self.tag}-clock; do test ! -e \"$state\"; done; "
+            "! ss -H -ltn | awk '{print $4}' | grep -Eq '(^|:)(55439|55440)$'",
         )
 
     def verify_complete_baseline(self) -> None:
@@ -1613,75 +2634,201 @@ class Controller:
             self.remote(
                 role,
                 f"verify_no_hidden_state_{role}",
+                "set -Eeuo pipefail; "
                 f"test ! -e {shlex.quote(self.remote_root)}; "
-                f"nft list table inet {self.tag} >/dev/null 2>&1 && exit 1 || true; "
+                f"test ! -L {shlex.quote(self.remote_root)}; "
+                f"if nft list table inet {self.tag} >/dev/null 2>&1; then exit 1; fi; "
                 + key_checks,
             )
         self.event("baseline.verified", replacement_manifest=matrix["manifest_sha256"], original_manifest=original["manifest_sha256"])
 
     def remove_owned_aux_databases(self) -> None:
-        command = (
-            "set -Eeuo pipefail; "
-            "names=$(runuser -u postgres -- psql -XAt postgres -c \"SELECT datname FROM pg_database WHERE "
-            f"datname ~ '^writer_witness_(candidate|rollback|failed)_{self.tag}_[0-9_]+$' ORDER BY datname\"); "
-            "for name in $names; do "
-            f"[[ \"$name\" =~ ^writer_witness_(candidate|rollback|failed)_{self.tag}_[0-9_]+$ ]]; "
-            "test \"$(runuser -u postgres -- psql -XAt postgres -c \"SELECT datallowconn FROM pg_database WHERE datname='$name'\")\" = f; "
-            "runuser -u postgres -- dropdb --if-exists \"$name\"; done; "
-            f"test -z \"$(runuser -u postgres -- psql -XAt postgres -c \"SELECT datname FROM pg_database WHERE datname ~ '^writer_witness_(candidate|rollback|failed)_{self.tag}_[0-9_]+$'\")\""
+        initial = self.journal.payload.get("initial_database_inventory")
+        if not isinstance(initial, list) or not all(isinstance(item, dict) for item in initial):
+            raise MatrixError("cannot clean auxiliary databases without initial inventory ownership")
+        initial_by_name = {str(item.get("name")): item for item in initial}
+        owned: dict[str, int] = {}
+        for raw in self.journal.values("restore_owned_databases"):
+            name, separator, oid_raw = raw.rpartition(":")
+            if (
+                separator != ":"
+                or not re.fullmatch(
+                    rf"writer_witness_rollback_{re.escape(self.tag)}_[0-9_]+",
+                    name,
+                )
+                or not oid_raw.isdigit()
+                or int(oid_raw) <= 0
+                or name in owned
+            ):
+                raise MatrixError("restore-owned database journal entry is unsafe")
+            owned[name] = int(oid_raw)
+
+        current = self.database_inventory()
+        current_by_name = {str(item.get("name")): item for item in current}
+        tag_pattern = re.compile(
+            rf"writer_witness_(?:candidate|rollback|failed)_{re.escape(self.tag)}_[0-9_]+\Z"
         )
-        self.remote("matrix_witness", "remove_owned_aux_databases", command, timeout=120)
+        for name, item in current_by_name.items():
+            if not tag_pattern.fullmatch(name):
+                continue
+            initial_item = initial_by_name.get(name)
+            if initial_item is not None and initial_item.get("oid") == item.get("oid"):
+                continue
+            if owned.get(name) != item.get("oid"):
+                raise MatrixError(
+                    f"campaign-tagged auxiliary database lacks exact journaled OID ownership: {name}"
+                )
+
+        for name, oid in sorted(owned.items()):
+            if name in initial_by_name:
+                raise MatrixError("restore cleanup refuses an initial-inventory database name")
+            observed = current_by_name.get(name)
+            if (
+                not isinstance(observed, dict)
+                or observed.get("oid") != oid
+                or observed.get("allow_connections") is not False
+            ):
+                raise MatrixError("restore-owned database no longer matches its exact cleanup claim")
+            command = (
+                "set -Eeuo pipefail; "
+                f"name={shlex.quote(name)}; expected_oid={oid}; "
+                "observed=$(runuser -u postgres -- psql -XAt postgres -c "
+                "\"SELECT oid||':'||datallowconn FROM pg_database WHERE datname='$name'\"); "
+                "test \"$observed\" = \"$expected_oid:f\"; "
+                "runuser -u postgres -- dropdb \"$name\"; "
+                "test -z \"$(runuser -u postgres -- psql -XAt postgres -c "
+                "\"SELECT oid FROM pg_database WHERE datname='$name'\")\""
+            )
+            self.remote(
+                "matrix_witness",
+                f"remove_owned_aux_database_{hashlib.sha256(name.encode()).hexdigest()[:12]}",
+                command,
+                timeout=120,
+            )
+
+        after = self.database_inventory()
+        after_by_name = {str(item.get("name")): item for item in after}
+        for name, item in initial_by_name.items():
+            if after_by_name.get(name) != item:
+                raise MatrixError(f"auxiliary cleanup changed initial database inventory: {name}")
+        for name in owned:
+            if name in after_by_name:
+                raise MatrixError(f"restore-owned auxiliary database remains after cleanup: {name}")
         self.event("cleanup.owned_aux_databases_removed")
 
     def cleanup(self) -> None:
         self._cleanup_mode = True
+        if (
+            self.journal.payload.get("remote_campaign_protocol") == "atomic-helper-v1"
+            and self.journal.payload.get("lifecycle_phase")
+            in {
+                "controller_created",
+                "local_authorization_consumption_intent",
+                "local_preflight_consumed",
+                "local_authorization_consumed",
+            }
+            and not self.remote_campaign_claimed
+            and not self.remote_campaign_ambiguous
+            and not self.remote_campaign_conflict
+        ):
+            # The lifecycle intent is persisted before the first remote command.
+            # This exact phase therefore proves that cleanup is local-only.
+            shutil.rmtree(self.local_secret_root, ignore_errors=True)
+            self.journal.update(
+                status="completed_without_remote_claim",
+                lifecycle_phase="completed",
+                dirty=False,
+                cleanup_errors=[],
+                local_authorization_reconciled=True,
+                completed_at=utc_now(),
+            )
+            self.event("cleanup.completed_before_remote_claim")
+            return
         if self.remote_campaign_conflict and not self.remote_campaign_claimed:
             shutil.rmtree(self.local_secret_root, ignore_errors=True)
             self.journal.update(
-                status="completed_without_ownership",
-                dirty=False,
-                cleanup_errors=[],
-                completed_at=utc_now(),
+                status="failed",
+                dirty=True,
+                cleanup_errors=["remote_campaign_ownership:foreign_or_stale"],
             )
-            self.event("cleanup.skipped_foreign_campaign_owner")
-            return
+            self.event("cleanup.blocked_foreign_campaign_owner")
+            raise MatrixError("cleanup refused mutation for an unproven foreign campaign state")
+        if self.remote_campaign_ambiguous and not self.remote_campaign_claimed:
+            # The claim SSH response may have been lost after the replacement
+            # Witness durably created our marker. Resolving that exact marker is
+            # read-only and is the only safe way to make the recovery path
+            # progress; a missing or foreign marker still fences every mutation.
+            self.claim_remote_campaign()
+        if not self.remote_campaign_claimed:
+            shutil.rmtree(self.local_secret_root, ignore_errors=True)
+            self.journal.update(
+                status="failed",
+                dirty=True,
+                cleanup_errors=["remote_campaign_ownership:not_proven"],
+            )
+            raise MatrixError("cleanup refused every remote mutation without proven campaign ownership")
+        self.assert_remote_campaign_owned()
+        if not isinstance(self.journal.payload.get("initial_database_inventory"), list):
+            if self.journal.payload.get("lifecycle_phase") != "remote_claimed":
+                raise MatrixError(
+                    "initial Witness database inventory is missing after the pre-scenario recovery boundary"
+                )
+            self.attest_initial_database_inventory()
+        self.journal.update(lifecycle_phase="cleanup_started", dirty=True)
         self.event("cleanup.start", order=list(CLEANUP_STEP_IDS))
         errors: list[str] = []
-        ordered_actions = (
-            ("stop_and_join_requesters", self.stop_and_remove_requesters),
-            ("revoke_transient_capability", self.recover_rotation),
-            ("retain_pre_recovery_evidence", self.capture_pre_recovery),
-            ("resume_paused_runtime", self.resume_witness_runtime),
-            ("remove_isolated_pressure", self.remove_isolated_pressure),
-        )
-        for name, action in ordered_actions:
+        assurance_errors: list[str] = []
+        critical_errors: list[str] = []
+
+        # Requesters are stopped while isolation remains active. Evidence is
+        # retained before any recovery, an interrupted live restore is reconciled
+        # before HMAC material can touch/restart the service, and the HMAC helper
+        # deliberately leaves the runtime stopped until the explicit resume step.
+        for name, action, critical in (
+            ("stop_and_join_requesters", self.stop_and_remove_requesters, True),
+            ("retain_pre_recovery_evidence", self.capture_pre_recovery, False),
+            ("recover_active_live_restore", self.recover_active_live_restore, True),
+            ("revoke_transient_capability", self.recover_rotation, True),
+            ("resume_paused_runtime", self.resume_witness_runtime, True),
+            ("remove_isolated_pressure", self.remove_isolated_pressure, True),
+        ):
             try:
                 action()
                 self.event("cleanup.step", step=name, status="passed")
             except Exception as exc:
-                errors.append(f"{name}:{exc}")
+                rendered = f"{name}:{exc}"
+                errors.append(rendered)
+                if critical:
+                    critical_errors.append(rendered)
+                else:
+                    assurance_errors.append(rendered)
                 self.event("cleanup.step", step=name, status="failed", error=str(exc))
-                break
-        if errors:
+                if critical:
+                    break
+        if critical_errors:
             shutil.rmtree(self.local_secret_root, ignore_errors=True)
             self.journal.update(status="failed", dirty=True, cleanup_errors=errors)
             raise MatrixError(
                 "cleanup stopped before reconnect/restore to preserve fault isolation: "
-                + "; ".join(errors)
+                + "; ".join(critical_errors)
             )
+        network_errors: list[str] = []
         sites = self.network_fault_sites | self.journal.values("network_fault_sites")
         for site in sorted(sites):
             try:
                 self.remove_partition(site)
             except Exception as exc:
-                errors.append(f"remove_scoped_network_faults:{site}:{exc}")
-        if errors:
+                rendered = f"remove_scoped_network_faults:{site}:{exc}"
+                errors.append(rendered)
+                network_errors.append(rendered)
+        if network_errors:
             shutil.rmtree(self.local_secret_root, ignore_errors=True)
             self.journal.update(status="failed", dirty=True, cleanup_errors=errors)
             raise MatrixError(
                 "cleanup stopped before restore because network isolation could not be reconciled: "
-                + "; ".join(errors)
+                + "; ".join(network_errors)
             )
+        baseline_errors: list[str] = []
         try:
             if self.witness_mutated:
                 self.restore_once()
@@ -1689,23 +2836,33 @@ class Controller:
             self.remove_owned_aux_databases()
             self.event("cleanup.step", step="restore_vacant_baseline", status="passed")
         except Exception as exc:
-            errors.append(f"restore_vacant_baseline:{exc}")
+            rendered = f"restore_vacant_baseline:{exc}"
+            errors.append(rendered)
+            baseline_errors.append(rendered)
             self.event("cleanup.step", step="restore_vacant_baseline", status="failed", error=str(exc))
         try:
             self.verify_complete_baseline()
             self.event("cleanup.step", step="verify_complete_baseline", status="passed")
         except Exception as exc:
-            errors.append(f"verify_complete_baseline:{exc}")
+            rendered = f"verify_complete_baseline:{exc}"
+            errors.append(rendered)
+            baseline_errors.append(rendered)
             self.event("cleanup.step", step="verify_complete_baseline", status="failed", error=str(exc))
         shutil.rmtree(self.local_secret_root, ignore_errors=True)
-        if errors:
+        if baseline_errors:
             self.journal.update(status="failed", dirty=True, cleanup_errors=errors)
-            raise MatrixError("; ".join(errors))
-        self.release_remote_campaign()
+            raise MatrixError("; ".join(baseline_errors))
+        if assurance_errors:
+            self.journal.update(status="failed", dirty=True, cleanup_errors=errors)
+            raise MatrixError(
+                "cleanup reached a safe baseline but assurance remains incomplete: "
+                + "; ".join(assurance_errors)
+            )
         self.journal.update(
             status="cleanup_verified_pending_postflight",
+            lifecycle_phase="cleanup_verified_pending_postflight",
             dirty=True,
-            cleanup_errors=[],
+            cleanup_errors=errors,
             witness_mutated=False,
             evidence_failed=self.evidence_failed,
         )
@@ -1735,7 +2892,13 @@ class Controller:
             "control_requests": self.control_requests,
             "control_request_budget": 100,
             "control_bytes_upper_bound": self.control_bytes_upper_bound,
+            "transport_operations": self.transport_operations,
+            "transport_bytes_upper_bound": self.transport_bytes_upper_bound,
+            "cleanup_transport_operations": self.cleanup_transport_operations,
+            "cleanup_transport_bytes_upper_bound": self.cleanup_transport_bytes_upper_bound,
             "dpi_byte_budget": self.dpi_byte_budget,
+            "dpi_accounting": "conservative_all_transport_upper_bound",
+            "max_scenario_seconds": MAX_SCENARIO_SECONDS,
             "secret_output_detected": self.secret_output_detected,
         }
         temporary = self.summary_path.with_suffix(".tmp")
@@ -1746,32 +2909,111 @@ class Controller:
         os.replace(temporary, self.summary_path)
         fsync_directory(self.summary_path.parent)
 
-    def run_full_postflight(self) -> None:
+    def run_full_postflight(self, *, expect_remote_campaign: bool = True) -> None:
         output = self.artifact_dir / "postflight.json"
+        arguments = [
+            "python3",
+            str(ROOT / "scripts/plan_writer_witness_real_host_matrix.py"),
+            "--mode",
+            "preflight",
+            "--expected-commit",
+            self.expected_head,
+        ]
+        if expect_remote_campaign:
+            arguments.extend(
+                (
+                    "--expected-active-campaign-tag",
+                    self.tag,
+                    "--expected-active-campaign-scenario",
+                    self.scenario,
+                )
+            )
+        arguments.extend(("--output", str(output)))
+        # The pinned preflight helper opens one independent SSH session to each
+        # of the four fixed roles. It is intentionally treated as an opaque,
+        # worst-case transport consumer because it cannot reuse this runner's
+        # ControlMaster sockets.
+        for role in ("webapp_fi", "webapp_ir", "matrix_witness", "rollback_witness"):
+            self._reserve_transport_budget(
+                role=role,
+                kind="ssh",
+                payload_bytes=SSH_COMMAND_PAYLOAD_MAX,
+                force_master_reservation=True,
+            )
         completed = self.command(
             "full_exact_sha_postflight",
-            [
-                "python3",
-                str(ROOT / "scripts/plan_writer_witness_real_host_matrix.py"),
-                "--mode",
-                "preflight",
-                "--expected-commit",
-                self.expected_head,
-                "--output",
-                str(output),
-            ],
+            arguments,
             timeout=900,
         )
         payload = safe_json(output)
         if completed.returncode != 0 or payload.get("status") != "preflight_passed":
             raise MatrixError("full exact-SHA postflight did not pass")
         self.journal.update(
-            status="completed",
-            dirty=False,
-            completed_at=utc_now(),
+            status="postflight_verified_release_pending",
+            lifecycle_phase="postflight_verified_release_pending",
+            dirty=True,
             postflight_path=str(output),
             postflight_sha256=file_sha256(output),
+            postflight_expected_remote_campaign=expect_remote_campaign,
         )
+
+    def finalize_campaign(self) -> None:
+        if self.journal.payload.get("lifecycle_phase") != "postflight_verified_release_pending":
+            raise MatrixError("campaign cannot release ownership before exact postflight")
+        self.assert_remote_campaign_owned()
+        self.release_remote_campaign()
+        self.journal.update(
+            status="completed",
+            lifecycle_phase="completed",
+            dirty=False,
+            completed_at=utc_now(),
+            cleanup_errors=[],
+        )
+
+    def recover_postflight_release_pending(self) -> None:
+        """Reconcile only an exact active claim or its exact release tombstone."""
+        try:
+            inspected_state = self.inspect_remote_campaign(
+                "recover_postflight_remote_campaign"
+            )
+        except Exception as exc:
+            self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
+            raise MatrixError(
+                "postflight campaign ownership/release state is ambiguous"
+            ) from exc
+        if inspected_state == "released_exact":
+            self.remote_campaign_claimed = False
+            self.remote_campaign_ambiguous = False
+            self.journal.update(
+                remote_campaign_claimed=False,
+                remote_campaign_ambiguous=False,
+                remote_campaign_release_state="released",
+                dirty=True,
+            )
+            self.run_full_postflight(expect_remote_campaign=False)
+            self.journal.update(
+                status="completed",
+                lifecycle_phase="completed",
+                dirty=False,
+                completed_at=utc_now(),
+                remote_release_reconciled=True,
+            )
+            return
+        if inspected_state != "active_exact":
+            self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
+            raise MatrixError(
+                "postflight recovery requires the exact active claim or exact release tombstone"
+            )
+        self.remote_campaign_claimed = True
+        self.remote_campaign_ambiguous = False
+        self.journal.update(
+            remote_campaign_claimed=True,
+            remote_campaign_ambiguous=False,
+            remote_campaign_claim_state="owned",
+            dirty=True,
+        )
+        self.run_full_postflight()
+        self.finalize_campaign()
 
 
 def git_value(*args: str) -> str:
@@ -1779,13 +3021,30 @@ def git_value(*args: str) -> str:
 
 
 def acquire_local_lock(scenario: str, expected_head: str) -> int:
-    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(LOCK_PATH, os.O_RDWR | os.O_CREAT, 0o600)
+    secure_directory(LOCK_PATH.parent)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
+        descriptor = os.open(LOCK_PATH, flags, 0o600)
+    except OSError as exc:
+        raise MatrixError("Matrix lock cannot be opened as an owner-controlled regular file") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            raise MatrixError("Matrix lock must be one owner-only regular file")
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
         os.close(descriptor)
         raise MatrixError(f"another Matrix run owns {LOCK_PATH}") from exc
+    except BaseException:
+        os.close(descriptor)
+        raise
     token = uuid.uuid4().hex
     payload = f"pid={os.getpid()}\ntoken={token}\nscenario={scenario}\nhead={expected_head}\n".encode()
     os.ftruncate(descriptor, 0)
@@ -1819,6 +3078,10 @@ def build_plan(args: argparse.Namespace, expected_head: str) -> dict[str, Any]:
             "requires_distinct_operator_observer": True,
             "requires_preflight_bound_observer_approval": True,
             "requires_out_of_band_console_and_restore_authorization": True,
+            "requires_persistent_multiplexed_ssh": True,
+            "accounts_http_ssh_scp_and_reconnect_upper_bounds": True,
+            "max_scenario_seconds": MAX_SCENARIO_SECONDS,
+            "minimum_all_transport_dpi_byte_budget": MIN_DPI_BYTE_BUDGET,
             "keeps_network_isolation_until_requesters_and_credentials_are_gone": True,
             "retains_evidence_before_restore": True,
             "uses_only_replacement_witness_for_transitions": True,
@@ -1841,7 +3104,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--approval", type=Path)
     parser.add_argument("--observer-signature", type=Path)
     parser.add_argument("--commander-signature", type=Path)
-    parser.add_argument("--allowed-signers", type=Path)
+    parser.add_argument("--allowed-signers", type=Path, default=TRUSTED_ALLOWED_SIGNERS)
     parser.add_argument("--reason")
     parser.add_argument("--change-id")
     parser.add_argument("--out-of-band-console")
@@ -1857,7 +3120,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    campaign_root = Path(os.getenv("WRITER_WITNESS_MATRIX_CAMPAIGN_ROOT", str(DEFAULT_CAMPAIGN_ROOT)))
+    campaign_root = DEFAULT_CAMPAIGN_ROOT
+    if args.mode != "plan":
+        secure_directory(DEFAULT_CONTROLLER_ROOT)
+        secure_directory(DEFAULT_ARTIFACT_ROOT)
+        secure_directory(campaign_root)
     if args.mode == "recover":
         if not args.campaign_journal:
             raise MatrixError("recover mode requires --campaign-journal")
@@ -1871,16 +3138,35 @@ def main() -> int:
         expected_head = str(journal.payload.get("expected_commit") or "")
         tag = str(journal.payload.get("tag") or "")
         baseline = journal.payload.get("baseline")
-        artifact_dir = Path(str(journal.payload.get("artifact_dir") or ""))
+        recorded_artifact_dir = Path(str(journal.payload.get("artifact_dir") or ""))
         if (
             scenario not in SCENARIOS
             or not re.fullmatch(r"[0-9a-f]{40}", expected_head)
             or not re.fullmatch(r"wwm_[0-9a-f]{12}", tag)
             or not isinstance(baseline, dict)
-            or not artifact_dir.is_absolute()
-            or not artifact_dir.is_dir()
+            or not recorded_artifact_dir.is_absolute()
         ):
             raise MatrixError("campaign journal cannot be recovered safely")
+        recorded_artifact_dir = direct_durable_child(
+            recorded_artifact_dir,
+            DEFAULT_ARTIFACT_ROOT,
+            label="campaign artifact directory",
+        )
+        if recorded_artifact_dir.exists():
+            artifact_dir = secure_directory(recorded_artifact_dir, create=False)
+        else:
+            artifact_dir = (
+                DEFAULT_ARTIFACT_ROOT
+                / f"recovery-{tag}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}"
+            )
+            artifact_dir.mkdir(mode=0o700)
+            secure_directory(artifact_dir, create=False)
+            journal.update(
+                artifact_dir=str(artifact_dir),
+                original_artifact_dir=str(recorded_artifact_dir),
+                evidence_loss_detected=True,
+                dirty=True,
+            )
         if git_value("branch", "--show-current") != EXPECTED_BRANCH:
             raise MatrixError("campaign recovery is on the wrong branch")
         if git_value("rev-parse", "HEAD") != expected_head or git_value("status", "--porcelain"):
@@ -1888,6 +3174,11 @@ def main() -> int:
         lock_descriptor = acquire_local_lock(scenario, expected_head)
         controller: Controller | None = None
         try:
+            recovery_entry_phase = str(
+                journal.payload.get("lifecycle_phase")
+                or journal.payload.get("status")
+                or ""
+            )
             journal.update(status="recovering", dirty=True, recovery_started_at=utc_now())
             controller = Controller(
                 scenario=scenario,
@@ -1905,8 +3196,15 @@ def main() -> int:
                 existing_journal=journal,
             )
             try:
-                controller.cleanup()
-                controller.run_full_postflight()
+                if recovery_entry_phase in {
+                    "postflight_verified_release_pending",
+                    "remote_campaign_released",
+                }:
+                    controller.recover_postflight_release_pending()
+                else:
+                    controller.cleanup()
+                    controller.run_full_postflight()
+                    controller.finalize_campaign()
             except BaseException as exc:
                 error = str(exc) or exc.__class__.__name__
                 journal.update(status="failed", dirty=True, recovery_error=error)
@@ -1943,8 +3241,8 @@ def main() -> int:
         )
         if not all(required_approval_values):
             raise MatrixError("approve mode requires concrete roles, incident, window, communications, and DPI budget")
-        if args.dpi_byte_budget < CONTROL_REQUEST_BYTES_UPPER_BOUND * 100:
-            raise MatrixError("approve mode DPI byte budget is below the conservative request ceiling")
+        if args.dpi_byte_budget < MIN_DPI_BYTE_BUDGET:
+            raise MatrixError("approve mode DPI byte budget is below the closed all-transport ceiling")
         if args.observer.strip().casefold() == args.incident_commander.strip().casefold():
             raise MatrixError("abort observer and incident commander must be distinct")
         try:
@@ -1957,28 +3255,40 @@ def main() -> int:
         now = datetime.now(timezone.utc)
         if window_start > now or window_end <= now or window_end > window_start + timedelta(hours=8):
             raise MatrixError("approval must be issued inside a maintenance window of at most eight hours")
-        preflight = safe_json(args.preflight)
+        if args.allowed_signers != TRUSTED_ALLOWED_SIGNERS:
+            raise MatrixError("approve mode requires the canonical trusted signer policy")
+        allowed_signers_raw = read_secure_regular(
+            TRUSTED_ALLOWED_SIGNERS,
+            label="trusted signer policy",
+        )
+        preflight_raw = read_secure_regular(args.preflight, label="preflight artifact")
+        preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
         validate_preflight(preflight, expected_head)
-        output = args.output or Path(f"/tmp/{args.scenario.lower()}-writer-witness-approval.json")
+        approval_now = datetime.now(timezone.utc)
+        output = args.output or (
+            DEFAULT_CONTROLLER_ROOT / "approvals" / f"{args.scenario.lower()}-writer-witness-approval.json"
+        )
+        secure_directory(output.parent)
         payload = {
             "schema_version": APPROVAL_SCHEMA,
             "status": "approved",
             "scenario": args.scenario,
             "expected_commit": expected_head,
-            "preflight_sha256": file_sha256(args.preflight),
+            "preflight_sha256": hashlib.sha256(preflight_raw).hexdigest(),
             "observer": args.observer.strip(),
             "incident_commander": args.incident_commander.strip(),
             "reason": args.reason.strip(),
             "change_id": args.change_id.strip(),
             "authorization_nonce": uuid.uuid4().hex,
-            "approved_at": utc_now(),
-            "expires_at": datetime.fromtimestamp(time.time() + 3600, timezone.utc).isoformat().replace("+00:00", "Z"),
+            "approved_at": approval_now.isoformat().replace("+00:00", "Z"),
+            "expires_at": (approval_now + timedelta(minutes=45)).isoformat().replace("+00:00", "Z"),
             "out_of_band_console_ready": True,
             "alternate_communications_ready": True,
             "maintenance_window_confirmed": True,
             "dpi_budget_confirmed": True,
             "restore_authorized": True,
             "max_control_requests": 100,
+            "max_scenario_seconds": MAX_SCENARIO_SECONDS,
             "dpi_byte_budget": args.dpi_byte_budget,
             "out_of_band_console": args.out_of_band_console.strip(),
             "alternate_communications": args.alternate_communications.strip(),
@@ -1986,9 +3296,13 @@ def main() -> int:
             "maintenance_window_end": args.maintenance_window_end.strip(),
             "restore_backup_sha256": preflight["observed_baseline"]["matrix_witness_dark_baseline"]["backup_sha256"],
             "restore_authorized_by": args.restore_authorized_by.strip(),
+            "allowed_signers_sha256": hashlib.sha256(allowed_signers_raw).hexdigest(),
         }
         output.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        output_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            output_flags |= os.O_NOFOLLOW
+        descriptor = os.open(output, output_flags, 0o600)
         try:
             raw = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
             if os.write(descriptor, raw) != len(raw):
@@ -2005,7 +3319,7 @@ def main() -> int:
     if (
         not args.preflight or not args.approval or not args.operator or not args.operator.strip()
         or not args.reason or not args.reason.strip() or not args.observer_signature
-        or not args.commander_signature or not args.allowed_signers
+        or not args.commander_signature
         or not args.change_id or not args.change_id.strip()
     ):
         raise MatrixError("execute mode requires signed approval, named operator, preflight, and incident reason")
@@ -2013,31 +3327,48 @@ def main() -> int:
         raise MatrixError("Matrix runner is on the wrong branch")
     if git_value("rev-parse", "HEAD") != expected_head or git_value("status", "--porcelain"):
         raise MatrixError("Matrix runner requires the exact clean frozen commit")
-    preflight = safe_json(args.preflight)
+    if args.allowed_signers != TRUSTED_ALLOWED_SIGNERS:
+        raise MatrixError("execute mode requires the canonical trusted signer policy")
+    preflight_raw = read_secure_regular(args.preflight, label="preflight artifact")
+    approval_raw = read_secure_regular(args.approval, label="observer approval")
+    observer_signature_raw = read_secure_regular(
+        args.observer_signature,
+        label="observer signature",
+    )
+    commander_signature_raw = read_secure_regular(
+        args.commander_signature,
+        label="incident commander signature",
+    )
+    allowed_signers_raw = read_secure_regular(
+        TRUSTED_ALLOWED_SIGNERS,
+        label="trusted signer policy",
+    )
+    preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
     baseline = validate_preflight(preflight, expected_head)
-    approval = safe_json(args.approval)
+    approval = parse_json_bytes(approval_raw, label="observer approval")
     observer, incident_commander = validate_approval(
         approval,
         scenario=args.scenario,
         expected_head=expected_head,
-        preflight_sha256=file_sha256(args.preflight),
+        preflight_sha256=hashlib.sha256(preflight_raw).hexdigest(),
         operator=args.operator.strip(),
         reason=args.reason.strip(),
         change_id=args.change_id.strip(),
         expected_restore_sha256=baseline["matrix_witness_dark_baseline"]["backup_sha256"],
+        expected_allowed_signers_sha256=hashlib.sha256(allowed_signers_raw).hexdigest(),
     )
-    assert_independent_signer_keys(args.allowed_signers, observer, incident_commander)
+    assert_independent_signer_keys(allowed_signers_raw, observer, incident_commander)
     verify_approval_signature(
-        args.approval,
-        args.observer_signature,
+        approval_raw,
+        observer_signature_raw,
         identity=observer,
-        allowed_signers=args.allowed_signers,
+        allowed_signers_raw=allowed_signers_raw,
     )
     verify_approval_signature(
-        args.approval,
-        args.commander_signature,
+        approval_raw,
+        commander_signature_raw,
         identity=incident_commander,
-        allowed_signers=args.allowed_signers,
+        allowed_signers_raw=allowed_signers_raw,
     )
 
     lock_descriptor = acquire_local_lock(args.scenario, expected_head)
@@ -2048,11 +3379,15 @@ def main() -> int:
         DEFAULT_ARTIFACT_ROOT
         / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}-{args.scenario.lower()}"
     )
+    artifact_dir = direct_durable_child(
+        artifact_dir,
+        DEFAULT_ARTIFACT_ROOT,
+        label="Matrix artifact directory",
+    )
     try:
         assert_no_dirty_campaigns(campaign_root)
-        consumed_preflight = consume_preflight(file_sha256(args.preflight), args.scenario, campaign_root)
-        consumed_approval = consume_approval(approval, campaign_root)
-        artifact_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+        artifact_dir.mkdir(exist_ok=False, mode=0o700)
+        secure_directory(artifact_dir, create=False)
         controller = Controller(
             scenario=args.scenario,
             operator=args.operator.strip(),
@@ -2068,25 +3403,50 @@ def main() -> int:
         )
         controller.journal.update(
             approval_path=str(args.approval),
-            approval_sha256=file_sha256(args.approval),
-            observer_signature_sha256=file_sha256(args.observer_signature),
-            commander_signature_sha256=file_sha256(args.commander_signature),
-            consumed_approval=str(consumed_approval),
-            consumed_preflight=str(consumed_preflight),
+            approval_sha256=hashlib.sha256(approval_raw).hexdigest(),
+            observer_signature_sha256=hashlib.sha256(observer_signature_raw).hexdigest(),
+            commander_signature_sha256=hashlib.sha256(commander_signature_raw).hexdigest(),
+            allowed_signers_sha256=hashlib.sha256(allowed_signers_raw).hexdigest(),
         )
 
+        pending_signal: int | None = None
+
         def abort_handler(signum: int, _frame: Any) -> None:
-            if controller is not None and controller._cleanup_mode:
-                controller.journal.update(signal_during_cleanup=signum, dirty=True)
-                controller.event("signal.deferred_during_cleanup", signum=signum)
-                return
-            raise MatrixAbort(f"Matrix controller received signal {signum}")
+            nonlocal pending_signal
+            pending_signal = signum
+            if controller is not None:
+                controller._abort_reason = f"Matrix controller received signal {signum}"
 
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, abort_handler)
         try:
-            controller.run_scenario()
+            preflight_sha256 = hashlib.sha256(preflight_raw).hexdigest()
+            authorization_nonce = str(approval["authorization_nonce"])
+            controller.journal.update(
+                lifecycle_phase="local_authorization_consumption_intent",
+                local_authorization_nonce=authorization_nonce,
+                local_preflight_sha256=preflight_sha256,
+                dirty=True,
+            )
+            consumed_preflight = consume_preflight(
+                preflight_sha256, args.scenario, campaign_root
+            )
+            controller.journal.update(
+                lifecycle_phase="local_preflight_consumed",
+                consumed_preflight=str(consumed_preflight),
+                dirty=True,
+            )
+            consumed_approval = consume_approval(approval, campaign_root)
+            controller.journal.update(
+                lifecycle_phase="local_authorization_consumed",
+                consumed_approval=str(consumed_approval),
+                dirty=True,
+            )
+            controller.run_scenario(
+                authorization_nonce=authorization_nonce,
+                preflight_sha256=preflight_sha256,
+            )
         except BaseException as exc:
             error = str(exc) or exc.__class__.__name__
             controller.event("scenario.failed", error=error)
@@ -2098,9 +3458,11 @@ def main() -> int:
         if (
             controller.journal.payload.get("status") == "cleanup_verified_pending_postflight"
             and not controller.remote_campaign_conflict
+            and not controller.journal.payload.get("cleanup_errors")
         ):
             try:
                 controller.run_full_postflight()
+                controller.finalize_campaign()
             except BaseException as exc:
                 postflight_error = str(exc) or exc.__class__.__name__
                 error = f"{error + '; ' if error else ''}postflight:{postflight_error}"
@@ -2109,8 +3471,9 @@ def main() -> int:
             error = f"{error + '; ' if error else ''}evidence:one or more evidence writes failed"
         if controller.secret_output_detected:
             error = f"{error + '; ' if error else ''}evidence:a secret sentinel was redacted from command output"
-        if controller.journal.payload.get("signal_during_cleanup") is not None:
-            error = f"{error + '; ' if error else ''}signal:received during mandatory cleanup"
+        if pending_signal is not None:
+            controller.journal.update(signal_received=pending_signal)
+            error = f"{error + '; ' if error else ''}signal:received during Matrix execution or cleanup"
         status = "passed" if error is None else "failed"
         if status == "failed" and controller.journal.payload.get("dirty") is False:
             controller.journal.update(status="recovered_failed", dirty=False, error=error)

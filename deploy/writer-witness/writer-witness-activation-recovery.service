@@ -1,0 +1,12 @@
+[Unit]
+Description=Recover an interrupted Writer Witness activation
+After=local-fs.target
+Before=nginx.service writer-witness.service writer-witness-backup.service writer-witness-offsite-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/writer-witness-activation recover-boot
+UMask=0077
+
+[Install]
+RequiredBy=nginx.service writer-witness.service writer-witness-backup.service writer-witness-offsite-backup.service
