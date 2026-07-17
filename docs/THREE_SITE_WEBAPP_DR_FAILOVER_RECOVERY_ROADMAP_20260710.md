@@ -2746,9 +2746,9 @@ Arvan/CDN mutation remain prohibited.
 
 The current feature-worktree remediation extends Section 47.6 with an exact
 installation trust chain. The implementation is present at source level and
-the focused verifier/deployment checks are part of the local gate; the final
-combined source gate must be rerun after the complete delta is frozen at one
-clean exact SHA. This subsection does not claim that the hardened release is
+the focused verifier/deployment checks plus the hermetic combined source gate
+have passed from a clean committed feature checkout. This subsection does not
+claim that the hardened release is
 installed or attested on the replacement dark Witness.
 
 The source-level contract is now:
@@ -2864,9 +2864,9 @@ base and is outside what this Python verifier can prove.
 |---|---|
 | Design and implementation in isolated feature worktree | Implemented at source level |
 | Release, installed-runtime, provenance, wheelhouse, and nftables verifier tests | `113` passed, zero failures/skips; real offline 45-package/2,771-RECORD/3,087-tree-entry attestation closed 22 venv ELF objects against 72 system ELF objects and also passed at the current worktree snapshot |
-| Current hermetic combined source snapshot | `384` unit tests passed with zero skips, followed by `4` guarded PostgreSQL tests and the four-database failure drill; this is still an uncommitted worktree result, not the final exact-SHA gate |
-| Final zero-skip source gate on one clean exact SHA | Pending after final integration |
-| Commit/push of the final remediation SHA | Pending |
+| Clean exact-SHA hermetic source gate | `384` unit tests passed with zero skips, followed by `4` guarded PostgreSQL tests and the four-database failure drill |
+| Final zero-skip source gate on the committed feature checkout | Passed |
+| Commit/push of the final remediation SHA | Completed on the isolated feature branch only; no `main` integration |
 | Install exact release and offline wheelhouse on `185.206.95.94` | Pending |
 | Live runtime/provenance, effective-systemd, nftables, and offsite proof | Pending |
 | Twelve hard-kill live-restore prerequisite points | Pending |
@@ -2874,11 +2874,11 @@ base and is outside what this Python verifier can prove.
 | RH-001/RH-010 or any other real-host scenario | Not authorized and not executed |
 | Full Matrix, merge with `main`, writer activation, WebApp or Arvan mutation | Not authorized and not executed |
 
-The next permitted sequence is limited to: freeze and source-verify the exact
-delta; commit/push only the feature branch; install that exact release only on
-the replacement dark Witness; configure and prove offsite custody; run and
-recover the twelve restore prerequisites; produce a fresh read-only exact-SHA
-preflight; and obtain external approval of that exact delta. A successful
+The next permitted sequence is limited to: package the exact feature delta for
+external re-review; install that exact release only on the replacement dark
+Witness; configure and prove offsite custody; run and recover the twelve restore
+prerequisites; produce a fresh read-only exact-SHA preflight; and obtain
+external approval of that exact delta. A successful
 source gate or dark-host attestation still does not authorize Full Matrix,
 `main` integration, a first lease, production WebApp changes, or CDN routing
 changes.

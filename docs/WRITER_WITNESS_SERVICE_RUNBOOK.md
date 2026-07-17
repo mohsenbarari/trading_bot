@@ -8,9 +8,9 @@ authorized
 ## Current Remediation Boundary
 
 The current worktree adds a fail-closed release/runtime trust contract. This is
-source-level work: the focused verifier and deployment tests are the applicable
-local evidence, and the complete exact-SHA source gate must be rerun after the
-final delta is frozen. None of the statements in this section claims that the
+source-level work: the focused verifier and deployment tests plus the complete
+clean-commit source gate are the applicable local evidence. None of the
+statements in this section claims that the
 new release was installed on `185.206.95.94`, that its live state was attested,
 that the twelve restore crash points or RH-010 ran, that Full Matrix ran, or
 that external reviewers approved the final delta.
@@ -24,11 +24,11 @@ RECORD files inside a closed `3,087`-entry venv inventory before and after
 release-bound system ELF objects. This is component-level source verification, not the final
 combined exact-SHA source gate and not live-host evidence.
 
-The current hermetic combined snapshot subsequently passed `384` explicitly
-listed unit tests with zero skips, all `4` guarded real-PostgreSQL tests, and
-the complete four-database failure drill. Because the worktree is not yet
-committed and frozen at one exact SHA, this result is evidence for the current
-source snapshot only; the exact-SHA gate remains pending.
+The hermetic combined gate passed from a clean committed feature checkout:
+`384` explicitly listed unit tests with zero skips, all `4` guarded
+real-PostgreSQL tests, and the complete four-database failure drill. This closes
+the local source gate only; it is not deployment, live-host, preflight, or
+real-host Matrix evidence.
 
 The reviewed deployment contract is:
 
