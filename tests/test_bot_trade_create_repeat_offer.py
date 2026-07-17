@@ -5,10 +5,12 @@ from unittest.mock import AsyncMock, patch
 from bot.handlers.trade_create import (
     _expire_offer_after_publication_failure,
     _handle_trade_confirm_core,
+    _send_repeat_offer_menu_refresh,
     handle_repeat_offer_button,
 )
 from bot.repeat_offer import BotRepeatOfferCandidate
 from core.services.offer_creation_service import OfferCreationAdmissionError
+from core.services.offer_republish_service import OfferNotRepeatableError
 
 
 class FakeSessionContext:
@@ -50,8 +52,8 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_create.AsyncSessionLocal",
             return_value=FakeSessionContext(),
         ), patch(
-            "bot.handlers.trade_create.load_latest_bot_repeat_offer_candidate",
-            new=AsyncMock(return_value=candidate),
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(candidate, False, None)),
         ), patch(
             "bot.handlers.trade_create._prepare_text_offer",
             new=AsyncMock(return_value=True),
@@ -78,8 +80,8 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_create.AsyncSessionLocal",
             return_value=FakeSessionContext(),
         ), patch(
-            "bot.handlers.trade_create.load_latest_bot_repeat_offer_candidate",
-            new=AsyncMock(return_value=None),
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(None, True, "button_not_found")),
         ), patch(
             "bot.handlers.trade_create._prepare_text_offer",
             new=AsyncMock(),
@@ -93,6 +95,71 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         state.update_data.assert_not_awaited()
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "MENU")
         self.assertIn("دیگر قابل تکرار نیست", message.answer.await_args.args[0])
+
+    async def test_stale_but_eligible_button_prepares_source_and_refreshes_menu(self):
+        candidate = BotRepeatOfferCandidate(
+            source_offer_id=41,
+            source_offer_public_id="ofr_source_41",
+            draft_text="ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری",
+            button_text="🔁 ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری",
+            legacy_button_text="🔁 ف ن ف ربع 25 عدد 178000 15 10",
+        )
+        message = SimpleNamespace(
+            text=candidate.legacy_button_text,
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=99),
+        )
+        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+        user = SimpleNamespace(id=9)
+
+        with patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(candidate, True, "legacy_button")),
+        ), patch(
+            "bot.handlers.trade_create._send_repeat_offer_menu_refresh",
+            new=AsyncMock(),
+        ) as refresh, patch(
+            "bot.handlers.trade_create._prepare_text_offer",
+            new=AsyncMock(return_value=True),
+        ) as prepare:
+            await handle_repeat_offer_button(message, state, user, message.bot)
+
+        refresh.assert_awaited_once_with(message.bot, chat_id=99, user=user)
+        self.assertEqual(prepare.await_args.args[3], candidate.draft_text)
+        provenance = state.update_data.await_args.kwargs
+        self.assertEqual(provenance["republished_from_offer_public_id"], "ofr_source_41")
+
+    async def test_ambiguous_legacy_button_requests_new_button_without_preparing(self):
+        message = SimpleNamespace(
+            text="🔁 ف ن ف ربع 25 عدد 178000 15 10",
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+        user = SimpleNamespace(id=9)
+
+        with patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(None, True, "ambiguous_legacy_button")),
+        ), patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="MENU"),
+        ), patch(
+            "bot.handlers.trade_create._prepare_text_offer",
+            new=AsyncMock(),
+        ) as prepare:
+            await handle_repeat_offer_button(message, state, user, message.bot)
+
+        prepare.assert_not_awaited()
+        self.assertIn("دکمه جدید را بزنید", message.answer.await_args.args[0])
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "MENU")
 
     async def test_confirm_revalidates_source_and_creates_foreign_provenance(self):
         creation_session = SimpleNamespace()
@@ -207,6 +274,107 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(offer.republished_from_offer_public_id)
         expire.assert_awaited_once()
+
+    async def test_final_ineligible_repeat_refreshes_stale_keyboard(self):
+        state = SimpleNamespace(
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 25,
+                    "trade_type": "sell",
+                    "settlement_type": "tomorrow",
+                    "commodity_id": 7,
+                    "commodity_name": "ربع",
+                    "price": 178000,
+                    "is_wholesale": False,
+                    "lot_sizes": [15, 10],
+                    "notes": "تحویل حضوری",
+                    "republished_from_offer_public_id": "ofr_source_41",
+                    "republished_from_offer_id": 41,
+                }
+            ),
+            clear=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=99),
+        )
+        user = SimpleNamespace(id=9, limitations_expire_at=None)
+        bot = SimpleNamespace()
+
+        with patch(
+            "bot.handlers.trade_create._bot_market_is_open",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=3),
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeScalarSession(0)),
+                FakeSessionContext(SimpleNamespace()),
+                FakeSessionContext(SimpleNamespace()),
+            ],
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.acquire_market_offer_admission_fence",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.trade_create.lock_repeatable_offer",
+            new=AsyncMock(side_effect=OfferNotRepeatableError("offer_ineligible")),
+        ), patch(
+            "bot.handlers.trade_create._send_repeat_offer_menu_refresh",
+            new=AsyncMock(),
+        ) as refresh, patch(
+            "bot.handlers.trade_create.settings",
+            SimpleNamespace(channel_id=-100),
+        ):
+            await _handle_trade_confirm_core(
+                callback,
+                state,
+                user,
+                bot,
+                check_user_limits_fn=lambda *_args: (True, None),
+                to_jalali_str_fn=lambda *_args: "",
+                success_message_text="OK",
+                unexpected_error_prefix="ERR",
+                warning_confirm_callback_data="confirm_warning",
+                cancel_callback_data="cancel",
+            )
+
+        self.assertIn("دیگر قابل تکرار نیست", callback.message.edit_text.await_args.args[0])
+        refresh.assert_awaited_once_with(bot, chat_id=99, user=user)
+        state.clear.assert_awaited_once_with()
+        callback.answer.assert_awaited_once_with()
+
+    async def test_menu_refresh_sends_current_keyboard_and_is_best_effort(self):
+        user = SimpleNamespace(id=9)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        with patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="MENU"),
+        ):
+            await _send_repeat_offer_menu_refresh(bot, chat_id=99, user=user)
+
+        bot.send_message.assert_awaited_once_with(
+            chat_id=99,
+            text="منو با آخرین وضعیت به‌روزرسانی شد.",
+            reply_markup="MENU",
+        )
+
+        failing_bot = SimpleNamespace(
+            send_message=AsyncMock(side_effect=RuntimeError("telegram down"))
+        )
+        with patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="MENU"),
+        ):
+            await _send_repeat_offer_menu_refresh(failing_bot, chat_id=99, user=user)
 
 
 if __name__ == "__main__":
