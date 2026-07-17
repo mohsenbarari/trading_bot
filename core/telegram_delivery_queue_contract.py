@@ -133,6 +133,7 @@ class TelegramFreshnessOutcome(str, Enum):
     SENT_NOOP = "sent_noop"
     SUPERSEDED = "superseded"
     EXPIRED_INTERACTION = "expired_interaction"
+    QUARANTINED = "quarantined"
 
 
 class TelegramOfferBusinessState(str, Enum):
@@ -591,6 +592,8 @@ def apply_freshness_decision(
         job.state = TelegramDeliveryState.EXPIRED_INTERACTION
     elif decision.outcome == TelegramFreshnessOutcome.SENT_NOOP:
         job.state = TelegramDeliveryState.SENT_NOOP
+    elif decision.outcome == TelegramFreshnessOutcome.QUARANTINED:
+        job.state = TelegramDeliveryState.QUARANTINED
     elif decision.outcome == TelegramFreshnessOutcome.WAIT_DEPENDENCY:
         job.state = TelegramDeliveryState.PENDING
     elif decision.outcome == TelegramFreshnessOutcome.RECLASSIFY:

@@ -407,6 +407,48 @@ async def run_telegram_delivery_queue_cycle(
             )
             raise
 
+        # Limiter admission is not a side effect at Telegram, but authoritative
+        # business state may have changed while the job waited for admission.
+        # Revalidate once more at the final local boundary before marking the
+        # dispatch as started. This closes the claim/limiter race without
+        # holding a database transaction over the network call.
+        final_freshness_time = utc_now()
+        try:
+            async with AsyncSessionLocal() as db:
+                freshness = await validator(db, job, final_freshness_time)
+                may_dispatch = await apply_telegram_delivery_freshness_result(
+                    db,
+                    current_server=current_server(),
+                    job_id=job_id,
+                    worker_id=active_worker_id,
+                    lease_token=lease_token,
+                    decision=freshness,
+                    now=final_freshness_time,
+                )
+                await db.commit()
+        except asyncio.CancelledError:
+            await _release_after_predispatch_error(
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                reason="worker_cancelled_before_dispatch",
+            )
+            raise
+        except Exception as exc:
+            await _release_after_predispatch_error(
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                reason=f"final_freshness_validator:{type(exc).__name__}",
+            )
+            raise
+
+        if not may_dispatch:
+            key = freshness.outcome.value
+            status_counts[key] = status_counts.get(key, 0) + 1
+            processed_count += 1
+            continue
+
         async with AsyncSessionLocal() as db:
             dispatch_marked = await mark_telegram_delivery_dispatch_started(
                 db,

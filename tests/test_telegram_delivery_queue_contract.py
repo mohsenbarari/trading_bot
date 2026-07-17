@@ -21,6 +21,7 @@ from core.telegram_delivery_queue_contract import (
     TelegramFeederRecord,
     TelegramFeederRecordState,
     TelegramFlowExit,
+    TelegramFreshnessDecision,
     TelegramFreshnessOutcome,
     TelegramFreshnessSnapshot,
     TelegramHandoffInterrupted,
@@ -1009,6 +1010,20 @@ class TelegramFreshnessContractTests(unittest.TestCase):
             ).outcome,
             TelegramFreshnessOutcome.SUPERSEDED,
         )
+
+    def test_quarantined_freshness_decision_is_terminal(self):
+        job = self.make_job(TelegramDeliveryAction.OFFER_PUBLISH)
+
+        apply_freshness_decision(
+            job,
+            TelegramFreshnessDecision(
+                TelegramFreshnessOutcome.QUARANTINED,
+                reason="canonical_identity_mismatch",
+            ),
+        )
+
+        self.assertEqual(job.state, TelegramDeliveryState.QUARANTINED)
+        self.assertTrue(job.is_terminal)
 
 
 class TelegramOfferEditFeederContractTests(unittest.TestCase):

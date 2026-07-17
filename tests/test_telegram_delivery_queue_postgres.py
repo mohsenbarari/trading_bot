@@ -26,7 +26,19 @@ from core.telegram_delivery_queue_limiter import (
     TelegramDeliveryDispatchAdmission,
     TelegramDeliveryLimiterUnavailableError,
 )
+from core.telegram_delivery_offer_freshness import (
+    telegram_channel_destination_key,
+    validate_offer_telegram_delivery_freshness,
+)
 from core.telegram_gateway import TelegramGatewayResult
+from core.enums import SettlementType
+from core.services.offer_publication_state_service import (
+    build_offer_publication_state,
+)
+from core.services.telegram_offer_channel_service import (
+    build_offer_channel_message,
+    build_offer_channel_reply_markup,
+)
 from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueValidationError,
     TelegramDeliveryQueueSurfaceError,
@@ -39,6 +51,12 @@ from core.services.telegram_delivery_queue_service import (
 )
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.commodity import Commodity
+from models.offer import Offer, OfferStatus, OfferType
+from models.offer_publication_state import (
+    OfferPublicationStatus,
+    OfferPublicationSurface,
+)
 from core.telegram_delivery_queue_worker import run_telegram_delivery_queue_cycle
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeDecision,
@@ -95,7 +113,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f2c7d8e9a0bd"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f3d8e9a0b1ce"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -688,6 +706,134 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(persisted.worker_id)
         self.assertIsNone(persisted.next_retry_at)
 
+    async def test_quarantined_freshness_result_is_terminal_and_releases_lease(self):
+        await self._enqueue("canonical-identity-mismatch")
+        job = await self._claim("worker-quarantine", now=utc_now())
+        async with self.Session() as db:
+            may_dispatch = await apply_telegram_delivery_freshness_result(
+                db,
+                current_server="foreign",
+                job_id=job.id,
+                worker_id=job.worker_id,
+                lease_token=job.lease_token,
+                decision=TelegramFreshnessDecision(
+                    TelegramFreshnessOutcome.QUARANTINED,
+                    reason="canonical_identity_mismatch",
+                ),
+            )
+            await db.commit()
+
+        self.assertFalse(may_dispatch)
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, job.id)
+        self.assertEqual(persisted.state, TelegramDeliveryState.QUARANTINED)
+        self.assertEqual(persisted.outcome_reason, "canonical_identity_mismatch")
+        self.assertIsNotNone(persisted.terminal_at)
+        self.assertIsNone(persisted.worker_id)
+        self.assertIsNone(persisted.lease_until)
+
+    async def test_offer_freshness_uses_real_authoritative_rows_and_version(self):
+        public_id = "ofr_stage3_freshness_pg"
+        commodity_name = "stage3-freshness-commodity"
+        channel_id = -100123456700
+        async with self.Session() as db:
+            await db.execute(
+                text(
+                    "DELETE FROM offer_publication_states "
+                    "WHERE offer_public_id = :public_id"
+                ),
+                {"public_id": public_id},
+            )
+            await db.execute(
+                text("DELETE FROM offers WHERE offer_public_id = :public_id"),
+                {"public_id": public_id},
+            )
+            await db.execute(
+                text("DELETE FROM commodities WHERE name = :name"),
+                {"name": commodity_name},
+            )
+            commodity = Commodity(name=commodity_name)
+            db.add(commodity)
+            await db.flush()
+            offer = Offer(
+                offer_public_id=public_id,
+                home_server="foreign",
+                offer_type=OfferType.SELL,
+                settlement_type=SettlementType.CASH,
+                commodity_id=commodity.id,
+                commodity=commodity,
+                quantity=10,
+                remaining_quantity=10,
+                price=72_500_000,
+                is_wholesale=True,
+                status=OfferStatus.ACTIVE,
+            )
+            db.add(offer)
+            await db.flush()
+            state = build_offer_publication_state(
+                offer,
+                OfferPublicationSurface.TELEGRAM_CHANNEL,
+                status=OfferPublicationStatus.SENT,
+            )
+            state.surface_resource_id = "900"
+            state.telegram_chat_id = channel_id
+            state.telegram_message_id = 900
+            db.add(state)
+            await db.flush()
+
+            payload = {
+                "chat_id": channel_id,
+                "message_id": 900,
+                "text": build_offer_channel_message(offer),
+                "reply_markup": build_offer_channel_reply_markup(offer),
+            }
+            enqueued = await enqueue_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                feeder=TelegramFeederKind.OFFER_EDIT,
+                source_natural_id=public_id,
+                source_version=offer.version_id,
+                action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+                bot_identity="channel_editor",
+                destination_key=telegram_channel_destination_key(channel_id),
+                destination_class=TelegramDestinationClass.CHANNEL,
+                method="editMessageText",
+                payload=payload,
+                template_version="offer-channel-v1",
+            )
+            await db.commit()
+            job = enqueued.job
+
+        async with self.Session() as db:
+            current = await validate_offer_telegram_delivery_freshness(
+                db,
+                job,
+                utc_now(),
+                expected_channel_id=channel_id,
+            )
+        self.assertEqual(current.outcome, TelegramFreshnessOutcome.SEND)
+
+        async with self.Session() as db:
+            offer = (
+                await db.execute(
+                    select(Offer).where(Offer.offer_public_id == public_id)
+                )
+            ).scalar_one()
+            offer.remaining_quantity = 5
+            await db.commit()
+        async with self.Session() as db:
+            stale = await validate_offer_telegram_delivery_freshness(
+                db,
+                job,
+                utc_now(),
+                expected_channel_id=channel_id,
+            )
+        self.assertEqual(stale.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+        self.assertEqual(
+            stale.replacement_action,
+            TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+        )
+
     async def test_dispatch_marker_refuses_iran_surface(self):
         await self._enqueue("foreign-only-marker")
         job = await self._claim("worker-foreign", now=utc_now())
@@ -867,6 +1013,49 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
         self.assertEqual(persisted.state, TelegramDeliveryState.SENT)
         self.assertEqual(persisted.telegram_message_id, 777)
+
+    async def test_worker_revalidates_after_limiter_before_gateway_io(self):
+        enqueued = await self._enqueue("stale-during-limiter-admission")
+        gateway = AsyncMock()
+        validation_count = 0
+
+        async def freshness_validator(db, job, now):
+            nonlocal validation_count
+            validation_count += 1
+            if validation_count == 1:
+                return TelegramFreshnessDecision(TelegramFreshnessOutcome.SEND)
+            return TelegramFreshnessDecision(
+                TelegramFreshnessOutcome.SUPERSEDED,
+                reason="offer_became_terminal_during_admission",
+            )
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ):
+            report = await run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
+                limit=1,
+                freshness_validator=freshness_validator,
+                gateway_call=gateway,
+                dispatch_limiter=_AllowLimiter(),
+                worker_id="worker-final-freshness-test",
+            )
+
+        self.assertEqual(validation_count, 2)
+        self.assertEqual(report.processed_count, 1)
+        self.assertEqual(report.status_counts, {"superseded": 1})
+        gateway.assert_not_awaited()
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+        self.assertEqual(persisted.state, TelegramDeliveryState.SUPERSEDED)
+        self.assertIsNone(persisted.dispatch_started_at)
 
     async def test_primary_gateway_wait_does_not_block_editor_lane_cycle(self):
         primary = await self._enqueue("lane-primary-slow")

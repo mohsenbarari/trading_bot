@@ -102,7 +102,10 @@ def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
 
 
-def _canonical_payload(payload: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+def canonical_telegram_delivery_payload(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], str]:
+    """Return strict JSON payload plus the immutable execution hash."""
     normalized = dict(payload)
     try:
         canonical = json.dumps(
@@ -311,7 +314,7 @@ async def enqueue_telegram_delivery_job(
     ):
         raise TelegramDeliveryQueueValidationError("channel_editor_route_not_allowlisted")
 
-    normalized_payload, payload_hash = _canonical_payload(payload)
+    normalized_payload, payload_hash = canonical_telegram_delivery_payload(payload)
     feeder_rank = feeder_internal_rank(feeder, action)
     priority, priority_rank = priority_and_rank_for_action(
         action,
