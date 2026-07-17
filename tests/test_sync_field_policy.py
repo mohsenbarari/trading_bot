@@ -64,6 +64,7 @@ class SyncFieldPolicyTests(unittest.TestCase):
             "offer_home_server": "foreign",
             "surface": "telegram_channel",
             "publication_owner_server": "foreign",
+            "publisher_bot_identity": "primary",
             "status": "sent",
             "dedupe_key": "offer-publication:telegram_channel:ofr_1",
             "surface_resource_id": "telegram:-1001:777",
@@ -84,6 +85,7 @@ class SyncFieldPolicyTests(unittest.TestCase):
         self.assertEqual(sanitized["offer_home_server"], "foreign")
         self.assertEqual(sanitized["surface"], "telegram_channel")
         self.assertEqual(sanitized["publication_owner_server"], "foreign")
+        self.assertEqual(sanitized["publisher_bot_identity"], "primary")
         self.assertEqual(sanitized["status"], "sent")
         self.assertEqual(sanitized["dedupe_key"], "offer-publication:telegram_channel:ofr_1")
         self.assertEqual(sanitized["offer_version_id"], 4)

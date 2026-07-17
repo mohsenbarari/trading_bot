@@ -66,7 +66,10 @@ def make_state(**overrides):
     data = {
         "id": 70,
         "status": OfferPublicationStatus.FAILED,
+        "publisher_bot_identity": "primary",
+        "telegram_chat_id": -100123,
         "telegram_message_id": None,
+        "surface_resource_id": None,
         "surface": OfferPublicationSurface.TELEGRAM_CHANNEL,
     }
     data.update(overrides)
@@ -289,6 +292,95 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(offer.channel_message_id, 777)
         self.assertEqual(report["findings"][0]["reason"], "legacy_offer_message_id_backfilled")
         db.commit.assert_awaited_once()
+
+    async def test_foreign_repair_restores_offer_mirror_from_canonical_state(self):
+        db = FakeDB()
+        offer = make_offer(channel_message_id=999)
+        state = make_state(
+            status=OfferPublicationStatus.SENT,
+            telegram_message_id=777,
+            surface_resource_id="777",
+        )
+        candidate = service.PublicationReconciliationCandidate(
+            issue="telegram_message_identity_mismatch",
+            offer=offer,
+            state=state,
+            surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+        )
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service."
+            "load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=[candidate]),
+        ):
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+            )
+
+        self.assertEqual(report["status"], "repaired")
+        self.assertEqual(offer.channel_message_id, 777)
+        self.assertEqual(state.telegram_message_id, 777)
+        self.assertEqual(
+            report["findings"][0]["reason"],
+            "legacy_offer_message_id_reconciled_from_canonical_state",
+        )
+        db.commit.assert_awaited_once()
+
+    async def test_foreign_repair_backfills_missing_primary_publisher(self):
+        db = FakeDB()
+        offer = make_offer(channel_message_id=None)
+        state = make_state(
+            status=OfferPublicationStatus.SENT,
+            publisher_bot_identity=None,
+            telegram_message_id=777,
+            surface_resource_id="777",
+        )
+        candidate = service.PublicationReconciliationCandidate(
+            issue="telegram_publisher_identity_missing",
+            offer=offer,
+            state=state,
+            surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+        )
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service."
+            "load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=[candidate]),
+        ):
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+            )
+
+        self.assertEqual(report["status"], "repaired")
+        self.assertEqual(state.publisher_bot_identity, "primary")
+        self.assertEqual(offer.channel_message_id, 777)
+        db.commit.assert_awaited_once()
+
+    def test_foreign_issue_detects_publisher_and_message_identity_drift(self):
+        offer = make_offer(channel_message_id=999)
+        state = make_state(
+            status=OfferPublicationStatus.SENT,
+            telegram_message_id=777,
+        )
+
+        self.assertEqual(
+            service._foreign_telegram_issue_for(offer, state),
+            "telegram_message_identity_mismatch",
+        )
+        state.publisher_bot_identity = None
+        self.assertEqual(
+            service._foreign_telegram_issue_for(offer, state),
+            "telegram_publisher_identity_missing",
+        )
+        state.publisher_bot_identity = "channel_editor"
+        self.assertEqual(
+            service._foreign_telegram_issue_for(offer, state),
+            "telegram_publisher_identity_mismatch",
+        )
 
     async def test_iran_repair_creates_visible_webapp_publication_state(self):
         db = FakeDB()
