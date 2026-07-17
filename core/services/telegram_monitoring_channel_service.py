@@ -311,7 +311,14 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
             ]
         )
 
-    return "\n".join(visible_lines) + "\n<blockquote expandable>" + "\n".join(details_lines) + "</blockquote>"
+    return "\n".join(
+        [
+            *visible_lines,
+            "",
+            "جزئیات:",
+            *details_lines,
+        ]
+    )
 
 
 async def load_customer_owner_for_offer(db: AsyncSession, offer: Offer) -> Any | None:
