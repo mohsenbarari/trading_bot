@@ -56,6 +56,9 @@ class TelegramDestinationClass(str, Enum):
 
 class TelegramDeliveryAction(str, Enum):
     CALLBACK_DEADLINE = "callback_deadline"
+    # Reserved for mixed-version database compatibility only. OTP values stay
+    # on the signed, short-lived Redis transport and are forbidden at durable
+    # queue enqueue boundaries.
     OTP_DEADLINE = "otp_deadline"
     OFFER_PUBLISH = "offer_publish"
     OFFER_SUCCESS = "offer_success"
@@ -186,6 +189,9 @@ DEFAULT_RATE_LIMIT_PROBE_DELAY_SECONDS = 0.1
 DEFAULT_GLOBAL_RATE_LIMIT_WINDOW_SECONDS = 2.0
 EDIT_STALE_AFTER_SECONDS = 5 * 60
 EDIT_CATCH_UP_FRESH_COUNT = 20
+NON_DURABLE_TELEGRAM_QUEUE_ACTIONS = frozenset(
+    {TelegramDeliveryAction.OTP_DEADLINE}
+)
 
 _AMBIGUOUS_SEND_ERRORS = {
     "networkerror",
@@ -283,7 +289,6 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.TIMED_BOT, TelegramDeliveryAction.TEMPORARY_CLEANUP): 3,
     (TelegramFeederKind.TIMED_BOT, TelegramDeliveryAction.COSMETIC_CLEANUP): 4,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.CALLBACK_DEADLINE): 0,
-    (TelegramFeederKind.DIRECT, TelegramDeliveryAction.OTP_DEADLINE): 0,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.GENERAL_IMMEDIATE): 0,
 }
 

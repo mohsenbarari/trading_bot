@@ -3,14 +3,14 @@
 - وضعیت: Accepted
 - تاریخ: `2026-07-16`
 - owner: Backend + Operations
-- چالش‌ها: `TOPQ-C16`, `TOPQ-C27`, `TOPQ-C28`, `TOPQ-C39`, `TOPQ-C40`, `TOPQ-C41`, `TOPQ-C59`, `TOPQ-C60`, `TOPQ-N17`
+- چالش‌ها: `TOPQ-C16`, `TOPQ-C27`, `TOPQ-C28`, `TOPQ-C39`, `TOPQ-C40`, `TOPQ-C41`, `TOPQ-C59`, `TOPQ-C60`, `TOPQ-C69`, `TOPQ-N17`
 
 ## تصمیم
 
 - شش feeder قطعی: ثبت/کنترل آفر، edit کانال، معامله/درخواست، مدیریتی/سیستمی، وضعیت بازار و عملیات زمان‌دار.
 - feeder فقط eligibility، internal rank، freshness، dependency، coalescing و fan-out را تعیین می‌کند. main queue فقط priority نهایی، lease، limiter، retry و Bot API را مالک است.
 - handoff با dedupe identity و رابطه child/main اتمیک یا outbox بازیاب‌پذیر است. feedback نتیجه main تنها راه terminal شدن child است.
-- callback/OTP deadlineدار مستقیماً وارد main می‌شود.
+- callback deadlineدار مستقیماً وارد main می‌شود. OTP از shared queue مستثناست و همان transport امضاشده و receipt کوتاه‌عمر Redis فعلی را حفظ می‌کند؛ enqueue پایدار آن fail-closed است.
 - broadcast یک in-flight برای هر campaign و حداکثر دو campaign `M6` هم‌زمان دارد؛ round-robin بر `last_released_at` است. retryable/ambiguous همان campaign و خطای bot/gateway همه campaignها را متوقف می‌کند.
 - gateway envelope `ok` را مرجع می‌داند، client مشترک lifecycle-safe دارد و فقط modeهای allowlisted `main/test` را می‌پذیرد.
 - runtime worker فقط روی foreign و پشت flag پیش‌فرض خاموش شروع می‌شود. CI/static guard تمام call siteهای مستقیم غیرمجاز را رد می‌کند.

@@ -54,7 +54,7 @@
 - صف گیرندگان broadcast مدیریتی حفظ، ولی worker مستقیم آن به feeder تبدیل می‌شود. در شروع هر broadcast فقط یک گیرنده به‌صورت in-flight به صف اصلی آزاد می‌شود؛ پیشروی پس از نتیجه terminal مجاز، و توقف روی retryable، ambiguous یا خطای عمومی campaign انجام می‌شود.
 - ثبت/انتشار آفر و edit آفرهای موجود در کانال دو صف تابع مستقل‌اند. استقلال آن‌ها dependency را حذف نمی‌کند: edit تا وجود `channel_message_id` واجد ارسال نیست و اگر آفر پیش از انتشار terminal شود، انتشار فعال و edit میانی هر دو با وضعیت نهایی supersede می‌شوند.
 - ترتیب داخلی شش صف تابع در بخش ۳ همیشه فعال است و فقط به حالت ازدحام بیش از ۳۰ آفر محدود نمی‌شود.
-- ترتیب `M0` تأییدشده عبارت است از callback و کد ورود deadlineدار، سپس اعلان معامله عبورکرده از پنج ثانیه و سپس انتشار آفر جدید.
+- ترتیب `M0` تأییدشده در shared queue عبارت است از callback deadlineدار، سپس اعلان معامله عبورکرده از پنج ثانیه و سپس انتشار آفر جدید. کد ورود محرمانه در مسیر تخصصی امضاشده و Redis کوتاه‌عمر فعلی می‌ماند و در PostgreSQL صف ذخیره نمی‌شود.
 - برای کاربر ثبت‌نام‌شده، بات نباید با حذف پیام یا `ReplyKeyboardRemove` او را مجبور کند برای بازیابی منوی اصلی دوباره `/start` بفرستد. پیام‌های بات، به‌خصوص پیام لنگر، تا حد امکان حفظ می‌شوند؛ کیبورد موقت ثبت‌نام/اتصال حساب در پایان جریان با منوی اصلی persistent جایگزین می‌شود. این تصمیم شامل inline keyboard آفر که باید در معامله/انقضا حذف شود نیست.
 - داده production فقط به‌صورت read-only برای انتخاب fixture و ترکیب بار استفاده می‌شود؛ تست نباید production را mutate کند.
 - تمام پاسخ‌های طبیعی Telegram که در اثر آفر صحیح، آفر ناصحیح، معامله، رقابت، انقضا و پیام مدیریتی به کاربر یا کانال می‌رسند باید واقعاً از Telegram آزمایشی ارسال، در مقصد دریافت و با ledger تطبیق داده شوند؛ mock به‌تنهایی مدرک این معیار نیست.
@@ -74,7 +74,7 @@
 
 | اولویت | ترتیب میان کارهای هم‌سطح |
 | --- | --- |
-| `M0` | callback و کد ورود deadlineدار؛ اعلان معامله عبورکرده از پنج ثانیه؛ انتشار آفر جدید |
+| `M0` | callback deadlineدار؛ اعلان معامله عبورکرده از پنج ثانیه؛ انتشار آفر جدید |
 | `M1` | تبدیل preview به پیام موفقیت؛ اعلان عادی دو طرف معامله پیش از پنج ثانیه؛ پاسخ آفر نامعتبر/بازار بسته/محدودیت؛ سایر پاسخ‌های فوری بات |
 | `M2` | edit آفر لات‌بندی‌شده فعال با معامله جزئی؛ اعلان عضویت کاربر جدید |
 | `M3` | edit آفر کاملاً معامله‌شده |
@@ -172,7 +172,8 @@
 
 ### 3.8 ورودی‌های مستقیم صف اصلی و قواعد مشترک
 
-- کد ورود، callback deadlineدار و پاسخ تعاملی فوری مستقیماً وارد `M0` می‌شوند.
+- callback deadlineدار و پاسخ تعاملی فوری مستقیماً وارد `M0` می‌شوند.
+- OTP همان رفتار فعلی `main` را حفظ می‌کند: فرمان امضاشده، receipt کوتاه‌عمر Redis و بدون persistence کد در outbox یا `telegram_delivery_jobs`. مقدار enum آن فقط برای سازگاری mixed-version رزرو است و enqueue پایدار باید آن را رد کند.
 - onboarding، اتصال حساب، منو و پاسخ فوری غیر deadlineدار وارد `M1` می‌شوند.
 - reconciliation/ambiguous یک control plane است و صف ارسال جدا محسوب نمی‌شود.
 - `429` اولویت را تغییر نمی‌دهد؛ همان job با `retry_after + safety_margin` می‌ماند.
@@ -613,7 +614,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - limiter توزیع‌شده با Lua اتمیک Redis پیاده شده است: cadence هر bot role مستقل، destination gate میان دو bot مشترک، کلید مقصد hashشده و outage/پاسخ نامعتبر Redis fail-closed است. انتظار عادی limiter پیش از dispatch marker بدون ثبت خطا lease را defer می‌کند؛ خرابی limiter پیش از Telegram lease را آزاد و supervisor را متوقف می‌کند.
 - `429` ابتدا همان مقصد را تا مقدار خام `retry_after + safety` می‌بندد، probe کنترل‌شده bot را اعمال می‌کند و 429 مقصد متمایز دوم در پنجره دوثانیه‌ای فقط همان bot را تا بیشترین موعد فعال نگه می‌دارد. TTL Redis هرگز از cadence یا حتی retry_after بسیار بزرگ کوتاه‌تر نمی‌شود و polling صد میلی‌ثانیه‌ای وجود ندارد.
 - revalidation authoritative خانواده آفر برای `offer_publish` و شش action ویرایش پیاده شده است: هر claim، Offer/status/version و publication identity را از PostgreSQL بازمی‌خواند، publisher یکتا، channel/message، route، hash و payload بازسازی‌شده با renderer فعلی را تطبیق می‌دهد؛ نسخه قدیمی به reconcile، نسخه جلوتر به انتظار dependency، identity یا payload ناسازگار به quarantine و terminal بدون publication به no-op قطعی می‌رود. freshness بلافاصله پس از limiter و پیش از dispatch marker برای بار دوم اجرا می‌شود تا race میان admission و تغییر Offer نیز بسته شود.
-- freshness سایر actionها شامل callback/OTP، success خصوصی آفر، درخواست و اعلان معامله، پیام مدیریتی، وضعیت بازار و cleanup زمان‌دار، به‌همراه freshness router هر lane، feeder cutover، مسیر عملیاتی pause/resume و reconcile jobهای blocked باید در ادامه Stage 3 تکمیل شوند.
+- freshness سایر actionها شامل callback، success خصوصی آفر، درخواست و اعلان معامله، پیام مدیریتی، وضعیت بازار و cleanup زمان‌دار، به‌همراه freshness router هر lane، feeder cutover، مسیر عملیاتی pause/resume و reconcile jobهای blocked باید در ادامه Stage 3 تکمیل شوند. OTP خارج shared queue باقی می‌ماند.
 - claim repository اکنون `bot_identity` را اجباری و allowlisted می‌کند و index آماده claim با `bot_identity` آغاز می‌شود؛ lane editor نمی‌تواند job primary را lease کند و برعکس.
 - supervisor واحد `queue-v1`، taskهای مستقل primary، editor و lease recovery را ایجاد می‌کند. batch، sleep، gateway wait و خطای یک lane در task lane دیگر barrier نمی‌سازد؛ adapter freshness و gateway هر lane صریح و اجباری است و نبود هرکدام پیش از DB fail-closed می‌شود.
 - editor یک feature flag مستقل با مقدار پیش‌فرض خاموش دارد. حتی با patch آزمایشی ownership، نبود adapter اختصاصی اجازه ساخت task یا side effect نمی‌دهد و gateway واقعی پیش‌فرض از worker حذف شده است.
@@ -624,6 +625,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - برای برش preflight، `270` تست unit/regression مرتبط پاس شدند. ماتریس شامل primary-only و primary+editor، اتصال دقیق هر readback به token همان lane، نبود config، token/bot/channel اشتباه، response/transport ناقص، membership ناسازگار، تمام permissionهای اضافه editor، permission ناشناخته آینده، redaction و اثبات صفر task در preflight ناموفق بود. هیچ تماس زنده Telegram یا deploy انجام نشد.
 - برای برش canonical publisher identity، `283` تست publication/queue/regression و `82` تست sync/parity/migration پاس شدند. migration روی PostgreSQL واقعی با دو رکورد legacy، backfill فقط Telegram، رد `channel_editor` و publisher روی WebApp، downgrade به `f2c7d8e9a0bd` و re-upgrade تا `f3d8e9a0b1ce` آزموده شد و دیتابیس scratch پس از ثبت نتیجه حذف شد.
 - برای برش Offer freshness در `2026-07-17`، `216` تست publication/queue/regression و `64` تست sync/parity پاس شدند؛ `28` تست PostgreSQL واقعی نیز persistence حالت quarantine، بازخوانی Offer/commodity/publication identity، تغییر version/remaining quantity، و revalidation دوم پس از limiter با صفر gateway call برای job stale را پوشش دادند. scratch نام‌دار پس از تست حذف و نبودنش تأیید شد؛ compile و `diff --check` نیز پاس شدند. این برش فقط خانواده publication/edit آفر است و هیچ تماس زنده Telegram، deploy یا فعال‌سازی runtime انجام نشد.
+- در اصلاح scope امنیتی OTP در `2026-07-17`، `150` تست queue/runtime/Offer و مسیرهای واقعی Stage 6 و login OTP پاس شدند؛ `29` تست PostgreSQL واقعی نیز ثابت کردند `OTP_DEADLINE` پیش از insert رد و برای payload حساس هیچ row ساخته نمی‌شود. scratch نام‌دار حذف و نبودنش تأیید شد؛ مقدار enum فقط برای mixed-version حفظ شده و runtime صف همچنان غیرفعال است.
 - این foundation مجوز deploy یا شروع Stage 4 نیست و runtime عمداً غیرفعال باقی مانده است.
 
 ### Stage 4 — deploy و آزمایش تکرارشونده staging
@@ -766,6 +768,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | `TOPQ-C66` | بالا | DECIDED | editor updateهای primary را دریافت نمی‌کند و discovery/polling می‌تواند stale یا ناسازگار شود | انتقال canonical `(publisher_bot_identity, destination_identity, message_id)` از publication state؛ بدون Telegram/API polling | integration primary-send→state→editor-edit و quarantine روی mismatch |
 | `TOPQ-C67` | بحرانی | DECIDED | token دوم، دسترسی بیش‌ازحد یا fingerprint اشتباه سطح حمله و خطر ارسال production را زیاد می‌کند | secret registry خارج DB، permission حداقلی `can_edit_messages`، fingerprint/readback و destination allowlist پیش از claim | secret scan، permission preflight و negative production fingerprint |
 | `TOPQ-C68` | بحرانی | DECIDED | dispatcher یا priority سراسری می‌تواند صدها job پر‌اولویت primary را جلوتر از editها نگه دارد و ظرفیت مستقل editor را بی‌استفاده کند | scheduler resource-aware و work-conserving با دو claim/execution lane مستقل زیر همان state machine؛ priority فقط میان رقیبان همان lane/منبع مشترک و gate مقصد فقط هنگام pacing/cooldown واقعی اعمال می‌شود | اشباع حداقل ۳۰۰ job `M0/M1` primary که دست‌کم ۲۰۰ مورد آن private/admin و خارج gate کانال‌اند، همراه ۱۰۰ edit editor؛ editor هنگام باقی‌بودن backlog primary پیشروی کند، مگر با شاهد gate مقصد خودش، و duplicate/fallback صفر باشد |
+| `TOPQ-C69` | بحرانی | DECIDED | ورود `OTP_DEADLINE` به صف پایدار، کد ورود محرمانه را در PostgreSQL نگه می‌دارد و رفتار امن فعلی `main` را تغییر می‌دهد | enum فقط برای mixed-version باقی می‌ماند؛ feeder mapping حذف و enqueue پایدار آن fail-closed است؛ مسیر امضاشده و receipt کوتاه‌عمر Redis مالک OTP می‌ماند | تست قرارداد rejection، تست PostgreSQL با شمار صفر row و regression کامل Stage 6 OTP |
 
 ### 13.5 چالش‌های غیرفنی و عملیاتی
 
@@ -799,7 +802,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 | [TOPQ-ADR-02](adr/TOPQ-ADR-02-queue-source-sync.md) | schema، منبع حقیقت، dedupe و مرز atomic producer/sync | `C22`, `C23`, `C29`, `C38` |
 | [TOPQ-ADR-03](adr/TOPQ-ADR-03-ambiguity-lease-reconciliation.md) | timeout/crash ambiguity، lease و reconciliation | `C07`, `C24`, `C35`, `C55` |
 | [TOPQ-ADR-04](adr/TOPQ-ADR-04-scheduler-freshness-outage.md) | scheduler resource-aware، laneهای اجرایی، priority، `M0` deadline، freshness، edit ordering/catch-up و outage mode | `C10`, `C12`, `C25`, `C26`, `C30`, `C37`, `C56`, `C57`, `C58`, `C68` |
-| [TOPQ-ADR-05](adr/TOPQ-ADR-05-worker-ownership-rollout.md) | inventory gateway، topology صف‌های تابع، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41`, `C59`, `C60` |
+| [TOPQ-ADR-05](adr/TOPQ-ADR-05-worker-ownership-rollout.md) | inventory gateway، topology صف‌های تابع، ownership workerهای موجود و rollout نسخه مختلط | `C16`, `C27`, `C28`, `C39`, `C40`, `C41`, `C59`, `C60`, `C69` |
 | [TOPQ-ADR-06](adr/TOPQ-ADR-06-operations-ux-go-live.md) | RACI، copy نهایی، keyboard/anchor UX، incident response و go/no-go | `C61`, `N03`, `N05`, `N10`, `N14` |
 | [TOPQ-ADR-07](adr/TOPQ-ADR-07-editor-bot-routing.md) | نقش editor، routing چند credential، lane مستقل اجرا، permission، limiter و گیت فعال‌سازی | `C62` تا `C68`, `N19` |
 
@@ -816,7 +819,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - artifact استاندارد هر run شامل `manifest.json`, `events.jsonl`, `errors.jsonl`, `reconciliation.json` و `summary.md` است. همه فایل‌ها `schema_version`, `run_id`, seed، commit، fingerprint محیط، config مؤثر، زمان UTC، شناسه job/dedupe، expected/actual و checksum دارند و token، PII و متن production در آن‌ها redacted است تا agentهای AI و انسان یک ورودی واحد و قابل بازتولید داشته باشند.
 - صف اصلی Telegram execution plane یکتا با اولویت `M0` تا `M7` است و صف‌های دامنه‌ای فقط feeder/coordinator آن هستند. شش feeder قطعی شامل ثبت/کنترل آفر، edit کانال، معامله/درخواست، مدیریتی/سیستمی، وضعیت بازار و عملیات زمان‌دار است. publish و edit صف‌های مستقل ولی دارای dependency هستند؛ fairness/catch-up و handoff در `C58/C59/C60` با قراردادهای بخش‌های 3، 6.5 و 13.12 بسته شده‌اند.
 - ترتیب داخلی صف edit همیشه فعال است: active lot-partial، traded، expired، cancelled، سایر اصلاحات و repair؛ آفر partial که پیش از dispatch کامل شود به طبقه traded reclassify می‌شود. newest-first بر `offer.created_at` تکیه دارد.
-- ترتیب `M0` به‌طور صریح callback/OTP deadlineدار، اعلان معامله عبورکرده از پنج ثانیه و سپس publication آفر است. اعلان نتیجه معامله ابتدا `M1` است و فقط recipient ارسال‌نشده مستقل ارتقا می‌یابد.
+- ترتیب `M0` shared queue به‌طور صریح callback deadlineدار، اعلان معامله عبورکرده از پنج ثانیه و سپس publication آفر است. اعلان نتیجه معامله ابتدا `M1` است و فقط recipient ارسال‌نشده مستقل ارتقا می‌یابد. OTP محرمانه از این صف مستثنا و در transport کوتاه‌عمر فعلی باقی می‌ماند.
 - برای کاربر authenticated، پیام و به‌خصوص anchor تا حد امکان حذف نمی‌شود و بات نباید او را برای بازگرداندن منو مجبور به `/start` کند. context keyboard در پایان success/error/cancel/timeout با منوی persistent جایگزین می‌شود؛ inline keyboardهای business-stale همچنان حذف می‌شوند.
 
 نمونه copy ترکیبی تأییدشده در `2026-07-16`:
@@ -940,6 +943,7 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 | `C21–C45` | Backend + Operations | Stage 2، 3 و 4 | توقف claim، حفظ job پایدار، fail-closed limiter و migration افزایشی |
 | `C46–C61` | Backend + staging run | Stage 2 و 4 | cancel فقط پیش از claim، supersession نسخه‌دار و cleanup محدود به `run_id` |
 | `C62–C68` | Backend + Operations + Security | Stage 3 و 4 | editor خاموش، توقف claim lane آن، حفظ job و reconcile پیش از هر تغییر routing |
+| `C69` | Backend + Security | Stage 3 | OTP خارج shared queue، حفظ transport فعلی و رد هر durable enqueue |
 | `N01–N06` | Product + Operations | Stage 4 و 5 | `NO-GO`، بدون کاهش SLO یا تغییر semantics |
 | `N07–N19` | Operations + Security | Stage 1، 4، 5 و 6 | توقف تست/release، حفظ artifact redacted، mode امن primary-only و عدم لمس production |
 

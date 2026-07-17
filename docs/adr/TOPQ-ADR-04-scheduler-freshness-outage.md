@@ -7,7 +7,7 @@
 
 ## تصمیم
 
-- صف اصلی تنها scheduler/control plane Bot API با اولویت `M0..M7` است، اما dispatcher تک‌اسلاتی سراسری نیست. زیر owner واحد `queue-v1` دو claim/execution lane هم‌زمان و work-conserving برای `primary` و `channel_editor` وجود دارد. ترتیب `M0`: callback/OTP، اعلان معامله عبورکرده از پنج ثانیه، publication آفر.
+- صف اصلی تنها scheduler/control plane Bot API در scope این Roadmap با اولویت `M0..M7` است، اما dispatcher تک‌اسلاتی سراسری نیست. زیر owner واحد `queue-v1` دو claim/execution lane هم‌زمان و work-conserving برای `primary` و `channel_editor` وجود دارد. ترتیب `M0`: callback deadlineدار، اعلان معامله عبورکرده از پنج ثانیه، publication آفر. OTP به‌علت محرمانگی payload در مسیر امضاشده و Redis کوتاه‌عمر فعلی می‌ماند و وارد PostgreSQL صف نمی‌شود.
 - هر lane فقط `bot_identity` خود را claim می‌کند و limiter، semaphore/in-flight و token budget مستقل دارد. هر دو lane همان repository، state machine، lease، fencing، retry classifier و feedback را استفاده می‌کنند.
 - priority فقط میان jobهای رقیب همان lane یا منبع مشترک اعمال می‌شود. backlog، sleep، retry یا `M0` در primary حق بیکار نگه‌داشتن ظرفیت editor را ندارد و برعکس.
 - اعلان هر recipient معامله در `M1` شروع و مستقل در `trade_committed_at+5s` به `M0` ارتقا می‌یابد؛ cooldown و retry_after دور زده نمی‌شود.

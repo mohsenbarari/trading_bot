@@ -345,6 +345,16 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
                     list(range(len(actions))),
                 )
 
+    def test_otp_action_is_reserved_but_never_accepted_by_durable_feeder(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "action_not_allowed_for_feeder:direct:otp_deadline",
+        ):
+            feeder_internal_rank(
+                TelegramFeederKind.DIRECT,
+                TelegramDeliveryAction.OTP_DEADLINE,
+            )
+
     async def test_same_priority_uses_action_rank_deadline_then_foreign_sequence(self):
         queue = InMemoryTelegramDeliveryQueue()
         later = await self.enqueue(

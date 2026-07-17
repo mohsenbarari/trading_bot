@@ -245,6 +245,34 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             count = await db.scalar(select(func.count()).select_from(TelegramDeliveryJobRecord))
         self.assertEqual(count, 1)
 
+    async def test_otp_payload_is_rejected_before_durable_insert(self):
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "telegram_action_forbidden_in_durable_queue",
+            ):
+                await enqueue_telegram_delivery_job(
+                    db,
+                    **self._enqueue_kwargs(
+                        "otp-must-not-persist",
+                        action=TelegramDeliveryAction.OTP_DEADLINE,
+                        payload={
+                            "chat_id": 1001,
+                            "text": "sensitive one-time code",
+                        },
+                        deadline=utc_now() + timedelta(seconds=30),
+                    ),
+                )
+            await db.rollback()
+        async with self.Session() as db:
+            count = await db.scalar(
+                select(func.count(TelegramDeliveryJobRecord.id)).where(
+                    TelegramDeliveryJobRecord.source_natural_id
+                    == "otp-must-not-persist"
+                )
+            )
+        self.assertEqual(count, 0)
+
     async def test_same_identity_with_changed_payload_is_rejected(self):
         await self._enqueue("dedupe-conflict")
         async with self.Session() as db:

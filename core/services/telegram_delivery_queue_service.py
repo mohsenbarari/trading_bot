@@ -22,6 +22,7 @@ from core.telegram_delivery_queue_contract import (
     CLAIMABLE_DELIVERY_STATES,
     FINAL_DELIVERY_STATES,
     MINIMUM_LEASE_MARGIN_SECONDS,
+    NON_DURABLE_TELEGRAM_QUEUE_ACTIONS,
     TelegramDeliveryAction,
     TelegramDeliveryDedupeConflictError,
     TelegramDeliveryDecision,
@@ -303,6 +304,10 @@ async def enqueue_telegram_delivery_job(
         raise TelegramDeliveryQueueValidationError("source_version_must_be_integer") from exc
     if normalized_source_version < 0:
         raise TelegramDeliveryQueueValidationError("source_version_must_be_non_negative")
+    if action in NON_DURABLE_TELEGRAM_QUEUE_ACTIONS:
+        raise TelegramDeliveryQueueValidationError(
+            "telegram_action_forbidden_in_durable_queue"
+        )
     if normalized_method not in SUPPORTED_TELEGRAM_QUEUE_METHODS:
         raise TelegramDeliveryQueueValidationError("telegram_method_not_allowlisted")
     if bot not in SUPPORTED_TELEGRAM_BOT_IDENTITIES:
