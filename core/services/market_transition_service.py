@@ -274,6 +274,15 @@ def _market_notice_staleness_seconds() -> int:
         return MARKET_NOTICE_STALENESS_SECONDS
 
 
+def market_channel_notice_freshness_deadline(
+    transition_at: datetime,
+) -> datetime | None:
+    max_age_seconds = _market_notice_staleness_seconds()
+    if max_age_seconds <= 0:
+        return None
+    return _coerce_utc_now(transition_at) + timedelta(seconds=max_age_seconds)
+
+
 def _foreign_independent_grace_seconds() -> int:
     raw = os.getenv("TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS")
     if raw is None:
@@ -303,10 +312,8 @@ def _market_offer_admission_lock_timeout_ms() -> int:
 
 
 def _market_notice_is_stale(*, transition_at: datetime, now: datetime) -> bool:
-    max_age_seconds = _market_notice_staleness_seconds()
-    if max_age_seconds <= 0:
-        return False
-    return now - _coerce_utc_now(transition_at) > timedelta(seconds=max_age_seconds)
+    deadline = market_channel_notice_freshness_deadline(transition_at)
+    return deadline is not None and _coerce_utc_now(now) > deadline
 
 
 async def _suppress_stale_market_notice(

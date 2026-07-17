@@ -11,9 +11,11 @@ from core.telegram_delivery_freshness_router import (
     TelegramDeliveryFreshnessRegistry,
     TelegramDeliveryFreshnessRouter,
     TelegramDeliveryFreshnessRoutingError,
+    market_freshness_routes,
     offer_freshness_routes,
     required_freshness_actions_for_lane,
 )
+from core.telegram_delivery_market_freshness import MARKET_NOTICE_FRESHNESS_ACTIONS
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -72,6 +74,25 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             editor.missing_actions,
             (TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,),
+        )
+
+    def test_offer_and_market_routes_report_remaining_primary_coverage(self):
+        validator = send_validator()
+        routes = offer_freshness_routes(validator)
+        routes.update(market_freshness_routes(validator))
+        registry = TelegramDeliveryFreshnessRegistry(routes)
+
+        primary = registry.coverage("primary")
+
+        self.assertEqual(
+            set(primary.configured_actions),
+            OFFER_FRESHNESS_ACTIONS | MARKET_NOTICE_FRESHNESS_ACTIONS,
+        )
+        self.assertEqual(
+            set(primary.missing_actions),
+            DURABLE_TELEGRAM_DELIVERY_ACTIONS
+            - OFFER_FRESHNESS_ACTIONS
+            - MARKET_NOTICE_FRESHNESS_ACTIONS,
         )
 
     def test_incomplete_lane_refuses_router_construction(self):
@@ -196,6 +217,11 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryFreshnessRegistry(
                 {TelegramDeliveryAction.GENERAL_IMMEDIATE: None}
             )
+        with self.assertRaisesRegex(
+            TelegramDeliveryFreshnessRoutingError,
+            "telegram_market_freshness_validator_invalid",
+        ):
+            market_freshness_routes(None)
 
 
 if __name__ == "__main__":

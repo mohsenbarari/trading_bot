@@ -30,6 +30,10 @@ from core.telegram_delivery_freshness_router import (
     DURABLE_TELEGRAM_DELIVERY_ACTIONS,
     TelegramDeliveryFreshnessRegistry,
 )
+from core.telegram_delivery_market_freshness import (
+    MarketTelegramDeliveryFreshnessValidator,
+    validate_market_telegram_delivery_freshness,
+)
 from core.telegram_delivery_offer_freshness import (
     telegram_channel_destination_key,
     validate_offer_telegram_delivery_freshness,
@@ -66,6 +70,15 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeDecision,
     TelegramDeliveryRuntimeMode,
 )
+from core.services.market_transition_service import (
+    MARKET_NOTICE_STATUS_PENDING,
+    MARKET_NOTICE_TRANSITION_OPENED,
+    MARKET_OPENED_CHANNEL_NOTICE,
+    market_channel_notice_dedupe_key,
+    market_channel_notice_freshness_deadline,
+)
+from models.market_channel_notice_receipt import MarketChannelNoticeReceipt
+from models.market_runtime_state import MarketRuntimeState
 
 
 DATABASE_NAME_PATTERN = re.compile(r"^telegram_queue_stage3_[a-z0-9_]+_test$")
@@ -172,6 +185,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
     def _enqueue_kwargs(
         source_id: str,
         *,
+        source_version: int = 1,
         feeder: TelegramFeederKind = TelegramFeederKind.DIRECT,
         action: TelegramDeliveryAction = TelegramDeliveryAction.GENERAL_IMMEDIATE,
         destination: str = "private:1001",
@@ -179,13 +193,14 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         method: str = "sendMessage",
         payload: dict | None = None,
         deadline=None,
+        freshness_deadline=None,
         bot_identity: str = "primary",
     ) -> dict:
         return {
             "current_server": "foreign",
             "feeder": feeder,
             "source_natural_id": source_id,
-            "source_version": 1,
+            "source_version": source_version,
             "action": action,
             "bot_identity": bot_identity,
             "destination_key": destination,
@@ -194,6 +209,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             "payload": payload or {"chat_id": 1001, "text": source_id},
             "template_version": "test-v1",
             "delivery_deadline_at": deadline,
+            "freshness_deadline_at": freshness_deadline,
             "run_id": "stage3-foundation-test",
         }
 
@@ -1144,6 +1160,107 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(persisted.state, TelegramDeliveryState.SENT)
         self.assertEqual(persisted.telegram_message_id, 991)
+
+    async def test_market_freshness_blocks_transition_changed_after_limiter(self):
+        channel_id = -100123456
+        transition_at = utc_now() - timedelta(seconds=10)
+        dedupe_key = market_channel_notice_dedupe_key(
+            transition=MARKET_NOTICE_TRANSITION_OPENED,
+            transition_at=transition_at,
+            notice_text=MARKET_OPENED_CHANNEL_NOTICE,
+        )
+        async with self.Session() as db:
+            await db.execute(text("DELETE FROM market_channel_notice_receipts"))
+            await db.execute(text("DELETE FROM market_runtime_state"))
+            db.add(
+                MarketRuntimeState(
+                    id=1,
+                    is_open=True,
+                    active_web_notice_visible=True,
+                    offers_since_last_open=0,
+                    last_transition_at=transition_at,
+                )
+            )
+            db.add(
+                MarketChannelNoticeReceipt(
+                    dedupe_key=dedupe_key,
+                    transition=MARKET_NOTICE_TRANSITION_OPENED,
+                    transition_at=transition_at,
+                    notice_text=MARKET_OPENED_CHANNEL_NOTICE,
+                    channel_id=str(channel_id),
+                    status=MARKET_NOTICE_STATUS_PENDING,
+                )
+            )
+            await db.commit()
+
+        enqueued = await self._enqueue(
+            dedupe_key,
+            feeder=TelegramFeederKind.MARKET_STATUS,
+            action=TelegramDeliveryAction.MARKET_TRANSITION,
+            destination=telegram_channel_destination_key(channel_id),
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="sendMessage",
+            payload={
+                "chat_id": channel_id,
+                "text": MARKET_OPENED_CHANNEL_NOTICE,
+            },
+            freshness_deadline=market_channel_notice_freshness_deadline(
+                transition_at
+            ),
+        )
+        validator = MarketTelegramDeliveryFreshnessValidator(channel_id)
+        async with self.Session() as db:
+            current = await validate_market_telegram_delivery_freshness(
+                db,
+                enqueued.job,
+                utc_now(),
+                expected_channel_id=channel_id,
+            )
+        self.assertEqual(current.outcome, TelegramFreshnessOutcome.SEND)
+
+        Session = self.Session
+
+        class _CloseMarketAfterFirstFreshness(_AllowLimiter):
+            async def acquire(self, _job, *, now):
+                async with Session() as db:
+                    state = await db.get(MarketRuntimeState, 1)
+                    state.is_open = False
+                    state.last_transition_at = now
+                    await db.commit()
+                return TelegramDeliveryDispatchAdmission(allowed=True)
+
+        gateway = AsyncMock()
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ):
+            report = await run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
+                limit=1,
+                freshness_validator=validator,
+                gateway_call=gateway,
+                dispatch_limiter=_CloseMarketAfterFirstFreshness(),
+                worker_id="worker-market-freshness-race-test",
+            )
+
+        self.assertEqual(report.status_counts, {"superseded": 1})
+        gateway.assert_not_awaited()
+        async with self.Session() as db:
+            persisted = await db.get(
+                TelegramDeliveryJobRecord,
+                enqueued.job.id,
+            )
+        self.assertEqual(persisted.state, TelegramDeliveryState.SUPERSEDED)
+        self.assertEqual(
+            persisted.outcome_reason,
+            "market_freshness_transition_no_longer_current",
+        )
 
     async def test_primary_gateway_wait_does_not_block_editor_lane_cycle(self):
         primary = await self._enqueue("lane-primary-slow")

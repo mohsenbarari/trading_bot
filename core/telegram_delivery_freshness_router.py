@@ -15,6 +15,7 @@ from core.services.telegram_delivery_queue_service import (
     TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
 )
+from core.telegram_delivery_market_freshness import MARKET_NOTICE_FRESHNESS_ACTIONS
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
 from core.telegram_delivery_queue_contract import (
     NON_DURABLE_TELEGRAM_QUEUE_ACTIONS,
@@ -235,3 +236,13 @@ def offer_freshness_routes(
             "telegram_offer_freshness_validator_invalid"
         )
     return {action: validator for action in OFFER_FRESHNESS_ACTIONS}
+
+
+def market_freshness_routes(
+    validator: TelegramDeliveryFreshnessValidator,
+) -> dict[TelegramDeliveryAction, TelegramFreshnessValidatorCallable]:
+    if not callable(validator):
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_market_freshness_validator_invalid"
+        )
+    return {action: validator for action in MARKET_NOTICE_FRESHNESS_ACTIONS}
