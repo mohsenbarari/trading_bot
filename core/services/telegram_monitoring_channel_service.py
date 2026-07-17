@@ -288,9 +288,9 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
     notes = str(getattr(offer, "notes", None) or "").strip()
     if notes:
         visible_lines.append(f"توضیحات: {_html(notes)}")
-    visible_lines.append(f"لفظ دهنده: {_html(presenter.account_name or '-')}")
 
     details_lines = [
+        f"لفظ دهنده: {_html(presenter.account_name or '-')}",
         f"وضعیت: {_html(_status_label(getattr(offer, 'status', None)))}",
         f"ارسال شده از: {_html(_origin_label(getattr(offer, 'home_server', None)))}",
         f"یوزرنیم تلگرام: {_html(presenter.telegram_username)}",
@@ -315,7 +315,8 @@ def build_monitoring_offer_message(offer: Any, presenter: MonitoringOfferPresent
         [
             *visible_lines,
             "",
-            "جزئیات:",
+            "--------------------",
+            "اطلاعات رصد:",
             *details_lines,
         ]
     )

@@ -94,7 +94,15 @@ class TelegramMonitoringChannelServiceTests(unittest.TestCase):
 
         self.assertIn("فروش ربع بهار 40 عدد فردا", message)
         self.assertIn("لفظ دهنده: internal_account", message)
-        self.assertIn("جزئیات:", message)
+        self.assertIn("--------------------\nاطلاعات رصد:\nلفظ دهنده: internal_account", message)
+        self.assertLess(
+            message.index("فروش ربع بهار 40 عدد فردا"),
+            message.index("--------------------"),
+        )
+        self.assertGreater(
+            message.index("لفظ دهنده: internal_account"),
+            message.index("--------------------"),
+        )
         self.assertNotIn("<blockquote", message)
         self.assertIn("ارسال شده از: بات", message)
         self.assertIn("یوزرنیم تلگرام: @coin_user", message)
