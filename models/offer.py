@@ -99,7 +99,7 @@ class Offer(Base):
 
     # Immutable provenance owned by the replacement offer. Unlike the legacy
     # outgoing pointer above, creating a replacement never mutates its source.
-    republished_from_offer_public_id = Column(String(40), nullable=True, unique=True, index=True)
+    republished_from_offer_public_id = Column(String(40), nullable=True)
     
     # زمان ایجاد
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -130,4 +130,11 @@ Index(
     Offer.created_at.desc(),
     Offer.id.desc(),
     postgresql_where=Offer.status == OfferStatus.ACTIVE,
+)
+
+Index(
+    'uq_offers_republished_from_offer_public_id_home_server',
+    Offer.republished_from_offer_public_id,
+    Offer.home_server,
+    unique=True,
 )

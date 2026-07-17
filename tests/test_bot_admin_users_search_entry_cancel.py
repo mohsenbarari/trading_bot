@@ -54,7 +54,8 @@ class BotAdminUsersSearchEntryCancelTests(unittest.IsolatedAsyncioTestCase):
         )
         state = SimpleNamespace()
         with patch("bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()) as clear_mock, patch(
-            "bot.handlers.admin_users.get_users_management_keyboard", return_value="KB"
+            "bot.handlers.admin_users.build_users_management_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.admin_users.update_anchor", new=AsyncMock()) as anchor_mock:
             await handle_user_search_cancel(query, state=state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         clear_mock.assert_awaited_once_with(state)

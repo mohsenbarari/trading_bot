@@ -198,8 +198,8 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.start.build_linked_account_panel_message",
             new=AsyncMock(return_value="welcome panel"),
         ), patch(
-            "bot.handlers.start.get_persistent_menu_keyboard",
-            return_value="persistent menu",
+            "bot.handlers.start.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="persistent menu"),
         ), patch(
             "bot.handlers.start._user_facing_webapp_url",
             return_value="https://app.example",

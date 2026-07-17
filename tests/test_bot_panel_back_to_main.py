@@ -14,7 +14,8 @@ class BotPanelBackToMainTests(unittest.IsolatedAsyncioTestCase):
         message = SimpleNamespace(bot=SimpleNamespace(), chat=SimpleNamespace(id=10), answer=AsyncMock(return_value=SimpleNamespace(message_id=71)))
         user = SimpleNamespace(role="standard")
         with patch("bot.handlers.panel.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
-            "bot.handlers.panel.get_persistent_menu_keyboard", return_value="KB"
+            "bot.handlers.panel.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.panel.set_anchor") as set_anchor, patch(
             "bot.handlers.panel.settings", SimpleNamespace(frontend_url="https://app")
         ):

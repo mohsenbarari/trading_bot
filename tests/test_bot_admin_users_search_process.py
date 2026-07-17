@@ -46,7 +46,10 @@ class BotAdminUsersSearchProcessTests(unittest.IsolatedAsyncioTestCase):
         state = SimpleNamespace()
         with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()) as delete_mock, patch(
             "bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()
-        ) as clear_mock, patch("bot.handlers.admin_users.get_users_management_keyboard", return_value="KB"), patch(
+        ) as clear_mock, patch(
+            "bot.handlers.admin_users.build_users_management_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
+        ), patch(
             "bot.handlers.admin_users.update_anchor", new=AsyncMock()
         ) as anchor_mock:
             await process_search_query(message, state=state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
@@ -68,7 +71,8 @@ class BotAdminUsersSearchProcessTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()), patch(
             "bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()
         ), patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)), patch(
-            "bot.handlers.admin_users.get_users_management_keyboard", return_value="KB"
+            "bot.handlers.admin_users.build_users_management_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.admin_users.update_anchor", new=AsyncMock()) as anchor_mock:
             await process_search_query(message, state=state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         self.assertEqual(anchor_mock.await_count, 2)
@@ -122,7 +126,8 @@ class BotAdminUsersSearchProcessTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()), patch(
             "bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()
         ), patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)), patch(
-            "bot.handlers.admin_users.get_users_management_keyboard", return_value="KB"
+            "bot.handlers.admin_users.build_users_management_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.admin_users.update_anchor", new=AsyncMock()) as anchor_mock:
             await process_search_query(message, state=SimpleNamespace(), user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
 

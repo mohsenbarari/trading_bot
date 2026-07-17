@@ -65,7 +65,8 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         command = SimpleNamespace(args="invite-token")
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
-            "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+            "bot.handlers.start.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ), patch(
             "bot.handlers.link_account.build_channel_access_text",
             new=AsyncMock(return_value="🔗 کانال معاملات:\nhttps://t.me/+returning"),

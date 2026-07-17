@@ -69,7 +69,7 @@ from bot.onboarding import (
     pending_onboarding_step,
 )
 from bot.states import Registration
-from bot.keyboards import get_persistent_menu_keyboard
+from bot.repeat_offer import build_persistent_navigation_keyboard
 from bot.handlers.link_account import (
     BOT_ACCOUNT_INACTIVE_REASON,
     bot_account_access_denial_reason,
@@ -482,8 +482,8 @@ async def _send_registration_handoff(
                 == TelegramRegistrationIntentStatus.RECONCILED_CREATED
             ),
         ),
-        reply_markup=get_persistent_menu_keyboard(
-            user.role,
+        reply_markup=await build_persistent_navigation_keyboard(
+            user,
             public_webapp_url_for_links(),
         ),
     )
@@ -682,7 +682,10 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         if user:
             anchor_msg = await message.answer(
                 await build_returning_account_panel_message(message.bot, user),
-                reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url()),
+                reply_markup=await build_persistent_navigation_keyboard(
+                    user,
+                    _user_facing_webapp_url(),
+                ),
             )
             set_anchor(message.chat.id, anchor_msg.message_id)
             return
@@ -778,7 +781,10 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 return
         anchor_msg = await message.answer(
             await build_returning_account_panel_message(message.bot, user),
-            reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url())
+            reply_markup=await build_persistent_navigation_keyboard(
+                user,
+                _user_facing_webapp_url(),
+            )
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
@@ -958,7 +964,10 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
         
         anchor_msg = await message.answer(
             await build_returning_account_panel_message(message.bot, user),
-            reply_markup=get_persistent_menu_keyboard(user.role, _user_facing_webapp_url())
+            reply_markup=await build_persistent_navigation_keyboard(
+                user,
+                _user_facing_webapp_url(),
+            )
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
     else:
@@ -1557,8 +1566,8 @@ async def _handle_bot_onboarding_ack(callback: types.CallbackQuery, user: Option
         try:
             anchor_msg = await callback.message.answer(
                 await build_linked_account_panel_message(callback.bot, db_user),
-                reply_markup=get_persistent_menu_keyboard(
-                    db_user.role,
+                reply_markup=await build_persistent_navigation_keyboard(
+                    db_user,
                     _user_facing_webapp_url(),
                 ),
             )

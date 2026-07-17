@@ -34,7 +34,8 @@ class BotPanelProfileMenuTests(unittest.IsolatedAsyncioTestCase):
             role=SimpleNamespace(value="مدیر ارشد"),
         )
         with patch("bot.handlers.panel.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
-            "bot.handlers.panel.get_user_panel_keyboard", return_value="KB"
+            "bot.handlers.panel.build_user_panel_navigation_keyboard",
+            new=AsyncMock(return_value="KB"),
         ), patch("bot.handlers.panel.set_anchor") as set_anchor, patch(
             "bot.handlers.panel.settings", SimpleNamespace(bot_username="botname")
         ):

@@ -287,6 +287,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         list_mock.assert_awaited_once()
         self.assertEqual(list_mock.await_args.kwargs["owner_user_id"], 88)
         self.assertEqual(list_mock.await_args.kwargs["limit"], 3)
+        self.assertEqual(list_mock.await_args.kwargs["replacement_home_server"], "iran")
         serialize_mock.assert_awaited_once()
 
     async def test_get_my_repeatable_offers_hides_tier2_customer(self):

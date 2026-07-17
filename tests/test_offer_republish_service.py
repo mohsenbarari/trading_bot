@@ -15,8 +15,9 @@ from core.services.offer_republish_service import (
     lock_repeatable_offer,
     offer_remaining_lot_sizes,
     offer_remaining_quantity,
+    repeatable_offer_conditions,
 )
-from models.offer import OfferType
+from models.offer import Offer, OfferType
 
 
 class FakeScalarResult:
@@ -28,11 +29,38 @@ class FakeScalarResult:
 
 
 class OfferRepublishPolicyTests(unittest.TestCase):
+    def test_republish_provenance_is_unique_per_home_not_globally(self):
+        provenance_column = Offer.__table__.c.republished_from_offer_public_id
+        self.assertFalse(bool(provenance_column.unique))
+
+        index = next(
+            item
+            for item in Offer.__table__.indexes
+            if item.name == "uq_offers_republished_from_offer_public_id_home_server"
+        )
+        self.assertTrue(index.unique)
+        self.assertEqual(
+            [column.name for column in index.columns],
+            ["republished_from_offer_public_id", "home_server"],
+        )
+
     def test_expiry_allowlist_excludes_bulk_cancel_and_market_close(self):
         self.assertEqual(set(REPEATABLE_EXPIRE_REASONS), {"time_limit", "manual"})
         self.assertNotIn("cancel_all", REPEATABLE_EXPIRE_REASONS)
         self.assertNotIn("bot_cancel_all", REPEATABLE_EXPIRE_REASONS)
         self.assertNotIn("market_closed", REPEATABLE_EXPIRE_REASONS)
+
+    def test_replacement_home_is_required_and_fail_closed(self):
+        window = OfferRepeatWindow(
+            opened_at=datetime(2026, 7, 14, 9, 0, 0),
+            recent_cutoff=datetime(2026, 7, 14, 10, 0, 0),
+        )
+        with self.assertRaises(ValueError):
+            repeatable_offer_conditions(
+                owner_user_id=9,
+                window=window,
+                replacement_home_server="unknown",
+            )
 
     def test_remaining_quantity_and_current_lots_are_authoritative(self):
         source = SimpleNamespace(
@@ -182,7 +210,11 @@ class OfferRepublishQueryTests(unittest.IsolatedAsyncioTestCase):
             "core.services.offer_republish_service.load_offer_repeat_window",
             new=AsyncMock(return_value=window),
         ):
-            result = await list_repeatable_offers(db, owner_user_id=9)
+            result = await list_repeatable_offers(
+                db,
+                owner_user_id=9,
+                replacement_home_server="foreign",
+            )
 
         self.assertEqual(result, [])
         sql = str(captured[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
@@ -191,6 +223,7 @@ class OfferRepublishQueryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("offers.expire_reason IN ('time_limit', 'manual')", sql)
         self.assertIn("offers.created_at >=", sql)
         self.assertIn("republished_from_offer_public_id = offers.offer_public_id", sql)
+        self.assertIn("home_server = 'foreign'", sql)
         self.assertIn("NOT (EXISTS", sql)
         self.assertIn("offers.republished_offer_id IS NULL", sql)
         self.assertIn("offers.archived IS false OR offers.archived IS NULL", sql)
@@ -219,12 +252,14 @@ class OfferRepublishQueryTests(unittest.IsolatedAsyncioTestCase):
                     offer_public_id="ofr_source_41",
                     expected_local_id=42,
                     market_is_open=True,
+                    replacement_home_server="foreign",
                 )
 
         self.assertEqual(exc_info.exception.reason, "offer_identity_mismatch")
         sql = str(captured[0].compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
         self.assertIn("FOR UPDATE", sql)
         self.assertIn("offers.offer_public_id = 'ofr_source_41'", sql)
+        self.assertIn("home_server = 'foreign'", sql)
 
 
 if __name__ == "__main__":

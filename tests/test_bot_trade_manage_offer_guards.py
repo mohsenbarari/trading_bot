@@ -35,7 +35,10 @@ class FakeSessionFactory:
 
 
 def make_callback():
-    return SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_reply_markup=AsyncMock()))
+    return SimpleNamespace(
+        answer=AsyncMock(),
+        message=SimpleNamespace(edit_reply_markup=AsyncMock(), answer=AsyncMock()),
+    )
 
 
 class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +91,10 @@ class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.trade_manage.forward_offer_expiry_to_home_server",
             new=AsyncMock(return_value=(200, {"expired": True, "replayed": True})),
-        ) as forward_mock:
+        ) as forward_mock, patch(
+            "bot.handlers.trade_manage.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="MENU"),
+        ):
             await handle_expire_offer(
                 callback,
                 SimpleNamespace(offer_id=5),
@@ -100,7 +106,8 @@ class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
         payload = forward_mock.await_args.args[1]
         self.assertIn("command_id", payload)
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
-        self.assertIn("منقضی شد", callback.answer.await_args.args[0])
+        callback.answer.assert_awaited_once_with()
+        self.assertIn("منقضی شد", callback.message.answer.await_args.args[0])
 
 
 if __name__ == "__main__":

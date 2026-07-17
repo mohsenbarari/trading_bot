@@ -38,7 +38,7 @@ from core.services.telegram_link_token_service import (
     consume_telegram_link_token,
     load_pending_telegram_link_token_user_for_update,
 )
-from bot.keyboards import get_persistent_menu_keyboard
+from bot.repeat_offer import build_persistent_navigation_keyboard
 from bot.utils.channel_invites import (
     build_channel_access_text,
     build_channel_join_request_text,
@@ -117,8 +117,8 @@ async def finalize_account_link(
                 address_registered=address is not None,
                 db=db,
             ),
-            reply_markup=get_persistent_menu_keyboard(
-                user.role,
+            reply_markup=await build_persistent_navigation_keyboard(
+                user,
                 _account_link_webapp_url(),
             ),
         )
@@ -428,7 +428,10 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
             return
         await message.answer(
             await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True),
-            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+            reply_markup=await build_persistent_navigation_keyboard(
+                user,
+                settings.frontend_url,
+            ),
         )
         return
 
@@ -528,8 +531,8 @@ async def handle_contact(message: types.Message, state: FSMContext):
                 return
             await message.answer(
                 await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True, db=db),
-                reply_markup=get_persistent_menu_keyboard(
-                    user.role,
+                reply_markup=await build_persistent_navigation_keyboard(
+                    user,
                     _account_link_webapp_url(),
                 ),
             )
@@ -651,8 +654,8 @@ async def handle_contact(message: types.Message, state: FSMContext):
                     projected_user,
                     newly_linked=True,
                 ),
-                reply_markup=get_persistent_menu_keyboard(
-                    projected_user.role,
+                reply_markup=await build_persistent_navigation_keyboard(
+                    projected_user,
                     public_webapp_url_for_links(),
                 ),
             )
@@ -797,8 +800,8 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
                     already_linked=not bool(link_token),
                     address_registered=True,
                 ),
-                reply_markup=get_persistent_menu_keyboard(
-                    projected_user.role,
+                reply_markup=await build_persistent_navigation_keyboard(
+                    projected_user,
                     public_webapp_url_for_links(),
                 ),
             )

@@ -60,6 +60,24 @@ class BotPanelNavigationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result)
         state.clear.assert_not_awaited()
 
+    async def test_repeat_offer_button_escapes_stale_fsm_safely(self):
+        user = SimpleNamespace(id=7, role="standard")
+        state = SimpleNamespace(clear=AsyncMock())
+        message = SimpleNamespace(
+            text="🔁 خ ن سکه 10 عدد 100000",
+            bot=SimpleNamespace(),
+        )
+
+        with patch(
+            "bot.handlers.trade_create.handle_repeat_offer_button",
+            new=AsyncMock(),
+        ) as repeat_handler:
+            result = await handoff_navigation_button(message, state, user)
+
+        self.assertTrue(result)
+        state.clear.assert_awaited_once_with()
+        repeat_handler.assert_awaited_once_with(message, state, user, message.bot)
+
 
 if __name__ == "__main__":
     unittest.main()

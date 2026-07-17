@@ -133,8 +133,8 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
                 frontend_url="https://coin.362514.ir",
             ),
         ), patch(
-            "bot.handlers.link_account.get_persistent_menu_keyboard",
-            return_value="menu",
+            "bot.handlers.link_account.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ) as keyboard_mock:
             await handle_contact(message, state)
 
@@ -152,7 +152,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("coin.362514.ir", answer_text)
         self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
-        keyboard_mock.assert_called_once_with(user.role, "https://coin.gold-trade.ir")
+        keyboard_mock.assert_awaited_once_with(user, "https://coin.gold-trade.ir")
 
     async def test_handle_contact_rolls_back_and_reports_commit_error(self):
         user = make_user()
@@ -320,8 +320,8 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.settings",
             SimpleNamespace(frontend_url="https://app.example"),
         ), patch(
-            "bot.handlers.link_account.get_persistent_menu_keyboard",
-            return_value="menu",
+            "bot.handlers.link_account.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ):
             await handle_address_completion(message, state)
 
@@ -389,8 +389,8 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.public_webapp_url_for_links",
             return_value="https://iran.example",
         ), patch(
-            "bot.handlers.link_account.get_persistent_menu_keyboard",
-            return_value="menu",
+            "bot.handlers.link_account.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ):
             await handle_contact(message, state)
 
@@ -467,8 +467,8 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.public_webapp_url_for_links",
             return_value="https://iran.example",
         ), patch(
-            "bot.handlers.link_account.get_persistent_menu_keyboard",
-            return_value="menu",
+            "bot.handlers.link_account.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ):
             await handle_address_completion(message, state)
 

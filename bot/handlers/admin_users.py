@@ -23,8 +23,6 @@ from models.user import User
 from core.enums import UserRole, NotificationLevel, NotificationCategory, UserAccountStatus
 from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str, create_user_notification, send_telegram_notification
 from bot.keyboards import (
-    get_users_management_keyboard, 
-    get_admin_panel_keyboard, 
     get_users_list_inline_keyboard,
     get_user_profile_return_keyboard,
     get_user_role_edit_keyboard,
@@ -35,6 +33,10 @@ from bot.keyboards import (
     get_skip_keyboard,
     get_block_settings_keyboard,
     get_max_block_options_keyboard
+)
+from bot.repeat_offer import (
+    build_admin_panel_navigation_keyboard,
+    build_users_management_navigation_keyboard,
 )
 from bot.states import UserManagement, UserLimitations
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
@@ -331,7 +333,7 @@ async def handle_users_menu(message: types.Message, user: Optional[User], state:
     msg = await message.answer(
         "👥 **مدیریت کاربران**\n\n"
         "لطفاً گزینه مورد نظر را انتخاب کنید:",
-        reply_markup=get_users_management_keyboard(),
+        reply_markup=await build_users_management_navigation_keyboard(user),
         parse_mode="Markdown"
     )
     
@@ -429,7 +431,7 @@ async def handle_back_to_admin(message: types.Message, user: Optional[User], sta
     
     msg = await message.answer(
         "به پنل مدیریت بازگشتید.",
-        reply_markup=get_admin_panel_keyboard(user.role)
+        reply_markup=await build_admin_panel_navigation_keyboard(user)
     )
 
 # --- جستجوی کاربر ---
@@ -467,7 +469,7 @@ async def handle_user_search_cancel(query: types.CallbackQuery, state: FSMContex
     msg = await query.message.answer(
         "👥 **مدیریت کاربران**\n\n"
         "لطفاً گزینه مورد نظر را انتخاب کنید:",
-        reply_markup=get_users_management_keyboard(),
+        reply_markup=await build_users_management_navigation_keyboard(user),
         parse_mode="Markdown"
     )
     
@@ -492,7 +494,7 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
     if not query_text:
         msg = await message.answer(
             "❌ متن جستجو نمی‌تواند خالی باشد.", 
-            reply_markup=get_users_management_keyboard()
+            reply_markup=await build_users_management_navigation_keyboard(user)
         )
         await update_anchor(state, msg.message_id, message.bot, message.chat.id)
         return
@@ -513,7 +515,7 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
     if not user_found or not _can_manage_target_user(user, user_found):
         msg = await message.answer(
             f"❌ کاربری با نام کاربری یا شماره موبایل **'{query_text}'** یافت نشد.",
-            reply_markup=get_users_management_keyboard(),
+            reply_markup=await build_users_management_navigation_keyboard(user),
             parse_mode="Markdown"
         )
         await update_anchor(state, msg.message_id, message.bot, message.chat.id)
