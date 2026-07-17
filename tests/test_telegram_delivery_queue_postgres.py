@@ -26,6 +26,10 @@ from core.telegram_delivery_queue_limiter import (
     TelegramDeliveryDispatchAdmission,
     TelegramDeliveryLimiterUnavailableError,
 )
+from core.telegram_delivery_freshness_router import (
+    DURABLE_TELEGRAM_DELIVERY_ACTIONS,
+    TelegramDeliveryFreshnessRegistry,
+)
 from core.telegram_delivery_offer_freshness import (
     telegram_channel_destination_key,
     validate_offer_telegram_delivery_freshness,
@@ -1084,6 +1088,62 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
         self.assertEqual(persisted.state, TelegramDeliveryState.SUPERSEDED)
         self.assertIsNone(persisted.dispatch_started_at)
+
+    async def test_complete_freshness_router_runs_at_both_worker_boundaries(self):
+        enqueued = await self._enqueue("worker-complete-router")
+        delegate = AsyncMock(
+            return_value=TelegramFreshnessDecision(
+                TelegramFreshnessOutcome.SEND,
+                reason="authoritative_current",
+            )
+        )
+        router = TelegramDeliveryFreshnessRegistry(
+            {
+                action: delegate
+                for action in DURABLE_TELEGRAM_DELIVERY_ACTIONS
+            }
+        ).build_lane_router("primary")
+        gateway = AsyncMock(
+            return_value=TelegramGatewayResult(
+                ok=True,
+                method="sendMessage",
+                status_code=200,
+                response_json={
+                    "ok": True,
+                    "result": {"message_id": 991},
+                },
+            )
+        )
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ):
+            report = await run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
+                limit=1,
+                freshness_validator=router,
+                gateway_call=gateway,
+                dispatch_limiter=_AllowLimiter(),
+                worker_id="worker-complete-router-test",
+            )
+
+        self.assertEqual(delegate.await_count, 2)
+        self.assertEqual(report.status_counts, {"sent": 1})
+        gateway.assert_awaited_once()
+        async with self.Session() as db:
+            persisted = await db.get(
+                TelegramDeliveryJobRecord,
+                enqueued.job.id,
+            )
+        self.assertEqual(persisted.state, TelegramDeliveryState.SENT)
+        self.assertEqual(persisted.telegram_message_id, 991)
 
     async def test_primary_gateway_wait_does_not_block_editor_lane_cycle(self):
         primary = await self._enqueue("lane-primary-slow")
