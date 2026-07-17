@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 BOT_REPEAT_OFFER_BUTTON_PREFIX = "🔁 "
 BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH = 64
+BOT_REPEAT_OFFER_RESOLUTION_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -38,17 +39,23 @@ class BotRepeatOfferCandidate:
     source_offer_public_id: str
     draft_text: str
     button_text: str
+    legacy_button_text: str | None = None
 
 
 def is_bot_repeat_offer_button_text(text: object) -> bool:
     return str(text or "").strip().startswith(BOT_REPEAT_OFFER_BUTTON_PREFIX)
 
 
-def _button_text(draft_without_notes: str) -> str:
-    text = f"{BOT_REPEAT_OFFER_BUTTON_PREFIX}{draft_without_notes}".strip()
+def _button_text(draft_text: str, *, source_offer_id: int | None = None) -> str:
+    suffix = f"  #{source_offer_id}" if source_offer_id is not None else ""
+    text = f"{BOT_REPEAT_OFFER_BUTTON_PREFIX}{draft_text}".strip()
+    available_length = BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH - len(suffix)
+    if len(text) > available_length:
+        text = f"{text[: available_length - 3].rstrip()}..."
+    text = f"{text}{suffix}"
     if len(text) <= BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH:
         return text
-    return f"{text[: BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH - 3].rstrip()}..."
+    return text[:BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH]
 
 
 def bot_repeat_offer_candidate(offer: Offer | object) -> BotRepeatOfferCandidate | None:
@@ -90,7 +97,8 @@ def bot_repeat_offer_candidate(offer: Offer | object) -> BotRepeatOfferCandidate
         source_offer_id=source_offer_id,
         source_offer_public_id=public_id,
         draft_text=draft_text,
-        button_text=_button_text(compact_draft),
+        button_text=_button_text(draft_text, source_offer_id=source_offer_id),
+        legacy_button_text=_button_text(compact_draft),
     )
 
 
@@ -110,6 +118,54 @@ async def load_latest_bot_repeat_offer_candidate(
     if not offers:
         return None
     return bot_repeat_offer_candidate(offers[0])
+
+
+async def resolve_bot_repeat_offer_button_candidate(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    button_text: str,
+) -> tuple[BotRepeatOfferCandidate | None, bool, str | None]:
+    """Resolve the button the user actually saw and report menu staleness."""
+    offers = await list_repeatable_offers(
+        db,
+        owner_user_id=owner_user_id,
+        limit=BOT_REPEAT_OFFER_RESOLUTION_LIMIT,
+        since_hours=1,
+        options=(selectinload(Offer.commodity),),
+        replacement_home_server=SERVER_FOREIGN,
+    )
+    if not offers:
+        return None, True, "no_repeatable_offer"
+
+    normalized_button = str(button_text or "").strip()
+    candidates = [
+        candidate
+        for offer in offers
+        if (candidate := bot_repeat_offer_candidate(offer)) is not None
+    ]
+    latest = candidates[0] if candidates else None
+
+    for candidate in candidates:
+        if normalized_button != candidate.button_text:
+            continue
+        needs_refresh = (
+            latest is None
+            or candidate.source_offer_public_id != latest.source_offer_public_id
+        )
+        return candidate, needs_refresh, None
+
+    legacy_matches = [
+        candidate
+        for candidate in candidates
+        if candidate.legacy_button_text == normalized_button
+    ]
+    if len(legacy_matches) == 1:
+        return legacy_matches[0], True, "legacy_button"
+    if len(legacy_matches) > 1:
+        return None, True, "ambiguous_legacy_button"
+
+    return None, True, "button_not_found"
 
 
 def prepend_repeat_offer_button(

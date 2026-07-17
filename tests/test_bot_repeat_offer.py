@@ -12,6 +12,7 @@ from bot.repeat_offer import (
     is_bot_repeat_offer_button_text,
     load_latest_bot_repeat_offer_candidate,
     prepend_repeat_offer_button,
+    resolve_bot_repeat_offer_button_candidate,
 )
 from core.enums import SettlementType, UserRole
 from models.offer import OfferType
@@ -55,7 +56,9 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("25 عدد", candidate.draft_text)
         self.assertIn("15 10", candidate.draft_text)
         self.assertIn("تحویل حضوری", candidate.draft_text)
-        self.assertNotIn("تحویل حضوری", candidate.button_text)
+        self.assertIn("تحویل حضوری", candidate.button_text)
+        self.assertTrue(candidate.button_text.endswith("#17"))
+        self.assertNotIn("تحویل حضوری", candidate.legacy_button_text)
         self.assertTrue(is_bot_repeat_offer_button_text(candidate.button_text))
         self.assertLessEqual(len(candidate.button_text), BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH)
 
@@ -69,8 +72,9 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNotNone(candidate)
-        self.assertEqual(len(candidate.button_text), BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH)
-        self.assertTrue(candidate.button_text.endswith("..."))
+        self.assertLessEqual(len(candidate.button_text), BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH)
+        self.assertIn("...", candidate.button_text)
+        self.assertTrue(candidate.button_text.endswith("#17"))
 
     async def test_loader_requests_latest_foreign_home_candidate(self):
         offer = make_offer()
@@ -87,6 +91,71 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list_mock.await_args.kwargs["limit"], 1)
         self.assertEqual(list_mock.await_args.kwargs["since_hours"], 1)
         self.assertEqual(list_mock.await_args.kwargs["replacement_home_server"], "foreign")
+
+    async def test_resolver_honors_still_eligible_old_and_legacy_buttons(self):
+        latest_offer = make_offer(
+            id=19,
+            offer_public_id="ofr_repeat_source_19",
+            price=180000,
+            notes=None,
+        )
+        older_offer = make_offer()
+        older_candidate = bot_repeat_offer_candidate(older_offer)
+
+        with patch(
+            "bot.repeat_offer.list_repeatable_offers",
+            new=AsyncMock(return_value=[latest_offer, older_offer]),
+        ) as list_mock:
+            resolved, needs_refresh, reason = await resolve_bot_repeat_offer_button_candidate(
+                SimpleNamespace(),
+                owner_user_id=9,
+                button_text=older_candidate.legacy_button_text,
+            )
+
+        self.assertEqual(resolved.source_offer_public_id, older_offer.offer_public_id)
+        self.assertTrue(needs_refresh)
+        self.assertEqual(reason, "legacy_button")
+        self.assertEqual(list_mock.await_args.kwargs["limit"], 50)
+
+    async def test_resolver_keeps_current_full_button_without_refresh(self):
+        offer = make_offer()
+        candidate = bot_repeat_offer_candidate(offer)
+        with patch(
+            "bot.repeat_offer.list_repeatable_offers",
+            new=AsyncMock(return_value=[offer]),
+        ):
+            resolved, needs_refresh, reason = await resolve_bot_repeat_offer_button_candidate(
+                SimpleNamespace(),
+                owner_user_id=9,
+                button_text=candidate.button_text,
+            )
+
+        self.assertEqual(resolved.source_offer_public_id, offer.offer_public_id)
+        self.assertFalse(needs_refresh)
+        self.assertIsNone(reason)
+
+    async def test_resolver_rejects_ambiguous_legacy_button(self):
+        latest_offer = make_offer(
+            id=19,
+            offer_public_id="ofr_repeat_source_19",
+            notes="توضیح جدید",
+        )
+        older_offer = make_offer()
+        legacy_button = bot_repeat_offer_candidate(older_offer).legacy_button_text
+
+        with patch(
+            "bot.repeat_offer.list_repeatable_offers",
+            new=AsyncMock(return_value=[latest_offer, older_offer]),
+        ):
+            resolved, needs_refresh, reason = await resolve_bot_repeat_offer_button_candidate(
+                SimpleNamespace(),
+                owner_user_id=9,
+                button_text=legacy_button,
+            )
+
+        self.assertIsNone(resolved)
+        self.assertTrue(needs_refresh)
+        self.assertEqual(reason, "ambiguous_legacy_button")
 
     async def test_decorator_prepends_row_and_fails_open(self):
         keyboard = ReplyKeyboardMarkup(
