@@ -1,0 +1,523 @@
+"""Authoritative freshness for private action notifications in the outbox."""
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.enums import UserAccountStatus
+from core.services.bot_access_policy import evaluate_bot_access
+from core.services.telegram_delivery_queue_service import (
+    TelegramDeliveryQueueValidationError,
+    canonical_telegram_delivery_payload,
+)
+from core.services.telegram_notification_outbox_service import (
+    telegram_notification_dedupe_key,
+    validate_telegram_notification_text,
+)
+from core.telegram_delivery_notification_action_contract import (
+    TELEGRAM_NOTIFICATION_ACTIONS,
+    TelegramNotificationActionPolicy,
+    telegram_notification_action_policy,
+    telegram_notification_action_policy_from_source,
+)
+from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryAction,
+    TelegramDestinationClass,
+    TelegramFreshnessDecision,
+    TelegramFreshnessOutcome,
+)
+from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_notification_outbox import (
+    TelegramNotificationOutbox,
+    TelegramNotificationOutboxStatus,
+)
+from models.user import User
+
+
+NOTIFICATION_ACTION_FRESHNESS_ACTIONS = TELEGRAM_NOTIFICATION_ACTIONS
+_SOURCE_SEPARATOR = ":payload-v1:"
+_ALLOWED_PARSE_MODES = frozenset({"Markdown", "MarkdownV2", "HTML"})
+_ACTIVE_STATUSES = frozenset(
+    {
+        TelegramNotificationOutboxStatus.PENDING.value,
+        TelegramNotificationOutboxStatus.RETRYABLE_FAILED.value,
+    }
+)
+_TERMINAL_STATUSES = frozenset(
+    {
+        TelegramNotificationOutboxStatus.SENT.value,
+        TelegramNotificationOutboxStatus.SKIPPED.value,
+        TelegramNotificationOutboxStatus.TERMINAL_FAILED.value,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramNotificationActionSource:
+    policy: TelegramNotificationActionPolicy
+    dedupe_key: str
+    source_id: str
+    recipient_user_id: int
+    text: str
+    parse_mode: str | None
+    reply_markup: dict[str, Any] | None
+    expected_account_status: str | None
+    expected_messenger_blocked: bool | None
+    expected_user_sync_version: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramNotificationActionSnapshot:
+    payload: dict[str, Any]
+    source_version: int
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def _strict_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _decision(
+    outcome: TelegramFreshnessOutcome,
+    *,
+    reason: str,
+    replacement_action: TelegramDeliveryAction | None = None,
+) -> TelegramFreshnessDecision:
+    return TelegramFreshnessDecision(
+        outcome=outcome,
+        reason=reason,
+        replacement_action=replacement_action,
+    )
+
+
+def _quarantined(reason: str) -> TelegramFreshnessDecision:
+    return _decision(TelegramFreshnessOutcome.QUARANTINED, reason=reason)
+
+
+def telegram_notification_action_destination_key(recipient_user_id: int) -> str:
+    normalized = _strict_positive_int(recipient_user_id)
+    if normalized is None:
+        raise ValueError("notification_action_recipient_user_id_invalid")
+    return f"private:user:{normalized}"
+
+
+def _validated_parse_mode(value: Any) -> str | None:
+    if value is None:
+        return None
+    parse_mode = str(value).strip()
+    if parse_mode not in _ALLOWED_PARSE_MODES:
+        raise ValueError("notification_action_parse_mode_invalid")
+    return parse_mode
+
+
+def _validate_source_contract(
+    outbox: TelegramNotificationOutbox | Any,
+) -> TelegramNotificationActionSource:
+    policy = telegram_notification_action_policy_from_source(
+        getattr(outbox, "source_type", None)
+    )
+    source_id = str(getattr(outbox, "source_id", "") or "").strip()
+    if not source_id or len(source_id) > 120:
+        raise ValueError("notification_action_source_id_invalid")
+    recipient_user_id = _strict_positive_int(
+        getattr(outbox, "recipient_user_id", None)
+    )
+    if recipient_user_id is None:
+        raise ValueError("notification_action_recipient_invalid")
+    expected_dedupe = telegram_notification_dedupe_key(
+        source_type=policy.source_type,
+        source_id=source_id,
+        recipient_user_id=recipient_user_id,
+    )
+    dedupe_key = str(getattr(outbox, "dedupe_key", "") or "").strip()
+    if dedupe_key != expected_dedupe:
+        raise ValueError("notification_action_dedupe_invalid")
+    text = validate_telegram_notification_text(
+        str(getattr(outbox, "text", "") or "")
+    )
+    parse_mode = _validated_parse_mode(getattr(outbox, "parse_mode", None))
+    extra_payload = getattr(outbox, "extra_payload", None)
+    if not isinstance(extra_payload, Mapping):
+        raise ValueError("notification_action_extra_payload_invalid")
+    if str(extra_payload.get("queue_action") or "") != policy.action.value:
+        raise ValueError("notification_action_extra_payload_action_mismatch")
+
+    expected_account_status: str | None = None
+    expected_messenger_blocked: bool | None = None
+    expected_user_sync_version = _strict_positive_int(
+        extra_payload.get("user_sync_version")
+    )
+    if expected_user_sync_version is None:
+        raise ValueError("notification_action_user_version_invalid")
+    if policy.action == TelegramDeliveryAction.ACCOUNT_STATUS:
+        if set(extra_payload) != {
+            "account_status",
+            "messenger_blocked",
+            "queue_action",
+            "user_sync_version",
+        }:
+            raise ValueError("notification_action_account_payload_invalid")
+        expected_account_status = str(
+            extra_payload.get("account_status") or ""
+        ).strip().lower()
+        if expected_account_status not in {
+            UserAccountStatus.ACTIVE.value,
+            UserAccountStatus.INACTIVE.value,
+        }:
+            raise ValueError("notification_action_account_status_invalid")
+        if not isinstance(extra_payload.get("messenger_blocked"), bool):
+            raise ValueError("notification_action_account_block_state_invalid")
+        expected_messenger_blocked = bool(extra_payload["messenger_blocked"])
+        reply_markup = None
+    else:
+        if set(extra_payload) not in (
+            {"queue_action", "user_sync_version"},
+            {"queue_action", "reply_markup", "user_sync_version"},
+        ):
+            raise ValueError("notification_action_extra_payload_invalid")
+        raw_reply_markup = extra_payload.get("reply_markup")
+        if raw_reply_markup is None:
+            reply_markup = None
+        elif isinstance(raw_reply_markup, Mapping):
+            reply_markup = dict(raw_reply_markup)
+        else:
+            raise ValueError("notification_action_reply_markup_invalid")
+
+    payload: dict[str, Any] = {
+        "chat_id": int(getattr(outbox, "telegram_id_at_enqueue", 0) or 0),
+        "text": text,
+        "parse_mode": parse_mode,
+    }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    canonical_telegram_delivery_payload(payload)
+    return TelegramNotificationActionSource(
+        policy=policy,
+        dedupe_key=dedupe_key,
+        source_id=source_id,
+        recipient_user_id=recipient_user_id,
+        text=text,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        expected_account_status=expected_account_status,
+        expected_messenger_blocked=expected_messenger_blocked,
+        expected_user_sync_version=expected_user_sync_version,
+    )
+
+
+def telegram_notification_action_source_natural_id(
+    outbox: TelegramNotificationOutbox | Any,
+) -> str:
+    source = _validate_source_contract(outbox)
+    snapshot = json.dumps(
+        {
+            "account_status": source.expected_account_status,
+            "dedupe_key": source.dedupe_key,
+            "messenger_blocked": source.expected_messenger_blocked,
+            "parse_mode": source.parse_mode,
+            "reply_markup": source.reply_markup,
+            "template_version": source.policy.template_version,
+            "text": source.text,
+            "user_sync_version": source.expected_user_sync_version,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    fingerprint = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:24]
+    identity = f"{source.dedupe_key}{_SOURCE_SEPARATOR}{fingerprint}"
+    if len(identity) > 256:
+        raise ValueError("notification_action_source_identity_too_long")
+    return identity
+
+
+def telegram_notification_action_outbox_dedupe_from_source(
+    source_natural_id: Any,
+) -> str | None:
+    identity = str(source_natural_id or "").strip()
+    if _SOURCE_SEPARATOR not in identity:
+        return None
+    dedupe_key, fingerprint = identity.rsplit(_SOURCE_SEPARATOR, 1)
+    if not dedupe_key or len(fingerprint) != 24:
+        return None
+    if any(character not in "0123456789abcdef" for character in fingerprint):
+        return None
+    return dedupe_key
+
+
+def _current_account_status(user: User | Any) -> str:
+    return str(
+        getattr(
+            getattr(user, "account_status", None),
+            "value",
+            getattr(user, "account_status", ""),
+        )
+        or ""
+    ).strip().lower()
+
+
+def notification_action_source_matches_current_user(
+    source: TelegramNotificationActionSource,
+    user: User | Any,
+) -> bool:
+    if source.policy.action != TelegramDeliveryAction.ACCOUNT_STATUS:
+        return True
+    return (
+        _current_account_status(user) == source.expected_account_status
+        and bool(getattr(user, "messenger_blocked_at", None))
+        is source.expected_messenger_blocked
+    )
+
+
+def notification_action_source_waits_for_current_user(
+    source: TelegramNotificationActionSource,
+    user: User | Any,
+) -> bool:
+    current_version = _strict_positive_int(getattr(user, "sync_version", None))
+    return bool(
+        current_version is not None
+        and source.expected_user_sync_version is not None
+        and current_version < source.expected_user_sync_version
+    )
+
+
+def telegram_notification_action_outbox_matches_current_user(
+    outbox: TelegramNotificationOutbox | Any,
+    user: User | Any,
+) -> bool:
+    return notification_action_source_matches_current_user(
+        _validate_source_contract(outbox),
+        user,
+    )
+
+
+def telegram_notification_action_outbox_waits_for_current_user(
+    outbox: TelegramNotificationOutbox | Any,
+    user: User | Any,
+) -> bool:
+    return notification_action_source_waits_for_current_user(
+        _validate_source_contract(outbox),
+        user,
+    )
+
+
+def build_telegram_notification_action_snapshot(
+    outbox: TelegramNotificationOutbox | Any,
+    user: User | Any,
+) -> TelegramNotificationActionSnapshot:
+    source = _validate_source_contract(outbox)
+    if _strict_positive_int(getattr(user, "id", None)) != source.recipient_user_id:
+        raise ValueError("notification_action_user_mismatch")
+    telegram_id = _strict_positive_int(getattr(user, "telegram_id", None))
+    user_sync_version = _strict_positive_int(getattr(user, "sync_version", None))
+    if telegram_id is None:
+        raise ValueError("notification_action_current_chat_id_invalid")
+    if user_sync_version is None:
+        raise ValueError("notification_action_recipient_version_invalid")
+    payload: dict[str, Any] = {
+        "chat_id": telegram_id,
+        "text": source.text,
+        "parse_mode": source.parse_mode,
+    }
+    if source.reply_markup is not None:
+        payload["reply_markup"] = source.reply_markup
+    normalized_payload, payload_hash = canonical_telegram_delivery_payload(payload)
+    version_snapshot = json.dumps(
+        {
+            "account_status": _current_account_status(user),
+            "messenger_blocked": bool(getattr(user, "messenger_blocked_at", None)),
+            "payload_hash": payload_hash,
+            "recipient_user_id": source.recipient_user_id,
+            "telegram_id": telegram_id,
+            "user_sync_version": user_sync_version,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    source_version = int.from_bytes(
+        hashlib.sha256(version_snapshot.encode("utf-8")).digest()[:8],
+        "big",
+    ) & ((1 << 63) - 1)
+    return TelegramNotificationActionSnapshot(
+        payload=normalized_payload,
+        source_version=source_version or 1,
+    )
+
+
+def _validate_static_route(
+    job: TelegramDeliveryJobRecord,
+) -> tuple[TelegramNotificationActionPolicy | None, TelegramFreshnessDecision | None]:
+    try:
+        policy = telegram_notification_action_policy(job.action_kind)
+    except ValueError:
+        return None, _quarantined("notification_action_freshness_action_mismatch")
+    if _enum_value(job.feeder_kind) != policy.feeder.value:
+        return policy, _quarantined("notification_action_freshness_feeder_mismatch")
+    if _enum_value(job.destination_class) != TelegramDestinationClass.PRIVATE.value:
+        return policy, _quarantined(
+            "notification_action_freshness_destination_class_mismatch"
+        )
+    if str(job.method or "") != "sendMessage":
+        return policy, _quarantined("notification_action_freshness_method_mismatch")
+    if str(job.bot_identity or "") != "primary":
+        return policy, _quarantined(
+            "notification_action_freshness_bot_identity_mismatch"
+        )
+    if str(job.template_version or "") != policy.template_version:
+        return policy, _quarantined("notification_action_freshness_template_mismatch")
+    if (
+        job.delivery_deadline_at is not None
+        or job.freshness_deadline_at is not None
+        or job.campaign_id is not None
+        or job.run_id is not None
+    ):
+        return policy, _quarantined("notification_action_freshness_deadline_forbidden")
+    return policy, None
+
+
+async def validate_notification_action_telegram_delivery_freshness(
+    db: AsyncSession,
+    job: TelegramDeliveryJobRecord,
+    now: datetime,
+) -> TelegramFreshnessDecision:
+    del now
+    policy, static_decision = _validate_static_route(job)
+    if static_decision is not None or policy is None:
+        return static_decision or _quarantined(
+            "notification_action_freshness_policy_missing"
+        )
+    dedupe_key = telegram_notification_action_outbox_dedupe_from_source(
+        job.source_natural_id
+    )
+    if dedupe_key is None:
+        return _quarantined("notification_action_freshness_source_invalid")
+    outbox = (
+        await db.execute(
+            select(TelegramNotificationOutbox)
+            .where(TelegramNotificationOutbox.dedupe_key == dedupe_key)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if outbox is None:
+        return _quarantined("notification_action_freshness_outbox_missing")
+    try:
+        source = _validate_source_contract(outbox)
+    except (TelegramDeliveryQueueValidationError, TypeError, ValueError):
+        return _quarantined("notification_action_freshness_source_contract_invalid")
+    if source.policy != policy:
+        return _quarantined("notification_action_freshness_policy_mismatch")
+    if _strict_positive_int(getattr(outbox, "telegram_id_at_enqueue", None)) is None:
+        return _quarantined("notification_action_freshness_enqueue_identity_invalid")
+    if _strict_positive_int(getattr(outbox, "queue_job_id", None)) != _strict_positive_int(
+        getattr(job, "id", None)
+    ):
+        return _quarantined("notification_action_freshness_queue_owner_mismatch")
+    if not isinstance(getattr(outbox, "queue_handed_off_at", None), datetime):
+        return _quarantined("notification_action_freshness_handoff_missing")
+    if str(job.destination_key or "") != telegram_notification_action_destination_key(
+        source.recipient_user_id
+    ):
+        return _quarantined("notification_action_freshness_destination_mismatch")
+
+    status = _enum_value(outbox.status)
+    if status == TelegramNotificationOutboxStatus.SENT.value:
+        if _strict_positive_int(outbox.telegram_message_id) is None:
+            return _quarantined("notification_action_freshness_sent_without_evidence")
+        return _decision(
+            TelegramFreshnessOutcome.SENT_NOOP,
+            reason="notification_action_freshness_already_sent",
+        )
+    if status in _TERMINAL_STATUSES:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_outbox_terminal",
+        )
+    if status not in _ACTIVE_STATUSES:
+        return _quarantined("notification_action_freshness_outbox_state_invalid")
+    try:
+        normalized_stored, stored_hash = canonical_telegram_delivery_payload(job.payload)
+        expected_source = telegram_notification_action_source_natural_id(outbox)
+    except (TelegramDeliveryQueueValidationError, TypeError, ValueError):
+        return _quarantined("notification_action_freshness_stored_payload_invalid")
+    if str(job.payload_hash or "") != stored_hash:
+        return _quarantined("notification_action_freshness_payload_hash_mismatch")
+    if str(job.source_natural_id or "") != expected_source:
+        return _decision(
+            TelegramFreshnessOutcome.RECLASSIFY,
+            replacement_action=policy.action,
+            reason="notification_action_freshness_content_changed",
+        )
+
+    user = await db.get(User, source.recipient_user_id)
+    if user is None:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_recipient_missing",
+        )
+    if _strict_positive_int(getattr(user, "telegram_id", None)) is None:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_recipient_unlinked",
+        )
+    if notification_action_source_waits_for_current_user(source, user):
+        return _decision(
+            TelegramFreshnessOutcome.WAIT_DEPENDENCY,
+            reason="notification_action_freshness_recipient_version_pending",
+        )
+    if not notification_action_source_matches_current_user(source, user):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_source_state_changed",
+        )
+    if policy.require_bot_access:
+        access = await evaluate_bot_access(db, user)
+        if not access.allowed:
+            return _decision(
+                TelegramFreshnessOutcome.SUPERSEDED,
+                reason="notification_action_freshness_recipient_access_denied",
+            )
+    try:
+        current = build_telegram_notification_action_snapshot(outbox, user)
+    except (TelegramDeliveryQueueValidationError, TypeError, ValueError):
+        return _quarantined("notification_action_freshness_current_payload_invalid")
+    if (
+        _strict_positive_int(job.source_version) != current.source_version
+        or normalized_stored != current.payload
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.RECLASSIFY,
+            replacement_action=policy.action,
+            reason="notification_action_freshness_recipient_route_changed",
+        )
+    return _decision(
+        TelegramFreshnessOutcome.SEND,
+        reason="notification_action_freshness_current",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NotificationActionTelegramDeliveryFreshnessValidator:
+    async def __call__(
+        self,
+        db: AsyncSession,
+        job: TelegramDeliveryJobRecord,
+        now: datetime,
+    ) -> TelegramFreshnessDecision:
+        return await validate_notification_action_telegram_delivery_freshness(
+            db,
+            job,
+            now,
+        )

@@ -149,6 +149,55 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.changed)
         log_exception.assert_called_once()
 
+    async def test_queue_owner_persists_account_notice_without_direct_send(self):
+        now = datetime(2026, 5, 18, 12, 0, 0)
+        user = SimpleNamespace(
+            id=27,
+            telegram_id=271,
+            account_status=UserAccountStatus.ACTIVE,
+            deactivated_at=None,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+            sync_version=4,
+        )
+        queue_runtime = SimpleNamespace(
+            mode=status_service.TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+        with patch.object(status_service, "_utcnow_naive", return_value=now), patch.object(
+            status_service,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_account_status_service.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send, patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_status_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue, patch(
+            "core.services.user_account_status_service.remove_user_from_telegram_channel",
+            new=AsyncMock(),
+        ):
+            result = await status_service.transition_user_account_status(
+                SimpleNamespace(),
+                user,
+                UserAccountStatus.INACTIVE,
+            )
+
+        self.assertTrue(result.changed)
+        direct_send.assert_not_awaited()
+        enqueue.assert_awaited_once()
+        self.assertEqual(
+            enqueue.await_args.kwargs["account_status"],
+            UserAccountStatus.INACTIVE,
+        )
+        self.assertFalse(enqueue.await_args.kwargs["messenger_blocked"])
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 4)
+        self.assertIn("account-inactive:27:", enqueue.await_args.kwargs["source_id"])
+
     async def test_transition_user_account_status_reactivates_and_attaches_join_line(self):
         user = SimpleNamespace(
             id=8,

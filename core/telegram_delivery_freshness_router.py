@@ -300,3 +300,19 @@ def repeat_offer_response_freshness_routes(
     return {
         action: validator for action in REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS
     }
+
+
+def notification_action_freshness_routes(
+    actions: Collection[TelegramDeliveryAction],
+    validator: TelegramDeliveryFreshnessValidator,
+) -> dict[TelegramDeliveryAction, TelegramDeliveryFreshnessValidatorCallable]:
+    if not callable(validator):
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_notification_action_freshness_validator_invalid"
+        )
+    normalized = frozenset(_normalize_action(action) for action in actions)
+    if not normalized:
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_notification_action_freshness_actions_empty"
+        )
+    return {action: validator for action in normalized}

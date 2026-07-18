@@ -80,7 +80,16 @@ class TelegramNotificationOutbox(Base):
             postgresql_where=text(
                 "status IN ('pending', 'retryable_failed') "
                 "AND source_type IN "
-                "('project_user_joined', 'offer_repeat_response') "
+                "('project_user_joined', 'offer_repeat_response', "
+                "'queue_action:account_status', "
+                "'queue_action:general_announcement', "
+                "'queue_action:general_immediate', "
+                "'queue_action:offer_validation_response', "
+                "'queue_action:targeted_admin_message', "
+                "'queue_action:trade_alternative', "
+                "'queue_action:trade_noncritical', "
+                "'queue_action:trade_response', "
+                "'queue_action:trade_unavailable') "
                 "AND queue_job_id IS NULL AND worker_id IS NULL "
                 "AND lease_until IS NULL"
             ),

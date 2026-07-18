@@ -11,6 +11,14 @@ from core.telegram_delivery_new_user_membership_freshness import (
     telegram_notification_outbox_dedupe_from_source,
     validate_new_user_membership_telegram_delivery_freshness,
 )
+from core.telegram_delivery_notification_action_contract import (
+    TELEGRAM_NOTIFICATION_ACTION_VALUES,
+    telegram_notification_action_policy,
+)
+from core.telegram_delivery_notification_action_freshness import (
+    telegram_notification_action_outbox_dedupe_from_source,
+    validate_notification_action_telegram_delivery_freshness,
+)
 from core.telegram_delivery_repeat_offer_freshness import (
     telegram_repeat_offer_outbox_dedupe_from_source,
     validate_repeat_offer_response_telegram_delivery_freshness,
@@ -55,10 +63,15 @@ _SUPERSEDED_SKIP_REASONS = {
     "repeat_offer_response_freshness_recipient_missing",
     "repeat_offer_response_freshness_recipient_unlinked",
     "repeat_offer_response_freshness_recipient_access_denied",
+    "notification_action_freshness_recipient_missing",
+    "notification_action_freshness_recipient_unlinked",
+    "notification_action_freshness_recipient_access_denied",
+    "notification_action_freshness_source_state_changed",
 }
 _TERMINAL_SOURCE_REASONS = {
     "new_user_membership_freshness_outbox_terminal",
     "repeat_offer_response_freshness_outbox_terminal",
+    "notification_action_freshness_outbox_terminal",
 }
 
 
@@ -94,6 +107,15 @@ def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
         action == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value
         and _enum_value(job.feeder_kind) == TelegramFeederKind.OFFER_CONTROL.value
     )
+    if not action_route_valid:
+        try:
+            policy = telegram_notification_action_policy(action)
+        except ValueError:
+            policy = None
+        action_route_valid = bool(
+            policy is not None
+            and _enum_value(job.feeder_kind) == policy.feeder.value
+        )
     if not common_route_valid or not action_route_valid:
         raise TelegramNotificationOutboxQueueFeedbackError(
             "notification_outbox_queue_feedback_route_mismatch"
@@ -112,6 +134,10 @@ async def _load_bound_outbox(
         )
     elif action == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value:
         dedupe_key = telegram_repeat_offer_outbox_dedupe_from_source(
+            job.source_natural_id
+        )
+    elif action in TELEGRAM_NOTIFICATION_ACTION_VALUES:
+        dedupe_key = telegram_notification_action_outbox_dedupe_from_source(
             job.source_natural_id
         )
     else:
@@ -286,9 +312,17 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
                     now,
                 )
             )
-        else:
+        elif _enum_value(job.action_kind) == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value:
             decision = (
                 await validate_repeat_offer_response_telegram_delivery_freshness(
+                    db,
+                    job,
+                    now,
+                )
+            )
+        else:
+            decision = (
+                await validate_notification_action_telegram_delivery_freshness(
                     db,
                     job,
                     now,

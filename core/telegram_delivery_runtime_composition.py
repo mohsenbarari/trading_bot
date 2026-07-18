@@ -30,9 +30,14 @@ from core.telegram_delivery_freshness_router import (
     admin_broadcast_freshness_routes,
     market_freshness_routes,
     new_user_membership_freshness_routes,
+    notification_action_freshness_routes,
     offer_freshness_routes,
     repeat_offer_response_freshness_routes,
     trade_result_freshness_routes,
+)
+from core.telegram_delivery_notification_action_freshness import (
+    NOTIFICATION_ACTION_FRESHNESS_ACTIONS,
+    NotificationActionTelegramDeliveryFreshnessValidator,
 )
 from core.telegram_delivery_lifecycle_router import (
     TelegramDeliveryLifecycleRegistry,
@@ -145,6 +150,13 @@ def configured_telegram_delivery_freshness_registry(
             validate_repeat_offer_response_telegram_delivery_freshness
         ),
     )
+    _merge_unique(
+        routes,
+        notification_action_freshness_routes(
+            NOTIFICATION_ACTION_FRESHNESS_ACTIONS,
+            NotificationActionTelegramDeliveryFreshnessValidator(),
+        ),
+    )
     return TelegramDeliveryFreshnessRegistry(routes)
 
 
@@ -169,6 +181,7 @@ def configured_telegram_delivery_lifecycle_registry(
         (ADMIN_BROADCAST_FRESHNESS_ACTIONS, admin_feedback),
         (NEW_USER_MEMBERSHIP_FRESHNESS_ACTIONS, notification_feedback),
         (REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS, notification_feedback),
+        (NOTIFICATION_ACTION_FRESHNESS_ACTIONS, notification_feedback),
     ):
         _merge_unique(routes, lifecycle_routes(actions, feedback))
     return TelegramDeliveryLifecycleRegistry(routes)

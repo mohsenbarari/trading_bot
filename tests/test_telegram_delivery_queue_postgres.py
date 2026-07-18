@@ -53,12 +53,12 @@ from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryDispatchDeferredError,
     TelegramDeliveryQueueValidationError,
     TelegramDeliveryQueueSurfaceError,
-    apply_telegram_delivery_freshness_result,
+    apply_telegram_delivery_freshness_result as _apply_telegram_delivery_freshness_result,
     claim_next_telegram_delivery_job,
     enqueue_telegram_delivery_job,
-    mark_telegram_delivery_dispatch_started,
+    mark_telegram_delivery_dispatch_started as _mark_telegram_delivery_dispatch_started,
     recover_expired_telegram_delivery_leases,
-    resolve_telegram_delivery_result,
+    resolve_telegram_delivery_result as _resolve_telegram_delivery_result,
 )
 from core.services.telegram_offer_queue_service import (
     load_offer_edit_fresh_success_counts,
@@ -144,6 +144,24 @@ class _NoopLifecycleFeedback:
         return None
 
 
+async def mark_telegram_delivery_dispatch_started(*args, **kwargs):
+    feedback = _NoopLifecycleFeedback()
+    kwargs.setdefault("dispatch_guard", feedback.assert_dispatchable)
+    return await _mark_telegram_delivery_dispatch_started(*args, **kwargs)
+
+
+async def apply_telegram_delivery_freshness_result(*args, **kwargs):
+    feedback = _NoopLifecycleFeedback()
+    kwargs.setdefault("feedback", feedback.apply_freshness)
+    return await _apply_telegram_delivery_freshness_result(*args, **kwargs)
+
+
+async def resolve_telegram_delivery_result(*args, **kwargs):
+    feedback = _NoopLifecycleFeedback()
+    kwargs.setdefault("feedback", feedback.apply_delivery_result)
+    return await _resolve_telegram_delivery_result(*args, **kwargs)
+
+
 class _DenyLimiter(_AllowLimiter):
     async def acquire(self, _job, *, now):
         return TelegramDeliveryDispatchAdmission(
@@ -195,7 +213,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fac3d4e5f6a7"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fad4e5f6a7b8"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,

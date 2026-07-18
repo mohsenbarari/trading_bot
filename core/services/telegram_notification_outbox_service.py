@@ -19,6 +19,11 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     configured_telegram_delivery_runtime,
 )
+from core.telegram_delivery_notification_action_contract import (
+    TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
+    telegram_notification_action_policy,
+)
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from core.utils import utc_now
 from models.telegram_notification_outbox import (
     TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
@@ -54,6 +59,7 @@ MAX_RATE_LIMIT_RETRY_AFTER_SECONDS = 24 * 60 * 60
 MAX_RETRY_JITTER_SECONDS = 5
 MAX_RETRY_ATTEMPTS = 8
 TEXT_MAX_LENGTH = 4096
+ALLOWED_NOTIFICATION_PARSE_MODES = frozenset({"Markdown", "MarkdownV2", "HTML"})
 
 _RETRYABLE_ERROR_CLASSES = {
     "connecterror",
@@ -249,6 +255,15 @@ def validate_telegram_notification_text(text: str) -> str:
     return cleaned
 
 
+def validate_telegram_notification_parse_mode(value: Any) -> str | None:
+    if value is None:
+        return None
+    parse_mode = str(value).strip()
+    if parse_mode not in ALLOWED_NOTIFICATION_PARSE_MODES:
+        raise ValueError("telegram_notification_parse_mode_invalid")
+    return parse_mode
+
+
 def telegram_notification_dedupe_key(
     *,
     source_type: str,
@@ -421,6 +436,95 @@ async def enqueue_offer_repeat_response_notification(
         source_id=normalized_source_id,
         parse_mode=None,
         extra_payload={"response_kind": kind},
+    )
+
+
+async def enqueue_telegram_action_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    action: TelegramDeliveryAction | str,
+    source_id: str,
+    text: str,
+    user_sync_version: int,
+    parse_mode: str | None = None,
+    reply_markup: Mapping[str, Any] | None = None,
+) -> TelegramNotificationEnqueueResult:
+    """Persist one allowlisted private ``sendMessage`` action intent."""
+    policy = telegram_notification_action_policy(action)
+    if policy.action == TelegramDeliveryAction.ACCOUNT_STATUS:
+        raise ValueError("telegram_account_status_requires_state_contract")
+    normalized_source_id = str(source_id or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("telegram_notification_action_source_id_invalid")
+    normalized_parse_mode = validate_telegram_notification_parse_mode(parse_mode)
+    if (
+        isinstance(user_sync_version, bool)
+        or not isinstance(user_sync_version, int)
+        or user_sync_version <= 0
+    ):
+        raise ValueError("telegram_notification_action_user_version_invalid")
+    extra_payload: dict[str, Any] = {
+        "queue_action": policy.action.value,
+        "user_sync_version": user_sync_version,
+    }
+    if reply_markup is not None:
+        if not isinstance(reply_markup, Mapping):
+            raise ValueError("telegram_notification_action_reply_markup_invalid")
+        extra_payload["reply_markup"] = dict(reply_markup)
+    return await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=text,
+        source_type=policy.source_type,
+        source_id=normalized_source_id,
+        parse_mode=normalized_parse_mode,
+        extra_payload=extra_payload,
+    )
+
+
+async def enqueue_account_status_telegram_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    source_id: str,
+    text: str,
+    account_status: Any,
+    messenger_blocked: bool,
+    user_sync_version: int,
+    parse_mode: str | None = "Markdown",
+) -> TelegramNotificationEnqueueResult:
+    """Persist an account notice tied to the user's current account state."""
+    policy = telegram_notification_action_policy(TelegramDeliveryAction.ACCOUNT_STATUS)
+    normalized_source_id = str(source_id or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("telegram_notification_action_source_id_invalid")
+    normalized_status = str(
+        getattr(account_status, "value", account_status) or ""
+    ).strip().lower()
+    if normalized_status not in {"active", "inactive"}:
+        raise ValueError("telegram_account_status_state_invalid")
+    if not isinstance(messenger_blocked, bool):
+        raise ValueError("telegram_account_status_block_state_invalid")
+    if (
+        isinstance(user_sync_version, bool)
+        or not isinstance(user_sync_version, int)
+        or user_sync_version <= 0
+    ):
+        raise ValueError("telegram_account_status_user_version_invalid")
+    return await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=text,
+        source_type=policy.source_type,
+        source_id=normalized_source_id,
+        parse_mode=validate_telegram_notification_parse_mode(parse_mode),
+        extra_payload={
+            "account_status": normalized_status,
+            "messenger_blocked": messenger_blocked,
+            "queue_action": policy.action.value,
+            "user_sync_version": user_sync_version,
+        },
     )
 
 
@@ -608,8 +712,17 @@ async def claim_next_telegram_notification_outbox(
             ),
             TelegramNotificationOutbox.queue_job_id.is_(None),
             TelegramNotificationOutbox.queue_handed_off_at.is_(None),
-            TelegramNotificationOutbox.source_type
-            != TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+            TelegramNotificationOutbox.source_type.not_in(
+                tuple(
+                    sorted(
+                        {
+                            TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+                            TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+                            *TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
+                        }
+                    )
+                )
+            ),
             TelegramNotificationOutbox.worker_id.is_(None),
             TelegramNotificationOutbox.lease_until.is_(None),
             or_(

@@ -40,6 +40,9 @@ from core.telegram_delivery_queue_contract import (
     TelegramFreshnessDecision,
     TelegramFreshnessOutcome,
 )
+from core.telegram_delivery_notification_action_contract import (
+    TELEGRAM_NOTIFICATION_ACTION_VALUES,
+)
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_delivery_resume_operation import (
@@ -205,6 +208,7 @@ def _require_lifecycle_callback(
     new_user_membership_reason: str,
     market_notice_reason: str,
     repeat_offer_response_reason: str,
+    notification_action_reason: str,
 ) -> None:
     if callable(callback):
         return
@@ -222,6 +226,8 @@ def _require_lifecycle_callback(
         raise TelegramDeliveryQueueValidationError(market_notice_reason)
     if action == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value:
         raise TelegramDeliveryQueueValidationError(repeat_offer_response_reason)
+    if action in TELEGRAM_NOTIFICATION_ACTION_VALUES:
+        raise TelegramDeliveryQueueValidationError(notification_action_reason)
 
 
 def _require_foreign(current_server: str) -> None:
@@ -883,6 +889,7 @@ async def mark_telegram_delivery_dispatch_started(
         new_user_membership_reason="new_user_membership_dispatch_guard_required",
         market_notice_reason="market_notice_dispatch_guard_required",
         repeat_offer_response_reason="repeat_offer_response_dispatch_guard_required",
+        notification_action_reason="notification_action_dispatch_guard_required",
     )
     if dispatch_guard is not None:
         await dispatch_guard(db, record, dispatch_linearized_at)
@@ -937,6 +944,7 @@ async def apply_telegram_delivery_freshness_result(
         new_user_membership_reason="new_user_membership_freshness_feedback_required",
         market_notice_reason="market_notice_freshness_feedback_required",
         repeat_offer_response_reason="repeat_offer_response_freshness_feedback_required",
+        notification_action_reason="notification_action_freshness_feedback_required",
     )
     contract_job = _record_to_contract(record)
     apply_freshness_decision(contract_job, decision)
@@ -1166,6 +1174,7 @@ async def resolve_telegram_delivery_result(
         new_user_membership_reason="new_user_membership_delivery_feedback_required",
         market_notice_reason="market_notice_delivery_feedback_required",
         repeat_offer_response_reason="repeat_offer_response_delivery_feedback_required",
+        notification_action_reason="notification_action_delivery_feedback_required",
     )
     await _acquire_dispatch_scope_locks(db, record=record)
     result_linearized_at = utc_now()

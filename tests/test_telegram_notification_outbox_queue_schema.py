@@ -1,6 +1,9 @@
 import pathlib
 import unittest
 
+from core.telegram_delivery_notification_action_contract import (
+    TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
+)
 from models.telegram_notification_outbox import TelegramNotificationOutbox
 
 
@@ -32,6 +35,23 @@ class TelegramNotificationOutboxQueueSchemaTests(unittest.TestCase):
         self.assertIn("ux_telegram_notification_outbox_queue_job", source)
         self.assertIn("ix_telegram_notification_outbox_queue_handoff", source)
         self.assertIn("source_type = 'project_user_joined'", source)
+
+    def test_action_queue_index_migration_is_current_head_child(self):
+        source = pathlib.Path(
+            "migrations/versions/"
+            "fad4e5f6a7b8_expand_notification_action_queue.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fac3d4e5f6a7"',
+            source,
+        )
+        self.assertIn("queue_action:account_status", source)
+        self.assertIn("queue_action:general_immediate", source)
+        self.assertIn("queue_action:offer_validation_response", source)
+        self.assertIn("queue_action:trade_unavailable", source)
+        for source_type in TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES:
+            self.assertIn(source_type, source)
+        self.assertIn("('project_user_joined', 'offer_repeat_response')", source)
 
 
 if __name__ == "__main__":
