@@ -150,7 +150,7 @@
       display: flex;
       gap: 12px;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
     }
 
     .direction-label h2 {
@@ -166,7 +166,7 @@
       line-height: 1.8;
     }
 
-    .recommendation {
+    .selection-badge {
       padding: 5px 9px;
       border-radius: 999px;
       background: #efe3ca;
@@ -676,7 +676,7 @@
     .score-table td:first-child { text-align: right; }
     .score-table tr:last-child td { border-bottom: 0; }
     .score-table thead { background: #f7f9fb; color: #4b5563; }
-    .score-table tbody tr:first-child { background: #fcf8ef; }
+    .score-table tbody tr:nth-child(2) { background: #eef4ff; }
 
     .desktop-proof {
       --ink: #1f2933;
@@ -862,10 +862,10 @@
     <header class="stage-header">
       <div>
         <h1>سه جهت بصری برای بازطراحی وب‌اپ</h1>
-        <p>سناریوی یکسان: مدیر میانی در صفحه «عملیات»؛ مرجع طراحی موبایل ۳۹۰×۸۴۴ و نسخه دسکتاپ صرفاً adaptive. تفاوت‌ها عمداً به شخصیت بصری، تراکم، شکل کارت‌ها و شیوه تأکید محدود شده‌اند.</p>
+        <p>انتخاب نهایی Stage 0A: «مالی مدرن». سناریوی مقایسه، مدیر میانی در صفحه «عملیات» است؛ مرجع طراحی موبایل ۳۹۰×۸۴۴ و نسخه دسکتاپ صرفاً adaptive.</p>
         <div class="protected-note"><strong>مرز محافظت‌شده:</strong> بازار و پیام‌رسان فقط جایگاه ثابت خود را در ناوبری دارند؛ محتوای داخلی، رفتار و UI آن‌ها در این طراحی بررسی یا تغییر نکرده است.</div>
       </div>
-      <span class="scope-badge">Stage 0 · بدون تغییر کد محصول</span>
+      <span class="scope-badge">Stage 0A · مالی مدرن انتخاب شد</span>
     </header>
 
     <section class="directions-grid" aria-label="مقایسه سه جهت بصری">
@@ -873,7 +873,6 @@
         <div class="direction-label">
           <div class="direction-label__top">
             <h2>آرام ممتاز</h2>
-            <span class="recommendation">پیشنهاد پایه</span>
           </div>
           <p>حرفه‌ای، آرام، ممتاز و مناسب استفاده طولانی</p>
           <div class="palette" aria-label="پالت آرام ممتاز">
@@ -907,7 +906,7 @@
       </article>
 
       <article class="direction direction--modern" id="direction-modern">
-        <div class="direction-label"><div class="direction-label__top"><h2>مالی مدرن</h2></div><p>دقیق، سریع، داده‌محور و متراکم‌تر</p><div class="palette"><span class="swatch" style="--swatch:#12314a"></span><span class="swatch" style="--swatch:#2f6fed"></span><span class="swatch" style="--swatch:#f4f7fa"></span><span class="swatch" style="--swatch:#d5a84b"></span></div></div>
+        <div class="direction-label"><div class="direction-label__top"><h2>مالی مدرن</h2><span class="selection-badge">انتخاب مالک محصول</span></div><p>دقیق، سریع، داده‌محور و متراکم‌تر</p><div class="palette"><span class="swatch" style="--swatch:#12314a"></span><span class="swatch" style="--swatch:#2f6fed"></span><span class="swatch" style="--swatch:#f4f7fa"></span><span class="swatch" style="--swatch:#d5a84b"></span></div></div>
         <div class="phone">
           <header class="phone-header"><div class="utility-row"><button class="icon-button" aria-label="اعلان‌ها"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg></button><span class="role-chip">مدیر میانی</span></div><h3>عملیات</h3><p>دسترسی‌های اجرایی و مدیریتی شما</p></header>
           <section class="phone-content"><div class="access-summary"><span class="access-summary__eyebrow">وضعیت دسترسی</span><strong>۲ مسیر فعال</strong><p>مشتریان و حسابداران در دسترس شما هستند</p><span class="summary-badge">۲ ابزار مدیریتی</span></div><div class="section-heading"><strong>مسیرهای پرتکرار</strong><span>بر اساس نقش شما</span></div><div class="action-list"><div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg></span><span class="action-card__copy"><strong>مشتریان</strong><span>دعوت، مدیریت و گزارش مشتریان</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M22 13a18.15 18.15 0 0 1-20 0"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg></span><span class="action-card__copy"><strong>مدیریت کاربران</strong><span>مشاهده، جست‌وجو و تنظیم کاربران پروژه</span></span><span class="action-card__arrow">‹</span></div></div><div class="context-note"><span class="context-note__dot"></span><div><strong>همه‌چیز بر اساس نقش شماست</strong><p>فقط مسیرهایی نمایش داده می‌شوند که برای حساب فعلی فعال‌اند.</p></div></div></section>
@@ -932,8 +931,8 @@
     </section>
 
     <section class="adaptive-section">
-      <h2>اثبات رفتار adaptive — آرام ممتاز</h2>
-      <p>این نمونه جهت نهایی را قطعی نمی‌کند؛ فقط نشان می‌دهد فضای کاری سنگین روی دسکتاپ از فضای اضافه برای list/detail و خلاصه دسترسی استفاده می‌کند و نسخه موبایل را صرفاً نمی‌کشد.</p>
+      <h2>نمونه adaptive مقایسه‌ای — آرام ممتاز</h2>
+      <p>این نمونه پیش از انتخاب نهایی ساخته شد و فقط رفتار adaptive را اثبات می‌کند. نمونه دسکتاپ منطبق با «مالی مدرن» در Stage 0B و همراه workspace پرتراکم ساخته می‌شود.</p>
       <div class="desktop-proof" id="adaptive-desktop">
         <aside class="desktop-sidebar"><div class="brand-mark"><span></span>سامانه معاملات</div><div class="desktop-nav"><div>خانه</div><div>بازار · جایگاه ثابت</div><div>پیام‌رسان · جایگاه ثابت</div><div class="active">عملیات</div><div>حساب</div></div></aside>
         <main class="desktop-main"><header class="desktop-heading"><div><h3>عملیات</h3><p>دسترسی‌های اجرایی و مدیریتی شما</p></div><button>مشاهده اعلان‌ها</button></header><div class="desktop-layout"><div class="desktop-actions"><section class="desktop-section"><div class="desktop-section__header"><strong>روابط کاری</strong><span>۲ مسیر فعال</span></div><div class="desktop-action-grid"><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>مشتریان</strong><span>دعوت، مدیریت و گزارش مشتریان</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>حسابداران</strong><span>دعوت و مدیریت تنظیمات حسابداران</span></span><span class="action-card__arrow">‹</span></div></div></section><section class="desktop-section"><div class="desktop-section__header"><strong>مدیریت</strong><span>۲ ابزار فعال</span></div><div class="desktop-action-grid"><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>ارسال دعوت‌نامه</strong><span>ساخت لینک دعوت برای کاربر مجاز</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>مدیریت کاربران</strong><span>جست‌وجو و تنظیم کاربران پروژه</span></span><span class="action-card__arrow">‹</span></div></div></section></div><aside class="desktop-aside"><div class="access-summary"><span class="access-summary__eyebrow">وضعیت دسترسی</span><strong>۲ مسیر فعال</strong><p>مشتریان و حسابداران در دسترس شما هستند</p><span class="summary-badge">۲ ابزار مدیریتی</span></div><div class="state-grid" style="grid-template-columns:1fr 1fr"><div class="state-card state-card--success"><strong>موفق</strong><span>نتیجه در همان زمینه نمایش داده می‌شود.</span></div><div class="state-card state-card--error"><strong>خطا</strong><span>Retry نزدیک پیام قرار می‌گیرد.</span></div></div></aside></div></main>
