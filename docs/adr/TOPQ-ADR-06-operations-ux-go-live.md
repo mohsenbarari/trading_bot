@@ -49,3 +49,10 @@ snapshot Bot/WebApp، keyboard/anchor، preflight محیط، secret scan، clean
 - log به‌جای dedupe/idempotency خام از job id یا correlation hash استفاده می‌کند و bundle نهایی با secret/PII scanner generic بررسی می‌شود.
 - label محیط تست باید صریحاً `test` باشد و test harness هر network/provider call واقعی را fail کند.
 - policy relink برای هر خانواده پیام، به‌ویژه trade/admin/account، پیش از Stage 4 ثبت و تست می‌شود.
+
+## الحاقیه resume بات و gateway `2026-07-19`
+
+- resume مستقیم Redis مجاز نیست. فرمان break-glass فقط روی foreign، با scope صریح، request-id یکتا، actor الزامی و عبارت تأیید exact اجرا می‌شود.
+- saga ابتدا درخواست را در PostgreSQL journal می‌کند، full channel permission preflight همان credentialهای فعال را می‌گیرد، jobهای blocked را یک‌بار آزاد می‌کند، سپس Redis را پاک و در پایان gate را active می‌کند.
+- قطع میان DB و Redis در حالت `database_applied` باقی می‌ماند؛ اجرای همان request-id شناسه jobهای ثبت‌شده را reuse می‌کند و درخواست متفاوت conflict می‌گیرد. 429 پیش‌پرواز deadline پایدار می‌سازد و retry پیش از آن fail-closed است.
+- actor فقط به‌صورت SHA-256، خطا فقط با class/reason کنترل‌شده و خروجی CLI بدون token، payload، chat id یا متن provider ثبت می‌شود.

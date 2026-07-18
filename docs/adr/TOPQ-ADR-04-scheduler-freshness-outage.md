@@ -55,3 +55,10 @@ limiter و scheduler فقط همراه execution-owner flag فعال می‌شو
 - یک 429 مقصد به‌تنهایی در restart به bot-wide pause تبدیل نمی‌شود؛ فقط `bot_cooldown_until` یا probe/bot evidence صریح کل bot را می‌بندد. تست هم‌زمان دو destination همچنان escalation واقعی bot-wide را اثبات می‌کند.
 - primary در channel cooldown/hard-pause با preflight فقط هویت وارد loop خصوصی می‌شود و claim آن به `destination_class=private` محدود است. با پاک‌شدن gate loop خارج می‌شود؛ channel job فقط پس از preflight کامل permission دوباره eligible می‌شود. editor در همان gate شروع نمی‌شود.
 - ماتریس واقعی PostgreSQL ثابت می‌کند M0 کانال بسته، M1 خصوصی را اشغال نمی‌کند؛ تست final marker نیز با lease مصنوعی ثابت می‌کند bypass scheduler هنوز پیش از side effect رد می‌شود.
+
+## الحاقیه gate پایدار پیش‌پرواز `2026-07-19`
+
+- `429` پیش‌پرواز پیش از sleep در `telegram_delivery_runtime_gates` ثبت می‌شود؛ deadline برابر retry_after خام به‌اضافه safety است و Redis فقط mirror اجرایی آن است.
+- startup از PostgreSQL cooldown و pauseهای bot/gateway را بازسازی می‌کند. claim و marker نهایی هر دو gate را می‌خوانند؛ خرابی یا پاک‌شدن Redis اجازهٔ ارسال زودرس نمی‌دهد.
+- preflight کامل موفق، cooldown منقضی را با evidence هویت/permission به `active` می‌برد. preflight هویتی private-only حق پاک‌کردن destination pause یا hard pause را ندارد.
+- pause ناشی از پاسخ provider و transition job در یک transaction ثبت می‌شوند؛ rollback هیچ gate یتیمی باقی نمی‌گذارد.
