@@ -161,11 +161,9 @@ class TelegramDeliveryNotificationActionContractTests(
             channel_id=-1001234567890
         ).coverage("primary")
         expected = {
-            "callback_deadline",
             "cosmetic_cleanup",
             "delayed_restriction",
             "noncritical_market",
-            "offer_expiry_callback",
             "temporary_cleanup",
             "timed_security",
         }

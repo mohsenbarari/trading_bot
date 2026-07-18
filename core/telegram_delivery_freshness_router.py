@@ -312,6 +312,28 @@ def offer_success_freshness_routes(
     return {TelegramDeliveryAction.OFFER_SUCCESS: validator}
 
 
+def callback_freshness_routes(
+    actions: Collection[TelegramDeliveryAction],
+    validator: TelegramDeliveryFreshnessValidator,
+) -> dict[TelegramDeliveryAction, TelegramDeliveryFreshnessValidatorCallable]:
+    if not callable(validator):
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_callback_freshness_validator_invalid"
+        )
+    normalized = frozenset(_normalize_action(action) for action in actions)
+    expected = frozenset(
+        {
+            TelegramDeliveryAction.CALLBACK_DEADLINE,
+            TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+        }
+    )
+    if normalized != expected:
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_callback_freshness_actions_invalid"
+        )
+    return {action: validator for action in normalized}
+
+
 def notification_action_freshness_routes(
     actions: Collection[TelegramDeliveryAction],
     validator: TelegramDeliveryFreshnessValidator,

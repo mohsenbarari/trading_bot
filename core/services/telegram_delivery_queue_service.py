@@ -210,6 +210,7 @@ def _require_lifecycle_callback(
     repeat_offer_response_reason: str,
     notification_action_reason: str,
     offer_success_reason: str,
+    callback_reason: str,
 ) -> None:
     if callable(callback):
         return
@@ -231,6 +232,11 @@ def _require_lifecycle_callback(
         raise TelegramDeliveryQueueValidationError(notification_action_reason)
     if action == TelegramDeliveryAction.OFFER_SUCCESS.value:
         raise TelegramDeliveryQueueValidationError(offer_success_reason)
+    if action in {
+        TelegramDeliveryAction.CALLBACK_DEADLINE.value,
+        TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK.value,
+    }:
+        raise TelegramDeliveryQueueValidationError(callback_reason)
 
 
 def _require_foreign(current_server: str) -> None:
@@ -894,6 +900,7 @@ async def mark_telegram_delivery_dispatch_started(
         repeat_offer_response_reason="repeat_offer_response_dispatch_guard_required",
         notification_action_reason="notification_action_dispatch_guard_required",
         offer_success_reason="offer_success_dispatch_guard_required",
+        callback_reason="callback_dispatch_guard_required",
     )
     if dispatch_guard is not None:
         await dispatch_guard(db, record, dispatch_linearized_at)
@@ -950,6 +957,7 @@ async def apply_telegram_delivery_freshness_result(
         repeat_offer_response_reason="repeat_offer_response_freshness_feedback_required",
         notification_action_reason="notification_action_freshness_feedback_required",
         offer_success_reason="offer_success_freshness_feedback_required",
+        callback_reason="callback_freshness_feedback_required",
     )
     contract_job = _record_to_contract(record)
     apply_freshness_decision(contract_job, decision)
@@ -1181,6 +1189,7 @@ async def resolve_telegram_delivery_result(
         repeat_offer_response_reason="repeat_offer_response_delivery_feedback_required",
         notification_action_reason="notification_action_delivery_feedback_required",
         offer_success_reason="offer_success_delivery_feedback_required",
+        callback_reason="callback_delivery_feedback_required",
     )
     await _acquire_dispatch_scope_locks(db, record=record)
     result_linearized_at = utc_now()

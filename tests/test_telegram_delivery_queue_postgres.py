@@ -60,6 +60,15 @@ from core.services.telegram_delivery_queue_service import (
     recover_expired_telegram_delivery_leases,
     resolve_telegram_delivery_result as _resolve_telegram_delivery_result,
 )
+from core.services.telegram_callback_queue_feedback import (
+    TelegramCallbackQueueLifecycleFeedback,
+)
+from core.services.telegram_callback_queue_service import (
+    enqueue_telegram_callback_answer,
+)
+from core.telegram_delivery_callback_freshness import (
+    validate_telegram_callback_delivery_freshness,
+)
 from core.services.telegram_offer_queue_service import (
     load_offer_edit_fresh_success_counts,
     record_offer_edit_delivery_success,
@@ -457,6 +466,226 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             count = await db.scalar(select(func.count()).select_from(TelegramDeliveryJobRecord))
         self.assertEqual(count, 1)
+
+    async def test_direct_callback_enqueue_is_idempotent_and_hides_query_identity(self):
+        received_at = utc_now()
+        async with self.Session() as db:
+            first = await enqueue_telegram_callback_answer(
+                db,
+                current_server="foreign",
+                callback_query_id="private-callback-query-id",
+                received_at=received_at,
+                text="پاسخ معمول",
+            )
+            await db.commit()
+        async with self.Session() as db:
+            replay = await enqueue_telegram_callback_answer(
+                db,
+                current_server="foreign",
+                callback_query_id="private-callback-query-id",
+                received_at=received_at,
+                text="پاسخ معمول",
+            )
+            await db.commit()
+
+        self.assertTrue(first.created)
+        self.assertFalse(replay.created)
+        self.assertEqual(first.job.id, replay.job.id)
+        self.assertEqual(first.job.priority, 0)
+        self.assertEqual(first.job.priority_rank, 0)
+        self.assertEqual(first.job.method, "answerCallbackQuery")
+        self.assertNotIn(
+            "private-callback-query-id",
+            first.job.source_natural_id,
+        )
+        self.assertNotIn(
+            "private-callback-query-id",
+            first.job.destination_key,
+        )
+        self.assertEqual(
+            first.job.payload["callback_query_id"],
+            "private-callback-query-id",
+        )
+
+    async def test_callback_lifecycle_expires_at_deadline_and_requires_feedback(self):
+        received_at = utc_now() - timedelta(seconds=11)
+        async with self.Session() as db:
+            enqueued = await enqueue_telegram_callback_answer(
+                db,
+                current_server="foreign",
+                callback_query_id="expired-callback-query-id",
+                received_at=received_at,
+                action=TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+            )
+            await db.commit()
+        claimed = await self._claim("callback-expired-worker", now=utc_now())
+        decision = await validate_telegram_callback_delivery_freshness(
+            None,
+            claimed,
+            utc_now(),
+        )
+        self.assertEqual(
+            decision.outcome,
+            TelegramFreshnessOutcome.EXPIRED_INTERACTION,
+        )
+        feedback = TelegramCallbackQueueLifecycleFeedback()
+        async with self.Session() as db:
+            applied = await _apply_telegram_delivery_freshness_result(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="callback-expired-worker",
+                lease_token=claimed.lease_token,
+                decision=decision,
+                feedback=feedback.apply_freshness,
+                now=utc_now(),
+            )
+            await db.commit()
+        self.assertFalse(applied)
+        async with self.Session() as db:
+            persisted = await db.get(
+                TelegramDeliveryJobRecord,
+                enqueued.job.id,
+            )
+        self.assertEqual(
+            persisted.state,
+            TelegramDeliveryState.EXPIRED_INTERACTION,
+        )
+
+    async def test_callback_success_requires_guard_and_finishes_without_message_id(self):
+        received_at = utc_now()
+        async with self.Session() as db:
+            enqueued = await enqueue_telegram_callback_answer(
+                db,
+                current_server="foreign",
+                callback_query_id="successful-callback-query-id",
+                received_at=received_at,
+            )
+            await db.commit()
+        claimed = await self._claim("callback-success-worker", now=received_at)
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "callback_dispatch_guard_required",
+            ):
+                await _mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=enqueued.job.id,
+                    worker_id="callback-success-worker",
+                    lease_token=claimed.lease_token,
+                    now=received_at,
+                )
+            await db.rollback()
+
+        feedback = TelegramCallbackQueueLifecycleFeedback()
+        async with self.Session() as db:
+            marked = await _mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="callback-success-worker",
+                lease_token=claimed.lease_token,
+                dispatch_guard=feedback.assert_dispatchable,
+                now=received_at,
+            )
+            await db.commit()
+        self.assertTrue(marked)
+
+        async with self.Session() as db:
+            decision = await _resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="callback-success-worker",
+                lease_token=claimed.lease_token,
+                result=TelegramGatewayResult(
+                    ok=True,
+                    method="answerCallbackQuery",
+                    status_code=200,
+                    response_json={"ok": True, "result": True},
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                feedback=feedback.apply_delivery_result,
+                now=received_at,
+            )
+            await db.commit()
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.SENT)
+        async with self.Session() as db:
+            persisted = await db.get(
+                TelegramDeliveryJobRecord,
+                enqueued.job.id,
+            )
+        self.assertEqual(persisted.state, TelegramDeliveryState.SENT)
+        self.assertIsNone(persisted.telegram_message_id)
+
+    async def test_provider_query_too_old_terminals_callback_as_expired(self):
+        received_at = utc_now()
+        async with self.Session() as db:
+            enqueued = await enqueue_telegram_callback_answer(
+                db,
+                current_server="foreign",
+                callback_query_id="provider-expired-callback-query-id",
+                received_at=received_at,
+            )
+            await db.commit()
+        claimed = await self._claim("callback-provider-expired", now=received_at)
+        feedback = TelegramCallbackQueueLifecycleFeedback()
+        async with self.Session() as db:
+            marked = await _mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="callback-provider-expired",
+                lease_token=claimed.lease_token,
+                dispatch_guard=feedback.assert_dispatchable,
+                now=received_at,
+            )
+            await db.commit()
+        self.assertTrue(marked)
+
+        async with self.Session() as db:
+            decision = await _resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="callback-provider-expired",
+                lease_token=claimed.lease_token,
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="answerCallbackQuery",
+                    status_code=400,
+                    response_json={
+                        "ok": False,
+                        "error_code": 400,
+                        "description": (
+                            "Bad Request: query is too old and response timeout "
+                            "expired or query ID is invalid"
+                        ),
+                    },
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                feedback=feedback.apply_delivery_result,
+                now=received_at,
+            )
+            await db.commit()
+        self.assertEqual(
+            decision.outcome,
+            TelegramDeliveryOutcome.EXPIRED_INTERACTION,
+        )
+        async with self.Session() as db:
+            persisted = await db.get(
+                TelegramDeliveryJobRecord,
+                enqueued.job.id,
+            )
+        self.assertEqual(
+            persisted.state,
+            TelegramDeliveryState.EXPIRED_INTERACTION,
+        )
 
     async def test_otp_payload_is_rejected_before_durable_insert(self):
         async with self.Session() as db:

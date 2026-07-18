@@ -134,7 +134,7 @@ class TelegramDeliveryOfferSuccessContractTests(
         self.assertEqual(snapshot.payload["parse_mode"], "Markdown")
         self.assertTrue(telegram_offer_success_source_natural_id(outbox))
 
-    def test_runtime_coverage_now_leaves_seven_source_specific_actions(self):
+    def test_runtime_coverage_now_leaves_five_source_specific_actions(self):
         freshness = configured_telegram_delivery_freshness_registry(
             channel_id=-1001234567890
         ).coverage("primary")
@@ -142,11 +142,9 @@ class TelegramDeliveryOfferSuccessContractTests(
             channel_id=-1001234567890
         ).coverage("primary")
         expected = {
-            "callback_deadline",
             "cosmetic_cleanup",
             "delayed_restriction",
             "noncritical_market",
-            "offer_expiry_callback",
             "temporary_cleanup",
             "timed_security",
         }

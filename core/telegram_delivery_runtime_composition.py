@@ -8,6 +8,9 @@ from typing import Any
 from core.services.telegram_admin_broadcast_queue_feedback import (
     TelegramAdminBroadcastQueueLifecycleFeedback,
 )
+from core.services.telegram_callback_queue_feedback import (
+    TelegramCallbackQueueLifecycleFeedback,
+)
 from core.services.telegram_market_notice_queue_feedback import (
     TelegramMarketNoticeQueueLifecycleFeedback,
 )
@@ -28,6 +31,7 @@ from core.telegram_delivery_freshness_router import (
     TelegramDeliveryFreshnessRegistry,
     TelegramDeliveryFreshnessRouter,
     admin_broadcast_freshness_routes,
+    callback_freshness_routes,
     market_freshness_routes,
     new_user_membership_freshness_routes,
     notification_action_freshness_routes,
@@ -35,6 +39,10 @@ from core.telegram_delivery_freshness_router import (
     offer_success_freshness_routes,
     repeat_offer_response_freshness_routes,
     trade_result_freshness_routes,
+)
+from core.telegram_delivery_callback_contract import CALLBACK_FRESHNESS_ACTIONS
+from core.telegram_delivery_callback_freshness import (
+    TelegramCallbackDeliveryFreshnessValidator,
 )
 from core.telegram_delivery_notification_action_freshness import (
     NOTIFICATION_ACTION_FRESHNESS_ACTIONS,
@@ -168,6 +176,13 @@ def configured_telegram_delivery_freshness_registry(
             OfferSuccessTelegramDeliveryFreshnessValidator()
         ),
     )
+    _merge_unique(
+        routes,
+        callback_freshness_routes(
+            CALLBACK_FRESHNESS_ACTIONS,
+            TelegramCallbackDeliveryFreshnessValidator(),
+        ),
+    )
     return TelegramDeliveryFreshnessRegistry(routes)
 
 
@@ -184,6 +199,7 @@ def configured_telegram_delivery_lifecycle_registry(
     trade_feedback = TradeResultQueueLifecycleFeedback()
     admin_feedback = TelegramAdminBroadcastQueueLifecycleFeedback()
     notification_feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
+    callback_feedback = TelegramCallbackQueueLifecycleFeedback()
 
     for actions, feedback in (
         (OFFER_FRESHNESS_ACTIONS, offer_feedback),
@@ -194,6 +210,7 @@ def configured_telegram_delivery_lifecycle_registry(
         (REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS, notification_feedback),
         (NOTIFICATION_ACTION_FRESHNESS_ACTIONS, notification_feedback),
         (OFFER_SUCCESS_FRESHNESS_ACTIONS, notification_feedback),
+        (CALLBACK_FRESHNESS_ACTIONS, callback_feedback),
     ):
         _merge_unique(routes, lifecycle_routes(actions, feedback))
     return TelegramDeliveryLifecycleRegistry(routes)

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
@@ -28,6 +29,15 @@ from core.services.offer_expiry_service import (
 from core.services.offer_expiry_limits import OfferManualExpireLimitError, enforce_manual_offer_expire_limits
 from core.services.offer_expiry_gate import try_acquire_offer_expiry_gate
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.services.telegram_callback_queue_service import (
+    enqueue_telegram_callback_answer,
+)
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
+from core.utils import utc_now
 from bot.callbacks import ExpireOfferCallback
 from bot.repeat_offer import build_persistent_navigation_keyboard
 from core.public_webapp_url import user_facing_webapp_url
@@ -50,10 +60,52 @@ async def _rollback_if_supported(session) -> None:
     if callable(rollback):
         await rollback()
 
+
+async def _answer_offer_expiry_callback(
+    callback: types.CallbackQuery,
+    *,
+    received_at: datetime,
+    text: str | None = None,
+    session=None,
+    commit: bool = True,
+) -> None:
+    """Preserve legacy replies or enqueue one direct M0 callback answer."""
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        if text is None:
+            await callback.answer()
+        else:
+            await callback.answer(text)
+        return
+
+    async def _enqueue(db) -> None:
+        await enqueue_telegram_callback_answer(
+            db,
+            current_server=current_server(),
+            callback_query_id=callback.id,
+            received_at=received_at,
+            action=TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+            text=text,
+        )
+        if commit:
+            await db.commit()
+
+    if session is not None:
+        await _enqueue(session)
+        return
+    async with AsyncSessionLocal() as db:
+        await _enqueue(db)
+
 @router.callback_query(ExpireOfferCallback.filter())
 async def handle_expire_offer(callback: types.CallbackQuery, callback_data: ExpireOfferCallback, user: Optional[User], bot: Bot):
+    callback_received_at = utc_now()
     if not user:
-        await callback.answer()
+        await _answer_offer_expiry_callback(
+            callback,
+            received_at=callback_received_at,
+        )
         return
     
     ts = get_trading_settings()
@@ -62,18 +114,32 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
 
     lease = await try_acquire_offer_expiry_gate(offer_id=offer_id)
     if not lease.acquired:
-        await callback.answer(OFFER_EXPIRY_LOCK_BUSY_TEXT)
+        await _answer_offer_expiry_callback(
+            callback,
+            received_at=callback_received_at,
+            text=OFFER_EXPIRY_LOCK_BUSY_TEXT,
+        )
         return
     try:
         async with AsyncSessionLocal() as session:
             offer = await session.get(Offer, offer_id)
 
             if not offer:
-                await callback.answer("❌ لفظ یافت نشد")
+                await _answer_offer_expiry_callback(
+                    callback,
+                    received_at=callback_received_at,
+                    text="❌ لفظ یافت نشد",
+                    session=session,
+                )
                 return
 
             if offer.user_id != user.id:
-                await callback.answer("❌ شما مالک این لفظ نیستید")
+                await _answer_offer_expiry_callback(
+                    callback,
+                    received_at=callback_received_at,
+                    text="❌ شما مالک این لفظ نیستید",
+                    session=session,
+                )
                 return
 
             if is_remote_home(getattr(offer, "home_server", None)):
@@ -97,7 +163,12 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                             "offer_id": getattr(offer, "id", None),
                         },
                     )
-                    await callback.answer("❌ شناسه عمومی لفظ برای انتقال معتبر نیست")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ شناسه عمومی لفظ برای انتقال معتبر نیست",
+                        session=session,
+                    )
                     return
                 status_code, body = await forward_offer_expiry_to_home_server(
                     offer.home_server,
@@ -105,11 +176,21 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 )
                 if status_code >= 400:
                     detail = body.get("detail") if isinstance(body, dict) else None
-                    await callback.answer(f"❌ {detail or 'خطا در منقضی کردن لفظ'}")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text=f"❌ {detail or 'خطا در منقضی کردن لفظ'}",
+                        session=session,
+                    )
                     return
             else:
                 if offer.status != OfferStatus.ACTIVE:
-                    await callback.answer("❌ این لفظ دیگر فعال نیست")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ این لفظ دیگر فعال نیست",
+                        session=session,
+                    )
                     return
                 _expunge_if_supported(session, offer)
                 try:
@@ -121,22 +202,47 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                     )
                 except StaleDataError:
                     await _rollback_if_supported(session)
-                    await callback.answer("❌ این لفظ دیگر فعال نیست")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ این لفظ دیگر فعال نیست",
+                        session=session,
+                    )
                     return
                 except (OperationalError, DBAPIError) as exc:
                     if is_offer_expiry_lock_busy(exc):
                         await _rollback_if_supported(session)
-                        await callback.answer(OFFER_EXPIRY_LOCK_BUSY_TEXT)
+                        await _answer_offer_expiry_callback(
+                            callback,
+                            received_at=callback_received_at,
+                            text=OFFER_EXPIRY_LOCK_BUSY_TEXT,
+                            session=session,
+                        )
                         return
                     raise
                 if not offer:
-                    await callback.answer("❌ لفظ یافت نشد")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ لفظ یافت نشد",
+                        session=session,
+                    )
                     return
                 if offer.user_id != user.id:
-                    await callback.answer("❌ شما مالک این لفظ نیستید")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ شما مالک این لفظ نیستید",
+                        session=session,
+                    )
                     return
                 if offer.status != OfferStatus.ACTIVE:
-                    await callback.answer("❌ این لفظ دیگر فعال نیست")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ این لفظ دیگر فعال نیست",
+                        session=session,
+                    )
                     return
                 try:
                     await enforce_manual_offer_expire_limits(
@@ -145,7 +251,12 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                         trading_settings=ts,
                     )
                 except OfferManualExpireLimitError as exc:
-                    await callback.answer(f"❌ {exc.detail}")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text=f"❌ {exc.detail}",
+                        session=session,
+                    )
                     return
                 try:
                     await expire_offer_authoritatively(
@@ -158,16 +269,35 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                             expired_by_user_id=user.id,
                             expired_by_actor_user_id=user.id,
                         ),
+                        commit=(
+                            configured_telegram_delivery_runtime().mode
+                            != TelegramDeliveryRuntimeMode.QUEUE_V1
+                        ),
                     )
                 except OfferNotAuthoritativeError:
-                    await callback.answer("❌ این لفظ باید روی سرور مرجع منقضی شود")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ این لفظ باید روی سرور مرجع منقضی شود",
+                        session=session,
+                    )
                     return
                 except OfferAlreadyInactiveError:
-                    await callback.answer("❌ این لفظ دیگر فعال نیست")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ این لفظ دیگر فعال نیست",
+                        session=session,
+                    )
                     return
                 except StaleDataError:
                     await _rollback_if_supported(session)
-                    await callback.answer("❌ این لفظ دیگر فعال نیست")
+                    await _answer_offer_expiry_callback(
+                        callback,
+                        received_at=callback_received_at,
+                        text="❌ این لفظ دیگر فعال نیست",
+                        session=session,
+                    )
                     return
 
                 if offer.channel_message_id:
@@ -176,9 +306,23 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                     except Exception as e:
                         logger.debug(f"Failed to apply channel offer state: {e}")
 
+            await _answer_offer_expiry_callback(
+                callback,
+                received_at=callback_received_at,
+                session=session,
+                commit=False,
+            )
+            if (
+                configured_telegram_delivery_runtime().mode
+                == TelegramDeliveryRuntimeMode.QUEUE_V1
+            ):
+                # The local Offer mutation and its callback obligation become
+                # visible atomically. Remote-home expiry is already protected
+                # by its command receipt and this commits the foreign callback.
+                await session.commit()
+
             # حذف دکمه از پیام کاربر
             await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.answer()
             await callback.message.answer(
                 "✅ لفظ شما منقضی شد.",
                 reply_markup=await build_persistent_navigation_keyboard(

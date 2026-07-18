@@ -215,6 +215,11 @@ _MESSAGE_NOT_FOUND_PATTERNS = (
     "message can't be edited",
     "message cannot be edited",
 )
+_CALLBACK_EXPIRED_PATTERNS = (
+    "query is too old",
+    "response timeout expired",
+    "query id is invalid",
+)
 
 
 _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPriority, int]] = {
@@ -794,6 +799,18 @@ def apply_gateway_result(
         return TelegramDeliveryDecision(
             TelegramDeliveryOutcome.PERMANENT_UNDELIVERABLE,
             reason="telegram_resource_not_found",
+        )
+
+    if (
+        job.method == "answerCallbackQuery"
+        and status_code == 400
+        and any(pattern in error_text for pattern in _CALLBACK_EXPIRED_PATTERNS)
+    ):
+        job.state = TelegramDeliveryState.EXPIRED_INTERACTION
+        job.next_retry_at = None
+        return TelegramDeliveryDecision(
+            TelegramDeliveryOutcome.EXPIRED_INTERACTION,
+            reason="telegram_callback_query_expired",
         )
 
     if status_code == 400 and any(pattern in error_text for pattern in _MESSAGE_NOT_FOUND_PATTERNS):
