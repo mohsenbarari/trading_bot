@@ -99,7 +99,10 @@ from bot.repeat_offer import (
     resolve_bot_repeat_offer_button_candidate,
 )
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
-from bot.telegram_interaction_message import answer_incoming_message_via_runtime
+from bot.telegram_interaction_message import (
+    answer_callback_message_via_runtime,
+    answer_incoming_message_via_runtime,
+)
 from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
@@ -245,7 +248,13 @@ def _wizard_navigation_keyboard(*, back_action: str, return_to_review: bool) -> 
     ])
 
 
-async def _show_price_prompt(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+async def _show_price_prompt(
+    message: types.Message,
+    state: FSMContext,
+    *,
+    edit: bool,
+    user: Optional[User] = None,
+) -> None:
     data = await state.get_data()
     return_to_review = bool(data.get("wizard_return_to_review"))
     markup = _wizard_navigation_keyboard(
@@ -256,11 +265,25 @@ async def _show_price_prompt(message: types.Message, state: FSMContext, *, edit:
     if edit:
         await message.edit_text(text, reply_markup=markup)
     else:
-        await message.answer(text, reply_markup=markup)
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            text,
+            source_key="offer-price-prompt",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=markup,
+            temporary_context_keyboard=True,
+        )
     await state.set_state(Trade.awaiting_price)
 
 
-async def _show_lot_sizes_prompt(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+async def _show_lot_sizes_prompt(
+    message: types.Message,
+    state: FSMContext,
+    *,
+    edit: bool,
+    user: Optional[User] = None,
+) -> None:
     data = await state.get_data()
     quantity = int(data.get("quantity") or 0)
     return_to_review = bool(data.get("wizard_return_to_review"))
@@ -277,11 +300,25 @@ async def _show_lot_sizes_prompt(message: types.Message, state: FSMContext, *, e
     if edit:
         await message.edit_text(text, reply_markup=markup)
     else:
-        await message.answer(text, reply_markup=markup)
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            text,
+            source_key="offer-lot-sizes-prompt",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=markup,
+            temporary_context_keyboard=True,
+        )
     await state.set_state(Trade.awaiting_lot_sizes)
 
 
-async def _show_notes_prompt(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+async def _show_notes_prompt(
+    message: types.Message,
+    state: FSMContext,
+    *,
+    edit: bool,
+    user: Optional[User] = None,
+) -> None:
     data = await state.get_data()
     return_to_review = bool(data.get("wizard_return_to_review"))
     if return_to_review:
@@ -307,11 +344,25 @@ async def _show_notes_prompt(message: types.Message, state: FSMContext, *, edit:
     if edit:
         await message.edit_text(text, reply_markup=markup)
     else:
-        await message.answer(text, reply_markup=markup)
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            text,
+            source_key="offer-notes-prompt",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=markup,
+            temporary_context_keyboard=True,
+        )
     await state.set_state(Trade.awaiting_notes)
 
 
-async def _show_wizard_review(message: types.Message, state: FSMContext, *, edit: bool) -> None:
+async def _show_wizard_review(
+    message: types.Message,
+    state: FSMContext,
+    *,
+    edit: bool,
+    user: Optional[User] = None,
+) -> None:
     from core.offer_settlement import build_offer_draft_text
 
     data = await state.get_data()
@@ -334,7 +385,15 @@ async def _show_wizard_review(message: types.Message, state: FSMContext, *, edit
     if edit:
         await message.edit_text(review_text, reply_markup=get_wizard_review_keyboard())
     else:
-        await message.answer(review_text, reply_markup=get_wizard_review_keyboard())
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            review_text,
+            source_key="offer-review-prompt",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=get_wizard_review_keyboard(),
+            temporary_context_keyboard=True,
+        )
     await state.set_state(Trade.awaiting_wizard_review)
 
 
@@ -401,9 +460,14 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
 
     await state.clear()
     await state.update_data(wizard_return_to_review=False)
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         "📈 ثبت آفر\n\nنوع معامله را انتخاب کنید:",
+        source_key="offer-wizard-start",
+        action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
         reply_markup=get_trade_type_keyboard(),
+        temporary_context_keyboard=True,
     )
     await state.set_state(Trade.awaiting_trade_type)
 
@@ -566,7 +630,13 @@ async def handle_quick_quantity(
         return
 
     if callback_data.value == "manual":
-        await callback.message.answer("✏️ لطفاً تعداد مورد نظر را به عدد وارد کنید:")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "✏️ لطفاً تعداد مورد نظر را به عدد وارد کنید:",
+            source_key="offer-manual-quantity-prompt",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         await answer_callback_query_via_runtime(callback)
         return
 
@@ -660,18 +730,23 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
     if data.get("wizard_return_to_review"):
         if data.get("is_wholesale") is False:
             await state.update_data(lot_sizes=None, wizard_edit_field="lot_sizes")
-            await _show_lot_sizes_prompt(message, state, edit=False)
+            await _show_lot_sizes_prompt(message, state, edit=False, user=user)
         else:
-            await _show_wizard_review(message, state, edit=False)
+            await _show_wizard_review(message, state, edit=False, user=user)
         return
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {data.get('trade_type_fa', '🟢 خرید')}\n"
         f"کالا: {data.get('commodity_name', 'نامشخص')}\n"
         f"تعداد: {quantity}\n\n"
         f"📦 نحوه معامله را انتخاب کنید:",
+        source_key="offer-lot-type-prompt",
+        action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
         parse_mode="Markdown",
         reply_markup=get_lot_type_keyboard(),
+        temporary_context_keyboard=True,
     )
     await state.set_state(Trade.awaiting_lot_type)
 
@@ -759,9 +834,9 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
 
     await state.update_data(lot_sizes=sorted(lot_sizes, reverse=True))
     if data.get("wizard_return_to_review"):
-        await _show_wizard_review(message, state, edit=False)
+        await _show_wizard_review(message, state, edit=False, user=user)
     else:
-        await _show_price_prompt(message, state, edit=False)
+        await _show_price_prompt(message, state, edit=False, user=user)
 
 
 @router.callback_query(Trade.awaiting_lot_sizes, AcceptLotsCallback.filter())
@@ -818,9 +893,9 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     data = await state.get_data()
     await state.update_data(price=int(price_text))
     if data.get("wizard_return_to_review"):
-        await _show_wizard_review(message, state, edit=False)
+        await _show_wizard_review(message, state, edit=False, user=user)
     else:
-        await _show_notes_prompt(message, state, edit=False)
+        await _show_notes_prompt(message, state, edit=False, user=user)
 
 
 @router.callback_query(Trade.awaiting_notes, SkipNotesCallback.filter(F.target == "notes"))
@@ -854,12 +929,17 @@ async def handle_notes_input(message: types.Message, state: FSMContext, user: Op
         return
 
     await state.update_data(notes=notes)
-    await _show_wizard_review(message, state, edit=False)
+    await _show_wizard_review(message, state, edit=False, user=user)
 
 
-async def show_trade_preview(message_or_callback, state: FSMContext, edit: bool = False):
+async def show_trade_preview(
+    message_or_callback,
+    state: FSMContext,
+    edit: bool = False,
+    user: Optional[User] = None,
+):
     """Compatibility wrapper for tests and old callers; no longer creates a direct-confirm path."""
-    await _show_wizard_review(message_or_callback, state, edit=edit)
+    await _show_wizard_review(message_or_callback, state, edit=edit, user=user)
 
 
 _WIZARD_STATE_VALUES = {
@@ -1849,7 +1929,13 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
         except Exception as exc:
             logger.warning("bot_cancel_all_cache_failed: %s", type(exc).__name__)
 
-    await message.answer(format_offer_cancel_all_bot_message(result))
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        format_offer_cancel_all_bot_message(result),
+        source_key="offer-cancel-all-result",
+        action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+    )
 
 
 async def _text_offer_response(
