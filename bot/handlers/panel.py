@@ -740,7 +740,13 @@ def _customer_relation_detail_text(relation: CustomerRelation) -> str:
     return "\n".join(lines)
 
 
-async def _edit_or_answer_customers_panel(target, owner_user_id: int, *, edit: bool) -> None:
+async def _edit_or_answer_customers_panel(
+    target,
+    owner_user_id: int,
+    *,
+    edit: bool,
+    user: Optional[User] = None,
+) -> None:
     relations = await _load_user_panel_customer_relations(owner_user_id)
     text = "👥 **مشتریان شما**\n\n"
     if relations:
@@ -751,7 +757,14 @@ async def _edit_or_answer_customers_panel(target, owner_user_id: int, *, edit: b
     if edit:
         await target.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
     else:
-        await target.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+        await answer_incoming_message_via_runtime(
+            target,
+            user,
+            text,
+            source_key="panel-customers-list",
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
 
 
 @router.message(F.text == USER_PANEL_CUSTOMERS_TEXT)
@@ -760,9 +773,14 @@ async def show_user_panel_customers(message: types.Message, state: FSMContext, u
         return
     async with AsyncSessionLocal() as session:
         if not await _can_use_customer_panel(session, user):
-            await message.answer("این بخش برای حساب شما فعال نیست.")
+            await answer_incoming_message_via_runtime(
+                message,
+                user,
+                "این بخش برای حساب شما فعال نیست.",
+                source_key="panel-customers-not-available",
+            )
             return
-    await _edit_or_answer_customers_panel(message, user.id, edit=False)
+    await _edit_or_answer_customers_panel(message, user.id, edit=False, user=user)
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "list"))
@@ -774,7 +792,12 @@ async def show_user_panel_customers_callback(callback: types.CallbackQuery, user
         if not await _can_use_customer_panel(session, user):
             await answer_callback_query_via_runtime(callback, "این بخش برای حساب شما فعال نیست.", show_alert=True)
             return
-    await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
+    await _edit_or_answer_customers_panel(
+        callback.message,
+        user.id,
+        edit=True,
+        user=user,
+    )
     await answer_callback_query_via_runtime(callback)
 
 
@@ -1116,7 +1139,12 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
         return
     await callback.message.answer(_customer_invite_result_message(status_code, body))
     try:
-        await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
+        await _edit_or_answer_customers_panel(
+            callback.message,
+            user.id,
+            edit=True,
+            user=user,
+        )
     except Exception:
         pass
 
@@ -1207,10 +1235,13 @@ async def handle_admin_settings_button(message: types.Message, state: FSMContext
         return
     
     await state.clear()
-    await message.answer(
-        await get_settings_text(), 
-        parse_mode="Markdown", 
-        reply_markup=get_settings_keyboard()
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        await get_settings_text(),
+        source_key="panel-admin-settings",
+        parse_mode="Markdown",
+        reply_markup=get_settings_keyboard(),
     )
 
 

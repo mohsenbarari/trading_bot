@@ -14,6 +14,86 @@ class _SessionContext:
 
 
 class BotPanelInteractionQueueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_reply_customer_and_admin_entries_use_interaction_queue(self):
+        denied_message = SimpleNamespace(answer=AsyncMock())
+        customers_message = SimpleNamespace(answer=AsyncMock())
+        settings_message = SimpleNamespace(answer=AsyncMock())
+        customer_user = SimpleNamespace(id=7, role=panel.UserRole.STANDARD)
+        admin_user = SimpleNamespace(id=9, role=panel.UserRole.SUPER_ADMIN)
+        settings_state = SimpleNamespace(clear=AsyncMock())
+
+        with patch(
+            "bot.handlers.panel.answer_incoming_message_via_runtime",
+            new=AsyncMock(),
+        ) as enqueue:
+            with (
+                patch(
+                    "bot.handlers.panel.AsyncSessionLocal",
+                    return_value=_SessionContext(),
+                ),
+                patch(
+                    "bot.handlers.panel._can_use_customer_panel",
+                    new=AsyncMock(return_value=False),
+                ),
+            ):
+                await panel.show_user_panel_customers(
+                    denied_message,
+                    SimpleNamespace(),
+                    customer_user,
+                )
+
+            with (
+                patch(
+                    "bot.handlers.panel.AsyncSessionLocal",
+                    return_value=_SessionContext(),
+                ),
+                patch(
+                    "bot.handlers.panel._can_use_customer_panel",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch(
+                    "bot.handlers.panel._load_user_panel_customer_relations",
+                    new=AsyncMock(return_value=[]),
+                ),
+            ):
+                await panel.show_user_panel_customers(
+                    customers_message,
+                    SimpleNamespace(),
+                    customer_user,
+                )
+
+            with (
+                patch(
+                    "bot.handlers.panel.get_settings_text",
+                    new=AsyncMock(return_value="SETTINGS"),
+                ),
+                patch(
+                    "bot.handlers.panel.get_settings_keyboard",
+                    return_value="SETTINGS-KB",
+                ),
+            ):
+                await panel.handle_admin_settings_button(
+                    settings_message,
+                    settings_state,
+                    admin_user,
+                )
+
+        self.assertEqual(
+            [call.kwargs["source_key"] for call in enqueue.await_args_list],
+            [
+                "panel-customers-not-available",
+                "panel-customers-list",
+                "panel-admin-settings",
+            ],
+        )
+        self.assertEqual(enqueue.await_args_list[1].kwargs["parse_mode"], "Markdown")
+        self.assertIsNotNone(enqueue.await_args_list[1].kwargs["reply_markup"])
+        self.assertEqual(enqueue.await_args_list[2].kwargs["reply_markup"], "SETTINGS-KB")
+        settings_state.clear.assert_awaited_once_with()
+        denied_message.answer.assert_not_awaited()
+        customers_message.answer.assert_not_awaited()
+        settings_message.answer.assert_not_awaited()
+
     async def test_single_reply_panel_actions_use_distinct_interaction_sources(self):
         message = SimpleNamespace(answer=AsyncMock())
         user = SimpleNamespace(id=7, role=panel.UserRole.STANDARD)
