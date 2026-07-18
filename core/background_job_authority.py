@@ -109,7 +109,11 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
     ),
     JOB_MARKET_SCHEDULE: BackgroundJobAuthorityEntry(
         job_name=JOB_MARKET_SCHEDULE,
-        mutated_tables=("market_runtime_state", "offers"),
+        mutated_tables=(
+            "market_runtime_state",
+            "offers",
+            "market_channel_notice_receipts",
+        ),
         allowed_servers=(SERVER_FOREIGN, SERVER_IRAN),
         authority_rule=(
             "iran is authoritative for market_runtime_state; foreign must only observe the synced iran runtime state "
@@ -280,6 +284,7 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "telegram_admin_broadcasts",
             "telegram_admin_broadcast_receipts",
             "telegram_notification_outbox",
+            "market_channel_notice_receipts",
         ),
         allowed_servers=(SERVER_FOREIGN,),
         authority_rule=(
@@ -291,9 +296,9 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "blindly replay an ambiguous send"
         ),
         sync_outbox_behavior=(
-            "telegram_delivery_jobs is foreign-local no-sync execution state; trade, admin-broadcast, and "
-            "notification-outbox receipts remain sync-visible domain audit while queue bindings and lease "
-            "fields are local-only"
+            "telegram_delivery_jobs and market-channel receipts are foreign-local no-sync execution state; "
+            "trade, admin-broadcast, and notification-outbox receipts remain sync-visible domain audit while "
+            "queue bindings and lease fields are local-only"
         ),
         local_runtime=True,
         external_state=("Telegram Bot API",),

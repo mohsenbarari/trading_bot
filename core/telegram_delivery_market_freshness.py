@@ -44,6 +44,8 @@ MARKET_NOTICE_FRESHNESS_ACTIONS = frozenset(
     }
 )
 MARKET_NOTICE_DELIVERY_SOURCE_VERSION = 1
+MARKET_NOTICE_TEMPLATE_VERSION = "market-channel-notice-v1"
+MARKET_NOTICE_CAMPAIGN_ID = "market-status"
 _MARKET_NOTICE_TEXT_BY_TRANSITION = {
     MARKET_NOTICE_TRANSITION_OPENED: MARKET_OPENED_CHANNEL_NOTICE,
     MARKET_NOTICE_TRANSITION_CLOSED: MARKET_CLOSED_CHANNEL_NOTICE,
@@ -108,6 +110,38 @@ def _quarantined(reason: str) -> TelegramFreshnessDecision:
     return _decision(TelegramFreshnessOutcome.QUARANTINED, reason=reason)
 
 
+def telegram_market_notice_destination_key(channel_id: int) -> str:
+    normalized = _strict_nonzero_int(
+        channel_id,
+        reason="telegram_market_freshness_expected_channel_invalid",
+    )
+    return f"channel:{normalized}"
+
+
+def build_market_notice_payload(
+    receipt: MarketChannelNoticeReceipt | Any,
+    *,
+    channel_id: int,
+) -> dict[str, Any]:
+    normalized_channel = _strict_nonzero_int(
+        channel_id,
+        reason="telegram_market_freshness_expected_channel_invalid",
+    )
+    text = getattr(receipt, "notice_text", None)
+    if not isinstance(text, str) or not text:
+        raise ValueError("market_notice_text_invalid")
+    return {"chat_id": normalized_channel, "text": text}
+
+
+def market_notice_action_for_status(status: Any) -> TelegramDeliveryAction:
+    normalized = str(status or "").strip().lower()
+    if normalized == MARKET_NOTICE_STATUS_PENDING:
+        return TelegramDeliveryAction.MARKET_TRANSITION
+    if normalized == MARKET_NOTICE_STATUS_FAILED:
+        return TelegramDeliveryAction.MARKET_STATUS_CORRECTION
+    raise ValueError("market_notice_status_not_handoffable")
+
+
 async def _load_notice_receipt(
     db: AsyncSession,
     *,
@@ -141,12 +175,20 @@ def _validate_static_route(
         return _quarantined("market_freshness_feeder_mismatch")
     if _enum_value(job.destination_class) != TelegramDestinationClass.CHANNEL.value:
         return _quarantined("market_freshness_destination_class_mismatch")
-    if str(job.destination_key) != f"channel:{expected_channel_id}":
+    if str(job.destination_key) != telegram_market_notice_destination_key(
+        expected_channel_id
+    ):
         return _quarantined("market_freshness_destination_key_mismatch")
     if str(job.method or "") != "sendMessage":
         return _quarantined("market_freshness_method_mismatch")
     if str(job.bot_identity or "") != "primary":
         return _quarantined("market_freshness_bot_identity_mismatch")
+    if str(job.template_version or "") != MARKET_NOTICE_TEMPLATE_VERSION:
+        return _quarantined("market_freshness_template_version_mismatch")
+    if str(job.campaign_id or "") != MARKET_NOTICE_CAMPAIGN_ID:
+        return _quarantined("market_freshness_campaign_mismatch")
+    if job.delivery_deadline_at is not None or job.run_id is not None:
+        return _quarantined("market_freshness_deadline_contract_invalid")
     return None
 
 
@@ -185,6 +227,17 @@ def _receipt_shape_decision(
         != MARKET_NOTICE_DELIVERY_SOURCE_VERSION
     ):
         return _quarantined("market_freshness_source_version_invalid")
+    if (
+        _strict_positive_int(getattr(job, "id", None)) is None
+        or _strict_positive_int(getattr(receipt, "id", None)) is None
+    ):
+        return _quarantined("market_freshness_binding_shape_invalid")
+    if _strict_positive_int(getattr(receipt, "queue_job_id", None)) != int(job.id):
+        return _quarantined("market_freshness_queue_owner_mismatch")
+    if not isinstance(getattr(receipt, "queue_handed_off_at", None), datetime):
+        return _quarantined("market_freshness_queue_handoff_missing")
+    if getattr(receipt, "queue_reconciliation_required_at", None) is not None:
+        return _quarantined("market_freshness_reconciliation_owner_conflict")
 
     raw_status = getattr(receipt, "status", None)
     status = str(raw_status or "").strip().lower()
@@ -237,10 +290,13 @@ def _authoritative_payload_decision(
         return _quarantined("market_freshness_payload_not_strict_json")
     if str(getattr(job, "payload_hash", "") or "") != payload_hash:
         return _quarantined("market_freshness_payload_hash_mismatch")
-    expected_payload = {
-        "chat_id": expected_channel_id,
-        "text": str(receipt.notice_text),
-    }
+    try:
+        expected_payload = build_market_notice_payload(
+            receipt,
+            channel_id=expected_channel_id,
+        )
+    except (TypeError, ValueError):
+        return _quarantined("market_freshness_payload_not_authoritative")
     if normalized_payload != expected_payload:
         return _quarantined("market_freshness_payload_not_authoritative")
     return None
@@ -297,10 +353,7 @@ async def validate_market_telegram_delivery_freshness(
         return _quarantined("market_freshness_source_identity_missing")
     receipt = await _load_notice_receipt(db, dedupe_key=source_identity)
     if receipt is None:
-        return _decision(
-            TelegramFreshnessOutcome.SUPERSEDED,
-            reason="market_freshness_receipt_missing",
-        )
+        return _quarantined("market_freshness_receipt_missing")
     shape_decision = _receipt_shape_decision(
         job,
         receipt,
@@ -361,11 +414,10 @@ async def validate_market_telegram_delivery_freshness(
             reason="market_freshness_deadline_passed",
         )
 
-    expected_action = (
-        TelegramDeliveryAction.MARKET_STATUS_CORRECTION
-        if status == MARKET_NOTICE_STATUS_FAILED
-        else TelegramDeliveryAction.MARKET_TRANSITION
-    )
+    try:
+        expected_action = market_notice_action_for_status(status)
+    except ValueError:
+        return _quarantined("market_freshness_receipt_status_invalid")
     if action != expected_action:
         return _decision(
             TelegramFreshnessOutcome.RECLASSIFY,

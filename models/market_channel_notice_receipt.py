@@ -1,7 +1,19 @@
 """Local receipt for Telegram market open/close channel notices."""
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -27,6 +39,32 @@ class MarketChannelNoticeReceipt(Base):
             "status",
             "next_retry_at",
         ),
+        Index(
+            "ix_market_channel_notice_receipts_queue_handoff",
+            "next_retry_at",
+            "id",
+            postgresql_where=text(
+                "status IN ('pending', 'failed') "
+                "AND queue_job_id IS NULL "
+                "AND queue_reconciliation_required_at IS NULL"
+            ),
+        ),
+        Index(
+            "ux_market_channel_notice_receipts_queue_job",
+            "queue_job_id",
+            unique=True,
+            postgresql_where=text("queue_job_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "((queue_job_id IS NULL AND queue_handed_off_at IS NULL) OR "
+            "(queue_job_id IS NOT NULL AND queue_handed_off_at IS NOT NULL))",
+            name="ck_market_channel_notice_receipts_queue_binding",
+        ),
+        CheckConstraint(
+            "NOT (queue_job_id IS NOT NULL AND "
+            "queue_reconciliation_required_at IS NOT NULL)",
+            name="ck_market_channel_notice_receipts_queue_owner",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -43,6 +81,13 @@ class MarketChannelNoticeReceipt(Base):
     sent_at = Column(DateTime(timezone=True), nullable=True)
     last_error_class = Column(String(120), nullable=True)
     last_error = Column(Text, nullable=True)
+    queue_job_id = Column(
+        BigInteger,
+        ForeignKey("telegram_delivery_jobs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    queue_handed_off_at = Column(DateTime(timezone=True), nullable=True)
+    queue_reconciliation_required_at = Column(DateTime(timezone=True), nullable=True)
     source = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())

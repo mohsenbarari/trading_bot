@@ -167,7 +167,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "market_channel_notice_receipts": _entry(
         "market_channel_notice_receipts",
         SyncPolicy.NO_SYNC,
-        ("telegram_bot", "sync_reconciliation"),
+        (
+            "telegram_bot",
+            "sync_reconciliation",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign local Telegram side-effect ledger",
         "no cross-server merge; dedupe key only protects local Telegram notice replay",
         "foreign-only market open/close channel notice idempotency",

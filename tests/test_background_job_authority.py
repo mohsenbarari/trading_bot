@@ -189,6 +189,7 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
                 "telegram_admin_broadcasts",
                 "telegram_admin_broadcast_receipts",
                 "telegram_notification_outbox",
+                "market_channel_notice_receipts",
             ),
         )
         self.assertTrue(queue.local_runtime)

@@ -45,6 +45,7 @@ def make_receipt(**overrides):
         ),
     )
     data = {
+        "id": 1,
         "dedupe_key": market_channel_notice_dedupe_key(
             transition=transition,
             transition_at=transition_at,
@@ -56,6 +57,9 @@ def make_receipt(**overrides):
         "channel_id": str(CHANNEL_ID),
         "status": MARKET_NOTICE_STATUS_PENDING,
         "telegram_message_id": None,
+        "queue_job_id": 1,
+        "queue_handed_off_at": NOW,
+        "queue_reconciliation_required_at": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -63,6 +67,7 @@ def make_receipt(**overrides):
 
 def make_state(**overrides):
     data = {
+        "id": 1,
         "is_open": True,
         "last_transition_at": TRANSITION_AT,
     }
@@ -83,12 +88,17 @@ def make_job(
     }
     _, payload_hash = canonical_telegram_delivery_payload(payload)
     data = {
+        "id": 1,
         "action_kind": action,
         "feeder_kind": TelegramFeederKind.MARKET_STATUS,
         "destination_class": TelegramDestinationClass.CHANNEL,
         "destination_key": f"channel:{CHANNEL_ID}",
         "method": "sendMessage",
         "bot_identity": "primary",
+        "template_version": freshness.MARKET_NOTICE_TEMPLATE_VERSION,
+        "campaign_id": freshness.MARKET_NOTICE_CAMPAIGN_ID,
+        "delivery_deadline_at": None,
+        "run_id": None,
         "source_natural_id": receipt.dedupe_key,
         "source_version": 1,
         "freshness_deadline_at": market_channel_notice_freshness_deadline(
@@ -335,7 +345,7 @@ class TelegramDeliveryMarketFreshnessTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             missing_receipt.outcome,
-            TelegramFreshnessOutcome.SUPERSEDED,
+            TelegramFreshnessOutcome.QUARANTINED,
         )
         self.assertEqual(
             missing_state.outcome,

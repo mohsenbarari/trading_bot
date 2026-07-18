@@ -31,6 +31,8 @@ from core.telegram_delivery_freshness_router import (
     TelegramDeliveryFreshnessRegistry,
 )
 from core.telegram_delivery_market_freshness import (
+    MARKET_NOTICE_CAMPAIGN_ID,
+    MARKET_NOTICE_TEMPLATE_VERSION,
     MarketTelegramDeliveryFreshnessValidator,
     validate_market_telegram_delivery_freshness,
 )
@@ -188,7 +190,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f8b3c4d5e6fd"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f9c4d5e6f7ae"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -258,6 +260,9 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         deadline=None,
         freshness_deadline=None,
         bot_identity: str = "primary",
+        template_version: str = "test-v1",
+        campaign_id: str | None = None,
+        run_id: str | None = "stage3-foundation-test",
     ) -> dict:
         return {
             "current_server": "foreign",
@@ -270,10 +275,11 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             "destination_class": destination_class,
             "method": method,
             "payload": payload or {"chat_id": 1001, "text": source_id},
-            "template_version": "test-v1",
+            "template_version": template_version,
             "delivery_deadline_at": deadline,
             "freshness_deadline_at": freshness_deadline,
-            "run_id": "stage3-foundation-test",
+            "campaign_id": campaign_id,
+            "run_id": run_id,
         }
 
     async def _enqueue(self, source_id: str, **overrides):
@@ -2523,7 +2529,24 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             freshness_deadline=market_channel_notice_freshness_deadline(
                 transition_at
             ),
+            template_version=MARKET_NOTICE_TEMPLATE_VERSION,
+            campaign_id=MARKET_NOTICE_CAMPAIGN_ID,
+            run_id=None,
         )
+        async with self.Session() as db:
+            receipt = (
+                await db.execute(
+                    select(MarketChannelNoticeReceipt).where(
+                        MarketChannelNoticeReceipt.dedupe_key == dedupe_key
+                    )
+                )
+            ).scalar_one()
+            receipt.queue_job_id = int(enqueued.job.id)
+            receipt.queue_handed_off_at = utc_now()
+            await db.commit()
+        enqueued.job.template_version = MARKET_NOTICE_TEMPLATE_VERSION
+        enqueued.job.campaign_id = MARKET_NOTICE_CAMPAIGN_ID
+        enqueued.job.run_id = None
         validator = MarketTelegramDeliveryFreshnessValidator(channel_id)
         async with self.Session() as db:
             current = await validate_market_telegram_delivery_freshness(
