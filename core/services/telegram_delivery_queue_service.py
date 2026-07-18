@@ -13,7 +13,7 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,8 +43,15 @@ from core.telegram_delivery_queue_contract import (
 from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_VALUES,
 )
+from core.telegram_gateway import TelegramGatewayResult
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_provider_outcome import (
+    TELEGRAM_PROVIDER_OUTCOME_APPLIED,
+    TELEGRAM_PROVIDER_OUTCOME_PENDING,
+    TELEGRAM_PROVIDER_OUTCOME_QUARANTINED,
+    TelegramDeliveryProviderOutcomeRecord,
+)
 from models.telegram_delivery_resume_operation import (
     ACTIVE_TELEGRAM_DELIVERY_RESUME_STATES,
     TelegramDeliveryResumeOperation,
@@ -118,6 +125,19 @@ class TelegramDeliveryLeaseRecoveryReport:
     ambiguous_sends: int
     pending_reconcile: int
     job_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramProviderOutcomePersistResult:
+    outcome: TelegramDeliveryProviderOutcomeRecord
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramProviderOutcomeBacklogReport:
+    pending_count: int
+    oldest_created_at: datetime | None
+    due_outcome_ids: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -565,10 +585,9 @@ def _sanitized_provider_response(result: TelegramGatewayResultLike) -> dict[str,
     parameters = body.get("parameters")
     if isinstance(parameters, Mapping):
         safe_parameters: dict[str, Any] = {}
-        if "retry_after" in parameters and isinstance(
-            parameters["retry_after"], (int, float, str)
-        ):
-            safe_parameters["retry_after"] = parameters["retry_after"]
+        retry_after = _positive_int(parameters.get("retry_after"))
+        if retry_after is not None:
+            safe_parameters["retry_after"] = retry_after
         if parameters.get("migrate_to_chat_id") is not None:
             # Presence affects classification; the raw destination identifier
             # is not needed in the execution audit row.
@@ -579,6 +598,120 @@ def _sanitized_provider_response(result: TelegramGatewayResultLike) -> dict[str,
     if message_id is not None:
         sanitized["result"] = {"message_id": int(message_id)}
     return sanitized or None
+
+
+def _provider_outcome_facts(
+    result: TelegramGatewayResultLike,
+) -> tuple[dict[str, Any], str]:
+    facts = {
+        "gateway_ok": bool(result.ok),
+        "method": str(result.method or ""),
+        "provider_status_code": (
+            int(result.status_code) if result.status_code is not None else None
+        ),
+        "provider_response": _sanitized_provider_response(result),
+        "provider_error_class": str(result.error or "")[:120] or None,
+        "telegram_message_id": result.message_id,
+        "retry_after_seconds": _raw_retry_after(result),
+    }
+    canonical = json.dumps(
+        facts,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return facts, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _provider_outcome_to_gateway_result(
+    outcome: TelegramDeliveryProviderOutcomeRecord,
+) -> TelegramGatewayResult:
+    response = dict(outcome.provider_response or {}) or None
+    return TelegramGatewayResult(
+        ok=bool(outcome.gateway_ok),
+        method=str(outcome.method),
+        status_code=outcome.provider_status_code,
+        response_json=response,
+        response_text=(
+            str(response.get("description") or "") if isinstance(response, Mapping) else ""
+        ),
+        error=outcome.provider_error_class,
+    )
+
+
+async def record_telegram_delivery_provider_outcome(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    job_id: int,
+    worker_id: str,
+    lease_token: int,
+    result: TelegramGatewayResultLike,
+    now: datetime | None = None,
+) -> TelegramProviderOutcomePersistResult:
+    """Durably record provider facts before applying domain feedback.
+
+    The unique job/fence identity makes process retries idempotent. A conflicting
+    fact for the same dispatch fence is quarantined by refusing the write.
+    """
+    _require_foreign(current_server)
+    current_time = now or utc_now()
+    record = (
+        await db.execute(
+            select(TelegramDeliveryJobRecord)
+            .where(TelegramDeliveryJobRecord.id == int(job_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        raise TelegramDeliveryQueueValidationError("provider_outcome_job_missing")
+    if (
+        int(record.lease_token or 0) != int(lease_token)
+        or record.dispatch_started_at is None
+        or (record.worker_id not in {None, str(worker_id)})
+    ):
+        raise TelegramDeliveryQueueValidationError("provider_outcome_stale_dispatch_fence")
+    if str(result.method or "") != str(record.method):
+        raise TelegramDeliveryQueueValidationError("provider_outcome_method_mismatch")
+
+    facts, outcome_hash = _provider_outcome_facts(result)
+    existing = (
+        await db.execute(
+            select(TelegramDeliveryProviderOutcomeRecord)
+            .where(
+                TelegramDeliveryProviderOutcomeRecord.job_id == int(job_id),
+                TelegramDeliveryProviderOutcomeRecord.lease_token == int(lease_token),
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if str(existing.outcome_hash) != outcome_hash:
+            raise TelegramDeliveryQueueValidationError("provider_outcome_fence_conflict")
+        return TelegramProviderOutcomePersistResult(outcome=existing, created=False)
+
+    outcome = TelegramDeliveryProviderOutcomeRecord(
+        job_id=int(job_id),
+        lease_token=int(lease_token),
+        worker_id=str(worker_id),
+        bot_identity=str(record.bot_identity),
+        method=str(record.method),
+        gateway_ok=facts["gateway_ok"],
+        provider_status_code=facts["provider_status_code"],
+        provider_response=facts["provider_response"],
+        provider_error_class=facts["provider_error_class"],
+        telegram_message_id=facts["telegram_message_id"],
+        retry_after_seconds=facts["retry_after_seconds"],
+        outcome_hash=outcome_hash,
+        apply_state=TELEGRAM_PROVIDER_OUTCOME_PENDING,
+        next_apply_at=current_time,
+        created_at=current_time,
+        updated_at=current_time,
+    )
+    db.add(outcome)
+    await db.flush()
+    return TelegramProviderOutcomePersistResult(outcome=outcome, created=True)
 
 
 def _record_to_contract(record: TelegramDeliveryJobRecord) -> TelegramDeliveryJob:
@@ -1158,6 +1291,7 @@ async def resolve_telegram_delivery_result(
     retry_max_seconds: float,
     global_rate_limit_window_seconds: float = 2.0,
     feedback: TelegramDeliveryResultFeedback | None = None,
+    recorded_outcome: TelegramDeliveryProviderOutcomeRecord | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryDecision:
     _require_foreign(current_server)
@@ -1169,12 +1303,31 @@ async def resolve_telegram_delivery_result(
             .with_for_update()
         )
     ).scalar_one_or_none()
-    if record is None or (
-        _enum_value(record.state) != TelegramDeliveryState.LEASED.value
-        or record.worker_id != str(worker_id)
-        or int(record.lease_token or 0) != int(lease_token)
-        or record.dispatch_started_at is None
-    ):
+    normal_fence_valid = bool(
+        record is not None
+        and _enum_value(record.state) == TelegramDeliveryState.LEASED.value
+        and record.worker_id == str(worker_id)
+        and int(record.lease_token or 0) == int(lease_token)
+        and record.dispatch_started_at is not None
+    )
+    recorded_fence_valid = bool(
+        record is not None
+        and recorded_outcome is not None
+        and int(recorded_outcome.job_id) == int(job_id)
+        and int(recorded_outcome.lease_token) == int(lease_token)
+        and str(recorded_outcome.worker_id) == str(worker_id)
+        and int(record.lease_token or 0) == int(lease_token)
+        and record.dispatch_started_at is not None
+        and record.worker_id in {None, str(worker_id)}
+        and _enum_value(record.state)
+        in {
+            TelegramDeliveryState.LEASED.value,
+            TelegramDeliveryState.AMBIGUOUS.value,
+            TelegramDeliveryState.AMBIGUOUS_UNRESOLVED.value,
+            TelegramDeliveryState.PENDING_RECONCILE.value,
+        }
+    )
+    if not (normal_fence_valid or recorded_fence_valid):
         return TelegramDeliveryDecision(
             outcome=TelegramDeliveryOutcome.STALE_LEASE,
             reason="stale_or_missing_lease",
@@ -1237,6 +1390,161 @@ async def resolve_telegram_delivery_result(
     return decision
 
 
+async def apply_telegram_delivery_provider_outcome(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    outcome_id: int,
+    retry_after_safety_seconds: float,
+    retry_base_seconds: float,
+    retry_max_seconds: float,
+    global_rate_limit_window_seconds: float,
+    feedback: TelegramDeliveryResultFeedback,
+    now: datetime | None = None,
+) -> TelegramDeliveryDecision:
+    """Apply one recorded provider fact and domain feedback atomically."""
+    _require_foreign(current_server)
+    current_time = now or utc_now()
+    outcome = (
+        await db.execute(
+            select(TelegramDeliveryProviderOutcomeRecord)
+            .where(TelegramDeliveryProviderOutcomeRecord.id == int(outcome_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if outcome is None:
+        return TelegramDeliveryDecision(
+            outcome=TelegramDeliveryOutcome.STALE_LEASE,
+            reason="provider_outcome_missing",
+        )
+    if outcome.apply_state == TELEGRAM_PROVIDER_OUTCOME_APPLIED:
+        return TelegramDeliveryDecision(
+            outcome=TelegramDeliveryOutcome.ALREADY_RESOLVED,
+            reason="provider_outcome_already_applied",
+        )
+    if outcome.apply_state != TELEGRAM_PROVIDER_OUTCOME_PENDING:
+        return TelegramDeliveryDecision(
+            outcome=TelegramDeliveryOutcome.QUARANTINED,
+            reason="provider_outcome_quarantined",
+        )
+
+    result = _provider_outcome_to_gateway_result(outcome)
+    decision = await resolve_telegram_delivery_result(
+        db,
+        current_server=current_server,
+        job_id=int(outcome.job_id),
+        worker_id=str(outcome.worker_id),
+        lease_token=int(outcome.lease_token),
+        result=result,
+        retry_after_safety_seconds=retry_after_safety_seconds,
+        retry_base_seconds=retry_base_seconds,
+        retry_max_seconds=retry_max_seconds,
+        global_rate_limit_window_seconds=global_rate_limit_window_seconds,
+        feedback=feedback,
+        recorded_outcome=outcome,
+        now=current_time,
+    )
+    if decision.outcome == TelegramDeliveryOutcome.STALE_LEASE:
+        outcome.apply_state = TELEGRAM_PROVIDER_OUTCOME_QUARANTINED
+        outcome.last_apply_error_class = "StaleProviderOutcomeFence"
+        outcome.last_apply_error_message = decision.reason
+    else:
+        outcome.apply_state = TELEGRAM_PROVIDER_OUTCOME_APPLIED
+        outcome.applied_at = current_time
+        outcome.next_apply_at = None
+        outcome.last_apply_error_class = None
+        outcome.last_apply_error_message = None
+    outcome.updated_at = current_time
+    await db.flush()
+    return decision
+
+
+async def record_telegram_provider_outcome_apply_failure(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    outcome_id: int,
+    error: BaseException,
+    retry_base_seconds: float = 1.0,
+    retry_max_seconds: float = 30.0,
+    now: datetime | None = None,
+) -> bool:
+    """Persist replay scheduling after an apply transaction rolled back."""
+    _require_foreign(current_server)
+    current_time = now or utc_now()
+    outcome = (
+        await db.execute(
+            select(TelegramDeliveryProviderOutcomeRecord)
+            .where(TelegramDeliveryProviderOutcomeRecord.id == int(outcome_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if outcome is None or outcome.apply_state != TELEGRAM_PROVIDER_OUTCOME_PENDING:
+        return False
+    outcome.apply_attempt_count = int(outcome.apply_attempt_count or 0) + 1
+    exponent = min(max(0, outcome.apply_attempt_count - 1), 10)
+    delay = min(
+        max(0.1, float(retry_max_seconds)),
+        max(0.1, float(retry_base_seconds)) * (2**exponent),
+    )
+    outcome.next_apply_at = current_time + timedelta(seconds=delay)
+    outcome.last_apply_error_class = type(error).__name__[:120]
+    outcome.last_apply_error_message = " ".join(str(error).split())[:500] or None
+    outcome.updated_at = current_time
+    await db.flush()
+    return True
+
+
+async def load_telegram_provider_outcome_backlog(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    max_rows: int,
+    now: datetime | None = None,
+) -> TelegramProviderOutcomeBacklogReport:
+    """Return bounded replay work plus complete pending age/count evidence."""
+    _require_foreign(current_server)
+    current_time = now or utc_now()
+    pending_count, oldest_created_at = (
+        await db.execute(
+            select(
+                func.count(TelegramDeliveryProviderOutcomeRecord.id),
+                func.min(TelegramDeliveryProviderOutcomeRecord.created_at),
+            ).where(
+                TelegramDeliveryProviderOutcomeRecord.apply_state
+                == TELEGRAM_PROVIDER_OUTCOME_PENDING
+            )
+        )
+    ).one()
+    due_ids = tuple(
+        int(value)
+        for value in (
+            await db.execute(
+                select(TelegramDeliveryProviderOutcomeRecord.id)
+                .where(
+                    TelegramDeliveryProviderOutcomeRecord.apply_state
+                    == TELEGRAM_PROVIDER_OUTCOME_PENDING,
+                    or_(
+                        TelegramDeliveryProviderOutcomeRecord.next_apply_at.is_(None),
+                        TelegramDeliveryProviderOutcomeRecord.next_apply_at <= current_time,
+                    ),
+                )
+                .order_by(
+                    TelegramDeliveryProviderOutcomeRecord.next_apply_at.asc().nullsfirst(),
+                    TelegramDeliveryProviderOutcomeRecord.created_at.asc(),
+                    TelegramDeliveryProviderOutcomeRecord.id.asc(),
+                )
+                .limit(max(1, int(max_rows)))
+            )
+        ).scalars()
+    )
+    return TelegramProviderOutcomeBacklogReport(
+        pending_count=int(pending_count or 0),
+        oldest_created_at=oldest_created_at,
+        due_outcome_ids=due_ids,
+    )
+
+
 async def recover_expired_telegram_delivery_leases(
     db: AsyncSession,
     *,
@@ -1252,6 +1560,14 @@ async def recover_expired_telegram_delivery_leases(
             TelegramDeliveryJobRecord.state == TelegramDeliveryState.LEASED,
             TelegramDeliveryJobRecord.lease_until.is_not(None),
             TelegramDeliveryJobRecord.lease_until <= current_time,
+            ~exists(
+                select(TelegramDeliveryProviderOutcomeRecord.id).where(
+                    TelegramDeliveryProviderOutcomeRecord.job_id
+                    == TelegramDeliveryJobRecord.id,
+                    TelegramDeliveryProviderOutcomeRecord.apply_state
+                    == TELEGRAM_PROVIDER_OUTCOME_PENDING,
+                )
+            ),
         )
         .order_by(TelegramDeliveryJobRecord.lease_until.asc(), TelegramDeliveryJobRecord.id.asc())
         .with_for_update(skip_locked=True)

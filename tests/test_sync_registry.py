@@ -59,6 +59,8 @@ class SyncRegistryTests(unittest.TestCase):
     def test_telegram_execution_tables_are_foreign_local_no_sync(self):
         for table_name in {
             "telegram_delivery_jobs",
+            "telegram_delivery_provider_outcomes",
+            "telegram_delivery_reconciliation_evidence",
             "telegram_delivery_feeder_states",
             "telegram_delivery_resume_operations",
             "telegram_interaction_anchor_states",

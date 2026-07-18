@@ -62,6 +62,10 @@ from .telegram_notification_outbox import (
     TelegramNotificationOutboxStatus,
 )
 from .telegram_delivery_job import TelegramDeliveryJobRecord
+from .telegram_delivery_provider_outcome import TelegramDeliveryProviderOutcomeRecord
+from .telegram_delivery_reconciliation_evidence import (
+    TelegramDeliveryReconciliationEvidence,
+)
 from .telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from .telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
 from .telegram_scheduled_operation import TelegramScheduledOperation
@@ -146,6 +150,8 @@ __all__ = [
     "TelegramNotificationOutbox",
     "TelegramNotificationOutboxStatus",
     "TelegramDeliveryJobRecord",
+    "TelegramDeliveryProviderOutcomeRecord",
+    "TelegramDeliveryReconciliationEvidence",
     "TelegramDeliveryFeederState",
     "TelegramDeliveryResumeOperation",
     "TelegramScheduledOperation",

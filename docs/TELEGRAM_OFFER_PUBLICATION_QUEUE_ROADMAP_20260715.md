@@ -1094,11 +1094,11 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 | شناسه | شدت | وضعیت اولیه | finding معتبر و تصمیم اصلاح | owner / شاهد بسته‌شدن |
 | --- | --- | --- | --- | --- |
 | `TOPQ-R01` | P0 | OPEN | audit فعلی dominance را اثبات نمی‌کند، بعضی convenience methodها و detached taskها را نمی‌بیند و false guard دارد | Backend؛ audit control-flow-aware، fixture منفی و صفر `remaining_*` |
-| `TOPQ-R02` | P0 | OPEN | supervisor خام به factory بدون credential registry آرگومان نمی‌دهد و composition production کامل نیست | Backend؛ lifecycle test واقعی start/stop با دو lane و flag خاموش/روشن مصنوعی |
-| `TOPQ-R03` | P0 | OPEN | receipt دو طرف معامله پس از commit و در BackgroundTask ساخته می‌شود و crash window موجب گم‌شدن intent است | Backend؛ ثبت هر دو recipient intent در همان transaction معامله + fault injection |
-| `TOPQ-R04` | P0 | OPEN | stateهای `AMBIGUOUS/PENDING_RECONCILE/AMBIGUOUS_UNRESOLVED` observer/reconciler عملیاتی ندارند | Backend+Operations؛ reconciler idempotent، evidence ledger، restart و alert test |
-| `TOPQ-R05` | P0 | OPEN | provider result، cooldown و domain feedback در یک transaction‌اند؛ شکست feedback می‌تواند `429/retry_after` قطعی را rollback و job را ambiguous کند | Backend؛ provider-outcome inbox append-only و replayable feedback saga با crash matrix |
-| `TOPQ-R06` | P0 | OPEN | پاسخ `2xx` ناقص و parseable برای `sendMessage` به retry می‌رود؛ نبود شاهد message id باید ambiguous باشد | Backend؛ تمام non-affirmative 2xx sendها بدون message id به ambiguity و تست matrix |
+| `TOPQ-R02` | P0 | CLOSED-LOCAL | composition واقعی runtime، registry credential دو lane، limiter مشترک، Redis lifecycle و factory بدون آرگومان تکمیل شد | `75f6ef4b`؛ `87` تست composition/credential/worker/contract |
+| `TOPQ-R03` | P0 | CLOSED-LOCAL | receipt همه recipient/channelها پیش از commit معامله و بدون provider call در همان transaction ثبت می‌شود؛ شکست intent کل معامله را rollback می‌کند | `9dd90815`؛ fault ordering و `108` تست receipt/router/contract |
+| `TOPQ-R04` | P0 | CLOSED-LOCAL | reconciler اجرایی stateهای مبهم، بازخوانی freshness پیش از retry edit، escalation بدون retry کور، health inspect، dry-run و resolution operator با evidence/actor هش‌شده افزوده شد | migration `fc18b9d0e2f3`؛ PostgreSQL fault/restart/manual-resolution و schema tests |
+| `TOPQ-R05` | P0 | CLOSED-LOCAL | provider fact پیش از feedback در inbox fence‌شده ثبت و توسط saga مستقل replay می‌شود؛ recovery نتیجه pending را ambiguous نمی‌کند | migration `fc18b9d0e2f3`؛ 429+feedback rollback+replay و migration roundtrip واقعی PostgreSQL |
+| `TOPQ-R06` | P0 | CLOSED-LOCAL | همه `2xx`های `sendMessage` بدون envelope مثبت و message id معتبر به ambiguity می‌روند | `9dd90815`؛ matrix پاسخ `{}`, `ok=true` ناقص و result تهی |
 | `TOPQ-R07` | P0 | OPEN | claim priority-first می‌تواند jobهای channel gated را بردارد و private primary آماده را دچار head-of-line کند | Backend؛ scheduler resource-aware و saturation test با skip منبع gated |
 | `TOPQ-R08` | P0 | OPEN | cooldown کانال editor در startup همه laneهای primary را می‌بندد؛ private primary باید پس از identity-only preflight مستقل ادامه دهد | Backend؛ restart/recovery test برای channel-gated + private-primary |
 | `TOPQ-R09` | P0 | OPEN | `429` preflight فقط در Redis است و با crash/Redis loss deadline provider از بین می‌رود | Backend؛ evidence PostgreSQL پیش از sleep و rehydrate test |

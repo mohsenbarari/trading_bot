@@ -185,6 +185,8 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
             queue.mutated_tables,
             (
                 "telegram_delivery_jobs",
+                "telegram_delivery_provider_outcomes",
+                "telegram_delivery_reconciliation_evidence",
                 "trade_delivery_receipts",
                 "telegram_admin_broadcasts",
                 "telegram_admin_broadcast_receipts",

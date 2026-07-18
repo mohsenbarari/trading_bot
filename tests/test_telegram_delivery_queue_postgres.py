@@ -57,8 +57,16 @@ from core.services.telegram_delivery_queue_service import (
     claim_next_telegram_delivery_job,
     enqueue_telegram_delivery_job,
     mark_telegram_delivery_dispatch_started as _mark_telegram_delivery_dispatch_started,
+    apply_telegram_delivery_provider_outcome,
+    record_telegram_delivery_provider_outcome,
+    record_telegram_provider_outcome_apply_failure,
     recover_expired_telegram_delivery_leases,
     resolve_telegram_delivery_result as _resolve_telegram_delivery_result,
+)
+from core.services.telegram_delivery_reconciliation_service import (
+    RECONCILIATION_CONFIRMED_ABSENT,
+    reconcile_telegram_delivery_jobs,
+    resolve_ambiguous_telegram_delivery_job,
 )
 from core.services.telegram_callback_queue_feedback import (
     TelegramCallbackQueueLifecycleFeedback,
@@ -75,6 +83,14 @@ from core.services.telegram_offer_queue_service import (
 )
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_provider_outcome import (
+    TELEGRAM_PROVIDER_OUTCOME_APPLIED,
+    TELEGRAM_PROVIDER_OUTCOME_PENDING,
+    TelegramDeliveryProviderOutcomeRecord,
+)
+from models.telegram_delivery_reconciliation_evidence import (
+    TelegramDeliveryReconciliationEvidence,
+)
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
@@ -222,7 +238,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fb07b8c9d0e1"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fc18b9d0e2f3"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -382,6 +398,355 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(expected_partial_indexes.issubset(indexes))
         for name in expected_partial_indexes:
             self.assertIn(" WHERE ", indexes[name])
+
+    async def test_provider_outcome_is_fenced_idempotent_and_conflict_safe(self):
+        now = utc_now()
+        enqueued = await self._enqueue("provider-outcome-fence")
+        claimed = await self._claim("provider-worker", now=now)
+        async with self.Session() as db:
+            marked = await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="provider-worker",
+                lease_token=claimed.lease_token,
+                now=now,
+            )
+            self.assertTrue(marked)
+            await db.commit()
+
+        result = TelegramGatewayResult(
+            ok=False,
+            method="sendMessage",
+            status_code=429,
+            response_json={
+                "ok": False,
+                "error_code": 429,
+                "description": "Too Many Requests",
+                "parameters": {"retry_after": 3},
+            },
+        )
+        async with self.Session() as db:
+            first = await record_telegram_delivery_provider_outcome(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="provider-worker",
+                lease_token=claimed.lease_token,
+                result=result,
+                now=now,
+            )
+            first_id = int(first.outcome.id)
+            await db.commit()
+        self.assertTrue(first.created)
+
+        async with self.Session() as db:
+            replay = await record_telegram_delivery_provider_outcome(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="provider-worker",
+                lease_token=claimed.lease_token,
+                result=result,
+                now=now,
+            )
+            await db.commit()
+        self.assertFalse(replay.created)
+        self.assertEqual(int(replay.outcome.id), first_id)
+
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "provider_outcome_fence_conflict",
+            ):
+                await record_telegram_delivery_provider_outcome(
+                    db,
+                    current_server="foreign",
+                    job_id=enqueued.job.id,
+                    worker_id="provider-worker",
+                    lease_token=claimed.lease_token,
+                    result=TelegramGatewayResult(
+                        ok=False,
+                        method="sendMessage",
+                        status_code=500,
+                        response_json={"ok": False, "error_code": 500},
+                    ),
+                    now=now,
+                )
+            await db.rollback()
+
+        async with self.Session() as db:
+            outcomes = list(
+                (
+                    await db.execute(
+                        select(TelegramDeliveryProviderOutcomeRecord).where(
+                            TelegramDeliveryProviderOutcomeRecord.job_id == enqueued.job.id
+                        )
+                    )
+                ).scalars()
+            )
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].apply_state, TELEGRAM_PROVIDER_OUTCOME_PENDING)
+
+    async def test_provider_outcome_survives_feedback_failure_and_recovery_skips_it(self):
+        now = utc_now()
+        enqueued = await self._enqueue("provider-outcome-replay")
+        claimed = await self._claim("provider-worker", now=now)
+        async with self.Session() as db:
+            await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="provider-worker",
+                lease_token=claimed.lease_token,
+                now=now,
+            )
+            persisted = await record_telegram_delivery_provider_outcome(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="provider-worker",
+                lease_token=claimed.lease_token,
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="sendMessage",
+                    status_code=429,
+                    response_json={
+                        "ok": False,
+                        "error_code": 429,
+                        "parameters": {"retry_after": 3},
+                    },
+                ),
+                now=now,
+            )
+            outcome_id = int(persisted.outcome.id)
+            await db.commit()
+
+        async def failing_feedback(_db, _job, _decision, _now):
+            raise RuntimeError("synthetic_feedback_failure")
+
+        async with self.Session() as db:
+            with self.assertRaisesRegex(RuntimeError, "synthetic_feedback_failure"):
+                await apply_telegram_delivery_provider_outcome(
+                    db,
+                    current_server="foreign",
+                    outcome_id=outcome_id,
+                    retry_after_safety_seconds=0.1,
+                    retry_base_seconds=1.0,
+                    retry_max_seconds=30.0,
+                    global_rate_limit_window_seconds=2.0,
+                    feedback=failing_feedback,
+                    now=now,
+                )
+            await db.rollback()
+
+        async with self.Session() as db:
+            await record_telegram_provider_outcome_apply_failure(
+                db,
+                current_server="foreign",
+                outcome_id=outcome_id,
+                error=RuntimeError("synthetic_feedback_failure"),
+                now=now,
+            )
+            recovery = await recover_expired_telegram_delivery_leases(
+                db,
+                current_server="foreign",
+                max_rows=10,
+                now=now + timedelta(minutes=2),
+            )
+            await db.commit()
+        self.assertEqual(recovery.job_ids, ())
+
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+            outcome = await db.get(TelegramDeliveryProviderOutcomeRecord, outcome_id)
+            self.assertEqual(job.state, TelegramDeliveryState.LEASED)
+            self.assertEqual(outcome.apply_state, TELEGRAM_PROVIDER_OUTCOME_PENDING)
+            self.assertEqual(outcome.apply_attempt_count, 1)
+
+        async with self.Session() as db:
+            decision = await apply_telegram_delivery_provider_outcome(
+                db,
+                current_server="foreign",
+                outcome_id=outcome_id,
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1.0,
+                retry_max_seconds=30.0,
+                global_rate_limit_window_seconds=2.0,
+                feedback=_NoopLifecycleFeedback().apply_delivery_result,
+                now=now + timedelta(seconds=2),
+            )
+            await db.commit()
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
+
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+            outcome = await db.get(TelegramDeliveryProviderOutcomeRecord, outcome_id)
+        self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
+        self.assertEqual(outcome.apply_state, TELEGRAM_PROVIDER_OUTCOME_APPLIED)
+        self.assertIsNotNone(outcome.applied_at)
+
+    async def test_reconciler_revalidates_idempotent_edit_before_safe_retry(self):
+        now = utc_now()
+        enqueued = await self._enqueue(
+            "reconcile-edit",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+            destination="channel:-1001",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            payload={"chat_id": -1001, "message_id": 10, "text": "latest"},
+            bot_identity="channel_editor",
+        )
+        claimed = await self._claim(
+            "editor-worker",
+            now=now,
+            bot_identity="channel_editor",
+        )
+        async with self.Session() as db:
+            await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="editor-worker",
+                lease_token=claimed.lease_token,
+                now=now,
+            )
+            await db.commit()
+        async with self.Session() as db:
+            recovery = await recover_expired_telegram_delivery_leases(
+                db,
+                current_server="foreign",
+                max_rows=10,
+                now=now + timedelta(minutes=2),
+            )
+            await db.commit()
+        self.assertEqual(recovery.pending_reconcile, 1)
+
+        async def current_freshness(_db, _job, _now):
+            return TelegramFreshnessDecision(
+                TelegramFreshnessOutcome.SEND,
+                reason="authoritative_edit_still_current",
+            )
+
+        feedback = _NoopLifecycleFeedback()
+        async with self.Session() as db:
+            report = await reconcile_telegram_delivery_jobs(
+                db,
+                current_server="foreign",
+                freshness_validators={"channel_editor": current_freshness},
+                freshness_feedbacks={
+                    "channel_editor": feedback.apply_freshness
+                },
+                result_feedbacks={
+                    "channel_editor": feedback.apply_delivery_result
+                },
+                max_rows=10,
+                now=now + timedelta(minutes=2, seconds=1),
+            )
+            await db.commit()
+        self.assertEqual(report.safe_retry_count, 1)
+
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+            evidence_count = await db.scalar(
+                select(func.count(TelegramDeliveryReconciliationEvidence.id)).where(
+                    TelegramDeliveryReconciliationEvidence.job_id == enqueued.job.id
+                )
+            )
+        self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
+        self.assertIsNone(job.dispatch_started_at)
+        self.assertEqual(evidence_count, 1)
+
+    async def test_ambiguous_send_escalates_and_only_audited_positive_absence_retries(self):
+        now = utc_now()
+        enqueued = await self._enqueue("reconcile-ambiguous-send")
+        claimed = await self._claim("send-worker", now=now)
+        async with self.Session() as db:
+            await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                worker_id="send-worker",
+                lease_token=claimed.lease_token,
+                now=now,
+            )
+            await db.commit()
+        async with self.Session() as db:
+            await recover_expired_telegram_delivery_leases(
+                db,
+                current_server="foreign",
+                max_rows=10,
+                now=now + timedelta(minutes=2),
+            )
+            await db.commit()
+
+        feedback = _NoopLifecycleFeedback()
+        async with self.Session() as db:
+            report = await reconcile_telegram_delivery_jobs(
+                db,
+                current_server="foreign",
+                freshness_validators={},
+                freshness_feedbacks={},
+                result_feedbacks={"primary": feedback.apply_delivery_result},
+                ambiguity_grace_seconds=1,
+                max_rows=10,
+                now=now + timedelta(minutes=2, seconds=2),
+            )
+            await db.commit()
+        self.assertEqual(report.unresolved_count, 1)
+
+        async with self.Session() as db:
+            dry_run = await resolve_ambiguous_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                resolution=RECONCILIATION_CONFIRMED_ABSENT,
+                evidence_reference="operator-channel-audit-42",
+                operator_reference="operator@example.test",
+                reason_code="confirmed_not_visible",
+                dry_run=True,
+                now=now + timedelta(minutes=3),
+            )
+            await db.rollback()
+        self.assertEqual(dry_run.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
+
+        async with self.Session() as db:
+            before = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+            self.assertEqual(before.state, TelegramDeliveryState.AMBIGUOUS_UNRESOLVED)
+
+        async with self.Session() as db:
+            resolved = await resolve_ambiguous_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                job_id=enqueued.job.id,
+                resolution=RECONCILIATION_CONFIRMED_ABSENT,
+                evidence_reference="operator-channel-audit-42",
+                operator_reference="operator@example.test",
+                reason_code="confirmed_not_visible",
+                now=now + timedelta(minutes=3),
+            )
+            await db.commit()
+        self.assertEqual(resolved.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
+
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+            evidence = list(
+                (
+                    await db.execute(
+                        select(TelegramDeliveryReconciliationEvidence)
+                        .where(
+                            TelegramDeliveryReconciliationEvidence.job_id
+                            == enqueued.job.id
+                        )
+                        .order_by(TelegramDeliveryReconciliationEvidence.id)
+                    )
+                ).scalars()
+            )
+        self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
+        self.assertEqual(len(evidence), 2)
+        self.assertNotIn("operator@example.test", str(evidence[-1].details))
+        self.assertNotEqual(evidence[-1].actor_ref_hash, "operator@example.test")
 
     async def test_offer_edit_fairness_counter_survives_transactions_and_resets_on_stale(self):
         now = utc_now()

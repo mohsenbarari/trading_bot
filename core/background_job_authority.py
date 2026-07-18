@@ -280,6 +280,8 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
         mutated_tables=(
             "telegram_delivery_jobs",
+            "telegram_delivery_provider_outcomes",
+            "telegram_delivery_reconciliation_evidence",
             "trade_delivery_receipts",
             "telegram_admin_broadcasts",
             "telegram_admin_broadcast_receipts",
@@ -297,7 +299,8 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "blindly replay an ambiguous send"
         ),
         sync_outbox_behavior=(
-            "telegram_delivery_jobs and market-channel receipts are foreign-local no-sync execution state; "
+            "telegram_delivery_jobs, provider outcomes, and market-channel receipts are foreign-local "
+            "no-sync execution state; "
             "trade, admin-broadcast, and notification-outbox receipts remain sync-visible domain audit while "
             "queue bindings and lease fields are local-only"
         ),

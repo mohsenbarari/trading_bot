@@ -389,6 +389,27 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "and must never be copied to Iran."
         ),
     ),
+    "telegram_delivery_provider_outcomes": _entry(
+        "telegram_delivery_provider_outcomes",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram provider outcome owner",
+        "never cross-sync provider facts or local apply lifecycle",
+        "Foreign-only replayable Telegram provider outcome inbox",
+        notes=(
+            "One immutable provider fact is fenced to one job lease; domain feedback may be "
+            "replayed without repeating the Telegram API call."
+        ),
+    ),
+    "telegram_delivery_reconciliation_evidence": _entry(
+        "telegram_delivery_reconciliation_evidence",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue", "telegram_delivery_queue_operations"),
+        "foreign local Telegram reconciliation audit owner",
+        "append-only evidence; never cross-sync provider or operator metadata",
+        "Foreign-only redacted ambiguity and retry decision audit",
+        notes="Evidence references and operator references are hashed before persistence.",
+    ),
     "telegram_scheduled_operations": _entry(
         "telegram_scheduled_operations",
         SyncPolicy.NO_SYNC,

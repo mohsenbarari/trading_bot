@@ -40,10 +40,16 @@ from core.services.telegram_delivery_queue_service import (
     defer_unstarted_telegram_delivery_lease,
     load_active_telegram_limiter_evidence,
     load_incomplete_telegram_resume_destination_keys,
+    load_telegram_provider_outcome_backlog,
     mark_telegram_delivery_dispatch_started,
+    record_telegram_delivery_provider_outcome,
+    record_telegram_provider_outcome_apply_failure,
     recover_expired_telegram_delivery_leases,
     release_unstarted_telegram_delivery_lease,
-    resolve_telegram_delivery_result,
+    apply_telegram_delivery_provider_outcome,
+)
+from core.services.telegram_delivery_reconciliation_service import (
+    reconcile_telegram_delivery_jobs,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryDecision,
@@ -510,24 +516,50 @@ async def _persist_delivery_result_after_dispatch(
     ],
     decision_time: datetime,
 ) -> tuple[TelegramDeliveryDecision, TelegramDeliveryDecision]:
-    """Persist one known provider result without ever repeating the API call.
-
-    A short database/feedback interruption while the process is still alive
-    should not discard a definitive 429 or success. An exhausted retry budget
-    deliberately leaves the dispatch-marked lease for ambiguous recovery.
-    """
-    last_classified_decision: TelegramDeliveryDecision | None = None
+    """Record one provider fact, then atomically apply queue/domain feedback."""
+    outcome_id: int | None = None
     for attempt in range(1, _RESULT_PERSISTENCE_MAX_ATTEMPTS + 1):
-        decision: TelegramDeliveryDecision | None = None
         try:
             async with AsyncSessionLocal() as db:
-                decision = await resolve_telegram_delivery_result(
+                persisted = await record_telegram_delivery_provider_outcome(
                     db,
                     current_server=current_server(),
                     job_id=job_id,
                     worker_id=worker_id,
                     lease_token=lease_token,
                     result=gateway_result,
+                    now=decision_time,
+                )
+                outcome_id = int(persisted.outcome.id)
+                await db.commit()
+            break
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if attempt >= _RESULT_PERSISTENCE_MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "Retrying Telegram provider-outcome recording",
+                extra={
+                    "event": "telegram_delivery.provider_outcome_record_retry",
+                    "job_id": job_id,
+                    "attempt": attempt,
+                    "max_attempts": _RESULT_PERSISTENCE_MAX_ATTEMPTS,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            await asyncio.sleep(0.05 * attempt)
+
+    if outcome_id is None:
+        raise RuntimeError("telegram_delivery_provider_outcome_record_exhausted")
+
+    for attempt in range(1, _RESULT_PERSISTENCE_MAX_ATTEMPTS + 1):
+        try:
+            async with AsyncSessionLocal() as db:
+                decision = await apply_telegram_delivery_provider_outcome(
+                    db,
+                    current_server=current_server(),
+                    outcome_id=outcome_id,
                     retry_after_safety_seconds=_retry_after_safety_seconds(),
                     retry_base_seconds=max(
                         0.1,
@@ -563,28 +595,27 @@ async def _persist_delivery_result_after_dispatch(
                     now=decision_time,
                 )
                 await db.commit()
-            limiter_decision = (
-                last_classified_decision
-                if decision.outcome == TelegramDeliveryOutcome.STALE_LEASE
-                and last_classified_decision is not None
-                else decision
-            )
-            return decision, limiter_decision
+            return decision, decision
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            if (
-                decision is not None
-                and decision.outcome != TelegramDeliveryOutcome.STALE_LEASE
-            ):
-                last_classified_decision = decision
+            async with AsyncSessionLocal() as failure_db:
+                await record_telegram_provider_outcome_apply_failure(
+                    failure_db,
+                    current_server=current_server(),
+                    outcome_id=outcome_id,
+                    error=exc,
+                    now=utc_now(),
+                )
+                await failure_db.commit()
             if attempt >= _RESULT_PERSISTENCE_MAX_ATTEMPTS:
                 raise
             logger.warning(
-                "Retrying Telegram provider-result persistence",
+                "Retrying Telegram provider-outcome application",
                 extra={
-                    "event": "telegram_delivery.result_persistence_retry",
+                    "event": "telegram_delivery.provider_outcome_apply_retry",
                     "job_id": job_id,
+                    "outcome_id": outcome_id,
                     "attempt": attempt,
                     "max_attempts": _RESULT_PERSISTENCE_MAX_ATTEMPTS,
                     "error_class": type(exc).__name__,
@@ -592,7 +623,7 @@ async def _persist_delivery_result_after_dispatch(
             )
             await asyncio.sleep(0.05 * attempt)
 
-    raise RuntimeError("telegram_delivery_result_persistence_retry_exhausted")
+    raise RuntimeError("telegram_delivery_provider_outcome_apply_exhausted")
 
 
 async def run_telegram_delivery_queue_cycle(
@@ -1057,6 +1088,166 @@ async def telegram_delivery_queue_recovery_loop() -> None:
         await asyncio.sleep(_worker_interval_seconds())
 
 
+async def run_telegram_provider_outcome_replay_cycle(
+    *,
+    lifecycle_feedbacks: Mapping[str, TelegramQueueLifecycleFeedback],
+    limit: int | None = None,
+) -> int:
+    """Apply due durable provider facts without repeating Telegram calls."""
+    assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
+    _assert_queue_runtime_owner()
+    batch_size = _worker_batch_limit(limit)
+    async with AsyncSessionLocal() as db:
+        backlog = await load_telegram_provider_outcome_backlog(
+            db,
+            current_server=current_server(),
+            max_rows=batch_size,
+            now=utc_now(),
+        )
+        await db.rollback()
+
+    async def routed_feedback(
+        db: AsyncSession,
+        job: TelegramDeliveryJobRecord,
+        decision: TelegramDeliveryDecision,
+        now: datetime,
+    ) -> None:
+        adapter = lifecycle_feedbacks.get(str(job.bot_identity))
+        if adapter is None:
+            raise TelegramDeliveryQueueImplementationIncompleteError(
+                f"telegram_provider_outcome_feedback_not_installed:{job.bot_identity}"
+            )
+        await adapter.apply_delivery_result(db, job, decision, now)
+
+    applied_count = 0
+    for outcome_id in backlog.due_outcome_ids:
+        try:
+            async with AsyncSessionLocal() as db:
+                decision = await apply_telegram_delivery_provider_outcome(
+                    db,
+                    current_server=current_server(),
+                    outcome_id=outcome_id,
+                    retry_after_safety_seconds=_retry_after_safety_seconds(),
+                    retry_base_seconds=max(
+                        0.1,
+                        float(
+                            getattr(
+                                settings,
+                                "telegram_delivery_queue_retry_base_seconds",
+                                1.0,
+                            )
+                        ),
+                    ),
+                    retry_max_seconds=max(
+                        0.1,
+                        float(
+                            getattr(
+                                settings,
+                                "telegram_delivery_queue_retry_max_seconds",
+                                300.0,
+                            )
+                        ),
+                    ),
+                    global_rate_limit_window_seconds=max(
+                        0.001,
+                        float(
+                            getattr(
+                                settings,
+                                "telegram_delivery_queue_global_rate_limit_window_seconds",
+                                2.0,
+                            )
+                        ),
+                    ),
+                    feedback=routed_feedback,
+                    now=utc_now(),
+                )
+                await db.commit()
+            if decision.outcome not in {
+                TelegramDeliveryOutcome.ALREADY_RESOLVED,
+                TelegramDeliveryOutcome.STALE_LEASE,
+            }:
+                applied_count += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            async with AsyncSessionLocal() as failure_db:
+                await record_telegram_provider_outcome_apply_failure(
+                    failure_db,
+                    current_server=current_server(),
+                    outcome_id=outcome_id,
+                    error=exc,
+                    now=utc_now(),
+                )
+                await failure_db.commit()
+            logger.warning(
+                "Telegram provider outcome replay deferred",
+                extra={
+                    "event": "telegram_delivery.provider_outcome_replay_deferred",
+                    "outcome_id": outcome_id,
+                    "error_class": type(exc).__name__,
+                },
+            )
+    return applied_count
+
+
+async def telegram_provider_outcome_replay_loop(
+    *,
+    lifecycle_feedbacks: Mapping[str, TelegramQueueLifecycleFeedback],
+) -> None:
+    while True:
+        await run_telegram_provider_outcome_replay_cycle(
+            lifecycle_feedbacks=lifecycle_feedbacks,
+        )
+        await asyncio.sleep(_worker_interval_seconds())
+
+
+async def telegram_delivery_reconciliation_loop(
+    *,
+    lanes: Sequence[TelegramDeliveryQueueLaneSpec],
+) -> None:
+    validators = {lane.bot_identity: lane.freshness_validator for lane in lanes}
+    freshness_feedbacks = {
+        lane.bot_identity: lane.lifecycle_feedback.apply_freshness for lane in lanes
+    }
+    result_feedbacks = {
+        lane.bot_identity: lane.lifecycle_feedback.apply_delivery_result for lane in lanes
+    }
+    while True:
+        async with AsyncSessionLocal() as db:
+            report = await reconcile_telegram_delivery_jobs(
+                db,
+                current_server=current_server(),
+                freshness_validators=validators,
+                freshness_feedbacks=freshness_feedbacks,
+                result_feedbacks=result_feedbacks,
+                ambiguity_grace_seconds=max(
+                    1.0,
+                    float(
+                        getattr(
+                            settings,
+                            "telegram_delivery_queue_ambiguity_grace_seconds",
+                            30.0,
+                        )
+                    ),
+                ),
+                max_rows=_worker_recover_limit(),
+                now=utc_now(),
+            )
+            await db.commit()
+        if report.unresolved_count or report.configuration_blocked_count:
+            logger.warning(
+                "Telegram delivery reconciliation requires attention",
+                extra={
+                    "event": "telegram_delivery.reconciliation_attention",
+                    "inspected_count": report.inspected_count,
+                    "unresolved_count": report.unresolved_count,
+                    "configuration_blocked_count": report.configuration_blocked_count,
+                    "pending_provider_outcome_count": report.pending_provider_outcome_count,
+                },
+            )
+        await asyncio.sleep(_worker_interval_seconds())
+
+
 def _telegram_delivery_lane_start_mode(
     lane: TelegramDeliveryQueueLaneSpec,
     *,
@@ -1297,6 +1488,22 @@ async def telegram_delivery_queue_loop(
         asyncio.create_task(
             telegram_delivery_queue_recovery_loop(),
             name="telegram-delivery-lease-recovery",
+        )
+    )
+    tasks.append(
+        asyncio.create_task(
+            telegram_delivery_reconciliation_loop(lanes=lanes),
+            name="telegram-delivery-reconciliation",
+        )
+    )
+    tasks.append(
+        asyncio.create_task(
+            telegram_provider_outcome_replay_loop(
+                lifecycle_feedbacks={
+                    lane.bot_identity: lane.lifecycle_feedback for lane in lanes
+                }
+            ),
+            name="telegram-delivery-provider-outcome-replay",
         )
     )
     tasks.append(
