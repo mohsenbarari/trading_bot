@@ -26,6 +26,7 @@ from core.services.trade_history_export_service import (
 )
 from core.utils import to_jalali_str
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.utils.public_profile import (
     PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK,
     build_bot_public_profile_keyboard,
@@ -43,7 +44,8 @@ router = Router()
 
 @router.callback_query(F.data == PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK)
 async def show_public_profile_username_unavailable(callback: types.CallbackQuery):
-    await callback.answer(
+    await answer_callback_query_via_runtime(
+        callback,
         "نام کاربری تلگرام این کاربر شناسایی نشده است.",
         show_alert=True,
     )
@@ -106,7 +108,11 @@ async def _ensure_history_profile_access(
     if profile is not None:
         return True
     if callback is not None:
-        await callback.answer("پروفایل در دسترس نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "پروفایل در دسترس نیست.",
+            show_alert=True,
+        )
     return False
 
 
@@ -254,12 +260,16 @@ async def change_history_months(callback: types.CallbackQuery, callback_data: Hi
         )
     except TelegramBadRequest:
         pass  # پیام تغییر نکرده
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 async def show_trade_history(callback: types.CallbackQuery, callback_data: TradeHistoryCallback, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer("لطفاً ابتدا ثبت نام کنید!", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "لطفاً ابتدا ثبت نام کنید!",
+            show_alert=True,
+        )
         return
 
     target_user_id = callback_data.target_user_id
@@ -267,19 +277,27 @@ async def show_trade_history(callback: types.CallbackQuery, callback_data: Trade
         return
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
     if target_user is None and not trades and target_user_id not in {user.id, 0}:
-        await callback.answer("کاربر یافت نشد!", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "کاربر یافت نشد!",
+            show_alert=True,
+        )
         return
 
     await state.update_data(history_months=3, history_target_id=target_user_id)
     is_self = target_user_id in {user.id, 0}
     text = format_trade_history(trades, None if is_self else target_user, user.id)
     await callback.message.edit_text(text, reply_markup=get_trade_history_keyboard(target_user_id))
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 async def filter_trade_history(callback: types.CallbackQuery, callback_data: HistoryPageCallback, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer("لطفاً ابتدا ثبت نام کنید!", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "لطفاً ابتدا ثبت نام کنید!",
+            show_alert=True,
+        )
         return
 
     target_user_id = callback_data.target_user_id
@@ -287,7 +305,11 @@ async def filter_trade_history(callback: types.CallbackQuery, callback_data: His
         return
     target_user, trades = await get_trade_history(user.id, target_user_id, months=callback_data.months)
     if target_user is None and not trades and target_user_id not in {user.id, 0}:
-        await callback.answer("کاربر یافت نشد!", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "کاربر یافت نشد!",
+            show_alert=True,
+        )
         return
 
     await state.update_data(history_months=callback_data.months, history_target_id=target_user_id)
@@ -297,7 +319,7 @@ async def filter_trade_history(callback: types.CallbackQuery, callback_data: His
         await callback.message.edit_text(text, reply_markup=get_trade_history_keyboard(target_user_id))
     except TelegramBadRequest:
         pass
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 # --- بقیه هندلرها (Excel, PDF, ...) ---
@@ -341,7 +363,10 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
     if not user:
         return
     
-    await callback.answer("⏳ در حال ایجاد فایل Excel...")
+    await answer_callback_query_via_runtime(
+        callback,
+        "⏳ در حال ایجاد فایل Excel...",
+    )
     
     data = await state.get_data()
     months = data.get("history_months", 3)
@@ -380,7 +405,10 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
     if not user:
         return
     
-    await callback.answer("⏳ در حال ایجاد فایل PDF...")
+    await answer_callback_query_via_runtime(
+        callback,
+        "⏳ در حال ایجاد فایل PDF...",
+    )
     
     data = await state.get_data()
     months = data.get("history_months", 3)
@@ -424,7 +452,10 @@ async def export_profile_trade_pdf(
     if not user:
         return
 
-    await callback.answer("⏳ در حال ایجاد فایل PDF...")
+    await answer_callback_query_via_runtime(
+        callback,
+        "⏳ در حال ایجاد فایل PDF...",
+    )
 
     target_user_id = callback_data.target_user_id
     if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
@@ -480,7 +511,7 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
             parse_mode="Markdown",
             reply_markup=get_user_panel_keyboard(user.role)
         )
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     async with AsyncSessionLocal() as session:
@@ -492,10 +523,14 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
             reply_markup=build_bot_public_profile_keyboard(profile),
         )
     else:
-        await callback.answer("پروفایل در دسترس نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "پروفایل در دسترس نیست.",
+            show_alert=True,
+        )
         return
     
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(TradeHistoryCallback.filter())
@@ -512,7 +547,11 @@ async def show_mutual_trade_history(callback: types.CallbackQuery, callback_data
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
     
     if not target_user and target_user_id != user.id:
-        await callback.answer("کاربر یافت نشد", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "کاربر یافت نشد",
+            show_alert=True,
+        )
         return
         
     is_self = (target_user_id == user.id)
@@ -522,4 +561,4 @@ async def show_mutual_trade_history(callback: types.CallbackQuery, callback_data
         text,
         reply_markup=get_trade_history_keyboard(target_user_id)
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)

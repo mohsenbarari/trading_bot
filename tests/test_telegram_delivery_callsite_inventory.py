@@ -124,7 +124,7 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             if item.disposition == "remaining_interactive_direct"
         ]
 
-        self.assertEqual(len(callback_calls), 258)
+        self.assertEqual(len(callback_calls), 241)
         self.assertFalse(
             any(item.callee.endswith(".message.answer") for item in callback_calls)
         )
