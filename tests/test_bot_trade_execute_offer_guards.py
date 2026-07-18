@@ -84,6 +84,39 @@ class BotTradeExecuteOfferGuardTests(unittest.IsolatedAsyncioTestCase):
                 await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=SimpleNamespace())
             callback.answer.assert_awaited_once_with(*expected_args, **expected_kwargs)
 
+    async def test_inactive_offer_requests_authoritative_channel_refresh(self):
+        user = make_bot_user()
+        offer = SimpleNamespace(status=OfferStatus.COMPLETED)
+        callback = make_callback()
+
+        with patch(
+            "bot.handlers.trade_execute.check_user_limits",
+            return_value=(True, None),
+        ), patch(
+            "bot.handlers.trade_execute.settings",
+            SimpleNamespace(channel_id=-100),
+        ), patch(
+            "bot.handlers.trade_execute.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(offer)),
+        ), patch(
+            "bot.handlers.trade_execute._queue_authoritative_channel_offer_refresh",
+            new=AsyncMock(return_value=True),
+        ) as refresh:
+            await handle_channel_trade(
+                callback,
+                SimpleNamespace(offer_id=7, amount=2),
+                user=user,
+                bot=SimpleNamespace(),
+            )
+
+        refresh.assert_awaited_once()
+        self.assertIs(refresh.await_args.args[1], offer)
+        self.assertFalse(refresh.await_args.kwargs["invalid_active_action"])
+        callback.answer.assert_awaited_once_with(
+            "این لفظ دیگر فعال نیست.",
+            show_alert=True,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

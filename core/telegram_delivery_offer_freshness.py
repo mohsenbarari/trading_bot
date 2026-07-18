@@ -42,6 +42,7 @@ OFFER_ACTIVE_EDIT_ACTIONS = frozenset(
     {
         TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
         TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+        TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
         TelegramDeliveryAction.RECONCILIATION_EDIT,
     }
 )

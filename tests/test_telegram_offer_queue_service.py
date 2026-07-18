@@ -157,6 +157,42 @@ class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["method"], "editMessageText")
         self.assertEqual(kwargs["payload"]["message_id"], 777)
 
+    async def test_invalid_action_refresh_uses_trade_feeder_and_editor_lane(self):
+        enqueue = AsyncMock(
+            return_value=SimpleNamespace(created=True, job=SimpleNamespace(id=3))
+        )
+        with patch.object(
+            service.settings,
+            "telegram_delivery_queue_channel_editor_enabled",
+            True,
+        ), patch.object(
+            service,
+            "enqueue_telegram_delivery_job",
+            new=enqueue,
+        ), patch.object(
+            service,
+            "_supersede_obsolete_offer_jobs",
+            new=AsyncMock(return_value=0),
+        ):
+            await service.enqueue_current_offer_delivery(
+                object(),
+                current_server="foreign",
+                offer=make_offer(remaining_quantity=10),
+                state=make_state(),
+                expected_channel_id=-1001234567890,
+                offer_expiry_minutes=None,
+                action=TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
+            )
+
+        kwargs = enqueue.await_args.kwargs
+        self.assertEqual(kwargs["feeder"].value, "trade")
+        self.assertEqual(
+            kwargs["action"],
+            TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,
+        )
+        self.assertEqual(kwargs["bot_identity"], "channel_editor")
+        self.assertEqual(kwargs["method"], "editMessageText")
+
     async def test_expired_unpublished_offer_is_not_enqueued(self):
         enqueue = AsyncMock()
         supersede = AsyncMock(return_value=1)

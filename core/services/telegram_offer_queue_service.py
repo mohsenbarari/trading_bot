@@ -277,14 +277,19 @@ async def enqueue_current_offer_delivery(
         now=current_time,
     )
     is_publish = selected_action in OFFER_PUBLISH_ACTIONS
+    feeder = (
+        TelegramFeederKind.OFFER_CONTROL
+        if is_publish
+        else (
+            TelegramFeederKind.TRADE
+            if selected_action == TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT
+            else TelegramFeederKind.OFFER_EDIT
+        )
+    )
     queue_result = await enqueue_telegram_delivery_job(
         db,
         current_server=current_server,
-        feeder=(
-            TelegramFeederKind.OFFER_CONTROL
-            if is_publish
-            else TelegramFeederKind.OFFER_EDIT
-        ),
+        feeder=feeder,
         source_natural_id=offer_public_id,
         source_version=source_version,
         action=selected_action,

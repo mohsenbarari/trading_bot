@@ -33,6 +33,13 @@ from core.services.trade_service import (
     validate_offer_trade_amount,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.services.telegram_offer_publication_service import (
+    load_telegram_publication_state_for_update,
+)
+from core.services.telegram_offer_queue_service import (
+    TelegramOfferQueueError,
+    enqueue_current_offer_delivery,
+)
 from core.server_routing import current_server, is_remote_home
 from core.trade_forwarding import forward_trade_to_home_server
 from core.trading_observability import log_trading_event
@@ -40,6 +47,7 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from bot.utils.trade_suggestion_messages import (
     PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
     build_offer_trade_buttons,
@@ -58,6 +66,68 @@ router = Router()
 OFFER_UNAVAILABLE_CALLBACK_MESSAGE = "این لفظ دیگر در دسترس نیست."
 OFFER_INACTIVE_CALLBACK_MESSAGE = "این لفظ دیگر فعال نیست."
 BOT_REMOTE_HOME_FORWARD_TIMEOUT_SECONDS = 2.0
+
+
+async def _queue_authoritative_channel_offer_refresh(
+    session,
+    offer: Offer,
+    *,
+    invalid_active_action: bool,
+) -> bool:
+    """Expedite a canonical channel refresh after a stale button click."""
+    if current_server() != "foreign":
+        return False
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return False
+    try:
+        state = await load_telegram_publication_state_for_update(session, offer)
+        if state is None or not getattr(state, "telegram_message_id", None):
+            return False
+        action = (
+            TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT
+            if invalid_active_action
+            else None
+        )
+        await enqueue_current_offer_delivery(
+            session,
+            current_server=current_server(),
+            offer=offer,
+            state=state,
+            expected_channel_id=settings.channel_id,
+            offer_expiry_minutes=None,
+            action=action,
+        )
+        await session.commit()
+        return True
+    except TelegramOfferQueueError as exc:
+        await session.rollback()
+        logger.warning(
+            "Rejected unsafe channel refresh after stale offer action",
+            extra={
+                "event": "telegram.invalid_offer_action_refresh_rejected",
+                "offer_public_id": str(
+                    getattr(offer, "offer_public_id", "") or ""
+                )[:40],
+                "reason": str(exc)[:120],
+            },
+        )
+        return False
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "Failed to queue channel refresh after stale offer action",
+            extra={
+                "event": "telegram.invalid_offer_action_refresh_failed",
+                "offer_public_id": str(
+                    getattr(offer, "offer_public_id", "") or ""
+                )[:40],
+                "error_class": type(exc).__name__,
+            },
+        )
+        return False
 
 
 def _callback_offer_public_id(callback_data) -> str | None:
@@ -639,6 +709,11 @@ async def _handle_channel_trade(
             offer_id = resolved_offer_id
         
         if offer.status != OfferStatus.ACTIVE:
+            await _queue_authoritative_channel_offer_refresh(
+                session,
+                offer,
+                invalid_active_action=False,
+            )
             await callback.answer(OFFER_INACTIVE_CALLBACK_MESSAGE, show_alert=True)
             return
         
@@ -814,6 +889,11 @@ async def _handle_channel_trade(
             requested_amount=actual_amount,
         )
         if not is_valid_amount:
+            await _queue_authoritative_channel_offer_refresh(
+                session,
+                offer,
+                invalid_active_action=True,
+            )
             if not offer.is_wholesale and available_amounts and amount_error == "این لات دیگر موجود نیست.":
                 suggestion_payload = build_lot_unavailable_suggestion_payload(
                     offer_id=offer.id,

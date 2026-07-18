@@ -184,6 +184,7 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryAction.OFFER_PUBLISH: OfferStatus.ACTIVE,
             TelegramDeliveryAction.PARTIAL_OFFER_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT: OfferStatus.ACTIVE,
+            TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.RECONCILIATION_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.TRADED_OFFER_EDIT: OfferStatus.COMPLETED,
             TelegramDeliveryAction.EXPIRED_OFFER_EDIT: OfferStatus.EXPIRED,

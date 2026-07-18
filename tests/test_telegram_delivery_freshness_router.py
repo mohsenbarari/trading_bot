@@ -85,10 +85,8 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
             set(primary.missing_actions),
             DURABLE_TELEGRAM_DELIVERY_ACTIONS - OFFER_FRESHNESS_ACTIONS,
         )
-        self.assertEqual(
-            editor.missing_actions,
-            (TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT,),
-        )
+        self.assertTrue(editor.complete)
+        self.assertEqual(editor.missing_actions, ())
 
     def test_offer_and_market_routes_report_remaining_primary_coverage(self):
         validator = send_validator()
@@ -197,17 +195,16 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
             primary.missing_actions,
         )
 
-    def test_incomplete_lane_refuses_router_construction(self):
+    def test_incomplete_primary_lane_refuses_router_construction(self):
         registry = TelegramDeliveryFreshnessRegistry(
             offer_freshness_routes(send_validator())
         )
 
         with self.assertRaisesRegex(
             TelegramDeliveryFreshnessRoutingError,
-            "telegram_freshness_lane_incomplete:channel_editor:"
-            "invalid_action_button_edit",
+            "telegram_freshness_lane_incomplete:primary:",
         ):
-            registry.build_lane_router("channel_editor")
+            registry.build_lane_router("primary")
 
     async def test_complete_editor_router_dispatches_only_matching_lane(self):
         validator = send_validator()
