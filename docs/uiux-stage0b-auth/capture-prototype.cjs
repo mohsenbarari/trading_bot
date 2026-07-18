@@ -92,6 +92,12 @@ async function main() {
           scrollWidth: node.scrollWidth,
           scrollHeight: node.scrollHeight,
         })),
+        screens: [...document.querySelectorAll('.phone .screen')].map((node) => ({
+          id: node.closest('.scenario')?.id || '',
+          clientHeight: node.clientHeight,
+          scrollHeight: node.scrollHeight,
+          verticallyClipped: node.scrollHeight > node.clientHeight,
+        })),
         touchTargets: {
           count: touchTargets.length,
           minimumWidth: Math.min(...touchTargets.map((item) => item.width)),

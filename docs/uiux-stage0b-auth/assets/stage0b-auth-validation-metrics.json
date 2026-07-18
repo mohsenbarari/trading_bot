@@ -82,9 +82,77 @@
       "scrollHeight": 842
     }
   ],
+  "screens": [
+    {
+      "id": "auth-login-mobile",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-login-otp",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-device-approval",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-recovery-waiting",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-invite-valid",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-register-review",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-register-otp",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-register-address",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-register-telegram",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-recovery-identity",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    },
+    {
+      "id": "auth-setup-password",
+      "clientHeight": 680,
+      "scrollHeight": 680,
+      "verticallyClipped": false
+    }
+  ],
   "touchTargets": {
     "count": 32,
-    "minimumWidth": 74,
+    "minimumWidth": 84,
     "minimumHeight": 44,
     "below44": []
   },
