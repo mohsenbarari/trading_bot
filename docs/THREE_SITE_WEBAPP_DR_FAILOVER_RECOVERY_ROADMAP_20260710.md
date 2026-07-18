@@ -3062,3 +3062,108 @@ controller-loss recovery capsule remains `BEFORE_REMAINING_MATRIX`; signer
 policy, RH-007 topology proof, product fencing/identity, current-main migration
 lineage, and Arvan/WebApp activation remain unchanged later gates. Full Matrix,
 `main` integration, first lease, and traffic/CDN changes are still forbidden.
+
+### 47.10 Exact-SHA split verdict at `bb3a17cf` and third source remediation - 2026-07-18
+
+Four supplied reports reviewed exact feature SHA `bb3a17cf`. Gemini and Claude
+approved a dark install, while both ChatGPT reports rejected it. The two reject
+reports traced additional executable paths and crash boundaries to concrete
+source. Mechanical inspection reproduced those paths, so the fail-closed
+verdict controls. No SSH, package installation, live service/database/firewall
+or TLS mutation, RH execution, deployment, merge, CDN/DNS change, or traffic
+movement is authorized or performed by this remediation.
+
+The source-confirmed immediate findings were:
+
+- rollback data was archived before predecessor service/timer intent and
+  health restoration became terminal; a crash in that gap could erase the
+  only durable completion plan;
+- ordinary provisioning invoked unpinned package-manager mutation before the
+  release lock and activation journal, and could create the service account or
+  repair prerequisite directories as part of a release attempt;
+- publication stopped timers but not already-running backup/offsite oneshots,
+  allowing old work to cross a helper-generation boundary;
+- systemd and installed client paths retained pre-source shell/loader or
+  ambient-interpreter injection paths; live Writer attestation did not close
+  its complete mapped native-code set;
+- a secret-bearing smoke client, the Matrix signer/client, and the PostgreSQL
+  clock-jump probe were not all invoked by a fixed isolated interpreter with a
+  closed environment and self-check;
+- campaign time could be sampled before waiting on the Writer row lock, then
+  used to authorize a mutation or replay after expiry;
+- RH-011 overlap could retain the original unbounded credential as the
+  previous key after the campaign expiry;
+- cleanup's 900-second epoch lived only in one controller process and could be
+  renewed by a later `--recover` process;
+- clear secret-bearing shell input could still be exposed when an operator
+  invoked provisioning with inherited xtrace;
+- the supplied source evidence hard-coded four guarded PostgreSQL tests and did
+  not prove the new post-lock timing barrier.
+
+The third source remediation closes those paths as follows:
+
+1. Activation schema v2 records the exact `load`, `active`, and `unit-file`
+   intent of Nginx, Writer, both backup services, and both timers. Rollback now
+   enters a durable `rolled_back_pending_service_completion` phase. Neither
+   `recover` nor a new `begin` archives that journal; only exact service-state
+   restoration and any required Writer health proof may call explicit rollback
+   completion. Freshly absent units remain absent. Boot recovery fails closed
+   while service completion is pending, preserving systemd ordering.
+2. Provision obtains a host-wide lock before its first persistent release
+   mutation. Ordinary release provisioning contains no `apt-get`, account
+   creation, or prerequisite-directory repair. It attests an externally
+   supplied exact dpkg inventory digest plus the pre-existing account/group and
+   bootstrap directory trust contract. OS/package preparation is a distinct,
+   explicitly approved image/bootstrap workflow.
+3. All six managed units are stopped and runtime-masked during serial
+   publication, including active oneshots. Rollback restores their exact prior
+   enable/mask and active intent; completion cannot infer intent from the new
+   release.
+4. Secret-bearing shell entrypoints use absolute `/bin/bash`, immediately
+   disable xtrace, and systemd clears the expanded shell, Python, glibc, and
+   dynamic-loader environment set. The source tests invoke provisioning under
+   inherited `bash -x` with a sentinel secret and require that it never appears
+   in output.
+5. Writer preflight now checks `/proc/<pid>/maps` through a fixed isolated
+   verifier. Every mapped ELF object must belong to the release-bound system
+   closure or the fully attested activation venv; deleted, escaped, writable,
+   or otherwise unknown mappings fail closed. The installed smoke client,
+   Matrix client, renderer, and host-fault clock probe each enforce their exact
+   interpreter, isolation flags, prefix, and clean-environment boundary.
+6. Campaign transitions lock the Writer row first, then obtain fresh database
+   time inside the transaction, and reject expiry before campaign receipt
+   lookup or mutation. The guarded PostgreSQL gate adds a real two-session
+   barrier: one session holds the row lock while another transition waits,
+   database time crosses expiry, and the released transition must create
+   neither state change nor receipt. The gate's expected count is now five and
+   the source/failure-drill evidence derives the observed count.
+7. Campaign prepare assigns the same bounded Witness `not_after` to both the
+   current and previous overlap credentials. Only exact campaign recovery may
+   restore the original unbounded baseline after ownership is proven.
+8. Cleanup start and expiry are fsynced into the campaign journal before
+   cleanup effects. Every later controller reconstructs the remaining allowance
+   from that UTC expiry rather than granting a new 900 seconds. Once expired,
+   ordinary remote inspection and repair stay forbidden; a narrowly flagged,
+   30-second maximum emergency path may only prove exact ownership, revoke the
+   transient credential, reconcile its owned HMAC journal, and release the
+   campaign tombstone. Any incomplete baseline repair remains dirty and needs
+   new explicit authorization.
+
+Current status is **source gate passed; clean commit/push and independent
+exact-SHA review pending**. The complete hermetic worktree gate passed `412`
+explicitly listed unit tests with zero failures and zero skips, all `5` guarded
+real-PostgreSQL tests, and the complete four-database failure drill. The
+PostgreSQL output names and passes the real post-lock expiry-barrier test. A
+fresh minimal release passed its closed verifier with
+`release-manifest.json` SHA-256
+`7bd4fc9eb7d042fcdb3b9bcf8e84a9e46a67a15a839c841a380b023462665b9f`;
+`git diff --check` and the closed shell/Python syntax list also passed. These
+results bind the current tracked source/test bytes but do not replace a clean
+commit/push or independent review of the resulting exact SHA.
+
+The independent signer-custody/source-pin gate remains `BEFORE_RH001`; the
+controller-loss recovery capsule remains `BEFORE_REMAINING_MATRIX`; RH-007
+topology, product fencing/identity, replication/failback, current-main migration
+lineage, and Arvan traffic controls remain later gates. A third-remediation
+source pass cannot authorize Full Matrix, `main` integration, first lease,
+production Writer activation, WebApp mutation, or traffic/CDN changes.

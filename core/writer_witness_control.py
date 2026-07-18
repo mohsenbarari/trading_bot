@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 from sqlalchemy import select, text
@@ -316,6 +316,7 @@ async def transition_witness_state(
     lease_duration_seconds: int = 180,
     now: datetime | None = None,
     authorization_not_after: datetime | None = None,
+    clock: Callable[[AsyncSession], Awaitable[datetime]] | None = None,
 ) -> WitnessTransitionResult:
     request_id, operator, reason, duration, _ = _normalized_command_values(
         action=action,
@@ -328,16 +329,6 @@ async def transition_witness_state(
         lease_duration_seconds=lease_duration_seconds,
     )
 
-    current = _utc(now) if now is not None else await _database_now(session)
-    if (
-        authorization_not_after is not None
-        and current >= _utc(authorization_not_after)
-    ):
-        # This check deliberately precedes receipt lookup and state locking.
-        # An expired campaign credential has no mutation authority and must not
-        # leave a durable receipt that could be replayed as an authorization.
-        raise WriterWitnessCampaignExpiredError()
-
     request_hash = witness_command_request_hash(
         action=action,
         requester_site=requester_site,
@@ -347,15 +338,31 @@ async def transition_witness_state(
         operator=operator,
         reason=reason,
     )
-    existing_receipt = await session.get(WebappWriterWitnessReceipt, request_id)
-    if existing_receipt is not None:
-        if existing_receipt.request_hash != request_hash:
-            raise WriterWitnessError("request_id was already used with different parameters")
-        return _result_from_payload(json.loads(existing_receipt.response_json))
+    if authorization_not_after is None:
+        existing_receipt = await session.get(WebappWriterWitnessReceipt, request_id)
+        if existing_receipt is not None:
+            if existing_receipt.request_hash != request_hash:
+                raise WriterWitnessError("request_id was already used with different parameters")
+            return _result_from_payload(json.loads(existing_receipt.response_json))
 
     state = await load_witness_state(session, for_update=True)
+    # Campaign authority is evaluated only after acquiring the singleton writer
+    # row lock, against a fresh PostgreSQL clock read.  A request that waited
+    # past expiry therefore cannot mutate or replay a receipt under stale time.
+    current = (
+        await (clock or _database_now)(session)
+        if authorization_not_after is not None or now is None
+        else _utc(now)
+    )
+    if (
+        authorization_not_after is not None
+        and current >= _utc(authorization_not_after)
+    ):
+        raise WriterWitnessCampaignExpiredError()
+
     # A concurrent exact retry may have committed while this transaction was
-    # waiting for the singleton row lock. Recheck the receipt under the lock.
+    # waiting for the singleton row lock. Campaign retries intentionally reach
+    # their first receipt lookup only after the fresh post-lock expiry check.
     existing_receipt = await session.get(WebappWriterWitnessReceipt, request_id)
     if existing_receipt is not None:
         if existing_receipt.request_hash != request_hash:

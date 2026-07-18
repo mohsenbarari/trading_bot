@@ -1246,6 +1246,10 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
             runtime["WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER"],
             self.campaign_not_after,
         )
+        self.assertEqual(
+            runtime["WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_NOT_AFTER"],
+            self.campaign_not_after,
+        )
         self.assertEqual(prepared["campaign_not_after"], self.campaign_not_after)
         rotation.revoke(
             "webapp_fi", 0, self.runtime, self.client_dir, self.state_root
@@ -1378,6 +1382,7 @@ class WriterWitnessSmokeExpectedStatusTests(unittest.TestCase):
             ]
             with (
                 patch.object(sys, "argv", argv),
+                patch.object(smoke, "_require_isolated_runtime"),
                 patch.object(smoke.ssl, "create_default_context", return_value=object()),
                 patch.object(smoke, "urlopen", side_effect=error),
                 contextlib.redirect_stdout(output),

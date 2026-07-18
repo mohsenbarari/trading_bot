@@ -1,5 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+set +x
+[[ "$-" != *x* ]] || {
+    echo "configure_writer_witness_s3_backup.sh refuses shell tracing" >&2
+    exit 70
+}
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "configure_writer_witness_s3_backup.sh must run as root" >&2
@@ -37,9 +42,24 @@ do
     fi
 done
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get -o Acquire::Retries=5 update
-apt-get -o Acquire::Retries=5 install -y --no-install-recommends age ca-certificates
+configure_lock=/run/lock/writer-witness-provision.lock
+[[ -f "$configure_lock" && ! -L "$configure_lock" \
+    && "$(stat -c '%u:%g:%a:%h' "$configure_lock")" == 0:0:600:1 ]] || {
+    echo "Writer Witness outer provision lock is missing or unsafe" >&2
+    exit 2
+}
+exec {configure_lock_fd}<>"$configure_lock"
+flock -n "$configure_lock_fd" || {
+    echo "another Writer Witness host operation is active" >&2
+    exit 75
+}
+for package in age ca-certificates; do
+    [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" == \
+        "install ok installed" ]] || {
+        echo "Writer Witness S3 configuration requires the pre-bootstrapped $package package" >&2
+        exit 2
+    }
+done
 
 install -d -m 0750 -o root -g writer-witness /etc/trading-bot-witness
 recipient_target=/etc/trading-bot-witness/offsite-age-recipient.txt

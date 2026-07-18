@@ -57,6 +57,7 @@ PINNED_SOURCE_PATHS = (
     "scripts/verify_writer_witness_release.py",
     "scripts/verify_writer_witness_runtime.py",
     "scripts/verify_writer_witness_runtime_provenance.py",
+    "scripts/verify_writer_witness_process_maps.py",
     "scripts/verify_writer_witness_wheelhouse.py",
     "scripts/verify_writer_witness_nftables.py",
     "scripts/writer_witness_matrix_client.py",
@@ -463,7 +464,7 @@ def remote_check_specs(
         (ROOT / "deploy/writer-witness/wheelhouse.sha256").read_bytes()
     ).hexdigest()
     expected_nftables_policy_sha256 = str(nftables_policy_binding()["policy_sha256"])
-    clean_python_prefix = "env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin"
+    clean_python_prefix = "/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin"
     clean_python_flags = "-I -S -B -X utf8 -X pycache_prefix=/dev/null"
     pip_check_source = (
         "import runpy,sys; site_packages=sys.argv[1]; "
@@ -775,7 +776,7 @@ def remote_check_specs(
                 f"--expected-python-version {shlex.quote(expected_python_version)} "
                 f"--expected-python-sha256 {shlex.quote(expected_python_sha256)}); "
                 "test -n \"$runtime_attestation_before_check\"; "
-                f"env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin PIP_CONFIG_FILE=/dev/null "
+                f"/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin PIP_CONFIG_FILE=/dev/null "
                 f"/opt/trading-bot-witness/active/venv/bin/python {clean_python_flags} "
                 f"-c {shlex.quote(pip_check_source)} "
                 "/opt/trading-bot-witness/active/venv/lib/python3.12/site-packages >/dev/null; "
@@ -803,10 +804,18 @@ def remote_check_specs(
                 "--expected-uid 0 --expected-gid 0); "
                 "printf '%s' \"$runtime_provenance_attestation\" "
                 "| grep -F '\"runtime_provenance_attested\":\"yes\"' >/dev/null; "
+                f"process_maps_attestation=$({clean_python_prefix} "
+                f"/opt/trading-bot-witness/active/venv/bin/python {clean_python_flags} "
+                "\"$release/scripts/verify_writer_witness_process_maps.py\" "
+                "--pid \"$pid\" --venv \"$venv_real\" "
+                "--system-runtime-manifest \"$release/deploy/writer-witness/python-runtime.json\" "
+                f"--expected-system-runtime-manifest-sha256 {shlex.quote(expected_system_runtime_manifest_sha256)}); "
+                "printf '%s' \"$process_maps_attestation\" "
+                "| grep -F '\"process_maps_attested\":\"yes\"' >/dev/null; "
                 "systemctl show -p ExecStart --value writer-witness.service "
                 "| grep -F '/opt/trading-bot-witness/active/venv/bin/python' >/dev/null; "
                 "test \"$(readlink -f /proc/$pid/exe)\" = \"$(readlink -f \"$venv_real/bin/python\")\"; "
-                "for forbidden in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE LD_PRELOAD LD_LIBRARY_PATH; do "
+                "for forbidden in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE BASH_ENV ENV SHELLOPTS BASHOPTS CDPATH GLOBIGNORE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT LD_PROFILE LD_SHOW_AUXV LD_BIND_NOW LD_BIND_NOT LD_ORIGIN_PATH LD_DYNAMIC_WEAK LD_HWCAP_MASK GLIBC_TUNABLES; do "
                 "! tr '\\0' '\\n' </proc/$pid/environ | grep -q \"^$forbidden=\"; done; "
                 "tr '\\0' '\\n' </proc/$pid/cmdline "
                 "| grep -F '/opt/trading-bot-witness/active/venv/bin/python' >/dev/null; "
@@ -870,7 +879,8 @@ def remote_check_specs(
                 "-noout -enddate | cut -d= -f2-)\" +%s); test \"$cert_end\" -gt $(( $(date +%s) + 604800 )); "
                 "for site in webapp_fi webapp_ir; do short=${site#webapp_}; "
                 f"url=$(sed -n 's/^WRITER_WITNESS_INTERNAL_URL=//p' /root/writer-witness-client-material/webapp-$short.env); test \"$url\" = https://{MATRIX_WITNESS}; "
-                "/usr/local/sbin/writer-witness-smoke-client "
+                f"{clean_python_prefix} /opt/trading-bot-witness/active/venv/bin/python "
+                f"{clean_python_flags} /usr/local/sbin/writer-witness-smoke-client "
                 "--env-file /root/writer-witness-client-material/webapp-$short.env "
                 "--ca-bundle /etc/trading-bot-witness/tls/ca.crt --site \"$site\" >/dev/null; done; "
                 "unsigned=$(curl --cacert /etc/trading-bot-witness/tls/ca.crt -sS -o /dev/null "
@@ -1171,7 +1181,7 @@ def build_plan(
             "expected_active_campaign_not_after": expected_active_campaign_not_after,
             "allow_expired_active_campaign": allow_expired_active_campaign,
             "source_gate_requires_zero_skips": True,
-            "source_gate_requires_guarded_postgres_tests": 4,
+            "source_gate_requires_guarded_postgres_tests": 5,
             "source_gate_requires_four_database_drill": True,
         },
         "hosts": {
@@ -1362,7 +1372,7 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
         or ""
     )
     if (
-        '"guarded_postgres_tests":4' not in source_stdout
+        '"guarded_postgres_tests":5' not in source_stdout
         or '"skipped":0' not in source_stdout
         or '"four_database_drill":true' not in source_stdout
     ):

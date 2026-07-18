@@ -98,7 +98,7 @@ def passing_preflight():
             "expected_active_campaign_tag": None,
             "expected_active_campaign_scenario": None,
             "source_gate_requires_zero_skips": True,
-            "source_gate_requires_guarded_postgres_tests": 4,
+            "source_gate_requires_guarded_postgres_tests": 5,
             "source_gate_requires_four_database_drill": True,
         },
         "failed_checks": [],
@@ -120,7 +120,7 @@ def passing_preflight():
                 "status": "passed",
                 "return_code": 0,
                 "stdout": (
-                    '{"guarded_postgres_tests":4,"skipped":0,'
+                    '{"guarded_postgres_tests":5,"skipped":0,'
                     '"four_database_drill":true}'
                     if check_id == "source_regression_gate"
                     else ""
@@ -321,9 +321,15 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
         controller.remote_campaign_claimed = True
         controller.remote_campaign_ambiguous = False
         controller.journal = mock.Mock()
+        cleanup_started_at = datetime.now(timezone.utc)
         controller.journal.payload = {
             "lifecycle_phase": "scenario_executing",
             "initial_database_inventory": [],
+            "cleanup_started_at": cleanup_started_at.isoformat(),
+            "cleanup_not_after": (
+                cleanup_started_at
+                + timedelta(seconds=runner.MAX_CLEANUP_SECONDS)
+            ).isoformat(),
         }
         controller.journal.values.return_value = set()
         controller.event = mock.Mock()
@@ -864,6 +870,76 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"):
             controller.raise_if_cleanup_deadline_exceeded()
 
+    def test_cleanup_deadline_is_persisted_and_cannot_renew_across_processes(self):
+        with tempfile.TemporaryDirectory(prefix="matrix-cleanup-window-") as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            now = datetime.now(timezone.utc)
+            journal = runner.CampaignJournal(
+                root / "wwm_0123456789ab.json",
+                {
+                    "schema_version": runner.RUNNER_SCHEMA,
+                    "cleanup_started_at": (now - timedelta(seconds=899)).isoformat(),
+                    "cleanup_not_after": (now + timedelta(seconds=1)).isoformat(),
+                },
+                create=True,
+            )
+            first = object.__new__(runner.Controller)
+            first.journal = journal
+            first._cleanup_mode = False
+            first.enter_cleanup_mode()
+            first_remaining = first._cleanup_deadline - __import__("time").monotonic()
+            self.assertGreater(first_remaining, 0)
+            self.assertLessEqual(first_remaining, 1.1)
+
+            reloaded = runner.CampaignJournal.load(journal.path)
+            second = object.__new__(runner.Controller)
+            second.journal = reloaded
+            second._cleanup_mode = False
+            second.enter_cleanup_mode()
+            second_remaining = second._cleanup_deadline - __import__("time").monotonic()
+            self.assertLessEqual(second_remaining, first_remaining)
+            self.assertEqual(
+                reloaded.payload["cleanup_not_after"],
+                journal.payload["cleanup_not_after"],
+            )
+
+    def test_expired_cleanup_allows_only_fixed_timeout_emergency_revocation(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = __import__("time").monotonic() - 1
+        controller.event = mock.Mock(return_value=True)
+        controller.redact_command_output = lambda value: value
+        controller.secret_output_detected = False
+        completed = subprocess.CompletedProcess(["true"], 0, "", "")
+        with mock.patch.object(
+            runner.subprocess,
+            "run",
+            return_value=completed,
+        ) as run_mock:
+            controller.command(
+                "exact_revocation_after_expiry",
+                ["true"],
+                timeout=900,
+                emergency_revocation=True,
+            )
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 30.0)
+        with self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"):
+            controller.command("forbidden_recovery_after_expiry", ["true"])
+
+    def test_cleanup_expiry_mid_run_routes_to_exact_emergency_revocation(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_within_deadline = mock.Mock(
+            side_effect=runner.MatrixAbort("cleanup exceeded")
+        )
+        controller._revoke_after_expired_cleanup_window = mock.Mock(
+            side_effect=runner.MatrixError("exact authority revoked; reauthorization required")
+        )
+        with self.assertRaisesRegex(runner.MatrixError, "reauthorization required"):
+            controller.cleanup()
+        controller._cleanup_within_deadline.assert_called_once_with()
+        controller._revoke_after_expired_cleanup_window.assert_called_once_with()
+
     def test_approve_mode_derives_a_deterministic_sub_hour_expiry(self):
         now = datetime.now(timezone.utc)
         with tempfile.TemporaryDirectory(prefix="matrix-approval-") as directory:
@@ -1081,9 +1157,15 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         controller.remote_campaign_claimed = claimed
         controller.remote_campaign_ambiguous = False
         controller.journal = mock.Mock()
+        cleanup_started_at = datetime.now(timezone.utc)
         controller.journal.payload = {
             "lifecycle_phase": "scenario_executing",
             "initial_database_inventory": [],
+            "cleanup_started_at": cleanup_started_at.isoformat(),
+            "cleanup_not_after": (
+                cleanup_started_at
+                + timedelta(seconds=runner.MAX_CLEANUP_SECONDS)
+            ).isoformat(),
         }
         controller.journal.values.return_value = set()
         controller.event = mock.Mock(return_value=True)
@@ -1824,7 +1906,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             persisted = json.loads(journal_path.read_text(encoding="utf-8"))
             self.assertTrue(persisted["evidence_loss_detected"])
             self.assertEqual(persisted["original_artifact_dir"], str(missing_artifact))
-            fake_controller.enter_cleanup_mode.assert_called_once()
+            fake_controller.enter_cleanup_mode.assert_not_called()
             fake_controller.cleanup.assert_called_once()
 
     def test_active_restore_journal_is_recovered_before_runtime_resume(self):

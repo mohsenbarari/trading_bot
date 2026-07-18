@@ -160,7 +160,37 @@ SPECIAL_PATHS = {
 }
 
 RELEASE_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
-SCHEMA = "writer_witness_activation_v1"
+SCHEMA = "writer_witness_activation_v2"
+MANAGED_UNITS = (
+    "nginx",
+    "writer-witness.service",
+    "writer-witness-backup.service",
+    "writer-witness-backup.timer",
+    "writer-witness-offsite-backup.service",
+    "writer-witness-offsite-backup.timer",
+)
+UNIT_STATE_VALUE_RE = re.compile(r"[A-Za-z0-9._-]+")
+UNIT_LOAD_STATES = frozenset({"loaded", "masked", "not-found"})
+UNIT_ACTIVE_STATES = frozenset(
+    {"active", "activating", "reloading", "inactive", "failed", "deactivating"}
+)
+UNIT_FILE_STATES = frozenset(
+    {
+        "enabled",
+        "enabled-runtime",
+        "disabled",
+        "masked",
+        "masked-runtime",
+        "static",
+        "indirect",
+        "generated",
+        "alias",
+        "linked",
+        "linked-runtime",
+        "transient",
+        "not-found",
+    }
+)
 DANGEROUS_RUNTIME_ENV = frozenset(
     {
         "PYTHONPATH",
@@ -168,8 +198,25 @@ DANGEROUS_RUNTIME_ENV = frozenset(
         "PYTHONSTARTUP",
         "PYTHONINSPECT",
         "PYTHONUSERBASE",
+        "BASH_ENV",
+        "ENV",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "CDPATH",
+        "GLOBIGNORE",
         "LD_PRELOAD",
         "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "LD_DEBUG",
+        "LD_DEBUG_OUTPUT",
+        "LD_PROFILE",
+        "LD_SHOW_AUXV",
+        "LD_BIND_NOW",
+        "LD_BIND_NOT",
+        "LD_ORIGIN_PATH",
+        "LD_DYNAMIC_WEAK",
+        "LD_HWCAP_MASK",
+        "GLIBC_TUNABLES",
     }
 )
 
@@ -585,6 +632,41 @@ def _validate_release_id(value: str) -> None:
         raise ActivationError("activation release id is invalid")
 
 
+def _parse_unit_states(values: list[str] | None, *, required: bool) -> dict[str, object]:
+    parsed: dict[str, object] = {}
+    for raw in values or ():
+        parts = raw.split(":")
+        if len(parts) != 4:
+            raise ActivationError("activation unit state must contain four fields")
+        unit, load_state, active_state, unit_file_state = parts
+        if unit not in MANAGED_UNITS or unit in parsed:
+            raise ActivationError(f"activation unit state is invalid or duplicated: {unit}")
+        if any(UNIT_STATE_VALUE_RE.fullmatch(value) is None for value in parts):
+            raise ActivationError(f"activation unit state contains an unsafe value: {unit}")
+        if (
+            load_state not in UNIT_LOAD_STATES
+            or active_state not in UNIT_ACTIVE_STATES
+            or unit_file_state not in UNIT_FILE_STATES
+            or (load_state == "not-found" and unit_file_state != "not-found")
+            or (load_state != "not-found" and unit_file_state == "not-found")
+        ):
+            raise ActivationError(f"activation unit state is unsupported: {unit}")
+        parsed[unit] = {
+            "load_state": load_state,
+            "active_state": active_state,
+            "unit_file_state": unit_file_state,
+        }
+    if required and set(parsed) != set(MANAGED_UNITS):
+        missing = sorted(set(MANAGED_UNITS) - set(parsed))
+        raise ActivationError(
+            "activation requires a complete pre-publication unit-state snapshot: "
+            + ",".join(missing)
+        )
+    if parsed and set(parsed) != set(MANAGED_UNITS):
+        raise ActivationError("activation unit-state snapshot is incomplete")
+    return parsed
+
+
 def _canonical_expected_path(root: Path, raw: str, parent: str, release_id: str) -> Path:
     expected = _mapped(root, parent) / release_id
     value = _mapped(root, raw)
@@ -611,11 +693,12 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
     with store.locked():
         existing = store.read_journal()
         if existing is not None:
-            if existing.get("phase") == "rolled_back":
-                _archive_and_remove(store, existing)
-            elif existing.get("phase") == "committed":
+            if existing.get("phase") in {
+                "committed",
+                "rolled_back_pending_service_completion",
+            }:
                 raise ActivationError(
-                    "committed activation requires service completion before a new begin"
+                    "activation requires service completion before a new begin"
                 )
             else:
                 raise ActivationError("unfinished activation exists; recover it before beginning")
@@ -743,6 +826,10 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
             "managed": managed,
             "special": special,
             "rollback_only": rollback_only,
+            "unit_states": _parse_unit_states(
+                args.unit_state,
+                required=store.root == Path("/"),
+            ),
         }
         store.write_journal(journal)
         _kill_after("begin_journal")
@@ -1015,7 +1102,7 @@ def _safe_remove_tree(path: Path, expected_parent: Path, active: Path) -> None:
 
 def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
     phase = journal.get("phase")
-    if phase == "rolled_back":
+    if phase == "rolled_back_pending_service_completion":
         _cleanup_owned_publication_temps(store, journal)
         active = _mapped(store.root, "/opt/trading-bot-witness/active")
         _safe_remove_tree(
@@ -1105,7 +1192,7 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
     _restore_managed(store, journal)
     _restore_rollback_only(store, journal)
     _cleanup_owned_publication_temps(store, journal)
-    journal["phase"] = "rolled_back"
+    journal["phase"] = "rolled_back_pending_service_completion"
     store.write_journal(journal)
     _kill_after("rollback_restored")
 
@@ -1141,10 +1228,12 @@ def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
             return
         _rollback(store, journal)
         journal = store.read_journal()
-        if journal is None or journal.get("phase") != "rolled_back":
+        if (
+            journal is None
+            or journal.get("phase") != "rolled_back_pending_service_completion"
+        ):
             raise ActivationError("activation rollback did not reach its durable terminal phase")
-        _archive_and_remove(store, journal)
-        print("activation_recovered=yes")
+        print("activation_recovered=rolled-back-pending-service-completion")
 
 
 def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
@@ -1199,6 +1288,14 @@ def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
             print("activation_recovered=deferred-live-rotation")
             return
         recover(store, args)
+        journal = store.read_journal()
+        if (
+            journal is not None
+            and journal.get("phase") == "rolled_back_pending_service_completion"
+        ):
+            raise ActivationError(
+                "rolled-back activation is pending exact service restoration"
+            )
     finally:
         if rotation_descriptor >= 0:
             try:
@@ -1248,6 +1345,69 @@ def complete(store: ActivationStore, args: argparse.Namespace) -> None:
         print("activation_completed=yes")
 
 
+def rollback_unit_intent(store: ActivationStore, args: argparse.Namespace) -> None:
+    """Return one fixed unit's exact pre-publication service state."""
+
+    if args.unit not in MANAGED_UNITS:
+        raise ActivationError("rollback unit is outside the managed unit set")
+    with store.locked():
+        journal = store.read_journal()
+        if (
+            journal is None
+            or journal.get("phase") != "rolled_back_pending_service_completion"
+        ):
+            raise ActivationError("rolled-back activation journal is missing")
+        unit_states = journal.get("unit_states")
+        if not isinstance(unit_states, dict):
+            raise ActivationError("activation unit-state snapshot is invalid")
+        state = unit_states.get(args.unit)
+        if not isinstance(state, dict) or set(state) != {
+            "load_state",
+            "active_state",
+            "unit_file_state",
+        }:
+            raise ActivationError(f"activation unit-state snapshot is missing: {args.unit}")
+        values = [
+            state[field]
+            for field in ("load_state", "active_state", "unit_file_state")
+        ]
+        if any(
+            not isinstance(value, str)
+            or UNIT_STATE_VALUE_RE.fullmatch(value) is None
+            for value in values
+        ):
+            raise ActivationError(f"activation unit-state snapshot is unsafe: {args.unit}")
+        print(":".join(values))
+
+
+def complete_rollback(store: ActivationStore, args: argparse.Namespace) -> None:
+    """Archive rollback intent only after exact unit-state restoration."""
+
+    with store.locked():
+        journal = store.read_journal()
+        if journal is None or journal.get("release_id") != args.release_id:
+            raise ActivationError("matching rolled-back activation journal is missing")
+        if journal.get("phase") != "rolled_back_pending_service_completion":
+            raise ActivationError("activation rollback is not pending service completion")
+        unit_states = journal.get("unit_states")
+        if not isinstance(unit_states, dict) or set(unit_states) != set(MANAGED_UNITS):
+            raise ActivationError("activation unit-state snapshot is incomplete")
+        _archive_and_remove(store, journal)
+        print("activation_rollback_completed=yes")
+
+
+def pending_release_id(store: ActivationStore, args: argparse.Namespace) -> None:
+    with store.locked():
+        journal = store.read_journal()
+        if journal is None or journal.get("phase") != args.phase:
+            raise ActivationError("matching pending activation journal is missing")
+        release_id = journal.get("release_id")
+        if not isinstance(release_id, str):
+            raise ActivationError("activation release id is invalid")
+        _validate_release_id(release_id)
+        print(release_id)
+
+
 def candidate_dir(store: ActivationStore, args: argparse.Namespace) -> None:
     with store.locked():
         journal = store.read_journal()
@@ -1278,9 +1438,18 @@ def parse_args() -> argparse.Namespace:
     begin_parser.add_argument("--release-dir", required=True)
     begin_parser.add_argument("--venv-dir", required=True)
     begin_parser.add_argument("--activation-dir", required=True)
-    for name in ("publish", "commit", "complete", "candidate-dir"):
+    begin_parser.add_argument("--unit-state", action="append")
+    for name in ("publish", "commit", "complete", "complete-rollback", "candidate-dir"):
         child = subparsers.add_parser(name)
         child.add_argument("--release-id", required=True)
+    rollback_intent_parser = subparsers.add_parser("rollback-unit-intent")
+    rollback_intent_parser.add_argument("--unit", required=True, choices=MANAGED_UNITS)
+    pending_parser = subparsers.add_parser("pending-release-id")
+    pending_parser.add_argument(
+        "--phase",
+        required=True,
+        choices=("committed", "rolled_back_pending_service_completion"),
+    )
     subparsers.add_parser("recover")
     subparsers.add_parser("recover-boot")
     subparsers.add_parser("active-release-id")
@@ -1302,6 +1471,9 @@ def main() -> None:
         "recover-boot": recover_boot,
         "commit": commit,
         "complete": complete,
+        "complete-rollback": complete_rollback,
+        "rollback-unit-intent": rollback_unit_intent,
+        "pending-release-id": pending_release_id,
         "candidate-dir": candidate_dir,
         "active-release-id": active_release_id,
     }

@@ -26,14 +26,24 @@ combined exact-SHA source gate and not live-host evidence.
 
 The two exact-SHA reviews of `21aae1de` subsequently rejected dark installation
 and exposed the second-remediation defects recorded in roadmap Section 47.9.
-After those source changes, the hermetic combined gate passed from the current
-feature worktree: `404` explicitly listed unit tests with zero skips, all `4`
+After those source changes, the hermetic combined gate passed from the feature
+worktree: `404` explicitly listed unit tests with zero skips, all `4`
 guarded real-PostgreSQL tests, and the complete four-database failure drill. A
 fresh minimal release also passed its closed manifest verification; the
 SHA-256 of `release-manifest.json` is
 `bc36beda23a49a9423aef26a60dee9eeb417b4136dcb664ab4bac56ff498562b`.
-This closes the local source gate only; it is not deployment, live-host,
-preflight, external approval, or real-host Matrix evidence.
+Those are historical results for the second-remediation snapshot, not evidence
+for the current source. At exact SHA `bb3a17cf`, Gemini and Claude approved a
+dark install, while both ChatGPT reviews rejected it. The fail-closed verdict
+therefore controls. Roadmap Section 47.10 records the third source remediation;
+its complete hermetic worktree gate passed `412` explicitly listed unit tests
+with zero skips, all `5` guarded real-PostgreSQL tests, and the complete
+four-database failure drill. A fresh minimal release passed closed-manifest
+verification with `release-manifest.json` SHA-256
+`7bd4fc9eb7d042fcdb3b9bcf8e84a9e46a67a15a839c841a380b023462665b9f`.
+These are local source results awaiting a clean commit/push and independent
+exact-SHA review; they are not deployment, live-host, preflight, external
+approval, or real-host Matrix evidence.
 
 The reviewed deployment contract is:
 
@@ -44,9 +54,17 @@ The reviewed deployment contract is:
   package path. The venv starts with `--without-pip`; the first installer bytes
   are executed directly from the already-attested pinned pip wheel under an
   isolated startup;
+- ordinary release provisioning does not run a package manager, create the
+  service account, or repair bootstrap directories. Those are separate,
+  explicitly approved image/bootstrap responsibilities. Before its first
+  persistent release mutation, provision acquires its host-wide lock, checks
+  the pre-existing account and directory trust contract, and requires the
+  exact read-only dpkg inventory digest supplied by the reviewed operator
+  input. Missing or mismatched prerequisites fail closed without changing the
+  host;
 - the release verifier binds bytes and metadata: the canonical tree must be
   root-owned, directories must be exactly `0755`, data files `0644`, only the
-  seven reviewed verifier/smoke scripts `0755`, and every file must have one
+  eight reviewed verifier/smoke scripts `0755`, and every file must have one
   hard link. Ownership, mode, inode and link-count drift fail closed;
 - `python-runtime.json` is a release-bound Ubuntu 24.04 host-runtime manifest,
   not only an interpreter version marker. It binds the canonical CPython
@@ -80,13 +98,18 @@ The reviewed deployment contract is:
   files. Candidate mode/size/digest bindings are written durably before the
   first publication, every managed publication has a crash-injection point,
   and all public units must be proven inactive before publication starts.
-  Errors and handled signals roll back immediately. A mandatory boot recovery
-  unit performs only rollback reconciliation before Nginx/Writer start; a
-  separately ordered periodic watchdog owns service completion. Both paths
-  serialize with provision and HMAC rotation. An uncommitted generation is
-  rolled back; a committed generation is completed only after the exact
-  services are healthy. SIGKILL or power loss therefore cannot leave an
-  unowned partially published generation serving;
+  All six managed service/timer units are stopped and runtime-masked during
+  publication, including already-running backup/offsite oneshots. Errors and
+  handled signals roll back immediately. A mandatory boot recovery unit
+  performs rollback reconciliation before Nginx/Writer start; a separately
+  ordered periodic watchdog owns service completion. Both paths serialize
+  with provision and HMAC rotation. An uncommitted generation is rolled back,
+  but its journal remains durable in a rollback-service-completion phase until
+  the exact predecessor load, active, and unit-file intent is restored and any
+  required health check passes. A committed generation is likewise completed
+  only after the exact services are healthy. Freshly absent units remain
+  absent rather than being enabled as a side effect. SIGKILL or power loss
+  therefore cannot erase the service intent needed to finish either direction;
 - credentials use an independent two-phase prepare/finalize contract. The
   root-only bootstrap file is created exclusively, existing rotated HMAC state
   wins over bootstrap state, finalize and durable bootstrap-HMAC scrubbing occur
@@ -105,7 +128,12 @@ The reviewed deployment contract is:
   `/proc` executable, argv, and forbidden-environment absence to that runtime.
   The offsite configurator parses S3 credentials through the same pinned clean
   system interpreter, and the online wheelhouse builder uses isolated pip then
-  runs the verifier through the closed trust-anchor startup;
+  runs the verifier through the closed trust-anchor startup. Systemd also
+  clears shell and ELF-loader injection variables and invokes shell helpers by
+  absolute path; every secret-bearing shell disables xtrace before reading
+  input. Preflight verifies the live Writer process maps against the exact
+  release-bound system and venv ELF closure and rejects deleted, escaped, or
+  otherwise unbound mapped objects;
 - attestation checks the effective systemd service, not only the unit file:
   its fragment path, absence of drop-ins, effective user/group/working
   directory/command, and required hardening properties must match the frozen
@@ -135,13 +163,20 @@ The reviewed deployment contract is:
   mutation. Cleanup has a separate non-renewable 900-second recovery window;
   every subprocess timeout is clamped to its remaining allowance. Expiry never
   blocks exact credential revocation, rollback, or campaign-tombstone release.
-  SSH ControlMaster sockets live only on verified tmpfs, but DPI accounting
+  The cleanup epoch and expiry are persisted before cleanup effects, so a new
+  recovery-controller process cannot renew the allowance. After that deadline,
+  only a narrowly bounded emergency path may prove exact campaign ownership,
+  revoke its credentials, reconcile owned rotation state, and release its
+  tombstone; it may not resume ordinary inspection or baseline repair. SSH
+  ControlMaster sockets live only on verified tmpfs, but DPI accounting
   charges a complete handshake upper bound for every SSH/SCP operation because
   OpenSSH can transparently recreate a dead master and still report success;
 - the source gate re-executes under `env -i`, supplies only non-secret
   placeholders, checks a closed shell/Python syntax list without bytecode, and
   treats any unit skip, guarded PostgreSQL failure, or four-database drill
-  failure as fatal.
+  failure as fatal. The guarded PostgreSQL gate contains five explicitly
+  counted tests, including a real two-session row-lock barrier that advances
+  database time past campaign expiry before the blocked transition resumes;
 
 The two-person Matrix approval policy has an additional source-level custody
 gate. `/etc/trading-bot-witness-matrix/allowed_signers` is not trusted merely
@@ -198,6 +233,26 @@ env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
   --expected-system-runtime-manifest-sha256 <release-bound-sha256> \
   --expected-lock-uid 0
 ```
+
+OS/image bootstrap is deliberately outside ordinary release provisioning. On
+the reviewed host image, retain the exact read-only package inventory and pass
+its SHA-256 through
+`WRITER_WITNESS_EXPECTED_HOST_PACKAGE_INVENTORY_SHA256`:
+
+```text
+packages=(ca-certificates libfaketime nginx openssl postgresql \
+  postgresql-client python3 python3-venv util-linux ufw)
+LC_ALL=C dpkg-query -W \
+  -f='${binary:Package}\t${Version}\t${Architecture}\t${db:Status-Abbrev}\n' \
+  "${packages[@]}" | LC_ALL=C sort \
+  > /root/writer-witness-host-packages.inventory
+sha256sum /root/writer-witness-host-packages.inventory
+```
+
+The account/group and bootstrap directory modes/owners must already match the
+runbook. A package, account, or bootstrap-layout change is a separately
+reviewed reimage/bootstrap operation; the release provisioner only attests and
+refuses drift. It must not repair those prerequisites in place.
 
 Both the pinned-wheel bootstrap and later `pip check` must use `env -i`, pip
 `--isolated`, and an explicitly

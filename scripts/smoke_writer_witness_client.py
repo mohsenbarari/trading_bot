@@ -7,8 +7,10 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import ssl
+import sys
 import time
 from urllib.parse import urlparse
 from urllib.error import HTTPError
@@ -17,6 +19,36 @@ from uuid import uuid4
 
 
 STATUS_PATH = "/v1/writer-witness/status"
+TRUSTED_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+ACTIVE_VENV_PYTHON = Path("/opt/trading-bot-witness/active/venv/bin/python")
+
+
+def _require_isolated_runtime() -> None:
+    if not (
+        sys.flags.isolated
+        and sys.flags.no_site
+        and sys.flags.ignore_environment
+        and sys.flags.dont_write_bytecode
+        and getattr(sys.flags, "safe_path", False)
+        and sys.flags.utf8_mode == 1
+        and sys.pycache_prefix == "/dev/null"
+    ):
+        raise SystemExit(
+            "writer witness smoke client requires isolated no-site Python startup"
+        )
+    # CPython 3.12 deliberately reports the base prefix when started with -S.
+    # Bind the exact launcher path instead; resolving only the path would also
+    # accept an arbitrary symlink to the system interpreter.
+    executable = Path(sys.executable)
+    if executable != ACTIVE_VENV_PYTHON or executable.resolve(strict=True) != (
+        ACTIVE_VENV_PYTHON.resolve(strict=True)
+    ):
+        raise SystemExit("writer witness smoke client is outside the active venv launcher")
+    allowed = {"PATH": TRUSTED_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise SystemExit("writer witness smoke client environment is not clean")
 
 
 def _settings(path: Path) -> dict[str, str]:
@@ -49,6 +81,7 @@ def _canonical(
 
 
 def main() -> int:
+    _require_isolated_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--ca-bundle", type=Path, required=True)

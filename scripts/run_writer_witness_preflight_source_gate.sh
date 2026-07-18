@@ -55,6 +55,7 @@ python_sources=( \
     scripts/verify_writer_witness_release.py \
     scripts/verify_writer_witness_runtime.py \
     scripts/verify_writer_witness_runtime_provenance.py \
+    scripts/verify_writer_witness_process_maps.py \
     scripts/verify_writer_witness_wheelhouse.py \
     scripts/verify_writer_witness_nftables.py \
     scripts/writer_witness_matrix_client.py \
@@ -96,6 +97,7 @@ unit_modules=( \
     tests.test_writer_witness_matrix_controller_provision \
     tests.test_verify_writer_witness_runtime \
     tests.test_verify_writer_witness_runtime_provenance \
+    tests.test_verify_writer_witness_process_maps \
     tests.test_verify_writer_witness_wheelhouse \
     tests.test_verify_writer_witness_nftables \
     tests.test_verify_writer_witness_release \
@@ -138,12 +140,50 @@ if result.skipped:
     raise SystemExit(1)
 print(
     json.dumps(
-        {"status": "passed", "gate": "writer-witness-unit-suite", "skipped": 0},
+        {
+            "status": "passed",
+            "gate": "writer-witness-unit-suite",
+            "tests": result.testsRun,
+            "skipped": 0,
+        },
         sort_keys=True,
     )
 )
 PY
 
-bash "$ROOT_DIR/scripts/run_writer_witness_failure_drill.sh"
+failure_drill_output="$(bash "$ROOT_DIR/scripts/run_writer_witness_failure_drill.sh")"
+printf '%s\n' "$failure_drill_output"
+python3 -I - "$failure_drill_output" <<'PY'
+import json
+import sys
 
-printf '%s\n' '{"status":"passed","gate":"writer-witness-preflight-source","guarded_postgres_tests":4,"skipped":0,"four_database_drill":true}'
+documents = []
+for line in sys.argv[1].splitlines():
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if (
+        isinstance(value, dict)
+        and value.get("drill") == "writer-witness-four-database-failure-matrix"
+    ):
+        documents.append(value)
+if len(documents) != 1 or documents[0].get("status") != "passed":
+    raise SystemExit("four-database failure drill did not emit one passing result")
+tests = documents[0].get("guarded_postgres_tests")
+if not isinstance(tests, int) or isinstance(tests, bool) or tests < 1:
+    raise SystemExit("four-database failure drill did not bind its PostgreSQL test count")
+print(
+    json.dumps(
+        {
+            "status": "passed",
+            "gate": "writer-witness-preflight-source",
+            "guarded_postgres_tests": tests,
+            "skipped": 0,
+            "four_database_drill": True,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+)
+PY

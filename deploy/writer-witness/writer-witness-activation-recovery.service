@@ -1,13 +1,14 @@
 [Unit]
 Description=Recover an interrupted Writer Witness activation
 After=local-fs.target
-Before=nginx.service writer-witness.service writer-witness-backup.service writer-witness-offsite-backup.service
+Before=nginx.service writer-witness.service writer-witness-backup.service writer-witness-backup.timer writer-witness-offsite-backup.service writer-witness-offsite-backup.timer
 
 [Service]
 Type=oneshot
-UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE LD_PRELOAD LD_LIBRARY_PATH
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE BASH_ENV ENV SHELLOPTS BASHOPTS CDPATH GLOBIGNORE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT LD_PROFILE LD_SHOW_AUXV LD_BIND_NOW LD_BIND_NOT LD_ORIGIN_PATH LD_DYNAMIC_WEAK LD_HWCAP_MASK GLIBC_TUNABLES
 ExecStart=/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null /usr/local/sbin/writer-witness-activation recover-boot
 UMask=0077
 
 [Install]
-RequiredBy=nginx.service writer-witness.service writer-witness-backup.service writer-witness-offsite-backup.service
+RequiredBy=nginx.service writer-witness.service writer-witness-backup.service writer-witness-backup.timer writer-witness-offsite-backup.service writer-witness-offsite-backup.timer

@@ -14,6 +14,7 @@ import re
 import socket
 import ssl
 import stat
+import sys
 import time
 from urllib.parse import urlparse
 
@@ -21,10 +22,31 @@ from urllib.parse import urlparse
 STATUS_PATH = "/v1/writer-witness/status"
 TRANSITION_PATH = "/v1/writer-witness/transitions"
 SITES = ("webapp_fi", "webapp_ir")
+TRUSTED_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 class MatrixClientError(RuntimeError):
     pass
+
+
+def require_isolated_runtime() -> None:
+    if Path(sys.executable).resolve(strict=True) != Path("/usr/bin/python3.12"):
+        raise MatrixClientError("matrix client is not using the pinned system Python")
+    if not (
+        sys.flags.isolated
+        and sys.flags.no_site
+        and sys.flags.ignore_environment
+        and sys.flags.dont_write_bytecode
+        and getattr(sys.flags, "safe_path", False)
+        and sys.flags.utf8_mode == 1
+        and sys.pycache_prefix == "/dev/null"
+    ):
+        raise MatrixClientError("matrix client startup is not isolated")
+    allowed = {"PATH": TRUSTED_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise MatrixClientError("matrix client environment is not clean")
 
 
 def settings(path: Path) -> dict[str, str]:
@@ -194,6 +216,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    require_isolated_runtime()
     args = parse_args()
     values = settings(args.env_file)
     base_url = values.get("WRITER_WITNESS_INTERNAL_URL", "").rstrip("/")

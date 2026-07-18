@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+set +x
+[[ "$-" != *x* ]] || { echo "Writer Witness backup refuses shell tracing" >&2; exit 70; }
 
 BACKUP_DIR="${WRITER_WITNESS_BACKUP_DIR:-/var/backups/trading-bot-witness}"
 RETENTION_DAYS="${WRITER_WITNESS_BACKUP_RETENTION_DAYS:-30}"

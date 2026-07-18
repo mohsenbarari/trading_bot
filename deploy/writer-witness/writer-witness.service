@@ -12,7 +12,8 @@ WorkingDirectory=/opt/trading-bot-witness/active/release
 EnvironmentFile=/etc/trading-bot-witness/runtime.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPYCACHEPREFIX=/dev/null
-UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE LD_PRELOAD LD_LIBRARY_PATH
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE BASH_ENV ENV SHELLOPTS BASHOPTS CDPATH GLOBIGNORE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT LD_PROFILE LD_SHOW_AUXV LD_BIND_NOW LD_BIND_NOT LD_ORIGIN_PATH LD_DYNAMIC_WEAK LD_HWCAP_MASK GLIBC_TUNABLES
 ExecStart=/opt/trading-bot-witness/active/venv/bin/python -I -B -X utf8 -X pycache_prefix=/dev/null -m uvicorn writer_witness_app:app --host 127.0.0.1 --port 8011 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3s

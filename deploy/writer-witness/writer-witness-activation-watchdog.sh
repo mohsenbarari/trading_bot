@@ -1,5 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+set +x
+[[ "$-" != *x* ]] || {
+    echo "Writer Witness activation watchdog refuses shell tracing" >&2
+    exit 70
+}
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 activation_helper=(
@@ -13,6 +18,82 @@ activation_helper=(
 # therefore makes this timer defer without observing or publishing mixed state.
 provision_lock=/var/lib/trading-bot-witness/activation-state/.provision.lock
 rotation_lock=/var/lib/trading-bot-witness/hmac-rotation/.runtime.lock
+managed_units=(
+    nginx
+    writer-witness.service
+    writer-witness-backup.service
+    writer-witness-backup.timer
+    writer-witness-offsite-backup.service
+    writer-witness-offsite-backup.timer
+)
+
+restore_rollback_unit_intent() {
+    local release_id unit intent load_state active_state unit_file_state current_load
+    release_id="$("${activation_helper[@]}" pending-release-id \
+        --phase rolled_back_pending_service_completion)"
+    systemctl daemon-reload
+    for unit in "${managed_units[@]}"; do
+        intent="$("${activation_helper[@]}" rollback-unit-intent --unit "$unit")"
+        IFS=: read -r load_state active_state unit_file_state <<<"$intent"
+        [[ "$intent" == "$load_state:$active_state:$unit_file_state" \
+            && "$load_state" =~ ^[A-Za-z0-9._-]+$ \
+            && "$active_state" =~ ^[A-Za-z0-9._-]+$ \
+            && "$unit_file_state" =~ ^[A-Za-z0-9._-]+$ ]] || {
+            echo "unsafe Writer Witness rollback unit intent: $unit" >&2
+            exit 70
+        }
+        systemctl unmask --runtime "$unit" >/dev/null 2>&1 || true
+        if [[ "$unit_file_state" == masked ]]; then
+            systemctl unmask "$unit" >/dev/null 2>&1 || true
+        fi
+        if [[ "$load_state" == not-found ]]; then
+            current_load="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)"
+            [[ -z "$current_load" || "$current_load" == not-found ]] || {
+                echo "Writer Witness rollback did not restore absent unit: $unit" >&2
+                exit 70
+            }
+            continue
+        fi
+        case "$active_state" in
+            active|activating|reloading)
+                systemctl start "$unit"
+                if [[ "$unit" == writer-witness-backup.service \
+                    || "$unit" == writer-witness-offsite-backup.service ]]; then
+                    [[ "$(systemctl show -p Result --value "$unit")" == success ]]
+                else
+                    systemctl is-active --quiet "$unit"
+                fi
+                ;;
+            inactive|failed|deactivating)
+                systemctl stop "$unit"
+                ! systemctl is-active --quiet "$unit"
+                ;;
+            *)
+                echo "unsupported Writer Witness rollback active state: $active_state" >&2
+                exit 70
+                ;;
+        esac
+        case "$unit_file_state" in
+            enabled) systemctl enable "$unit" >/dev/null ;;
+            enabled-runtime) systemctl enable --runtime "$unit" >/dev/null ;;
+            disabled) systemctl disable "$unit" >/dev/null ;;
+            masked) systemctl mask "$unit" >/dev/null ;;
+            masked-runtime) systemctl mask --runtime "$unit" >/dev/null ;;
+            static|indirect|generated|alias|linked|linked-runtime|transient) ;;
+            *)
+                echo "unsupported Writer Witness rollback unit-file state: $unit_file_state" >&2
+                exit 70
+                ;;
+        esac
+    done
+    if [[ "$("${activation_helper[@]}" rollback-unit-intent \
+        --unit writer-witness.service)" =~ ^loaded:(active|activating|reloading): ]]; then
+        curl --fail --silent --show-error \
+            --retry 30 --retry-delay 1 --retry-all-errors \
+            http://127.0.0.1:8011/health/ready >/dev/null
+    fi
+    "${activation_helper[@]}" complete-rollback --release-id "$release_id" >/dev/null
+}
 for lock in "$provision_lock" "$rotation_lock"; do
     [[ -f "$lock" && ! -L "$lock" \
         && "$(stat -c '%u:%g:%a:%h' "$lock")" == 0:0:600:1 ]] || {
@@ -30,14 +111,8 @@ case "$result" in
     activation_recovered=no)
         exit 0
         ;;
-    activation_recovered=yes)
-        systemctl daemon-reload
-        systemctl enable --now \
-            nginx \
-            writer-witness.service \
-            writer-witness-backup.timer \
-            writer-witness-offsite-backup.timer
-        systemctl restart nginx writer-witness.service
+    activation_recovered=rolled-back-pending-service-completion)
+        restore_rollback_unit_intent
         ;;
     activation_recovered=committed-pending-service-completion)
         release_id="$("${activation_helper[@]}" active-release-id)"

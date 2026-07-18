@@ -84,6 +84,9 @@ install -m 0755 \
     "$ROOT_DIR/scripts/verify_writer_witness_runtime_provenance.py" \
     "$DESTINATION/scripts/verify_writer_witness_runtime_provenance.py"
 install -m 0755 \
+    "$ROOT_DIR/scripts/verify_writer_witness_process_maps.py" \
+    "$DESTINATION/scripts/verify_writer_witness_process_maps.py"
+install -m 0755 \
     "$ROOT_DIR/scripts/verify_writer_witness_wheelhouse.py" \
     "$DESTINATION/scripts/verify_writer_witness_wheelhouse.py"
 install -m 0755 \

@@ -517,7 +517,7 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
             raise MatrixError(f"preflight run bundle {key} drifted")
     if (
         bundle.get("source_gate_requires_zero_skips") is not True
-        or bundle.get("source_gate_requires_guarded_postgres_tests") != 4
+        or bundle.get("source_gate_requires_guarded_postgres_tests") != 5
         or bundle.get("source_gate_requires_four_database_drill") is not True
         or bundle.get("expected_active_campaign_tag") is not None
         or bundle.get("expected_active_campaign_scenario") is not None
@@ -598,7 +598,7 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
         raise MatrixError("preflight result inventory does not match the closed required checks")
     source = indexed["source_regression_gate"]
     source_output = str((source or {}).get("stdout") or "")
-    for marker in ('"guarded_postgres_tests":4', '"skipped":0', '"four_database_drill":true'):
+    for marker in ('"guarded_postgres_tests":5', '"skipped":0', '"four_database_drill":true'):
         if marker not in source_output:
             raise MatrixError("preflight source gate is not zero-skip and four-database complete")
     return baseline  # type: ignore[return-value]
@@ -864,6 +864,7 @@ class Controller:
         secure_directory(self.local_secret_root, create=False)
         self._event_lock = threading.Lock()
         self._budget_lock = threading.Lock()
+        self._cleanup_mode_lock = threading.Lock()
         self.evidence_failed = False
         self.secret_output_detected = False
         self._secret_sentinels: set[str] = set()
@@ -1077,11 +1078,54 @@ class Controller:
             raise MatrixAbort("Matrix cleanup exceeded its separate 900-second recovery bound")
 
     def enter_cleanup_mode(self) -> None:
-        """Start one non-renewable cleanup allowance for this controller run."""
+        """Restore or durably start one non-renewable cross-process cleanup window."""
 
-        self._cleanup_mode = True
-        if not hasattr(self, "_cleanup_deadline"):
-            self._cleanup_deadline = time.monotonic() + MAX_CLEANUP_SECONDS
+        lock = getattr(self, "_cleanup_mode_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._cleanup_mode_lock = lock
+        with lock:
+            started_raw = self.journal.payload.get("cleanup_started_at")
+            not_after_raw = self.journal.payload.get("cleanup_not_after")
+            if bool(started_raw) != bool(not_after_raw):
+                raise MatrixError("campaign journal cleanup window is incomplete")
+            if not started_raw:
+                started = datetime.now(timezone.utc)
+                not_after = started + timedelta(seconds=MAX_CLEANUP_SECONDS)
+                started_raw = started.isoformat().replace("+00:00", "Z")
+                not_after_raw = not_after.isoformat().replace("+00:00", "Z")
+                # Persist before any cleanup side effect. A new controller
+                # process must inherit this exact wall-clock deadline.
+                self.journal.update(
+                    cleanup_started_at=started_raw,
+                    cleanup_not_after=not_after_raw,
+                    dirty=True,
+                )
+            try:
+                started = datetime.fromisoformat(
+                    str(started_raw).replace("Z", "+00:00")
+                )
+                not_after = datetime.fromisoformat(
+                    str(not_after_raw).replace("Z", "+00:00")
+                )
+                if started.tzinfo is None or not_after.tzinfo is None:
+                    raise ValueError("timezone is required")
+                started = started.astimezone(timezone.utc)
+                not_after = not_after.astimezone(timezone.utc)
+            except (TypeError, ValueError) as exc:
+                raise MatrixError("campaign journal cleanup window is invalid") from exc
+            if (
+                not_after <= started
+                or (not_after - started).total_seconds() > MAX_CLEANUP_SECONDS
+                or started > datetime.now(timezone.utc) + timedelta(seconds=30)
+            ):
+                raise MatrixError("campaign journal cleanup window exceeds its fixed bound")
+            remaining = max(
+                0.0,
+                (not_after - datetime.now(timezone.utc)).total_seconds(),
+            )
+            self._cleanup_mode = True
+            self._cleanup_deadline = time.monotonic() + remaining
         self.raise_if_cleanup_deadline_exceeded()
 
     def _reserve_transport_budget(
@@ -1327,12 +1371,15 @@ class Controller:
             arguments.extend(("--preflight-sha256", preflight_sha256))
         return " ".join(shlex.quote(item) for item in arguments)
 
-    def inspect_remote_campaign(self, label: str) -> str:
+    def inspect_remote_campaign(
+        self, label: str, *, emergency_revocation: bool = False
+    ) -> str:
         completed = self.remote(
             "matrix_witness",
             label,
             self.remote_campaign_command("inspect"),
             check=False,
+            emergency_revocation=emergency_revocation,
         )
         if completed.returncode != 0:
             raise MatrixError("replacement Witness campaign inspection failed")
@@ -1465,7 +1512,8 @@ class Controller:
     def assert_remote_campaign_owned(self, *, allow_expired_cleanup: bool = False) -> None:
         try:
             inspected_state = self.inspect_remote_campaign(
-                "verify_remote_campaign_ownership"
+                "verify_remote_campaign_ownership",
+                emergency_revocation=allow_expired_cleanup,
             )
         except Exception as exc:
             self.mark_remote_campaign_ambiguous("lost_or_foreign")
@@ -1626,7 +1674,7 @@ class Controller:
         )
         self.event("critical_precheck.passed")
 
-    def release_remote_campaign(self) -> None:
+    def release_remote_campaign(self, *, emergency_revocation: bool = False) -> None:
         if not self.remote_campaign_claimed and self.tag not in self.journal.values("remote_campaign"):
             return
         command = self.remote_campaign_command("release")
@@ -1638,6 +1686,7 @@ class Controller:
                         f"release_remote_campaign_attempt_{attempt}",
                         command,
                         check=False,
+                        emergency_revocation=emergency_revocation,
                     )
                 except subprocess.TimeoutExpired:
                     self.journal.update(
@@ -1648,7 +1697,8 @@ class Controller:
                 if completed.returncode == 0:
                     break
             inspected_state = self.inspect_remote_campaign(
-                "inspect_released_remote_campaign"
+                "inspect_released_remote_campaign",
+                emergency_revocation=emergency_revocation,
             )
         except Exception as exc:
             self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
@@ -1709,13 +1759,18 @@ class Controller:
         transport_kind: str | None = None,
         transport_payload_bytes: int = 0,
         transport_file_bytes: int = 0,
+        emergency_revocation: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         if self._cleanup_mode:
-            self.raise_if_cleanup_deadline_exceeded()
             remaining_cleanup_seconds = self._cleanup_deadline - time.monotonic()
             if remaining_cleanup_seconds <= 0:
-                self.raise_if_cleanup_deadline_exceeded()
-            effective_timeout: float = min(float(timeout), remaining_cleanup_seconds)
+                if not emergency_revocation:
+                    self.raise_if_cleanup_deadline_exceeded()
+                # Expiry cannot renew the 900-second cleanup budget. It leaves
+                # only this fixed, narrowly-routed revocation primitive.
+                effective_timeout = min(float(timeout), 30.0)
+            else:
+                effective_timeout = min(float(timeout), remaining_cleanup_seconds)
         else:
             self.raise_if_abort_requested()
             effective_timeout = float(timeout)
@@ -1773,7 +1828,8 @@ class Controller:
         if check and completed.returncode != 0:
             raise MatrixError(f"{name} failed with exit code {completed.returncode}")
         if self._cleanup_mode:
-            self.raise_if_cleanup_deadline_exceeded()
+            if not emergency_revocation:
+                self.raise_if_cleanup_deadline_exceeded()
         else:
             self.raise_if_abort_requested()
         return completed
@@ -1803,6 +1859,7 @@ class Controller:
         *,
         timeout: int = 30,
         check: bool = True,
+        emergency_revocation: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         return self.command(
             name,
@@ -1812,6 +1869,7 @@ class Controller:
             transport_role=role,
             transport_kind="ssh",
             transport_payload_bytes=len(command.encode("utf-8")),
+            emergency_revocation=emergency_revocation,
         )
 
     def transfer_from(self, role: str, remote_path: str, local_path: Path, name: str) -> None:
@@ -1993,7 +2051,8 @@ class Controller:
                 dirty=True,
             )
         parts = [
-            "/usr/bin/python3", "-I", "-S", "-B", "-X", "utf8",
+            "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+            "/usr/bin/python3.12", "-I", "-S", "-B", "-X", "utf8",
             "-X", "pycache_prefix=/dev/null", f"{self.remote_root}/client.py", command,
             "--env-file", f"{self.remote_root}/{env_name}",
             "--ca-bundle", f"{self.remote_root}/witness-ca.crt",
@@ -2703,7 +2762,7 @@ class Controller:
             )
         self.staged_sites.clear()
 
-    def recover_rotation(self) -> None:
+    def recover_rotation(self, *, emergency_revocation: bool = False) -> None:
         sites = self.rotation_sites | self.journal.values("rotation_sites")
         for site in sorted(sites):
             command = (
@@ -2722,7 +2781,12 @@ class Controller:
                 f"test -z \"$(find /var/lib/trading-bot-witness/hmac-rotation -maxdepth 1 "
                 f"-name '.rotation-delete-{site}-*' -print -quit)\""
             )
-            self.remote("matrix_witness", f"recover_hmac_rotation_{site}", command)
+            self.remote(
+                "matrix_witness",
+                f"recover_hmac_rotation_{site}",
+                command,
+                emergency_revocation=emergency_revocation,
+            )
             self.rotation_sites.discard(site)
         if sites:
             self.remote(
@@ -2739,6 +2803,7 @@ class Controller:
                 "flock -n \"$root/.runtime.lock\" -c true; "
                 "test -z \"$(find \"$root\" -mindepth 1 -maxdepth 1 "
                 "! -name '.runtime.lock' -print -quit)\"",
+                emergency_revocation=emergency_revocation,
             )
 
     def recover_active_live_restore(self) -> None:
@@ -2902,7 +2967,51 @@ class Controller:
                 raise MatrixError(f"restore-owned auxiliary database remains after cleanup: {name}")
         self.event("cleanup.owned_aux_databases_removed")
 
+    def _revoke_after_expired_cleanup_window(self) -> None:
+        """Retain only exact campaign/HMAC revocation after cleanup expiry."""
+
+        errors: list[str] = []
+        try:
+            if self.remote_campaign_claimed or self.tag in self.journal.values(
+                "remote_campaign"
+            ):
+                self.assert_remote_campaign_owned(allow_expired_cleanup=True)
+        except Exception as exc:
+            errors.append(f"expired_cleanup_ownership:{exc}")
+        if not errors:
+            try:
+                self.recover_rotation(emergency_revocation=True)
+            except Exception as exc:
+                errors.append(f"expired_cleanup_hmac_revocation:{exc}")
+        if not errors:
+            try:
+                self.release_remote_campaign(emergency_revocation=True)
+            except Exception as exc:
+                errors.append(f"expired_cleanup_campaign_release:{exc}")
+        shutil.rmtree(self.local_secret_root, ignore_errors=True)
+        self.journal.update(
+            status="failed_cleanup_window_expired",
+            dirty=True,
+            cleanup_errors=errors or ["cleanup_window_expired_after_exact_revocation"],
+            expired_cleanup_exact_revocation_completed=not errors,
+        )
+        if errors:
+            raise MatrixError(
+                "cleanup window expired and exact revocation is incomplete: "
+                + "; ".join(errors)
+            )
+        raise MatrixError(
+            "cleanup window expired; campaign and transient HMAC authority were revoked, "
+            "but baseline recovery still requires a new explicit authorization"
+        )
+
     def cleanup(self) -> None:
+        try:
+            self._cleanup_within_deadline()
+        except MatrixAbort:
+            self._revoke_after_expired_cleanup_window()
+
+    def _cleanup_within_deadline(self) -> None:
         self.enter_cleanup_mode()
         if (
             self.journal.payload.get("remote_campaign_protocol") == "atomic-helper-v1"
@@ -2983,6 +3092,8 @@ class Controller:
             try:
                 action()
                 self.event("cleanup.step", step=name, status="passed")
+            except MatrixAbort:
+                raise
             except Exception as exc:
                 rendered = f"{name}:{exc}"
                 errors.append(rendered)
@@ -3006,6 +3117,8 @@ class Controller:
             try:
                 action()
                 self.event("cleanup.step", step=name, status="passed")
+            except MatrixAbort:
+                raise
             except Exception as exc:
                 rendered = f"{name}:{exc}"
                 errors.append(rendered)
@@ -3024,6 +3137,8 @@ class Controller:
         for site in sorted(sites):
             try:
                 self.remove_partition(site)
+            except MatrixAbort:
+                raise
             except Exception as exc:
                 rendered = f"remove_scoped_network_faults:{site}:{exc}"
                 errors.append(rendered)
@@ -3042,6 +3157,8 @@ class Controller:
                 self.witness_mutated = False
             self.remove_owned_aux_databases()
             self.event("cleanup.step", step="restore_vacant_baseline", status="passed")
+        except MatrixAbort:
+            raise
         except Exception as exc:
             rendered = f"restore_vacant_baseline:{exc}"
             errors.append(rendered)
@@ -3050,6 +3167,8 @@ class Controller:
         try:
             self.verify_complete_baseline()
             self.event("cleanup.step", step="verify_complete_baseline", status="passed")
+        except MatrixAbort:
+            raise
         except Exception as exc:
             rendered = f"verify_complete_baseline:{exc}"
             errors.append(rendered)
@@ -3407,11 +3526,14 @@ def main() -> int:
                 existing_journal=journal,
             )
             try:
-                controller.enter_cleanup_mode()
                 if recovery_entry_phase in {
                     "postflight_verified_release_pending",
                     "remote_campaign_released",
                 }:
+                    try:
+                        controller.enter_cleanup_mode()
+                    except MatrixAbort:
+                        controller._revoke_after_expired_cleanup_window()
                     controller.recover_postflight_release_pending()
                 else:
                     controller.cleanup()

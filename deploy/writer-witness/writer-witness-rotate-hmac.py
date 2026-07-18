@@ -1191,12 +1191,16 @@ def prepare(
         runtime_removals: set[str] = set()
         if campaign_not_after is not None:
             runtime_changes[not_after_name] = campaign_not_after
+            # Both credentials accepted during the overlap belong to the same
+            # bounded campaign.  The baseline credential must not become an
+            # unbounded back door merely because it moved to the previous slot.
+            runtime_changes[previous_not_after_name] = campaign_not_after
         else:
             runtime_removals.add(not_after_name)
-        if runtime.get(not_after_name):
-            runtime_changes[previous_not_after_name] = runtime[not_after_name]
-        else:
-            runtime_removals.add(previous_not_after_name)
+            if runtime.get(not_after_name):
+                runtime_changes[previous_not_after_name] = runtime[not_after_name]
+            else:
+                runtime_removals.add(previous_not_after_name)
         _atomic_update_env(
             runtime_path,
             changes=runtime_changes,

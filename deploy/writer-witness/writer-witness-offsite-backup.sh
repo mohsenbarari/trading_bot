@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+set +x
+[[ "$-" != *x* ]] || { echo "Writer Witness offsite backup refuses shell tracing" >&2; exit 70; }
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 BACKUP_DIR="${WRITER_WITNESS_BACKUP_DIR:-/var/backups/trading-bot-witness}"

@@ -162,6 +162,7 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         self.assertIn("tests.test_writer_witness_matrix_controller_provision", source_gate)
         self.assertIn("tests.test_verify_writer_witness_runtime", source_gate)
         self.assertIn("tests.test_verify_writer_witness_runtime_provenance", source_gate)
+        self.assertIn("tests.test_verify_writer_witness_process_maps", source_gate)
         self.assertIn("tests.test_verify_writer_witness_nftables", source_gate)
         self.assertIn("tests.test_verify_writer_witness_release", source_gate)
         self.assertIn("tests.test_render_writer_witness_credentials", source_gate)
@@ -194,6 +195,9 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         self.assertIn("env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin", command)
         self.assertIn("-I -S -B -X utf8 -X pycache_prefix=/dev/null", command)
         self.assertIn("runtime_provenance_attested", command)
+        self.assertIn("verify_writer_witness_process_maps.py", command)
+        self.assertIn("process_maps_attested", command)
+        self.assertIn("LD_AUDIT", command)
         self.assertLess(command.index("--system-only"), command.index("runpy.run_module"))
         self.assertIn("nft -j list ruleset", command)
         self.assertIn("verify_writer_witness_nftables.py", command)
@@ -211,7 +215,7 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         specs_and_stdout = (
             (
                 preflight.CheckSpec("source_regression_gate", ("true",), "control"),
-                '{"guarded_postgres_tests":4,"skipped":0,"four_database_drill":true}\n',
+                '{"guarded_postgres_tests":5,"skipped":0,"four_database_drill":true}\n',
             ),
             (
                 preflight.CheckSpec("webapp_fi_baseline", ("true",), "webapp_fi"),

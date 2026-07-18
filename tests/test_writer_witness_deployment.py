@@ -13,7 +13,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 ACTIVATION_HELPER = ROOT / "deploy/writer-witness/writer-witness-activation.py"
-ACTIVATION_MANAGED_FILES = tuple(runpy.run_path(str(ACTIVATION_HELPER))["MANAGED_FILES"])
+ACTIVATION_MODULE = runpy.run_path(str(ACTIVATION_HELPER))
+ACTIVATION_MANAGED_FILES = tuple(ACTIVATION_MODULE["MANAGED_FILES"])
+ACTIVATION_MANAGED_UNITS = tuple(ACTIVATION_MODULE["MANAGED_UNITS"])
 
 
 class WriterWitnessDeploymentTests(unittest.TestCase):
@@ -24,6 +26,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         *,
         release_id: str | None = None,
         kill_after: str | None = None,
+        complete_rollback: bool = True,
     ) -> subprocess.CompletedProcess:
         arguments = [
             sys.executable,
@@ -53,6 +56,21 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                         f"/opt/trading-bot-witness/activations/{release_id}",
                     ]
                 )
+                predecessor = (root / "srv/trading-bot-witness/current").exists()
+                for unit in ACTIVATION_MANAGED_UNITS:
+                    if predecessor:
+                        active_state = (
+                            "inactive" if unit.endswith("backup.service") else "active"
+                        )
+                        unit_file_state = (
+                            "static" if unit.endswith("backup.service") else "enabled"
+                        )
+                        state = f"{unit}:loaded:{active_state}:{unit_file_state}"
+                    elif unit == "nginx":
+                        state = f"{unit}:loaded:inactive:disabled"
+                    else:
+                        state = f"{unit}:not-found:inactive:not-found"
+                    arguments.extend(["--unit-state", state])
             else:
                 arguments.extend(["--release-id", release_id])
         environment = {
@@ -66,13 +84,34 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                     "WRITER_WITNESS_ACTIVATION_KILL_AFTER": kill_after,
                 }
             )
-        return subprocess.run(
+        completed = subprocess.run(
             arguments,
             cwd=ROOT,
             env=environment,
             capture_output=True,
             text=True,
         )
+        if (
+            command == "recover"
+            and complete_rollback
+            and completed.returncode == 0
+            and "activation_recovered=rolled-back-pending-service-completion"
+            in completed.stdout
+        ):
+            journal = json.loads(
+                (
+                    root
+                    / "var/lib/trading-bot-witness/activation-state/active.json"
+                ).read_text(encoding="utf-8")
+            )
+            finalized = self._activation_run(
+                root,
+                "complete-rollback",
+                release_id=str(journal["release_id"]),
+            )
+            if finalized.returncode != 0:
+                return finalized
+        return completed
 
     def _prepare_activation_host(self, root: Path, release_id: str) -> dict[str, Path]:
         for relative, mode in (
@@ -253,6 +292,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("scripts/verify_writer_witness_release.py", manifest)
             self.assertIn("scripts/verify_writer_witness_runtime.py", manifest)
             self.assertIn("scripts/verify_writer_witness_runtime_provenance.py", manifest)
+            self.assertIn("scripts/verify_writer_witness_process_maps.py", manifest)
             self.assertIn("scripts/verify_writer_witness_wheelhouse.py", manifest)
             self.assertIn("scripts/verify_writer_witness_nftables.py", manifest)
             self.assertIn("scripts/render_writer_witness_credentials.py", manifest)
@@ -300,6 +340,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             "scripts/verify_writer_witness_release.py",
             "scripts/verify_writer_witness_runtime.py",
             "scripts/verify_writer_witness_runtime_provenance.py",
+            "scripts/verify_writer_witness_process_maps.py",
             "scripts/verify_writer_witness_wheelhouse.py",
         }
         missing = sorted(source for source in executed_sources if source not in gate)
@@ -404,6 +445,30 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             watchdog_script.index('result="$("${activation_helper[@]}" recover)"'),
         )
         self.assertIn("Environment=PYTHONPYCACHEPREFIX=/dev/null", unit)
+        for forbidden in ("BASH_ENV", "SHELLOPTS", "LD_AUDIT", "GLIBC_TUNABLES"):
+            self.assertIn(forbidden, unit)
+            self.assertIn(forbidden, recovery)
+            self.assertIn(forbidden, watchdog_unit)
+        self.assertIn(
+            "ExecStart=/bin/bash /usr/local/sbin/writer-witness-activation-watchdog",
+            watchdog_unit,
+        )
+
+    def test_provision_refuses_shell_trace_without_exposing_secret_environment(self):
+        sentinel = "must-never-appear-writer-witness-secret"
+        completed = subprocess.run(
+            ["/bin/bash", "-x", str(ROOT / "scripts/provision_writer_witness_host.sh")],
+            cwd=ROOT,
+            env={
+                "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+                "WRITER_WITNESS_SECRET_SENTINEL": sentinel,
+            },
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertNotIn(sentinel, completed.stdout + completed.stderr)
+        self.assertIn("SOURCE_DIR is required", completed.stderr)
 
     def test_nginx_exposes_only_fixed_private_control_paths(self):
         config = (ROOT / "deploy/writer-witness/nginx.conf.template").read_text()
@@ -416,8 +481,30 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("client_max_body_size 16k;", config)
         self.assertNotIn("Access-Control-Allow-Origin", config)
 
+    def test_activation_rejects_unit_states_that_rollback_cannot_restore(self):
+        parse_unit_states = ACTIVATION_MODULE["_parse_unit_states"]
+        activation_error = ACTIVATION_MODULE["ActivationError"]
+        values = [
+            f"{unit}:loaded:inactive:disabled" for unit in ACTIVATION_MANAGED_UNITS
+        ]
+        values[0] = f"{ACTIVATION_MANAGED_UNITS[0]}:error:inactive:disabled"
+        with self.assertRaisesRegex(activation_error, "unsupported"):
+            parse_unit_states(values, required=True)
+
+        values[0] = f"{ACTIVATION_MANAGED_UNITS[0]}:not-found:inactive:enabled"
+        with self.assertRaisesRegex(activation_error, "unsupported"):
+            parse_unit_states(values, required=True)
+
     def test_provisioning_keeps_webapp_and_cdn_activation_out_of_scope(self):
         script = (ROOT / "scripts/provision_writer_witness_host.sh").read_text()
+        self.assertNotIn("apt-get", script)
+        self.assertNotIn("useradd", script)
+        self.assertIn("WRITER_WITNESS_EXPECTED_HOST_PACKAGE_INVENTORY_SHA256", script)
+        self.assertIn("/run/lock/writer-witness-provision.lock", script)
+        self.assertLess(
+            script.index('flock -n "$outer_provision_lock_fd"'),
+            script.index('install -d -m 0755 -o root -g root "$release_dir"'),
+        )
         self.assertIn("GRANT SELECT, UPDATE ON webapp_writer_witness_state", script)
         self.assertIn("GRANT SELECT, INSERT ON webapp_writer_witness_receipts", script)
         self.assertNotIn("ufw allow from", script)
@@ -570,6 +657,9 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             script.index("installed_activation publish"),
         )
         self.assertIn('systemctl stop "$unit"', script)
+        self.assertIn('writer-witness-backup.service', script)
+        self.assertIn('writer-witness-offsite-backup.service', script)
+        self.assertIn('systemctl mask --runtime "$unit"', script)
         self.assertIn('ActiveState --value "$unit"', script)
         self.assertIn("activation could not quiesce", script)
         self.assertLess(
@@ -579,7 +669,10 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertNotIn('cat >/etc/trading-bot-witness/runtime.env', script)
         self.assertNotIn('>"/etc/nginx/sites-available/writer-witness"', script)
         self.assertIn('/var/lib/trading-bot-witness/restore-state', script)
-        self.assertIn('root / ".campaign.lock"', script)
+        self.assertIn(
+            'Path("/var/lib/trading-bot-witness/matrix-campaign/.campaign.lock")',
+            script,
+        )
 
     def test_activation_initial_migration_commits_one_code_runtime_generation(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-activation-") as directory:
@@ -652,7 +745,10 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
             recovered = self._activation_run(root, "recover")
             self.assertEqual(recovered.returncode, 0, recovered.stderr)
-            self.assertIn("activation_recovered=yes", recovered.stdout)
+            self.assertIn(
+                "activation_recovered=rolled-back-pending-service-completion",
+                recovered.stdout,
+            )
             for relative in (
                 "opt/trading-bot-witness/active",
                 "srv/trading-bot-witness/current",
@@ -883,6 +979,58 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                     self.assertFalse(paths["venv"].exists())
                     self.assertFalse(paths["activation"].exists())
 
+    def test_activation_rollback_journal_survives_until_explicit_service_completion(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-activation-services-") as directory:
+            root = Path(directory)
+            release_id = "service-completion"
+            self._prepare_activation_host(root, release_id)
+            self._begin_and_stage_activation(root, release_id)
+            killed = self._activation_run(
+                root,
+                "publish",
+                release_id=release_id,
+                kill_after="new_active_switched",
+            )
+            self.assertEqual(killed.returncode, -signal.SIGKILL)
+
+            recovered = self._activation_run(
+                root,
+                "recover",
+                complete_rollback=False,
+            )
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            self.assertIn("rolled-back-pending-service-completion", recovered.stdout)
+            journal_path = root / "var/lib/trading-bot-witness/activation-state/active.json"
+            journal_before = journal_path.read_bytes()
+            journal = json.loads(journal_before)
+            self.assertEqual(
+                journal["phase"], "rolled_back_pending_service_completion"
+            )
+            self.assertEqual(set(journal["unit_states"]), set(ACTIVATION_MANAGED_UNITS))
+
+            repeated = self._activation_run(
+                root,
+                "recover",
+                complete_rollback=False,
+            )
+            self.assertEqual(repeated.returncode, 0, repeated.stderr)
+            self.assertEqual(journal_path.read_bytes(), journal_before)
+            blocked = self._activation_run(
+                root,
+                "begin",
+                release_id="must-not-start",
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("requires service completion", blocked.stderr)
+
+            completed = self._activation_run(
+                root,
+                "complete-rollback",
+                release_id=release_id,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertFalse(journal_path.exists())
+
     def test_activation_commit_marker_survives_sigkill_without_rolling_back(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-activation-commit-") as directory:
             root = Path(directory)
@@ -970,8 +1118,10 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
                 os.close(descriptor)
             recovered = self._activation_run(root, "recover-boot")
-            self.assertEqual(recovered.returncode, 0, recovered.stderr)
-            self.assertIn("activation_recovered=yes", recovered.stdout)
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn("pending exact service restoration", recovered.stderr)
+            completed = self._activation_run(root, "recover")
+            self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(
                 (root / "srv/trading-bot-witness/current").resolve(),
                 paths["old_release"].resolve(),
@@ -1007,8 +1157,10 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
                 os.close(descriptor)
             recovered = self._activation_run(root, "recover-boot")
-            self.assertEqual(recovered.returncode, 0, recovered.stderr)
-            self.assertIn("activation_recovered=yes", recovered.stdout)
+            self.assertNotEqual(recovered.returncode, 0)
+            self.assertIn("pending exact service restoration", recovered.stderr)
+            completed = self._activation_run(root, "recover")
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_activation_never_claims_or_cleans_a_preexisting_release_path(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-activation-owned-") as directory:
@@ -1605,6 +1757,8 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn('"GET"', smoke)
         self.assertNotIn('method="POST"', smoke)
         self.assertNotIn('"secret": secret', smoke)
+        self.assertIn('Path(sys.executable)', smoke)
+        self.assertNotIn('Path(sys.prefix)', smoke)
 
 
 if __name__ == "__main__":

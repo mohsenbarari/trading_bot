@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+set +x
+[[ "$-" != *x* ]] || { echo "Writer Witness live restore refuses shell tracing" >&2; exit 70; }
 
 SERVICE=writer-witness.service
 INTERNAL_TEST_MODE=false

@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import secrets
 import stat
+import sys
 import tempfile
 import uuid
 from urllib.parse import urlsplit
@@ -56,10 +57,42 @@ CLIENT_FILES = {
 }
 KEY_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 SECRET_PATTERN = re.compile(r"[0-9a-f]{64}")
+TRUSTED_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 class CredentialRenderError(RuntimeError):
     """A credential-state invariant was not satisfied."""
+
+
+def _require_isolated_runtime() -> None:
+    if not (
+        sys.flags.isolated
+        and sys.flags.no_site
+        and sys.flags.ignore_environment
+        and sys.flags.dont_write_bytecode
+        and getattr(sys.flags, "safe_path", False)
+        and sys.flags.utf8_mode == 1
+        and sys.pycache_prefix == "/dev/null"
+    ):
+        raise CredentialRenderError("credential renderer Python startup is not isolated")
+    executable = Path(sys.executable)
+    prefix = Path(sys.prefix).resolve(strict=True)
+    system_runtime = (
+        executable.resolve(strict=True) == Path("/usr/bin/python3.12")
+        and prefix == Path("/usr")
+    )
+    release_runtime = (
+        prefix.parent == Path("/opt/trading-bot-witness/venvs")
+        and prefix.name
+        and not prefix.is_symlink()
+    )
+    if not system_runtime and not release_runtime:
+        raise CredentialRenderError("credential renderer is outside an approved runtime")
+    allowed = {"PATH": TRUSTED_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise CredentialRenderError("credential renderer environment is not clean")
 
 
 def _reclaim_bootstrap_initializers(path: Path, *, expected_uid: int) -> None:
@@ -937,6 +970,7 @@ def write_database_env(
 
 
 def main() -> int:
+    _require_isolated_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",

@@ -507,7 +507,6 @@ def create_writer_witness_app(
                 # collide with their own persisted receipt.
                 operator = f"hmac:{caller.site}"
                 try:
-                    transition_now = await service_runtime.clock(session)
                     result = await transition_witness_state(
                         session,
                         action=command.action,
@@ -523,8 +522,8 @@ def create_writer_witness_app(
                             else None
                         ),
                         lease_duration_seconds=command.lease_duration_seconds,
-                        now=transition_now,
                         authorization_not_after=caller.credential_not_after,
+                        clock=service_runtime.clock,
                     )
                 except WriterWitnessCampaignExpiredError as exc:
                     await session.rollback()

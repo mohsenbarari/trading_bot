@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
+set +x
+[[ "$-" != *x* ]] || { echo "Writer Witness host-fault helper refuses shell tracing" >&2; exit 70; }
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "writer witness matrix host fault helper must run as root" >&2
@@ -219,7 +221,9 @@ if [[ "$action" == "clock-jump" ]]; then
     production_system_identifier="$(isolated_system_python -c 'import json,sys; print(json.load(open(sys.argv[1]))["system_identifier"])' "$production_before")"
     first_postgres_pid="$postgres_pid"
     first_postgres_ticks="$(process_start_ticks "$postgres_pid")"
-    runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
+    runuser -u postgres -- /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        /opt/trading-bot-witness/active/venv/bin/python \
+        -I -B -X utf8 -X pycache_prefix=/dev/null \
         /srv/trading-bot-witness/current/scripts/run_writer_witness_clock_jump_probe.py \
         --phase phase-one \
         --tag "$tag" \
@@ -241,7 +245,9 @@ if [[ "$action" == "clock-jump" ]]; then
     fi
     state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
         --phase running --postgres-pid "$postgres_pid"
-    runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
+    runuser -u postgres -- /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        /opt/trading-bot-witness/active/venv/bin/python \
+        -I -B -X utf8 -X pycache_prefix=/dev/null \
         /srv/trading-bot-witness/current/scripts/run_writer_witness_clock_jump_probe.py \
         --phase phase-two \
         --tag "$tag" \

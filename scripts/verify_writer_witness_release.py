@@ -31,6 +31,7 @@ EXECUTABLE_RELEASE_PATHS = frozenset(
         "scripts/verify_writer_witness_release.py",
         "scripts/verify_writer_witness_runtime.py",
         "scripts/verify_writer_witness_runtime_provenance.py",
+        "scripts/verify_writer_witness_process_maps.py",
         "scripts/verify_writer_witness_wheelhouse.py",
     }
 )

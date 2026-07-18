@@ -16,7 +16,7 @@ from sqlalchemy.engine import make_url
 ROOT = Path(__file__).resolve().parents[1]
 DATABASE_ENV = "WRITER_FENCING_TEST_DATABASE_URL"
 DATABASE_PREFIX = "stage4_registration_writerfence_"
-EXPECTED_TESTS = 4
+EXPECTED_TESTS = 5
 
 
 def guarded_url() -> str:

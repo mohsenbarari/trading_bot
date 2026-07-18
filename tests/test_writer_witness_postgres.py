@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from core.writer_witness_contract import validate_witness_lease_proof
 from core.writer_witness_control import (
     ACTION_ACQUIRE,
+    WriterWitnessCampaignExpiredError,
     WriterWitnessError,
     load_witness_snapshot,
     persist_witness_rejection,
@@ -196,6 +197,80 @@ class WriterWitnessPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(replay.exception.replayed)
         self.assertEqual(durable.holder_site, "webapp_fi")
         self.assertEqual(durable.writer_epoch, 1)
+
+    async def test_campaign_expiry_is_rechecked_after_waiting_for_writer_row_lock(self):
+        async with self.sessions() as blocker, self.sessions() as contender, self.sessions() as observer:
+            await blocker.execute(
+                text(
+                    "SELECT authority FROM webapp_writer_witness_state "
+                    "WHERE authority = 'webapp' FOR UPDATE"
+                )
+            )
+            expires_at = (
+                await observer.execute(
+                    text("SELECT clock_timestamp() + interval '1 second'")
+                )
+            ).scalar_one()
+            contender_pid = (
+                await contender.execute(text("SELECT pg_backend_pid()"))
+            ).scalar_one()
+
+            transition = asyncio.create_task(
+                transition_witness_state(
+                    contender,
+                    action=ACTION_ACQUIRE,
+                    requester_site="webapp_fi",
+                    expected_epoch=0,
+                    expected_lease_id=None,
+                    request_id="campaign-post-lock-expiry",
+                    operator="hmac:webapp_fi",
+                    reason="prove post-lock campaign expiry",
+                    private_key_base64=self.private_key,
+                    authorization_not_after=expires_at,
+                )
+            )
+            for _ in range(50):
+                wait_event = (
+                    await observer.execute(
+                        text(
+                            "SELECT wait_event_type FROM pg_stat_activity "
+                            "WHERE pid = :pid"
+                        ),
+                        {"pid": contender_pid},
+                    )
+                ).scalar_one_or_none()
+                if wait_event == "Lock":
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                transition.cancel()
+                await blocker.rollback()
+                self.fail("campaign contender never reached the PostgreSQL row-lock barrier")
+
+            await observer.execute(
+                text(
+                    "SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM "
+                    "(:expires_at - clock_timestamp()))) + 0.1)"
+                ),
+                {"expires_at": expires_at},
+            )
+            await blocker.commit()
+            with self.assertRaises(WriterWitnessCampaignExpiredError):
+                await transition
+            await contender.rollback()
+
+            receipt_count = (
+                await observer.execute(
+                    text(
+                        "SELECT count(*) FROM webapp_writer_witness_receipts "
+                        "WHERE request_id = 'campaign-post-lock-expiry'"
+                    )
+                )
+            ).scalar_one()
+            state = await load_witness_snapshot(observer)
+            self.assertEqual(receipt_count, 0)
+            self.assertEqual(state.writer_epoch, 0)
+            self.assertIsNone(state.holder_site)
 
 
 if __name__ == "__main__":

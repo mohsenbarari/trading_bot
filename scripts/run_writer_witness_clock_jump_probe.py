@@ -40,10 +40,31 @@ EXPECTED_PORT = 55440
 TAG_PATTERN = re.compile(r"wwm_[0-9a-f]{12}\Z")
 ALLOWED_PHASES = ("phase-one", "phase-two")
 OFFSET_TOLERANCE_SECONDS = 5.0
+TRUSTED_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 class ClockProbeError(RuntimeError):
     """The isolated clock boundary cannot be proven safely."""
+
+
+def require_isolated_runtime() -> None:
+    if not (
+        sys.flags.isolated
+        and sys.flags.ignore_environment
+        and sys.flags.dont_write_bytecode
+        and getattr(sys.flags, "safe_path", False)
+        and sys.flags.utf8_mode == 1
+        and sys.pycache_prefix == "/dev/null"
+    ):
+        raise ClockProbeError("clock probe Python startup is not isolated")
+    expected_prefix = Path("/opt/trading-bot-witness/active/venv").resolve(strict=True)
+    if Path(sys.prefix).resolve(strict=True) != expected_prefix:
+        raise ClockProbeError("clock probe is outside the active attested venv")
+    allowed = {"PATH": TRUSTED_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise ClockProbeError("clock probe environment is not clean")
 
 
 def private_key_base64() -> str:
@@ -424,6 +445,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    require_isolated_runtime()
     args = parse_args(argv)
     if os.geteuid() == 0:
         raise ClockProbeError("clock probe must run as the isolated PostgreSQL OS user")
