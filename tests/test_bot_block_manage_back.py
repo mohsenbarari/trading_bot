@@ -37,7 +37,7 @@ class BotBlockManageBackTests(unittest.IsolatedAsyncioTestCase):
             await handle_back(callback, state, user=SimpleNamespace(id=5))
 
         self.assertEqual(state.cleared, 1)
-        self.assertIn("قابلیت مسدود کردن برای شما غیرفعال است", safe_edit.await_args.args[1])
+        self.assertIn("قابلیت مسدود کردن برای شما غیرفعال است", safe_edit.await_args.args[2])
         callback.answer.assert_awaited_once()
 
     async def test_back_to_user_panel_from_block_menu_edits_panel_text(self):
@@ -47,11 +47,21 @@ class BotBlockManageBackTests(unittest.IsolatedAsyncioTestCase):
         )
         state = SimpleNamespace(clear=AsyncMock())
 
-        await back_to_user_panel_from_block_menu(callback, state, user=SimpleNamespace(id=5))
+        with patch(
+            "bot.handlers.block_manage.edit_callback_message_via_runtime",
+            new=AsyncMock(),
+        ) as edit:
+            await back_to_user_panel_from_block_menu(
+                callback,
+                state,
+                user=SimpleNamespace(id=5),
+            )
 
         state.clear.assert_awaited_once()
-        callback.message.edit_text.assert_awaited_once()
-        self.assertIn("پنل کاربر", callback.message.edit_text.await_args.args[0])
+        callback.message.edit_text.assert_not_awaited()
+        edit.assert_awaited_once()
+        self.assertIn("پنل کاربر", edit.await_args.args[2])
+        self.assertEqual(edit.await_args.kwargs["source_key"], "block-panel-back")
         callback.answer.assert_awaited_once()
 
 

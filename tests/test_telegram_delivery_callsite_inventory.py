@@ -67,6 +67,25 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             all(item.disposition == "legacy_owner_guarded" for item in matches)
         )
 
+    def test_block_family_edits_use_the_queue_adapter_only(self):
+        remaining_block_calls = [
+            item
+            for item in self.inventory
+            if item.path == "bot/handlers/block_manage.py"
+            and item.disposition.startswith("remaining_")
+        ]
+        self.assertEqual(remaining_block_calls, [])
+
+        adapter_calls = [
+            item
+            for item in self.inventory
+            if item.path == "bot/telegram_interaction_message.py"
+            and item.scope == "edit_callback_message_via_runtime"
+            and item.callee == "message.edit_text"
+        ]
+        self.assertEqual(len(adapter_calls), 1)
+        self.assertEqual(adapter_calls[0].disposition, "legacy_mode_guarded")
+
     def test_otp_and_membership_mutations_are_not_misreported_as_shared_message_work(self):
         otp_calls = [
             item
