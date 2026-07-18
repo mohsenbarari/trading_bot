@@ -40,3 +40,11 @@ priority، internal rank، deadline، eligibility، `next_retry_at` خام، fre
 ## feature flag و rollback
 
 limiter و scheduler فقط همراه execution-owner flag فعال می‌شوند و lifecycle هر دو lane زیر همان flag/owner است. rollback claim هر دو lane را متوقف و cooldown/jobها را حفظ می‌کند؛ feeder حق شروع ارسال مستقیم هم‌زمان ندارد.
+
+## الحاقیه ممیزی `2026-07-18`
+
+- claim باید resource-aware باشد و job مقصد channel که gate آن بسته است batch را اشغال نکند؛ private primary آماده باید در همان cycle قابل dispatch بماند.
+- در startup، channel cooldown editor فقط channel work را defer می‌کند. primary پس از identity-only preflight می‌تواند private work را اجرا کند، ولی publication تا full channel preflight و gate پاک متوقف می‌ماند.
+- `429` preflight قبل از هر sleep در PostgreSQL ثبت و پس از Redis loss rehydrate می‌شود.
+- Lua limiter از Redis `TIME` استفاده می‌کند. config باید `0 < base_backoff <= max_backoff`، مقادیر finite/bounded و jitter کنترل‌شده را enforce کند؛ provider attempt از claim/admission attempt جداست.
+- newest-first edit باید در کل backlog قابل‌اجرا باشد، نه فقط در انتخاب هر cycle feeder.

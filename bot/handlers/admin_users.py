@@ -810,7 +810,11 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
         
         if target_user:
             if not _can_manage_target_user(user, target_user):
-                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "❌ شما مجاز به مدیریت این کاربر نیستید.",
+                    show_alert=True,
+                )
                 return
             if await _reject_users_callback_if_not_authoritative(callback, "unblock"):
                 return
@@ -853,9 +857,17 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
                 reply_markup=get_user_settings_keyboard(target_user.id, account_status=target_user.account_status, is_restricted=False, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                 parse_mode="Markdown"
             )
-            await callback.answer("✅ رفع مسدودیت انجام شد.", show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                "✅ رفع مسدودیت انجام شد.",
+                show_alert=True,
+            )
         else:
-            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                "❌ کاربر یافت نشد.",
+                show_alert=True,
+            )
 
 
 @router.callback_query(F.data.startswith("user_unlimit_"))
@@ -872,7 +884,11 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
         
         if target_user:
             if not _can_manage_target_user(user, target_user):
-                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "❌ شما مجاز به مدیریت این کاربر نیستید.",
+                    show_alert=True,
+                )
                 return
             if await _reject_users_callback_if_not_authoritative(callback, "unlimit"):
                 return
@@ -921,9 +937,17 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
                 reply_markup=get_user_settings_keyboard(target_user.id, account_status=target_user.account_status, is_restricted=is_restricted, has_limitations=False, can_edit_role=_can_edit_target_role(user)),
                 parse_mode="Markdown"
             )
-            await callback.answer("✅ محدودیت‌ها برداشته شد.", show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                "✅ محدودیت‌ها برداشته شد.",
+                show_alert=True,
+            )
         else:
-            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                "❌ کاربر یافت نشد.",
+                show_alert=True,
+            )
 
 
 @router.callback_query(F.data.startswith("user_edit_role_"))

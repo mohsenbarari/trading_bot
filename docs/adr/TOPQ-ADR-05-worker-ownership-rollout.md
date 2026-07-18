@@ -32,7 +32,7 @@
 
 ## اثر بر داده، sync و failure mode
 
-child identity و main job relation مطابق ADR-02 پایدارند. sync فقط intent را منتقل می‌کند و execution state foreign را برنمی‌گرداند. crash میان enqueue/link با replay همان dedupe key ترمیم می‌شود؛ خطای feedback child را terminal نمی‌کند تا نتیجه main دوباره خوانده شود. feature flag یکتای execution owner از double-send نسخه مختلط جلوگیری می‌کند.
+child identity و main job relation مطابق ADR-02 پایدارند. sync فقط intent را منتقل می‌کند و execution state foreign را برنمی‌گرداند. crash میان enqueue/link با replay همان dedupe key ترمیم می‌شود؛ خطای feedback child را terminal نمی‌کند تا نتیجه main دوباره خوانده شود. feature flag یکتای execution owner فقط میان binaryهایی معتبر است که آن flag را می‌شناسند؛ binary قدیمی `main` آن را enforce نمی‌کند و به‌تنهایی از double-send نسخه مختلط جلوگیری نمی‌کند.
 
 ## تست و observability
 
@@ -41,3 +41,9 @@ inventory machine-readable، صفر bypass، handoff crash، feedback/cancel/res
 ## rollback
 
 claim جدید هر دو lane متوقف، in-flight و ambiguous reconcile، ownership اتمیک برگردانده و jobهای پایدار حفظ می‌شوند. توقف فقط lane editor از مسیر flag اختصاصی مجاز است، اما pendingهای آن route عوض نمی‌کنند. migration در rollback حذف نمی‌شود.
+
+## الحاقیه ممیزی `2026-07-18`
+
+- production composition باید credential registry و تمام dependencyهای lifecycle را صریح به supervisor تزریق کند؛ factory خام صفرآرگومانی معیار code-ready نیست.
+- cutover نسخه مختلط فقط با ownership epoch بادوام یا choreography فیزیکی و تست‌شده `stop-old → drain/reconcile → start-new` مجاز است. topology فعلی single bot container می‌تواند این روش را پشتیبانی کند، اما باید rehearsal و شاهد عدم overlap داشته باشد.
+- audit callsite باید control-flow-aware باشد؛ وجود tokenهای runtime در متن یک تابع، guard معتبر محسوب نمی‌شود.

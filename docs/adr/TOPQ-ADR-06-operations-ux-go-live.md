@@ -41,3 +41,11 @@
 ## تست، observability و rollback
 
 snapshot Bot/WebApp، keyboard/anchor، preflight محیط، secret scan، cleanup readback، support drill، pause/resume و canary matrix تست می‌شوند. rollback مطابق ADR-05 است و هیچ داده یا پیام production در staging لمس نمی‌شود.
+
+## الحاقیه ممیزی `2026-07-18`
+
+- policy retention باید worker batch/idempotent، legal-hold rule، metric و تست واقعی داشته باشد؛ وجود `payload_redacted_at` بدون writer کافی نیست.
+- گزارش عملیات باید backlog/oldest age، ambiguous/unresolved، blocked bot/gateway/destination، outcome inbox lag، reconciliation و stop threshold را machine-readable و AI-readable ارائه کند.
+- log به‌جای dedupe/idempotency خام از job id یا correlation hash استفاده می‌کند و bundle نهایی با secret/PII scanner generic بررسی می‌شود.
+- label محیط تست باید صریحاً `test` باشد و test harness هر network/provider call واقعی را fail کند.
+- policy relink برای هر خانواده پیام، به‌ویژه trade/admin/account، پیش از Stage 4 ثبت و تست می‌شود.

@@ -53,6 +53,10 @@ AIROGRAM_CONVENIENCE_METHODS = frozenset(
         "reply",
     }
 )
+AIROGRAM_CONVENIENCE_PREFIXES = (
+    "answer_",
+    "reply_",
+)
 CALLABLE_GATEWAY_NAMES = frozenset(
     {
         "gateway_send",
@@ -91,8 +95,8 @@ REMAINING_DISPOSITION_BUDGETS = {
     "remaining_business_direct": 0,
     "remaining_callback_direct": 0,
     "remaining_cleanup_direct": 13,
-    "remaining_interactive_direct": 261,
-    "remaining_memory_timer": 5,
+    "remaining_interactive_direct": 283,
+    "remaining_memory_timer": 7,
 }
 
 
@@ -129,9 +133,23 @@ def _is_aiogram_convenience_call(path: str, callee: str) -> bool:
     if not path.startswith("bot/"):
         return False
     terminal = _terminal_name(callee)
-    if terminal not in AIROGRAM_CONVENIENCE_METHODS:
+    if (
+        terminal not in AIROGRAM_CONVENIENCE_METHODS
+        and not terminal.startswith(AIROGRAM_CONVENIENCE_PREFIXES)
+    ):
         return False
     parts = set(callee.split("."))
+    if terminal.startswith(AIROGRAM_CONVENIENCE_PREFIXES):
+        return bool(
+            parts
+            & {
+                "callback",
+                "event",
+                "join_request",
+                "message",
+                "query",
+            }
+        )
     return bool(
         parts
         & {
@@ -190,11 +208,197 @@ def _scope_text(source_lines: Sequence[str], nodes: Sequence[ast.AST]) -> str:
     return "".join(source_lines[outer.lineno - 1 : outer.end_lineno])
 
 
-def _has_queue_mode_guard(scope_text: str) -> bool:
-    return (
-        "TelegramDeliveryRuntimeMode.QUEUE_V1" in scope_text
-        and "configured_telegram_delivery_runtime" in scope_text
+def _queue_mode_condition_polarity(
+    node: ast.AST,
+    *,
+    aliases: dict[str, int],
+) -> int:
+    """Return 1 when true means queue, -1 when true means legacy, else 0.
+
+    Only exact predicates are accepted.  Merely mentioning the runtime mode
+    somewhere in a function is not control-flow evidence.
+    """
+
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, 0)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return -_queue_mode_condition_polarity(node.operand, aliases=aliases)
+    if not isinstance(node, ast.Compare) or len(node.ops) != 1 or len(node.comparators) != 1:
+        return 0
+
+    left = ast.unparse(node.left)
+    right = ast.unparse(node.comparators[0])
+    names = {left, right}
+    if not any(name.endswith("TelegramDeliveryRuntimeMode.QUEUE_V1") for name in names):
+        return 0
+    runtime_side = right if left.endswith("TelegramDeliveryRuntimeMode.QUEUE_V1") else left
+    if not (
+        runtime_side.endswith(".mode")
+        or runtime_side in aliases
+        or "configured_telegram_delivery_runtime" in runtime_side
+    ):
+        return 0
+
+    operator = node.ops[0]
+    if isinstance(operator, (ast.Eq, ast.Is)):
+        return 1
+    if isinstance(operator, (ast.NotEq, ast.IsNot)):
+        return -1
+    return 0
+
+
+def _function_mode_aliases(function_node: ast.AST | None) -> dict[str, int]:
+    if function_node is None:
+        return {}
+    aliases: dict[str, int] = {}
+    for node in ast.walk(function_node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) and node is not function_node:
+            continue
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = getattr(node, "value", None)
+            if value is None:
+                continue
+            polarity = _queue_mode_condition_polarity(value, aliases=aliases)
+            if not polarity:
+                rendered = ast.unparse(value)
+                if (
+                    "configured_telegram_delivery_runtime" in rendered
+                    and rendered.endswith(".mode")
+                ):
+                    polarity = 1
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and polarity:
+                    aliases[target.id] = polarity
+    return aliases
+
+
+def _condition_mode_implication(
+    node: ast.AST,
+    *,
+    when_true: bool,
+    aliases: dict[str, int],
+) -> int:
+    polarity = _queue_mode_condition_polarity(node, aliases=aliases)
+    if polarity:
+        return polarity if when_true else -polarity
+    if isinstance(node, ast.BoolOp):
+        # All operands of AND are true on its true branch; all operands of OR
+        # are false on its false branch.  One exact mode predicate therefore
+        # dominates that branch even when the other operands are unrelated.
+        all_selected = (
+            isinstance(node.op, ast.And) and when_true
+        ) or (
+            isinstance(node.op, ast.Or) and not when_true
+        )
+        if not all_selected:
+            return 0
+        implications = {
+            implication
+            for value in node.values
+            if (
+                implication := _condition_mode_implication(
+                    value,
+                    when_true=when_true,
+                    aliases=aliases,
+                )
+            )
+        }
+        if len(implications) == 1:
+            return implications.pop()
+    return 0
+
+
+def _block_always_exits(statements: Sequence[ast.stmt]) -> bool:
+    if not statements:
+        return False
+    terminal = statements[-1]
+    if isinstance(terminal, (ast.Return, ast.Raise)):
+        return True
+    if isinstance(terminal, ast.If):
+        return _block_always_exits(terminal.body) and _block_always_exits(
+            terminal.orelse
+        )
+    return False
+
+
+def _statement_contains_legacy_assert(statement: ast.AST) -> bool:
+    for node in ast.walk(statement):
+        if isinstance(node, ast.Call) and "_assert_legacy" in _dotted_name(node.func):
+            return True
+    return False
+
+
+def _legacy_guard_evidence(
+    *,
+    ancestors: Sequence[ast.AST],
+    call: ast.Call,
+) -> str | None:
+    function_node = next(
+        (
+            node
+            for node in reversed(ancestors)
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+        ),
+        None,
     )
+    aliases = _function_mode_aliases(function_node)
+    chain = [*ancestors, call]
+
+    for parent, child in zip(chain, chain[1:]):
+        if not isinstance(parent, ast.If):
+            continue
+        if (
+            child in parent.body
+            and _condition_mode_implication(
+                parent.test,
+                when_true=True,
+                aliases=aliases,
+            )
+            == -1
+        ):
+            return f"legacy-only true branch at line {parent.lineno}"
+        if (
+            child in parent.orelse
+            and _condition_mode_implication(
+                parent.test,
+                when_true=False,
+                aliases=aliases,
+            )
+            == -1
+        ):
+            return f"legacy-only else branch at line {parent.lineno}"
+
+    for parent, child in zip(chain, chain[1:]):
+        for _field, value in ast.iter_fields(parent):
+            if not isinstance(value, list) or child not in value:
+                continue
+            for previous in value[: value.index(child)]:
+                if _statement_contains_legacy_assert(previous):
+                    return f"dominating legacy assertion at line {previous.lineno}"
+                if not isinstance(previous, ast.If):
+                    continue
+                if (
+                    _condition_mode_implication(
+                        previous.test,
+                        when_true=True,
+                        aliases=aliases,
+                    )
+                    == 1
+                    and _block_always_exits(previous.body)
+                ):
+                    return f"queue branch exits at line {previous.lineno}"
+                if (
+                    _condition_mode_implication(
+                        previous.test,
+                        when_true=False,
+                        aliases=aliases,
+                    )
+                    == 1
+                    and _block_always_exits(previous.orelse)
+                ):
+                    return f"queue else branch exits at line {previous.lineno}"
+    return None
 
 
 def _classify(
@@ -204,6 +408,7 @@ def _classify(
     kind: str,
     scope: str,
     scope_text: str,
+    legacy_guard_evidence: str | None,
 ) -> tuple[str, str]:
     terminal = _terminal_name(callee)
     if path in TRANSPORT_FILES:
@@ -231,10 +436,10 @@ def _classify(
         return "non_message_control", "channel membership mutation is not delivery pacing"
     if path in LEGACY_OWNER_FILES:
         return "legacy_owner_guarded", "legacy worker is excluded by runtime ownership"
-    if "_assert_legacy" in scope_text:
-        return "legacy_owner_guarded", "final legacy side-effect boundary asserts runtime ownership"
-    if _has_queue_mode_guard(scope_text):
-        return "legacy_mode_guarded", "queue-v1 branch exits before direct Telegram call"
+    if legacy_guard_evidence is not None:
+        if "assertion" in legacy_guard_evidence:
+            return "legacy_owner_guarded", legacy_guard_evidence
+        return "legacy_mode_guarded", legacy_guard_evidence
     if "include_telegram" in scope_text and "if include_telegram" in scope_text:
         return "legacy_parameter_guarded", "queue-v1 caller disables the Telegram branch explicitly"
     if path.startswith("bot/"):
@@ -258,7 +463,15 @@ class _CallsiteVisitor(ast.NodeVisitor):
         self.path = path
         self.source_lines = source_lines
         self.stack: list[ast.AST] = []
+        self.ancestors: list[ast.AST] = []
         self.callsites: list[TelegramDeliveryCallsite] = []
+
+    def visit(self, node: ast.AST):  # type: ignore[override]
+        self.ancestors.append(node)
+        try:
+            return super().visit(node)
+        finally:
+            self.ancestors.pop()
 
     def _visit_scope(self, node: ast.AST) -> None:
         self.stack.append(node)
@@ -285,6 +498,10 @@ class _CallsiteVisitor(ast.NodeVisitor):
                 kind=kind,
                 scope=_scope_name(self.stack),
                 scope_text=scope_text,
+                legacy_guard_evidence=_legacy_guard_evidence(
+                    ancestors=self.ancestors[:-1],
+                    call=node,
+                ),
             )
             self.callsites.append(
                 TelegramDeliveryCallsite(
@@ -300,14 +517,25 @@ class _CallsiteVisitor(ast.NodeVisitor):
             )
         elif callee == "asyncio.create_task":
             rendered = ast.unparse(node.args[0]) if node.args else ""
-            if any(hint in rendered.lower() for hint in MEMORY_TIMER_HINTS):
+            trade_suggestion_detached = (
+                self.path == "bot/utils/trade_suggestion_messages.py"
+                and rendered in {"_enqueue()", "_runner()"}
+            )
+            if any(hint in rendered.lower() for hint in MEMORY_TIMER_HINTS) or trade_suggestion_detached:
                 scope_text = _scope_text(self.source_lines, self.stack)
-                if "_assert_legacy" in scope_text:
+                guard_evidence = _legacy_guard_evidence(
+                    ancestors=self.ancestors[:-1],
+                    call=node,
+                )
+                if self.path == "core/telegram_delivery_queue_worker.py":
+                    disposition = "queue_execution"
+                    evidence = "owned queue supervisor task"
+                elif guard_evidence and "assertion" in guard_evidence:
                     disposition = "legacy_owner_guarded"
-                    evidence = "legacy timer boundary asserts runtime ownership"
-                elif _has_queue_mode_guard(scope_text):
+                    evidence = guard_evidence
+                elif guard_evidence:
                     disposition = "legacy_mode_guarded"
-                    evidence = "queue-v1 branch does not schedule a Telegram timer"
+                    evidence = guard_evidence
                 elif "include_telegram=not queue_mode" in rendered:
                     disposition = "non_delivery_timer"
                     evidence = "timer retains only the WebApp notification in queue-v1"

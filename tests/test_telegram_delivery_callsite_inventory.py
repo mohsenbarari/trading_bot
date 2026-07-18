@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from scripts.audit_telegram_delivery_calls import (
     REMAINING_DISPOSITION_BUDGETS,
@@ -183,6 +184,82 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         )
         self.assertTrue(
             any(item.callee == "callback.message.answer" for item in interactive_calls)
+        )
+
+    def test_runtime_tokens_elsewhere_do_not_hide_an_unguarded_call(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bot").mkdir()
+            (root / "bot" / "sample.py").write_text(
+                """
+async def unsafe(message):
+    await message.answer('unguarded')
+    if configured_telegram_delivery_runtime().mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
+        return
+""",
+                encoding="utf-8",
+            )
+
+            inventory = build_inventory(root)
+
+        self.assertEqual(len(inventory), 1)
+        self.assertEqual(
+            inventory[0].disposition,
+            "remaining_interactive_direct",
+        )
+
+    def test_only_a_dominating_queue_exit_marks_legacy_call_guarded(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bot").mkdir()
+            (root / "bot" / "sample.py").write_text(
+                """
+async def safe(message):
+    queue_mode = configured_telegram_delivery_runtime().mode == TelegramDeliveryRuntimeMode.QUEUE_V1
+    if queue_mode:
+        return
+    await message.answer('legacy')
+""",
+                encoding="utf-8",
+            )
+
+            inventory = build_inventory(root)
+
+        self.assertEqual(len(inventory), 1)
+        self.assertEqual(inventory[0].disposition, "legacy_mode_guarded")
+        self.assertIn("queue branch exits", inventory[0].evidence)
+
+    def test_answer_document_and_detached_enqueue_are_in_inventory(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bot" / "utils").mkdir(parents=True)
+            (root / "bot" / "sample.py").write_text(
+                """
+async def export(message):
+    await message.answer_document('report')
+""",
+                encoding="utf-8",
+            )
+            (root / "bot" / "utils" / "trade_suggestion_messages.py").write_text(
+                """
+async def schedule():
+    async def _enqueue():
+        return None
+    asyncio.create_task(_enqueue())
+""",
+                encoding="utf-8",
+            )
+
+            inventory = build_inventory(root)
+
+        dispositions = {(item.callee, item.disposition) for item in inventory}
+        self.assertIn(
+            ("message.answer_document", "remaining_interactive_direct"),
+            dispositions,
+        )
+        self.assertIn(
+            ("asyncio.create_task(_enqueue())", "remaining_memory_timer"),
+            dispositions,
         )
 
 

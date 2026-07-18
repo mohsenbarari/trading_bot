@@ -40,3 +40,9 @@ unique/concurrent enqueue، peer outage، replay دوطرفه، clock skew، mes
 ## feature flag و rollback
 
 schema پیش از code و با flag خاموش deploy می‌شود. rollback code-forward-compatible است؛ رکوردهای صف حذف نمی‌شوند و ownership فقط پس از drain/reconciliation تغییر می‌کند.
+
+## الحاقیه ممیزی `2026-07-18`
+
+- تغییر NO_SYNC table/field یا fingerprint بدون negotiation نسخه، rolling deploy دو peer را ناسازگار می‌کند. پیش از Stage 4 باید mixed-version matrix، semantics fingerprint و release choreography صریح پیاده و تست شود.
+- intent هر دو recipient معامله باید در همان transaction commit معامله ساخته شود؛ BackgroundTask پس از commit فقط مجاز به پردازش intent پایدار است.
+- endpoint عمومی ایجاد آفر باید idempotency اجباری یا receipt server-side سازگار داشته باشد؛ تکیه بر رفتار frontend برای clientهای دیگر کافی نیست.

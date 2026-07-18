@@ -40,3 +40,7 @@
 ## feature flag و rollback
 
 صف با flag پیش‌فرض خاموش اجرا می‌شود. rollback هیچ expiry را تغییر نمی‌دهد؛ claim متوقف، in-flight/ambiguous reconcile و ownership مطابق ADR-05 اتمیک به مسیر قبلی برمی‌گردد.
+
+## الحاقیه ممیزی `2026-07-18`
+
+بار مرجع فقط `3 publication/s` نیست. پس از warm-up انقضای دو‌دقیقه‌ای، نزدیک `3 terminal edit/s` و editهای partial نیز به همان مقصد کانال اضافه می‌شوند؛ demand ترکیبی برآوردی حدود `6.18 operation/s` است. interval پیش‌فرض `1.05s` و candidate `0.25s` روی کاغذ به‌ترتیب حدود `0.95` و `4 operation/s` ظرفیت می‌دهند. این محاسبه سقف واقعی Telegram را اثبات نمی‌کند، اما یک precondition اجباری برای Stage 4 است: calibration باید ظرفیت امن مقصد را قبل از دور `1800+400` ثابت کند؛ شکست، `NO-GO` و تصمیم صریح محصول است. بات ویرایشگر ظرفیت همان chat را خودکار افزایش نمی‌دهد.

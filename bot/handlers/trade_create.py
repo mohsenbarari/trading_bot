@@ -1154,13 +1154,13 @@ async def _handle_trade_confirm_core(
     warning_acknowledged: bool = False,
 ) -> None:
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if not await _bot_market_is_open():
         await callback.message.edit_text(BOT_MARKET_CLOSED_MESSAGE)
         await state.clear()
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     from core.trading_settings import get_trading_settings
@@ -1183,7 +1183,7 @@ async def _handle_trade_confirm_core(
             error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
         await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
         await state.clear()
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     allowed, error_msg = check_user_limits_fn(user, "trade", quantity)
@@ -1199,7 +1199,7 @@ async def _handle_trade_confirm_core(
             error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
         await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
         await state.clear()
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     async with AsyncSessionLocal() as session:
@@ -1218,7 +1218,7 @@ async def _handle_trade_confirm_core(
                 parse_mode="Markdown",
             )
             await state.clear()
-            await callback.answer()
+            await answer_callback_query_via_runtime(callback)
             return
 
     trade_type = data.get("trade_type")
@@ -1259,7 +1259,7 @@ async def _handle_trade_confirm_core(
     if not is_valid_comp:
         await callback.message.edit_text(err_comp, parse_mode="Markdown")
         await state.clear()
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if price_warning and not warning_acknowledged:
@@ -1270,13 +1270,13 @@ async def _handle_trade_confirm_core(
                 cancel_callback_data=cancel_callback_data,
             ),
         )
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if not settings.channel_id:
         await callback.message.edit_text("❌ کانال تنظیم نشده است.")
         await state.clear()
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     queue_owns_telegram_delivery = (
@@ -1675,7 +1675,7 @@ async def _handle_trade_confirm_core(
         await callback.message.edit_text(f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید.")
 
     await state.clear()
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_legacy_confirm, TradeActionCallback.filter(F.action == "confirm"))

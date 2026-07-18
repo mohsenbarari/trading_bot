@@ -36,6 +36,7 @@
 - checkpoint سیزدهم cutover پیام‌ساز interaction در `2026-07-18`: ورودی مستقل منوی مسدودسازی کاربر با source key ثابت `block-menu-entry` و همان متن/inline keyboard legacy به `GENERAL_IMMEDIATE/M1` منتقل شد؛ caller به `Message` فوری، anchor، flow-exit یا edit وابسته نیست. renderer تکراری و بدون caller پنل حذف شد. دو fallback تکرار آفر که از قبل source بادوام داشتند پیش از direct legacy assertion صریح گرفتند تا بازگشت غیرمنتظره `None` در queue mode هرگز bypass نسازد. fixture انقضای probe Redis نیز با expiry کنترل‌شده از race پنجاه‌میلی‌ثانیه‌ای تست جدا شد؛ کل ماژول Redis و `100/100` تکرار مستقل سبز ماند. `37` تست متمرکز، هر `15/35/92` تست خانواده‌های block/panel/trade-create و suite گسترده `574` تست Telegram با `137` skip محیطی پاس شدند. inventory جاری total=`378`، `legacy_owner_guarded=12` و `remaining_interactive_direct=272` است؛ runtime همچنان خاموش است.
 - checkpoint چهاردهم interaction در `2026-07-18`: persistence و execution محدود و fail-closed برای `editMessageText` خصوصی با target ازپیش‌شناخته‌شده تکمیل شد. target با route/message id دقیق serialize می‌شود، در dedupe و source/version fingerprint شرکت می‌کند و فقط `KNOWN_MESSAGE` مثبت و هم‌مسیر پذیرفته می‌شود؛ target وابسته به receipt هنوز در این برش persistence ندارد و وانمود نمی‌شود. handoff method را از قرارداد immutable می‌گیرد، freshness همان method/target/payload را دوباره می‌سنجد و feedback پاسخ `message is not modified` را با message id target به‌عنوان success قطعی ثبت می‌کند. هشت مسیر واقعی edit خانواده block از adapter callback با callback-id هش‌شده عبور کردند؛ رفتار legacy و نادیده‌گرفتن فقط خطای not-modified حفظ شد. دو mock قدیمی Stage 5 نیز با helper async فعلی منوی تکرار آفر هم‌تراز شدند. `57` تست متمرکز، `102` تست قرارداد/regression، `15` تست خانواده block، `38` تست PostgreSQL واقعی، suite مرجع `585` تست و suite وسیع‌تر `677` تست با Redis واقعی پاس شدند. inventory جاری total=`377`، `legacy_mode_guarded=67` و `remaining_interactive_direct=270` است؛ runtime همچنان خاموش است.
 - checkpoint پانزدهم interaction در `2026-07-18`: هر ۹ مرز `editMessageText` شناخته‌شده flow کنترل پیام همگانی مدیریتی—prompt متن، لغو، انتخاب گروه/کاربر، refresh جست‌وجو و سه outcome تأیید—به adapter بادوام edit منتقل شد. هر outcome source key مستقل دارد، ترتیب mutationهای FSM و commit ساخت campaign نسبت به edit حفظ شده و این کنترل‌ها همچنان `GENERAL_IMMEDIATE/M1` هستند؛ campaign و receiptهای کاربران همان صف تابع `ADMIN_BROADCAST/M6` را دارند. تنها `editMessageReplyMarkup` انتخاب گروه عمداً مستقیم باقی ماند، چون قرارداد فعلی فقط `editMessageText` را می‌پذیرد و تبدیل صوری آن رفتار Telegram را عوض می‌کرد. `23` تست متمرکز مسیر/inventory، suite مرجع `586` تست و suite وسیع‌تر `678` تست با PostgreSQL و Redis واقعی و بدون skip پاس شدند؛ migration محافظت‌شده نیز دیتابیس scratch خالی را تا head بالا آورد. inventory جاری total=`368` و `remaining_interactive_direct=261` است؛ schema، head و runtime تغییری نکردند.
+- checkpoint ممیزی مستقل `2026-07-18`: چهار گزارش مستقل روی snapshot قدیمی‌تر `87177969` با کد جاری `342e4bd9` تطبیق داده شدند و هیچ finding صرفاً به‌دلیل پیشنهاد reviewer پذیرفته یا رد نشد. نتیجه بازبینی مستقل کد جاری نشان داد inventory قبلی فقط syntactic است و به‌علت guard‌سنجی در سطح کل تابع، چند bypass واقعی را `legacy_mode_guarded` گزارش می‌کند؛ همچنین `answer_document` و detached task عمومی را کامل نمی‌بیند. بنابراین اعداد `368/261/13/5` فقط lower bound تاریخی‌اند و تا جایگزینی ممیزی dominance-aware معیار خروج Stage 3 نیستند. گپ‌های جدید durability، runtime composition، reconciliation، rolling sync/ownership، retention/operations و ظرفیت در بخش `13.13` ثبت شده‌اند؛ runtime همچنان code-disabled و هیچ deploy/merge مجاز نشده است.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -732,7 +733,7 @@ python3 scripts/audit_telegram_delivery_calls.py --check
 python3 scripts/audit_telegram_delivery_calls.py --format json
 ```
 
-baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint callback، ۳۲ فراخوانی `callback.message.answer` که پیام جدید می‌سازند از callback deadlineدار جدا و به interaction منتقل شدند؛ سپس هر `260` callback واقعی با دو ingress اختصاصی موجود یا adapter legacy مشترک پوشش داده شد. پس از پانزده cutover پیام‌ساز/interaction، خروجی جاری `368` مرز دارد و هیچ `remaining_callback_direct` ندارد. این ممیزی محافظه‌کارانه است: reachable بودن هر مسیر در یک deployment را ادعا نمی‌کند، اما هیچ فراخوانی را فقط به‌دلیل «احتمالاً بلااستفاده بودن» از inventory حذف نمی‌کند.
+baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint callback، ۳۲ فراخوانی `callback.message.answer` که پیام جدید می‌سازند از callback deadlineدار جدا و به interaction منتقل شدند؛ سپس هر `260` callback واقعی با دو ingress اختصاصی موجود یا adapter legacy مشترک پوشش داده شد. پس از پانزده cutover پیام‌ساز/interaction، خروجی تاریخی `368` مرز و صفر `remaining_callback_direct` گزارش کرد. ممیزی مستقل بعدی ثابت کرد این ابزار در شکل فعلی محافظه‌کارانه نیست: وجود tokenهای runtime در هر نقطه تابع را به‌اشتباه معادل dominance شاخه legacy می‌گیرد، بعضی convenience methodها و detached taskها را نمی‌بیند و در نتیجه bypass را کم‌شماری می‌کند. این جدول تا پیاده‌شدن audit معنایی فقط snapshot تاریخی است و گیت release محسوب نمی‌شود.
 
 | disposition | تعداد | نتیجه |
 | --- | ---: | --- |
@@ -759,7 +760,7 @@ baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint c
 4. انتقال cleanupها و هفت timer حافظه‌ای به `telegram_scheduled_operations` با حفظ anchor و سیاست «عدم حذف پیام لنگر».
 5. تکمیل reconciler عملیاتی `AMBIGUOUS`, `PENDING_RECONCILE`, blocked و اثبات inventory بدون remaining direct پیش از تغییر `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY`.
 
-کاهش هر دسته بدون تغییر baseline مجاز است؛ افزایش آن یا callsite طبقه‌بندی‌نشده تست را fail می‌کند. صفرشدن coverage registry به معنی صفرشدن callsite مستقیم نیست و تا پایان پنج برش بالا Stage 3 باز می‌ماند.
+کاهش هر دسته بدون تغییر baseline مجاز است؛ افزایش آن یا callsite طبقه‌بندی‌نشده تست را fail می‌کند. بااین‌حال baseline عددی به‌تنهایی کافی نیست: ابزار جایگزین باید برای هر callsite شاهد control-flow محلی و machine-readable ثبت کند، `send*/edit*/delete*/answer*/reply*/copy*/forward*` و taskهای جداشده را ببیند، fixtureهای منفی bypass را رد کند و در معیار نهایی تمام دسته‌های `remaining_*` را به صفر برساند. صفرشدن coverage registry به معنی صفرشدن callsite مستقیم نیست و تا پایان پنج برش بالا و تمام remediationهای P0/P1 بخش `13.13` Stage 3 باز می‌ماند.
 
 ### Stage 4 — deploy و آزمایش تکرارشونده staging
 
@@ -773,6 +774,7 @@ baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint c
 - اجرای ماتریس intervalها
 - اجرای endurance و burst
 - ثبت raw evidence و گزارش مقایسه‌ای
+- گیت ظرفیت پیش از load: runner باید نرخ publication و edit را جدا و ترکیبی محاسبه کند. workload مرجع به‌طور تحلیلی حدود `3 publication/s` و پس از warm-up نزدیک `3 edit/s` به‌اضافه editهای partial می‌طلبد؛ مقدار پیش‌فرض `1.05s` و حتی candidate `0.25s` بدون شاهد provider برای بار ترکیبی کافی فرض نمی‌شوند. شروع دور مرجع فقط وقتی مجاز است که smoke کالیبراسیون امکان رسیدن به demand را بدون `429` پایدار نشان دهد؛ در غیر این صورت نتیجه صریح `NO-GO` و تصمیم محصول لازم است.
 
 معیار خروج: یک interval پایه و safety margin با شواهد تکرارپذیر انتخاب و تصمیم روشن `editor_enabled=true|false` با شاهد cross-bot، امنیت دسترسی و بهبود قابل‌اندازه‌گیری ثبت شود.
 
@@ -1084,6 +1086,53 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 | `N07–N19` | Operations + Security | Stage 1، 4، 5 و 6 | توقف تست/release، حفظ artifact redacted، mode امن primary-only و عدم لمس production |
 
 هیچ ردیفی صرفاً با نوشته‌شدن این تصمیم‌ها `IMPLEMENTED` یا `VERIFIED` محسوب نمی‌شود. ارتقای وضعیت فقط با commit کد/تست یا artifact staging انجام می‌شود.
+
+### 13.13 ثبت remediation ممیزی مستقل — `2026-07-18`
+
+چهار گزارش مستقل Codex، ChatGPT Pro، Claude و Gemini روی snapshotهای یکسان نبودند؛ سه گزارش commit `87177969` را بررسی کرده‌اند، درحالی‌که مبنای اجرای این ثبت `342e4bd9` است. هر ادعا دوباره روی کد جاری بررسی شد. وضعیت `OPEN` یعنی blocker قبل از تست نهایی، `CONDITIONAL` یعنی الزام rollout یا تصمیم محصول که با تست نهایی/زنده اثبات می‌شود و `REJECTED` یعنی ادعای reviewer که نباید دوباره به‌عنوان finding وارد برنامه شود.
+
+| شناسه | شدت | وضعیت اولیه | finding معتبر و تصمیم اصلاح | owner / شاهد بسته‌شدن |
+| --- | --- | --- | --- | --- |
+| `TOPQ-R01` | P0 | OPEN | audit فعلی dominance را اثبات نمی‌کند، بعضی convenience methodها و detached taskها را نمی‌بیند و false guard دارد | Backend؛ audit control-flow-aware، fixture منفی و صفر `remaining_*` |
+| `TOPQ-R02` | P0 | OPEN | supervisor خام به factory بدون credential registry آرگومان نمی‌دهد و composition production کامل نیست | Backend؛ lifecycle test واقعی start/stop با دو lane و flag خاموش/روشن مصنوعی |
+| `TOPQ-R03` | P0 | OPEN | receipt دو طرف معامله پس از commit و در BackgroundTask ساخته می‌شود و crash window موجب گم‌شدن intent است | Backend؛ ثبت هر دو recipient intent در همان transaction معامله + fault injection |
+| `TOPQ-R04` | P0 | OPEN | stateهای `AMBIGUOUS/PENDING_RECONCILE/AMBIGUOUS_UNRESOLVED` observer/reconciler عملیاتی ندارند | Backend+Operations؛ reconciler idempotent، evidence ledger، restart و alert test |
+| `TOPQ-R05` | P0 | OPEN | provider result، cooldown و domain feedback در یک transaction‌اند؛ شکست feedback می‌تواند `429/retry_after` قطعی را rollback و job را ambiguous کند | Backend؛ provider-outcome inbox append-only و replayable feedback saga با crash matrix |
+| `TOPQ-R06` | P0 | OPEN | پاسخ `2xx` ناقص و parseable برای `sendMessage` به retry می‌رود؛ نبود شاهد message id باید ambiguous باشد | Backend؛ تمام non-affirmative 2xx sendها بدون message id به ambiguity و تست matrix |
+| `TOPQ-R07` | P0 | OPEN | claim priority-first می‌تواند jobهای channel gated را بردارد و private primary آماده را دچار head-of-line کند | Backend؛ scheduler resource-aware و saturation test با skip منبع gated |
+| `TOPQ-R08` | P0 | OPEN | cooldown کانال editor در startup همه laneهای primary را می‌بندد؛ private primary باید پس از identity-only preflight مستقل ادامه دهد | Backend؛ restart/recovery test برای channel-gated + private-primary |
+| `TOPQ-R09` | P0 | OPEN | `429` preflight فقط در Redis است و با crash/Redis loss deadline provider از بین می‌رود | Backend؛ evidence PostgreSQL پیش از sleep و rehydrate test |
+| `TOPQ-R10` | P0 | OPEN | resume audited فقط مقصد را پوشش می‌دهد؛ bot/gateway block مسیر crash-safe و full-preflight ندارد | Backend+Operations؛ saga و CLI برای bot/gateway با race/restart test |
+| `TOPQ-R11` | P0 | OPEN | افزودن NO_SYNC table/field fingerprint بدون تغییر protocol/registry، rolling deploy دو peer را ناسازگار می‌کند | Backend+Operations؛ negotiation یا release choreography تست‌شده با mixed-version matrix |
+| `TOPQ-R12` | P0 | CONDITIONAL | binary قدیمی flag ownership جدید را نمی‌شناسد؛ جلوگیری از overlap فقط با epoch بادوام یا stop-old/drain/start-new فیزیکی معتبر است | Operations؛ topology proof و rehearsal اتمیک پیش از production |
+| `TOPQ-R13` | P0 | OPEN | exception بعد از commit آفر ممکن است Offer پذیرفته‌شده را expire و failure کاذب نشان دهد | Backend؛ مرز commit صریح و fault injection بعد از commit |
+| `TOPQ-R14` | P0 | OPEN | ban/unban حذف حساب نتیجه gateway را نادیده می‌گیرد و retry/reconcile بادوام ندارد | Backend+Security؛ membership saga با نتیجه قطعی، retry و audit |
+| `TOPQ-R15` | P1 | OPEN | idempotency create API اختیاری است؛ frontend کلید پایدار دارد ولی client دیگر می‌تواند duplicate بسازد | Product+Backend؛ الزام کلید یا receipt server-side و compatibility test |
+| `TOPQ-R16` | P1 | OPEN | سیاست relink برای خانواده‌های حساس یکسان نیست و احتمال ارسال به مالک جدید route وجود دارد | Product+Security+Backend؛ جدول policy per-family و تست relink/privacy |
+| `TOPQ-R17` | P1 | OPEN | limiter Lua از ساعت application استفاده می‌کند و برای چند worker/clock skew شکننده است | Backend؛ Redis `TIME` و skew/concurrency tests |
+| `TOPQ-R18` | P1 | OPEN | newest-first edit فقط هنگام feeder selection است؛ jobهای pending میان cycleها ترتیب global تضمین‌شده ندارند | Backend؛ rank قابل‌به‌روزرسانی یا scheduler comparator و depth test |
+| `TOPQ-R19` | P1 | OPEN | retention فقط policy است؛ `payload_redacted_at` و پاک‌سازی terminal اجرای production ندارند | Backend+Privacy؛ worker batch/idempotent، legal hold، metric و tests |
+| `TOPQ-R20` | P0 | OPEN | alertهای backlog/age/ambiguity/blocked، dashboard، shadow planner و stop threshold کامل نیستند | Operations+Backend؛ report machine-readable، alert tests و runbook |
+| `TOPQ-R21` | P1 | OPEN | transport ممکن است response معتبر را با خطای close از دست بدهد و برخی proxy/transport errors دقیق طبقه‌بندی نمی‌شوند | Backend؛ حفظ response، pre-write/unknown-write classification و fault matrix |
+| `TOPQ-R22` | P1 | OPEN | ورودی non-finite/overflow retry، config `base>max`، jitter و تفکیک provider-attempt از admission-attempt سخت‌سازی نشده‌اند | Backend؛ config validation و fuzz/property tests |
+| `TOPQ-R23` | P1 | OPEN | log gateway idempotency/dedupe identity می‌تواند شناسه‌های source/destination را افشا کند | Security+Backend؛ correlation hash، secret/PII scan و artifact test |
+| `TOPQ-R24` | P1 | CONDITIONAL | downgrade کامل در migration legacy `5061c56d11e7` می‌شکند؛ regression صف نیست اما rollback کد باید forward-compatible بماند | Backend+Operations؛ ثبت constraint و تست app/config rollback بدون downgrade schema |
+| `TOPQ-R25` | P0 | CONDITIONAL | permission readback زنده editor باید روی SHA نهایی تکرار و artifact redacted/checksumدار ذخیره شود | Operations+Security؛ Stage 4 preflight، بدون استفاده token در این Stage |
+| `TOPQ-R26` | P1 | OPEN | شاخه باید در SHA نهایی با main reconcile شود و review/evidence پس از آن بازتولید شود | Backend؛ merge-base/patch-id report روی worktree candidate، بدون merge بدون تأیید |
+| `TOPQ-R27` | P1 | OPEN | تست synthetic با label `production` شواهد را مبهم می‌کند | Backend؛ env test صریح و assertion عدم network/provider |
+| `TOPQ-R28` | P0 | CONDITIONAL | demand تحلیلی کانال حدود `6.18 op/s` است؛ candidateهای فعلی interval حداکثر `4 op/s` می‌دهند و وجود editor ظرفیت chat را تضمین نمی‌کند | Product+Operations؛ calibration Stage 4؛ شکست برابر `NO-GO` و نه تغییر پنهانی semantics |
+
+ادعاهای بازبینی‌شده و ردشده: `20 پیام در دقیقه` محدودیت مستند group است نه channel؛ قفل advisory طی HTTP نگه داشته نمی‌شود؛ editor طبق preflight کد حق send/delete ندارد؛ `retry_after` رسمی Telegram از نوع Integer است؛ flake قدیمی Redis پس از اصلاح fixture نشانه race محصول نیست؛ شکست full downgrade از migration legacy است؛ و وجود بات دوم به‌تنهایی ظرفیت همان channel را دوبرابر نمی‌کند. این موارد فقط با شاهد جدید قابل بازگشایی‌اند.
+
+#### ترتیب بستن پیش از تست نهایی staging
+
+1. `R01` و تست‌های منفی audit؛ سپس inventory واقعی مبنای cutover قرار گیرد.
+2. `R02`, `R11`, `R12`, `R26` برای lifecycle و rollout بدون owner هم‌زمان.
+3. `R03..R10`, `R13`, `R14` برای حذف windowهای گم‌شدن/ابهام و recovery ناقص.
+4. `R17`, `R18`, `R21`, `R22` برای scheduler/limiter/transport قابل‌اعتماد.
+5. `R15`, `R16`, `R19`, `R20`, `R23`, `R27` برای API، privacy، retention و عملیات.
+6. cutover تمام callsite/timerهای باقی‌مانده، اجرای suite کامل و تولید evidence bundle روی SHA تمیز.
+7. `R25` و `R28` فقط در Stage 4 با Telegram/staging زنده تعیین تکلیف می‌شوند. تست نهایی `1800 valid + 400 invalid` تا تکمیل بندهای ۱ تا ۶ شروع نمی‌شود و در scope اجرای فعلی نیست.
 
 ## 14. معیار پذیرش نهایی
 

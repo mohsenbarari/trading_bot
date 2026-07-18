@@ -55,3 +55,9 @@
 ## rollout و rollback
 
 ابتدا schema و routing با editor خاموش deploy می‌شوند. Stage 4 smoke، benchmark و تست head-of-line دو lane را اجرا می‌کند؛ سپس یک flag مستقل `channel_editor_enabled` فقط برای editهای کانال فعال می‌شود. rollback این flag را خاموش و claim جدید lane editor را متوقف می‌کند؛ in-flight/ambiguous قبل از routing دوباره reconcile می‌شوند. pending job موجود خودکار به primary بازنویسی نمی‌شود و migration حذف نمی‌شود.
+
+## الحاقیه ممیزی `2026-07-18`
+
+- channel cooldown در startup نباید private primary را متوقف کند؛ identity-only mode فقط private-capable است و مجوز publication/edit نیست.
+- resume برای bot/gateway همانند destination باید saga audit‌شده، full preflight، recheck Redis و crash recovery داشته باشد.
+- permission readback زنده فقط روی SHA نهایی و بلافاصله پیش از smoke Stage 4 معتبر است؛ artifact باید redacted و checksumدار باشد و تمام Story rights نیز false باشند.
