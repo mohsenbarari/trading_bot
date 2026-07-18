@@ -89,9 +89,9 @@ LEGACY_OWNER_FILES = frozenset(
 # bypass must update the reviewed baseline deliberately.
 REMAINING_DISPOSITION_BUDGETS = {
     "remaining_business_direct": 0,
-    "remaining_callback_direct": 292,
+    "remaining_callback_direct": 258,
     "remaining_cleanup_direct": 13,
-    "remaining_interactive_direct": 312,
+    "remaining_interactive_direct": 344,
     "remaining_memory_timer": 7,
 }
 
@@ -159,9 +159,11 @@ def _call_kind(path: str, callee: str) -> str | None:
     if "telegram_gateway" in callee and terminal in GATEWAY_METHODS:
         return "gateway"
     if _is_aiogram_convenience_call(path, callee):
-        if terminal == "answer" and (
-            "callback" in callee.split(".") or "query" in callee.split(".")
-        ):
+        parts = callee.split(".")
+        if terminal == "answer" and len(parts) >= 2 and parts[-2] in {
+            "callback",
+            "query",
+        }:
             return "callback_answer"
         return "interactive_message"
     return None

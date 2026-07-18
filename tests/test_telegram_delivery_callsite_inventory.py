@@ -112,6 +112,26 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             }.issubset(guarded_scopes)
         )
 
+    def test_callback_inventory_excludes_new_private_messages(self):
+        callback_calls = [
+            item
+            for item in self.inventory
+            if item.disposition == "remaining_callback_direct"
+        ]
+        interactive_calls = [
+            item
+            for item in self.inventory
+            if item.disposition == "remaining_interactive_direct"
+        ]
+
+        self.assertEqual(len(callback_calls), 258)
+        self.assertFalse(
+            any(item.callee.endswith(".message.answer") for item in callback_calls)
+        )
+        self.assertTrue(
+            any(item.callee == "callback.message.answer" for item in interactive_calls)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

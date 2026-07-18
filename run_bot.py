@@ -23,7 +23,12 @@ from bot.handlers import (
 )
 from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
-from bot.middlewares import AuthMiddleware, StaleNavigationHandoffMiddleware, TradeContentionGateMiddleware
+from bot.middlewares import (
+    AuthMiddleware,
+    CallbackReceiptMiddleware,
+    StaleNavigationHandoffMiddleware,
+    TradeContentionGateMiddleware,
+)
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
@@ -120,6 +125,9 @@ async def main():
         storage=storage,
         events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
     )
+
+    # Capture the callback deadline origin before Auth or any other DB work.
+    dp.update.outer_middleware(CallbackReceiptMiddleware())
 
     # Hot trade callbacks must fail fast before Auth opens a DB session.
     dp.update.outer_middleware(TradeContentionGateMiddleware())

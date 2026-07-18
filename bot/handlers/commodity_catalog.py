@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from bot.callbacks import CommodityCatalogPageCallback
 from bot.message_manager import DeleteDelay, delete_previous_anchor, set_anchor
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import is_user_global_web_locked
 from models.commodity import Commodity
@@ -239,7 +240,11 @@ async def paginate_commodity_catalog(
     user: User | None,
 ):
     if not _bot_user_can_view_catalog(user):
-        await callback.answer("دسترسی ندارید.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "دسترسی ندارید.",
+            show_alert=True,
+        )
         return
 
     text, keyboard = await _render_catalog(callback_data.page)
@@ -247,4 +252,4 @@ async def paginate_commodity_catalog(
         await callback.message.edit_text(text, reply_markup=keyboard)
     except TelegramBadRequest:
         pass
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
