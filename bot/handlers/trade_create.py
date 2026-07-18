@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 from aiogram import Router, F, types, Bot
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -1685,16 +1686,68 @@ async def _text_offer_response(
     edit: bool,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = None,
-) -> None:
+) -> types.Message | None:
     kwargs = {}
     if reply_markup is not None:
         kwargs["reply_markup"] = reply_markup
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
     if edit:
-        await message.edit_text(text, **kwargs)
+        response = await message.edit_text(text, **kwargs)
     else:
-        await message.answer(text, **kwargs)
+        response = await message.answer(text, **kwargs)
+    return response if isinstance(response, types.Message) else None
+
+
+async def _disable_pending_text_offer_confirmation(
+    state: FSMContext,
+    bot: Bot | object,
+) -> None:
+    """Best-effort removal of buttons from the superseded offer preview."""
+    data = await state.get_data()
+    if not isinstance(data, Mapping):
+        return
+    chat_id = data.get("text_offer_confirmation_chat_id")
+    message_id = data.get("text_offer_confirmation_message_id")
+    if not isinstance(chat_id, int) or not isinstance(message_id, int):
+        return
+
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=None,
+        )
+    except Exception:
+        logger.info(
+            "Could not remove superseded text-offer confirmation buttons",
+            exc_info=True,
+            extra={
+                "event": "telegram.text_offer.superseded_markup_remove_failed",
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
+        )
+
+
+async def _reject_stale_text_offer_callback(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+) -> bool:
+    """Prevent an older preview button from confirming the current FSM draft."""
+    get_data = getattr(state, "get_data", None)
+    if not callable(get_data):
+        return False
+    data = await get_data()
+    if not isinstance(data, Mapping):
+        return False
+    expected_message_id = data.get("text_offer_confirmation_message_id")
+    actual_message_id = getattr(getattr(callback, "message", None), "message_id", None)
+    if not isinstance(expected_message_id, int) or actual_message_id == expected_message_id:
+        return False
+
+    await callback.answer("این پیش\u200cنمایش قدیمی است.", show_alert=True)
+    return True
 
 
 async def _send_repeat_offer_menu_refresh(
@@ -1855,12 +1908,17 @@ async def _prepare_text_offer(
             InlineKeyboardButton(text="❌ انصراف", callback_data=TextOfferActionCallback(action="cancel").pack())
         ]
     ])
-    await _text_offer_response(
+    confirmation_message = await _text_offer_response(
         message,
         preview,
         edit=edit_response,
         reply_markup=confirm_kb,
     )
+    if confirmation_message is not None:
+        await state.update_data(
+            text_offer_confirmation_chat_id=confirmation_message.chat.id,
+            text_offer_confirmation_message_id=confirmation_message.message_id,
+        )
     await state.set_state(Trade.awaiting_text_confirm)
     return True
 
@@ -1948,9 +2006,29 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     )
 
 
+@router.message(Trade.awaiting_text_confirm, F.text.func(has_trade_indicator))
+async def handle_text_offer_while_confirmation_pending(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User],
+    bot: Optional[Bot] = None,
+):
+    """Treat a newly typed offer as a replacement for the pending preview."""
+    if not user:
+        return
+
+    runtime_bot = bot or message.bot
+    await _disable_pending_text_offer_confirmation(state, runtime_bot)
+    await state.clear()
+    await handle_text_offer(message, state, user, runtime_bot)
+
+
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm"))
 async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     """تایید و ارسال لفظ متنی به کانال (از لاجیک مشترک handle_trade_confirm استفاده می‌کند)"""
+    if await _reject_stale_text_offer_callback(callback, state):
+        return
+
     from core.utils import check_user_limits as runtime_check_user_limits
     from core.utils import to_jalali_str as runtime_to_jalali_str
 
@@ -1970,6 +2048,9 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
 
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm_warning"))
 async def handle_text_offer_warning_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
+    if await _reject_stale_text_offer_callback(callback, state):
+        return
+
     from core.utils import check_user_limits as runtime_check_user_limits
     from core.utils import to_jalali_str as runtime_to_jalali_str
 
@@ -1991,6 +2072,9 @@ async def handle_text_offer_warning_confirm(callback: types.CallbackQuery, state
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "cancel"))
 async def handle_text_offer_cancel(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     """انصراف از لفظ متنی"""
+    if await _reject_stale_text_offer_callback(callback, state):
+        return
+
     await callback.message.edit_text("❌ لفظ لغو شد.")
     await state.clear()
     await callback.answer()
