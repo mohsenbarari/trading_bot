@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -360,6 +360,20 @@ async def load_offer_edit_queue_candidates(
     limit: int,
 ) -> list[TelegramOfferQueueCandidate]:
     state = aliased(OfferPublicationState)
+    edit_rank = case(
+        (
+            and_(
+                Offer.status == OfferStatus.ACTIVE,
+                Offer.remaining_quantity.is_not(None),
+                Offer.remaining_quantity < Offer.quantity,
+            ),
+            0,
+        ),
+        (Offer.status == OfferStatus.COMPLETED, 1),
+        (Offer.status == OfferStatus.EXPIRED, 2),
+        (Offer.status == OfferStatus.CANCELLED, 3),
+        else_=4,
+    )
     rows = (
         await db.execute(
             select(Offer, state)
@@ -378,8 +392,9 @@ async def load_offer_edit_queue_candidates(
                     state.offer_version_id != Offer.version_id,
                 ),
             )
-            # The subordinate edit queue is explicitly newest-first.
-            .order_by(Offer.updated_at.desc().nullslast(), Offer.created_at.desc(), Offer.id.desc())
+            # Internal action rank is resolved before handing work to the main
+            # queue. Within one rank, the newest Offer is always released first.
+            .order_by(edit_rank.asc(), Offer.created_at.desc(), Offer.id.desc())
             .limit(max(1, int(limit)))
             .with_for_update(of=Offer, skip_locked=True)
         )

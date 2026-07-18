@@ -3,6 +3,8 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.dialects import postgresql
+
 from core.services import telegram_offer_queue_service as service
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from core.utils import utc_now
@@ -211,6 +213,26 @@ class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.skipped_reason, "offer_publication_deadline_passed")
         enqueue.assert_not_awaited()
+
+    async def test_edit_candidate_query_applies_internal_rank_then_newest_offer(self):
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [])),
+        )
+
+        candidates = await service.load_offer_edit_queue_candidates(db, limit=25)
+
+        self.assertEqual(candidates, [])
+        statement = db.execute.await_args.args[0]
+        sql = str(
+            statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("CASE WHEN", sql)
+        self.assertIn("offers.remaining_quantity < offers.quantity", sql)
+        self.assertIn("offers.created_at DESC", sql)
+        self.assertLess(sql.index("CASE WHEN"), sql.index("offers.created_at DESC"))
 
 
 if __name__ == "__main__":
