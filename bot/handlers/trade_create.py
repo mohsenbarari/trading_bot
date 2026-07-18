@@ -99,6 +99,7 @@ from bot.repeat_offer import (
     resolve_bot_repeat_offer_button_candidate,
 )
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import answer_incoming_message_via_runtime
 from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
@@ -356,7 +357,13 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
 
     denial_reason = await _bot_trade_access_denial_reason(user)
     if denial_reason:
-        await message.answer(bot_access_denial_message(denial_reason))
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            bot_access_denial_message(denial_reason),
+            source_key="offer-start-access-denied",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     if user.trading_restricted_until:
@@ -369,17 +376,27 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
             minutes = (total_seconds % 3600) // 60
             countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
             expiry_jalali = to_jalali_str(user.trading_restricted_until, "%Y/%m/%d - %H:%M")
-            await message.answer(
+            await answer_incoming_message_via_runtime(
+                message,
+                user,
                 f"⛔️ **حساب شما مسدود است**\n\n"
                 f"📅 تاریخ رفع مسدودیت: {expiry_jalali}\n"
                 f"⏳ زمان باقی‌مانده: {countdown}\n\n"
                 f"تا رفع مسدودیت امکان انتشار لفظ در کانال را ندارید.",
+                source_key="offer-start-restricted",
+                action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
                 parse_mode="Markdown",
             )
             return
 
     if not await _bot_market_is_open():
-        await message.answer(BOT_MARKET_CLOSED_MESSAGE)
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            BOT_MARKET_CLOSED_MESSAGE,
+            source_key="offer-start-market-closed",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     await state.clear()
@@ -609,15 +626,33 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
         if quantity <= 0:
             raise ValueError()
     except ValueError:
-        await message.answer("❌ لطفاً یک عدد صحیح مثبت وارد کنید.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "❌ لطفاً یک عدد صحیح مثبت وارد کنید.",
+            source_key="offer-quantity-invalid",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     ts = get_trading_settings()
     if quantity < ts.offer_min_quantity:
-        await message.answer(f"❌ حداقل تعداد باید {ts.offer_min_quantity} باشد.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            f"❌ حداقل تعداد باید {ts.offer_min_quantity} باشد.",
+            source_key="offer-quantity-below-min",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
     if quantity > ts.offer_max_quantity:
-        await message.answer(f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد.",
+            source_key="offer-quantity-above-max",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     data = await state.get_data()
@@ -684,7 +719,13 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
         if not lot_sizes:
             raise ValueError()
     except ValueError:
-        await message.answer("❌ لطفاً اعداد را با فاصله وارد کنید (مثال: 10 15 25)")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "❌ لطفاً اعداد را با فاصله وارد کنید (مثال: 10 15 25)",
+            source_key="offer-lots-invalid-format",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     is_valid, error_msg, suggested = validate_lot_sizes(quantity, lot_sizes)
@@ -706,7 +747,14 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
                 )
             ])
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
-        await message.answer(error_msg, reply_markup=keyboard)
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            error_msg,
+            source_key="offer-lots-invalid-allocation",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=keyboard,
+        )
         return
 
     await state.update_data(lot_sizes=sorted(lot_sizes, reverse=True))
@@ -758,7 +806,13 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     price_text = normalize_digits((message.text or "").strip())
     is_valid, price_error = validate_price(price_text)
     if not is_valid:
-        await message.answer(price_error.replace("price", "قیمت"))
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            price_error.replace("price", "قیمت"),
+            source_key="offer-price-invalid",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     data = await state.get_data()
@@ -790,7 +844,13 @@ async def handle_notes_input(message: types.Message, state: FSMContext, user: Op
 
     notes = (message.text or "").strip()
     if len(notes) > 200:
-        await message.answer("❌ توضیحات نباید بیش از 200 کاراکتر باشد.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "❌ توضیحات نباید بیش از 200 کاراکتر باشد.",
+            source_key="offer-notes-too-long",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+        )
         return
 
     await state.update_data(notes=notes)
