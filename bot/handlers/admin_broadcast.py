@@ -7,7 +7,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.states import AdminBroadcast
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
-from bot.telegram_interaction_message import answer_incoming_message_via_runtime
+from bot.telegram_interaction_message import (
+    answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+)
 from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.services.telegram_admin_broadcast_service import (
@@ -136,12 +139,19 @@ async def _estimate_recipient_count(user: User, state_data: dict) -> int:
         return len(recipients)
 
 
-async def _ask_for_message_text(callback: types.CallbackQuery, state: FSMContext) -> None:
+async def _ask_for_message_text(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: User,
+) -> None:
     await state.set_state(AdminBroadcast.awaiting_message_text)
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
         "متن پیام را وارد کنید.\n"
         f"حداکثر طول مجاز: {TELEGRAM_BROADCAST_TEXT_MAX_LENGTH} کاراکتر\n"
         "پیام به صورت متن ساده ارسال می‌شود.",
+        source_key="admin-broadcast-ask-text",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data=f"{CALLBACK_PREFIX}:cancel")]]
         ),
@@ -168,7 +178,12 @@ async def cancel_telegram_admin_broadcast(callback: types.CallbackQuery, state: 
     if await _reject_if_not_superadmin_callback(callback, user):
         return
     await state.clear()
-    await callback.message.edit_text("فرایند ارسال پیام لغو شد.")
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
+        "فرایند ارسال پیام لغو شد.",
+        source_key="admin-broadcast-cancel",
+    )
     await answer_callback_query_via_runtime(callback)
 
 
@@ -181,7 +196,7 @@ async def choose_all_recipients(callback: types.CallbackQuery, state: FSMContext
         target_groups=[],
         selected_user_ids=[],
     )
-    await _ask_for_message_text(callback, state)
+    await _ask_for_message_text(callback, state, user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -194,7 +209,13 @@ async def choose_group_recipients(callback: types.CallbackQuery, state: FSMConte
         target_groups=[],
         selected_user_ids=[],
     )
-    await callback.message.edit_text("گروه‌های دریافت‌کننده را انتخاب کنید:", reply_markup=_groups_keyboard(set()))
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
+        "گروه‌های دریافت‌کننده را انتخاب کنید:",
+        source_key="admin-broadcast-groups",
+        reply_markup=_groups_keyboard(set()),
+    )
     await answer_callback_query_via_runtime(callback)
 
 
@@ -236,7 +257,7 @@ async def finish_group_selection(callback: types.CallbackQuery, state: FSMContex
             show_alert=True,
         )
         return
-    await _ask_for_message_text(callback, state)
+    await _ask_for_message_text(callback, state, user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -250,8 +271,11 @@ async def choose_selected_recipients(callback: types.CallbackQuery, state: FSMCo
         target_groups=[],
         selected_user_ids=[],
     )
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
         "نام، نام کاربری، شماره موبایل یا username کاربر را برای جستجو وارد کنید.",
+        source_key="admin-broadcast-selected",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data=f"{CALLBACK_PREFIX}:cancel")]]
         ),
@@ -318,8 +342,11 @@ async def toggle_selected_user(callback: types.CallbackQuery, state: FSMContext,
     if query:
         async with AsyncSessionLocal() as db:
             recipients = await search_telegram_admin_broadcast_recipients(db, query=query, limit=10)
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
         f"انتخاب‌شده‌ها: {len(selected_ids)}",
+        source_key="admin-broadcast-selected-toggle",
         reply_markup=_search_results_keyboard(recipients, selected_ids=selected_ids),
     )
     await answer_callback_query_via_runtime(callback)
@@ -331,8 +358,11 @@ async def search_again(callback: types.CallbackQuery, state: FSMContext, user: U
         return
     await state.set_state(AdminBroadcast.awaiting_search_query)
     data = await state.get_data()
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
         f"جستجوی جدید را وارد کنید.\nانتخاب‌شده‌ها: {len(data.get('selected_user_ids') or [])}",
+        source_key="admin-broadcast-search-again",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data=f"{CALLBACK_PREFIX}:cancel")]]
         ),
@@ -352,7 +382,7 @@ async def finish_selected_recipients(callback: types.CallbackQuery, state: FSMCo
             show_alert=True,
         )
         return
-    await _ask_for_message_text(callback, state)
+    await _ask_for_message_text(callback, state, user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -435,17 +465,28 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
             "درخواست معتبر نیست.",
             show_alert=True,
         )
-        await callback.message.edit_text(f"خطا در ایجاد پیام: {str(exc)}")
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            f"خطا در ایجاد پیام: {str(exc)}",
+            source_key="admin-broadcast-confirm-error",
+        )
         await state.clear()
         return
 
     await state.clear()
     if receipt_count == 0:
-        await callback.message.edit_text(
-            f"گیرنده واجد شرایطی پیدا نشد.\nشناسه ثبت: {broadcast_id}\nپیامی برای ارسال در صف قرار نگرفت."
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            f"گیرنده واجد شرایطی پیدا نشد.\nشناسه ثبت: {broadcast_id}\nپیامی برای ارسال در صف قرار نگرفت.",
+            source_key="admin-broadcast-confirm-empty",
         )
     else:
-        await callback.message.edit_text(
-            f"✅ پیام در صف ارسال بات قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}"
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            f"✅ پیام در صف ارسال بات قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}",
+            source_key="admin-broadcast-confirm-queued",
         )
     await answer_callback_query_via_runtime(callback)

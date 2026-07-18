@@ -86,6 +86,23 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         self.assertEqual(len(adapter_calls), 1)
         self.assertEqual(adapter_calls[0].disposition, "legacy_mode_guarded")
 
+    def test_admin_broadcast_text_edits_use_queue_adapter(self):
+        remaining_admin_broadcast_calls = [
+            item
+            for item in self.inventory
+            if item.path == "bot/handlers/admin_broadcast.py"
+            and item.disposition.startswith("remaining_")
+        ]
+        self.assertEqual(len(remaining_admin_broadcast_calls), 1)
+        self.assertEqual(
+            remaining_admin_broadcast_calls[0].scope,
+            "toggle_group_recipient",
+        )
+        self.assertEqual(
+            remaining_admin_broadcast_calls[0].callee,
+            "callback.message.edit_reply_markup",
+        )
+
     def test_otp_and_membership_mutations_are_not_misreported_as_shared_message_work(self):
         otp_calls = [
             item
