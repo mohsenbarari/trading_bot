@@ -67,11 +67,15 @@ restore_rollback_unit_intent() {
                     [[ "$current_active" != active \
                         && "$current_active" != activating \
                         && "$current_active" != deactivating ]] || return 75
+                    if [[ "$current_active" == failed ]]; then
+                        echo "preserving failed Writer Witness oneshot during rollback: $unit" >&2
+                        return 70
+                    fi
                 else
                     systemctl stop "$unit"
-                fi
-                if [[ "$current_active" == failed ]]; then
-                    systemctl reset-failed "$unit"
+                    if [[ "$current_active" == failed ]]; then
+                        systemctl reset-failed "$unit"
+                    fi
                 fi
                 ! systemctl is-active --quiet "$unit"
                 ;;
@@ -111,8 +115,10 @@ restore_rollback_unit_intent() {
             --unit-state "$unit:$load_state:$active_state:$unit_file_state"
         )
     done
+    attest_recovery_toolchain
     "${activation_helper[@]}" complete-rollback \
         --release-id "$release_id" \
+        --host-toolchain-inventory-sha256 "$host_toolchain_inventory_sha256" \
         "${observed_unit_state_args[@]}" >/dev/null
 }
 for lock in "$provision_lock" "$rotation_lock"; do
@@ -126,6 +132,66 @@ exec {provision_lock_fd}<>"$provision_lock"
 flock -n "$provision_lock_fd" || exit 0
 exec {rotation_lock_fd}<>"$rotation_lock"
 flock -n "$rotation_lock_fd" || exit 0
+
+binding="$("${activation_helper[@]}" pending-toolchain-binding)"
+case "$binding" in
+    none)
+        test "$("${activation_helper[@]}" recover)" = activation_recovered=no
+        exit 0
+        ;;
+    terminal)
+        test "$("${activation_helper[@]}" recover)" = \
+            activation_recovered=rolled-back-without-service-changes
+        exit 0
+        ;;
+esac
+IFS='|' read -r release_id host_toolchain_inventory_sha256 recovery_candidates \
+    <<<"$binding"
+[[ "$release_id" =~ ^[A-Za-z0-9._-]+$ \
+    && "$host_toolchain_inventory_sha256" =~ ^[0-9a-f]{64}$ \
+    && "$recovery_candidates" =~ ^/var/lib/trading-bot-witness/activation-state/operations/[0-9a-f]{32}/candidates$ ]] || {
+    echo "Writer Witness watchdog recovery binding is unsafe" >&2
+    exit 70
+}
+
+attest_recovery_toolchain() {
+    local refreshed
+    refreshed="$("${activation_helper[@]}" pending-toolchain-binding)"
+    [[ "$refreshed" == "$binding" ]] || {
+        echo "Writer Witness watchdog recovery binding changed" >&2
+        return 70
+    }
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$recovery_candidates/recovery-host-toolchain-verifier.py" \
+        --expected-inventory-sha256 "$host_toolchain_inventory_sha256" \
+        >/dev/null
+}
+
+coproc WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS {
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$recovery_candidates/recovery-package-lock-holder.py"
+}
+package_lock_pid="$WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS_PID"
+package_lock_ready_fd="${WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS[0]}"
+package_lock_control_fd="${WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS[1]}"
+IFS= read -r package_lock_status <&"$package_lock_ready_fd" || {
+    wait "$package_lock_pid" || true
+    echo "Writer Witness watchdog package locks did not become ready" >&2
+    exit 75
+}
+exec {package_lock_ready_fd}<&-
+[[ "$package_lock_status" == package_manager_locks_held=yes ]]
+release_watchdog_package_locks() {
+    if [[ -n "${package_lock_control_fd:-}" ]]; then
+        exec {package_lock_control_fd}>&-
+        package_lock_control_fd=
+        wait "$package_lock_pid"
+    fi
+}
+trap release_watchdog_package_locks EXIT
+attest_recovery_toolchain
 
 result="$("${activation_helper[@]}" recover)"
 case "$result" in
@@ -150,8 +216,11 @@ case "$result" in
         curl --fail --silent --show-error \
             --retry 30 --retry-delay 1 --retry-all-errors \
             http://127.0.0.1:8011/health/ready >/dev/null
+        attest_recovery_toolchain
         "${activation_helper[@]}" complete \
-            --release-id "$release_id" >/dev/null
+            --release-id "$release_id" \
+            --host-toolchain-inventory-sha256 \
+                "$host_toolchain_inventory_sha256" >/dev/null
         ;;
     *)
         echo "unexpected Writer Witness activation recovery result: $result" >&2

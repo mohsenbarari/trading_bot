@@ -46,6 +46,7 @@ shell_sources=( \
 )
 
 python_sources=( \
+    scripts/hold_writer_witness_package_locks.py \
     scripts/plan_writer_witness_real_host_matrix.py \
     scripts/provision_writer_witness_matrix_controller.py \
     scripts/render_writer_witness_credentials.py \
@@ -86,6 +87,11 @@ for relative in sys.argv[2:]:
     compile(path.read_bytes(), str(path), "exec", dont_inherit=True)
 print('{"status":"passed","gate":"writer-witness-closed-source-syntax"}')
 PY
+
+/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+    python3 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+    scripts/verify_writer_witness_host_toolchain.py \
+    --verify-command-surface "$ROOT_DIR" >/dev/null
 
 unit_modules=( \
     tests.test_writer_witness \

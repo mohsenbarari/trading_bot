@@ -85,11 +85,13 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         )
         for path in (self.runtime, *self.client_dir.iterdir()):
             path.chmod(0o600)
+        self._original_campaign_binding = rotation._require_active_campaign_binding
         self.guards = (
             patch.object(rotation, "_require_root"),
             patch.object(rotation, "_require_dark_state"),
             patch.object(rotation, "_require_service_stopped"),
             patch.object(rotation, "_restart_and_verify"),
+            patch.object(rotation, "_require_active_campaign_binding"),
             patch.object(
                 rotation.secrets,
                 "token_hex",
@@ -105,6 +107,8 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         def campaign_aware_prepare(*args, **kwargs):
             if kwargs.get("campaign_tag") is not None:
                 kwargs.setdefault("campaign_not_after", self.campaign_not_after)
+                kwargs.setdefault("campaign_expected_commit", "a" * 40)
+                kwargs.setdefault("campaign_scenario", "RH-001")
             return self._original_prepare(*args, **kwargs)
 
         rotation.prepare = campaign_aware_prepare
@@ -1283,6 +1287,57 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
             "WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER",
             self._values(self.runtime),
         )
+
+    def test_campaign_rotation_cannot_finish_revoked_key_as_future_baseline(self):
+        self._original_prepare(
+            "webapp_fi",
+            0,
+            self.runtime,
+            self.client_dir,
+            self.state_root,
+            campaign_tag="wwm_0123456789ab",
+            campaign_not_after=self.campaign_not_after,
+            campaign_expected_commit="a" * 40,
+            campaign_scenario="RH-001",
+        )
+        rotation.revoke(
+            "webapp_fi", 0, self.runtime, self.client_dir, self.state_root
+        )
+        with self.assertRaisesRegex(rotation.RotationError, "baseline is restored"):
+            rotation.finish("webapp_fi", self.state_root)
+        with self.assertRaisesRegex(rotation.RotationError, "future rotation baseline"):
+            rotation.prepare(
+                "webapp_fi",
+                0,
+                self.runtime,
+                self.client_dir,
+                self.root / "second-state",
+            )
+        rotation.rollback(
+            "webapp_fi", 0, self.runtime, self.client_dir, self.state_root
+        )
+        finished = rotation.finish("webapp_fi", self.state_root)
+        self.assertEqual(finished["phase"], "finished")
+
+    def test_campaign_prepare_binds_exact_server_side_claim(self):
+        with patch.object(
+            rotation.subprocess,
+            "run",
+            return_value=__import__("subprocess").CompletedProcess([], 0, "", ""),
+        ) as run_mock:
+            self._original_campaign_binding(
+                campaign_tag="wwm_0123456789ab",
+                expected_commit="b" * 40,
+                scenario="RH-011",
+                not_after=self.campaign_not_after,
+            )
+        command = run_mock.call_args.args[0]
+        self.assertIn("assert", command)
+        self.assertIn("wwm_0123456789ab", command)
+        self.assertIn("b" * 40, command)
+        self.assertIn("RH-011", command)
+        self.assertIn(self.campaign_not_after, command)
+        self.assertIn("active", command)
 
     def test_rollback_restores_original_runtime_and_client(self):
         runtime_before = self.runtime.read_bytes()

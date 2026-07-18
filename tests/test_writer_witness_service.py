@@ -251,6 +251,49 @@ class WriterWitnessAuthenticationTests(unittest.TestCase):
                     )
                 )
 
+        with self.assertRaisesRegex(
+            WitnessServiceConfigurationError, "cannot be a Matrix key"
+        ):
+            _service_credentials(
+                WriterWitnessServiceSettings(
+                    **{
+                        **bounded_overlap.model_dump(),
+                        "writer_witness_service_webapp_fi_previous_key_id": (
+                            "matrix-wwm_abcdefabcdef-fi"
+                        ),
+                    }
+                )
+            )
+
+    def test_matrix_credential_lifetime_is_capped_by_database_time(self):
+        credential = WitnessClientCredential(
+            key_id="matrix-wwm_0123456789ab-fi",
+            site="webapp_fi",
+            secret=FI_CREDENTIAL.secret,
+            not_after=NOW + timedelta(seconds=901),
+        )
+        body = b"{}"
+        headers = sign_witness_request(
+            credential=credential,
+            method="POST",
+            path=WITNESS_TRANSITION_PATH,
+            body=body,
+            request_id="far-future-campaign",
+            timestamp=int(NOW.timestamp()),
+        )
+        with self.assertRaisesRegex(
+            WitnessAuthenticationError, "exceeds its campaign lifetime"
+        ) as captured:
+            verify_witness_request(
+                credentials={credential.key_id: credential},
+                method="POST",
+                path=WITNESS_TRANSITION_PATH,
+                body=body,
+                headers=headers,
+                now=NOW,
+            )
+        self.assertEqual(captured.exception.code, "witness_campaign_expiry_invalid")
+
     def test_minimal_service_settings_enforce_distinct_database_identity(self):
         private_key, public_key = keypair()
         with tempfile.TemporaryDirectory() as tmpdir:

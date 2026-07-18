@@ -19,6 +19,8 @@ ACTIVATION_MANAGED_UNITS = tuple(ACTIVATION_MODULE["MANAGED_UNITS"])
 
 
 class WriterWitnessDeploymentTests(unittest.TestCase):
+    HOST_TOOLCHAIN_SHA256 = "f" * 64
+
     def _activation_run(
         self,
         root: Path,
@@ -55,6 +57,12 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                         f"/opt/trading-bot-witness/venvs/{release_id}",
                         "--activation-dir",
                         f"/opt/trading-bot-witness/activations/{release_id}",
+                        "--host-toolchain-inventory-sha256",
+                        self.HOST_TOOLCHAIN_SHA256,
+                        "--host-toolchain-verifier",
+                        str(ROOT / "scripts/verify_writer_witness_host_toolchain.py"),
+                        "--package-lock-helper",
+                        str(ROOT / "scripts/hold_writer_witness_package_locks.py"),
                     ]
                 )
             else:
@@ -95,6 +103,18 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                     ]
             for state in unit_states:
                 arguments.extend(["--unit-state", state])
+        if command in {
+            "record-unit-intent",
+            "commit",
+            "complete",
+            "complete-rollback",
+        }:
+            arguments.extend(
+                [
+                    "--host-toolchain-inventory-sha256",
+                    self.HOST_TOOLCHAIN_SHA256,
+                ]
+            )
         environment = {
             "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
             "WRITER_WITNESS_ACTIVATION_TEST_MODE": "1",
@@ -319,6 +339,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("scripts/run_writer_witness_clock_jump_probe.py", manifest)
             self.assertIn("scripts/verify_writer_witness_release.py", manifest)
             self.assertIn("scripts/verify_writer_witness_host_toolchain.py", manifest)
+            self.assertIn("scripts/hold_writer_witness_package_locks.py", manifest)
             self.assertIn("scripts/verify_writer_witness_runtime.py", manifest)
             self.assertIn("scripts/verify_writer_witness_runtime_provenance.py", manifest)
             self.assertIn("scripts/verify_writer_witness_process_maps.py", manifest)
@@ -363,6 +384,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             "deploy/writer-witness/writer-witness-s3-put.py",
             "deploy/writer-witness/writer-witness-state-manifest.sh",
             "scripts/render_writer_witness_credentials.py",
+            "scripts/hold_writer_witness_package_locks.py",
             "scripts/run_writer_witness_clock_jump_probe.py",
             "scripts/smoke_writer_witness_client.py",
             "scripts/verify_writer_witness_nftables.py",
@@ -470,8 +492,16 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         )
         self.assertIn('flock -n "$provision_lock_fd"', watchdog_script)
         self.assertIn('flock -n "$rotation_lock_fd"', watchdog_script)
+        self.assertIn("pending-toolchain-binding", watchdog_script)
+        self.assertIn("recovery-package-lock-holder.py", watchdog_script)
+        self.assertIn("recovery-host-toolchain-verifier.py", watchdog_script)
+        self.assertIn("host_toolchain_inventory_sha256", watchdog_script)
         self.assertLess(
             watchdog_script.index('flock -n "$rotation_lock_fd"'),
+            watchdog_script.index('result="$("${activation_helper[@]}" recover)"'),
+        )
+        self.assertLess(
+            watchdog_script.index("attest_recovery_toolchain"),
             watchdog_script.index('result="$("${activation_helper[@]}" recover)"'),
         )
         self.assertIn("Environment=PYTHONPYCACHEPREFIX=/dev/null", unit)
@@ -558,6 +588,87 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             recovered = self._activation_run(root, "recover")
             self.assertEqual(recovered.returncode, 0, recovered.stderr)
             self.assertIn("rolled-back-without-service-changes", recovered.stdout)
+
+    def test_activation_recovery_helpers_are_copied_and_journal_bound_at_begin(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-recovery-binding-") as raw:
+            root = Path(raw)
+            release_id = "recovery-binding"
+            self._prepare_activation_host(root, release_id)
+            begun = self._activation_run(root, "begin", release_id=release_id)
+            self.assertEqual(begun.returncode, 0, begun.stderr)
+            candidates = Path(begun.stdout.strip())
+            binding = self._activation_run(root, "pending-toolchain-binding")
+            self.assertEqual(binding.returncode, 0, binding.stderr)
+            release, digest, observed_candidates = binding.stdout.strip().split("|")
+            self.assertEqual(release, release_id)
+            self.assertEqual(digest, self.HOST_TOOLCHAIN_SHA256)
+            self.assertEqual(Path(observed_candidates), candidates)
+            verifier = candidates / "recovery-host-toolchain-verifier.py"
+            self.assertEqual(verifier.stat().st_mode & 0o777, 0o700)
+            verifier.write_text("tampered\n", encoding="utf-8")
+            refused = self._activation_run(root, "pending-toolchain-binding")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("differs from its journal", refused.stderr)
+
+    def test_no_service_terminal_archive_recovers_after_every_hard_kill(self):
+        failpoints = (
+            "rollback_without_service_terminal_recorded",
+            "archive_history_published",
+            "archive_before_journal_unlink",
+            "archive_journal_unlinked",
+            "archive_journal_fsynced",
+            "archive_operation_removed",
+            "archive_operation_fsynced",
+        )
+        for failpoint in failpoints:
+            with self.subTest(failpoint=failpoint):
+                with tempfile.TemporaryDirectory(
+                    prefix="writer-witness-terminal-archive-"
+                ) as directory:
+                    root = Path(directory)
+                    release_id = "terminal-retry"
+                    paths = self._prepare_activation_host(root, release_id)
+                    begun = self._activation_run(root, "begin", release_id=release_id)
+                    self.assertEqual(begun.returncode, 0, begun.stderr)
+
+                    killed = self._activation_run(
+                        root,
+                        "recover",
+                        kill_after=failpoint,
+                        complete_rollback=False,
+                    )
+                    self.assertEqual(killed.returncode, -signal.SIGKILL, killed.stderr)
+
+                    recovered = self._activation_run(root, "recover")
+                    self.assertEqual(recovered.returncode, 0, recovered.stderr)
+                    repeated = self._activation_run(root, "recover")
+                    self.assertEqual(repeated.returncode, 0, repeated.stderr)
+                    self.assertIn("activation_recovered=no", repeated.stdout)
+                    self.assertFalse(
+                        (
+                            root
+                            / "var/lib/trading-bot-witness/activation-state/active.json"
+                        ).exists()
+                    )
+                    history = list(
+                        (
+                            root
+                            / "var/lib/trading-bot-witness/activation-state/history"
+                        ).glob("*-rolled_back_without_service_changes.json")
+                    )
+                    self.assertEqual(len(history), 1)
+                    self.assertFalse(paths["release"].exists())
+                    self.assertFalse(paths["venv"].exists())
+                    self.assertFalse(paths["activation"].exists())
+                    self.assertEqual(
+                        (root / "srv/trading-bot-witness/current").resolve(),
+                        paths["old_release"].resolve(),
+                    )
+
+                    retried = self._activation_run(root, "begin", release_id=release_id)
+                    self.assertEqual(retried.returncode, 0, retried.stderr)
+                    cleaned = self._activation_run(root, "recover")
+                    self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
 
     def test_activation_rollback_completion_requires_exact_observed_unit_state(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-exact-intent-") as directory:
@@ -656,7 +767,8 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("--system-only", script)
         self.assertIn("--system-runtime-manifest", script)
         self.assertIn("--expected-system-runtime-manifest-sha256", script)
-        self.assertIn('"schema_version": "writer_witness_runtime_provenance_v2"', script)
+        self.assertIn('"schema_version": "writer_witness_runtime_provenance_v3"', script)
+        self.assertIn('"host_toolchain_inventory_sha256"', script)
         self.assertIn("basicConstraints=critical,CA:TRUE,pathlen:0", script)
         self.assertIn("keyUsage=critical,keyCertSign,cRLSign", script)
         self.assertIn("extendedKeyUsage=serverAuth", script)
@@ -767,6 +879,18 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn('writer-witness-offsite-backup.service', script)
         self.assertIn('systemctl mask --runtime "$unit"', script)
         self.assertIn('ActiveState --value "$unit"', script)
+        self.assertIn("preserves failed oneshot evidence", script)
+        snapshot = script[script.index("activation_unit_state_args=()") :]
+        self.assertNotIn(
+            "active|activating|deactivating|inactive|failed) active_state=inactive",
+            snapshot,
+        )
+        wait_loop = snapshot[
+            snapshot.index(
+                "for unit in writer-witness-backup.service writer-witness-offsite-backup.service"
+            ) :
+        ]
+        self.assertNotIn('systemctl reset-failed "$unit"', wait_loop)
         self.assertIn("activation could not quiesce", script)
         self.assertLess(
             script.index("installed_activation publish"),

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import hmac
+import re
 
 from core.runtime_sites import WEBAPP_SITES
 
@@ -18,6 +19,10 @@ HEADER_SITE = "X-Writer-Witness-Site"
 HEADER_TIMESTAMP = "X-Writer-Witness-Timestamp"
 HEADER_REQUEST_ID = "X-Writer-Witness-Request-Id"
 HEADER_SIGNATURE = "X-Writer-Witness-Signature"
+MATRIX_CREDENTIAL_PATTERN = re.compile(
+    r"matrix-wwm_[0-9a-f]{12}-(?:fi|ir)\Z"
+)
+MAX_MATRIX_CREDENTIAL_REMAINING_SECONDS = 900
 
 
 class WitnessAuthenticationError(RuntimeError):
@@ -140,6 +145,18 @@ def verify_witness_request(
     if credential is None or credential.site != site or site not in WEBAPP_SITES:
         raise WitnessAuthenticationError("unknown witness client credential")
     current = _utc(now)
+    if MATRIX_CREDENTIAL_PATTERN.fullmatch(credential.key_id):
+        if credential.not_after is None:
+            raise WitnessAuthenticationError(
+                "matrix witness credential lacks a campaign expiry",
+                code="witness_campaign_expiry_invalid",
+            )
+        remaining = (_utc(credential.not_after) - current).total_seconds()
+        if remaining > MAX_MATRIX_CREDENTIAL_REMAINING_SECONDS:
+            raise WitnessAuthenticationError(
+                "matrix witness credential exceeds its campaign lifetime",
+                code="witness_campaign_expiry_invalid",
+            )
     if credential.not_after is not None and current >= _utc(credential.not_after):
         raise WitnessAuthenticationError(
             "witness client credential has expired",

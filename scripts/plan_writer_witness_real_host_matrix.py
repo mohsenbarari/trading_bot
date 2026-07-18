@@ -45,6 +45,7 @@ SOURCE_GATE = ROOT / "scripts/run_writer_witness_preflight_source_gate.sh"
 PINNED_SOURCE_PATHS = (
     "scripts/build_writer_witness_release.sh",
     "scripts/build_writer_witness_wheelhouse.sh",
+    "scripts/hold_writer_witness_package_locks.py",
     "scripts/plan_writer_witness_real_host_matrix.py",
     "scripts/provision_writer_witness_host.sh",
     "scripts/provision_writer_witness_matrix_controller.py",
@@ -424,6 +425,7 @@ def remote_check_specs(
     include_source_tests: bool = True,
     expected_commit: str | None = None,
     expected_release_manifest_sha256: str | None = None,
+    expected_host_toolchain_inventory_sha256: str | None = None,
     expected_active_campaign_tag: str | None = None,
     expected_active_campaign_scenario: str | None = None,
     expected_active_campaign_not_after: str | None = None,
@@ -448,6 +450,18 @@ def remote_check_specs(
         or any(char not in "0123456789abcdef" for char in expected_release_manifest_sha256)
     ):
         raise ValueError("expected_release_manifest_sha256 must be 64 lowercase hex characters")
+    expected_host_toolchain_inventory_sha256 = str(
+        expected_host_toolchain_inventory_sha256 or ""
+    ).strip()
+    if expected_host_toolchain_inventory_sha256:
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_host_toolchain_inventory_sha256):
+            raise ValueError(
+                "expected_host_toolchain_inventory_sha256 must be 64 lowercase hex characters"
+            )
+    else:
+        # Plan-only callers may inspect the command shape without authorizing
+        # execution. Actual preflight rejects this sentinel before SSH.
+        expected_host_toolchain_inventory_sha256 = "UNCONFIGURED-HOST-TOOLCHAIN"
     release_verifier_sha256 = hashlib.sha256(
         (ROOT / "scripts/verify_writer_witness_release.py").read_bytes()
     ).hexdigest()
@@ -743,6 +757,12 @@ def remote_check_specs(
                 "--release-root \"$release\" "
                 f"--expected-manifest-sha256 \"{expected_release_manifest_sha256}\" "
                 "--expected-uid 0 --expected-gid 0; "
+                f"host_toolchain_attestation=$({clean_python_prefix} "
+                f"{shlex.quote(expected_python_executable)} {clean_python_flags} "
+                "\"$release/scripts/verify_writer_witness_host_toolchain.py\" "
+                "--expected-inventory-sha256 "
+                f"{shlex.quote(expected_host_toolchain_inventory_sha256)}); "
+                "test \"$host_toolchain_attestation\" = host_toolchain_attested=yes; "
                 f"system_runtime_attestation=$({clean_python_prefix} "
                 f"{shlex.quote(expected_python_executable)} {clean_python_flags} "
                 "\"$release/scripts/verify_writer_witness_runtime.py\" --system-only "
@@ -802,6 +822,8 @@ def remote_check_specs(
                 f"--expected-python-version {shlex.quote(expected_python_version)} "
                 f"--expected-python-sha256 {shlex.quote(expected_python_sha256)} "
                 f"--expected-system-runtime-manifest-sha256 {shlex.quote(expected_system_runtime_manifest_sha256)} "
+                "--expected-host-toolchain-inventory-sha256 "
+                f"{shlex.quote(expected_host_toolchain_inventory_sha256)} "
                 "--expected-uid 0 --expected-gid 0); "
                 "printf '%s' \"$runtime_provenance_attestation\" "
                 "| grep -F '\"runtime_provenance_attested\":\"yes\"' >/dev/null; "
@@ -954,7 +976,8 @@ def remote_check_specs(
                 "echo unsigned_status=401; echo cert_sha256=$cert; echo cert_not_after_epoch=$cert_end; "
                 "echo manifest_sha256=$manifest; echo nginx_sha256=$nginx_sha; echo firewall_sha256=$firewall_sha; "
                 "echo release_manifest_sha256=$release_manifest_sha; echo installed_helpers_match=yes; echo effective_unit_attested=yes; "
-                "echo system_runtime_attested=yes; echo runtime_attested=yes; echo runtime_provenance_attested=yes; echo offsite_upload_attested=yes; echo running_release_match=yes; echo network_policy_semantics_match=yes; "
+                "echo host_toolchain_attested=yes; echo system_runtime_attested=yes; echo runtime_attested=yes; echo runtime_provenance_attested=yes; echo offsite_upload_attested=yes; echo running_release_match=yes; echo network_policy_semantics_match=yes; "
+                f"echo host_toolchain_inventory_sha256={expected_host_toolchain_inventory_sha256}; "
                 f"echo nftables_policy_sha256={expected_nftables_policy_sha256}; "
                 "echo database_inventory_sha256=$inventory_sha; echo connection_enabled_aux_databases=0; echo orphan_candidate_failed_databases=0; "
                 "echo campaign_state=$campaign_state; echo isolated_pressure_state=absent; "
@@ -1128,6 +1151,12 @@ def source_manifest() -> dict[str, str]:
     return result
 
 
+def source_manifest_sha256(manifest: dict[str, str] | None = None) -> str:
+    payload = manifest if manifest is not None else source_manifest()
+    encoded = (json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n").encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def witness_release_manifest_sha256() -> str:
     with tempfile.TemporaryDirectory(prefix="writer-witness-matrix-release-") as parent:
         destination = Path(parent) / "release"
@@ -1144,6 +1173,7 @@ def build_plan(
     *,
     include_source_tests: bool = True,
     expected_commit: str | None = None,
+    expected_host_toolchain_inventory_sha256: str | None = None,
     expected_active_campaign_tag: str | None = None,
     expected_active_campaign_scenario: str | None = None,
     expected_active_campaign_not_after: str | None = None,
@@ -1151,10 +1181,14 @@ def build_plan(
 ) -> dict[str, object]:
     git = git_metadata(expected_commit)
     expected_release_manifest_sha256 = witness_release_manifest_sha256()
+    frozen_source_manifest = source_manifest()
     checks = remote_check_specs(
         include_source_tests=include_source_tests,
         expected_commit=str(git["expected_commit"]),
         expected_release_manifest_sha256=expected_release_manifest_sha256,
+        expected_host_toolchain_inventory_sha256=(
+            expected_host_toolchain_inventory_sha256
+        ),
         expected_active_campaign_tag=expected_active_campaign_tag,
         expected_active_campaign_scenario=expected_active_campaign_scenario,
         expected_active_campaign_not_after=expected_active_campaign_not_after,
@@ -1167,8 +1201,15 @@ def build_plan(
         "git": git,
         "run_bundle": {
             "expected_commit": git["expected_commit"],
-            "source_sha256": source_manifest(),
+            "source_manifest": frozen_source_manifest,
+            "source_sha256": source_manifest_sha256(frozen_source_manifest),
             "witness_release_manifest_sha256": expected_release_manifest_sha256,
+            "host_toolchain_inventory_sha256": (
+                expected_host_toolchain_inventory_sha256
+            ),
+            "host_toolchain_inventory_configured": bool(
+                expected_host_toolchain_inventory_sha256
+            ),
             "python_runtime": python_runtime_binding(),
             "requirements_lock_sha256": hashlib.sha256(
                 (ROOT / "deploy/writer-witness/requirements.lock").read_bytes()
@@ -1271,12 +1312,27 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
         return plan, 2
 
     bundle = plan.get("run_bundle")
-    if not isinstance(bundle, dict) or bundle.get("source_sha256") != source_manifest():
+    current_source_manifest = source_manifest()
+    if (
+        not isinstance(bundle, dict)
+        or bundle.get("source_manifest") != current_source_manifest
+        or bundle.get("source_sha256")
+        != source_manifest_sha256(current_source_manifest)
+    ):
         plan["status"] = "blocked_source_bundle_drift"
         return plan, 2
     expected_release_manifest = witness_release_manifest_sha256()
     if bundle.get("witness_release_manifest_sha256") != expected_release_manifest:
         plan["status"] = "blocked_release_bundle_drift"
+        return plan, 2
+    expected_host_toolchain_inventory = str(
+        bundle.get("host_toolchain_inventory_sha256") or ""
+    )
+    if (
+        bundle.get("host_toolchain_inventory_configured") is not True
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_host_toolchain_inventory)
+    ):
+        plan["status"] = "blocked_host_toolchain_binding"
         return plan, 2
 
     results: list[dict[str, object]] = []
@@ -1284,6 +1340,9 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
     for spec in remote_check_specs(
         expected_commit=str(git_info["expected_commit"]),
         expected_release_manifest_sha256=expected_release_manifest,
+        expected_host_toolchain_inventory_sha256=(
+            expected_host_toolchain_inventory
+        ),
         expected_active_campaign_tag=(
             str(bundle.get("expected_active_campaign_tag"))
             if bundle.get("expected_active_campaign_tag") is not None
@@ -1351,6 +1410,10 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
         failed.append("matrix_witness_release_manifest_attestation_missing")
     expected_matrix_markers = {
         "installed_helpers_match": "yes",
+        "host_toolchain_attested": "yes",
+        "host_toolchain_inventory_sha256": (
+            expected_host_toolchain_inventory
+        ),
         "effective_unit_attested": "yes",
         "system_runtime_attested": "yes",
         "runtime_attested": "yes",
@@ -1407,6 +1470,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Exact 40-character feature-branch commit authorized for this run bundle.",
     )
     parser.add_argument(
+        "--expected-host-toolchain-inventory-sha256",
+        help="Exact approved immutable toolchain inventory digest for Matrix Witness.",
+    )
+    parser.add_argument(
         "--expected-active-campaign-tag",
         help="Postflight-only exact remote campaign tag that must remain owned during inspection.",
     )
@@ -1432,9 +1499,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--skip-source-tests is not allowed in preflight mode")
     if args.mode == "preflight" and not args.expected_commit:
         raise SystemExit("--expected-commit is mandatory in preflight mode")
+    if args.mode == "preflight" and not args.expected_host_toolchain_inventory_sha256:
+        raise SystemExit(
+            "--expected-host-toolchain-inventory-sha256 is mandatory in preflight mode"
+        )
     plan = build_plan(
         include_source_tests=not args.skip_source_tests,
         expected_commit=args.expected_commit,
+        expected_host_toolchain_inventory_sha256=(
+            args.expected_host_toolchain_inventory_sha256
+        ),
         expected_active_campaign_tag=args.expected_active_campaign_tag,
         expected_active_campaign_scenario=args.expected_active_campaign_scenario,
         expected_active_campaign_not_after=args.expected_active_campaign_not_after,

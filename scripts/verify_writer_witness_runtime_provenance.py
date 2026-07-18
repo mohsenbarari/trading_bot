@@ -21,7 +21,7 @@ from typing import Iterable, Mapping, Sequence
 
 
 MAXIMUM_JSON_BYTES = 1024 * 1024
-PROVENANCE_SCHEMA_VERSION = "writer_witness_runtime_provenance_v2"
+PROVENANCE_SCHEMA_VERSION = "writer_witness_runtime_provenance_v3"
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 PYTHON_VERSION_PATTERN = re.compile(
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z",
@@ -30,6 +30,7 @@ PYTHON_VERSION_PATTERN = re.compile(
 TRUSTED_SYSTEM_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 PROVENANCE_FIELDS = frozenset(
     {
+        "host_toolchain_inventory_sha256",
         "release_manifest_sha256",
         "requirements_lock_sha256",
         "runtime",
@@ -429,6 +430,7 @@ def attest_runtime_provenance(
     expected_python_version: str,
     expected_python_sha256: str,
     expected_system_runtime_manifest_sha256: str,
+    expected_host_toolchain_inventory_sha256: str,
     expected_uid: int = 0,
     expected_gid: int = 0,
     require_clean_startup: bool = False,
@@ -440,6 +442,10 @@ def attest_runtime_provenance(
         (expected_wheelhouse_manifest_sha256, "expected wheelhouse manifest SHA-256"),
         (expected_requirements_lock_sha256, "expected requirements lock SHA-256"),
         (expected_python_sha256, "expected Python SHA-256"),
+        (
+            expected_host_toolchain_inventory_sha256,
+            "expected host toolchain inventory SHA-256",
+        ),
         (
             expected_system_runtime_manifest_sha256,
             "expected system runtime manifest SHA-256",
@@ -466,6 +472,10 @@ def attest_runtime_provenance(
             "runtime provenance schema version is unsupported"
         )
     for key, expected in (
+        (
+            "host_toolchain_inventory_sha256",
+            expected_host_toolchain_inventory_sha256,
+        ),
         ("release_manifest_sha256", expected_release_manifest_sha256),
         ("wheelhouse_manifest_sha256", expected_wheelhouse_manifest_sha256),
         ("requirements_lock_sha256", expected_requirements_lock_sha256),
@@ -510,6 +520,9 @@ def attest_runtime_provenance(
         "installed_file_count": fresh_runtime["installed_file_count"],
         "installed_files_sha256": fresh_runtime["installed_files_sha256"],
         "installed_package_count": fresh_runtime["installed_package_count"],
+        "host_toolchain_inventory_sha256": (
+            expected_host_toolchain_inventory_sha256
+        ),
         "provenance_sha256": provenance_sha256,
         "release_manifest_sha256": expected_release_manifest_sha256,
         "requirements_lock_sha256": expected_requirements_lock_sha256,
@@ -553,6 +566,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=_sha256_argument,
         required=True,
     )
+    parser.add_argument(
+        "--expected-host-toolchain-inventory-sha256",
+        type=_sha256_argument,
+        required=True,
+    )
     parser.add_argument("--expected-uid", type=_non_negative_identifier, default=0)
     parser.add_argument("--expected-gid", type=_non_negative_identifier, default=0)
     return parser.parse_args(argv)
@@ -571,6 +589,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_python_sha256=args.expected_python_sha256,
             expected_system_runtime_manifest_sha256=(
                 args.expected_system_runtime_manifest_sha256
+            ),
+            expected_host_toolchain_inventory_sha256=(
+                args.expected_host_toolchain_inventory_sha256
             ),
             expected_uid=args.expected_uid,
             expected_gid=args.expected_gid,

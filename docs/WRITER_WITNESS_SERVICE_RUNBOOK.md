@@ -296,9 +296,19 @@ packages exist, both runtime attestation and `pip check` use the stricter `-I
 startup/configuration before the attested path is established. Full venv
 attestation before and after `pip check` must pass the system manifest and its
 release-bound SHA-256. Provenance schema
-`writer_witness_runtime_provenance_v2` must store that SHA-256 both at top level
-and inside the exact fresh runtime object, and its verifier must receive the
-same expected value.
+`writer_witness_runtime_provenance_v3` must store that SHA-256 both at top level
+and inside the exact fresh runtime object. It also stores the approved host
+toolchain inventory SHA-256, and its verifier must receive both exact expected
+values.
+
+Provisioning holds the native POSIX record locks used by apt and dpkg for the
+whole activation, including optional SSH hardening. It re-attests the exact
+host-toolchain digest immediately before every activation journal boundary.
+The journal durably snapshots the release-bound verifier and package-lock
+holder before it is published, so boot/watchdog recovery can acquire the same
+native locks and fail closed on toolchain drift before rollback or completion.
+The real-host preflight independently runs the release-bound toolchain verifier
+and requires the same digest in runtime provenance and in its retained output.
 
 Manifest generation scans native ELF members inside the exact offline wheels
 and adds every system library they require to the host closure. Full venv

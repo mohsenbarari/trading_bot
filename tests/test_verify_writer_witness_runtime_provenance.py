@@ -30,6 +30,7 @@ REQUIREMENTS_SHA256 = "c" * 64
 PYTHON_SHA256 = "d" * 64
 PYTHON_VERSION = "3.12.3"
 SYSTEM_MANIFEST_SHA256 = "9" * 64
+HOST_TOOLCHAIN_SHA256 = "0" * 64
 
 
 def valid_runtime() -> dict[str, object]:
@@ -66,6 +67,7 @@ def valid_runtime() -> dict[str, object]:
 
 def valid_provenance(runtime: dict[str, object] | None = None) -> dict[str, object]:
     return {
+        "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
         "release_manifest_sha256": RELEASE_SHA256,
         "requirements_lock_sha256": REQUIREMENTS_SHA256,
         "runtime": runtime if runtime is not None else valid_runtime(),
@@ -105,6 +107,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
         expected_python_version: str = PYTHON_VERSION,
         expected_python_sha256: str = PYTHON_SHA256,
         expected_system_manifest: str = SYSTEM_MANIFEST_SHA256,
+        expected_host_toolchain: str = HOST_TOOLCHAIN_SHA256,
         expected_uid: int | None = None,
         expected_gid: int | None = None,
     ) -> dict[str, object]:
@@ -117,6 +120,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
             expected_python_version=expected_python_version,
             expected_python_sha256=expected_python_sha256,
             expected_system_runtime_manifest_sha256=expected_system_manifest,
+            expected_host_toolchain_inventory_sha256=expected_host_toolchain,
             expected_uid=os.getuid() if expected_uid is None else expected_uid,
             expected_gid=os.getgid() if expected_gid is None else expected_gid,
         )
@@ -151,6 +155,11 @@ class RuntimeProvenanceTests(unittest.TestCase):
 
     def test_all_release_bindings_are_exact(self) -> None:
         cases = (
+            (
+                "host_toolchain_inventory_sha256",
+                HOST_TOOLCHAIN_SHA256,
+                "8" * 64,
+            ),
             ("release_manifest_sha256", RELEASE_SHA256, "0" * 64),
             ("wheelhouse_manifest_sha256", WHEELHOUSE_SHA256, "1" * 64),
             ("requirements_lock_sha256", REQUIREMENTS_SHA256, "2" * 64),
@@ -170,6 +179,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
                     "expected_wheelhouse": WHEELHOUSE_SHA256,
                     "expected_requirements": REQUIREMENTS_SHA256,
                     "expected_system_manifest": SYSTEM_MANIFEST_SHA256,
+                    "expected_host_toolchain": HOST_TOOLCHAIN_SHA256,
                 }
                 with self.assertRaisesRegex(
                     provenance.RuntimeProvenanceAttestationError,
@@ -299,7 +309,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
 
     def test_schema_version_and_runtime_object_type_are_strict(self) -> None:
         document = valid_provenance()
-        document["schema_version"] = "writer_witness_runtime_provenance_v3"
+        document["schema_version"] = "writer_witness_runtime_provenance_v4"
         self.write_document(document)
         with self.assertRaisesRegex(
             provenance.RuntimeProvenanceAttestationError, "unsupported"
@@ -336,6 +346,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
                 expected_python_version=PYTHON_VERSION,
                 expected_python_sha256=PYTHON_SHA256,
                 expected_system_runtime_manifest_sha256=SYSTEM_MANIFEST_SHA256,
+                expected_host_toolchain_inventory_sha256=HOST_TOOLCHAIN_SHA256,
                 expected_uid=os.getuid(),
                 expected_gid=os.getgid(),
             )
@@ -453,6 +464,7 @@ class RuntimeProvenanceTests(unittest.TestCase):
                 expected_python_version=PYTHON_VERSION,
                 expected_python_sha256=PYTHON_SHA256,
                 expected_system_runtime_manifest_sha256=SYSTEM_MANIFEST_SHA256,
+                expected_host_toolchain_inventory_sha256=HOST_TOOLCHAIN_SHA256,
                 expected_uid=os.getuid(),
                 expected_gid=os.getgid(),
             )
@@ -488,6 +500,8 @@ class CommandLineTests(unittest.TestCase):
             PYTHON_SHA256,
             "--expected-system-runtime-manifest-sha256",
             SYSTEM_MANIFEST_SHA256,
+            "--expected-host-toolchain-inventory-sha256",
+            HOST_TOOLCHAIN_SHA256,
         ]
 
     def test_default_production_owner_is_root_and_json_is_deterministic(self) -> None:
@@ -518,6 +532,10 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(
             keyword["expected_system_runtime_manifest_sha256"],
             SYSTEM_MANIFEST_SHA256,
+        )
+        self.assertEqual(
+            keyword["expected_host_toolchain_inventory_sha256"],
+            HOST_TOOLCHAIN_SHA256,
         )
 
     def test_cli_accepts_explicit_owner_and_reports_attestation_failure(self) -> None:

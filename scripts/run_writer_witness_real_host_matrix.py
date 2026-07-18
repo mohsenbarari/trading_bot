@@ -27,6 +27,8 @@ from typing import Any
 import uuid
 from urllib.parse import urlparse
 
+from scripts import plan_writer_witness_real_host_matrix as preflight_plan
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CLIENT_SCRIPT = ROOT / "scripts/writer_witness_matrix_client.py"
@@ -511,8 +513,21 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
             (ROOT / "deploy/writer-witness/wheelhouse.sha256").read_bytes()
         ).hexdigest(),
     }
-    if not re.fullmatch(r"[0-9a-f]{64}", str(bundle.get("source_sha256", ""))):
+    current_source_manifest = preflight_plan.source_manifest()
+    if (
+        bundle.get("source_manifest") != current_source_manifest
+        or bundle.get("source_sha256")
+        != preflight_plan.source_manifest_sha256(current_source_manifest)
+    ):
         raise MatrixError("preflight run bundle source identity is invalid")
+    host_toolchain_inventory_sha256 = str(
+        bundle.get("host_toolchain_inventory_sha256") or ""
+    )
+    if (
+        bundle.get("host_toolchain_inventory_configured") is not True
+        or not re.fullmatch(r"[0-9a-f]{64}", host_toolchain_inventory_sha256)
+    ):
+        raise MatrixError("preflight host toolchain binding is invalid")
     if bundle.get("python_runtime") != expected_python_runtime:
         raise MatrixError("preflight run bundle Python runtime binding drifted")
     if bundle.get("nftables_policy") != expected_nftables_policy:
@@ -562,6 +577,12 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
         "release_manifest_sha256"
     ):
         raise MatrixError("preflight release manifest is not bound to the observed generation")
+    if (
+        matrix.get("host_toolchain_attested") != "yes"
+        or matrix.get("host_toolchain_inventory_sha256")
+        != host_toolchain_inventory_sha256
+    ):
+        raise MatrixError("preflight host toolchain is not bound to the observed generation")
     if not re.fullmatch(r"writer-witness-[0-9]{8}T[0-9]{6}Z\.dump", str(matrix.get("backup", ""))):
         raise MatrixError("replacement Witness baseline backup identity is invalid")
     required_markers = {
@@ -841,6 +862,23 @@ class Controller:
         self.expected_head = expected_head
         self.preflight = preflight
         self.baseline = baseline
+        preflight_bundle = preflight.get("run_bundle") if isinstance(preflight, dict) else None
+        if existing_journal is None:
+            configured_toolchain = (
+                str(preflight_bundle.get("host_toolchain_inventory_sha256") or "")
+                if isinstance(preflight_bundle, dict)
+                else ""
+            )
+            # Production construction always carries the validated preflight.
+            # The zero value is reserved for deliberately bare unit fixtures,
+            # which never execute remote postflight.
+            self.host_toolchain_inventory_sha256 = configured_toolchain or ("0" * 64)
+        else:
+            self.host_toolchain_inventory_sha256 = str(
+                existing_journal.payload.get("host_toolchain_inventory_sha256") or ""
+            )
+        if not re.fullmatch(r"[0-9a-f]{64}", self.host_toolchain_inventory_sha256):
+            raise MatrixError("campaign host toolchain binding is invalid")
         seed = f"{scenario}|{operator}|{observer}|{utc_now()}|{uuid.uuid4()}".encode()
         self.tag = tag or ("wwm_" + hashlib.sha256(seed).hexdigest()[:12])
         if not re.fullmatch(r"wwm_[0-9a-f]{12}", self.tag):
@@ -977,6 +1015,9 @@ class Controller:
                     "updated_at": self.started_at,
                     "artifact_dir": str(artifact_dir),
                     "baseline": baseline,
+                    "host_toolchain_inventory_sha256": (
+                        self.host_toolchain_inventory_sha256
+                    ),
                     "resources": {},
                 },
                 create=True,
@@ -1593,11 +1634,24 @@ class Controller:
             dirty=True,
         )
 
-    def assert_remote_campaign_owned(self, *, allow_expired_cleanup: bool = False) -> None:
+    def assert_remote_campaign_owned(
+        self,
+        *,
+        allow_expired_campaign_marker: bool = False,
+        use_emergency_transport: bool = False,
+    ) -> None:
+        """Prove exact ownership without conflating expiry and transport authority.
+
+        An exact campaign marker may be inspected after its Witness-clock expiry
+        during ordinary cleanup.  That does not authorize the separately
+        persisted emergency transport reserve, which becomes usable only after
+        the ordinary cleanup deadline has elapsed.
+        """
+
         try:
             inspected_state = self.inspect_remote_campaign(
                 "verify_remote_campaign_ownership",
-                emergency_revocation=allow_expired_cleanup,
+                emergency_revocation=use_emergency_transport,
             )
         except Exception as exc:
             self.mark_remote_campaign_ambiguous("lost_or_foreign")
@@ -1608,7 +1662,7 @@ class Controller:
                 conflict=inspected_state != "absent",
             )
             raise MatrixError("replacement Witness campaign ownership is not proven")
-        if self.remote_campaign_expired and not allow_expired_cleanup:
+        if self.remote_campaign_expired and not allow_expired_campaign_marker:
             raise MatrixError("replacement Witness campaign authorization has expired")
         self.remote_campaign_claimed = True
         self.remote_campaign_ambiguous = False
@@ -2029,7 +2083,9 @@ class Controller:
                 f"prepare_{site}_matrix_credential",
                 f"{REMOTE_ISOLATED_PYTHON} /usr/local/sbin/writer-witness-rotate-hmac "
                 f"prepare --site {site} --expected-epoch 0 --campaign-tag {self.tag} "
-                f"--campaign-not-after {shlex.quote(self.campaign_not_after)}",
+                f"--campaign-not-after {shlex.quote(self.campaign_not_after)} "
+                f"--campaign-expected-commit {shlex.quote(self.expected_head)} "
+                f"--campaign-scenario {shlex.quote(self.scenario)}",
             )
         self.claim("staged_sites", site)
         self.staged_sites.add(site)
@@ -3079,7 +3135,10 @@ class Controller:
             if self.remote_campaign_claimed or self.tag in self.journal.values(
                 "remote_campaign"
             ):
-                self.assert_remote_campaign_owned(allow_expired_cleanup=True)
+                self.assert_remote_campaign_owned(
+                    allow_expired_campaign_marker=True,
+                    use_emergency_transport=True,
+                )
         except Exception as exc:
             errors.append(f"expired_cleanup_ownership:{exc}")
         if not errors:
@@ -3166,7 +3225,7 @@ class Controller:
                 cleanup_errors=["remote_campaign_ownership:not_proven"],
             )
             raise MatrixError("cleanup refused every remote mutation without proven campaign ownership")
-        self.assert_remote_campaign_owned(allow_expired_cleanup=True)
+        self.assert_remote_campaign_owned(allow_expired_campaign_marker=True)
         if not isinstance(self.journal.payload.get("initial_database_inventory"), list):
             if self.journal.payload.get("lifecycle_phase") != "remote_claimed":
                 raise MatrixError(
@@ -3356,6 +3415,8 @@ class Controller:
             "preflight",
             "--expected-commit",
             self.expected_head,
+            "--expected-host-toolchain-inventory-sha256",
+            self.host_toolchain_inventory_sha256,
         ]
         if expect_remote_campaign:
             arguments.extend(
@@ -3402,7 +3463,7 @@ class Controller:
     def finalize_campaign(self) -> None:
         if self.journal.payload.get("lifecycle_phase") != "postflight_verified_release_pending":
             raise MatrixError("campaign cannot release ownership before exact postflight")
-        self.assert_remote_campaign_owned(allow_expired_cleanup=True)
+        self.assert_remote_campaign_owned(allow_expired_campaign_marker=True)
         self.release_remote_campaign()
         self.journal.update(
             status="completed",

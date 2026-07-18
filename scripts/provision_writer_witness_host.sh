@@ -85,11 +85,15 @@ restore_rollback_unit_intent() {
                     [[ "$current_active" != active \
                         && "$current_active" != activating \
                         && "$current_active" != deactivating ]] || return 75
+                    if [[ "$current_active" == failed ]]; then
+                        echo "preserving failed Writer Witness oneshot during rollback: $unit" >&2
+                        return 70
+                    fi
                 else
                     systemctl stop "$unit"
-                fi
-                if [[ "$current_active" == failed ]]; then
-                    systemctl reset-failed "$unit"
+                    if [[ "$current_active" == failed ]]; then
+                        systemctl reset-failed "$unit"
+                    fi
                 fi
                 ! systemctl is-active --quiet "$unit"
                 ;;
@@ -129,6 +133,8 @@ restore_rollback_unit_intent() {
     done
     installed_activation complete-rollback \
         --release-id "$release_id" \
+        --host-toolchain-inventory-sha256 \
+            "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
         "${observed_unit_state_args[@]}" >/dev/null
 }
 
@@ -247,6 +253,7 @@ for required in \
     "$ASSET_DIR/writer-witness-matrix-host-faults.sh" \
     "$ASSET_DIR/writer-witness-matrix-host-fault-state.py" \
     "$SOURCE_DIR/scripts/run_writer_witness_clock_jump_probe.py" \
+    "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py" \
     "$SOURCE_DIR/scripts/render_writer_witness_credentials.py" \
     "$SOURCE_DIR/scripts/smoke_writer_witness_client.py" \
     "$SOURCE_DIR/scripts/verify_writer_witness_release.py" \
@@ -583,9 +590,39 @@ flock -n "$outer_provision_lock_fd" || {
     exit 75
 }
 
-isolated_system_python "$SOURCE_DIR/scripts/verify_writer_witness_host_toolchain.py" \
-    --expected-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
-    >/dev/null
+attest_host_toolchain() {
+    isolated_system_python "$SOURCE_DIR/scripts/verify_writer_witness_host_toolchain.py" \
+        --expected-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+        >/dev/null
+}
+
+# apt/dpkg use POSIX record locks, which are independent from BSD flock.
+# Keep a dedicated child holding their native lock files for the complete
+# activation; the control pipe closes automatically even if this shell dies.
+coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER {
+    isolated_system_python "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py"
+}
+package_lock_holder_pid="$WRITER_WITNESS_PACKAGE_LOCK_HOLDER_PID"
+package_lock_ready_fd="${WRITER_WITNESS_PACKAGE_LOCK_HOLDER[0]}"
+package_lock_control_fd="${WRITER_WITNESS_PACKAGE_LOCK_HOLDER[1]}"
+IFS= read -r package_lock_status <&"$package_lock_ready_fd" || {
+    wait "$package_lock_holder_pid" || true
+    echo "Writer Witness package-manager lock holder did not become ready" >&2
+    exit 75
+}
+exec {package_lock_ready_fd}<&-
+[[ "$package_lock_status" == package_manager_locks_held=yes ]]
+kill -0 "$package_lock_holder_pid"
+
+release_package_manager_locks() {
+    if [[ -n "${package_lock_control_fd:-}" ]]; then
+        exec {package_lock_control_fd}>&-
+        package_lock_control_fd=
+        wait "$package_lock_holder_pid"
+    fi
+}
+
+attest_host_toolchain
 isolated_system_python - <<'PY'
 import grp
 import pwd
@@ -861,7 +898,12 @@ activation_candidates="$(installed_activation begin \
     --release-id "$RELEASE_ID" \
     --release-dir "$release_dir" \
     --venv-dir "$venv_dir" \
-    --activation-dir "$activation_dir")"
+    --activation-dir "$activation_dir" \
+    --host-toolchain-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+    --host-toolchain-verifier \
+        "$SOURCE_DIR/scripts/verify_writer_witness_host_toolchain.py" \
+    --package-lock-helper \
+        "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py")"
 
 install -d -m 0755 -o root -g root "$release_dir"
 cp -a "$SOURCE_DIR/." "$release_dir/"
@@ -1508,7 +1550,8 @@ requirements_lock_sha256="$(sha256sum "$ASSET_DIR/requirements.lock" | awk '{pri
     "$requirements_lock_sha256" \
     "$expected_python_version" \
     "$expected_python_sha256" \
-    "$system_runtime_manifest_sha256" <<'PY'
+    "$system_runtime_manifest_sha256" \
+    "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" <<'PY'
 from pathlib import Path
 import json
 import os
@@ -1524,6 +1567,7 @@ import sys
     expected_python_version,
     expected_python_sha256,
     expected_system_runtime_manifest_sha256,
+    expected_host_toolchain_inventory_sha256,
 ) = sys.argv[1:]
 runtime = json.loads(runtime_raw)
 if (
@@ -1541,10 +1585,11 @@ if (
 ):
     raise SystemExit("Writer Witness runtime evidence is not bound to its release inputs")
 payload = {
+    "host_toolchain_inventory_sha256": expected_host_toolchain_inventory_sha256,
     "release_manifest_sha256": release_manifest_sha256,
     "requirements_lock_sha256": requirements_lock_sha256,
     "runtime": runtime,
-    "schema_version": "writer_witness_runtime_provenance_v2",
+    "schema_version": "writer_witness_runtime_provenance_v3",
     "system_runtime_manifest_sha256": expected_system_runtime_manifest_sha256,
     "wheelhouse_manifest_sha256": wheelhouse_manifest_sha256,
 }
@@ -1584,6 +1629,8 @@ PY
     --expected-python-version "$expected_python_version" \
     --expected-python-sha256 "$expected_python_sha256" \
     --expected-system-runtime-manifest-sha256 "$system_runtime_manifest_sha256" \
+    --expected-host-toolchain-inventory-sha256 \
+        "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
     --expected-uid 0 \
     --expected-gid 0 \
     >/dev/null
@@ -1610,7 +1657,11 @@ for unit in "${WRITER_WITNESS_MANAGED_UNITS[@]}"; do
     if [[ "$unit" == writer-witness-backup.service \
         || "$unit" == writer-witness-offsite-backup.service ]]; then
         case "$active_state" in
-            active|activating|deactivating|inactive|failed) active_state=inactive ;;
+            active|activating|deactivating|inactive) active_state=inactive ;;
+            failed)
+                echo "refusing activation while Writer Witness oneshot failure is retained: $unit" >&2
+                exit 70
+                ;;
             *)
                 echo "unsafe Writer Witness oneshot state before activation: $unit:$active_state" >&2
                 exit 70
@@ -1621,8 +1672,10 @@ for unit in "${WRITER_WITNESS_MANAGED_UNITS[@]}"; do
         --unit-state "$unit:$load_state:$active_state:$unit_file_state"
     )
 done
+attest_host_toolchain
 installed_activation record-unit-intent \
     --release-id "$RELEASE_ID" \
+    --host-toolchain-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
     "${activation_unit_state_args[@]}" >/dev/null
 activation_service_stopped=true
 
@@ -1642,8 +1695,8 @@ for unit in writer-witness-backup.service writer-witness-offsite-backup.service;
         case "$active_state" in
             inactive) break ;;
             failed)
-                systemctl reset-failed "$unit"
-                break
+                echo "Writer Witness activation preserves failed oneshot evidence: $unit" >&2
+                exit 70
                 ;;
             active|activating|deactivating)
                 [[ "$attempt" -lt 300 ]] || {
@@ -1746,7 +1799,11 @@ runtime_super="$(runuser -u postgres -- psql -XAtqc \
     --hmac-state-root /var/lib/trading-bot-witness/hmac-rotation \
     --rotation-lock-fd "$rotation_lock_fd" \
     >/dev/null
-installed_activation commit --release-id "$RELEASE_ID" >/dev/null
+attest_host_toolchain
+installed_activation commit \
+    --release-id "$RELEASE_ID" \
+    --host-toolchain-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+    >/dev/null
 activation_transaction_open=false
 
 # A committed journal remains durable until the public daemons and timers are
@@ -1761,16 +1818,19 @@ systemctl restart nginx writer-witness.service
 curl --fail --silent --show-error \
     --retry 30 --retry-delay 1 --retry-all-errors \
     http://127.0.0.1:8011/health/ready >/dev/null
-installed_activation complete --release-id "$RELEASE_ID" >/dev/null
+attest_host_toolchain
+installed_activation complete \
+    --release-id "$RELEASE_ID" \
+    --host-toolchain-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+    >/dev/null
 activation_service_stopped=false
-flock -u "$rotation_lock_fd"
-exec {rotation_lock_fd}>&-
 trap - ERR HUP INT TERM EXIT
 
 # Optional SSH hardening is deliberately outside the release activation
 # transaction.  Both files are atomically published only after the Writer
 # Witness generation itself is durably committed.
 if [[ "$HARDEN_SSH" == "true" ]]; then
+    attest_host_toolchain
     source_authorized_keys="$(getent passwd "$SSH_KEY_SOURCE_USER" | cut -d: -f6)/.ssh/authorized_keys"
     if [[ ! -s "$source_authorized_keys" ]]; then
         echo "cannot harden SSH without a non-empty source authorized_keys file" >&2
@@ -1804,7 +1864,12 @@ EOF
     [[ "$effective_password_auth" == "no" ]]
     [[ "$effective_root_login" == "without-password" || "$effective_root_login" == "prohibit-password" ]]
     systemctl reload ssh
+    attest_host_toolchain
 fi
+
+release_package_manager_locks
+flock -u "$rotation_lock_fd"
+exec {rotation_lock_fd}>&-
 
 printf '{"status":"ready-dark","release":"%s","public_ip":"%s","webapp_flags_changed":false,"cdn_changed":false}\n' \
     "$RELEASE_ID" "$WITNESS_PUBLIC_IP"

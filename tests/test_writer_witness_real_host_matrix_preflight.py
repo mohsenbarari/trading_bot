@@ -173,18 +173,28 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         self.assertIn("writer-witness-activation.py", source_gate)
 
     def test_runtime_provenance_and_effective_nftables_are_release_bound(self):
+        host_toolchain_sha256 = "7" * 64
         command = next(
             " ".join(spec.command)
             for spec in preflight.remote_check_specs(
                 include_source_tests=False,
                 expected_commit="a" * 40,
                 expected_release_manifest_sha256="b" * 64,
+                expected_host_toolchain_inventory_sha256=host_toolchain_sha256,
             )
             if spec.check_id == "matrix_witness_dark_baseline"
         )
         runtime = preflight.python_runtime_binding()
         policy = preflight.nftables_policy_binding()
         self.assertIn("verify_writer_witness_runtime_provenance.py", command)
+        self.assertIn("verify_writer_witness_host_toolchain.py", command)
+        self.assertIn("--expected-inventory-sha256", command)
+        self.assertIn("--expected-host-toolchain-inventory-sha256", command)
+        self.assertIn(host_toolchain_sha256, command)
+        self.assertLess(
+            command.index("verify_writer_witness_host_toolchain.py"),
+            command.index("verify_writer_witness_runtime_provenance.py"),
+        )
         self.assertIn("runtime-provenance.json", command)
         self.assertIn(str(runtime["python_version"]), command)
         self.assertIn(str(runtime["python_sha256"]), command)
@@ -247,8 +257,11 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
                 "expected_commit": "a" * 40,
             },
             "run_bundle": {
-                "source_sha256": preflight.source_manifest(),
+                "source_manifest": preflight.source_manifest(),
+                "source_sha256": preflight.source_manifest_sha256(),
                 "witness_release_manifest_sha256": expected_manifest_sha256,
+                "host_toolchain_inventory_sha256": "7" * 64,
+                "host_toolchain_inventory_configured": True,
             },
         }
         completed = [
@@ -284,7 +297,8 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
                 "expected_commit": "a" * 40,
             },
             "run_bundle": {
-                "source_sha256": preflight.source_manifest(),
+                "source_manifest": preflight.source_manifest(),
+                "source_sha256": preflight.source_manifest_sha256(),
                 "witness_release_manifest_sha256": "a" * 64,
             },
         }

@@ -19,6 +19,7 @@ from scripts.plan_writer_witness_real_host_matrix import abort_and_rollback_cont
 
 
 HEAD = "a" * 40
+HOST_TOOLCHAIN_SHA256 = "7" * 64
 
 
 def lock_worker(path: str, action: str, ready, release, results) -> None:
@@ -44,6 +45,7 @@ def passing_preflight():
         (runner.ROOT / "deploy/writer-witness/nftables-policy.json").read_text(encoding="utf-8")
     )
     release_manifest_sha256 = "9" * 64
+    source_manifest = runner.preflight_plan.source_manifest()
     matrix = {
         "state": "webapp:0:vacant",
         "receipts": "0",
@@ -55,6 +57,8 @@ def passing_preflight():
         "database_inventory_sha256": "2" * 64,
         "release_manifest_sha256": release_manifest_sha256,
         "installed_helpers_match": "yes",
+        "host_toolchain_attested": "yes",
+        "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
         "running_release_match": "yes",
         "release_manifest_attested": "yes",
         "release_metadata_attested": "yes",
@@ -85,8 +89,13 @@ def passing_preflight():
         "git": {"head": HEAD, "expected_commit": HEAD},
         "run_bundle": {
             "expected_commit": HEAD,
-            "source_sha256": "8" * 64,
+            "source_manifest": source_manifest,
+            "source_sha256": runner.preflight_plan.source_manifest_sha256(
+                source_manifest
+            ),
             "witness_release_manifest_sha256": release_manifest_sha256,
+            "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
+            "host_toolchain_inventory_configured": True,
             "python_runtime": python_runtime,
             "requirements_lock_sha256": hashlib.sha256(
                 (runner.ROOT / "deploy/writer-witness/requirements.lock").read_bytes()
@@ -180,18 +189,36 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
             "effective_unit_attested",
             "system_runtime_attested",
             "runtime_provenance_attested",
+            "host_toolchain_attested",
             "nftables_policy_sha256",
         ):
             with self.subTest(marker=marker):
                 payload = passing_preflight()
                 payload["observed_baseline"]["matrix_witness_dark_baseline"].pop(marker)
-                with self.assertRaisesRegex(runner.MatrixError, "required current marker"):
+                with self.assertRaisesRegex(
+                    runner.MatrixError, "required current marker|host toolchain"
+                ):
                     runner.validate_preflight(payload, HEAD)
 
     def test_preflight_rejects_bundle_digest_drift(self):
         payload = passing_preflight()
         payload["run_bundle"]["requirements_lock_sha256"] = "0" * 64
         with self.assertRaisesRegex(runner.MatrixError, "requirements_lock_sha256 drifted"):
+            runner.validate_preflight(payload, HEAD)
+
+        payload = passing_preflight()
+        payload["run_bundle"]["source_manifest"].pop(
+            "writer_witness_app.py"
+        )
+        with self.assertRaisesRegex(runner.MatrixError, "source identity"):
+            runner.validate_preflight(payload, HEAD)
+
+    def test_preflight_rejects_host_toolchain_binding_drift(self):
+        payload = passing_preflight()
+        payload["observed_baseline"]["matrix_witness_dark_baseline"][
+            "host_toolchain_inventory_sha256"
+        ] = "6" * 64
+        with self.assertRaisesRegex(runner.MatrixError, "host toolchain"):
             runner.validate_preflight(payload, HEAD)
 
     def test_preflight_freshness_begins_when_expensive_checks_complete(self):
@@ -380,6 +407,8 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
     def test_abort_monitor_failure_interrupts_scenario_wait(self):
         controller = object.__new__(runner.Controller)
         controller.tag = "wwm_0123456789ab"
+        controller.expected_head = HEAD
+        controller.scenario = "RH-001"
         controller._abort_event = __import__("threading").Event()
         controller._abort_reason = None
         controller._monitor_thread = None
@@ -391,6 +420,8 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
     def test_partial_staging_is_owned_before_ambiguous_transfer(self):
         controller = object.__new__(runner.Controller)
         controller.tag = "wwm_0123456789ab"
+        controller.expected_head = HEAD
+        controller.scenario = "RH-001"
         controller.remote_root = "/run/writer-witness-matrix/wwm_0123456789ab"
         controller.local_secret_root = Path(tempfile.mkdtemp())
         controller.rotation_sites = set()
@@ -832,6 +863,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                     "tag": tag,
                     "scenario": "RH-001",
                     "expected_commit": HEAD,
+                    "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
                     "dpi_byte_budget": runner.MIN_DPI_BYTE_BUDGET,
                     "max_scenario_seconds": runner.MAX_SCENARIO_SECONDS,
                     "created_at": created_at.isoformat(),
@@ -934,6 +966,123 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"),
         ):
             controller.command("forbidden_recovery_after_expiry", ["true"])
+
+    def test_expired_marker_permission_does_not_consume_emergency_transport(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 200.0
+        controller._emergency_revocation_mode = False
+        controller.remote_campaign_expired = True
+        controller.remote_campaign_claimed = True
+        controller.remote_campaign_ambiguous = False
+        controller.remote_campaign_conflict = False
+        controller.journal = mock.Mock()
+        controller.event = mock.Mock(return_value=True)
+        controller.redact_command_output = lambda value: value
+        controller.secret_output_detected = False
+        controller._secret_sentinels = set()
+        controller._budget_lock = __import__("threading").Lock()
+        controller.control_requests = 0
+        controller.control_bytes_upper_bound = 0
+        controller.transport_operations = 0
+        controller.transport_bytes_upper_bound = 0
+        controller.cleanup_transport_operations = 0
+        controller.cleanup_transport_bytes_upper_bound = 0
+        controller.emergency_transport_operations = 0
+        controller.emergency_transport_bytes_upper_bound = 0
+        controller._transport_master_roles = set()
+        controller._transport_master_deadlines = {}
+        controller.dpi_byte_budget = runner.MIN_DPI_BYTE_BUDGET
+        controller.local_secret_root = Path(tempfile.mkdtemp(prefix="matrix-marker-"))
+        controller.tag = "wwm_0123456789ab"
+        controller.expected_head = HEAD
+        controller.scenario = "RH-001"
+        controller.campaign_not_after = "2026-07-18T12:00:00Z"
+
+        inspection = json.dumps(
+            {
+                "status": "inspected",
+                "state": "active_exact",
+                "expired": True,
+                "active_relation": "exact",
+                "release_relation": "absent",
+                "tag": controller.tag,
+                "expected_commit": controller.expected_head,
+                "scenario": controller.scenario,
+                "not_after": controller.campaign_not_after,
+            }
+        ) + "\n"
+        completed = subprocess.CompletedProcess([], 0, inspection, "")
+        with (
+            mock.patch.object(runner.time, "monotonic", return_value=100.0),
+            mock.patch.object(runner.subprocess, "run", return_value=completed),
+        ):
+            controller.assert_remote_campaign_owned(
+                allow_expired_campaign_marker=True
+            )
+
+        self.assertEqual(controller.cleanup_transport_operations, 1)
+        self.assertEqual(controller.emergency_transport_operations, 0)
+        self.assertFalse(controller._emergency_revocation_mode)
+
+    def test_emergency_expired_marker_proof_uses_only_emergency_transport(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 99.0
+        controller._emergency_revocation_mode = True
+        controller._emergency_revocation_deadline = 130.0
+        controller.remote_campaign_expired = True
+        controller.remote_campaign_claimed = True
+        controller.remote_campaign_ambiguous = False
+        controller.remote_campaign_conflict = False
+        controller.journal = mock.Mock()
+        controller.event = mock.Mock(return_value=True)
+        controller.redact_command_output = lambda value: value
+        controller.secret_output_detected = False
+        controller._secret_sentinels = set()
+        controller._budget_lock = __import__("threading").Lock()
+        controller.control_requests = 0
+        controller.control_bytes_upper_bound = 0
+        controller.transport_operations = 0
+        controller.transport_bytes_upper_bound = 0
+        controller.cleanup_transport_operations = 0
+        controller.cleanup_transport_bytes_upper_bound = 0
+        controller.emergency_transport_operations = 0
+        controller.emergency_transport_bytes_upper_bound = 0
+        controller._transport_master_roles = set()
+        controller._transport_master_deadlines = {}
+        controller.dpi_byte_budget = runner.MIN_DPI_BYTE_BUDGET
+        controller.local_secret_root = Path(tempfile.mkdtemp(prefix="matrix-emergency-marker-"))
+        controller.tag = "wwm_0123456789ab"
+        controller.expected_head = HEAD
+        controller.scenario = "RH-001"
+        controller.campaign_not_after = "2026-07-18T12:00:00Z"
+
+        inspection = json.dumps(
+            {
+                "status": "inspected",
+                "state": "active_exact",
+                "expired": True,
+                "active_relation": "exact",
+                "release_relation": "absent",
+                "tag": controller.tag,
+                "expected_commit": controller.expected_head,
+                "scenario": controller.scenario,
+                "not_after": controller.campaign_not_after,
+            }
+        ) + "\n"
+        completed = subprocess.CompletedProcess([], 0, inspection, "")
+        with (
+            mock.patch.object(runner.time, "monotonic", return_value=100.0),
+            mock.patch.object(runner.subprocess, "run", return_value=completed),
+        ):
+            controller.assert_remote_campaign_owned(
+                allow_expired_campaign_marker=True,
+                use_emergency_transport=True,
+            )
+
+        self.assertEqual(controller.cleanup_transport_operations, 0)
+        self.assertEqual(controller.emergency_transport_operations, 1)
 
     def test_emergency_timeout_is_one_aggregate_window_across_commands(self):
         controller = object.__new__(runner.Controller)
@@ -1686,6 +1835,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             controller = object.__new__(runner.Controller)
             controller.artifact_dir = Path(directory)
             controller.expected_head = HEAD
+            controller.host_toolchain_inventory_sha256 = HOST_TOOLCHAIN_SHA256
             controller.tag = "wwm_0123456789ab"
             controller.scenario = "RH-001"
             controller.journal = mock.Mock()
@@ -1719,6 +1869,8 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             self.assertIn("--expected-active-campaign-tag", command_args)
             self.assertIn("--expected-active-campaign-scenario", command_args)
             self.assertIn("--expected-active-campaign-not-after", command_args)
+            self.assertIn("--expected-host-toolchain-inventory-sha256", command_args)
+            self.assertIn(HOST_TOOLCHAIN_SHA256, command_args)
             self.assertIn(controller.tag, command_args)
 
             controller.journal.payload.update(

@@ -22,6 +22,7 @@ import re
 import shutil
 import signal
 import stat
+import subprocess
 import sys
 import uuid
 
@@ -160,6 +161,15 @@ SPECIAL_PATHS = {
 }
 
 RELEASE_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+RECOVERY_HOST_TOOLCHAIN_VERIFIER = "recovery-host-toolchain-verifier.py"
+RECOVERY_PACKAGE_LOCK_HOLDER = "recovery-package-lock-holder.py"
+PACKAGE_MANAGER_LOCK_PATHS = (
+    Path("/var/lib/dpkg/lock-frontend"),
+    Path("/var/lib/dpkg/lock"),
+    Path("/var/lib/apt/lists/lock"),
+    Path("/var/cache/apt/archives/lock"),
+)
 SCHEMA = "writer_witness_activation_v3"
 MANAGED_UNITS = (
     "nginx",
@@ -690,20 +700,49 @@ def _canonical_expected_path(root: Path, raw: str, parent: str, release_id: str)
 
 
 def _archive_and_remove(store: ActivationStore, journal: dict[str, object]) -> None:
+    """Durably terminalize one activation without depending on its snapshots.
+
+    History is published before the active journal is removed, and operation
+    garbage collection happens only after the journal unlink is durable.  A
+    recovery that observes a terminal journal can therefore repeat this
+    function even when an earlier process already published history or removed
+    the operation directory.  Conversely, a crash after the durable journal
+    unlink leaves only an orphan operation, which the no-journal recovery path
+    already owns and removes.
+    """
+
     operation, _, _ = _operation_paths(store, journal)
+    history_name = f"{journal['release_id']}-{journal['operation_id']}-{journal['phase']}.json"
+    history_path = store.history / history_name
+    expected_history = (
+        json.dumps(journal, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    try:
+        observed_history, _ = _read_regular(history_path, 4 * 1024 * 1024)
+    except FileNotFoundError:
+        _atomic_json(history_path, journal, mode=0o600)
+    else:
+        if observed_history != expected_history:
+            raise ActivationError("activation terminal history conflicts with its journal")
+    _kill_after("archive_history_published")
+    _kill_after("archive_before_journal_unlink")
+    store.journal.unlink()
+    _kill_after("archive_journal_unlinked")
+    _fsync_directory(store.state)
+    _kill_after("archive_journal_fsynced")
     if operation.exists():
         if operation.is_symlink() or not operation.is_dir():
             raise ActivationError("activation operation directory is unsafe")
         shutil.rmtree(operation)
+        _kill_after("archive_operation_removed")
         _fsync_directory(store.operations)
-    history_name = f"{journal['release_id']}-{journal['operation_id']}-{journal['phase']}.json"
-    _atomic_json(store.history / history_name, journal, mode=0o600)
-    store.journal.unlink()
-    _fsync_directory(store.state)
+    _kill_after("archive_operation_fsynced")
 
 
 def begin(store: ActivationStore, args: argparse.Namespace) -> None:
     _validate_release_id(args.release_id)
+    if SHA256_RE.fullmatch(args.host_toolchain_inventory_sha256) is None:
+        raise ActivationError("activation host toolchain binding is invalid")
     with store.locked():
         existing = store.read_journal()
         if existing is not None:
@@ -748,6 +787,32 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
         _fsync_directory(snapshots)
         _fsync_directory(operation)
         _fsync_directory(store.operations)
+
+        recovery_helpers: dict[str, str] = {}
+        for name, raw_source in (
+            (RECOVERY_HOST_TOOLCHAIN_VERIFIER, args.host_toolchain_verifier),
+            (RECOVERY_PACKAGE_LOCK_HOLDER, args.package_lock_helper),
+        ):
+            source = Path(raw_source)
+            if not source.is_absolute():
+                raise ActivationError("activation recovery helper path must be absolute")
+            payload, metadata = _read_regular(source, 4 * 1024 * 1024)
+            if (
+                metadata.st_uid != os.geteuid()
+                or metadata.st_gid != os.getegid()
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+            ):
+                raise ActivationError("activation recovery helper metadata is unsafe")
+            _atomic_write(
+                candidates / name,
+                payload,
+                mode=0o700,
+                uid=os.geteuid(),
+                gid=os.getegid(),
+                token=operation_id,
+            )
+            recovery_helpers[name] = hashlib.sha256(payload).hexdigest()
+        _fsync_directory(candidates)
 
         managed: dict[str, object] = {}
         for item in MANAGED_FILES:
@@ -845,6 +910,10 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
             # intentionally outside that service-state snapshot.
             "unit_intent_finalized": False,
             "unit_states": {},
+            "host_toolchain_inventory_sha256": (
+                args.host_toolchain_inventory_sha256
+            ),
+            "recovery_helpers": recovery_helpers,
         }
         store.write_journal(journal)
         _kill_after("begin_journal")
@@ -862,6 +931,7 @@ def record_unit_intent(store: ActivationStore, args: argparse.Namespace) -> None
             raise ActivationError("activation is no longer eligible for unit intent")
         if journal.get("unit_intent_finalized") is not False:
             raise ActivationError("activation unit intent is already finalized")
+        _require_host_toolchain_binding(journal, args.host_toolchain_inventory_sha256)
         journal["unit_states"] = _parse_unit_states(args.unit_state, required=True)
         journal["unit_intent_finalized"] = True
         store.write_journal(journal)
@@ -874,6 +944,16 @@ def _journal_absolute(store: ActivationStore, journal: dict[str, object], key: s
     if not isinstance(raw, str) or raw.startswith("/") or ".." in Path(raw).parts:
         raise ActivationError(f"activation journal path is invalid: {key}")
     return store.root / raw
+
+
+def _require_host_toolchain_binding(
+    journal: dict[str, object], observed_sha256: str
+) -> None:
+    if (
+        SHA256_RE.fullmatch(observed_sha256) is None
+        or journal.get("host_toolchain_inventory_sha256") != observed_sha256
+    ):
+        raise ActivationError("activation host toolchain differs from its journal binding")
 
 
 def _ensure_symlink_pair(directory: Path, release: Path, venv: Path) -> None:
@@ -1145,6 +1225,12 @@ def _safe_remove_tree(path: Path, expected_parent: Path, active: Path) -> None:
 
 def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
     phase = journal.get("phase")
+    if phase == "rolled_back_without_service_changes":
+        # This terminal phase no longer needs snapshots.  An earlier process
+        # may have been killed at any archive substep, including after history
+        # publication or operation garbage collection.
+        _archive_and_remove(store, journal)
+        return
     if phase == "rolled_back_pending_service_completion":
         _cleanup_owned_publication_temps(store, journal)
         active = _mapped(store.root, "/opt/trading-bot-witness/active")
@@ -1166,6 +1252,7 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
         if journal.get("unit_intent_finalized") is not True:
             journal["phase"] = "rolled_back_without_service_changes"
             store.write_journal(journal)
+            _kill_after("rollback_without_service_terminal_recorded")
             _archive_and_remove(store, journal)
         return
     if phase == "committed":
@@ -1260,6 +1347,7 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
     if journal.get("unit_intent_finalized") is not True:
         journal["phase"] = "rolled_back_without_service_changes"
         store.write_journal(journal)
+        _kill_after("rollback_without_service_terminal_recorded")
         _archive_and_remove(store, journal)
 
 
@@ -1290,6 +1378,101 @@ def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
         print("activation_recovered=rolled-back-pending-service-completion")
 
 
+def _validated_recovery_binding(
+    store: ActivationStore, journal: dict[str, object]
+) -> tuple[str, str, Path]:
+    release_id = journal.get("release_id")
+    digest = journal.get("host_toolchain_inventory_sha256")
+    if not isinstance(release_id, str) or not isinstance(digest, str):
+        raise ActivationError("activation recovery binding is invalid")
+    _validate_release_id(release_id)
+    if SHA256_RE.fullmatch(digest) is None:
+        raise ActivationError("activation recovery toolchain digest is invalid")
+    _, candidates, _ = _operation_paths(store, journal)
+    helper_hashes = journal.get("recovery_helpers")
+    if not isinstance(helper_hashes, dict) or set(helper_hashes) != {
+        RECOVERY_HOST_TOOLCHAIN_VERIFIER,
+        RECOVERY_PACKAGE_LOCK_HOLDER,
+    }:
+        raise ActivationError("activation recovery helper binding is incomplete")
+    for name, expected in helper_hashes.items():
+        if not isinstance(expected, str) or SHA256_RE.fullmatch(expected) is None:
+            raise ActivationError("activation recovery helper digest is invalid")
+        payload, metadata = _read_regular(candidates / name, 4 * 1024 * 1024)
+        if (
+            metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+            or hashlib.sha256(payload).hexdigest() != expected
+        ):
+            raise ActivationError("activation recovery helper differs from its journal")
+    return release_id, digest, candidates
+
+
+def _attest_boot_recovery_toolchain(
+    store: ActivationStore, journal: dict[str, object]
+) -> list[int]:
+    """Exclude apt/dpkg and attest before boot-time rollback mutation."""
+
+    descriptors: list[int] = []
+    try:
+        for path in PACKAGE_MANAGER_LOCK_PATHS:
+            descriptor = os.open(
+                path,
+                os.O_RDWR
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != 0
+                or metadata.st_gid != 0
+                or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+            ):
+                os.close(descriptor)
+                raise ActivationError("boot recovery package lock metadata is unsafe")
+            try:
+                fcntl.lockf(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BaseException:
+                os.close(descriptor)
+                raise
+            descriptors.append(descriptor)
+        _, digest, candidates = _validated_recovery_binding(store, journal)
+        completed = subprocess.run(
+            [
+                "/usr/bin/python3.12",
+                "-I",
+                "-S",
+                "-B",
+                "-X",
+                "utf8",
+                "-X",
+                "pycache_prefix=/dev/null",
+                str(candidates / RECOVERY_HOST_TOOLCHAIN_VERIFIER),
+                "--expected-inventory-sha256",
+                digest,
+            ],
+            env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0 or completed.stdout.strip() != "host_toolchain_attested=yes":
+            raise ActivationError("boot recovery host toolchain attestation failed")
+        return descriptors
+    except BaseException:
+        for descriptor in reversed(descriptors):
+            try:
+                fcntl.lockf(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        raise
+
+
 def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
     """Recover at boot while excluding both provision and HMAC rotation."""
 
@@ -1302,6 +1485,7 @@ def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
     flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     provision_descriptor = os.open(provision_lock, flags, 0o600)
     rotation_descriptor = -1
+    package_descriptors: list[int] = []
     try:
         metadata = os.fstat(provision_descriptor)
         if (
@@ -1341,6 +1525,13 @@ def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
                 raise
             print("activation_recovered=deferred-live-rotation")
             return
+        journal = store.read_journal()
+        if (
+            journal is not None
+            and journal.get("phase") != "rolled_back_without_service_changes"
+            and os.environ.get("WRITER_WITNESS_ACTIVATION_TEST_MODE") != "1"
+        ):
+            package_descriptors = _attest_boot_recovery_toolchain(store, journal)
         recover(store, args)
         journal = store.read_journal()
         if (
@@ -1351,6 +1542,12 @@ def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
                 "rolled-back activation is pending exact service restoration"
             )
     finally:
+        for descriptor in reversed(package_descriptors):
+            try:
+                fcntl.lockf(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(descriptor)
         if rotation_descriptor >= 0:
             try:
                 fcntl.flock(rotation_descriptor, fcntl.LOCK_UN)
@@ -1371,6 +1568,7 @@ def commit(store: ActivationStore, args: argparse.Namespace) -> None:
             raise ActivationError("matching activated journal is missing")
         if journal.get("phase") != "activated":
             raise ActivationError("activation is not ready to commit")
+        _require_host_toolchain_binding(journal, args.host_toolchain_inventory_sha256)
         activation_dir = _journal_absolute(store, journal, "activation_dir")
         active = _mapped(store.root, "/opt/trading-bot-witness/active")
         if not active.is_symlink() or active.resolve(strict=True) != activation_dir.resolve(strict=True):
@@ -1391,6 +1589,7 @@ def complete(store: ActivationStore, args: argparse.Namespace) -> None:
             raise ActivationError("matching committed activation journal is missing")
         if journal.get("phase") != "committed":
             raise ActivationError("activation is not committed")
+        _require_host_toolchain_binding(journal, args.host_toolchain_inventory_sha256)
         activation_dir = _journal_absolute(store, journal, "activation_dir")
         active = _mapped(store.root, "/opt/trading-bot-witness/active")
         if not active.is_symlink() or active.resolve(strict=True) != activation_dir.resolve(strict=True):
@@ -1444,6 +1643,7 @@ def complete_rollback(store: ActivationStore, args: argparse.Namespace) -> None:
             raise ActivationError("matching rolled-back activation journal is missing")
         if journal.get("phase") != "rolled_back_pending_service_completion":
             raise ActivationError("activation rollback is not pending service completion")
+        _require_host_toolchain_binding(journal, args.host_toolchain_inventory_sha256)
         unit_states = journal.get("unit_states")
         if not isinstance(unit_states, dict) or set(unit_states) != set(MANAGED_UNITS):
             raise ActivationError("activation unit-state snapshot is incomplete")
@@ -1464,6 +1664,21 @@ def pending_release_id(store: ActivationStore, args: argparse.Namespace) -> None
             raise ActivationError("activation release id is invalid")
         _validate_release_id(release_id)
         print(release_id)
+
+
+def pending_toolchain_binding(store: ActivationStore, _args: argparse.Namespace) -> None:
+    """Return one validated recovery capability without exposing mutable JSON."""
+
+    with store.locked():
+        journal = store.read_journal()
+        if journal is None:
+            print("none")
+            return
+        if journal.get("phase") == "rolled_back_without_service_changes":
+            print("terminal")
+            return
+        release_id, digest, candidates = _validated_recovery_binding(store, journal)
+        print(f"{release_id}|{digest}|{candidates}")
 
 
 def candidate_dir(store: ActivationStore, args: argparse.Namespace) -> None:
@@ -1496,15 +1711,24 @@ def parse_args() -> argparse.Namespace:
     begin_parser.add_argument("--release-dir", required=True)
     begin_parser.add_argument("--venv-dir", required=True)
     begin_parser.add_argument("--activation-dir", required=True)
+    begin_parser.add_argument("--host-toolchain-inventory-sha256", required=True)
+    begin_parser.add_argument("--host-toolchain-verifier", required=True)
+    begin_parser.add_argument("--package-lock-helper", required=True)
     intent_parser = subparsers.add_parser("record-unit-intent")
     intent_parser.add_argument("--release-id", required=True)
     intent_parser.add_argument("--unit-state", action="append", required=True)
+    intent_parser.add_argument("--host-toolchain-inventory-sha256", required=True)
     for name in ("publish", "commit", "complete", "candidate-dir"):
         child = subparsers.add_parser(name)
         child.add_argument("--release-id", required=True)
+        if name in {"commit", "complete"}:
+            child.add_argument("--host-toolchain-inventory-sha256", required=True)
     complete_rollback_parser = subparsers.add_parser("complete-rollback")
     complete_rollback_parser.add_argument("--release-id", required=True)
     complete_rollback_parser.add_argument("--unit-state", action="append", required=True)
+    complete_rollback_parser.add_argument(
+        "--host-toolchain-inventory-sha256", required=True
+    )
     rollback_intent_parser = subparsers.add_parser("rollback-unit-intent")
     rollback_intent_parser.add_argument("--unit", required=True, choices=MANAGED_UNITS)
     pending_parser = subparsers.add_parser("pending-release-id")
@@ -1516,6 +1740,7 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("recover")
     subparsers.add_parser("recover-boot")
     subparsers.add_parser("active-release-id")
+    subparsers.add_parser("pending-toolchain-binding")
     return parser.parse_args()
 
 
@@ -1540,6 +1765,7 @@ def main() -> None:
         "pending-release-id": pending_release_id,
         "candidate-dir": candidate_dir,
         "active-release-id": active_release_id,
+        "pending-toolchain-binding": pending_toolchain_binding,
     }
     commands[args.command](store, args)
 

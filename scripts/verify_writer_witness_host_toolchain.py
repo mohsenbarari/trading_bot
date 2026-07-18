@@ -22,6 +22,7 @@ TOOL_NAMES = (
     "awk",
     "basename",
     "bash",
+    "cat",
     "chmod",
     "chown",
     "cmp",
@@ -30,6 +31,8 @@ TOOL_NAMES = (
     "curl",
     "cut",
     "date",
+    "dd",
+    "df",
     "dirname",
     "dpkg-query",
     "dropdb",
@@ -52,7 +55,6 @@ TOOL_NAMES = (
     "nft",
     "nginx",
     "openssl",
-    "perl",
     "pg_config",
     "pg_ctl",
     "pg_dump",
@@ -80,9 +82,11 @@ TOOL_NAMES = (
     "sync",
     "systemctl",
     "timedatectl",
+    "timeout",
     "tr",
     "ufw",
     "umount",
+    "wc",
 )
 EXTRA_PACKAGES = ("ca-certificates", "libfaketime", "python3-venv")
 SEARCH_PATHS = (Path("/usr/sbin"), Path("/usr/bin"), Path("/sbin"), Path("/bin"))
@@ -91,6 +95,116 @@ POSTGRESQL_SERVER_BINARIES = frozenset({"initdb", "pg_ctl", "postgres"})
 POSTGRESQL_WRAPPED_BINARIES = frozenset(
     {"createdb", "dropdb", "pg_dump", "pg_restore", "psql"}
 )
+
+# This is the reviewed, reachable privileged host command surface.  Each tool
+# has an exact source marker outside TOOL_NAMES (except ldd/pg_config, whose
+# subprocess invocations live in this verifier).  The source gate requires
+# exact set equality with TOOL_NAMES: adding an invocation or an inventory
+# entry is therefore one explicit, reviewable contract change rather than a
+# hand-picked subset assertion.
+COMMAND_SURFACE = {
+    "age": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "age --encrypt"),
+    "awk": ("deploy/writer-witness/writer-witness-state-manifest.sh", "| awk '{print $1}'"),
+    "basename": ("scripts/plan_writer_witness_real_host_matrix.py", "basename \"$latest\""),
+    "bash": ("scripts/provision_writer_witness_host.sh", "#!/bin/bash"),
+    "cat": ("scripts/provision_writer_witness_host.sh", 'cat >"$ssh_hardening_candidate"'),
+    "chmod": ("deploy/writer-witness/writer-witness-live-restore.sh", "chmod 0600"),
+    "chown": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "chown postgres:postgres"),
+    "cmp": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "cmp --silent"),
+    "cp": ("scripts/provision_writer_witness_host.sh", "cp -a"),
+    "createdb": ("deploy/writer-witness/writer-witness-restore-drill.sh", "createdb"),
+    "curl": ("deploy/writer-witness/writer-witness-live-restore.sh", "curl --fail"),
+    "cut": ("scripts/provision_writer_witness_host.sh", "| cut -d: -f6"),
+    "date": ("deploy/writer-witness/writer-witness-backup.sh", "date -u"),
+    "dd": ("deploy/writer-witness/writer-witness-live-restore.sh", "dd iflag=fullblock bs=1048576 count=64 status=none"),
+    "df": ("scripts/plan_writer_witness_real_host_matrix.py", "used=$(df -P /"),
+    "dirname": ("deploy/writer-witness/writer-witness-live-restore.sh", "dirname -- \"$path\""),
+    "dpkg-query": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "dpkg-query"),
+    "dropdb": ("deploy/writer-witness/writer-witness-restore-drill.sh", "dropdb"),
+    "env": ("scripts/provision_writer_witness_host.sh", "/usr/bin/env -i"),
+    "find": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "find \"$BACKUP_DIR\""),
+    "flock": ("deploy/writer-witness/writer-witness-live-restore.sh", "flock --exclusive --nonblock"),
+    "getent": ("scripts/provision_writer_witness_host.sh", "getent passwd"),
+    "grep": ("deploy/writer-witness/writer-witness-live-restore.sh", "| grep -qx 1"),
+    "head": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "head -1"),
+    "id": ("deploy/writer-witness/writer-witness-live-restore.sh", "id -u"),
+    "install": ("deploy/writer-witness/writer-witness-backup.sh", "install -d"),
+    "initdb": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "initdb"),
+    "journalctl": ("scripts/provision_writer_witness_host.sh", "journalctl"),
+    "ldd": ("scripts/verify_writer_witness_host_toolchain.py", '_find_tool("ldd")'),
+    "ln": ("deploy/writer-witness/writer-witness-live-restore.sh", "ln -T"),
+    "mktemp": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "mktemp"),
+    "mount": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "mount -t tmpfs"),
+    "mountpoint": ("scripts/run_writer_witness_real_host_matrix.py", "mountpoint -q"),
+    "mv": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "mv -f"),
+    "nft": ("scripts/provision_writer_witness_host.sh", "nft -j list ruleset"),
+    "nginx": ("scripts/provision_writer_witness_host.sh", "nginx -t"),
+    "openssl": ("scripts/provision_writer_witness_host.sh", "openssl"),
+    "pg_config": ("scripts/verify_writer_witness_host_toolchain.py", '_find_tool("pg_config")'),
+    "pg_ctl": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "pg_ctl"),
+    "pg_dump": ("deploy/writer-witness/writer-witness-backup.sh", "pg_dump"),
+    "pg_restore": ("deploy/writer-witness/writer-witness-live-restore.sh", "pg_restore"),
+    "pgrep": ("scripts/run_writer_witness_real_host_matrix.py", "pgrep -f"),
+    "psql": ("deploy/writer-witness/writer-witness-state-manifest.sh", "psql -XAt"),
+    "postgres": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "postgres"),
+    "python3": ("scripts/run_writer_witness_real_host_matrix.py", '"python3",'),
+    "python3.12": ("deploy/writer-witness/writer-witness-activation-watchdog.sh", "/usr/bin/python3.12"),
+    "readlink": ("scripts/provision_writer_witness_host.sh", "readlink -f"),
+    "realpath": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "realpath -e"),
+    "rm": ("deploy/writer-witness/writer-witness-live-restore.sh", "rm -f"),
+    "runuser": ("deploy/writer-witness/writer-witness-backup.sh", "runuser -u postgres"),
+    "scp": ("scripts/run_writer_witness_real_host_matrix.py", '"scp", "-q"'),
+    "sed": ("scripts/provision_writer_witness_host.sh", "sed -n"),
+    "seq": ("deploy/writer-witness/writer-witness-live-restore.sh", "seq 1 30"),
+    "sha256sum": ("deploy/writer-witness/writer-witness-backup.sh", "sha256sum"),
+    "sh": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "#!/bin/sh"),
+    "sleep": ("deploy/writer-witness/writer-witness-live-restore.sh", "sleep 1"),
+    "sort": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "sort -nr"),
+    "ss": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "ss -H -ltn"),
+    "ssh": ("scripts/run_writer_witness_real_host_matrix.py", '"ssh", "-o"'),
+    "sshd": ("scripts/provision_writer_witness_host.sh", "sshd -t"),
+    "stat": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "stat -c"),
+    "sync": ("deploy/writer-witness/writer-witness-live-restore.sh", "sync -f"),
+    "systemctl": ("deploy/writer-witness/writer-witness-live-restore.sh", "systemctl stop"),
+    "timedatectl": ("scripts/plan_writer_witness_real_host_matrix.py", "timedatectl show"),
+    "timeout": ("scripts/plan_writer_witness_real_host_matrix.py", "timeout 5 bash -c"),
+    "tr": ("scripts/provision_writer_witness_host.sh", "tr -d"),
+    "ufw": ("scripts/plan_writer_witness_real_host_matrix.py", "ufw status verbose"),
+    "umount": ("deploy/writer-witness/writer-witness-matrix-host-fault-state.py", '"umount"'),
+    "wc": ("deploy/writer-witness/writer-witness-live-restore.sh", "dd bs=1 count=1 status=none | wc -c"),
+}
+
+
+def verify_command_surface(source_root: Path) -> dict[str, object]:
+    if not source_root.is_absolute() or not source_root.is_dir():
+        raise ToolchainError("command source root must be an absolute directory")
+    inventory = set(TOOL_NAMES)
+    declared = set(COMMAND_SURFACE)
+    missing = sorted(declared - inventory)
+    unbound = sorted(inventory - declared)
+    if missing or unbound:
+        raise ToolchainError(
+            "host command surface and immutable inventory differ: "
+            f"missing_from_inventory={missing}; missing_source_binding={unbound}"
+        )
+    covered: list[dict[str, str]] = []
+    for command in sorted(COMMAND_SURFACE):
+        relative, marker = COMMAND_SURFACE[command]
+        path = source_root / relative
+        try:
+            payload = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ToolchainError(f"cannot read command source: {relative}") from exc
+        if marker not in payload:
+            raise ToolchainError(
+                f"host command source marker drifted: {relative}:{command}"
+            )
+        covered.append({"command": command, "source": relative})
+    return {
+        "command_surface_attested": "yes",
+        "entries": covered,
+        "entry_count": len(covered),
+    }
 
 
 def _clean_run(arguments: list[str]) -> str:
@@ -375,11 +489,21 @@ def parse_args() -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--emit-inventory", action="store_true")
     mode.add_argument("--expected-inventory-sha256")
+    mode.add_argument("--verify-command-surface", type=Path)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.verify_command_surface is not None:
+        print(
+            json.dumps(
+                verify_command_surface(args.verify_command_surface),
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        return
     payload = canonical_bytes(build_inventory())
     if args.emit_inventory:
         os.write(1, payload)

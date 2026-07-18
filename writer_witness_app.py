@@ -287,6 +287,10 @@ def _service_credentials(
             rf"matrix-wwm_[0-9a-f]{{12}}-{expected_short_site}",
             key_id,
         ) is not None
+        if campaign_key and slot != "current":
+            raise WitnessServiceConfigurationError(
+                f"a previous witness credential cannot be a Matrix key for {site}"
+            )
         if not_after_text:
             if not_after_text.endswith("Z"):
                 not_after_text = not_after_text[:-1] + "+00:00"
@@ -306,8 +310,7 @@ def _service_credentials(
                 raise WitnessServiceConfigurationError(
                     f"campaign expiry does not match the witness credential for {site}:{slot}"
                 )
-            if slot == "current":
-                current_campaign_expiry[site] = not_after
+            current_campaign_expiry[site] = not_after
         elif not_after is not None:
             # During a bounded Matrix campaign the pre-campaign credential is
             # retained in the previous slot and intentionally receives the

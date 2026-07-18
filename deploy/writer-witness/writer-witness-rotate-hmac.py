@@ -25,6 +25,7 @@ from urllib.request import urlopen
 RUNTIME_ENV = Path("/etc/trading-bot-witness/runtime.env")
 CLIENT_DIR = Path("/root/writer-witness-client-material")
 STATE_ROOT = Path("/var/lib/trading-bot-witness/hmac-rotation")
+CAMPAIGN_HELPER = Path("/usr/local/sbin/writer-witness-matrix-campaign")
 SITE_SETTINGS = {
     "webapp_fi": ("FI", "webapp-fi.env"),
     "webapp_ir": ("IR", "webapp-ir.env"),
@@ -933,6 +934,58 @@ def _campaign_expiry(value: str | None, *, campaign_tag: str | None) -> str | No
     return parsed.isoformat().replace("+00:00", "Z")
 
 
+def _require_active_campaign_binding(
+    *,
+    campaign_tag: str,
+    expected_commit: str,
+    scenario: str,
+    not_after: str,
+) -> None:
+    """Bind credential publication to the exact durable campaign claim."""
+
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
+        raise RotationError("matrix campaign commit binding is missing or invalid")
+    if not re.fullmatch(r"RH-(?:00[1-9]|01[0-2])", scenario):
+        raise RotationError("matrix campaign scenario binding is missing or invalid")
+    completed = subprocess.run(
+        [
+            "/usr/bin/env",
+            "-i",
+            "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+            "/usr/bin/python3.12",
+            "-I",
+            "-S",
+            "-B",
+            "-X",
+            "utf8",
+            "-X",
+            "pycache_prefix=/dev/null",
+            str(CAMPAIGN_HELPER),
+            "assert",
+            "--tag",
+            campaign_tag,
+            "--expected-commit",
+            expected_commit,
+            "--scenario",
+            scenario,
+            "--not-after",
+            not_after,
+            "--expect",
+            "active",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+    )
+    if completed.returncode != 0:
+        raise RotationError(
+            "matrix credential is not bound to the exact active campaign claim"
+        )
+
+
 def _require_root() -> None:
     if os.geteuid() != 0:
         raise RotationError("rotation must run as root")
@@ -1076,6 +1129,8 @@ def prepare(
     state_root: Path = STATE_ROOT,
     campaign_tag: str | None = None,
     campaign_not_after: str | None = None,
+    campaign_expected_commit: str | None = None,
+    campaign_scenario: str | None = None,
 ) -> dict[str, object]:
     _require_root()
     _require_dark_state(expected_epoch)
@@ -1085,6 +1140,16 @@ def prepare(
         campaign_not_after,
         campaign_tag=campaign_tag,
     )
+    if campaign_tag is None:
+        if campaign_expected_commit is not None or campaign_scenario is not None:
+            raise RotationError("campaign identity is valid only for a matrix campaign")
+    else:
+        _require_active_campaign_binding(
+            campaign_tag=campaign_tag,
+            expected_commit=str(campaign_expected_commit or ""),
+            scenario=str(campaign_scenario or ""),
+            not_after=str(campaign_not_after),
+        )
     (
         key_name,
         secret_name,
@@ -1126,6 +1191,11 @@ def prepare(
         raise RotationError("the selected site already has an overlap credential")
     _validate_pair(runtime, client, key_name, secret_name)
     old_key_id = runtime[key_name]
+    if re.fullmatch(
+        rf"matrix-wwm_[0-9a-f]{{12}}-{site.removeprefix('webapp_')}",
+        old_key_id,
+    ):
+        raise RotationError("a Matrix credential cannot become a future rotation baseline")
     new_key_id = (
         f"matrix-{campaign_tag}-{site.removeprefix('webapp_')}"
         if campaign_tag is not None
@@ -1154,6 +1224,8 @@ def prepare(
         "phase": "staging",
         "campaign_tag": campaign_tag,
         "campaign_not_after": campaign_not_after,
+        "campaign_expected_commit": campaign_expected_commit,
+        "campaign_scenario": campaign_scenario,
         "staging_name": staging_dir.name,
         "operation_token": operation_token,
     }
@@ -1436,6 +1508,10 @@ def finish(site: str, state_root: Path = STATE_ROOT) -> dict[str, object]:
     metadata_campaign = metadata.get("campaign_tag")
     if metadata_campaign is not None and not isinstance(metadata_campaign, str):
         raise RotationError("rotation campaign metadata is invalid")
+    if metadata_campaign is not None and metadata.get("phase") == "revoked":
+        raise RotationError(
+            "a campaign rotation cannot finish until its exact baseline is restored"
+        )
     _delete_owned_state_directory(
         rotation_dir,
         state_root=state_root,
@@ -1622,6 +1698,8 @@ def main() -> int:
     parser.add_argument("--expected-epoch", type=int, required=True)
     parser.add_argument("--campaign-tag")
     parser.add_argument("--campaign-not-after")
+    parser.add_argument("--campaign-expected-commit")
+    parser.add_argument("--campaign-scenario")
     parser.add_argument(
         "--leave-service-stopped",
         action="store_true",
@@ -1632,6 +1710,11 @@ def main() -> int:
         parser.error("--leave-service-stopped is valid only with recover")
     if args.campaign_not_after is not None and args.action != "prepare":
         parser.error("--campaign-not-after is valid only with prepare")
+    if (
+        args.campaign_expected_commit is not None
+        or args.campaign_scenario is not None
+    ) and args.action != "prepare":
+        parser.error("campaign identity options are valid only with prepare")
     _ensure_private_directory(STATE_ROOT)
     # FI and IR have independent journals but mutate one shared runtime.env.
     # Serialize both sites so concurrent controllers cannot lose each other's
@@ -1657,6 +1740,8 @@ def main() -> int:
                 args.expected_epoch,
                 campaign_tag=args.campaign_tag,
                 campaign_not_after=args.campaign_not_after,
+                campaign_expected_commit=args.campaign_expected_commit,
+                campaign_scenario=args.campaign_scenario,
             )
         elif args.action == "revoke":
             result = revoke(args.site, args.expected_epoch)
