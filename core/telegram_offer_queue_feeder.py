@@ -75,24 +75,25 @@ async def _handoff_candidates(
     invalid = 0
     for candidate in candidates:
         try:
-            result = await enqueue_current_offer_delivery(
-                db,
-                current_server=current_server(),
-                offer=candidate.offer,
-                state=candidate.state,
-                expected_channel_id=expected_channel_id,
-                offer_expiry_minutes=offer_expiry_minutes,
-            )
+            # Keep all candidate row locks until the batch commit, while one
+            # malformed candidate rolls back only its own handoff work.
+            async with db.begin_nested():
+                result = await enqueue_current_offer_delivery(
+                    db,
+                    current_server=current_server(),
+                    offer=candidate.offer,
+                    state=candidate.state,
+                    expected_channel_id=expected_channel_id,
+                    offer_expiry_minutes=offer_expiry_minutes,
+                )
             if result.queue_result is None:
                 skipped += 1
             elif result.queue_result.created:
                 handed_off += 1
             else:
                 deduplicated += 1
-            await db.commit()
         except TelegramOfferQueueError as exc:
             invalid += 1
-            await db.rollback()
             logger.error(
                 "Offer queue handoff rejected unsafe candidate",
                 extra={
@@ -103,6 +104,7 @@ async def _handoff_candidates(
                     "reason": str(exc)[:120],
                 },
             )
+    await db.commit()
     return handed_off, deduplicated, skipped, invalid
 
 

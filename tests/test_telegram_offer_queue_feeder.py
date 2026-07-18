@@ -11,6 +11,20 @@ class FakeSession:
     def __init__(self):
         self.commit = AsyncMock()
         self.rollback = AsyncMock()
+        self.savepoint_entries = 0
+
+    def begin_nested(self):
+        session = self
+
+        class Savepoint:
+            async def __aenter__(self):
+                session.savepoint_entries += 1
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        return Savepoint()
 
 
 class FakeSessionContext:
@@ -94,6 +108,7 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(report.publication_gated)
         self.assertEqual(enqueue.await_count, 2)
         self.assertEqual(session.commit.await_count, 2)
+        self.assertEqual(session.savepoint_entries, 2)
         session.rollback.assert_not_awaited()
         load_publication.assert_awaited_once()
         load_edits.assert_awaited_once()
@@ -179,8 +194,9 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(counts, (1, 0, 0, 1))
-        session.rollback.assert_awaited_once()
         session.commit.assert_awaited_once()
+        session.rollback.assert_not_awaited()
+        self.assertEqual(session.savepoint_entries, 2)
 
     def test_runtime_owner_guard_rejects_legacy(self):
         runtime = SimpleNamespace(
