@@ -8,6 +8,7 @@ import hashlib
 from typing import Any
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
@@ -29,6 +30,15 @@ from models.user import User
 
 TELEGRAM_NOTIFICATION_OUTBOX_WORKER_ID = "telegram-notification-outbox"
 TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED = "project_user_joined"
+TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE = "offer_repeat_response"
+
+TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH = "menu_refresh"
+TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON = "stale_button"
+TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT = "منو با آخرین وضعیت به‌روزرسانی شد"
+TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT = (
+    "متن این دکمه قدیمی است. منو با آخرین وضعیت به‌روزرسانی شد؛ "
+    "دکمه جدید را بزنید."
+)
 
 TELEGRAM_NOTIFICATION_DELIVERY_STATUS_NO_ROW = "no_row"
 TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SENT = "sent"
@@ -117,6 +127,12 @@ class TelegramNotificationDeliveryResult:
     reason: str | None = None
     retry_after_seconds: int | None = None
     alert_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramNotificationEnqueueResult:
+    outbox: TelegramNotificationOutbox
+    created: bool
 
 
 def _enum_value(value: Any) -> str:
@@ -242,6 +258,170 @@ def telegram_notification_dedupe_key(
     source = str(source_type or "").strip() or "generic"
     source_identity = str(source_id if source_id is not None else "none").strip() or "none"
     return f"telegram-notification:{source}:{source_identity}:{int(recipient_user_id)}"
+
+
+def validate_offer_repeat_response_contract(
+    *,
+    text: str,
+    response_kind: str,
+) -> tuple[str, str]:
+    kind = str(response_kind or "").strip().lower()
+    expected_text = {
+        TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH: (
+            TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT
+        ),
+        TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON: (
+            TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT
+        ),
+    }.get(kind)
+    if expected_text is None:
+        raise ValueError("offer_repeat_response_kind_invalid")
+    cleaned_text = validate_telegram_notification_text(text)
+    if cleaned_text != expected_text:
+        raise ValueError("offer_repeat_response_text_invalid")
+    return kind, cleaned_text
+
+
+def _validate_existing_notification_identity(
+    outbox: TelegramNotificationOutbox,
+    *,
+    source_type: str,
+    source_id: str | None,
+    recipient_user_id: int,
+    text: str,
+    parse_mode: str | None,
+    extra_payload: Mapping[str, Any],
+) -> None:
+    if (
+        str(outbox.source_type or "") != source_type
+        or str(outbox.source_id or "") != str(source_id or "")
+        or int(outbox.recipient_user_id or 0) != recipient_user_id
+        or str(outbox.text or "") != text
+        or outbox.parse_mode != parse_mode
+        or dict(outbox.extra_payload or {}) != dict(extra_payload)
+    ):
+        raise ValueError("telegram_notification_dedupe_payload_conflict")
+
+
+async def enqueue_telegram_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    text: str,
+    source_type: str,
+    source_id: str | int | None,
+    parse_mode: str | None = None,
+    extra_payload: Mapping[str, Any] | None = None,
+) -> TelegramNotificationEnqueueResult:
+    """Create one idempotent outbox intent without hiding payload conflicts."""
+    cleaned_text = validate_telegram_notification_text(text)
+    source = str(source_type or "").strip() or "generic"
+    source_identity = str(source_id if source_id is not None else "none").strip() or None
+    if len(source) > 80 or (source_identity is not None and len(source_identity) > 120):
+        raise ValueError("telegram_notification_source_identity_invalid")
+    if (
+        isinstance(recipient.user_id, bool)
+        or not isinstance(recipient.user_id, int)
+        or recipient.user_id <= 0
+        or isinstance(recipient.telegram_id, bool)
+        or not isinstance(recipient.telegram_id, int)
+        or recipient.telegram_id <= 0
+    ):
+        raise ValueError("telegram_notification_recipient_invalid")
+    recipient_user_id = recipient.user_id
+    telegram_id = recipient.telegram_id
+    payload = dict(extra_payload or {})
+    dedupe_key = telegram_notification_dedupe_key(
+        source_type=source,
+        source_id=source_identity,
+        recipient_user_id=recipient_user_id,
+    )
+    if len(dedupe_key) > 192:
+        raise ValueError("telegram_notification_dedupe_key_too_long")
+
+    existing = (
+        await db.execute(
+            select(TelegramNotificationOutbox).where(
+                TelegramNotificationOutbox.dedupe_key == dedupe_key
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        _validate_existing_notification_identity(
+            existing,
+            source_type=source,
+            source_id=source_identity,
+            recipient_user_id=recipient_user_id,
+            text=cleaned_text,
+            parse_mode=parse_mode,
+            extra_payload=payload,
+        )
+        return TelegramNotificationEnqueueResult(outbox=existing, created=False)
+
+    row = TelegramNotificationOutbox(
+        dedupe_key=dedupe_key,
+        source_type=source,
+        source_id=source_identity,
+        recipient_user_id=recipient_user_id,
+        telegram_id_at_enqueue=telegram_id,
+        text=cleaned_text,
+        parse_mode=parse_mode,
+        status=TelegramNotificationOutboxStatus.PENDING,
+        attempt_count=0,
+        extra_payload=payload,
+        created_at=utc_now(),
+    )
+    try:
+        async with db.begin_nested():
+            db.add(row)
+            await db.flush()
+    except IntegrityError:
+        existing = (
+            await db.execute(
+                select(TelegramNotificationOutbox).where(
+                    TelegramNotificationOutbox.dedupe_key == dedupe_key
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        _validate_existing_notification_identity(
+            existing,
+            source_type=source,
+            source_id=source_identity,
+            recipient_user_id=recipient_user_id,
+            text=cleaned_text,
+            parse_mode=parse_mode,
+            extra_payload=payload,
+        )
+        return TelegramNotificationEnqueueResult(outbox=existing, created=False)
+    return TelegramNotificationEnqueueResult(outbox=row, created=True)
+
+
+async def enqueue_offer_repeat_response_notification(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    source_id: str,
+    response_kind: str,
+    text: str,
+) -> TelegramNotificationEnqueueResult:
+    normalized_source_id = str(source_id or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("offer_repeat_response_source_id_invalid")
+    kind, cleaned_text = validate_offer_repeat_response_contract(
+        text=text,
+        response_kind=response_kind,
+    )
+    return await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=cleaned_text,
+        source_type=TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+        source_id=normalized_source_id,
+        parse_mode=None,
+        extra_payload={"response_kind": kind},
+    )
 
 
 async def enqueue_telegram_notifications(
@@ -428,6 +608,8 @@ async def claim_next_telegram_notification_outbox(
             ),
             TelegramNotificationOutbox.queue_job_id.is_(None),
             TelegramNotificationOutbox.queue_handed_off_at.is_(None),
+            TelegramNotificationOutbox.source_type
+            != TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
             TelegramNotificationOutbox.worker_id.is_(None),
             TelegramNotificationOutbox.lease_until.is_(None),
             or_(

@@ -17,6 +17,7 @@ from core.services.telegram_delivery_queue_service import (
     enqueue_telegram_delivery_job,
 )
 from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
     TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
 )
 from core.telegram_delivery_new_user_membership_freshness import (
@@ -26,6 +27,12 @@ from core.telegram_delivery_new_user_membership_freshness import (
     telegram_new_user_membership_destination_key,
     telegram_new_user_membership_source_natural_id,
     telegram_new_user_membership_source_version,
+)
+from core.telegram_delivery_repeat_offer_freshness import (
+    REPEAT_OFFER_RESPONSE_TEMPLATE_VERSION,
+    build_repeat_offer_response_snapshot,
+    telegram_repeat_offer_response_destination_key,
+    telegram_repeat_offer_response_source_natural_id,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -48,6 +55,10 @@ NOTIFICATION_OUTBOX_QUEUE_REQUIRES_RECONCILIATION = "requires_reconciliation"
 _ACTIVE_STATUSES = (
     TelegramNotificationOutboxStatus.PENDING,
     TelegramNotificationOutboxStatus.RETRYABLE_FAILED,
+)
+_QUEUE_SOURCE_TYPES = (
+    TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
 )
 
 
@@ -89,8 +100,7 @@ async def _select_next_due_outbox(
         await db.execute(
             select(TelegramNotificationOutbox)
             .where(
-                TelegramNotificationOutbox.source_type
-                == TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+                TelegramNotificationOutbox.source_type.in_(_QUEUE_SOURCE_TYPES),
                 TelegramNotificationOutbox.status.in_(_ACTIVE_STATUSES),
                 TelegramNotificationOutbox.queue_job_id.is_(None),
                 TelegramNotificationOutbox.queue_handed_off_at.is_(None),
@@ -201,7 +211,12 @@ async def handoff_next_due_telegram_notification_outbox(
             error_class="BotAccessDenied",
             now=current_time,
         )
-    if await get_active_customer_relation_for_user(db, recipient_user_id) is not None:
+    source_type = str(outbox.source_type or "").strip()
+    if (
+        source_type == TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED
+        and await get_active_customer_relation_for_user(db, recipient_user_id)
+        is not None
+    ):
         return await _finalize_unhandoffable_outbox(
             db,
             outbox=outbox,
@@ -212,16 +227,36 @@ async def handoff_next_due_telegram_notification_outbox(
         )
 
     try:
-        source_natural_id = telegram_new_user_membership_source_natural_id(
-            outbox
-        )
-        source_version = telegram_new_user_membership_source_version(user)
-        destination_key = telegram_new_user_membership_destination_key(
-            recipient_user_id
-        )
-        payload = build_new_user_membership_payload(outbox, user)
-        source_id = int(str(outbox.source_id or "").strip())
-        campaign_id = telegram_new_user_membership_campaign_id(source_id)
+        if source_type == TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED:
+            source_natural_id = telegram_new_user_membership_source_natural_id(
+                outbox
+            )
+            source_version = telegram_new_user_membership_source_version(user)
+            destination_key = telegram_new_user_membership_destination_key(
+                recipient_user_id
+            )
+            payload = build_new_user_membership_payload(outbox, user)
+            source_id = int(str(outbox.source_id or "").strip())
+            campaign_id = telegram_new_user_membership_campaign_id(source_id)
+            feeder = TelegramFeederKind.ADMIN_SYSTEM
+            action = TelegramDeliveryAction.NEW_USER_MEMBERSHIP
+            template_version = NEW_USER_MEMBERSHIP_TEMPLATE_VERSION
+        elif source_type == TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE:
+            source_natural_id = telegram_repeat_offer_response_source_natural_id(
+                outbox
+            )
+            destination_key = telegram_repeat_offer_response_destination_key(
+                recipient_user_id
+            )
+            snapshot = await build_repeat_offer_response_snapshot(db, outbox, user)
+            source_version = snapshot.source_version
+            payload = snapshot.payload
+            campaign_id = None
+            feeder = TelegramFeederKind.OFFER_CONTROL
+            action = TelegramDeliveryAction.OFFER_REPEAT_RESPONSE
+            template_version = REPEAT_OFFER_RESPONSE_TEMPLATE_VERSION
+        else:
+            raise ValueError("telegram_notification_queue_source_unsupported")
     except (TypeError, ValueError, OverflowError) as exc:
         return await _finalize_unhandoffable_outbox(
             db,
@@ -235,16 +270,16 @@ async def handoff_next_due_telegram_notification_outbox(
     enqueue_result = await enqueue_telegram_delivery_job(
         db,
         current_server=current_server,
-        feeder=TelegramFeederKind.ADMIN_SYSTEM,
+        feeder=feeder,
         source_natural_id=source_natural_id,
         source_version=source_version,
-        action=TelegramDeliveryAction.NEW_USER_MEMBERSHIP,
+        action=action,
         bot_identity="primary",
         destination_key=destination_key,
         destination_class=TelegramDestinationClass.PRIVATE,
         method="sendMessage",
         payload=payload,
-        template_version=NEW_USER_MEMBERSHIP_TEMPLATE_VERSION,
+        template_version=template_version,
         campaign_id=campaign_id,
     )
     job_id = int(enqueue_result.job.id)

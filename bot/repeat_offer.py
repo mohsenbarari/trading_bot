@@ -25,6 +25,17 @@ from core.services.offer_republish_service import (
     offer_remaining_lot_sizes,
     offer_remaining_quantity,
 )
+from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+    TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+    TelegramNotificationEnqueueResult,
+    TelegramNotificationRecipient,
+    enqueue_offer_repeat_response_notification,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from models.offer import Offer, OfferStatus
 from models.user import User
 
@@ -44,6 +55,43 @@ class BotRepeatOfferCandidate:
     source_offer_public_id: str
     draft_text: str
     button_text: str
+
+
+async def enqueue_repeat_offer_response_if_queue_owner(
+    *,
+    chat_id: int,
+    user: User | object,
+    source_id: str,
+    response_kind: str,
+    text: str,
+) -> TelegramNotificationEnqueueResult | None:
+    """Persist a repeat-offer response only when queue-v1 owns delivery."""
+    runtime = configured_telegram_delivery_runtime()
+    if runtime.mode != TelegramDeliveryRuntimeMode.QUEUE_V1:
+        return None
+    user_id = getattr(user, "id", None)
+    if (
+        isinstance(user_id, bool)
+        or not isinstance(user_id, int)
+        or user_id <= 0
+        or isinstance(chat_id, bool)
+        or not isinstance(chat_id, int)
+        or chat_id <= 0
+    ):
+        raise ValueError("offer_repeat_response_recipient_invalid")
+    async with AsyncSessionLocal() as session:
+        result = await enqueue_offer_repeat_response_notification(
+            session,
+            recipient=TelegramNotificationRecipient(
+                user_id=user_id,
+                telegram_id=chat_id,
+            ),
+            source_id=source_id,
+            response_kind=response_kind,
+            text=text,
+        )
+        await session.commit()
+        return result
 
 
 def is_bot_repeat_offer_button_text(text: object) -> bool:
@@ -170,6 +218,35 @@ async def refresh_repeat_offer_menu_for_expired_offer(
             access = await evaluate_bot_access(session, user)
             if not access.allowed:
                 return False
+            runtime = configured_telegram_delivery_runtime()
+            if runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
+                public_id = str(getattr(offer, "offer_public_id", "") or "").strip()
+                if not public_id:
+                    return False
+                now = time.monotonic()
+                previous_sent_at = _repeat_offer_refresh_sent_at.get(
+                    int(owner_user_id)
+                )
+                if (
+                    previous_sent_at is not None
+                    and now - previous_sent_at
+                    < BOT_REPEAT_OFFER_REFRESH_DEBOUNCE_SECONDS
+                ):
+                    return False
+                enqueue_result = await enqueue_offer_repeat_response_notification(
+                    session,
+                    recipient=TelegramNotificationRecipient(
+                        user_id=int(owner_user_id),
+                        telegram_id=int(telegram_id),
+                    ),
+                    source_id=f"expiry:{public_id}",
+                    response_kind=TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+                    text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+                )
+                await session.commit()
+                if enqueue_result.created:
+                    _repeat_offer_refresh_sent_at[int(owner_user_id)] = now
+                return enqueue_result.created
             candidate = await load_latest_bot_repeat_offer_candidate(
                 session,
                 owner_user_id=int(owner_user_id),
@@ -195,7 +272,7 @@ async def refresh_repeat_offer_menu_for_expired_offer(
         )
         await bot.send_message(
             chat_id=int(telegram_id),
-            text="منو با آخرین وضعیت به‌روزرسانی شد",
+            text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
             reply_markup=keyboard,
         )
         _repeat_offer_refresh_sent_at[int(owner_user_id)] = now

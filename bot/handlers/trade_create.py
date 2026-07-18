@@ -85,7 +85,14 @@ from bot.callbacks import (
 from bot.repeat_offer import (
     BOT_REPEAT_OFFER_BUTTON_PREFIX,
     build_persistent_navigation_keyboard,
+    enqueue_repeat_offer_response_if_queue_owner,
     resolve_bot_repeat_offer_button_candidate,
+)
+from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+    TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+    TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON,
+    TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
 )
 
 
@@ -1299,6 +1306,10 @@ async def _handle_trade_confirm_core(
                 bot,
                 chat_id=callback.from_user.id,
                 user=user,
+                source_id=(
+                    "repeat-success:"
+                    f"{republish_idempotency_key or offer_public_id or republish_source_public_id}"
+                ),
             )
     except OfferNotRepeatableError as exc:
         logger.info(
@@ -1317,6 +1328,10 @@ async def _handle_trade_confirm_core(
             bot,
             chat_id=callback.from_user.id,
             user=user,
+            source_id=(
+                "repeat-ineligible:"
+                f"{republish_idempotency_key or republish_source_public_id}"
+            ),
         )
     except IntegrityError as exc:
         logger.warning(
@@ -1336,6 +1351,10 @@ async def _handle_trade_confirm_core(
                 bot,
                 chat_id=callback.from_user.id,
                 user=user,
+                source_id=(
+                    "repeat-conflict:"
+                    f"{republish_idempotency_key or republish_source_public_id}"
+                ),
             )
         else:
             await callback.message.edit_text(
@@ -1755,18 +1774,28 @@ async def _send_repeat_offer_menu_refresh(
     *,
     chat_id: int,
     user: User | object,
+    source_id: str = "",
 ) -> None:
     """Best-effort refresh for Telegram's non-editable reply keyboard."""
     from core.public_webapp_url import user_facing_webapp_url
 
     try:
+        queued = await enqueue_repeat_offer_response_if_queue_owner(
+            chat_id=chat_id,
+            user=user,
+            source_id=source_id,
+            response_kind=TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+            text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+        )
+        if queued is not None:
+            return
         keyboard = await build_persistent_navigation_keyboard(
             user,
             user_facing_webapp_url(settings_obj=settings),
         )
         await bot.send_message(
             chat_id=chat_id,
-            text="منو با آخرین وضعیت به‌روزرسانی شد",
+            text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
             reply_markup=keyboard,
         )
     except Exception:
@@ -1958,14 +1987,27 @@ async def handle_repeat_offer_button(
         from core.public_webapp_url import user_facing_webapp_url
 
         await state.clear()
-        await message.answer(
-            "متن این دکمه قدیمی است. منو با آخرین وضعیت به‌روزرسانی شد؛ "
-            "دکمه جدید را بزنید.",
-            reply_markup=await build_persistent_navigation_keyboard(
-                user,
-                user_facing_webapp_url(settings_obj=settings),
-            ),
+        message_id = getattr(message, "message_id", None)
+        if isinstance(message_id, bool) or not isinstance(message_id, int):
+            message_id = uuid4().hex
+        chat_id = getattr(getattr(message, "chat", None), "id", None)
+        if not isinstance(chat_id, int) or isinstance(chat_id, bool) or chat_id <= 0:
+            chat_id = getattr(user, "telegram_id", 0)
+        queued = await enqueue_repeat_offer_response_if_queue_owner(
+            chat_id=int(chat_id or 0),
+            user=user,
+            source_id=f"stale-button:{message_id}",
+            response_kind=TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON,
+            text=TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
         )
+        if queued is None:
+            await message.answer(
+                TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
+                reply_markup=await build_persistent_navigation_keyboard(
+                    user,
+                    user_facing_webapp_url(settings_obj=settings),
+                ),
+            )
         return
 
     await state.clear()

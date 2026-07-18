@@ -125,6 +125,40 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("دکمه جدید را بزنید", message.answer.await_args.args[0])
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "MENU")
 
+    async def test_stale_button_queue_owner_persists_response_without_direct_send(self):
+        message = SimpleNamespace(
+            text="🔁 خ ن سکه 10 عدد 100000",
+            message_id=81,
+            chat=SimpleNamespace(id=99),
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+        user = SimpleNamespace(id=9, telegram_id=99)
+        queued = SimpleNamespace(created=True)
+
+        with patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(None, True, "stale_button")),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=queued),
+        ) as enqueue, patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            await handle_repeat_offer_button(message, state, user, message.bot)
+
+        message.answer.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_id"],
+            "stale-button:81",
+        )
+
     async def test_confirm_revalidates_source_and_creates_foreign_provenance(self):
         creation_session = SimpleNamespace()
         state = SimpleNamespace(
@@ -312,7 +346,12 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIn("دیگر قابل تکرار نیست", callback.message.edit_text.await_args.args[0])
-        refresh.assert_awaited_once_with(bot, chat_id=99, user=user)
+        refresh.assert_awaited_once_with(
+            bot,
+            chat_id=99,
+            user=user,
+            source_id="repeat-ineligible:ofr_source_41",
+        )
         state.clear.assert_awaited_once_with()
         callback.answer.assert_awaited_once_with()
 
@@ -339,6 +378,31 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value="MENU"),
         ):
             await _send_repeat_offer_menu_refresh(failing_bot, chat_id=99, user=user)
+
+    async def test_menu_refresh_queue_owner_never_calls_telegram_directly(self):
+        user = SimpleNamespace(id=9)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        queued = SimpleNamespace(created=True)
+        with patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=queued),
+        ) as enqueue, patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            await _send_repeat_offer_menu_refresh(
+                bot,
+                chat_id=99,
+                user=user,
+                source_id="repeat-success:bot-repeat:intent-1",
+            )
+
+        bot.send_message.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_id"],
+            "repeat-success:bot-repeat:intent-1",
+        )
 
 
 if __name__ == "__main__":

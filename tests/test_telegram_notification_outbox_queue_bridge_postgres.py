@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from datetime import timedelta
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -22,12 +23,20 @@ from core.services.telegram_notification_outbox_queue_service import (
     handoff_next_due_telegram_notification_outbox,
 )
 from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
     TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+    TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+    TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+    TelegramNotificationRecipient,
     claim_next_telegram_notification_outbox,
+    enqueue_offer_repeat_response_notification,
     telegram_notification_dedupe_key,
 )
 from core.telegram_delivery_new_user_membership_freshness import (
     validate_new_user_membership_telegram_delivery_freshness,
+)
+from core.telegram_delivery_repeat_offer_freshness import (
+    validate_repeat_offer_response_telegram_delivery_freshness,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryOutcome,
@@ -179,6 +188,49 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             await db.commit()
             return result
 
+    async def _seed_repeat_outbox(self):
+        async with self.Session() as db:
+            user = self._user(
+                account_name="repeat_offer_recipient",
+                mobile="09121119991",
+                telegram_id=8_199_991,
+            )
+            db.add(user)
+            await db.flush()
+            source_id = "repeat-success:bot-repeat:postgres-intent-1"
+            outbox = TelegramNotificationOutbox(
+                dedupe_key=telegram_notification_dedupe_key(
+                    source_type=TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+                    source_id=source_id,
+                    recipient_user_id=int(user.id),
+                ),
+                source_type=TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+                source_id=source_id,
+                recipient_user_id=int(user.id),
+                telegram_id_at_enqueue=int(user.telegram_id),
+                text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+                parse_mode=None,
+                status=TelegramNotificationOutboxStatus.PENDING,
+                attempt_count=0,
+                extra_payload={
+                    "response_kind": (
+                        TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH
+                    )
+                },
+                created_at=utc_now() - timedelta(seconds=1),
+            )
+            db.add(outbox)
+            await db.commit()
+            return int(outbox.id), int(user.id)
+
+    async def _handoff_repeat(self):
+        with patch(
+            "core.telegram_delivery_repeat_offer_freshness."
+            "load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=None),
+        ):
+            return await self._handoff()
+
     async def _claim_job(self, *, worker_id="membership-bridge"):
         async with self.Session() as db:
             job = await claim_next_telegram_delivery_job(
@@ -269,6 +321,112 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             self.assertIsNotNone(outbox.telegram_message_id)
             self.assertIsNone(outbox.queue_job_id)
             self.assertEqual(current.state, TelegramDeliveryState.SENT)
+
+    async def test_repeat_response_success_uses_same_atomic_lifecycle(self):
+        outbox_id, _ = await self._seed_repeat_outbox()
+        handoff = await self._handoff_repeat()
+        self.assertEqual(handoff.disposition, NOTIFICATION_OUTBOX_QUEUE_HANDOFF)
+        job = await self._claim_job(worker_id="repeat-bridge")
+        feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
+
+        with patch(
+            "core.telegram_delivery_repeat_offer_freshness."
+            "load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=None),
+        ):
+            async with self.Session() as db:
+                current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+                freshness = (
+                    await validate_repeat_offer_response_telegram_delivery_freshness(
+                        db,
+                        current,
+                        utc_now(),
+                    )
+                )
+                self.assertEqual(freshness.outcome, TelegramFreshnessOutcome.SEND)
+                marked = await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=int(current.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(current.lease_token),
+                    dispatch_guard=feedback.assert_dispatchable,
+                    now=utc_now(),
+                )
+                self.assertTrue(marked)
+                await db.commit()
+
+        async with self.Session() as db:
+            current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+            decision = await resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=int(current.id),
+                worker_id="repeat-bridge",
+                lease_token=int(current.lease_token),
+                result=TelegramGatewayResult(
+                    ok=True,
+                    method="sendMessage",
+                    status_code=200,
+                    response_json={"ok": True, "result": {"message_id": 911}},
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                feedback=feedback.apply_delivery_result,
+                now=utc_now(),
+            )
+            await db.commit()
+            self.assertEqual(decision.outcome, TelegramDeliveryOutcome.SENT)
+
+        async with self.Session() as db:
+            outbox = await db.get(TelegramNotificationOutbox, outbox_id)
+            current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+            self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SENT)
+            self.assertEqual(outbox.telegram_message_id, 911)
+            self.assertIsNone(outbox.queue_job_id)
+            self.assertEqual(current.state, TelegramDeliveryState.SENT)
+
+    async def test_repeat_response_source_enqueue_is_idempotent(self):
+        async with self.Session() as db:
+            user = self._user(
+                account_name="repeat_enqueue_recipient",
+                mobile="09121119992",
+                telegram_id=8_199_992,
+            )
+            db.add(user)
+            await db.flush()
+            recipient = TelegramNotificationRecipient(
+                user_id=int(user.id),
+                telegram_id=int(user.telegram_id),
+            )
+            first = await enqueue_offer_repeat_response_notification(
+                db,
+                recipient=recipient,
+                source_id="expiry:ofr_repeat_idempotent_1",
+                response_kind=TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+                text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+            )
+            second = await enqueue_offer_repeat_response_notification(
+                db,
+                recipient=recipient,
+                source_id="expiry:ofr_repeat_idempotent_1",
+                response_kind=TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
+                text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
+            )
+            await db.commit()
+
+        self.assertTrue(first.created)
+        self.assertFalse(second.created)
+        self.assertEqual(first.outbox.id, second.outbox.id)
+        async with self.Session() as db:
+            legacy_claim = await claim_next_telegram_notification_outbox(
+                db,
+                current_server="foreign",
+                lease_seconds=30,
+                now=utc_now() + timedelta(hours=1),
+            )
+            self.assertIsNone(legacy_claim)
 
     async def test_concurrent_handoff_creates_one_job_per_outbox(self):
         await self._seed_outbox(recipients=3)
@@ -386,6 +544,60 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             self.assertEqual(outbox.queue_job_id, int(job.id))
             self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.PENDING)
 
+    async def test_repeat_response_429_keeps_same_bound_job(self):
+        outbox_id, _ = await self._seed_repeat_outbox()
+        await self._handoff_repeat()
+        job = await self._claim_job(worker_id="repeat-bridge")
+        feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
+        with patch(
+            "core.telegram_delivery_repeat_offer_freshness."
+            "load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=None),
+        ):
+            async with self.Session() as db:
+                current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+                marked = await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=int(current.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(current.lease_token),
+                    dispatch_guard=feedback.assert_dispatchable,
+                    now=utc_now(),
+                )
+                self.assertTrue(marked)
+                await db.commit()
+        async with self.Session() as db:
+            current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+            decision = await resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=int(current.id),
+                worker_id="repeat-bridge",
+                lease_token=int(current.lease_token),
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="sendMessage",
+                    status_code=429,
+                    response_json={
+                        "ok": False,
+                        "error_code": 429,
+                        "parameters": {"retry_after": 120},
+                    },
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                feedback=feedback.apply_delivery_result,
+                now=utc_now(),
+            )
+            await db.commit()
+            self.assertEqual(decision.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
+        async with self.Session() as db:
+            outbox = await db.get(TelegramNotificationOutbox, outbox_id)
+            self.assertEqual(outbox.queue_job_id, int(job.id))
+            self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.PENDING)
+
     async def test_relink_reclassifies_and_builds_new_job(self):
         outbox_ids, user_ids = await self._seed_outbox(recipients=1)
         first = await self._handoff()
@@ -427,6 +639,60 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             user = await db.get(User, user_ids[0])
             self.assertEqual(old.state, TelegramDeliveryState.PENDING_RECONCILE)
             self.assertEqual(new.payload["chat_id"], int(user.telegram_id))
+            self.assertEqual(outbox.queue_job_id, int(new.id))
+
+    async def test_repeat_response_relink_reclassifies_to_distinct_job(self):
+        outbox_id, user_id = await self._seed_repeat_outbox()
+        first = await self._handoff_repeat()
+        job = await self._claim_job(worker_id="repeat-bridge")
+        async with self.Session() as db:
+            user = await db.get(User, user_id, with_for_update=True)
+            user.telegram_id = int(user.telegram_id) + 999
+            user.sync_version = int(user.sync_version) + 1
+            await db.commit()
+
+        feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
+        with patch(
+            "core.telegram_delivery_repeat_offer_freshness."
+            "load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=None),
+        ):
+            async with self.Session() as db:
+                current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+                freshness = (
+                    await validate_repeat_offer_response_telegram_delivery_freshness(
+                        db,
+                        current,
+                        utc_now(),
+                    )
+                )
+                self.assertEqual(
+                    freshness.outcome,
+                    TelegramFreshnessOutcome.RECLASSIFY,
+                )
+                dispatched = await apply_telegram_delivery_freshness_result(
+                    db,
+                    current_server="foreign",
+                    job_id=int(current.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(current.lease_token),
+                    decision=freshness,
+                    feedback=feedback.apply_freshness,
+                    now=utc_now(),
+                )
+                self.assertFalse(dispatched)
+                await db.commit()
+
+        replacement = await self._handoff_repeat()
+        self.assertNotEqual(replacement.job_id, first.job_id)
+        async with self.Session() as db:
+            old = await db.get(TelegramDeliveryJobRecord, int(first.job_id))
+            new = await db.get(TelegramDeliveryJobRecord, int(replacement.job_id))
+            outbox = await db.get(TelegramNotificationOutbox, outbox_id)
+            user = await db.get(User, user_id)
+            self.assertEqual(old.state, TelegramDeliveryState.PENDING_RECONCILE)
+            self.assertEqual(new.payload["chat_id"], int(user.telegram_id))
+            self.assertNotEqual(new.source_version, old.source_version)
             self.assertEqual(outbox.queue_job_id, int(new.id))
 
     async def test_lifecycle_callbacks_are_required(self):
@@ -510,6 +776,92 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 )
             await db.rollback()
 
+    async def test_repeat_response_lifecycle_callbacks_are_required(self):
+        await self._seed_repeat_outbox()
+        await self._handoff_repeat()
+        job = await self._claim_job(worker_id="repeat-bridge")
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "repeat_offer_response_dispatch_guard_required",
+            ):
+                await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=int(job.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(job.lease_token),
+                    now=utc_now(),
+                )
+            await db.rollback()
+
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "repeat_offer_response_freshness_feedback_required",
+            ):
+                await apply_telegram_delivery_freshness_result(
+                    db,
+                    current_server="foreign",
+                    job_id=int(job.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(job.lease_token),
+                    decision=TelegramFreshnessDecision(
+                        TelegramFreshnessOutcome.SUPERSEDED,
+                        reason="synthetic",
+                    ),
+                    now=utc_now(),
+                )
+            await db.rollback()
+
+        feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
+        with patch(
+            "core.telegram_delivery_repeat_offer_freshness."
+            "load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=None),
+        ):
+            async with self.Session() as db:
+                current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+                marked = await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=int(current.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(current.lease_token),
+                    dispatch_guard=feedback.assert_dispatchable,
+                    now=utc_now(),
+                )
+                self.assertTrue(marked)
+                await db.commit()
+
+        async with self.Session() as db:
+            current = await db.get(TelegramDeliveryJobRecord, int(job.id))
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "repeat_offer_response_delivery_feedback_required",
+            ):
+                await resolve_telegram_delivery_result(
+                    db,
+                    current_server="foreign",
+                    job_id=int(current.id),
+                    worker_id="repeat-bridge",
+                    lease_token=int(current.lease_token),
+                    result=TelegramGatewayResult(
+                        ok=True,
+                        method="sendMessage",
+                        status_code=200,
+                        response_json={
+                            "ok": True,
+                            "result": {"message_id": 777},
+                        },
+                    ),
+                    retry_after_safety_seconds=0.1,
+                    retry_base_seconds=1,
+                    retry_max_seconds=300,
+                    now=utc_now(),
+                )
+            await db.rollback()
+
     async def test_existing_orphan_job_is_never_adopted(self):
         outbox_ids, _ = await self._seed_outbox(recipients=1)
         first = await self._handoff()
@@ -564,10 +916,23 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                     )
                 ).scalars()
             )
+            queue_predicate = (
+                await db.execute(
+                    text(
+                        "SELECT pg_get_expr(i.indpred, i.indrelid) "
+                        "FROM pg_index i "
+                        "JOIN pg_class c ON c.oid = i.indexrelid "
+                        "WHERE c.relname = "
+                        "'ix_telegram_notification_outbox_queue_handoff'"
+                    )
+                )
+            ).scalar_one()
         self.assertIn("ix_telegram_notification_outbox_queue_handoff", indexes)
         self.assertIn("ux_telegram_notification_outbox_queue_job", indexes)
         self.assertIn("ck_telegram_notification_outbox_queue_binding", constraints)
         self.assertIn("fk_telegram_notification_outbox_queue_job", constraints)
+        self.assertIn("project_user_joined", queue_predicate)
+        self.assertIn("offer_repeat_response", queue_predicate)
 
 
 if __name__ == "__main__":

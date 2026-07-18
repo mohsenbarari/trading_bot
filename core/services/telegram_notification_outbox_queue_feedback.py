@@ -11,6 +11,10 @@ from core.telegram_delivery_new_user_membership_freshness import (
     telegram_notification_outbox_dedupe_from_source,
     validate_new_user_membership_telegram_delivery_freshness,
 )
+from core.telegram_delivery_repeat_offer_freshness import (
+    telegram_repeat_offer_outbox_dedupe_from_source,
+    validate_repeat_offer_response_telegram_delivery_freshness,
+)
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryDecision,
@@ -48,6 +52,13 @@ _SUPERSEDED_SKIP_REASONS = {
     "new_user_membership_freshness_recipient_unlinked",
     "new_user_membership_freshness_recipient_access_denied",
     "new_user_membership_freshness_customer_excluded",
+    "repeat_offer_response_freshness_recipient_missing",
+    "repeat_offer_response_freshness_recipient_unlinked",
+    "repeat_offer_response_freshness_recipient_access_denied",
+}
+_TERMINAL_SOURCE_REASONS = {
+    "new_user_membership_freshness_outbox_terminal",
+    "repeat_offer_response_freshness_outbox_terminal",
 }
 
 
@@ -70,15 +81,20 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
-    if (
-        _enum_value(job.action_kind)
-        != TelegramDeliveryAction.NEW_USER_MEMBERSHIP.value
-        or _enum_value(job.feeder_kind) != TelegramFeederKind.ADMIN_SYSTEM.value
-        or _enum_value(job.destination_class)
-        != TelegramDestinationClass.PRIVATE.value
-        or str(job.method or "") != "sendMessage"
-        or str(job.bot_identity or "") != "primary"
-    ):
+    action = _enum_value(job.action_kind)
+    common_route_valid = (
+        _enum_value(job.destination_class) == TelegramDestinationClass.PRIVATE.value
+        and str(job.method or "") == "sendMessage"
+        and str(job.bot_identity or "") == "primary"
+    )
+    action_route_valid = (
+        action == TelegramDeliveryAction.NEW_USER_MEMBERSHIP.value
+        and _enum_value(job.feeder_kind) == TelegramFeederKind.ADMIN_SYSTEM.value
+    ) or (
+        action == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value
+        and _enum_value(job.feeder_kind) == TelegramFeederKind.OFFER_CONTROL.value
+    )
+    if not common_route_valid or not action_route_valid:
         raise TelegramNotificationOutboxQueueFeedbackError(
             "notification_outbox_queue_feedback_route_mismatch"
         )
@@ -89,9 +105,17 @@ async def _load_bound_outbox(
     *,
     job: TelegramDeliveryJobRecord,
 ) -> TelegramNotificationOutbox:
-    dedupe_key = telegram_notification_outbox_dedupe_from_source(
-        job.source_natural_id
-    )
+    action = _enum_value(job.action_kind)
+    if action == TelegramDeliveryAction.NEW_USER_MEMBERSHIP.value:
+        dedupe_key = telegram_notification_outbox_dedupe_from_source(
+            job.source_natural_id
+        )
+    elif action == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value:
+        dedupe_key = telegram_repeat_offer_outbox_dedupe_from_source(
+            job.source_natural_id
+        )
+    else:
+        dedupe_key = None
     if dedupe_key is None:
         raise TelegramNotificationOutboxQueueFeedbackError(
             "notification_outbox_queue_feedback_source_invalid"
@@ -241,21 +265,35 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
         await db.execute(
             select(User).where(User.id == recipient_user_id).with_for_update()
         )
-        await db.execute(
-            select(AccountantRelation.id)
-            .where(AccountantRelation.accountant_user_id == recipient_user_id)
-            .with_for_update()
-        )
-        await db.execute(
-            select(CustomerRelation.id)
-            .where(CustomerRelation.customer_user_id == recipient_user_id)
-            .with_for_update()
-        )
-        decision = await validate_new_user_membership_telegram_delivery_freshness(
-            db,
-            job,
-            now,
-        )
+        if (
+            _enum_value(job.action_kind)
+            == TelegramDeliveryAction.NEW_USER_MEMBERSHIP.value
+        ):
+            await db.execute(
+                select(AccountantRelation.id)
+                .where(AccountantRelation.accountant_user_id == recipient_user_id)
+                .with_for_update()
+            )
+            await db.execute(
+                select(CustomerRelation.id)
+                .where(CustomerRelation.customer_user_id == recipient_user_id)
+                .with_for_update()
+            )
+            decision = (
+                await validate_new_user_membership_telegram_delivery_freshness(
+                    db,
+                    job,
+                    now,
+                )
+            )
+        else:
+            decision = (
+                await validate_repeat_offer_response_telegram_delivery_freshness(
+                    db,
+                    job,
+                    now,
+                )
+            )
         if decision.outcome != TelegramFreshnessOutcome.SEND:
             raise TelegramNotificationOutboxQueueFeedbackError(
                 "notification_outbox_queue_dispatch_guard_rejected:"
@@ -295,7 +333,7 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
                 )
             _clear_binding(outbox, now=now, reason=reason)
         elif outcome == TelegramFreshnessOutcome.SUPERSEDED:
-            if reason == "new_user_membership_freshness_outbox_terminal":
+            if reason in _TERMINAL_SOURCE_REASONS:
                 if (
                     _enum_value(outbox.status)
                     not in TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES

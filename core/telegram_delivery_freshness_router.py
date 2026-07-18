@@ -22,6 +22,9 @@ from core.telegram_delivery_admin_broadcast_freshness import (
 from core.telegram_delivery_new_user_membership_freshness import (
     NEW_USER_MEMBERSHIP_FRESHNESS_ACTIONS,
 )
+from core.telegram_delivery_repeat_offer_freshness import (
+    REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS,
+)
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
 from core.telegram_delivery_trade_freshness import TRADE_RESULT_FRESHNESS_ACTIONS
 from core.telegram_delivery_queue_contract import (
@@ -284,4 +287,16 @@ def new_user_membership_freshness_routes(
         )
     return {
         action: validator for action in NEW_USER_MEMBERSHIP_FRESHNESS_ACTIONS
+    }
+
+
+def repeat_offer_response_freshness_routes(
+    validator: TelegramDeliveryFreshnessValidator,
+) -> dict[TelegramDeliveryAction, TelegramDeliveryFreshnessValidatorCallable]:
+    if not callable(validator):
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_repeat_offer_response_freshness_validator_invalid"
+        )
+    return {
+        action: validator for action in REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS
     }

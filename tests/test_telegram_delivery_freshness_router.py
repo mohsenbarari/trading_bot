@@ -15,6 +15,7 @@ from core.telegram_delivery_freshness_router import (
     market_freshness_routes,
     new_user_membership_freshness_routes,
     offer_freshness_routes,
+    repeat_offer_response_freshness_routes,
     required_freshness_actions_for_lane,
     trade_result_freshness_routes,
 )
@@ -26,6 +27,9 @@ from core.telegram_delivery_admin_broadcast_freshness import (
 )
 from core.telegram_delivery_new_user_membership_freshness import (
     NEW_USER_MEMBERSHIP_FRESHNESS_ACTIONS,
+)
+from core.telegram_delivery_repeat_offer_freshness import (
+    REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -171,6 +175,25 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(
             TelegramDeliveryAction.ACCOUNT_STATUS,
+            primary.missing_actions,
+        )
+
+    def test_repeat_offer_response_route_covers_only_repeat_response_action(self):
+        validator = send_validator()
+        routes = repeat_offer_response_freshness_routes(validator)
+
+        primary = TelegramDeliveryFreshnessRegistry(routes).coverage("primary")
+
+        self.assertEqual(
+            set(primary.configured_actions),
+            REPEAT_OFFER_RESPONSE_FRESHNESS_ACTIONS,
+        )
+        self.assertNotIn(
+            TelegramDeliveryAction.OFFER_REPEAT_RESPONSE,
+            primary.missing_actions,
+        )
+        self.assertIn(
+            TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
             primary.missing_actions,
         )
 
