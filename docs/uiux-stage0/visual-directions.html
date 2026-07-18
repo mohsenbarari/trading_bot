@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stage 0 — جهت‌های بصری بازطراحی وب‌اپ</title>
+  <style>
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Regular.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Medium.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-SemiBold.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Vazirmatn";
+      src: url("../../frontend/node_modules/vazirmatn/fonts/webfonts/Vazirmatn-Bold.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 700;
+      font-display: swap;
+    }
+
+    * { box-sizing: border-box; }
+
+    :root {
+      color-scheme: light;
+      font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+      background: #edf0f4;
+      color: #1f2937;
+    }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      background:
+        radial-gradient(circle at 90% -10%, rgba(182, 138, 53, 0.12), transparent 32rem),
+        #edf0f4;
+    }
+
+    button { font: inherit; }
+    svg { display: block; }
+
+    .stage {
+      width: min(1520px, calc(100% - 32px));
+      margin: 32px auto 64px;
+    }
+
+    .stage-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: start;
+      padding: 30px 32px;
+      border: 1px solid #dfe4ea;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 16px 44px rgba(31, 41, 55, 0.07);
+    }
+
+    .stage-header h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.45;
+      letter-spacing: -0.02em;
+    }
+
+    .stage-header p {
+      max-width: 920px;
+      margin: 0;
+      color: #667085;
+      font-size: 14px;
+      line-height: 2;
+    }
+
+    .scope-badge {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 14px;
+      border: 1px solid #eadcbc;
+      border-radius: 999px;
+      background: #fbf5e8;
+      color: #72551d;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .scope-badge::before {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #b68a35;
+      content: "";
+    }
+
+    .protected-note {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+      padding: 12px 16px;
+      border: 1px dashed #cbd5e1;
+      border-radius: 14px;
+      background: rgba(248, 250, 252, 0.78);
+      color: #526070;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .protected-note strong { color: #243244; }
+
+    .directions-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 432px);
+      gap: 32px;
+      justify-content: center;
+      margin-top: 28px;
+      direction: ltr;
+    }
+
+    .direction {
+      direction: rtl;
+    }
+
+    .direction-label {
+      min-height: 112px;
+      padding: 12px 18px 16px;
+    }
+
+    .direction-label__top {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .direction-label h2 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.5;
+    }
+
+    .direction-label p {
+      margin: 4px 0 10px;
+      color: #667085;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .recommendation {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: #efe3ca;
+      color: #72551d;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .palette {
+      display: flex;
+      gap: 6px;
+    }
+
+    .swatch {
+      width: 30px;
+      height: 12px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 999px;
+      background: var(--swatch);
+    }
+
+    .phone {
+      position: relative;
+      display: grid;
+      grid-template-rows: 136px 620px 88px;
+      width: 390px;
+      height: 844px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--phone-border);
+      border-radius: 34px;
+      background: var(--page);
+      color: var(--ink);
+      box-shadow: var(--phone-shadow);
+      isolation: isolate;
+    }
+
+    .phone::before {
+      position: absolute;
+      top: 9px;
+      left: 50%;
+      z-index: 3;
+      width: 58px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.16);
+      content: "";
+      transform: translateX(-50%);
+    }
+
+    .phone-header {
+      position: relative;
+      padding: 24px 18px 12px;
+      background: var(--page);
+    }
+
+    .utility-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 32px;
+    }
+
+    .icon-button {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 1px solid var(--soft-border);
+      border-radius: var(--icon-radius);
+      background: var(--icon-bg);
+      color: var(--accent);
+    }
+
+    .icon-button svg { width: 18px; height: 18px; }
+
+    .role-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--chip-bg);
+      color: var(--chip-text);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .phone-header h3 {
+      margin: 8px 0 0;
+      font-size: var(--title-size);
+      line-height: 1.35;
+      letter-spacing: -0.02em;
+    }
+
+    .phone-header p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .phone-content {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--page);
+    }
+
+    .access-summary {
+      min-height: 174px;
+      padding: 18px;
+      border: 1px solid var(--summary-border);
+      border-radius: var(--summary-radius);
+      background: var(--summary-bg);
+      color: var(--summary-ink);
+      box-shadow: var(--summary-shadow);
+    }
+
+    .access-summary__eyebrow {
+      display: block;
+      color: var(--summary-eyebrow);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.8;
+    }
+
+    .access-summary strong {
+      display: block;
+      margin-top: 2px;
+      font-size: 28px;
+      line-height: 1.45;
+      letter-spacing: -0.02em;
+    }
+
+    .access-summary p {
+      margin: 0;
+      color: var(--summary-muted);
+      font-size: 11px;
+      line-height: 1.8;
+    }
+
+    .summary-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      margin-top: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--summary-chip-bg);
+      color: var(--summary-chip-text);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 24px;
+    }
+
+    .section-heading strong {
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .section-heading span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .action-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .action-card {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) 18px;
+      gap: 11px;
+      align-items: center;
+      min-height: 88px;
+      padding: 12px 14px;
+      border: 1px solid var(--action-border);
+      border-radius: var(--action-radius);
+      background: var(--action-bg);
+      color: var(--ink);
+      box-shadow: var(--action-shadow);
+    }
+
+    .action-card__icon {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: var(--action-icon-radius);
+      background: var(--action-icon-bg);
+      color: var(--accent);
+    }
+
+    .action-card__icon svg { width: 18px; height: 18px; }
+
+    .action-card__copy strong {
+      display: block;
+      font-size: 13.5px;
+      line-height: 1.7;
+    }
+
+    .action-card__copy span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.75;
+    }
+
+    .action-card__arrow {
+      color: var(--accent);
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .context-note {
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      margin-top: auto;
+      padding: 12px 14px;
+      border: 1px solid var(--note-border);
+      border-radius: var(--note-radius);
+      background: var(--note-bg);
+    }
+
+    .context-note__dot {
+      width: 8px;
+      height: 8px;
+      margin-top: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .context-note strong {
+      display: block;
+      font-size: 11px;
+      line-height: 1.8;
+    }
+
+    .context-note p {
+      margin: 1px 0 0;
+      color: var(--muted);
+      font-size: 10.5px;
+      line-height: 1.75;
+    }
+
+    .bottom-shell {
+      padding: 8px 16px 14px;
+      background: var(--nav-shell);
+    }
+
+    .bottom-nav {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      height: 66px;
+      padding: 5px;
+      border: 1px solid var(--nav-border);
+      border-radius: var(--nav-radius);
+      background: var(--nav-bg);
+      box-shadow: var(--nav-shadow);
+    }
+
+    .nav-item {
+      position: relative;
+      display: grid;
+      gap: 2px;
+      place-items: center;
+      min-width: 0;
+      border-radius: var(--nav-item-radius);
+      color: var(--nav-muted);
+      font-size: 10px;
+      line-height: 1.3;
+    }
+
+    .nav-item svg { width: 17px; height: 17px; }
+
+    .nav-item.is-active {
+      background: var(--nav-active-bg);
+      color: var(--nav-active);
+      font-weight: 700;
+    }
+
+    .direction--calm {
+      --page: #fbf8f1;
+      --ink: #1f2933;
+      --muted: #667085;
+      --accent: #a97928;
+      --phone-border: #d2c3a5;
+      --phone-shadow: 0 24px 70px rgba(60, 49, 29, 0.16);
+      --title-size: 27px;
+      --soft-border: #e7ddcc;
+      --icon-bg: #fff;
+      --icon-radius: 11px;
+      --chip-bg: #f4ead5;
+      --chip-text: #72551d;
+      --summary-bg: #1f2933;
+      --summary-border: #1f2933;
+      --summary-radius: 24px;
+      --summary-ink: #fff;
+      --summary-eyebrow: #d8c7a3;
+      --summary-muted: #d1d5db;
+      --summary-chip-bg: #3b454f;
+      --summary-chip-text: #f1d99e;
+      --summary-shadow: 0 13px 28px rgba(31, 41, 51, 0.18);
+      --action-bg: #fff;
+      --action-border: #e7ddcc;
+      --action-radius: 18px;
+      --action-shadow: 0 5px 16px rgba(70, 57, 33, 0.06);
+      --action-icon-bg: #f7eedc;
+      --action-icon-radius: 11px;
+      --note-bg: #f5ecda;
+      --note-border: #e7d4ac;
+      --note-radius: 16px;
+      --nav-shell: #f8f3e8;
+      --nav-bg: rgba(255, 255, 255, 0.95);
+      --nav-border: #e3d9c8;
+      --nav-radius: 22px;
+      --nav-shadow: 0 8px 24px rgba(54, 45, 28, 0.09);
+      --nav-item-radius: 15px;
+      --nav-muted: #7a7f87;
+      --nav-active: #72551d;
+      --nav-active-bg: #f1e4c9;
+    }
+
+    .direction--modern {
+      --page: #f4f7fa;
+      --ink: #12314a;
+      --muted: #52697b;
+      --accent: #2f6fed;
+      --phone-border: #b9cbd9;
+      --phone-shadow: 0 24px 65px rgba(31, 65, 92, 0.14);
+      --title-size: 25px;
+      --soft-border: #cbd9e5;
+      --icon-bg: #fff;
+      --icon-radius: 9px;
+      --chip-bg: #e8f0ff;
+      --chip-text: #2353b5;
+      --summary-bg: #fff;
+      --summary-border: #c7d7e4;
+      --summary-radius: 16px;
+      --summary-ink: #12314a;
+      --summary-eyebrow: #52697b;
+      --summary-muted: #64748b;
+      --summary-chip-bg: #e8f0ff;
+      --summary-chip-text: #2353b5;
+      --summary-shadow: none;
+      --action-bg: #fff;
+      --action-border: #d4e0e9;
+      --action-radius: 13px;
+      --action-shadow: none;
+      --action-icon-bg: #edf3ff;
+      --action-icon-radius: 8px;
+      --note-bg: #edf4fa;
+      --note-border: #cad9e6;
+      --note-radius: 12px;
+      --nav-shell: #ecf2f7;
+      --nav-bg: #fff;
+      --nav-border: #cad7e2;
+      --nav-radius: 16px;
+      --nav-shadow: none;
+      --nav-item-radius: 10px;
+      --nav-muted: #718394;
+      --nav-active: #2353b5;
+      --nav-active-bg: #e8f0ff;
+    }
+
+    .direction--iranian {
+      --page: #fff9ee;
+      --ink: #173f3b;
+      --muted: #66736f;
+      --accent: #167c72;
+      --phone-border: #cfb88f;
+      --phone-shadow: 0 25px 72px rgba(65, 73, 50, 0.17);
+      --title-size: 27px;
+      --soft-border: #e7cc98;
+      --icon-bg: #fff4df;
+      --icon-radius: 14px;
+      --chip-bg: #e4f1ea;
+      --chip-text: #135e56;
+      --summary-bg: #173f3b;
+      --summary-border: #173f3b;
+      --summary-radius: 28px;
+      --summary-ink: #fff7e7;
+      --summary-eyebrow: #f0d7a2;
+      --summary-muted: #d4e7e3;
+      --summary-chip-bg: #d99c2b;
+      --summary-chip-text: #3c2a0a;
+      --summary-shadow: 0 14px 30px rgba(23, 63, 59, 0.2);
+      --action-bg: #fffdf8;
+      --action-border: #ead7b3;
+      --action-radius: 22px;
+      --action-shadow: 0 5px 17px rgba(83, 69, 36, 0.06);
+      --action-icon-bg: #e7f2ed;
+      --action-icon-radius: 14px;
+      --note-bg: #f7ead9;
+      --note-border: #e5caa0;
+      --note-radius: 22px;
+      --nav-shell: #f8efdf;
+      --nav-bg: #fffaf1;
+      --nav-border: #e3cfa8;
+      --nav-radius: 25px;
+      --nav-shadow: 0 8px 22px rgba(76, 65, 38, 0.08);
+      --nav-item-radius: 17px;
+      --nav-muted: #757c75;
+      --nav-active: #fff;
+      --nav-active-bg: #167c72;
+    }
+
+    .direction--modern .access-summary {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .direction--modern .access-summary::after {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: 5px;
+      background: #2f6fed;
+      content: "";
+    }
+
+    .direction--iranian .phone-header::after {
+      position: absolute;
+      top: 43px;
+      left: 58px;
+      width: 34px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #d99c2b 0 46%, #b85c4a 46% 100%);
+      content: "";
+      opacity: 0.7;
+    }
+
+    .direction--iranian .action-card:first-child {
+      border-color: #cae2d8;
+      background: #f5fbf8;
+    }
+
+    .direction--iranian .action-card:nth-child(2) {
+      border-color: #edcfc3;
+      background: #fff7f2;
+    }
+
+    .direction--iranian .action-card:nth-child(2) .action-card__icon {
+      background: #f8e4dc;
+      color: #b85c4a;
+    }
+
+    .direction--iranian .action-card:nth-child(2) .action-card__arrow {
+      color: #b85c4a;
+    }
+
+    .decision-panel,
+    .adaptive-section {
+      margin-top: 34px;
+      padding: 28px;
+      border: 1px solid #dce2e8;
+      border-radius: 24px;
+      background: #fff;
+      box-shadow: 0 14px 38px rgba(31, 41, 55, 0.06);
+    }
+
+    .decision-panel h2,
+    .adaptive-section h2 {
+      margin: 0 0 6px;
+      font-size: 22px;
+    }
+
+    .decision-panel > p,
+    .adaptive-section > p {
+      margin: 0 0 18px;
+      color: #667085;
+      font-size: 12px;
+      line-height: 1.9;
+    }
+
+    .score-table {
+      width: 100%;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+      border-collapse: separate;
+      border-spacing: 0;
+      border-radius: 16px;
+      font-size: 12px;
+    }
+
+    .score-table th,
+    .score-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #edf0f3;
+      text-align: center;
+    }
+
+    .score-table th:first-child,
+    .score-table td:first-child { text-align: right; }
+    .score-table tr:last-child td { border-bottom: 0; }
+    .score-table thead { background: #f7f9fb; color: #4b5563; }
+    .score-table tbody tr:first-child { background: #fcf8ef; }
+
+    .desktop-proof {
+      --ink: #1f2933;
+      --muted: #667085;
+      --accent: #a97928;
+      --summary-bg: #1f2933;
+      --summary-border: #1f2933;
+      --summary-radius: 24px;
+      --summary-ink: #fff;
+      --summary-eyebrow: #d8c7a3;
+      --summary-muted: #d1d5db;
+      --summary-chip-bg: #3b454f;
+      --summary-chip-text: #f1d99e;
+      --summary-shadow: 0 13px 28px rgba(31, 41, 51, 0.18);
+      --action-bg: #fff;
+      --action-border: #e7ddcc;
+      --action-radius: 18px;
+      --action-shadow: 0 5px 16px rgba(70, 57, 33, 0.06);
+      --action-icon-bg: #f7eedc;
+      --action-icon-radius: 11px;
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      width: 1280px;
+      min-height: 720px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid #d7c8aa;
+      border-radius: 24px;
+      background: #fbf8f1;
+      color: #1f2933;
+      box-shadow: 0 24px 70px rgba(60, 49, 29, 0.14);
+    }
+
+    .desktop-sidebar {
+      padding: 26px 22px;
+      border-left: 1px solid #e8decc;
+      background: #fffdf8;
+    }
+
+    .brand-mark {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 30px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .brand-mark span {
+      width: 32px;
+      height: 32px;
+      border-radius: 11px;
+      background: linear-gradient(145deg, #c19a4a, #7a5a1e);
+    }
+
+    .desktop-nav {
+      display: grid;
+      gap: 7px;
+    }
+
+    .desktop-nav div {
+      padding: 11px 12px;
+      border-radius: 12px;
+      color: #68707a;
+      font-size: 12px;
+    }
+
+    .desktop-nav .active {
+      background: #f1e4c9;
+      color: #72551d;
+      font-weight: 700;
+    }
+
+    .desktop-main {
+      padding: 28px 32px;
+    }
+
+    .desktop-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+    }
+
+    .desktop-heading h3 { margin: 0; font-size: 27px; }
+    .desktop-heading p { margin: 4px 0 0; color: #667085; font-size: 12px; }
+
+    .desktop-heading button {
+      min-height: 42px;
+      padding: 8px 16px;
+      border: 1px solid #dfd2ba;
+      border-radius: 12px;
+      background: #fff;
+      color: #72551d;
+    }
+
+    .desktop-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 316px;
+      gap: 20px;
+      direction: ltr;
+    }
+
+    .desktop-layout > * { direction: rtl; }
+    .desktop-actions { display: grid; gap: 16px; }
+
+    .desktop-section {
+      padding: 20px;
+      border: 1px solid #e8decc;
+      border-radius: 20px;
+      background: #fff;
+    }
+
+    .desktop-section__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .desktop-section__header strong { font-size: 14px; }
+    .desktop-section__header span { color: #72551d; font-size: 10px; }
+
+    .desktop-action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .desktop-action-grid .action-card { min-height: 104px; }
+    .desktop-aside .access-summary { min-height: 214px; }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .state-card {
+      min-height: 94px;
+      padding: 14px;
+      border: 1px solid #e7ddcc;
+      border-radius: 16px;
+      background: #fff;
+    }
+
+    .state-card strong { display: block; font-size: 11px; }
+    .state-card span { color: #667085; font-size: 9px; line-height: 1.8; }
+    .state-card--error { border-color: #efc5c5; background: #fff8f8; }
+    .state-card--success { border-color: #bde1d1; background: #f5fbf8; }
+
+    @media (max-width: 1400px) {
+      .directions-grid {
+        justify-content: start;
+        overflow-x: auto;
+        padding: 0 16px 16px;
+        scroll-snap-type: x mandatory;
+      }
+
+      .direction { scroll-snap-align: center; }
+      .desktop-proof { transform-origin: top right; }
+    }
+
+    @media (max-width: 760px) {
+      .stage { width: 100%; margin-top: 0; }
+      .stage-header,
+      .decision-panel,
+      .adaptive-section { border-radius: 0; }
+      .stage-header { grid-template-columns: 1fr; padding: 24px 18px; }
+      .stage-header h1 { font-size: 24px; }
+      .scope-badge { width: max-content; }
+      .decision-panel,
+      .adaptive-section { padding: 20px 16px; }
+      .score-table { min-width: 660px; }
+      .decision-panel { overflow-x: auto; }
+      .adaptive-section { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <header class="stage-header">
+      <div>
+        <h1>سه جهت بصری برای بازطراحی وب‌اپ</h1>
+        <p>سناریوی یکسان: مدیر میانی در صفحه «عملیات»؛ مرجع طراحی موبایل ۳۹۰×۸۴۴ و نسخه دسکتاپ صرفاً adaptive. تفاوت‌ها عمداً به شخصیت بصری، تراکم، شکل کارت‌ها و شیوه تأکید محدود شده‌اند.</p>
+        <div class="protected-note"><strong>مرز محافظت‌شده:</strong> بازار و پیام‌رسان فقط جایگاه ثابت خود را در ناوبری دارند؛ محتوای داخلی، رفتار و UI آن‌ها در این طراحی بررسی یا تغییر نکرده است.</div>
+      </div>
+      <span class="scope-badge">Stage 0 · بدون تغییر کد محصول</span>
+    </header>
+
+    <section class="directions-grid" aria-label="مقایسه سه جهت بصری">
+      <article class="direction direction--calm" id="direction-calm">
+        <div class="direction-label">
+          <div class="direction-label__top">
+            <h2>آرام ممتاز</h2>
+            <span class="recommendation">پیشنهاد پایه</span>
+          </div>
+          <p>حرفه‌ای، آرام، ممتاز و مناسب استفاده طولانی</p>
+          <div class="palette" aria-label="پالت آرام ممتاز">
+            <span class="swatch" style="--swatch:#1f2933"></span><span class="swatch" style="--swatch:#b68a35"></span><span class="swatch" style="--swatch:#fbf8f1"></span><span class="swatch" style="--swatch:#fff"></span>
+          </div>
+        </div>
+        <div class="phone">
+          <header class="phone-header">
+            <div class="utility-row">
+              <button class="icon-button" aria-label="اعلان‌ها">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>
+              </button>
+              <span class="role-chip">مدیر میانی</span>
+            </div>
+            <h3>عملیات</h3>
+            <p>دسترسی‌های اجرایی و مدیریتی شما</p>
+          </header>
+          <section class="phone-content">
+            <div class="access-summary"><span class="access-summary__eyebrow">وضعیت دسترسی</span><strong>۲ مسیر فعال</strong><p>مشتریان و حسابداران در دسترس شما هستند</p><span class="summary-badge">۲ ابزار مدیریتی</span></div>
+            <div class="section-heading"><strong>مسیرهای پرتکرار</strong><span>بر اساس نقش شما</span></div>
+            <div class="action-list">
+              <div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg></span><span class="action-card__copy"><strong>مشتریان</strong><span>دعوت، مدیریت و گزارش مشتریان</span></span><span class="action-card__arrow">‹</span></div>
+              <div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M22 13a18.15 18.15 0 0 1-20 0"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg></span><span class="action-card__copy"><strong>مدیریت کاربران</strong><span>مشاهده، جست‌وجو و تنظیم کاربران پروژه</span></span><span class="action-card__arrow">‹</span></div>
+            </div>
+            <div class="context-note"><span class="context-note__dot"></span><div><strong>همه‌چیز بر اساس نقش شماست</strong><p>فقط مسیرهایی نمایش داده می‌شوند که برای حساب فعلی فعال‌اند.</p></div></div>
+          </section>
+          <footer class="bottom-shell"><nav class="bottom-nav" aria-label="ناوبری اصلی">
+            <span class="nav-item">خانه</span><span class="nav-item">بازار</span><span class="nav-item">پیام‌رسان</span><span class="nav-item is-active">عملیات</span><span class="nav-item">حساب</span>
+          </nav></footer>
+        </div>
+      </article>
+
+      <article class="direction direction--modern" id="direction-modern">
+        <div class="direction-label"><div class="direction-label__top"><h2>مالی مدرن</h2></div><p>دقیق، سریع، داده‌محور و متراکم‌تر</p><div class="palette"><span class="swatch" style="--swatch:#12314a"></span><span class="swatch" style="--swatch:#2f6fed"></span><span class="swatch" style="--swatch:#f4f7fa"></span><span class="swatch" style="--swatch:#d5a84b"></span></div></div>
+        <div class="phone">
+          <header class="phone-header"><div class="utility-row"><button class="icon-button" aria-label="اعلان‌ها"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg></button><span class="role-chip">مدیر میانی</span></div><h3>عملیات</h3><p>دسترسی‌های اجرایی و مدیریتی شما</p></header>
+          <section class="phone-content"><div class="access-summary"><span class="access-summary__eyebrow">وضعیت دسترسی</span><strong>۲ مسیر فعال</strong><p>مشتریان و حسابداران در دسترس شما هستند</p><span class="summary-badge">۲ ابزار مدیریتی</span></div><div class="section-heading"><strong>مسیرهای پرتکرار</strong><span>بر اساس نقش شما</span></div><div class="action-list"><div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg></span><span class="action-card__copy"><strong>مشتریان</strong><span>دعوت، مدیریت و گزارش مشتریان</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M22 13a18.15 18.15 0 0 1-20 0"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg></span><span class="action-card__copy"><strong>مدیریت کاربران</strong><span>مشاهده، جست‌وجو و تنظیم کاربران پروژه</span></span><span class="action-card__arrow">‹</span></div></div><div class="context-note"><span class="context-note__dot"></span><div><strong>همه‌چیز بر اساس نقش شماست</strong><p>فقط مسیرهایی نمایش داده می‌شوند که برای حساب فعلی فعال‌اند.</p></div></div></section>
+          <footer class="bottom-shell"><nav class="bottom-nav"><span class="nav-item">خانه</span><span class="nav-item">بازار</span><span class="nav-item">پیام‌رسان</span><span class="nav-item is-active">عملیات</span><span class="nav-item">حساب</span></nav></footer>
+        </div>
+      </article>
+
+      <article class="direction direction--iranian" id="direction-iranian">
+        <div class="direction-label"><div class="direction-label__top"><h2>ایرانی معاصر</h2></div><p>گرم، انسانی، متمایز و بدون تزئین سنتی مستقیم</p><div class="palette"><span class="swatch" style="--swatch:#173f3b"></span><span class="swatch" style="--swatch:#167c72"></span><span class="swatch" style="--swatch:#d99c2b"></span><span class="swatch" style="--swatch:#b85c4a"></span></div></div>
+        <div class="phone">
+          <header class="phone-header"><div class="utility-row"><button class="icon-button" aria-label="اعلان‌ها"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg></button><span class="role-chip">مدیر میانی</span></div><h3>عملیات</h3><p>دسترسی‌های اجرایی و مدیریتی شما</p></header>
+          <section class="phone-content"><div class="access-summary"><span class="access-summary__eyebrow">وضعیت دسترسی</span><strong>۲ مسیر فعال</strong><p>مشتریان و حسابداران در دسترس شما هستند</p><span class="summary-badge">۲ ابزار مدیریتی</span></div><div class="section-heading"><strong>مسیرهای پرتکرار</strong><span>بر اساس نقش شما</span></div><div class="action-list"><div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg></span><span class="action-card__copy"><strong>مشتریان</strong><span>دعوت، مدیریت و گزارش مشتریان</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M22 13a18.15 18.15 0 0 1-20 0"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg></span><span class="action-card__copy"><strong>مدیریت کاربران</strong><span>مشاهده، جست‌وجو و تنظیم کاربران پروژه</span></span><span class="action-card__arrow">‹</span></div></div><div class="context-note"><span class="context-note__dot"></span><div><strong>همه‌چیز بر اساس نقش شماست</strong><p>فقط مسیرهایی نمایش داده می‌شوند که برای حساب فعلی فعال‌اند.</p></div></div></section>
+          <footer class="bottom-shell"><nav class="bottom-nav"><span class="nav-item">خانه</span><span class="nav-item">بازار</span><span class="nav-item">پیام‌رسان</span><span class="nav-item is-active">عملیات</span><span class="nav-item">حساب</span></nav></footer>
+        </div>
+      </article>
+    </section>
+
+    <section class="decision-panel">
+      <h2>مقایسه تصمیم</h2>
+      <p>امتیازها فرضیه طراحی Stage 0 هستند و پس از انتخاب اولیه با تست پنج‌ثانیه‌ای و سناریوی واقعی اعتبارسنجی می‌شوند.</p>
+      <table class="score-table"><thead><tr><th>جهت</th><th>سرعت ادراک</th><th>خوانایی موبایل</th><th>انسجام</th><th>اعتماد</th><th>تمایز برند</th></tr></thead><tbody><tr><td><strong>آرام ممتاز</strong></td><td>۴ از ۵</td><td>۵ از ۵</td><td>۵ از ۵</td><td>۵ از ۵</td><td>۴ از ۵</td></tr><tr><td><strong>مالی مدرن</strong></td><td>۵ از ۵</td><td>۴ از ۵</td><td>۴ از ۵</td><td>۴ از ۵</td><td>۳ از ۵</td></tr><tr><td><strong>ایرانی معاصر</strong></td><td>۴ از ۵</td><td>۴ از ۵</td><td>۴ از ۵</td><td>۴ از ۵</td><td>۵ از ۵</td></tr></tbody></table>
+    </section>
+
+    <section class="adaptive-section">
+      <h2>اثبات رفتار adaptive — آرام ممتاز</h2>
+      <p>این نمونه جهت نهایی را قطعی نمی‌کند؛ فقط نشان می‌دهد فضای کاری سنگین روی دسکتاپ از فضای اضافه برای list/detail و خلاصه دسترسی استفاده می‌کند و نسخه موبایل را صرفاً نمی‌کشد.</p>
+      <div class="desktop-proof" id="adaptive-desktop">
+        <aside class="desktop-sidebar"><div class="brand-mark"><span></span>سامانه معاملات</div><div class="desktop-nav"><div>خانه</div><div>بازار · جایگاه ثابت</div><div>پیام‌رسان · جایگاه ثابت</div><div class="active">عملیات</div><div>حساب</div></div></aside>
+        <main class="desktop-main"><header class="desktop-heading"><div><h3>عملیات</h3><p>دسترسی‌های اجرایی و مدیریتی شما</p></div><button>مشاهده اعلان‌ها</button></header><div class="desktop-layout"><div class="desktop-actions"><section class="desktop-section"><div class="desktop-section__header"><strong>روابط کاری</strong><span>۲ مسیر فعال</span></div><div class="desktop-action-grid"><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>مشتریان</strong><span>دعوت، مدیریت و گزارش مشتریان</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>حسابداران</strong><span>دعوت و مدیریت تنظیمات حسابداران</span></span><span class="action-card__arrow">‹</span></div></div></section><section class="desktop-section"><div class="desktop-section__header"><strong>مدیریت</strong><span>۲ ابزار فعال</span></div><div class="desktop-action-grid"><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>ارسال دعوت‌نامه</strong><span>ساخت لینک دعوت برای کاربر مجاز</span></span><span class="action-card__arrow">‹</span></div><div class="action-card"><span class="action-card__icon"></span><span class="action-card__copy"><strong>مدیریت کاربران</strong><span>جست‌وجو و تنظیم کاربران پروژه</span></span><span class="action-card__arrow">‹</span></div></div></section></div><aside class="desktop-aside"><div class="access-summary"><span class="access-summary__eyebrow">وضعیت دسترسی</span><strong>۲ مسیر فعال</strong><p>مشتریان و حسابداران در دسترس شما هستند</p><span class="summary-badge">۲ ابزار مدیریتی</span></div><div class="state-grid" style="grid-template-columns:1fr 1fr"><div class="state-card state-card--success"><strong>موفق</strong><span>نتیجه در همان زمینه نمایش داده می‌شود.</span></div><div class="state-card state-card--error"><strong>خطا</strong><span>Retry نزدیک پیام قرار می‌گیرد.</span></div></div></aside></div></main>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
