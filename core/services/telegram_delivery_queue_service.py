@@ -196,18 +196,20 @@ async def _acquire_dispatch_scope_locks(
     )
 
 
-def _is_trade_result_job(record: TelegramDeliveryJobRecord) -> bool:
-    return _enum_value(record.action_kind) == TelegramDeliveryAction.TRADE_RESULT.value
-
-
-def _require_trade_result_callback(
+def _require_lifecycle_callback(
     record: TelegramDeliveryJobRecord,
     callback: Any,
     *,
     reason: str,
+    admin_broadcast_reason: str,
 ) -> None:
-    if _is_trade_result_job(record) and not callable(callback):
+    if callable(callback):
+        return
+    action = _enum_value(record.action_kind)
+    if action == TelegramDeliveryAction.TRADE_RESULT.value:
         raise TelegramDeliveryQueueValidationError(reason)
+    if action == TelegramDeliveryAction.ADMIN_BROADCAST.value:
+        raise TelegramDeliveryQueueValidationError(admin_broadcast_reason)
 
 
 def _require_foreign(current_server: str) -> None:
@@ -861,10 +863,11 @@ async def mark_telegram_delivery_dispatch_started(
     dispatch_linearized_at = max(current_time, utc_now())
     if record.lease_until is None or record.lease_until <= dispatch_linearized_at:
         return False
-    _require_trade_result_callback(
+    _require_lifecycle_callback(
         record,
         dispatch_guard,
         reason="trade_result_dispatch_guard_required",
+        admin_broadcast_reason="admin_broadcast_dispatch_guard_required",
     )
     if dispatch_guard is not None:
         await dispatch_guard(db, record, dispatch_linearized_at)
@@ -911,10 +914,11 @@ async def apply_telegram_delivery_freshness_result(
         or int(record.lease_token or 0) != int(lease_token)
     ):
         return False
-    _require_trade_result_callback(
+    _require_lifecycle_callback(
         record,
         feedback,
         reason="trade_result_freshness_feedback_required",
+        admin_broadcast_reason="admin_broadcast_freshness_feedback_required",
     )
     contract_job = _record_to_contract(record)
     apply_freshness_decision(contract_job, decision)
@@ -1136,10 +1140,11 @@ async def resolve_telegram_delivery_result(
             reason="stale_or_missing_lease",
         )
 
-    _require_trade_result_callback(
+    _require_lifecycle_callback(
         record,
         feedback,
         reason="trade_result_delivery_feedback_required",
+        admin_broadcast_reason="admin_broadcast_delivery_feedback_required",
     )
     await _acquire_dispatch_scope_locks(db, record=record)
     result_linearized_at = utc_now()

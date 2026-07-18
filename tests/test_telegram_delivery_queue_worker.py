@@ -443,10 +443,11 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         create_task.assert_not_called()
         preflight.assert_not_awaited()
 
-    async def test_supervisor_starts_lanes_recovery_and_trade_feeder_as_independent_tasks(self):
+    async def test_supervisor_starts_lanes_recovery_and_feeders_as_independent_tasks(self):
         started_lanes: set[str] = set()
         recovery_started = asyncio.Event()
-        feeder_started = asyncio.Event()
+        trade_feeder_started = asyncio.Event()
+        admin_feeder_started = asyncio.Event()
         all_started = asyncio.Event()
 
         async def lane_loop(lane):
@@ -454,20 +455,39 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             if (
                 len(started_lanes) == 2
                 and recovery_started.is_set()
-                and feeder_started.is_set()
+                and trade_feeder_started.is_set()
+                and admin_feeder_started.is_set()
             ):
                 all_started.set()
             await asyncio.Event().wait()
 
         async def recovery_loop():
             recovery_started.set()
-            if len(started_lanes) == 2 and feeder_started.is_set():
+            if (
+                len(started_lanes) == 2
+                and trade_feeder_started.is_set()
+                and admin_feeder_started.is_set()
+            ):
                 all_started.set()
             await asyncio.Event().wait()
 
-        async def feeder_loop():
-            feeder_started.set()
-            if len(started_lanes) == 2 and recovery_started.is_set():
+        async def trade_feeder_loop():
+            trade_feeder_started.set()
+            if (
+                len(started_lanes) == 2
+                and recovery_started.is_set()
+                and admin_feeder_started.is_set()
+            ):
+                all_started.set()
+            await asyncio.Event().wait()
+
+        async def admin_feeder_loop():
+            admin_feeder_started.set()
+            if (
+                len(started_lanes) == 2
+                and recovery_started.is_set()
+                and trade_feeder_started.is_set()
+            ):
                 all_started.set()
             await asyncio.Event().wait()
 
@@ -490,7 +510,10 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=recovery_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
-            side_effect=feeder_loop,
+            side_effect=trade_feeder_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_admin_broadcast_queue_handoff_loop",
+            side_effect=admin_feeder_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
             new=AsyncMock(side_effect=preflight_for_selected_role),
@@ -516,7 +539,8 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(all_started.wait(), timeout=1)
             self.assertEqual(started_lanes, {"primary", "channel_editor"})
             self.assertTrue(recovery_started.is_set())
-            self.assertTrue(feeder_started.is_set())
+            self.assertTrue(trade_feeder_started.is_set())
+            self.assertTrue(admin_feeder_started.is_set())
             self.assertEqual(preflight.await_count, 2)
             self.assertEqual(
                 {call.kwargs["bot_identities"] for call in preflight.await_args_list},
@@ -604,6 +628,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
+            "core.telegram_delivery_queue_worker.telegram_admin_broadcast_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
             "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
             new=preflight,
         ), patch(
@@ -672,6 +699,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_admin_broadcast_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
@@ -748,6 +778,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
                 side_effect=idle_loop,
             ), patch(
+                "core.telegram_delivery_queue_worker.telegram_admin_broadcast_queue_handoff_loop",
+                side_effect=idle_loop,
+            ), patch(
                 "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
                 new=AsyncMock(),
             ) as preflight, patch(
@@ -806,6 +839,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_admin_broadcast_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
@@ -1143,6 +1179,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_admin_broadcast_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",

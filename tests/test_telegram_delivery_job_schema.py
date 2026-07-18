@@ -278,6 +278,24 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertIn("postgresql_where", source)
         self.assertIn('op.drop_table("telegram_delivery_resume_operations")', source)
 
+    def test_admin_broadcast_queue_binding_migration_follows_resume_head(self):
+        source = Path(
+            "migrations/versions/"
+            "f7a2b3c4d5ec_bind_admin_broadcast_to_delivery_queue.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f6f1c2d3e4fb"',
+            source,
+        )
+        self.assertIn('"telegram_admin_broadcast_receipts"', source)
+        self.assertIn('"queue_job_id"', source)
+        self.assertIn('"queue_handed_off_at"', source)
+        self.assertIn('"queue_last_handed_off_at"', source)
+        self.assertIn(
+            'op.drop_column("telegram_admin_broadcast_receipts", "queue_job_id")',
+            source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

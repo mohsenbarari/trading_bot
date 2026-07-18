@@ -335,7 +335,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "telegram_admin_broadcasts": _entry(
         "telegram_admin_broadcasts",
         SyncPolicy.SYNC,
-        ("telegram_bot_admin", "telegram_admin_broadcast_worker"),
+        (
+            "telegram_bot_admin",
+            "telegram_admin_broadcast_worker",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign Telegram admin broadcast authority",
         "foreign creates broadcast rows; id remains partitioned and receipt rows carry dedupe identity",
         "Telegram-only management broadcast audit",
@@ -344,7 +348,10 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "telegram_admin_broadcast_receipts": _entry(
         "telegram_admin_broadcast_receipts",
         SyncPolicy.SYNC,
-        ("telegram_admin_broadcast_worker",),
+        (
+            "telegram_admin_broadcast_worker",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign Telegram admin broadcast delivery owner",
         "dedupe key plus terminal-state precedence; local lease fields are not cross-server execution authority",
         "Telegram-only management broadcast delivery audit and repair",

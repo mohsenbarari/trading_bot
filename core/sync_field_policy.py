@@ -279,6 +279,28 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         action=SyncFieldAction.DROP,
         reason="local Telegram broadcast delivery lease deadline; opposite server must not use it for execution",
     ),
+    ("telegram_admin_broadcast_receipts", "queue_job_id"): _entry(
+        "telegram_admin_broadcast_receipts",
+        "queue_job_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        references_no_sync_table="telegram_delivery_jobs",
+        reason="foreign-local binding to the no-sync shared Telegram execution queue",
+    ),
+    ("telegram_admin_broadcast_receipts", "queue_handed_off_at"): _entry(
+        "telegram_admin_broadcast_receipts",
+        "queue_handed_off_at",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="foreign-local handoff timestamp for shared Telegram queue ownership",
+    ),
+    ("telegram_admin_broadcasts", "queue_last_handed_off_at"): _entry(
+        "telegram_admin_broadcasts",
+        "queue_last_handed_off_at",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="foreign-local durable round-robin cursor for admin broadcast campaigns",
+    ),
     ("telegram_notification_outbox", "text"): _entry(
         "telegram_notification_outbox",
         "text",

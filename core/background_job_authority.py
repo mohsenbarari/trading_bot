@@ -274,7 +274,12 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
     ),
     JOB_TELEGRAM_DELIVERY_QUEUE: BackgroundJobAuthorityEntry(
         job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
-        mutated_tables=("telegram_delivery_jobs", "trade_delivery_receipts"),
+        mutated_tables=(
+            "telegram_delivery_jobs",
+            "trade_delivery_receipts",
+            "telegram_admin_broadcasts",
+            "telegram_admin_broadcast_receipts",
+        ),
         allowed_servers=(SERVER_FOREIGN,),
         authority_rule=(
             "foreign-only shared Telegram execution owner; it may claim local delivery jobs only after "
@@ -285,8 +290,8 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "blindly replay an ambiguous send"
         ),
         sync_outbox_behavior=(
-            "telegram_delivery_jobs is foreign-local no-sync execution state; trade delivery receipts remain "
-            "sync-visible domain audit while worker_id/lease_until are local-only ownership fields"
+            "telegram_delivery_jobs is foreign-local no-sync execution state; trade and admin-broadcast "
+            "receipts remain sync-visible domain audit while queue bindings and lease fields are local-only"
         ),
         local_runtime=True,
         external_state=("Telegram Bot API",),

@@ -11,6 +11,7 @@ from core.telegram_delivery_freshness_router import (
     TelegramDeliveryFreshnessRegistry,
     TelegramDeliveryFreshnessRouter,
     TelegramDeliveryFreshnessRoutingError,
+    admin_broadcast_freshness_routes,
     market_freshness_routes,
     offer_freshness_routes,
     required_freshness_actions_for_lane,
@@ -19,6 +20,9 @@ from core.telegram_delivery_freshness_router import (
 from core.telegram_delivery_market_freshness import MARKET_NOTICE_FRESHNESS_ACTIONS
 from core.telegram_delivery_offer_freshness import OFFER_FRESHNESS_ACTIONS
 from core.telegram_delivery_trade_freshness import TRADE_RESULT_FRESHNESS_ACTIONS
+from core.telegram_delivery_admin_broadcast_freshness import (
+    ADMIN_BROADCAST_FRESHNESS_ACTIONS,
+)
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramFreshnessDecision,
@@ -119,6 +123,25 @@ class TelegramDeliveryFreshnessRouterTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryAction.TRADE_NONCRITICAL,
         ):
             self.assertIn(action, primary.missing_actions)
+
+    def test_admin_broadcast_route_covers_only_durable_broadcast_action(self):
+        validator = send_validator()
+        routes = offer_freshness_routes(validator)
+        routes.update(market_freshness_routes(validator))
+        routes.update(trade_result_freshness_routes(validator))
+        routes.update(admin_broadcast_freshness_routes(validator))
+
+        primary = TelegramDeliveryFreshnessRegistry(routes).coverage("primary")
+
+        self.assertEqual(
+            set(primary.configured_actions),
+            OFFER_FRESHNESS_ACTIONS
+            | MARKET_NOTICE_FRESHNESS_ACTIONS
+            | TRADE_RESULT_FRESHNESS_ACTIONS
+            | ADMIN_BROADCAST_FRESHNESS_ACTIONS,
+        )
+        self.assertNotIn(TelegramDeliveryAction.ADMIN_BROADCAST, primary.missing_actions)
+        self.assertIn(TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE, primary.missing_actions)
 
     def test_incomplete_lane_refuses_router_construction(self):
         registry = TelegramDeliveryFreshnessRegistry(
