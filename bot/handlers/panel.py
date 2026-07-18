@@ -563,26 +563,6 @@ def get_user_panel_blocked_keyboard(blocked_users: list[dict]) -> InlineKeyboard
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _render_user_panel_blocked_users(message: types.Message, user_id: int) -> None:
-    from core.services.block_service import get_blocked_users
-
-    async with AsyncSessionLocal() as session:
-        blocked_users = await get_blocked_users(session, user_id)
-
-    if not blocked_users:
-        await message.answer(
-            "📋 لیست کاربران مسدود شده شما خالی است.",
-            reply_markup=_user_panel_back_keyboard(),
-        )
-        return
-
-    await message.answer(
-        "📋 **کاربران مسدود شده**\n\nبرای رفع مسدودیت روی نام کاربر بزنید:",
-        parse_mode="Markdown",
-        reply_markup=get_user_panel_blocked_keyboard(blocked_users),
-    )
-
-
 @router.message(F.text == USER_PANEL_BLOCKED_USERS_TEXT)
 async def show_user_panel_blocked_users(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:

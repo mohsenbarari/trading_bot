@@ -50,6 +50,23 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             all(item.disposition == "legacy_mode_guarded" for item in matches)
         )
 
+    def test_repeat_offer_direct_fallbacks_are_owner_guarded(self):
+        expected_scopes = {
+            "_send_repeat_offer_menu_refresh",
+            "handle_repeat_offer_button",
+        }
+        matches = [
+            item
+            for item in self.inventory
+            if item.path == "bot/handlers/trade_create.py"
+            and item.scope in expected_scopes
+            and item.callee in {"bot.send_message", "message.answer"}
+        ]
+        self.assertEqual({item.scope for item in matches}, expected_scopes)
+        self.assertTrue(
+            all(item.disposition == "legacy_owner_guarded" for item in matches)
+        )
+
     def test_otp_and_membership_mutations_are_not_misreported_as_shared_message_work(self):
         otp_calls = [
             item

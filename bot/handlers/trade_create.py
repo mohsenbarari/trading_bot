@@ -119,6 +119,15 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+
+def _assert_legacy_repeat_offer_delivery_owner() -> None:
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.LEGACY
+    ):
+        raise RuntimeError("repeat_offer_direct_delivery_requires_legacy_owner")
+
+
 BOT_MARKET_CLOSED_MESSAGE = (
     "بعلت بسته بودن بازار درخواست شما ثبت نشد\n"
     "لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید."
@@ -2029,6 +2038,7 @@ async def _send_repeat_offer_menu_refresh(
         )
         if queued is not None:
             return
+        _assert_legacy_repeat_offer_delivery_owner()
         keyboard = await build_persistent_navigation_keyboard(
             user,
             user_facing_webapp_url(settings_obj=settings),
@@ -2241,6 +2251,7 @@ async def handle_repeat_offer_button(
             text=TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
         )
         if queued is None:
+            _assert_legacy_repeat_offer_delivery_owner()
             await message.answer(
                 TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
                 reply_markup=await build_persistent_navigation_keyboard(

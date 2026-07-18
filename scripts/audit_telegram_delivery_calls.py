@@ -91,8 +91,8 @@ REMAINING_DISPOSITION_BUDGETS = {
     "remaining_business_direct": 0,
     "remaining_callback_direct": 0,
     "remaining_cleanup_direct": 13,
-    "remaining_interactive_direct": 304,
-    "remaining_memory_timer": 7,
+    "remaining_interactive_direct": 272,
+    "remaining_memory_timer": 5,
 }
 
 

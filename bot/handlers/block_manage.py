@@ -188,12 +188,15 @@ async def reject_delegated_block_management_message(message: types.Message, user
     return True
 
 
-async def send_block_menu_message(message: types.Message, user: User) -> types.Message:
+async def send_block_menu_message(message: types.Message, user: User):
     async with AsyncSessionLocal() as session:
         status = await get_block_status(session, user.id)
 
-    return await message.answer(
+    return await answer_incoming_message_via_runtime(
+        message,
+        user,
         build_block_menu_text(status),
+        source_key="block-menu-entry",
         parse_mode="Markdown",
         reply_markup=get_block_menu_keyboard(status),
     )

@@ -11,6 +11,7 @@ from bot.handlers.trade_create import (
 from bot.repeat_offer import BotRepeatOfferCandidate
 from core.services.offer_creation_service import OfferCreationAdmissionError
 from core.services.offer_republish_service import OfferNotRepeatableError
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 class FakeSessionContext:
@@ -158,6 +159,42 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             enqueue.await_args.kwargs["source_id"],
             "stale-button:81",
         )
+
+    async def test_stale_button_fails_closed_if_queue_handoff_returns_none(self):
+        message = SimpleNamespace(
+            text="🔁 خ ن سکه 10 عدد 100000",
+            message_id=81,
+            chat=SimpleNamespace(id=99),
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+        user = SimpleNamespace(id=9, telegram_id=99)
+
+        with patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(None, True, "stale_button")),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ), patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "repeat_offer_direct_delivery_requires_legacy_owner",
+            ):
+                await handle_repeat_offer_button(message, state, user, message.bot)
+
+        message.answer.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
 
     async def test_confirm_revalidates_source_and_creates_foreign_provenance(self):
         creation_session = SimpleNamespace()
@@ -403,6 +440,29 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             enqueue.await_args.kwargs["source_id"],
             "repeat-success:bot-repeat:intent-1",
         )
+
+    async def test_menu_refresh_fails_closed_if_queue_handoff_returns_none(self):
+        user = SimpleNamespace(id=9)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        with patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ), patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            await _send_repeat_offer_menu_refresh(
+                bot,
+                chat_id=99,
+                user=user,
+                source_id="repeat-success:bot-repeat:intent-2",
+            )
+
+        bot.send_message.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
 
 
 if __name__ == "__main__":
