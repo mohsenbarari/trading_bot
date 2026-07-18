@@ -140,6 +140,63 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+    async def test_channel_cooldown_keeps_primary_private_lane_available(self):
+        channel_destination = f"channel:{int(worker.settings.channel_id)}"
+        cooldown = self._rehydration(
+            cooldown_destinations=(channel_destination,),
+        )
+        primary_mode = worker._telegram_delivery_lane_start_mode(
+            SimpleNamespace(bot_identity="primary"),
+            rehydration=cooldown,
+            channel_destination_key=channel_destination,
+        )
+        editor_mode = worker._telegram_delivery_lane_start_mode(
+            SimpleNamespace(bot_identity="channel_editor"),
+            rehydration=cooldown,
+            channel_destination_key=channel_destination,
+        )
+        self.assertEqual(primary_mode, (True, True))
+        self.assertEqual(editor_mode, (False, False))
+
+    async def test_private_only_lane_exits_for_full_preflight_when_channel_gate_clears(self):
+        channel_destination = f"channel:{int(worker.settings.channel_id)}"
+        limiter = _AllowLimiter()
+        lane = SimpleNamespace(
+            bot_identity="primary",
+            freshness_validator=AsyncMock(),
+            lifecycle_feedback=_NoopLifecycleFeedback(),
+            gateway_call=AsyncMock(),
+            dispatch_limiter=limiter,
+        )
+        cycle = AsyncMock()
+        with patch(
+            "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
+            new=AsyncMock(
+                side_effect=(
+                    self._rehydration(
+                        cooldown_destinations=(channel_destination,),
+                    ),
+                    self._rehydration(),
+                )
+            ),
+        ), patch(
+            "core.telegram_delivery_queue_worker.run_telegram_delivery_queue_cycle",
+            new=cycle,
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            await worker.telegram_delivery_private_only_lane_loop(
+                lane,
+                channel_destination_key=channel_destination,
+            )
+
+        cycle.assert_awaited_once()
+        self.assertEqual(
+            cycle.await_args.kwargs["allowed_destination_classes"],
+            {worker.TelegramDestinationClass.PRIVATE},
+        )
+
     async def test_cycle_without_authoritative_freshness_adapter_refuses_before_db_touch(self):
         with patch(
             "core.telegram_delivery_queue_worker.assert_background_job_authority"
@@ -765,6 +822,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             started.set()
             await asyncio.Event().wait()
 
+        async def private_lane_loop(lane, **_kwargs):
+            await lane_loop(lane)
+
         async def idle_loop():
             await asyncio.Event().wait()
 
@@ -781,6 +841,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_lane_loop",
             side_effect=lane_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_private_only_lane_loop",
+            side_effect=private_lane_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
             side_effect=idle_loop,

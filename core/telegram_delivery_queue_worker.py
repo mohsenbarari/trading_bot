@@ -55,6 +55,7 @@ from core.telegram_delivery_queue_contract import (
     TelegramDeliveryDecision,
     TelegramDeliveryOutcome,
     TelegramDeliveryState,
+    TelegramDestinationClass,
     TelegramFreshnessDecision,
 )
 from core.telegram_delivery_queue_limiter import (
@@ -382,7 +383,6 @@ async def rehydrate_telegram_delivery_limiter_state(
             and evidence.next_retry_at is not None
             and evidence.next_retry_at > current_time
         ):
-            blocked_bot_identities.add(evidence.bot_identity)
             cooldown_destination_keys.add(evidence.destination_key)
             await dispatch_limiter.observe(
                 evidence,
@@ -636,6 +636,7 @@ async def run_telegram_delivery_queue_cycle(
     dispatch_limiter: TelegramDeliveryDispatchLimiter | None = None,
     worker_id: str | None = None,
     recover_leases: bool = True,
+    allowed_destination_classes: set[TelegramDestinationClass] | None = None,
 ) -> TelegramDeliveryQueueCycleReport:
     """Run a bounded testable cycle without holding a DB transaction over HTTP."""
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
@@ -693,6 +694,7 @@ async def run_telegram_delivery_queue_cycle(
                 worker_id=active_worker_id,
                 request_timeout_seconds=_request_timeout_seconds(),
                 lease_seconds=_lease_seconds(),
+                allowed_destination_classes=allowed_destination_classes,
             )
             if job is None:
                 await db.rollback()
@@ -1049,6 +1051,68 @@ async def telegram_delivery_queue_lane_loop(
         await asyncio.sleep(_worker_interval_seconds())
 
 
+async def telegram_delivery_private_only_lane_loop(
+    lane: TelegramDeliveryQueueLaneSpec,
+    *,
+    channel_destination_key: str,
+) -> None:
+    """Keep primary private traffic moving while channel capability is gated.
+
+    The loop exits as soon as the durable channel gate clears so the activation
+    controller must run a full channel permission preflight before channel work
+    can be claimed again.
+    """
+    if lane.bot_identity != TELEGRAM_PRIMARY_BOT_IDENTITY:
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "identity_only_lane_must_be_primary"
+        )
+    logger.info(
+        "Telegram primary lane started in private-only mode",
+        extra={
+            "event": "telegram_delivery_queue_lane.private_only_started",
+            "bot_role": lane.bot_identity,
+        },
+    )
+    while True:
+        rehydration = await rehydrate_telegram_delivery_limiter_state(
+            lane.dispatch_limiter
+        )
+        may_start, identity_only = _telegram_delivery_lane_start_mode(
+            lane,
+            rehydration=rehydration,
+            channel_destination_key=channel_destination_key,
+        )
+        if not may_start or not identity_only:
+            return
+        try:
+            await run_telegram_delivery_queue_cycle(
+                bot_identity=lane.bot_identity,
+                freshness_validator=lane.freshness_validator,
+                lifecycle_feedback=lane.lifecycle_feedback,
+                gateway_call=lane.gateway_call,
+                dispatch_limiter=lane.dispatch_limiter,
+                recover_leases=False,
+                allowed_destination_classes={TelegramDestinationClass.PRIVATE},
+            )
+        except asyncio.CancelledError:
+            raise
+        except (
+            TelegramDeliveryQueueImplementationIncompleteError,
+            TelegramDeliveryLimiterUnavailableError,
+        ):
+            raise
+        except Exception as exc:
+            _loop_errors.log(
+                logger,
+                "Error in Telegram private-only lane %s: %s",
+                lane.bot_identity,
+                exc,
+                job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
+                bot_role=lane.bot_identity,
+            )
+        await asyncio.sleep(_worker_interval_seconds())
+
+
 async def telegram_delivery_queue_recovery_loop() -> None:
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
@@ -1230,7 +1294,7 @@ async def telegram_delivery_reconciliation_loop(
                         )
                     ),
                 ),
-                max_rows=_worker_recover_limit(),
+                max_rows=_recover_limit(),
                 now=utc_now(),
             )
             await db.commit()
@@ -1259,9 +1323,10 @@ def _telegram_delivery_lane_start_mode(
         return False, False
     if lane.bot_identity in set(rehydration.blocked_bot_identities):
         return False, False
-    if channel_destination_key in set(rehydration.cooldown_destination_keys):
-        return False, False
-    if channel_destination_key in set(rehydration.hard_blocked_destination_keys):
+    if channel_destination_key in {
+        *rehydration.cooldown_destination_keys,
+        *rehydration.hard_blocked_destination_keys,
+    }:
         if lane.bot_identity == TELEGRAM_PRIMARY_BOT_IDENTITY:
             return True, True
         return False, False
@@ -1367,7 +1432,13 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 },
             )
             retry_delay = _worker_interval_seconds()
-            await telegram_delivery_queue_lane_loop(lane)
+            if identity_only:
+                await telegram_delivery_private_only_lane_loop(
+                    lane,
+                    channel_destination_key=channel_destination_key,
+                )
+            else:
+                await telegram_delivery_queue_lane_loop(lane)
             rehydration = None
         except asyncio.CancelledError:
             raise

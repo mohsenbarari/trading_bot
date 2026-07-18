@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from core.server_routing import SERVER_FOREIGN
 from core.telegram_delivery_queue_contract import (
@@ -930,6 +931,7 @@ async def claim_next_telegram_delivery_job(
     worker_id: str,
     request_timeout_seconds: float,
     lease_seconds: float,
+    allowed_destination_classes: set[TelegramDestinationClass] | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryJobRecord | None:
     _require_foreign(current_server)
@@ -939,6 +941,18 @@ async def claim_next_telegram_delivery_job(
     if float(lease_seconds) < float(request_timeout_seconds) + MINIMUM_LEASE_MARGIN_SECONDS:
         raise TelegramDeliveryQueueValidationError("lease_must_cover_request_timeout_plus_margin")
     current_time = now or utc_now()
+    normalized_destination_classes: tuple[TelegramDestinationClass, ...] | None = None
+    if allowed_destination_classes is not None:
+        normalized_destination_classes = tuple(
+            sorted(
+                {TelegramDestinationClass(value) for value in allowed_destination_classes},
+                key=lambda value: value.value,
+            )
+        )
+        if not normalized_destination_classes:
+            raise TelegramDeliveryQueueValidationError(
+                "allowed_destination_classes_must_not_be_empty"
+            )
     trade_overdue = (
         (TelegramDeliveryJobRecord.action_kind == TelegramDeliveryAction.TRADE_RESULT)
         & TelegramDeliveryJobRecord.delivery_deadline_at.is_not(None)
@@ -946,20 +960,91 @@ async def claim_next_telegram_delivery_job(
     )
     effective_priority = case((trade_overdue, 0), else_=TelegramDeliveryJobRecord.priority)
     effective_rank = case((trade_overdue, 1), else_=TelegramDeliveryJobRecord.priority_rank)
-    stmt = (
-        select(TelegramDeliveryJobRecord)
-        .where(
-            TelegramDeliveryJobRecord.bot_identity == lane_identity,
-            TelegramDeliveryJobRecord.state.in_(tuple(CLAIMABLE_DELIVERY_STATES)),
+    blocker = aliased(TelegramDeliveryJobRecord)
+    destination_or_runtime_blocked = exists(
+        select(blocker.id).where(
+            blocker.id != TelegramDeliveryJobRecord.id,
             or_(
-                TelegramDeliveryJobRecord.eligible_at.is_(None),
-                TelegramDeliveryJobRecord.eligible_at <= current_time,
-            ),
-            or_(
-                TelegramDeliveryJobRecord.next_retry_at.is_(None),
-                TelegramDeliveryJobRecord.next_retry_at <= current_time,
+                and_(
+                    blocker.destination_key == TelegramDeliveryJobRecord.destination_key,
+                    or_(
+                        and_(
+                            blocker.state == TelegramDeliveryState.LEASED,
+                            blocker.dispatch_started_at.is_not(None),
+                        ),
+                        and_(
+                            blocker.state == TelegramDeliveryState.PENDING_RETRY,
+                            blocker.outcome_reason == "telegram_rate_limited",
+                            blocker.next_retry_at.is_not(None),
+                            blocker.next_retry_at > current_time,
+                        ),
+                        and_(
+                            blocker.state.in_(_DURABLE_UNRESOLVED_DESTINATION_STATES),
+                            blocker.dispatch_started_at.is_not(None),
+                        ),
+                        blocker.state == TelegramDeliveryState.BLOCKED_DESTINATION,
+                    ),
+                ),
+                and_(
+                    blocker.bot_identity == TelegramDeliveryJobRecord.bot_identity,
+                    blocker.state == TelegramDeliveryState.BLOCKED_BOT,
+                ),
+                blocker.state == TelegramDeliveryState.BLOCKED_GATEWAY,
+                and_(
+                    blocker.bot_identity == TelegramDeliveryJobRecord.bot_identity,
+                    blocker.bot_cooldown_until.is_not(None),
+                    blocker.bot_cooldown_until > current_time,
+                ),
+                and_(
+                    blocker.bot_identity == TelegramDeliveryJobRecord.bot_identity,
+                    blocker.rate_limit_probe.is_(True),
+                    blocker.dispatch_started_at.is_not(None),
+                    blocker.state.in_(
+                        (
+                            TelegramDeliveryState.LEASED,
+                            *_DURABLE_UNRESOLVED_DESTINATION_STATES,
+                        )
+                    ),
+                ),
             ),
         )
+    )
+    resume_incomplete = exists(
+        select(TelegramDeliveryResumeOperation.id).where(
+            TelegramDeliveryResumeOperation.destination_key
+            == TelegramDeliveryJobRecord.destination_key,
+            TelegramDeliveryResumeOperation.state.in_(
+                ACTIVE_TELEGRAM_DELIVERY_RESUME_STATES
+            ),
+        )
+    )
+    claim_filters: list[Any] = [
+        TelegramDeliveryJobRecord.bot_identity == lane_identity,
+        TelegramDeliveryJobRecord.state.in_(tuple(CLAIMABLE_DELIVERY_STATES)),
+        or_(
+            TelegramDeliveryJobRecord.eligible_at.is_(None),
+            TelegramDeliveryJobRecord.eligible_at <= current_time,
+        ),
+        or_(
+            TelegramDeliveryJobRecord.next_retry_at.is_(None),
+            TelegramDeliveryJobRecord.next_retry_at <= current_time,
+        ),
+        or_(
+            TelegramDeliveryJobRecord.bot_cooldown_until.is_(None),
+            TelegramDeliveryJobRecord.bot_cooldown_until <= current_time,
+        ),
+        ~destination_or_runtime_blocked,
+        ~resume_incomplete,
+    ]
+    if normalized_destination_classes is not None:
+        claim_filters.append(
+            TelegramDeliveryJobRecord.destination_class.in_(
+                normalized_destination_classes
+            )
+        )
+    stmt = (
+        select(TelegramDeliveryJobRecord)
+        .where(*claim_filters)
         .order_by(
             effective_priority.asc(),
             effective_rank.asc(),

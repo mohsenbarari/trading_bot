@@ -1551,6 +1551,24 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             "durable-gate-worker-2",
             now=now + timedelta(milliseconds=10),
         )
+        self.assertIsNone(second)
+        async with self.Session() as db:
+            second = (
+                await db.execute(
+                    select(TelegramDeliveryJobRecord)
+                    .where(
+                        TelegramDeliveryJobRecord.source_natural_id
+                        == "durable-gate-second"
+                    )
+                    .with_for_update()
+                )
+            ).scalar_one()
+            second.state = TelegramDeliveryState.LEASED
+            second.worker_id = "durable-gate-worker-2"
+            second.lease_token = 1
+            second.lease_until = now + timedelta(seconds=30)
+            second.attempt_count = 1
+            await db.commit()
         async with self.Session() as db:
             with self.assertRaisesRegex(
                 TelegramDeliveryDispatchDeferredError,
@@ -1794,7 +1812,9 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     retry_after_safety_seconds=0.1,
                     retry_base_seconds=1,
                     retry_max_seconds=300,
-                    global_rate_limit_window_seconds=2.0,
+                    # Keep the test insensitive to a loaded local PostgreSQL;
+                    # the assertion is about commit ordering, not a 2s wall-clock SLA.
+                    global_rate_limit_window_seconds=30.0,
                     now=provider_time,
                 )
                 await db.commit()
@@ -1847,8 +1867,16 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
 
-        job = await self._claim("max-429-worker", now=now)
-        self.assertEqual(job.id, third.job.id)
+        # Bypass the claim scheduler deliberately to exercise the final
+        # serializable dispatch boundary against the latest blocker deadline.
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, third.job.id)
+            job.state = TelegramDeliveryState.LEASED
+            job.worker_id = "max-429-worker"
+            job.lease_token = 1
+            job.lease_until = now + timedelta(seconds=30)
+            job.attempt_count = 1
+            await db.commit()
         async with self.Session() as db:
             with self.assertRaises(TelegramDeliveryDispatchDeferredError) as raised:
                 await mark_telegram_delivery_dispatch_started(
@@ -1940,15 +1968,13 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(first_decision.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
-        self.assertEqual(report.status_counts, {"durable_dispatch_wait": 1})
+        self.assertEqual(report.status_counts, {})
+        self.assertEqual(report.processed_count, 0)
         gateway.assert_not_awaited()
         async with self.Session() as db:
             persisted = await db.get(TelegramDeliveryJobRecord, second.job.id)
-        self.assertEqual(persisted.state, TelegramDeliveryState.PENDING_RETRY)
-        self.assertEqual(
-            persisted.outcome_reason,
-            "durable_dispatch_gate:pending_retry",
-        )
+        self.assertEqual(persisted.state, TelegramDeliveryState.PENDING)
+        self.assertIsNone(persisted.outcome_reason)
 
     async def test_durable_429_gate_does_not_stall_different_destination(self):
         await self._enqueue("different-gate-first", destination="private:blocked")
@@ -2030,6 +2056,74 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             persisted = await db.get(TelegramDeliveryJobRecord, allowed.job.id)
         self.assertEqual(persisted.state, TelegramDeliveryState.SENT)
+
+    async def test_claim_skips_higher_priority_channel_resource_with_durable_gate(self):
+        channel_destination = "channel:-1001"
+        await self._enqueue(
+            "resource-gate-existing",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+            destination=channel_destination,
+            destination_class=TelegramDestinationClass.CHANNEL,
+            payload={"chat_id": -1001, "text": "existing"},
+        )
+        now = utc_now()
+        first = await self._claim("resource-gate-first", now=now)
+        async with self.Session() as db:
+            await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=first.id,
+                worker_id=first.worker_id,
+                lease_token=first.lease_token,
+                now=now,
+            )
+            await db.commit()
+        async with self.Session() as db:
+            await resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=first.id,
+                worker_id=first.worker_id,
+                lease_token=first.lease_token,
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="sendMessage",
+                    status_code=429,
+                    response_json={
+                        "ok": False,
+                        "error_code": 429,
+                        "parameters": {"retry_after": 120},
+                    },
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                now=now + timedelta(milliseconds=10),
+            )
+            await db.commit()
+
+        blocked = await self._enqueue(
+            "resource-gate-higher-priority",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+            destination=channel_destination,
+            destination_class=TelegramDestinationClass.CHANNEL,
+            payload={"chat_id": -1001, "text": "blocked"},
+        )
+        private = await self._enqueue(
+            "resource-gate-private-progress",
+            destination="private:resource-progress",
+        )
+        claimed = await self._claim(
+            "resource-aware-worker",
+            now=now + timedelta(seconds=1),
+        )
+        self.assertEqual(int(claimed.id), int(private.job.id))
+
+        async with self.Session() as db:
+            blocked_record = await db.get(TelegramDeliveryJobRecord, blocked.job.id)
+        self.assertEqual(blocked_record.state, TelegramDeliveryState.PENDING)
 
     async def test_startup_rehydrates_committed_429_before_claims(self):
         await self._enqueue("rehydrate-429", destination="private:rehydrate")
@@ -2482,8 +2576,9 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(
                     report.status_counts,
-                    {"durable_dispatch_wait": 1},
+                    {},
                 )
+                self.assertEqual(report.processed_count, 0)
                 gateway.assert_not_awaited()
 
                 control_args = case.get("control")
@@ -2636,7 +2731,8 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 recover_leases=False,
             )
 
-        self.assertEqual(report.status_counts, {"durable_dispatch_wait": 1})
+        self.assertEqual(report.status_counts, {})
+        self.assertEqual(report.processed_count, 0)
         gateway_second.assert_not_awaited()
         gateway_first.assert_awaited_once()
         async with self.Session() as db:
@@ -2646,7 +2742,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(
             persisted_second.state,
-            TelegramDeliveryState.PENDING_RETRY,
+            TelegramDeliveryState.PENDING,
         )
 
     async def test_reclassification_preserves_immutable_identity_and_waits_for_reconciliation(self):

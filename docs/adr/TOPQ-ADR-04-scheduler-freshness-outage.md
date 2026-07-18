@@ -48,3 +48,10 @@ limiter و scheduler فقط همراه execution-owner flag فعال می‌شو
 - `429` preflight قبل از هر sleep در PostgreSQL ثبت و پس از Redis loss rehydrate می‌شود.
 - Lua limiter از Redis `TIME` استفاده می‌کند. config باید `0 < base_backoff <= max_backoff`، مقادیر finite/bounded و jitter کنترل‌شده را enforce کند؛ provider attempt از claim/admission attempt جداست.
 - newest-first edit باید در کل backlog قابل‌اجرا باشد، نه فقط در انتخاب هر cycle feeder.
+
+## الحاقیه پیاده‌سازی resource-aware `2026-07-19`
+
+- query claim پیش از lease، blockerهای committed همان destination، resume ناتمام، bot pause/cooldown/probe و gateway pause را با subquery correlated حذف می‌کند. marker سریال‌شونده همچنان همین gateها را دوباره می‌خواند تا race بین claim و dispatch پوشش داده شود.
+- یک 429 مقصد به‌تنهایی در restart به bot-wide pause تبدیل نمی‌شود؛ فقط `bot_cooldown_until` یا probe/bot evidence صریح کل bot را می‌بندد. تست هم‌زمان دو destination همچنان escalation واقعی bot-wide را اثبات می‌کند.
+- primary در channel cooldown/hard-pause با preflight فقط هویت وارد loop خصوصی می‌شود و claim آن به `destination_class=private` محدود است. با پاک‌شدن gate loop خارج می‌شود؛ channel job فقط پس از preflight کامل permission دوباره eligible می‌شود. editor در همان gate شروع نمی‌شود.
+- ماتریس واقعی PostgreSQL ثابت می‌کند M0 کانال بسته، M1 خصوصی را اشغال نمی‌کند؛ تست final marker نیز با lease مصنوعی ثابت می‌کند bypass scheduler هنوز پیش از side effect رد می‌شود.
