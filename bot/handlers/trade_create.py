@@ -61,11 +61,14 @@ from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
     publish_offer_to_telegram_channel_once,
 )
+from core.services.telegram_callback_queue_service import (
+    enqueue_telegram_callback_answer,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
-from core.utils import to_jalali_str, check_user_limits
+from core.utils import to_jalali_str, check_user_limits, utc_now
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
     get_settlement_type_keyboard,
@@ -101,8 +104,10 @@ from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON,
     TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
     TelegramNotificationRecipient,
+    enqueue_telegram_action_notification_once,
     enqueue_offer_success_preview_notification_once,
 )
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +119,13 @@ BOT_MARKET_CLOSED_MESSAGE = (
     "لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید."
 )
 INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
+STALE_TRADE_BUILDER_GUIDANCE = (
+    "این مرحله با دکمه‌های پیام قبلی ادامه پیدا می‌کند. "
+    "برای شروع مجدد، دکمه «📈 معامله» را بزنید یا لفظ کامل ارسال کنید."
+)
+STALE_TRADE_CREATION_CALLBACK_TEXT = (
+    "این دکمه دیگر فعال نیست. ثبت آفر را دوباره شروع کنید."
+)
 
 
 def _build_channel_offer_text(
@@ -2145,6 +2157,71 @@ async def handle_text_offer_while_confirmation_pending(
     await handle_text_offer(message, state, user, runtime_bot)
 
 
+async def _send_stale_trade_builder_guidance(
+    message: types.Message,
+    *,
+    user: User,
+) -> None:
+    """Keep the recovered main behavior while respecting queue ownership."""
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        await message.answer(STALE_TRADE_BUILDER_GUIDANCE)
+        return
+
+    async with AsyncSessionLocal() as session:
+        current_user = await session.get(User, user.id)
+        telegram_id = getattr(current_user, "telegram_id", None)
+        if current_user is None or telegram_id is None:
+            return
+        message_id = getattr(message, "message_id", None)
+        if isinstance(message_id, bool) or not isinstance(message_id, int):
+            message_id = uuid4().hex
+        await enqueue_telegram_action_notification_once(
+            session,
+            recipient=TelegramNotificationRecipient(
+                user_id=int(current_user.id),
+                telegram_id=int(telegram_id),
+            ),
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            source_id=f"stale-trade-builder:{message_id}",
+            text=STALE_TRADE_BUILDER_GUIDANCE,
+            user_sync_version=int(getattr(current_user, "sync_version", 0) or 0),
+        )
+        await session.commit()
+
+
+async def _answer_stale_trade_creation_callback(
+    callback: types.CallbackQuery,
+    *,
+    received_at: datetime,
+    text: str | None = None,
+    show_alert: bool = False,
+) -> None:
+    """Answer stale builder callbacks directly only under legacy ownership."""
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        if text is None and not show_alert:
+            await callback.answer()
+        else:
+            await callback.answer(text, show_alert=show_alert)
+        return
+
+    async with AsyncSessionLocal() as session:
+        await enqueue_telegram_callback_answer(
+            session,
+            current_server=current_server(),
+            callback_query_id=callback.id,
+            received_at=received_at,
+            text=text,
+            show_alert=show_alert,
+        )
+        await session.commit()
+
+
 @router.message(StateFilter(*_TEXT_OFFER_RECOVERY_STATES), F.text.func(has_trade_indicator))
 async def handle_text_offer_from_stale_trade_state(
     message: types.Message,
@@ -2187,10 +2264,7 @@ async def handle_unexpected_trade_builder_message(
             "user_id": user.id,
         },
     )
-    await message.answer(
-        "این مرحله با دکمه‌های پیام قبلی ادامه پیدا می‌کند. "
-        "برای شروع مجدد، دکمه «📈 معامله» را بزنید یا لفظ کامل ارسال کنید."
-    )
+    await _send_stale_trade_builder_guidance(message, user=user)
 
 
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm"))
@@ -2268,8 +2342,12 @@ async def handle_stale_trade_creation_callback(
     user: Optional[User],
 ):
     """Acknowledge stale offer-builder buttons without changing current state."""
+    callback_received_at = utc_now()
     if not user:
-        await callback.answer()
+        await _answer_stale_trade_creation_callback(
+            callback,
+            received_at=callback_received_at,
+        )
         return
 
     callback_prefix = str(callback.data or "").partition(":")[0] or None
@@ -2282,7 +2360,9 @@ async def handle_stale_trade_creation_callback(
             "user_id": user.id,
         },
     )
-    await callback.answer(
-        "این دکمه دیگر فعال نیست. ثبت آفر را دوباره شروع کنید.",
+    await _answer_stale_trade_creation_callback(
+        callback,
+        received_at=callback_received_at,
+        text=STALE_TRADE_CREATION_CALLBACK_TEXT,
         show_alert=True,
     )

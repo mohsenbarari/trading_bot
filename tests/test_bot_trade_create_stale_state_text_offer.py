@@ -37,6 +37,17 @@ from bot.handlers import trade_create
 from bot.states import AdminBroadcast, Trade
 
 
+class AsyncSessionContext:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
     async def test_every_trade_state_has_a_text_offer_recovery_path(self):
         covered_states = {
@@ -127,11 +138,15 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
             clear=AsyncMock(),
         )
 
-        await handle_unexpected_trade_builder_message(
-            message,
-            state,
-            user=SimpleNamespace(id=276),
-        )
+        with patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="legacy"),
+        ):
+            await handle_unexpected_trade_builder_message(
+                message,
+                state,
+                user=SimpleNamespace(id=276),
+            )
 
         message.answer.assert_awaited_once()
         self.assertIn("دکمه", message.answer.await_args.args[0])
@@ -145,16 +160,113 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
             set_state=AsyncMock(),
         )
 
-        await handle_stale_trade_creation_callback(
-            callback,
-            state,
-            user=SimpleNamespace(id=276),
-        )
+        with patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="legacy"),
+        ):
+            await handle_stale_trade_creation_callback(
+                callback,
+                state,
+                user=SimpleNamespace(id=276),
+            )
 
         callback.answer.assert_awaited_once_with(
             "این دکمه دیگر فعال نیست. ثبت آفر را دوباره شروع کنید.",
             show_alert=True,
         )
+        state.clear.assert_not_awaited()
+        state.set_state.assert_not_awaited()
+
+    async def test_queue_mode_guidance_uses_offer_control_outbox_without_direct_send(self):
+        message = SimpleNamespace(
+            message_id=44,
+            text="متن نامعتبر",
+            answer=AsyncMock(),
+        )
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=Trade.awaiting_trade_type.state),
+            clear=AsyncMock(),
+        )
+        persisted_user = SimpleNamespace(
+            id=276,
+            telegram_id=98276,
+            sync_version=7,
+        )
+        session = SimpleNamespace(
+            get=AsyncMock(return_value=persisted_user),
+            commit=AsyncMock(),
+        )
+
+        with patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=AsyncSessionContext(session),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_telegram_action_notification_once",
+            new=AsyncMock(),
+        ) as enqueue:
+            await handle_unexpected_trade_builder_message(
+                message,
+                state,
+                user=SimpleNamespace(id=276),
+            )
+
+        message.answer.assert_not_awaited()
+        enqueue.assert_awaited_once()
+        self.assertEqual(
+            enqueue.await_args.kwargs["action"].value,
+            "offer_validation_response",
+        )
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_id"],
+            "stale-trade-builder:44",
+        )
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 7)
+        session.commit.assert_awaited_once_with()
+
+    async def test_queue_mode_stale_callback_uses_direct_m0_ingress(self):
+        callback = SimpleNamespace(
+            id="stale-builder-276",
+            data="trade_type:buy",
+            answer=AsyncMock(),
+        )
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=None),
+            clear=AsyncMock(),
+            set_state=AsyncMock(),
+        )
+        session = SimpleNamespace(commit=AsyncMock())
+
+        with patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=AsyncSessionContext(session),
+        ), patch(
+            "bot.handlers.trade_create.current_server",
+            return_value="foreign",
+        ), patch(
+            "bot.handlers.trade_create.enqueue_telegram_callback_answer",
+            new=AsyncMock(),
+        ) as enqueue:
+            await handle_stale_trade_creation_callback(
+                callback,
+                state,
+                user=SimpleNamespace(id=276),
+            )
+
+        callback.answer.assert_not_awaited()
+        enqueue.assert_awaited_once()
+        self.assertIs(enqueue.await_args.args[0], session)
+        self.assertEqual(
+            enqueue.await_args.kwargs["callback_query_id"],
+            "stale-builder-276",
+        )
+        self.assertTrue(enqueue.await_args.kwargs["show_alert"])
+        session.commit.assert_awaited_once_with()
         state.clear.assert_not_awaited()
         state.set_state.assert_not_awaited()
 

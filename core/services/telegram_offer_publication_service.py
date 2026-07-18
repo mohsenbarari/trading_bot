@@ -22,6 +22,10 @@ from core.services.offer_publication_state_service import (
     normalize_publication_status,
     publication_dedupe_key,
 )
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import utc_now_naive
 from models.offer import OfferStatus
 from models.offer_publication_state import (
@@ -53,6 +57,14 @@ SENT_TELEGRAM_PUBLICATION_STATUSES = {
     OfferPublicationStatus.SENT,
     OfferPublicationStatus.VISIBLE,
 }
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_publication_direct_sender_is_not_runtime_owner"
+        )
 
 
 @dataclass(slots=True)
@@ -310,6 +322,7 @@ async def publish_offer_to_telegram_channel_once(
     ``Offer.channel_message_id``. The legacy field is still backfilled locally
     because older code paths use it to edit the channel post.
     """
+    _assert_legacy_direct_delivery_owner()
     if current_server() != SERVER_FOREIGN:
         return TelegramOfferPublicationResult(
             message_id=None,

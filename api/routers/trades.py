@@ -90,6 +90,7 @@ from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 from core.trading_observability import log_trading_event
 from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
@@ -114,6 +115,14 @@ TRADE_TRANSIENT_RETRY_BASE_DELAY_SECONDS = 0.05
 router = APIRouter(
     tags=["Trades"],
 )
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_trade_router_direct_sender_is_not_runtime_owner"
+        )
 
 
 def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> None:
@@ -1818,6 +1827,7 @@ def trade_to_response(
 
 async def send_telegram_message(chat_id: int, text: str) -> bool:
     """ارسال پیام به تلگرام"""
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token or not chat_id:
         return False
@@ -1948,6 +1958,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
 
 def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token or not chat_id:
         return False

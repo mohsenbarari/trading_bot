@@ -72,6 +72,37 @@ def make_offer(**overrides):
 
 
 class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_owner_rejects_legacy_direct_publication_before_side_effects(self):
+        offer = make_offer()
+        db = FakeDB()
+        send_mock = AsyncMock(return_value=777)
+
+        with patch.object(
+            publication_service,
+            "configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                legacy_workers_enabled=False,
+                queue_worker_enabled=True,
+            ),
+        ), patch.object(
+            publication_service,
+            "current_server",
+            return_value="foreign",
+        ) as server_mock:
+            with self.assertRaises(
+                publication_service.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await publication_service.publish_offer_to_telegram_channel_once(
+                    db,
+                    offer,
+                    SimpleNamespace(id=1),
+                    send_offer_to_channel=send_mock,
+                )
+
+        server_mock.assert_not_called()
+        send_mock.assert_not_awaited()
+        self.assertEqual(db.execute_calls, [])
+
     async def test_get_or_create_recovers_from_duplicate_insert_race(self):
         offer = make_offer()
         existing = publication_service.build_offer_publication_state(

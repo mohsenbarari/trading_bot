@@ -693,6 +693,27 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(trades._queue_trade_telegram_message(background_tasks, 1, "hello"))
         background_tasks.add_task.assert_called_once_with(trades.send_telegram_message_sync, 1, "hello")
 
+    async def test_queue_owner_rejects_legacy_trade_router_senders(self):
+        queue_runtime = SimpleNamespace(
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        with patch.object(
+            trades,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch.object(trades.telegram_gateway, "send_message", new=AsyncMock()) as send:
+            with self.assertRaises(
+                trades.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await trades.send_telegram_message(1, "hello")
+            with self.assertRaises(
+                trades.TelegramDeliveryRuntimeConfigurationError
+            ):
+                trades.send_telegram_message_sync(1, "hello")
+
+        send.assert_not_awaited()
+
     def test_completed_trade_path_uses_receipt_delivery_not_direct_telegram_helpers(self):
         source = inspect.getsource(trades._execute_trade_authoritatively)
 
