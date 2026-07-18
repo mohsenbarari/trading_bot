@@ -389,6 +389,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "and must never be copied to Iran."
         ),
     ),
+    "telegram_delivery_feeder_states": _entry(
+        "telegram_delivery_feeder_states",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram feeder coordinator",
+        "never cross-sync queue fairness counters or feeder cursors",
+        "Foreign-only Telegram subordinate-feeder scheduling state",
+        notes=(
+            "This row is updated atomically with foreign Telegram queue feedback "
+            "and is never domain authority on Iran."
+        ),
+    ),
     "telegram_delivery_resume_operations": _entry(
         "telegram_delivery_resume_operations",
         SyncPolicy.NO_SYNC,
