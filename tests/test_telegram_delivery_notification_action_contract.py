@@ -166,7 +166,6 @@ class TelegramDeliveryNotificationActionContractTests(
             "delayed_restriction",
             "noncritical_market",
             "offer_expiry_callback",
-            "offer_success",
             "temporary_cleanup",
             "timed_security",
         }

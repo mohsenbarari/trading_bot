@@ -1,4 +1,4 @@
-"""Atomic feeder handoff for project-user membership notifications."""
+"""Atomic feeder handoff from the private notification outbox."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -39,6 +39,18 @@ from core.telegram_delivery_notification_action_freshness import (
     telegram_notification_action_outbox_waits_for_current_user,
     telegram_notification_action_source_natural_id,
 )
+from core.telegram_delivery_offer_success_contract import (
+    OFFER_SUCCESS_TEMPLATE_VERSION,
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
+)
+from core.telegram_delivery_offer_success_freshness import (
+    build_telegram_offer_success_snapshot,
+    load_offer_success_offer,
+    telegram_offer_success_destination_key,
+    telegram_offer_success_outbox_matches_current_state,
+    telegram_offer_success_outbox_waits_for_state,
+    telegram_offer_success_source_natural_id,
+)
 from core.telegram_delivery_repeat_offer_freshness import (
     REPEAT_OFFER_RESPONSE_TEMPLATE_VERSION,
     build_repeat_offer_response_snapshot,
@@ -71,6 +83,7 @@ _ACTIVE_STATUSES = (
 _QUEUE_SOURCE_TYPES = (
     TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
     TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
     *sorted(TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES),
 )
 
@@ -175,7 +188,7 @@ async def handoff_next_due_telegram_notification_outbox(
     current_server: str,
     now: datetime | None = None,
 ) -> TelegramNotificationOutboxQueueHandoffResult | None:
-    """Bind one eligible membership outbox row to one main-queue job."""
+    """Bind one eligible allowlisted outbox row to one main-queue job."""
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         raise TelegramNotificationOutboxQueueHandoffError(
             "telegram_notification_outbox_queue_handoff_is_foreign_only"
@@ -219,6 +232,39 @@ async def handoff_next_due_telegram_notification_outbox(
         action_policy = telegram_notification_action_policy_from_source(source_type)
     except ValueError:
         action_policy = None
+    offer_success_offer = None
+    if source_type == TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS:
+        try:
+            offer_success_offer = await load_offer_success_offer(
+                db,
+                str(outbox.source_id or "").strip(),
+            )
+            waits_for_offer_success = (
+                telegram_offer_success_outbox_waits_for_state(
+                    outbox,
+                    user,
+                    offer_success_offer,
+                )
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            return await _finalize_unhandoffable_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+                reason=str(exc)[:120] or "offer_success_payload_invalid",
+                error_class="TelegramPayloadError",
+                now=current_time,
+            )
+        if waits_for_offer_success:
+            outbox.reason = "offer_success_source_version_pending"
+            outbox.next_retry_at = current_time + timedelta(seconds=1)
+            outbox.updated_at = current_time
+            await _flush(db)
+            return TelegramNotificationOutboxQueueHandoffResult(
+                outbox_id=int(outbox.id),
+                disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
+                reason="offer_success_source_version_pending",
+            )
     if action_policy is not None:
         try:
             waits_for_recipient = (
@@ -270,6 +316,7 @@ async def handoff_next_due_telegram_notification_outbox(
             now=current_time,
         )
 
+    method = "sendMessage"
     try:
         if source_type == TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED:
             source_natural_id = telegram_new_user_membership_source_natural_id(
@@ -299,6 +346,36 @@ async def handoff_next_due_telegram_notification_outbox(
             feeder = TelegramFeederKind.OFFER_CONTROL
             action = TelegramDeliveryAction.OFFER_REPEAT_RESPONSE
             template_version = REPEAT_OFFER_RESPONSE_TEMPLATE_VERSION
+        elif source_type == TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS:
+            source_natural_id = telegram_offer_success_source_natural_id(outbox)
+            destination_key = telegram_offer_success_destination_key(
+                recipient_user_id
+            )
+            if not telegram_offer_success_outbox_matches_current_state(
+                outbox,
+                user,
+                offer_success_offer,
+            ):
+                return await _finalize_unhandoffable_outbox(
+                    db,
+                    outbox=outbox,
+                    status=TelegramNotificationOutboxStatus.SKIPPED,
+                    reason="offer_success_source_state_changed",
+                    error_class="TelegramNotificationSuperseded",
+                    now=current_time,
+                )
+            snapshot = build_telegram_offer_success_snapshot(
+                outbox,
+                user,
+                offer_success_offer,
+            )
+            source_version = snapshot.source_version
+            payload = snapshot.payload
+            campaign_id = None
+            feeder = TelegramFeederKind.OFFER_CONTROL
+            action = TelegramDeliveryAction.OFFER_SUCCESS
+            template_version = OFFER_SUCCESS_TEMPLATE_VERSION
+            method = "editMessageText"
         elif action_policy is not None:
             source_natural_id = telegram_notification_action_source_natural_id(
                 outbox
@@ -347,7 +424,7 @@ async def handoff_next_due_telegram_notification_outbox(
         bot_identity="primary",
         destination_key=destination_key,
         destination_class=TelegramDestinationClass.PRIVATE,
-        method="sendMessage",
+        method=method,
         payload=payload,
         template_version=template_version,
         campaign_id=campaign_id,

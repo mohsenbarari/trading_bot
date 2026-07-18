@@ -81,6 +81,7 @@ class TelegramNotificationOutbox(Base):
                 "status IN ('pending', 'retryable_failed') "
                 "AND source_type IN "
                 "('project_user_joined', 'offer_repeat_response', "
+                "'offer_success_preview', "
                 "'queue_action:account_status', "
                 "'queue_action:general_announcement', "
                 "'queue_action:general_immediate', "

@@ -53,6 +53,17 @@ class TelegramNotificationOutboxQueueSchemaTests(unittest.TestCase):
             self.assertIn(source_type, source)
         self.assertIn("('project_user_joined', 'offer_repeat_response')", source)
 
+    def test_offer_success_queue_index_migration_is_current_head_child(self):
+        source = pathlib.Path(
+            "migrations/versions/fae5f6a7b8c9_expand_offer_success_queue.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fad4e5f6a7b8"',
+            source,
+        )
+        self.assertIn("offer_success_preview", source)
+        self.assertIn("include_offer_success=False", source)
+
 
 if __name__ == "__main__":
     unittest.main()

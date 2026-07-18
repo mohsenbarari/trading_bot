@@ -302,6 +302,16 @@ def repeat_offer_response_freshness_routes(
     }
 
 
+def offer_success_freshness_routes(
+    validator: TelegramDeliveryFreshnessValidator,
+) -> dict[TelegramDeliveryAction, TelegramDeliveryFreshnessValidatorCallable]:
+    if not callable(validator):
+        raise TelegramDeliveryFreshnessRoutingError(
+            "telegram_offer_success_freshness_validator_invalid"
+        )
+    return {TelegramDeliveryAction.OFFER_SUCCESS: validator}
+
+
 def notification_action_freshness_routes(
     actions: Collection[TelegramDeliveryAction],
     validator: TelegramDeliveryFreshnessValidator,

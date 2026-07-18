@@ -100,6 +100,8 @@ from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON,
     TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT,
+    TelegramNotificationRecipient,
+    enqueue_offer_success_preview_notification_once,
 )
 
 
@@ -1173,10 +1175,43 @@ async def _handle_trade_confirm_core(
             new_offer = creation_outcome.offer
             if queue_owns_telegram_delivery:
                 # Offer acceptance and its Telegram publication intent are one
-                # transaction.  A failure here means no accepted Offer is
-                # exposed to the user and no publication obligation is lost.
+                # transaction with the private success-preview edit. A failure
+                # here means no accepted Offer is exposed to the user and no
+                # Telegram obligation is lost.
                 await session.flush()
                 await get_or_create_telegram_publication_state(session, new_offer)
+                success_commodity_name = await _canonical_commodity_name_from_session(
+                    session,
+                    getattr(new_offer, "commodity_id", None) or commodity_id,
+                    commodity_name,
+                )
+                success_offer_text = _build_channel_offer_text(
+                    trade_type=(
+                        getattr(getattr(new_offer, "offer_type", None), "value", None)
+                        or trade_type
+                    ),
+                    settlement_type=(
+                        getattr(new_offer, "settlement_type", None)
+                        or settlement_type
+                    ),
+                    commodity_name=success_commodity_name,
+                    quantity=getattr(new_offer, "quantity", None) or quantity,
+                    price=getattr(new_offer, "price", None) or price,
+                    notes=getattr(new_offer, "notes", None) or notes,
+                )
+                await enqueue_offer_success_preview_notification_once(
+                    session,
+                    recipient=TelegramNotificationRecipient(
+                        user_id=int(user.id),
+                        telegram_id=int(callback.message.chat.id),
+                    ),
+                    offer_public_id=str(new_offer.offer_public_id),
+                    offer_version=int(getattr(new_offer, "version_id", 1) or 1),
+                    preview_message_id=int(callback.message.message_id),
+                    success_copy=success_message_text,
+                    offer_text=success_offer_text,
+                    user_sync_version=int(getattr(user, "sync_version", 1) or 1),
+                )
                 await session.commit()
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
@@ -1336,15 +1371,16 @@ async def _handle_trade_confirm_core(
         except Exception as push_error:
             logger.warning(f"Market offer Web Push schedule error: {push_error}")
 
-        await callback.message.edit_text(
-            f"{success_message_text}\n\n**لفظ شما:**\n\n{published_channel_message}",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="❌ منقضی کردن", callback_data=ExpireOfferCallback(offer_id=offer_id).pack())]
-                ]
-            ),
-        )
+        if not queue_owns_telegram_delivery:
+            await callback.message.edit_text(
+                f"{success_message_text}\n\n**لفظ شما:**\n\n{published_channel_message}",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="❌ منقضی کردن", callback_data=ExpireOfferCallback(offer_id=offer_id).pack())]
+                    ]
+                ),
+            )
         if republish_source_public_id:
             await _send_repeat_offer_menu_refresh(
                 bot,

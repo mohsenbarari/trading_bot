@@ -190,7 +190,11 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
 
     async def test_queue_mode_commits_offer_and_intent_atomically_without_direct_telegram_send(self):
         callback = SimpleNamespace(
-            message=SimpleNamespace(edit_text=AsyncMock()),
+            message=SimpleNamespace(
+                chat=SimpleNamespace(id=555),
+                message_id=808,
+                edit_text=AsyncMock(),
+            ),
             answer=AsyncMock(),
             from_user=SimpleNamespace(id=555),
         )
@@ -227,6 +231,14 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
             session.events.append("intent")
             return SimpleNamespace(status="pending")
 
+        async def persist_success(session, **kwargs):
+            self.assertIs(session, create_session)
+            self.assertEqual(kwargs["preview_message_id"], 808)
+            self.assertEqual(kwargs["recipient"].telegram_id, 555)
+            self.assertIn("🟢خرید سکه 12 عدد", kwargs["offer_text"])
+            create_session.events.append("success")
+            return SimpleNamespace(created=True)
+
         runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
         bot = SimpleNamespace(send_message=AsyncMock())
         with patch(
@@ -259,25 +271,33 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
             "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
             new=AsyncMock(),
         ) as direct_publish, patch(
+            "bot.handlers.trade_create.enqueue_offer_success_preview_notification_once",
+            new=AsyncMock(side_effect=persist_success),
+        ) as success_intent, patch(
             "bot.handlers.trade_create.settings",
             SimpleNamespace(channel_id=-100, bot_username="botname"),
         ):
             await handle_trade_confirm(
                 callback,
                 state,
-                user=SimpleNamespace(id=1, limitations_expire_at=None),
+                user=SimpleNamespace(
+                    id=1,
+                    limitations_expire_at=None,
+                    sync_version=7,
+                ),
                 bot=bot,
             )
 
-        self.assertEqual(create_session.events, ["flush", "intent", "commit"])
+        self.assertEqual(
+            create_session.events,
+            ["flush", "intent", "success", "commit"],
+        )
         self.assertEqual(create_session.commits, 1)
         intent_mock.assert_awaited_once()
+        success_intent.assert_awaited_once()
         direct_publish.assert_not_awaited()
         bot.send_message.assert_not_awaited()
-        response_text = callback.message.edit_text.await_args.args[0]
-        self.assertIn("لفظ شما", response_text)
-        self.assertIn("🟢خرید سکه 12 عدد", response_text)
-        self.assertIsNotNone(callback.message.edit_text.await_args.kwargs["reply_markup"])
+        callback.message.edit_text.assert_not_awaited()
 
     async def test_handle_trade_confirm_retries_stale_publication_without_duplicate_send_or_expiry(self):
         callback = SimpleNamespace(

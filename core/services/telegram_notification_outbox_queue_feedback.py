@@ -1,4 +1,4 @@
-"""Atomic main-queue lifecycle feedback for membership notification outbox."""
+"""Atomic main-queue lifecycle feedback for the notification outbox."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -19,6 +19,13 @@ from core.telegram_delivery_notification_action_freshness import (
     telegram_notification_action_outbox_dedupe_from_source,
     validate_notification_action_telegram_delivery_freshness,
 )
+from core.telegram_delivery_offer_success_contract import (
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
+)
+from core.telegram_delivery_offer_success_freshness import (
+    telegram_offer_success_outbox_dedupe_from_source,
+    validate_offer_success_telegram_delivery_freshness,
+)
 from core.telegram_delivery_repeat_offer_freshness import (
     telegram_repeat_offer_outbox_dedupe_from_source,
     validate_repeat_offer_response_telegram_delivery_freshness,
@@ -34,6 +41,7 @@ from core.telegram_delivery_queue_contract import (
 )
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
+from models.offer import Offer
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_notification_outbox import (
     TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
@@ -67,11 +75,15 @@ _SUPERSEDED_SKIP_REASONS = {
     "notification_action_freshness_recipient_unlinked",
     "notification_action_freshness_recipient_access_denied",
     "notification_action_freshness_source_state_changed",
+    "offer_success_freshness_recipient_missing",
+    "offer_success_freshness_recipient_access_denied",
+    "offer_success_freshness_source_state_changed",
 }
 _TERMINAL_SOURCE_REASONS = {
     "new_user_membership_freshness_outbox_terminal",
     "repeat_offer_response_freshness_outbox_terminal",
     "notification_action_freshness_outbox_terminal",
+    "offer_success_freshness_outbox_terminal",
 }
 
 
@@ -95,9 +107,11 @@ def _positive_int(value: Any) -> int | None:
 
 def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
     action = _enum_value(job.action_kind)
+    is_offer_success = action == TelegramDeliveryAction.OFFER_SUCCESS.value
     common_route_valid = (
         _enum_value(job.destination_class) == TelegramDestinationClass.PRIVATE.value
-        and str(job.method or "") == "sendMessage"
+        and str(job.method or "")
+        == ("editMessageText" if is_offer_success else "sendMessage")
         and str(job.bot_identity or "") == "primary"
     )
     action_route_valid = (
@@ -105,6 +119,9 @@ def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
         and _enum_value(job.feeder_kind) == TelegramFeederKind.ADMIN_SYSTEM.value
     ) or (
         action == TelegramDeliveryAction.OFFER_REPEAT_RESPONSE.value
+        and _enum_value(job.feeder_kind) == TelegramFeederKind.OFFER_CONTROL.value
+    ) or (
+        is_offer_success
         and _enum_value(job.feeder_kind) == TelegramFeederKind.OFFER_CONTROL.value
     )
     if not action_route_valid:
@@ -138,6 +155,10 @@ async def _load_bound_outbox(
         )
     elif action in TELEGRAM_NOTIFICATION_ACTION_VALUES:
         dedupe_key = telegram_notification_action_outbox_dedupe_from_source(
+            job.source_natural_id
+        )
+    elif action == TelegramDeliveryAction.OFFER_SUCCESS.value:
+        dedupe_key = telegram_offer_success_outbox_dedupe_from_source(
             job.source_natural_id
         )
     else:
@@ -293,6 +314,22 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
         )
         if (
             _enum_value(job.action_kind)
+            == TelegramDeliveryAction.OFFER_SUCCESS.value
+        ):
+            if (
+                str(outbox.source_type or "").strip()
+                != TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS
+            ):
+                raise TelegramNotificationOutboxQueueFeedbackError(
+                    "notification_outbox_queue_offer_success_source_mismatch"
+                )
+            await db.execute(
+                select(Offer.id)
+                .where(Offer.offer_public_id == str(outbox.source_id or ""))
+                .with_for_update()
+            )
+        if (
+            _enum_value(job.action_kind)
             == TelegramDeliveryAction.NEW_USER_MEMBERSHIP.value
         ):
             await db.execute(
@@ -319,6 +356,15 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
                     job,
                     now,
                 )
+            )
+        elif (
+            _enum_value(job.action_kind)
+            == TelegramDeliveryAction.OFFER_SUCCESS.value
+        ):
+            decision = await validate_offer_success_telegram_delivery_freshness(
+                db,
+                job,
+                now,
             )
         else:
             decision = (

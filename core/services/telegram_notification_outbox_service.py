@@ -23,6 +23,11 @@ from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
     telegram_notification_action_policy,
 )
+from core.telegram_delivery_offer_success_contract import (
+    TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
+    build_offer_success_text,
+    validate_offer_success_copy,
+)
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from core.utils import utc_now
 from models.telegram_notification_outbox import (
@@ -439,6 +444,50 @@ async def enqueue_offer_repeat_response_notification(
     )
 
 
+async def enqueue_offer_success_preview_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    offer_public_id: str,
+    offer_version: int,
+    preview_message_id: int,
+    success_copy: str,
+    offer_text: str,
+    user_sync_version: int,
+) -> TelegramNotificationEnqueueResult:
+    """Persist the one private preview edit atomically with Offer creation."""
+    normalized_public_id = str(offer_public_id or "").strip()
+    if not normalized_public_id or len(normalized_public_id) > 40:
+        raise ValueError("offer_success_public_id_invalid")
+    for value, reason in (
+        (offer_version, "offer_success_offer_version_invalid"),
+        (preview_message_id, "offer_success_message_id_invalid"),
+        (user_sync_version, "offer_success_user_version_invalid"),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(reason)
+    normalized_copy = validate_offer_success_copy(success_copy)
+    text = build_offer_success_text(
+        success_copy=normalized_copy,
+        offer_text=offer_text,
+    )
+    return await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=text,
+        source_type=TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
+        source_id=normalized_public_id,
+        parse_mode="Markdown",
+        extra_payload={
+            "offer_public_id": normalized_public_id,
+            "offer_version": offer_version,
+            "preview_message_id": preview_message_id,
+            "success_copy": normalized_copy,
+            "user_sync_version": user_sync_version,
+        },
+    )
+
+
 async def enqueue_telegram_action_notification_once(
     db: AsyncSession,
     *,
@@ -718,6 +767,7 @@ async def claim_next_telegram_notification_outbox(
                         {
                             TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
                             TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
+                            TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
                             *TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
                         }
                     )

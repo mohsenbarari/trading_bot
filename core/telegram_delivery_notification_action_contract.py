@@ -1,8 +1,9 @@
 """Strict contracts for private notifications backed by the durable outbox.
 
-Only actions listed here may use ``telegram_notification_outbox`` as their
-authoritative source.  Interactive callbacks, offer preview edits, channel
-messages, and timed cleanup deliberately require their own source models.
+Only actions listed here may use the generic ``queue_action:*`` source shape.
+Interactive callbacks, Offer preview edits, channel messages, and timed
+cleanup require dedicated source contracts even when they reuse the durable
+notification outbox storage.
 """
 from __future__ import annotations
 
