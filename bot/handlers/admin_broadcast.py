@@ -7,6 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.states import AdminBroadcast
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import answer_incoming_message_via_runtime
 from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.services.telegram_admin_broadcast_service import (
@@ -152,9 +153,12 @@ async def start_telegram_admin_broadcast(message: types.Message, state: FSMConte
     if not _is_superadmin(user):
         return
     await state.clear()
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         "📣 ارسال پیام از طریق بات تلگرام\n\n"
         "گیرندگان فقط کاربران فعال، متصل به بات و مجاز به استفاده از بات هستند.",
+        source_key="admin-broadcast-menu",
         reply_markup=_main_menu_keyboard(),
     )
 
@@ -269,7 +273,16 @@ async def process_selected_recipient_search(message: types.Message, state: FSMCo
         text = f"نتایج جستجو برای «{query}»\nانتخاب‌شده‌ها: {len(selected_ids)}"
     else:
         text = f"برای «{query}» کاربر مجاز و متصل به بات پیدا نشد.\nانتخاب‌شده‌ها: {len(selected_ids)}"
-    await message.answer(text, reply_markup=_search_results_keyboard(recipients, selected_ids=selected_ids))
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        text,
+        source_key="admin-broadcast-search-results",
+        reply_markup=_search_results_keyboard(
+            recipients,
+            selected_ids=selected_ids,
+        ),
+    )
 
 
 @router.callback_query(F.data.startswith(f"{CALLBACK_PREFIX}:tu:"))
@@ -351,9 +364,19 @@ async def process_broadcast_message_text(message: types.Message, state: FSMConte
         content = validate_telegram_admin_broadcast_content(message.text or "")
     except TelegramAdminBroadcastValidationError as exc:
         if str(exc) == "content_too_long":
-            await message.answer(f"متن پیام نباید بیشتر از {TELEGRAM_BROADCAST_TEXT_MAX_LENGTH} کاراکتر باشد.")
+            await answer_incoming_message_via_runtime(
+                message,
+                user,
+                f"متن پیام نباید بیشتر از {TELEGRAM_BROADCAST_TEXT_MAX_LENGTH} کاراکتر باشد.",
+                source_key="admin-broadcast-content-too-long",
+            )
         else:
-            await message.answer("متن پیام نمی‌تواند خالی باشد.")
+            await answer_incoming_message_via_runtime(
+                message,
+                user,
+                "متن پیام نمی‌تواند خالی باشد.",
+                source_key="admin-broadcast-content-empty",
+            )
         return
 
     data = await state.get_data()
@@ -361,16 +384,24 @@ async def process_broadcast_message_text(message: types.Message, state: FSMConte
     try:
         recipient_count = await _estimate_recipient_count(user, {**data, "content": content})
     except TelegramAdminBroadcastValidationError:
-        await message.answer("گیرندگان پیام معتبر نیستند. لطفاً فرایند را از ابتدا شروع کنید.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "گیرندگان پیام معتبر نیستند. لطفاً فرایند را از ابتدا شروع کنید.",
+            source_key="admin-broadcast-recipients-invalid",
+        )
         await state.clear()
         return
 
     await state.set_state(AdminBroadcast.awaiting_confirmation)
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         "پیش‌نمایش پیام:\n\n"
         f"{_truncate_preview(content)}\n\n"
         f"تعداد گیرندگان واجد شرایط در این لحظه: {recipient_count}\n"
         "برای قرار گرفتن پیام در صف ارسال تایید کنید.",
+        source_key="admin-broadcast-preview",
         reply_markup=_confirmation_keyboard(),
     )
 
