@@ -22,6 +22,7 @@ from bot.repeat_offer import (
     build_user_panel_navigation_keyboard,
     is_bot_repeat_offer_button_text,
 )
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -98,7 +99,7 @@ async def _reject_settings_callback_if_not_authoritative(callback: types.Callbac
     decision = _settings_admin_write_decision(operation)
     if decision.ok:
         return False
-    await callback.answer(f"❌ {admin_write_rejection_message(decision)}", show_alert=True)
+    await answer_callback_query_via_runtime(callback, f"❌ {admin_write_rejection_message(decision)}", show_alert=True)
     return True
 
 
@@ -505,7 +506,7 @@ async def unblock_user_from_user_panel(
     user: Optional[User],
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     from bot.handlers.block_manage import reject_delegated_block_management
@@ -518,7 +519,7 @@ async def unblock_user_from_user_panel(
         success, result_message = await unblock_user(session, user.id, callback_data.user_id)
         blocked_users = await get_blocked_users(session, user.id)
 
-    await callback.answer(result_message, show_alert=not success)
+    await answer_callback_query_via_runtime(callback, result_message, show_alert=not success)
     if blocked_users:
         await callback.message.edit_text(
             "📋 **کاربران مسدود شده**\n\nبرای رفع مسدودیت روی نام کاربر بزنید:",
@@ -535,10 +536,10 @@ async def unblock_user_from_user_panel(
 @router.callback_query(UserPanelBlockCallback.filter(F.action == "back"))
 async def back_to_user_panel_from_blocked(callback: types.CallbackQuery, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 def _customer_status_label(status: object) -> str:
@@ -674,14 +675,14 @@ async def show_user_panel_customers(message: types.Message, state: FSMContext, u
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "list"))
 async def show_user_panel_customers_callback(callback: types.CallbackQuery, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     async with AsyncSessionLocal() as session:
         if not await _can_use_customer_panel(session, user):
-            await callback.answer("این بخش برای حساب شما فعال نیست.", show_alert=True)
+            await answer_callback_query_via_runtime(callback, "این بخش برای حساب شما فعال نیست.", show_alert=True)
             return
     await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "detail"))
@@ -691,18 +692,18 @@ async def show_user_panel_customer_detail(
     user: Optional[User],
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     relation = await _load_user_panel_customer_relation(user.id, callback_data.relation_id)
     if not relation:
-        await callback.answer("مشتری یافت نشد.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "مشتری یافت نشد.", show_alert=True)
         return
     await callback.message.edit_text(
         _customer_relation_detail_text(relation),
         parse_mode="Markdown",
         reply_markup=get_customer_detail_keyboard(relation),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "ask_unlink"))
@@ -711,7 +712,7 @@ async def ask_unlink_user_panel_customer(
     callback_data: UserPanelCustomerCallback,
     user: Optional[User],
 ):
-    await callback.answer(CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT, show_alert=True)
+    await answer_callback_query_via_runtime(callback, CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT, show_alert=True)
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "confirm_unlink"))
@@ -720,7 +721,7 @@ async def confirm_unlink_user_panel_customer(
     callback_data: UserPanelCustomerCallback,
     user: Optional[User],
 ):
-    await callback.answer(CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT, show_alert=True)
+    await answer_callback_query_via_runtime(callback, CUSTOMER_RELATION_MANAGE_WEBAPP_ONLY_TEXT, show_alert=True)
 
 
 async def _wait_for_customer_invite_projection(
@@ -794,17 +795,17 @@ def _customer_invite_confirm_keyboard() -> InlineKeyboardMarkup:
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "invite_tier2"))
 async def user_panel_customer_invite_tier2_webapp_only(callback: types.CallbackQuery, user: Optional[User]):
-    await callback.answer(USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT, show_alert=True)
+    await answer_callback_query_via_runtime(callback, USER_PANEL_INVITE_TIER2_WEBAPP_ONLY_TEXT, show_alert=True)
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "invite_tier1"))
 async def start_user_panel_customer_invite_tier1(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     allowed, reason = await _customer_invite_access_allowed(user)
     if not allowed:
-        await callback.answer(reason or "عدم دسترسی", show_alert=True)
+        await answer_callback_query_via_runtime(callback, reason or "عدم دسترسی", show_alert=True)
         return
 
-    await callback.answer("در حال بررسی وضعیت اتصال دو سرور...")
+    await answer_callback_query_via_runtime(callback, "در حال بررسی وضعیت اتصال دو سرور...")
     sync_gate = await check_customer_invite_sync_ready()
     if not sync_gate.ready:
         await callback.message.answer(sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.")
@@ -896,7 +897,7 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
     allowed, reason = await _customer_invite_access_allowed(user)
     if not allowed:
         await state.clear()
-        await callback.answer(reason or "عدم دسترسی", show_alert=True)
+        await answer_callback_query_via_runtime(callback, reason or "عدم دسترسی", show_alert=True)
         return
 
     data = await state.get_data()
@@ -905,10 +906,10 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
     owner_id = data.get("customer_invite_owner_id")
     if owner_id != user.id or not management_name or not mobile_number:
         await state.clear()
-        await callback.answer("اطلاعات دعوت ناقص است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "اطلاعات دعوت ناقص است.", show_alert=True)
         return
 
-    await callback.answer("در حال ارسال دعوت به سرور ایران...")
+    await answer_callback_query_via_runtime(callback, "در حال ارسال دعوت به سرور ایران...")
     sync_gate = await check_customer_invite_sync_ready()
     if not sync_gate.ready:
         await callback.message.answer(sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.")
@@ -971,17 +972,17 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
 @router.callback_query(UserPanelCustomerInviteCallback.filter(F.action == "cancel"), StateFilter(CustomerInvite))
 async def cancel_customer_invite_tier1(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     await state.clear()
-    await callback.answer("لغو شد")
+    await answer_callback_query_via_runtime(callback, "لغو شد")
     await callback.message.answer("دعوت مشتری لغو شد.")
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "back"))
 async def back_to_user_panel_from_customers(callback: types.CallbackQuery, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 # --- تنظیمات: نام‌های فارسی و کلیدها ---
@@ -1060,7 +1061,7 @@ async def handle_admin_settings_button(message: types.Message, state: FSMContext
 @router.callback_query(F.data.startswith("settings_edit_"))
 async def handle_settings_edit_click(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await callback.answer("دسترسی ندارید")
+        await answer_callback_query_via_runtime(callback, "دسترسی ندارید")
         return
     if await _reject_settings_callback_if_not_authoritative(callback, "update"):
         return
@@ -1089,7 +1090,7 @@ async def handle_settings_edit_click(callback: types.CallbackQuery, state: FSMCo
         parse_mode="Markdown",
         reply_markup=cancel_kb
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 # --- هندلر دریافت مقدار جدید ---
@@ -1153,7 +1154,7 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
 @router.callback_query(F.data == "settings_cancel_edit")
 async def handle_settings_cancel(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     
     await state.clear()
@@ -1162,14 +1163,14 @@ async def handle_settings_cancel(callback: types.CallbackQuery, state: FSMContex
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
     )
-    await callback.answer("انصراف")
+    await answer_callback_query_via_runtime(callback, "انصراف")
 
 
 # --- هندلر بازنشانی به پیش‌فرض ---
 @router.callback_query(F.data == "settings_reset_all")
 async def handle_settings_reset(callback: types.CallbackQuery, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await callback.answer("دسترسی ندارید")
+        await answer_callback_query_via_runtime(callback, "دسترسی ندارید")
         return
     if await _reject_settings_callback_if_not_authoritative(callback, "reset"):
         return
@@ -1188,13 +1189,13 @@ async def handle_settings_reset(callback: types.CallbackQuery, user: Optional[Us
         parse_mode="Markdown",
         reply_markup=confirm_kb
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == "settings_reset_confirm")
 async def handle_settings_reset_confirm(callback: types.CallbackQuery, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     if await _reject_settings_callback_if_not_authoritative(callback, "reset"):
         return
@@ -1204,9 +1205,9 @@ async def handle_settings_reset_confirm(callback: types.CallbackQuery, user: Opt
     default_settings = TradingSettings()
     if await save_trading_settings_async(default_settings.model_dump()):
         await refresh_settings_cache_async()
-        await callback.answer("✅ تنظیمات بازنشانی شد")
+        await answer_callback_query_via_runtime(callback, "✅ تنظیمات بازنشانی شد")
     else:
-        await callback.answer("❌ خطا در بازنشانی")
+        await answer_callback_query_via_runtime(callback, "❌ خطا در بازنشانی")
     
     await callback.message.edit_text(
         await get_settings_text(),
@@ -1218,7 +1219,7 @@ async def handle_settings_reset_confirm(callback: types.CallbackQuery, user: Opt
 @router.callback_query(F.data == "settings_reset_cancel")
 async def handle_settings_reset_cancel(callback: types.CallbackQuery, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     
     await callback.message.edit_text(
@@ -1226,7 +1227,7 @@ async def handle_settings_reset_cancel(callback: types.CallbackQuery, user: Opti
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
     )
-    await callback.answer("لغو شد")
+    await answer_callback_query_via_runtime(callback, "لغو شد")
 
 
 # --- هندلر دکمه بازگشت ---

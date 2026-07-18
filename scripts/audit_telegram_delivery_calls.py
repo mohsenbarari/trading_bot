@@ -89,7 +89,7 @@ LEGACY_OWNER_FILES = frozenset(
 # bypass must update the reviewed baseline deliberately.
 REMAINING_DISPOSITION_BUDGETS = {
     "remaining_business_direct": 0,
-    "remaining_callback_direct": 151,
+    "remaining_callback_direct": 118,
     "remaining_cleanup_direct": 13,
     "remaining_interactive_direct": 344,
     "remaining_memory_timer": 7,
