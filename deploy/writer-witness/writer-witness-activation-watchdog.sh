@@ -28,7 +28,8 @@ managed_units=(
 )
 
 restore_rollback_unit_intent() {
-    local release_id unit intent load_state active_state unit_file_state current_load
+    local release_id unit intent load_state active_state unit_file_state current_load current_active
+    local -a observed_unit_state_args=()
     release_id="$("${activation_helper[@]}" pending-release-id \
         --phase rolled_back_pending_service_completion)"
     systemctl daemon-reload
@@ -55,17 +56,23 @@ restore_rollback_unit_intent() {
             continue
         fi
         case "$active_state" in
-            active|activating|reloading)
+            active)
                 systemctl start "$unit"
+                systemctl is-active --quiet "$unit"
+                ;;
+            inactive)
+                current_active="$(systemctl show -p ActiveState --value "$unit")"
                 if [[ "$unit" == writer-witness-backup.service \
                     || "$unit" == writer-witness-offsite-backup.service ]]; then
-                    [[ "$(systemctl show -p Result --value "$unit")" == success ]]
+                    [[ "$current_active" != active \
+                        && "$current_active" != activating \
+                        && "$current_active" != deactivating ]] || return 75
                 else
-                    systemctl is-active --quiet "$unit"
+                    systemctl stop "$unit"
                 fi
-                ;;
-            inactive|failed|deactivating)
-                systemctl stop "$unit"
+                if [[ "$current_active" == failed ]]; then
+                    systemctl reset-failed "$unit"
+                fi
                 ! systemctl is-active --quiet "$unit"
                 ;;
             *)
@@ -87,12 +94,26 @@ restore_rollback_unit_intent() {
         esac
     done
     if [[ "$("${activation_helper[@]}" rollback-unit-intent \
-        --unit writer-witness.service)" =~ ^loaded:(active|activating|reloading): ]]; then
+        --unit writer-witness.service)" =~ ^loaded:active: ]]; then
         curl --fail --silent --show-error \
             --retry 30 --retry-delay 1 --retry-all-errors \
             http://127.0.0.1:8011/health/ready >/dev/null
     fi
-    "${activation_helper[@]}" complete-rollback --release-id "$release_id" >/dev/null
+    systemctl daemon-reload
+    for unit in "${managed_units[@]}"; do
+        load_state="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)"
+        active_state="$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)"
+        unit_file_state="$(systemctl show -p UnitFileState --value "$unit" 2>/dev/null || true)"
+        [[ -n "$load_state" ]] || load_state=not-found
+        [[ -n "$active_state" ]] || active_state=inactive
+        [[ -n "$unit_file_state" ]] || unit_file_state=not-found
+        observed_unit_state_args+=(
+            --unit-state "$unit:$load_state:$active_state:$unit_file_state"
+        )
+    done
+    "${activation_helper[@]}" complete-rollback \
+        --release-id "$release_id" \
+        "${observed_unit_state_args[@]}" >/dev/null
 }
 for lock in "$provision_lock" "$rotation_lock"; do
     [[ -f "$lock" && ! -L "$lock" \
@@ -109,6 +130,9 @@ flock -n "$rotation_lock_fd" || exit 0
 result="$("${activation_helper[@]}" recover)"
 case "$result" in
     activation_recovered=no)
+        exit 0
+        ;;
+    activation_recovered=rolled-back-without-service-changes)
         exit 0
         ;;
     activation_recovered=rolled-back-pending-service-completion)

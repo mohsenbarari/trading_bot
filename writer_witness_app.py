@@ -262,6 +262,7 @@ def _service_credentials(
     )
     result: dict[str, WitnessClientCredential] = {}
     used_secrets: set[str] = set()
+    current_campaign_expiry: dict[str, datetime] = {}
     for site, slot, raw_key_id, raw_secret, raw_not_after in configured:
         key_id = str(raw_key_id or "").strip()
         secret = str(raw_secret or "")
@@ -286,10 +287,6 @@ def _service_credentials(
             rf"matrix-wwm_[0-9a-f]{{12}}-{expected_short_site}",
             key_id,
         ) is not None
-        if campaign_key != bool(not_after_text):
-            raise WitnessServiceConfigurationError(
-                f"campaign expiry does not match the witness credential for {site}:{slot}"
-            )
         if not_after_text:
             if not_after_text.endswith("Z"):
                 not_after_text = not_after_text[:-1] + "+00:00"
@@ -304,6 +301,25 @@ def _service_credentials(
                     f"writer witness campaign expiry lacks timezone for {site}:{slot}"
                 )
             not_after = not_after.astimezone(timezone.utc)
+        if campaign_key:
+            if not_after is None:
+                raise WitnessServiceConfigurationError(
+                    f"campaign expiry does not match the witness credential for {site}:{slot}"
+                )
+            if slot == "current":
+                current_campaign_expiry[site] = not_after
+        elif not_after is not None:
+            # During a bounded Matrix campaign the pre-campaign credential is
+            # retained in the previous slot and intentionally receives the
+            # exact same expiry.  No other non-campaign credential may carry a
+            # campaign expiry.
+            if (
+                slot != "previous"
+                or current_campaign_expiry.get(site) != not_after
+            ):
+                raise WitnessServiceConfigurationError(
+                    f"campaign expiry does not match the witness credential for {site}:{slot}"
+                )
         result[key_id] = WitnessClientCredential(
             key_id=key_id,
             site=site,

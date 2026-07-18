@@ -22,6 +22,7 @@ EXPECTED_EXECUTABLE_PATHS = {
     "scripts/run_writer_witness_clock_jump_probe.py",
     "scripts/smoke_writer_witness_client.py",
     "scripts/verify_writer_witness_nftables.py",
+    "scripts/verify_writer_witness_host_toolchain.py",
     "scripts/verify_writer_witness_release.py",
     "scripts/verify_writer_witness_runtime.py",
     "scripts/verify_writer_witness_runtime_provenance.py",
@@ -119,7 +120,7 @@ class WriterWitnessReleaseMetadataTests(unittest.TestCase):
             self.assertIn("release_metadata_attested=yes", verified.stdout)
             self.assertIn(f"release_expected_uid={os.geteuid()}", verified.stdout)
             self.assertIn(f"release_expected_gid={os.getegid()}", verified.stdout)
-            self.assertIn("release_executable_entries=8", verified.stdout)
+            self.assertIn("release_executable_entries=9", verified.stdout)
 
     def test_release_rejects_an_owner_binding_mismatch(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-release-owner-") as value:

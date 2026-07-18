@@ -907,16 +907,21 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
     def test_expired_cleanup_allows_only_fixed_timeout_emergency_revocation(self):
         controller = object.__new__(runner.Controller)
         controller._cleanup_mode = True
-        controller._cleanup_deadline = __import__("time").monotonic() - 1
+        controller._cleanup_deadline = 99.0
+        controller._emergency_revocation_mode = True
+        controller._emergency_revocation_deadline = 130.0
         controller.event = mock.Mock(return_value=True)
         controller.redact_command_output = lambda value: value
         controller.secret_output_detected = False
         completed = subprocess.CompletedProcess(["true"], 0, "", "")
-        with mock.patch.object(
-            runner.subprocess,
-            "run",
-            return_value=completed,
-        ) as run_mock:
+        with (
+            mock.patch.object(runner.time, "monotonic", return_value=100.0),
+            mock.patch.object(
+                runner.subprocess,
+                "run",
+                return_value=completed,
+            ) as run_mock,
+        ):
             controller.command(
                 "exact_revocation_after_expiry",
                 ["true"],
@@ -924,8 +929,73 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 emergency_revocation=True,
             )
         self.assertEqual(run_mock.call_args.kwargs["timeout"], 30.0)
-        with self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"):
+        with (
+            mock.patch.object(runner.time, "monotonic", return_value=100.0),
+            self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"),
+        ):
             controller.command("forbidden_recovery_after_expiry", ["true"])
+
+    def test_emergency_timeout_is_one_aggregate_window_across_commands(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 99.0
+        controller._emergency_revocation_mode = True
+        controller._emergency_revocation_deadline = 105.0
+        controller.event = mock.Mock(return_value=True)
+        controller.redact_command_output = lambda value: value
+        controller.secret_output_detected = False
+        completed = subprocess.CompletedProcess(["true"], 0, "", "")
+        with (
+            mock.patch.object(
+                runner.time,
+                "monotonic",
+                side_effect=(100.0, 100.0, 101.0, 103.0, 103.0, 104.0),
+            ),
+            mock.patch.object(
+                runner.subprocess,
+                "run",
+                return_value=completed,
+            ) as run_mock,
+        ):
+            controller.command("emergency_one", ["true"], timeout=30, emergency_revocation=True)
+            controller.command("emergency_two", ["true"], timeout=30, emergency_revocation=True)
+        self.assertEqual(
+            [call.kwargs["timeout"] for call in run_mock.call_args_list],
+            [5.0, 2.0],
+        )
+
+    def test_emergency_transport_subreserve_survives_ordinary_cleanup_exhaustion(self):
+        controller = object.__new__(runner.Controller)
+        controller._budget_lock = __import__("threading").Lock()
+        controller._cleanup_mode = True
+        controller._emergency_revocation_mode = True
+        controller.control_requests = 0
+        controller.control_bytes_upper_bound = 0
+        controller.transport_operations = 0
+        controller.transport_bytes_upper_bound = 0
+        controller.cleanup_transport_operations = 1
+        controller.cleanup_transport_bytes_upper_bound = (
+            runner.CLEANUP_TRANSPORT_BYTES_RESERVE
+            - runner.EMERGENCY_TRANSPORT_BYTES_RESERVE
+        )
+        controller.emergency_transport_operations = 0
+        controller.emergency_transport_bytes_upper_bound = 0
+        controller._transport_master_roles = set()
+        controller._transport_master_deadlines = {}
+        controller.dpi_byte_budget = runner.MIN_DPI_BYTE_BUDGET
+        controller.journal = mock.Mock()
+        with self.assertRaisesRegex(runner.MatrixError, "cleanup exceeded"):
+            controller._reserve_transport_budget(
+                role="matrix_witness", kind="ssh", payload_bytes=4
+            )
+        reserved = controller._reserve_transport_budget(
+            role="matrix_witness",
+            kind="ssh",
+            payload_bytes=4,
+            emergency_revocation=True,
+        )
+        self.assertGreater(reserved, 0)
+        self.assertEqual(controller.emergency_transport_operations, 1)
 
     def test_cleanup_expiry_mid_run_routes_to_exact_emergency_revocation(self):
         controller = object.__new__(runner.Controller)

@@ -56,6 +56,7 @@ PINNED_SOURCE_PATHS = (
     "scripts/run_writer_witness_real_host_matrix.py",
     "scripts/verify_writer_witness_release.py",
     "scripts/verify_writer_witness_runtime.py",
+    "scripts/verify_writer_witness_host_toolchain.py",
     "scripts/verify_writer_witness_runtime_provenance.py",
     "scripts/verify_writer_witness_process_maps.py",
     "scripts/verify_writer_witness_wheelhouse.py",

@@ -54,6 +54,7 @@ python_sources=( \
     scripts/run_writer_witness_real_host_matrix.py \
     scripts/verify_writer_witness_release.py \
     scripts/verify_writer_witness_runtime.py \
+    scripts/verify_writer_witness_host_toolchain.py \
     scripts/verify_writer_witness_runtime_provenance.py \
     scripts/verify_writer_witness_process_maps.py \
     scripts/verify_writer_witness_wheelhouse.py \
@@ -96,6 +97,7 @@ unit_modules=( \
     tests.test_writer_witness_matrix_campaign \
     tests.test_writer_witness_matrix_controller_provision \
     tests.test_verify_writer_witness_runtime \
+    tests.test_verify_writer_witness_host_toolchain \
     tests.test_verify_writer_witness_runtime_provenance \
     tests.test_verify_writer_witness_process_maps \
     tests.test_verify_writer_witness_wheelhouse \

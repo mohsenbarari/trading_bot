@@ -75,6 +75,9 @@ install -m 0755 \
     "$ROOT_DIR/scripts/run_writer_witness_clock_jump_probe.py" \
     "$DESTINATION/scripts/run_writer_witness_clock_jump_probe.py"
 install -m 0755 \
+    "$ROOT_DIR/scripts/verify_writer_witness_host_toolchain.py" \
+    "$DESTINATION/scripts/verify_writer_witness_host_toolchain.py"
+install -m 0755 \
     "$ROOT_DIR/scripts/verify_writer_witness_release.py" \
     "$DESTINATION/scripts/verify_writer_witness_release.py"
 install -m 0755 \

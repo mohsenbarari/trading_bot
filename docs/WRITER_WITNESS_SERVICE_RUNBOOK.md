@@ -45,6 +45,16 @@ These are local source results awaiting a clean commit/push and independent
 exact-SHA review; they are not deployment, live-host, preflight, external
 approval, or real-host Matrix evidence.
 
+ChatGPT Pro then rejected exact SHA `086affed`; roadmap Section 47.11 records
+the fourth source remediation. Its hermetic source gate passed `421` explicitly
+listed unit tests with zero skips, all `5` guarded real-PostgreSQL tests, and
+the complete four-database failure drill. A fresh minimal release passed its
+closed verifier with `86` manifest entries, `9` executable entries, and
+`release-manifest.json` SHA-256
+`9f63102e74f6dcb3526c00c63c832119f7e781d53cd1aae6116a00f885fdbf20`.
+These are still source-only results pending independent review of the committed
+exact SHA; they are not dark-host installation or RH evidence.
+
 The reviewed deployment contract is:
 
 - provisioning requires an offline wheelhouse whose exact file set and every
@@ -92,21 +102,25 @@ The reviewed deployment contract is:
   staged release/runtime/provenance file and containing directory is fsynced
   before the active pointer is changed, and the exact nftables gate passes
   before the new generation is exposed;
-- activation is a journaled `begin -> publish -> credential finalize -> commit
+- activation is a journaled `begin -> late unit-intent snapshot -> publish -> credential finalize -> commit
   -> service completion` transaction over the
   code, venv, runtime provenance, runtime/client env, Nginx, systemd, and helper
   files. Candidate mode/size/digest bindings are written durably before the
   first publication, every managed publication has a crash-injection point,
-  and all public units must be proven inactive before publication starts.
-  All six managed service/timer units are stopped and runtime-masked during
-  publication, including already-running backup/offsite oneshots. Errors and
+  and the stable predecessor intent is recorded immediately before the first
+  systemd mutation. Transitional and failed states are not replayable. Backup
+  timers are frozen first; an already-running backup/offsite oneshot finishes
+  under its old generation and is never stopped or replayed, while its durable
+  rollback intent is normalized to inactive. All managed units are then proven
+  inactive and runtime-masked before publication. Errors and
   handled signals roll back immediately. A mandatory boot recovery unit
   performs rollback reconciliation before Nginx/Writer start; a separately
   ordered periodic watchdog owns service completion. Both paths serialize
   with provision and HMAC rotation. An uncommitted generation is rolled back,
   but its journal remains durable in a rollback-service-completion phase until
-  the exact predecessor load, active, and unit-file intent is restored and any
-  required health check passes. A committed generation is likewise completed
+  the exact predecessor load, active, and unit-file intent is restored,
+  resampled, and compared by the transaction helper, and any required health
+  check passes. A committed generation is likewise completed
   only after the exact services are healthy. Freshly absent units remain
   absent rather than being enabled as a side effect. SIGKILL or power loss
   therefore cannot erase the service intent needed to finish either direction;
@@ -120,7 +134,10 @@ The reviewed deployment contract is:
   publication use reclaimable initialization namespaces so a crash cannot
   wedge a fresh retry. Database credentials are parsed from a closed rendered
   schema, are never evaluated by shell `source`, and PostgreSQL receives only
-  generated SCRAM verifiers in role DDL rather than clear passwords;
+  generated SCRAM verifiers in role DDL rather than clear passwords. During a
+  bounded Matrix overlap, the campaign key is current and the baseline key is
+  previous; both must carry the exact same expiry. Any other expiry on a
+  non-campaign credential fails service startup;
 - all installed privileged Python helpers use the pinned system interpreter
   under `env -i`, `-I -S -B`, UTF-8 mode, and disabled bytecode, and reject an
   unisolated direct start. The Writer service starts through its exact
@@ -131,8 +148,15 @@ The reviewed deployment contract is:
   runs the verifier through the closed trust-anchor startup. Systemd also
   clears shell and ELF-loader injection variables and invokes shell helpers by
   absolute path; every secret-bearing shell disables xtrace before reading
-  input. Preflight verifies the live Writer process maps against the exact
-  release-bound system and venv ELF closure and rejects deleted, escaped, or
+  input. Before ordinary release mutation, a separately approved host
+  toolchain digest binds every privileged executable used by provisioning and
+  recovery to its resolved path, owner package, exact SHA-256, and safe
+  metadata; its complete observable ELF dependency closure is bound with the
+  same file/package evidence, along with required non-executable bootstrap
+  packages. Preflight verifies
+  the live Writer process maps against the exact release-bound system and venv
+  ELF closure, binds every executable mapping's `/proc` device/inode to the
+  currently hashed file, and rejects deleted, replaced, escaped, changing, or
   otherwise unbound mapped objects;
 - attestation checks the effective systemd service, not only the unit file:
   its fragment path, absence of drop-ins, effective user/group/working
@@ -156,7 +180,9 @@ The reviewed deployment contract is:
 - the Matrix authorization budget covers all network transports, not only API
   calls. The minimum is `64 MiB`, including conservative HTTP, SSH handshake
   and command, SCP, reconnect, abort-probe, cleanup, and final-postflight upper
-  bounds; `16 MiB` is reserved only for cleanup. Every scenario has a
+  bounds; `16 MiB` is reserved only for cleanup. Ordinary cleanup may use at
+  most `14 MiB`; an isolated `2 MiB` sub-reserve is usable only by exact
+  emergency revocation. Every scenario has a
   Witness-clock `not_after` no later than 900 seconds after start. That expiry
   is carried by each scenario HMAC credential and is checked again with fresh
   database time inside the transition transaction before any state or receipt
@@ -167,7 +193,9 @@ The reviewed deployment contract is:
   recovery-controller process cannot renew the allowance. After that deadline,
   only a narrowly bounded emergency path may prove exact campaign ownership,
   revoke its credentials, reconcile owned rotation state, and release its
-  tombstone; it may not resume ordinary inspection or baseline repair. SSH
+  tombstone. That entire path shares one durably persisted, non-renewable
+  30-second aggregate deadline and independent operation/byte counters; it may
+  not resume ordinary inspection or baseline repair. SSH
   ControlMaster sockets live only on verified tmpfs, but DPI accounting
   charges a complete handshake upper bound for every SSH/SCP operation because
   OpenSSH can transparently recreate a dead master and still report success;
@@ -235,18 +263,20 @@ env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
 ```
 
 OS/image bootstrap is deliberately outside ordinary release provisioning. On
-the reviewed host image, retain the exact read-only package inventory and pass
-its SHA-256 through
-`WRITER_WITNESS_EXPECTED_HOST_PACKAGE_INVENTORY_SHA256`:
+the reviewed host image, retain the exact read-only package and executable
+inventory and pass its SHA-256 through
+`WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256`. The inventory binds
+every privileged executable used by provisioning/recovery to its resolved
+path, owner package, metadata and file SHA-256; package versions alone are not
+sufficient:
 
 ```text
-packages=(ca-certificates libfaketime nginx openssl postgresql \
-  postgresql-client python3 python3-venv util-linux ufw)
-LC_ALL=C dpkg-query -W \
-  -f='${binary:Package}\t${Version}\t${Architecture}\t${db:Status-Abbrev}\n' \
-  "${packages[@]}" | LC_ALL=C sort \
-  > /root/writer-witness-host-packages.inventory
-sha256sum /root/writer-witness-host-packages.inventory
+env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+  <release>/scripts/verify_writer_witness_host_toolchain.py \
+  --emit-inventory \
+  > /root/writer-witness-host-toolchain.inventory.json
+sha256sum /root/writer-witness-host-toolchain.inventory.json
 ```
 
 The account/group and bootstrap directory modes/owners must already match the

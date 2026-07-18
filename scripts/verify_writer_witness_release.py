@@ -28,6 +28,7 @@ EXECUTABLE_RELEASE_PATHS = frozenset(
         "scripts/run_writer_witness_clock_jump_probe.py",
         "scripts/smoke_writer_witness_client.py",
         "scripts/verify_writer_witness_nftables.py",
+        "scripts/verify_writer_witness_host_toolchain.py",
         "scripts/verify_writer_witness_release.py",
         "scripts/verify_writer_witness_runtime.py",
         "scripts/verify_writer_witness_runtime_provenance.py",

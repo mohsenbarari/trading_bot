@@ -160,7 +160,7 @@ SPECIAL_PATHS = {
 }
 
 RELEASE_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
-SCHEMA = "writer_witness_activation_v2"
+SCHEMA = "writer_witness_activation_v3"
 MANAGED_UNITS = (
     "nginx",
     "writer-witness.service",
@@ -171,9 +171,10 @@ MANAGED_UNITS = (
 )
 UNIT_STATE_VALUE_RE = re.compile(r"[A-Za-z0-9._-]+")
 UNIT_LOAD_STATES = frozenset({"loaded", "masked", "not-found"})
-UNIT_ACTIVE_STATES = frozenset(
-    {"active", "activating", "reloading", "inactive", "failed", "deactivating"}
-)
+# A rollback intent is a durable desired state, not an observation of a
+# transition.  Recording activating/reloading/deactivating/failed would make
+# replay ambiguous and can duplicate a completed oneshot side effect.
+UNIT_ACTIVE_STATES = frozenset({"active", "inactive"})
 UNIT_FILE_STATES = frozenset(
     {
         "enabled",
@@ -649,6 +650,19 @@ def _parse_unit_states(values: list[str] | None, *, required: bool) -> dict[str,
             or unit_file_state not in UNIT_FILE_STATES
             or (load_state == "not-found" and unit_file_state != "not-found")
             or (load_state != "not-found" and unit_file_state == "not-found")
+            or (
+                load_state == "masked"
+                and unit_file_state not in {"masked", "masked-runtime"}
+            )
+            or (load_state == "masked" and active_state != "inactive")
+            or (
+                unit
+                in {
+                    "writer-witness-backup.service",
+                    "writer-witness-offsite-backup.service",
+                }
+                and active_state != "inactive"
+            )
         ):
             raise ActivationError(f"activation unit state is unsupported: {unit}")
         parsed[unit] = {
@@ -826,14 +840,33 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
             "managed": managed,
             "special": special,
             "rollback_only": rollback_only,
-            "unit_states": _parse_unit_states(
-                args.unit_state,
-                required=store.root == Path("/"),
-            ),
+            # Unit intent is finalized only immediately before the first
+            # systemd mutation.  The long release/runtime staging interval is
+            # intentionally outside that service-state snapshot.
+            "unit_intent_finalized": False,
+            "unit_states": {},
         }
         store.write_journal(journal)
         _kill_after("begin_journal")
         print(str(candidates))
+
+
+def record_unit_intent(store: ActivationStore, args: argparse.Namespace) -> None:
+    """Durably bind stable service intent immediately before quiescence."""
+
+    with store.locked():
+        journal = store.read_journal()
+        if journal is None or journal.get("release_id") != args.release_id:
+            raise ActivationError("matching prepared activation journal is missing")
+        if journal.get("phase") != "prepared":
+            raise ActivationError("activation is no longer eligible for unit intent")
+        if journal.get("unit_intent_finalized") is not False:
+            raise ActivationError("activation unit intent is already finalized")
+        journal["unit_states"] = _parse_unit_states(args.unit_state, required=True)
+        journal["unit_intent_finalized"] = True
+        store.write_journal(journal)
+        _kill_after("unit_intent_recorded")
+        print("activation_unit_intent_recorded=yes")
 
 
 def _journal_absolute(store: ActivationStore, journal: dict[str, object], key: str) -> Path:
@@ -983,6 +1016,16 @@ def publish(store: ActivationStore, args: argparse.Namespace) -> None:
             raise ActivationError("matching prepared activation journal is missing")
         if journal.get("phase") != "prepared":
             raise ActivationError("activation journal is not prepared")
+        if journal.get("unit_intent_finalized") is not True:
+            raise ActivationError("activation unit intent is not finalized")
+        _parse_unit_states(
+            [
+                f"{unit}:{state['load_state']}:{state['active_state']}:{state['unit_file_state']}"
+                for unit, state in dict(journal.get("unit_states", {})).items()
+                if isinstance(state, dict)
+            ],
+            required=True,
+        )
         release_dir = _journal_absolute(store, journal, "release_dir")
         venv_dir = _journal_absolute(store, journal, "venv_dir")
         activation_dir = _journal_absolute(store, journal, "activation_dir")
@@ -1120,6 +1163,10 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
             _mapped(store.root, "/srv/trading-bot-witness/releases"),
             active,
         )
+        if journal.get("unit_intent_finalized") is not True:
+            journal["phase"] = "rolled_back_without_service_changes"
+            store.write_journal(journal)
+            _archive_and_remove(store, journal)
         return
     if phase == "committed":
         raise ActivationError("committed activation cannot be rolled back automatically")
@@ -1210,6 +1257,10 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
     _safe_remove_tree(
         release_dir, _mapped(store.root, "/srv/trading-bot-witness/releases"), active
     )
+    if journal.get("unit_intent_finalized") is not True:
+        journal["phase"] = "rolled_back_without_service_changes"
+        store.write_journal(journal)
+        _archive_and_remove(store, journal)
 
 
 def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
@@ -1228,6 +1279,9 @@ def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
             return
         _rollback(store, journal)
         journal = store.read_journal()
+        if journal is None:
+            print("activation_recovered=rolled-back-without-service-changes")
+            return
         if (
             journal is None
             or journal.get("phase") != "rolled_back_pending_service_completion"
@@ -1355,6 +1409,7 @@ def rollback_unit_intent(store: ActivationStore, args: argparse.Namespace) -> No
         if (
             journal is None
             or journal.get("phase") != "rolled_back_pending_service_completion"
+            or journal.get("unit_intent_finalized") is not True
         ):
             raise ActivationError("rolled-back activation journal is missing")
         unit_states = journal.get("unit_states")
@@ -1392,6 +1447,9 @@ def complete_rollback(store: ActivationStore, args: argparse.Namespace) -> None:
         unit_states = journal.get("unit_states")
         if not isinstance(unit_states, dict) or set(unit_states) != set(MANAGED_UNITS):
             raise ActivationError("activation unit-state snapshot is incomplete")
+        observed = _parse_unit_states(args.unit_state, required=True)
+        if observed != unit_states:
+            raise ActivationError("activation rollback unit state does not match intent")
         _archive_and_remove(store, journal)
         print("activation_rollback_completed=yes")
 
@@ -1438,10 +1496,15 @@ def parse_args() -> argparse.Namespace:
     begin_parser.add_argument("--release-dir", required=True)
     begin_parser.add_argument("--venv-dir", required=True)
     begin_parser.add_argument("--activation-dir", required=True)
-    begin_parser.add_argument("--unit-state", action="append")
-    for name in ("publish", "commit", "complete", "complete-rollback", "candidate-dir"):
+    intent_parser = subparsers.add_parser("record-unit-intent")
+    intent_parser.add_argument("--release-id", required=True)
+    intent_parser.add_argument("--unit-state", action="append", required=True)
+    for name in ("publish", "commit", "complete", "candidate-dir"):
         child = subparsers.add_parser(name)
         child.add_argument("--release-id", required=True)
+    complete_rollback_parser = subparsers.add_parser("complete-rollback")
+    complete_rollback_parser.add_argument("--release-id", required=True)
+    complete_rollback_parser.add_argument("--unit-state", action="append", required=True)
     rollback_intent_parser = subparsers.add_parser("rollback-unit-intent")
     rollback_intent_parser.add_argument("--unit", required=True, choices=MANAGED_UNITS)
     pending_parser = subparsers.add_parser("pending-release-id")
@@ -1466,6 +1529,7 @@ def main() -> None:
     store = ActivationStore(root)
     commands = {
         "begin": begin,
+        "record-unit-intent": record_unit_intent,
         "publish": publish,
         "recover": recover,
         "recover-boot": recover_boot,

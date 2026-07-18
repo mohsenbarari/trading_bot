@@ -67,6 +67,11 @@ SCP_FILE_BYTES_MAX = 1_048_576
 MAX_SCENARIO_TRANSPORT_OPERATIONS = 1_024
 CLEANUP_TRANSPORT_BYTES_RESERVE = 16 * 1024 * 1024
 MAX_CLEANUP_TRANSPORT_OPERATIONS = 512
+# A non-renewable sub-reserve survives exhaustion of ordinary cleanup so the
+# exact HMAC/campaign revocation path still has bounded transport authority.
+EMERGENCY_REVOCATION_SECONDS = 30
+EMERGENCY_TRANSPORT_BYTES_RESERVE = 2 * 1024 * 1024
+MAX_EMERGENCY_TRANSPORT_OPERATIONS = 32
 MIN_DPI_BYTE_BUDGET = 64 * 1024 * 1024
 REMOTE_ISOLATED_PYTHON = (
     "/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin "
@@ -865,6 +870,7 @@ class Controller:
         self._event_lock = threading.Lock()
         self._budget_lock = threading.Lock()
         self._cleanup_mode_lock = threading.Lock()
+        self._emergency_mode_lock = threading.Lock()
         self.evidence_failed = False
         self.secret_output_detected = False
         self._secret_sentinels: set[str] = set()
@@ -878,6 +884,8 @@ class Controller:
         self.transport_bytes_upper_bound = 0
         self.cleanup_transport_operations = 0
         self.cleanup_transport_bytes_upper_bound = 0
+        self.emergency_transport_operations = 0
+        self.emergency_transport_bytes_upper_bound = 0
         self._transport_master_roles: set[str] = set()
         self._transport_master_deadlines: dict[str, float] = {}
         self.dpi_byte_budget = int(dpi_byte_budget)
@@ -936,6 +944,7 @@ class Controller:
         self._abort_reason: str | None = None
         self._monitor_thread: threading.Thread | None = None
         self._cleanup_mode = False
+        self._emergency_revocation_mode = False
         if existing_journal is None:
             campaign_path = campaign_root / f"{self.tag}.json"
             self.journal = CampaignJournal(
@@ -962,6 +971,8 @@ class Controller:
                     "transport_bytes_upper_bound": 0,
                     "cleanup_transport_operations": 0,
                     "cleanup_transport_bytes_upper_bound": 0,
+                    "emergency_transport_operations": 0,
+                    "emergency_transport_bytes_upper_bound": 0,
                     "created_at": self.started_at,
                     "updated_at": self.started_at,
                     "artifact_dir": str(artifact_dir),
@@ -1002,6 +1013,8 @@ class Controller:
                 "transport_bytes_upper_bound",
                 "cleanup_transport_operations",
                 "cleanup_transport_bytes_upper_bound",
+                "emergency_transport_operations",
+                "emergency_transport_bytes_upper_bound",
             ):
                 value = self.journal.payload.get(attribute, 0)
                 if not isinstance(value, int) or value < 0:
@@ -1128,6 +1141,51 @@ class Controller:
             self._cleanup_deadline = time.monotonic() + remaining
         self.raise_if_cleanup_deadline_exceeded()
 
+    def enter_emergency_revocation_mode(self) -> None:
+        """Start or resume one aggregate 30-second exact-revocation window."""
+
+        if not self._cleanup_mode:
+            raise MatrixError("emergency revocation requires cleanup mode")
+        lock = getattr(self, "_emergency_mode_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._emergency_mode_lock = lock
+        with lock:
+            started_raw = self.journal.payload.get("emergency_revocation_started_at")
+            not_after_raw = self.journal.payload.get("emergency_revocation_not_after")
+            if bool(started_raw) != bool(not_after_raw):
+                raise MatrixError("campaign journal emergency revocation window is incomplete")
+            if not started_raw:
+                started = datetime.now(timezone.utc)
+                not_after = started + timedelta(seconds=EMERGENCY_REVOCATION_SECONDS)
+                started_raw = started.isoformat().replace("+00:00", "Z")
+                not_after_raw = not_after.isoformat().replace("+00:00", "Z")
+                self.journal.update(
+                    emergency_revocation_started_at=started_raw,
+                    emergency_revocation_not_after=not_after_raw,
+                    dirty=True,
+                )
+            try:
+                started = datetime.fromisoformat(str(started_raw).replace("Z", "+00:00"))
+                not_after = datetime.fromisoformat(str(not_after_raw).replace("Z", "+00:00"))
+                if started.tzinfo is None or not_after.tzinfo is None:
+                    raise ValueError("timezone is required")
+                started = started.astimezone(timezone.utc)
+                not_after = not_after.astimezone(timezone.utc)
+            except (TypeError, ValueError) as exc:
+                raise MatrixError("campaign journal emergency revocation window is invalid") from exc
+            if (
+                not_after <= started
+                or (not_after - started).total_seconds() > EMERGENCY_REVOCATION_SECONDS
+                or started > datetime.now(timezone.utc) + timedelta(seconds=30)
+            ):
+                raise MatrixError("emergency revocation window exceeds its fixed bound")
+            remaining = max(0.0, (not_after - datetime.now(timezone.utc)).total_seconds())
+            self._emergency_revocation_mode = True
+            self._emergency_revocation_deadline = time.monotonic() + remaining
+        if remaining <= 0:
+            raise MatrixAbort("Matrix emergency revocation exceeded its aggregate 30-second bound")
+
     def _reserve_transport_budget(
         self,
         *,
@@ -1136,6 +1194,7 @@ class Controller:
         payload_bytes: int,
         transfer_bytes: int = 0,
         force_master_reservation: bool = False,
+        emergency_revocation: bool = False,
     ) -> int:
         if role not in HOSTS:
             raise MatrixError("transport budget role is invalid")
@@ -1147,6 +1206,12 @@ class Controller:
             raise MatrixError("transport file exceeds its closed transfer bound")
         base = SSH_COMMAND_BYTES_UPPER_BOUND if kind == "ssh" else SCP_SESSION_BYTES_UPPER_BOUND
         with self._budget_lock:
+            self.emergency_transport_operations = getattr(
+                self, "emergency_transport_operations", 0
+            )
+            self.emergency_transport_bytes_upper_bound = getattr(
+                self, "emergency_transport_bytes_upper_bound", 0
+            )
             roles = self._transport_master_roles
             deadlines = getattr(self, "_transport_master_deadlines", {})
             now = time.monotonic()
@@ -1160,15 +1225,32 @@ class Controller:
             # so accounting never depends on observing that internal reconnect.
             amount += SSH_MASTER_BYTES_UPPER_BOUND
             if self._cleanup_mode:
-                next_operations = self.cleanup_transport_operations + 1
-                next_bytes = self.cleanup_transport_bytes_upper_bound + amount
-                if (
-                    next_operations > MAX_CLEANUP_TRANSPORT_OPERATIONS
-                    or next_bytes > CLEANUP_TRANSPORT_BYTES_RESERVE
-                ):
-                    raise MatrixError("cleanup exceeded its pre-authorized transport reserve")
-                self.cleanup_transport_operations = next_operations
-                self.cleanup_transport_bytes_upper_bound = next_bytes
+                if emergency_revocation:
+                    if not getattr(self, "_emergency_revocation_mode", False):
+                        raise MatrixError("emergency transport requires a durable revocation window")
+                    next_operations = self.emergency_transport_operations + 1
+                    next_bytes = self.emergency_transport_bytes_upper_bound + amount
+                    if (
+                        next_operations > MAX_EMERGENCY_TRANSPORT_OPERATIONS
+                        or next_bytes > EMERGENCY_TRANSPORT_BYTES_RESERVE
+                    ):
+                        raise MatrixError("emergency revocation exceeded its isolated transport reserve")
+                    self.emergency_transport_operations = next_operations
+                    self.emergency_transport_bytes_upper_bound = next_bytes
+                else:
+                    next_operations = self.cleanup_transport_operations + 1
+                    next_bytes = self.cleanup_transport_bytes_upper_bound + amount
+                    ordinary_cleanup_ceiling = (
+                        CLEANUP_TRANSPORT_BYTES_RESERVE
+                        - EMERGENCY_TRANSPORT_BYTES_RESERVE
+                    )
+                    if (
+                        next_operations > MAX_CLEANUP_TRANSPORT_OPERATIONS
+                        or next_bytes > ordinary_cleanup_ceiling
+                    ):
+                        raise MatrixError("cleanup exceeded its pre-authorized transport reserve")
+                    self.cleanup_transport_operations = next_operations
+                    self.cleanup_transport_bytes_upper_bound = next_bytes
             else:
                 next_operations = self.transport_operations + 1
                 next_bytes = self.transport_bytes_upper_bound + amount
@@ -1187,6 +1269,8 @@ class Controller:
                 transport_bytes_upper_bound=self.transport_bytes_upper_bound,
                 cleanup_transport_operations=self.cleanup_transport_operations,
                 cleanup_transport_bytes_upper_bound=self.cleanup_transport_bytes_upper_bound,
+                emergency_transport_operations=self.emergency_transport_operations,
+                emergency_transport_bytes_upper_bound=self.emergency_transport_bytes_upper_bound,
                 dirty=True,
             )
         return amount
@@ -1766,10 +1850,19 @@ class Controller:
             if remaining_cleanup_seconds <= 0:
                 if not emergency_revocation:
                     self.raise_if_cleanup_deadline_exceeded()
-                # Expiry cannot renew the 900-second cleanup budget. It leaves
-                # only this fixed, narrowly-routed revocation primitive.
-                effective_timeout = min(float(timeout), 30.0)
+                if not getattr(self, "_emergency_revocation_mode", False):
+                    raise MatrixError("emergency revocation window was not durably entered")
+                remaining_emergency_seconds = (
+                    self._emergency_revocation_deadline - time.monotonic()
+                )
+                if remaining_emergency_seconds <= 0:
+                    raise MatrixAbort(
+                        "Matrix emergency revocation exceeded its aggregate 30-second bound"
+                    )
+                effective_timeout = min(float(timeout), remaining_emergency_seconds)
             else:
+                if emergency_revocation:
+                    raise MatrixError("emergency revocation is only valid after cleanup expiry")
                 effective_timeout = min(float(timeout), remaining_cleanup_seconds)
         else:
             self.raise_if_abort_requested()
@@ -1789,6 +1882,7 @@ class Controller:
                 kind=transport_kind,
                 payload_bytes=transport_payload_bytes,
                 transfer_bytes=transport_file_bytes,
+                emergency_revocation=emergency_revocation,
             )
         try:
             completed = subprocess.run(
@@ -1828,7 +1922,12 @@ class Controller:
         if check and completed.returncode != 0:
             raise MatrixError(f"{name} failed with exit code {completed.returncode}")
         if self._cleanup_mode:
-            if not emergency_revocation:
+            if emergency_revocation:
+                if time.monotonic() > self._emergency_revocation_deadline:
+                    raise MatrixAbort(
+                        "Matrix emergency revocation exceeded its aggregate 30-second bound"
+                    )
+            else:
                 self.raise_if_cleanup_deadline_exceeded()
         else:
             self.raise_if_abort_requested()
@@ -2031,7 +2130,7 @@ class Controller:
             if self._cleanup_mode:
                 if (
                     self.cleanup_transport_bytes_upper_bound + CONTROL_REQUEST_BYTES_UPPER_BOUND
-                    > CLEANUP_TRANSPORT_BYTES_RESERVE
+                    > CLEANUP_TRANSPORT_BYTES_RESERVE - EMERGENCY_TRANSPORT_BYTES_RESERVE
                 ):
                     raise MatrixError("cleanup exceeded its pre-authorized transport reserve")
                 self.cleanup_transport_bytes_upper_bound += CONTROL_REQUEST_BYTES_UPPER_BOUND
@@ -2048,6 +2147,10 @@ class Controller:
                 transport_bytes_upper_bound=self.transport_bytes_upper_bound,
                 cleanup_transport_operations=self.cleanup_transport_operations,
                 cleanup_transport_bytes_upper_bound=self.cleanup_transport_bytes_upper_bound,
+                emergency_transport_operations=getattr(self, "emergency_transport_operations", 0),
+                emergency_transport_bytes_upper_bound=getattr(
+                    self, "emergency_transport_bytes_upper_bound", 0
+                ),
                 dirty=True,
             )
         parts = [
@@ -2970,6 +3073,7 @@ class Controller:
     def _revoke_after_expired_cleanup_window(self) -> None:
         """Retain only exact campaign/HMAC revocation after cleanup expiry."""
 
+        self.enter_emergency_revocation_mode()
         errors: list[str] = []
         try:
             if self.remote_campaign_claimed or self.tag in self.journal.values(
@@ -3222,6 +3326,14 @@ class Controller:
             "transport_bytes_upper_bound": self.transport_bytes_upper_bound,
             "cleanup_transport_operations": self.cleanup_transport_operations,
             "cleanup_transport_bytes_upper_bound": self.cleanup_transport_bytes_upper_bound,
+            "emergency_transport_operations": getattr(
+                self, "emergency_transport_operations", 0
+            ),
+            "emergency_transport_bytes_upper_bound": getattr(
+                self, "emergency_transport_bytes_upper_bound", 0
+            ),
+            "emergency_transport_bytes_reserve": EMERGENCY_TRANSPORT_BYTES_RESERVE,
+            "emergency_revocation_seconds": EMERGENCY_REVOCATION_SECONDS,
             "dpi_byte_budget": self.dpi_byte_budget,
             "dpi_accounting": "conservative_all_transport_upper_bound",
             "max_scenario_seconds": MAX_SCENARIO_SECONDS,

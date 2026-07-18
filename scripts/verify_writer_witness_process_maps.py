@@ -111,7 +111,7 @@ def _is_elf(path: Path) -> bool:
         os.close(descriptor)
 
 
-def _system_elf_paths(manifest: Path, expected_sha256: str) -> set[Path]:
+def _system_elf_paths(manifest: Path, expected_sha256: str) -> dict[Path, str]:
     payload = _read_regular(manifest, 4 * 1024 * 1024)
     if hashlib.sha256(payload).hexdigest() != expected_sha256:
         raise ProcessMapsError("system runtime manifest differs from its release pin")
@@ -119,25 +119,79 @@ def _system_elf_paths(manifest: Path, expected_sha256: str) -> set[Path]:
     objects = document.get("elf_objects") if isinstance(document, dict) else None
     if not isinstance(objects, list) or not objects:
         raise ProcessMapsError("system runtime manifest has no ELF closure")
-    paths: set[Path] = set()
+    paths: dict[Path, str] = {}
     for item in objects:
         raw = item.get("path") if isinstance(item, dict) else None
-        if not isinstance(raw, str) or not raw.startswith("/"):
+        expected_object_sha256 = item.get("sha256") if isinstance(item, dict) else None
+        if (
+            not isinstance(raw, str)
+            or not raw.startswith("/")
+            or not isinstance(expected_object_sha256, str)
+            or SHA256_RE.fullmatch(expected_object_sha256) is None
+        ):
             raise ProcessMapsError("system runtime manifest contains an unsafe ELF path")
-        paths.add(Path(raw).resolve(strict=True))
+        resolved = Path(raw).resolve(strict=True)
+        if resolved in paths and paths[resolved] != expected_object_sha256:
+            raise ProcessMapsError("system runtime manifest contains conflicting ELF paths")
+        paths[resolved] = expected_object_sha256
     return paths
 
 
-def _venv_elf_paths(venv: Path) -> set[Path]:
+def _stable_identity_and_sha256(path: Path) -> tuple[tuple[int, int], str]:
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 1:
+            raise ProcessMapsError(f"mapped native object is unsafe: {path}")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_uid,
+            value.st_gid,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+        if identity(before) != identity(after):
+            raise ProcessMapsError(f"mapped native object changed during read: {path}")
+        return (before.st_dev, before.st_ino), digest.hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+def _venv_elf_paths(venv: Path) -> dict[Path, str]:
     if venv.is_symlink() or not venv.is_dir() or venv.resolve(strict=True) != venv:
         raise ProcessMapsError("Writer Witness venv must be one canonical real directory")
-    paths: set[Path] = set()
+    paths: dict[Path, str] = {}
     for path in venv.rglob("*"):
         if path.is_symlink() or not path.is_file():
             continue
         if _is_elf(path):
-            paths.add(path.resolve(strict=True))
+            resolved = path.resolve(strict=True)
+            _, digest = _stable_identity_and_sha256(resolved)
+            paths[resolved] = digest
     return paths
+
+
+def _process_start_time(stat_payload: bytes) -> bytes:
+    closing = stat_payload.rfind(b")")
+    if closing < 1:
+        raise ProcessMapsError("process stat metadata is malformed")
+    fields = stat_payload[closing + 2 :].split()
+    if len(fields) < 20:
+        raise ProcessMapsError("process stat metadata is incomplete")
+    return fields[19]
 
 
 def attest_process_maps(
@@ -146,30 +200,64 @@ def attest_process_maps(
     if pid < 2:
         raise ProcessMapsError("process pid is invalid")
     process_root = Path("/proc") / str(pid)
+    before_start = _process_start_time(_read_proc(process_root / "stat", 64 * 1024))
     executable = (process_root / "exe").resolve(strict=True)
     allowed = _system_elf_paths(system_runtime_manifest, expected_manifest_sha256)
-    allowed.update(_venv_elf_paths(venv))
-    allowed.add(executable)
+    venv_allowed = _venv_elf_paths(venv)
+    for path, digest in venv_allowed.items():
+        if path in allowed and allowed[path] != digest:
+            raise ProcessMapsError("venv ELF path conflicts with the system runtime")
+        allowed[path] = digest
+    if executable not in allowed:
+        raise ProcessMapsError("live process executable is outside the attested closure")
     mapped_native: set[Path] = set()
-    maps = _read_proc(process_root / "maps", 16 * 1024 * 1024).decode("utf-8")
+    maps_payload = _read_proc(process_root / "maps", 16 * 1024 * 1024)
+    maps = maps_payload.decode("utf-8")
     for line in maps.splitlines():
         fields = line.split(maxsplit=5)
         if len(fields) < 6:
             continue
-        raw = fields[5]
+        address_range, permissions, _offset, device_text, inode_text, raw = fields
         if raw.startswith("["):
             continue
         if "(deleted)" in raw or "\\" in raw:
             raise ProcessMapsError(f"live process has an unresolvable mapped object: {raw}")
         if not raw.startswith("/"):
             continue
-        path = Path(raw)
-        if not _is_elf(path):
+        if "x" not in permissions:
             continue
+        path = Path(raw)
         resolved = path.resolve(strict=True)
         mapped_native.add(resolved)
         if resolved not in allowed:
             raise ProcessMapsError(f"live process maps an unattested native object: {resolved}")
+        try:
+            device_major_text, device_minor_text = device_text.split(":", 1)
+            mapped_device = os.makedev(
+                int(device_major_text, 16), int(device_minor_text, 16)
+            )
+            mapped_inode = int(inode_text, 10)
+        except (TypeError, ValueError) as exc:
+            raise ProcessMapsError(f"live process map identity is malformed: {line}") from exc
+        (current_device, current_inode), observed_digest = _stable_identity_and_sha256(
+            resolved
+        )
+        if (mapped_device, mapped_inode) != (current_device, current_inode):
+            raise ProcessMapsError(
+                f"live process map inode differs from the attested path: {resolved}"
+            )
+        if observed_digest != allowed[resolved]:
+            raise ProcessMapsError(
+                f"live process maps changed native bytes: {resolved}"
+            )
+        # Ensure the address-range field is canonical enough that a malformed
+        # proc line cannot be accepted while identity checks are in progress.
+        if re.fullmatch(r"[0-9a-f]+-[0-9a-f]+", address_range) is None:
+            raise ProcessMapsError("live process map address range is malformed")
+    after_maps = _read_proc(process_root / "maps", 16 * 1024 * 1024)
+    after_start = _process_start_time(_read_proc(process_root / "stat", 64 * 1024))
+    if maps_payload != after_maps or before_start != after_start:
+        raise ProcessMapsError("live process identity or native maps changed during attestation")
     if executable not in mapped_native or len(mapped_native) < 2:
         raise ProcessMapsError("live process native-object map is incomplete")
     return {

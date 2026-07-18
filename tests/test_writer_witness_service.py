@@ -207,6 +207,50 @@ class WriterWitnessAuthenticationTests(unittest.TestCase):
             datetime(2026, 7, 15, 10, 15, tzinfo=timezone.utc),
         )
 
+        bounded_overlap = WriterWitnessServiceSettings(
+            **{
+                **common,
+                "writer_witness_service_webapp_fi_key_id": (
+                    "matrix-wwm_0123456789ab-fi"
+                ),
+                "writer_witness_service_webapp_fi_not_after": (
+                    "2026-07-15T10:15:00Z"
+                ),
+                "writer_witness_service_webapp_fi_previous_key_id": (
+                    FI_CREDENTIAL.key_id
+                ),
+                "writer_witness_service_webapp_fi_previous_secret": (
+                    previous_secret
+                ),
+                "writer_witness_service_webapp_fi_previous_not_after": (
+                    "2026-07-15T10:15:00+00:00"
+                ),
+            }
+        )
+        overlap_credentials = _service_credentials(bounded_overlap)
+        self.assertEqual(
+            overlap_credentials[FI_CREDENTIAL.key_id].not_after,
+            datetime(2026, 7, 15, 10, 15, tzinfo=timezone.utc),
+        )
+
+        for invalid_expiry in (
+            "2026-07-15T10:16:00Z",
+            "2026-07-15T10:15:00",
+        ):
+            with self.subTest(invalid_expiry=invalid_expiry), self.assertRaises(
+                WitnessServiceConfigurationError
+            ):
+                _service_credentials(
+                    WriterWitnessServiceSettings(
+                        **{
+                            **bounded_overlap.model_dump(),
+                            "writer_witness_service_webapp_fi_previous_not_after": (
+                                invalid_expiry
+                            ),
+                        }
+                    )
+                )
+
     def test_minimal_service_settings_enforce_distinct_database_identity(self):
         private_key, public_key = keypair()
         with tempfile.TemporaryDirectory() as tmpdir:

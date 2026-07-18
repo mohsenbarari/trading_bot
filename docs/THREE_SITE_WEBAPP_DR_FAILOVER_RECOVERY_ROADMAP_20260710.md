@@ -3167,3 +3167,69 @@ topology, product fencing/identity, replication/failback, current-main migration
 lineage, and Arvan traffic controls remain later gates. A third-remediation
 source pass cannot authorize Full Matrix, `main` integration, first lease,
 production Writer activation, WebApp mutation, or traffic/CDN changes.
+
+### 47.11 ChatGPT Pro rejection at `086affed` and fourth source remediation - 2026-07-18
+
+The supplied ChatGPT Pro report reviewed exact feature SHA `086affed` and did
+not approve a dark install, the guarded live prerequisites, or RH-001. Its
+source traces were mechanically reproduced. This roadmap therefore adopts the
+reject verdict and keeps SSH/install, live service/database/firewall/TLS
+mutation, RH execution, deployment, `main` integration, CDN/DNS change, and
+traffic movement unauthorized while the source is remediated.
+
+The immediate findings and their source dispositions are:
+
+1. The activation transaction no longer samples replay intent before the long
+   release/runtime staging interval. `begin` owns only filesystem candidates;
+   a new durable late-intent step runs immediately before the first systemd
+   mutation, rejects transitional/failed intent, and is mandatory before
+   publish. Backup timers freeze first. Any in-flight backup/offsite oneshot
+   finishes under its old generation and is never stopped or replayed; its
+   rollback intent is normalized to inactive. Rollback journal completion now
+   requires the helper to compare all six resampled `load + active + unit-file`
+   states with the durable intent. Crash recovery before the late snapshot
+   archives only a no-service-change rollback, including a second crash during
+   that cleanup.
+2. The former ten-package version list is replaced by a release-bound host
+   toolchain verifier. Its externally approved canonical inventory binds every
+   privileged executable used by provision/recovery to the requested and
+   resolved paths, exact file SHA-256, safe metadata, and owning package
+   identity/version/architecture/status, plus the non-executable bootstrap
+   packages. Every ELF tool's complete observable native dependency closure is
+   included with the same byte/package evidence. Ordinary release provisioning only verifies this digest; it does
+   not install or repair the host.
+3. The Witness credential parser now accepts the actual Matrix preparation
+   state: a campaign current key and its baseline previous key may coexist only
+   when both carry the exact same bounded expiry. A non-campaign expiry outside
+   that exact overlap still fails service startup. The rotation test now feeds
+   the prepared `runtime.env` through the real service parser.
+4. Live process-map attestation no longer trusts pathname membership alone.
+   Every executable file mapping is tied to its `/proc` device/inode, the
+   current file is read through a stable descriptor and checked against its
+   system-manifest or venv SHA-256, and process start time plus the full maps
+   payload must remain unchanged across the verification interval.
+5. Cleanup now reserves `2 MiB` of the existing `16 MiB` cleanup allowance in
+   a separate emergency bucket that ordinary recovery cannot consume. Exact
+   post-expiry revocation has independent persisted operation/byte counters and
+   one persisted, non-renewable 30-second aggregate deadline shared by all of
+   its subprocesses; it no longer receives 30 seconds per command.
+6. Activation recovery and watchdog units explicitly clear all activation
+   test/failpoint environment variables in addition to the existing Python,
+   shell, glibc, and loader injection set.
+
+Local evidence remains source-only. The focused credential, HMAC, process-map,
+controller, and toolchain groups passed `117` tests. The closed source gate
+passed its syntax phase and all `421` explicitly listed unit tests with zero
+failures and zero skips, all `5` guarded real-PostgreSQL tests, and the complete
+four-database failure drill. A fresh minimal release passed its
+closed verifier with `86` manifest entries, `9` executable entries, and
+`release-manifest.json` SHA-256
+`9f63102e74f6dcb3526c00c63c832119f7e781d53cd1aae6116a00f885fdbf20`.
+
+The fourth remediation still requires independent review of its committed
+exact SHA before reconsidering a dark install. Independent
+signer custody remains `BEFORE_RH001`; controller-loss recovery remains
+`BEFORE_REMAINING_MATRIX`; current-main migration lineage and all product/CDN
+activation gates remain later. This work does not authorize Full Matrix,
+`main` integration, a first lease, WebApp mutation, production deployment, or
+traffic changes.

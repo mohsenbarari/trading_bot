@@ -11,6 +11,8 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+from writer_witness_app import WriterWitnessServiceSettings, _service_credentials
+
 
 ROOT = Path(__file__).resolve().parents[1]
 ROTATION_PATH = ROOT / "deploy/writer-witness/writer-witness-rotate-hmac.py"
@@ -1251,6 +1253,17 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
             self.campaign_not_after,
         )
         self.assertEqual(prepared["campaign_not_after"], self.campaign_not_after)
+        parsed = _service_credentials(
+            WriterWitnessServiceSettings(
+                **{key.lower(): value for key, value in runtime.items()}
+            )
+        )
+        self.assertEqual(
+            parsed["webapp-fi-v1"].not_after,
+            datetime.fromisoformat(
+                self.campaign_not_after.replace("Z", "+00:00")
+            ),
+        )
         rotation.revoke(
             "webapp_fi", 0, self.runtime, self.client_dir, self.state_root
         )

@@ -97,6 +97,31 @@ class WriterWitnessProcessMapsTests(unittest.TestCase):
             with self.assertRaisesRegex(ProcessMapsError, "unattested native object"):
                 self._attest(process, venv)
 
+    def test_replaced_allowed_path_cannot_attest_an_old_mapped_inode(self):
+        runtime = json.loads(RUNTIME_MANIFEST.read_text(encoding="utf-8"))
+        source = next(
+            Path(item["path"])
+            for item in runtime["elf_objects"]
+            if "libz.so" in str(item["path"])
+        )
+        with tempfile.TemporaryDirectory(prefix="writer-witness-maps-venv-") as directory:
+            venv = Path(directory).resolve()
+            allowed = venv / "allowed.so"
+            replacement = venv / "replacement.so"
+            shutil.copyfile(source, allowed)
+            process = self._spawn(
+                "import ctypes,sys,time; ctypes.CDLL(sys.argv[1]); "
+                "print('ready', flush=True); time.sleep(30)",
+                str(allowed),
+            )
+            self.assertEqual(process.stdout.readline().strip(), "ready")
+            shutil.copyfile(source, replacement)
+            os.replace(replacement, allowed)
+            with self.assertRaisesRegex(
+                ProcessMapsError, "unresolvable mapped object|map inode differs"
+            ):
+                self._attest(process, venv)
+
 
 if __name__ == "__main__":
     unittest.main()

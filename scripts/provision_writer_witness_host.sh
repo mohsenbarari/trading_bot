@@ -41,7 +41,8 @@ wait_for_writer_witness_ready() {
 }
 
 restore_rollback_unit_intent() {
-    local release_id unit intent load_state active_state unit_file_state current_load
+    local release_id unit intent load_state active_state unit_file_state current_load current_active
+    local -a observed_unit_state_args=()
     release_id="$(installed_activation pending-release-id \
         --phase rolled_back_pending_service_completion)"
     systemctl daemon-reload
@@ -71,17 +72,25 @@ restore_rollback_unit_intent() {
             continue
         fi
         case "$active_state" in
-            active|activating|reloading)
+            active)
                 systemctl start "$unit"
+                systemctl is-active --quiet "$unit"
+                ;;
+            inactive)
+                current_active="$(systemctl show -p ActiveState --value "$unit")"
                 if [[ "$unit" == writer-witness-backup.service \
                     || "$unit" == writer-witness-offsite-backup.service ]]; then
-                    [[ "$(systemctl show -p Result --value "$unit")" == success ]]
+                    # Never replay or interrupt an old-generation oneshot.  A
+                    # watchdog retry will complete rollback after it exits.
+                    [[ "$current_active" != active \
+                        && "$current_active" != activating \
+                        && "$current_active" != deactivating ]] || return 75
                 else
-                    systemctl is-active --quiet "$unit"
+                    systemctl stop "$unit"
                 fi
-                ;;
-            inactive|failed|deactivating)
-                systemctl stop "$unit"
+                if [[ "$current_active" == failed ]]; then
+                    systemctl reset-failed "$unit"
+                fi
                 ! systemctl is-active --quiet "$unit"
                 ;;
             *)
@@ -103,10 +112,24 @@ restore_rollback_unit_intent() {
         esac
     done
     intent="$(installed_activation rollback-unit-intent --unit writer-witness.service)"
-    if [[ "$intent" =~ ^loaded:(active|activating|reloading): ]]; then
+    if [[ "$intent" =~ ^loaded:active: ]]; then
         wait_for_writer_witness_ready
     fi
-    installed_activation complete-rollback --release-id "$release_id" >/dev/null
+    systemctl daemon-reload
+    for unit in "${WRITER_WITNESS_MANAGED_UNITS[@]}"; do
+        load_state="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)"
+        active_state="$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)"
+        unit_file_state="$(systemctl show -p UnitFileState --value "$unit" 2>/dev/null || true)"
+        [[ -n "$load_state" ]] || load_state=not-found
+        [[ -n "$active_state" ]] || active_state=inactive
+        [[ -n "$unit_file_state" ]] || unit_file_state=not-found
+        observed_unit_state_args+=(
+            --unit-state "$unit:$load_state:$active_state:$unit_file_state"
+        )
+    done
+    installed_activation complete-rollback \
+        --release-id "$release_id" \
+        "${observed_unit_state_args[@]}" >/dev/null
 }
 
 reconcile_installed_activation() {
@@ -114,6 +137,9 @@ reconcile_installed_activation() {
     result="$(installed_activation recover)"
     case "$result" in
         activation_recovered=no)
+            return 0
+            ;;
+        activation_recovered=rolled-back-without-service-changes)
             return 0
             ;;
         activation_recovered=rolled-back-pending-service-completion)
@@ -154,9 +180,9 @@ SSH_KEY_SOURCE_USER="${WRITER_WITNESS_SSH_KEY_SOURCE_USER:-ubuntu}"
 WHEELHOUSE="${WRITER_WITNESS_WHEELHOUSE:-}"
 ROTATE_TLS="${WRITER_WITNESS_ROTATE_TLS:-false}"
 EXPECTED_MANIFEST_SHA256="${WRITER_WITNESS_EXPECTED_MANIFEST_SHA256:-}"
-EXPECTED_HOST_PACKAGE_INVENTORY_SHA256="${WRITER_WITNESS_EXPECTED_HOST_PACKAGE_INVENTORY_SHA256:-}"
+EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="${WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256:-}"
 
-for value_name in SOURCE_DIR WITNESS_PUBLIC_IP WEBAPP_FI_SOURCE_IP WEBAPP_IR_SOURCE_IP SSH_SOURCE_IP EXPECTED_MANIFEST_SHA256 EXPECTED_HOST_PACKAGE_INVENTORY_SHA256 WHEELHOUSE; do
+for value_name in SOURCE_DIR WITNESS_PUBLIC_IP WEBAPP_FI_SOURCE_IP WEBAPP_IR_SOURCE_IP SSH_SOURCE_IP EXPECTED_MANIFEST_SHA256 EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256 WHEELHOUSE; do
     value="${!value_name}"
     if [[ -z "$value" ]]; then
         echo "$value_name is required" >&2
@@ -167,8 +193,8 @@ if [[ ! "$EXPECTED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
     echo "WRITER_WITNESS_EXPECTED_MANIFEST_SHA256 must be 64 lowercase hex characters" >&2
     exit 2
 fi
-if [[ ! "$EXPECTED_HOST_PACKAGE_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "WRITER_WITNESS_EXPECTED_HOST_PACKAGE_INVENTORY_SHA256 must be 64 lowercase hex characters" >&2
+if [[ ! "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256 must be 64 lowercase hex characters" >&2
     exit 2
 fi
 if [[ ! "$RELEASE_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -225,6 +251,7 @@ for required in \
     "$SOURCE_DIR/scripts/smoke_writer_witness_client.py" \
     "$SOURCE_DIR/scripts/verify_writer_witness_release.py" \
     "$SOURCE_DIR/scripts/verify_writer_witness_runtime.py" \
+    "$SOURCE_DIR/scripts/verify_writer_witness_host_toolchain.py" \
     "$SOURCE_DIR/scripts/verify_writer_witness_runtime_provenance.py" \
     "$SOURCE_DIR/scripts/verify_writer_witness_process_maps.py" \
     "$SOURCE_DIR/scripts/verify_writer_witness_wheelhouse.py" \
@@ -556,37 +583,9 @@ flock -n "$outer_provision_lock_fd" || {
     exit 75
 }
 
-readonly -a required_host_packages=(
-    ca-certificates
-    libfaketime
-    nginx
-    openssl
-    postgresql
-    postgresql-client
-    python3
-    python3-venv
-    util-linux
-    ufw
-)
-host_package_inventory="$(
-    LC_ALL=C dpkg-query -W \
-        -f='${binary:Package}\t${Version}\t${Architecture}\t${db:Status-Abbrev}\n' \
-        "${required_host_packages[@]}" | LC_ALL=C sort
-)" || {
-    echo "Writer Witness immutable host package baseline is incomplete" >&2
-    exit 2
-}
-if grep -Ev $'^[^\t]+\t[^\t]+\t[^\t]+\tii $' <<<"$host_package_inventory" | grep -q .; then
-    echo "Writer Witness immutable host package baseline is not fully installed" >&2
-    exit 2
-fi
-host_package_inventory_sha256="$(
-    printf '%s\n' "$host_package_inventory" | sha256sum | awk '{print $1}'
-)"
-[[ "$host_package_inventory_sha256" == "$EXPECTED_HOST_PACKAGE_INVENTORY_SHA256" ]] || {
-    echo "Writer Witness immutable host package inventory differs from its approved pin" >&2
-    exit 2
-}
+isolated_system_python "$SOURCE_DIR/scripts/verify_writer_witness_host_toolchain.py" \
+    --expected-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+    >/dev/null
 isolated_system_python - <<'PY'
 import grp
 import pwd
@@ -803,7 +802,7 @@ isolated_system_python \
 activation_transaction_open=false
 activation_service_stopped=false
 rollback_activation_transaction() {
-    local original_status="${1:-1}"
+    local original_status="${1:-1}" recovery_result
     trap - ERR HUP INT TERM EXIT
     set +e
     if [[ "$activation_transaction_open" == true ]]; then
@@ -811,15 +810,25 @@ rollback_activation_transaction() {
             systemctl stop writer-witness.service >/dev/null 2>&1 || true
         fi
         recovery_status=0
-        installed_activation recover >/dev/null || recovery_status=$?
+        recovery_result="$(installed_activation recover)" || recovery_status=$?
         if [[ "$recovery_status" -ne 0 ]]; then
             echo "Writer Witness activation rollback failed; refusing to restart services" >&2
             exit 70
         fi
-        restore_rollback_unit_intent || {
-            echo "Writer Witness exact unit-state restoration failed" >&2
-            exit 70
-        }
+        case "$recovery_result" in
+            activation_recovered=rolled-back-pending-service-completion)
+                restore_rollback_unit_intent || {
+                    echo "Writer Witness exact unit-state restoration failed" >&2
+                    exit 70
+                }
+                ;;
+            activation_recovered=rolled-back-without-service-changes)
+                ;;
+            *)
+                echo "unexpected Writer Witness activation rollback result: $recovery_result" >&2
+                exit 70
+                ;;
+        esac
     fi
     exit "$original_status"
 }
@@ -847,31 +856,12 @@ done
 # The helper may durably publish its journal and then fail before returning the
 # candidate path. Arm the shell rollback first so that this ambiguous response
 # is reconciled immediately rather than being left solely to boot recovery.
-activation_unit_state_args=()
-for unit in "${WRITER_WITNESS_MANAGED_UNITS[@]}"; do
-    load_state="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)"
-    active_state="$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)"
-    unit_file_state="$(systemctl show -p UnitFileState --value "$unit" 2>/dev/null || true)"
-    [[ -n "$load_state" ]] || load_state=not-found
-    [[ -n "$active_state" ]] || active_state=inactive
-    [[ -n "$unit_file_state" ]] || unit_file_state=not-found
-    for value in "$load_state" "$active_state" "$unit_file_state"; do
-        [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]] || {
-            echo "unsafe Writer Witness pre-publication unit state: $unit" >&2
-            exit 70
-        }
-    done
-    activation_unit_state_args+=(
-        --unit-state "$unit:$load_state:$active_state:$unit_file_state"
-    )
-done
 activation_transaction_open=true
 activation_candidates="$(installed_activation begin \
     --release-id "$RELEASE_ID" \
     --release-dir "$release_dir" \
     --venv-dir "$venv_dir" \
-    --activation-dir "$activation_dir" \
-    "${activation_unit_state_args[@]}")"
+    --activation-dir "$activation_dir")"
 
 install -d -m 0755 -o root -g root "$release_dir"
 cp -a "$SOURCE_DIR/." "$release_dir/"
@@ -881,6 +871,7 @@ chmod 0755 \
     "$release_dir/scripts/run_writer_witness_clock_jump_probe.py" \
     "$release_dir/scripts/smoke_writer_witness_client.py" \
     "$release_dir/scripts/verify_writer_witness_nftables.py" \
+    "$release_dir/scripts/verify_writer_witness_host_toolchain.py" \
     "$release_dir/scripts/verify_writer_witness_release.py" \
     "$release_dir/scripts/verify_writer_witness_runtime.py" \
     "$release_dir/scripts/verify_writer_witness_runtime_provenance.py" \
@@ -1608,15 +1599,72 @@ fsync_directories \
 # publication.  The Writer Witness candidate is validated on loopback while
 # Nginx remains stopped; the watchdog reconciles a killed provisioner within
 # one timer interval after the provision lock is released.
-activation_service_stopped=true
+activation_unit_state_args=()
 for unit in "${WRITER_WITNESS_MANAGED_UNITS[@]}"; do
     load_state="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)"
-    if [[ "$load_state" == not-found || -z "$load_state" ]]; then
-        continue
-    fi
-    systemctl stop "$unit"
     active_state="$(systemctl show -p ActiveState --value "$unit")"
-    [[ "$active_state" == inactive || "$active_state" == failed ]] || {
+    unit_file_state="$(systemctl show -p UnitFileState --value "$unit" 2>/dev/null || true)"
+    [[ -n "$load_state" ]] || load_state=not-found
+    [[ -n "$active_state" ]] || active_state=inactive
+    [[ -n "$unit_file_state" ]] || unit_file_state=not-found
+    if [[ "$unit" == writer-witness-backup.service \
+        || "$unit" == writer-witness-offsite-backup.service ]]; then
+        case "$active_state" in
+            active|activating|deactivating|inactive|failed) active_state=inactive ;;
+            *)
+                echo "unsafe Writer Witness oneshot state before activation: $unit:$active_state" >&2
+                exit 70
+                ;;
+        esac
+    fi
+    activation_unit_state_args+=(
+        --unit-state "$unit:$load_state:$active_state:$unit_file_state"
+    )
+done
+installed_activation record-unit-intent \
+    --release-id "$RELEASE_ID" \
+    "${activation_unit_state_args[@]}" >/dev/null
+activation_service_stopped=true
+
+# Freeze schedules first.  A backup that crossed the snapshot boundary is
+# allowed to finish under the old generation; it is never stopped or replayed.
+for unit in writer-witness-backup.timer writer-witness-offsite-backup.timer; do
+    [[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" == not-found ]] \
+        && continue
+    systemctl stop "$unit"
+    systemctl mask --runtime "$unit" >/dev/null
+done
+for unit in writer-witness-backup.service writer-witness-offsite-backup.service; do
+    [[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" == not-found ]] \
+        && continue
+    for attempt in $(seq 1 300); do
+        active_state="$(systemctl show -p ActiveState --value "$unit")"
+        case "$active_state" in
+            inactive) break ;;
+            failed)
+                systemctl reset-failed "$unit"
+                break
+                ;;
+            active|activating|deactivating)
+                [[ "$attempt" -lt 300 ]] || {
+                    echo "Writer Witness activation timed out waiting for $unit" >&2
+                    exit 70
+                }
+                sleep 1
+                ;;
+            *)
+                echo "Writer Witness activation observed unsafe oneshot state: $unit:$active_state" >&2
+                exit 70
+                ;;
+        esac
+    done
+    systemctl mask --runtime "$unit" >/dev/null
+done
+for unit in nginx writer-witness.service; do
+    [[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" == not-found ]] \
+        && continue
+    systemctl stop "$unit"
+    [[ "$(systemctl show -p ActiveState --value "$unit")" == inactive ]] || {
         echo "Writer Witness activation could not quiesce $unit" >&2
         exit 70
     }
