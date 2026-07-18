@@ -33,6 +33,7 @@ class WitnessClientCredential:
     key_id: str
     site: str
     secret: str
+    not_after: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class VerifiedWitnessCaller:
     site: str
     request_id: str
     timestamp: int
+    credential_not_after: datetime | None = None
 
 
 def _utc(value: datetime) -> datetime:
@@ -137,13 +139,19 @@ def verify_witness_request(
     credential = credentials.get(key_id)
     if credential is None or credential.site != site or site not in WEBAPP_SITES:
         raise WitnessAuthenticationError("unknown witness client credential")
+    current = _utc(now)
+    if credential.not_after is not None and current >= _utc(credential.not_after):
+        raise WitnessAuthenticationError(
+            "witness client credential has expired",
+            code="witness_campaign_expired",
+        )
     if not request_id or len(request_id) > 64:
         raise WitnessAuthenticationError("witness request id is invalid")
     try:
         timestamp = int(timestamp_text)
     except ValueError as exc:
         raise WitnessAuthenticationError("witness request timestamp is invalid") from exc
-    current_timestamp = int(_utc(now).timestamp())
+    current_timestamp = int(current.timestamp())
     age = current_timestamp - timestamp
     if age > max(1, int(max_age_seconds)):
         raise WitnessAuthenticationError(
@@ -175,4 +183,5 @@ def verify_witness_request(
         site=site,
         request_id=request_id,
         timestamp=timestamp,
+        credential_not_after=credential.not_after,
     )

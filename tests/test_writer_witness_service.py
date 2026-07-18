@@ -111,6 +111,16 @@ class MutableClock:
         return self.value
 
 
+class SequenceClock:
+    def __init__(self, *values: datetime):
+        self.values = list(values)
+
+    async def __call__(self, _session):
+        if len(self.values) > 1:
+            return self.values.pop(0)
+        return self.values[0]
+
+
 class SharedFakeSession:
     def __init__(self, receipts: dict[str, WebappWriterWitnessReceipt]):
         self.receipts = receipts
@@ -179,6 +189,23 @@ class WriterWitnessAuthenticationTests(unittest.TestCase):
                 WitnessServiceConfigurationError
             ):
                 _service_credentials(WriterWitnessServiceSettings(**common, **unsafe))
+
+        campaign_settings = WriterWitnessServiceSettings(
+            **{
+                **common,
+                "writer_witness_service_webapp_fi_key_id": (
+                    "matrix-wwm_0123456789ab-fi"
+                ),
+                "writer_witness_service_webapp_fi_not_after": (
+                    "2026-07-15T10:15:00Z"
+                ),
+            }
+        )
+        campaign_credentials = _service_credentials(campaign_settings)
+        self.assertEqual(
+            campaign_credentials["matrix-wwm_0123456789ab-fi"].not_after,
+            datetime(2026, 7, 15, 10, 15, tzinfo=timezone.utc),
+        )
 
     def test_minimal_service_settings_enforce_distinct_database_identity(self):
         private_key, public_key = keypair()
@@ -410,6 +437,56 @@ class WriterWitnessServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(first.json()["replayed"])
         self.assertEqual(replay.status_code, 409)
         self.assertTrue(replay.json()["replayed"])
+
+    async def test_campaign_expiry_crossed_inside_transaction_creates_no_receipt(self):
+        expiry = NOW + timedelta(seconds=5)
+        campaign_credential = WitnessClientCredential(
+            key_id="matrix-wwm_0123456789ab-fi",
+            site="webapp_fi",
+            secret="campaign-secret-0123456789abcdef-0123456789abcdef",
+            not_after=expiry,
+        )
+        sessions = SharedSessionFactory()
+        runtime = WriterWitnessServiceRuntime(
+            session_factory=sessions,
+            private_key_base64=self.private_key,
+            credentials={campaign_credential.key_id: campaign_credential},
+            # Authentication succeeds before expiry; the fresh database-time
+            # read immediately before transition application crosses it.
+            clock=SequenceClock(NOW, expiry),
+        )
+        app = create_writer_witness_app(runtime)
+        transport = httpx.ASGITransport(app=app)
+        body = command_body(
+            action="acquire",
+            epoch=0,
+            lease_id=None,
+            request_id="campaign-expired-in-transaction",
+            reason="prove transaction-bound campaign expiry",
+        )
+        headers = sign_witness_request(
+            credential=campaign_credential,
+            method="POST",
+            path=WITNESS_TRANSITION_PATH,
+            body=body,
+            request_id="campaign-expired-in-transaction",
+            timestamp=int(NOW.timestamp()),
+        )
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://witness.test",
+        ) as client:
+            response = await client.post(
+                WITNESS_TRANSITION_PATH,
+                content=body,
+                headers=headers,
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "witness_campaign_expired")
+        self.assertEqual(sessions.receipts, {})
+        self.assertEqual(self.state.writer_epoch, 0)
+        self.assertIsNone(self.state.holder_site)
 
 
 if __name__ == "__main__":

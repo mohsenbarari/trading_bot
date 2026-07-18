@@ -32,6 +32,7 @@ export JWT_SECRET_KEY="matrix-gate-placeholder-jwt-secret-32-bytes"
 shell_sources=( \
     scripts/build_writer_witness_release.sh \
     scripts/build_writer_witness_wheelhouse.sh \
+    scripts/configure_writer_witness_s3_backup.sh \
     scripts/provision_writer_witness_host.sh \
     scripts/run_writer_witness_preflight_source_gate.sh \
     scripts/run_writer_witness_failure_drill.sh \

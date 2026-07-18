@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from datetime import datetime, timedelta, timezone
 import errno
 import fcntl
 import json
@@ -15,6 +16,7 @@ import secrets
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.request import urlopen
@@ -31,6 +33,28 @@ SITE_SETTINGS = {
 
 class RotationError(RuntimeError):
     """A fail-closed rotation precondition or operation failed."""
+
+
+def _assert_isolated_runtime() -> None:
+    if Path(sys.executable).resolve(strict=True) != Path("/usr/bin/python3.12"):
+        raise RotationError("HMAC helper is not using the pinned system Python")
+    if (
+        not sys.flags.isolated
+        or not sys.flags.no_site
+        or not sys.flags.ignore_environment
+        or not sys.flags.dont_write_bytecode
+        or not sys.flags.utf8_mode
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise RotationError("HMAC helper startup is not isolated")
+    if any(
+        os.environ.get(name)
+        for name in (
+            "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+            "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH",
+        )
+    ):
+        raise RotationError("HMAC helper inherited a forbidden runtime environment")
 
 
 def _validate_owned_directory(path: Path, *, private: bool = False) -> None:
@@ -872,7 +896,7 @@ def _next_key_id(current: str) -> str:
     return candidate
 
 
-def _site_keys(site: str) -> tuple[str, str, str, str, str]:
+def _site_keys(site: str) -> tuple[str, str, str, str, str, str, str]:
     suffix, client_name = SITE_SETTINGS[site]
     prefix = f"WRITER_WITNESS_SERVICE_WEBAPP_{suffix}"
     return (
@@ -880,8 +904,33 @@ def _site_keys(site: str) -> tuple[str, str, str, str, str]:
         f"{prefix}_SECRET",
         f"{prefix}_PREVIOUS_KEY_ID",
         f"{prefix}_PREVIOUS_SECRET",
+        f"{prefix}_NOT_AFTER",
+        f"{prefix}_PREVIOUS_NOT_AFTER",
         client_name,
     )
+
+
+def _campaign_expiry(value: str | None, *, campaign_tag: str | None) -> str | None:
+    if campaign_tag is None:
+        if value is not None:
+            raise RotationError("campaign expiry is valid only for a matrix campaign")
+        return None
+    if value is None or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z",
+        value,
+    ):
+        raise RotationError("matrix campaign expiry is missing or invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RotationError("matrix campaign expiry is invalid") from exc
+    now = datetime.now(timezone.utc)
+    parsed = parsed.astimezone(timezone.utc) if parsed.tzinfo is not None else parsed
+    if parsed.tzinfo is None or parsed <= now:
+        raise RotationError("matrix campaign expiry is not in the future")
+    if parsed > now + timedelta(seconds=900):
+        raise RotationError("matrix campaign expiry exceeds 900 seconds")
+    return parsed.isoformat().replace("+00:00", "Z")
 
 
 def _require_root() -> None:
@@ -972,7 +1021,15 @@ def _quarantine_unclaimed_rotation_directory(
 ) -> str:
     """Reclaim a metadata-less owned claim after proving no mutation occurred."""
 
-    key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
+    (
+        key_name,
+        secret_name,
+        previous_key_name,
+        previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
+        client_name,
+    ) = _site_keys(site)
     rotation_dir = state_root / site
     directory_stat = rotation_dir.lstat()
     if (
@@ -985,7 +1042,14 @@ def _quarantine_unclaimed_rotation_directory(
     _, runtime = _read_env(runtime_path)
     _, client = _read_env(client_dir / client_name)
     _validate_pair(runtime, client, key_name, secret_name)
-    if runtime.get(previous_key_name) or runtime.get(previous_secret_name):
+    if any(
+        runtime.get(name)
+        for name in (
+            previous_key_name,
+            previous_secret_name,
+            previous_not_after_name,
+        )
+    ):
         raise RotationError("unclaimed rotation state may have mutated credentials")
     if campaign_tag is not None:
         scenario_key_id = f"matrix-{campaign_tag}-{site.removeprefix('webapp_')}"
@@ -1011,17 +1075,32 @@ def prepare(
     client_dir: Path = CLIENT_DIR,
     state_root: Path = STATE_ROOT,
     campaign_tag: str | None = None,
+    campaign_not_after: str | None = None,
 ) -> dict[str, object]:
     _require_root()
     _require_dark_state(expected_epoch)
     if campaign_tag is not None and not re.fullmatch(r"wwm_[0-9a-f]{12}", campaign_tag):
         raise RotationError("matrix campaign tag is invalid")
-    key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
+    campaign_not_after = _campaign_expiry(
+        campaign_not_after,
+        campaign_tag=campaign_tag,
+    )
+    (
+        key_name,
+        secret_name,
+        previous_key_name,
+        previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
+        client_name,
+    ) = _site_keys(site)
     owned_runtime_keys = {
         key_name,
         secret_name,
         previous_key_name,
         previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
     }
     required_runtime_keys = {key_name, secret_name}
     rotation_dir = state_root / site
@@ -1074,6 +1153,7 @@ def prepare(
         "new_key_id": new_key_id,
         "phase": "staging",
         "campaign_tag": campaign_tag,
+        "campaign_not_after": campaign_not_after,
         "staging_name": staging_dir.name,
         "operation_token": operation_token,
     }
@@ -1102,14 +1182,25 @@ def prepare(
             client_path=client_dir / client_name,
         )
 
+        runtime_changes = {
+            key_name: new_key_id,
+            secret_name: new_secret,
+            previous_key_name: old_key_id,
+            previous_secret_name: runtime[secret_name],
+        }
+        runtime_removals: set[str] = set()
+        if campaign_not_after is not None:
+            runtime_changes[not_after_name] = campaign_not_after
+        else:
+            runtime_removals.add(not_after_name)
+        if runtime.get(not_after_name):
+            runtime_changes[previous_not_after_name] = runtime[not_after_name]
+        else:
+            runtime_removals.add(previous_not_after_name)
         _atomic_update_env(
             runtime_path,
-            changes={
-                key_name: new_key_id,
-                secret_name: new_secret,
-                previous_key_name: old_key_id,
-                previous_secret_name: runtime[secret_name],
-            },
+            changes=runtime_changes,
+            removals=runtime_removals,
             operation_token=operation_token,
         )
         _atomic_update_env(
@@ -1180,12 +1271,22 @@ def revoke(
     _require_root()
     _require_dark_state(expected_epoch)
     _ensure_private_directory(state_root)
-    key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
+    (
+        key_name,
+        secret_name,
+        previous_key_name,
+        previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
+        client_name,
+    ) = _site_keys(site)
     owned_runtime_keys = {
         key_name,
         secret_name,
         previous_key_name,
         previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
     }
     required_runtime_keys = {key_name, secret_name}
     rotation_dir = state_root / site
@@ -1218,7 +1319,11 @@ def revoke(
         _atomic_update_env(
             runtime_path,
             changes={},
-            removals={previous_key_name, previous_secret_name},
+            removals={
+                previous_key_name,
+                previous_secret_name,
+                previous_not_after_name,
+            },
             operation_token=operation_token,
         )
         _restart_and_verify()
@@ -1252,12 +1357,22 @@ def rollback(
     _require_root()
     _require_dark_state(expected_epoch)
     _ensure_private_directory(state_root)
-    key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
+    (
+        key_name,
+        secret_name,
+        previous_key_name,
+        previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
+        client_name,
+    ) = _site_keys(site)
     owned_runtime_keys = {
         key_name,
         secret_name,
         previous_key_name,
         previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
     }
     required_runtime_keys = {key_name, secret_name}
     rotation_dir = state_root / site
@@ -1347,12 +1462,22 @@ def recover(
             raise RotationError("matrix campaign tag is invalid")
     else:
         _require_dark_state(expected_epoch)
-    key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
+    (
+        key_name,
+        secret_name,
+        previous_key_name,
+        previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
+        client_name,
+    ) = _site_keys(site)
     owned_runtime_keys = {
         key_name,
         secret_name,
         previous_key_name,
         previous_secret_name,
+        not_after_name,
+        previous_not_after_name,
     }
     required_runtime_keys = {key_name, secret_name}
     rotation_dir = state_root / site
@@ -1486,11 +1611,13 @@ def recover(
 
 
 def main() -> int:
+    _assert_isolated_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("prepare", "revoke", "rollback", "finish", "recover"))
     parser.add_argument("--site", choices=tuple(SITE_SETTINGS), required=True)
     parser.add_argument("--expected-epoch", type=int, required=True)
     parser.add_argument("--campaign-tag")
+    parser.add_argument("--campaign-not-after")
     parser.add_argument(
         "--leave-service-stopped",
         action="store_true",
@@ -1499,6 +1626,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.leave_service_stopped and args.action != "recover":
         parser.error("--leave-service-stopped is valid only with recover")
+    if args.campaign_not_after is not None and args.action != "prepare":
+        parser.error("--campaign-not-after is valid only with prepare")
     _ensure_private_directory(STATE_ROOT)
     # FI and IR have independent journals but mutate one shared runtime.env.
     # Serialize both sites so concurrent controllers cannot lose each other's
@@ -1519,7 +1648,12 @@ def main() -> int:
             raise RotationError("rotation lock is not one owner-only regular file")
         fcntl.flock(lock_descriptor, fcntl.LOCK_EX)
         if args.action == "prepare":
-            result = prepare(args.site, args.expected_epoch, campaign_tag=args.campaign_tag)
+            result = prepare(
+                args.site,
+                args.expected_epoch,
+                campaign_tag=args.campaign_tag,
+                campaign_not_after=args.campaign_not_after,
+            )
         elif args.action == "revoke":
             result = revoke(args.site, args.expected_epoch)
         elif args.action == "rollback":

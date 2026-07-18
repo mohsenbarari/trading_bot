@@ -42,6 +42,16 @@ class WriterWitnessError(RuntimeError):
         self.replayed = replayed
 
 
+class WriterWitnessCampaignExpiredError(WriterWitnessError):
+    """Raised before any receipt/state mutation when campaign authority expired."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "writer witness campaign credential has expired",
+            code="witness_campaign_expired",
+        )
+
+
 @dataclass(frozen=True)
 class WitnessStateSnapshot:
     holder_site: str | None
@@ -305,6 +315,7 @@ async def transition_witness_state(
     private_key_base64: str | None,
     lease_duration_seconds: int = 180,
     now: datetime | None = None,
+    authorization_not_after: datetime | None = None,
 ) -> WitnessTransitionResult:
     request_id, operator, reason, duration, _ = _normalized_command_values(
         action=action,
@@ -316,6 +327,16 @@ async def transition_witness_state(
         reason=reason,
         lease_duration_seconds=lease_duration_seconds,
     )
+
+    current = _utc(now) if now is not None else await _database_now(session)
+    if (
+        authorization_not_after is not None
+        and current >= _utc(authorization_not_after)
+    ):
+        # This check deliberately precedes receipt lookup and state locking.
+        # An expired campaign credential has no mutation authority and must not
+        # leave a durable receipt that could be replayed as an authorization.
+        raise WriterWitnessCampaignExpiredError()
 
     request_hash = witness_command_request_hash(
         action=action,
@@ -340,7 +361,6 @@ async def transition_witness_state(
         if existing_receipt.request_hash != request_hash:
             raise WriterWitnessError("request_id was already used with different parameters")
         return _result_from_payload(json.loads(existing_receipt.response_json))
-    current = _utc(now) if now is not None else await _database_now(session)
     current_epoch = int(state.writer_epoch)
     if current_epoch != int(expected_epoch):
         raise WriterWitnessError(

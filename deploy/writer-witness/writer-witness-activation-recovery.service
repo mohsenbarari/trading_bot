@@ -5,7 +5,8 @@ Before=nginx.service writer-witness.service writer-witness-backup.service writer
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/writer-witness-activation-watchdog
+UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE LD_PRELOAD LD_LIBRARY_PATH
+ExecStart=/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null /usr/local/sbin/writer-witness-activation recover-boot
 UMask=0077
 
 [Install]

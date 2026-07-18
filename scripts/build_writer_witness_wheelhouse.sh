@@ -13,12 +13,15 @@ if [[ -e "$DESTINATION" && -n "$(find "$DESTINATION" -mindepth 1 -maxdepth 1 -pr
 fi
 install -d -m 0755 "$DESTINATION"
 BOUND_MANIFEST="$ROOT_DIR/deploy/writer-witness/wheelhouse.sha256"
+readonly WRITER_WITNESS_SYSTEM_PYTHON=/usr/bin/python3.12
 if [[ ! -f "$BOUND_MANIFEST" ]]; then
     echo "bound Writer Witness wheelhouse manifest is missing" >&2
     exit 2
 fi
 
-python3 -m pip download \
+/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+    "$WRITER_WITNESS_SYSTEM_PYTHON" -I -B -X utf8 -X pycache_prefix=/dev/null \
+    -m pip --isolated download \
     --disable-pip-version-check \
     --only-binary=:all: \
     --platform manylinux2014_x86_64 \
@@ -29,7 +32,9 @@ python3 -m pip download \
     --dest "$DESTINATION" \
     --requirement "$ROOT_DIR/deploy/writer-witness/requirements.lock"
 
-python3 "$ROOT_DIR/scripts/verify_writer_witness_wheelhouse.py" \
+/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+    "$WRITER_WITNESS_SYSTEM_PYTHON" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+    "$ROOT_DIR/scripts/verify_writer_witness_wheelhouse.py" \
     --wheelhouse "$DESTINATION" \
     --manifest "$BOUND_MANIFEST" \
     --expected-uid "$(id -u)" \

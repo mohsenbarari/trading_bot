@@ -33,6 +33,28 @@ class RecoveryError(RuntimeError):
     """A tagged resource could not be safely attributed or reconciled."""
 
 
+def _assert_isolated_runtime(*, test_mode: bool) -> None:
+    if not test_mode and Path(sys.executable).resolve(strict=True) != Path("/usr/bin/python3.12"):
+        raise RecoveryError("host-fault helper is not using the pinned system Python")
+    if (
+        not sys.flags.isolated
+        or not sys.flags.no_site
+        or not sys.flags.ignore_environment
+        or not sys.flags.dont_write_bytecode
+        or not sys.flags.utf8_mode
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise RecoveryError("host-fault helper startup is not isolated")
+    if any(
+        os.environ.get(name)
+        for name in (
+            "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+            "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH",
+        )
+    ):
+        raise RecoveryError("host-fault helper inherited a forbidden runtime environment")
+
+
 def _fsync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -717,6 +739,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             workload_gid,
             test_mode,
         ) = _paths(args)
+        _assert_isolated_runtime(test_mode=test_mode)
         if args.no_mount and not test_mode:
             raise RecoveryError("--no-mount is test-only")
         if args.test_failpoint and not test_mode:

@@ -1,4 +1,5 @@
 import contextlib
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import io
 import os
@@ -41,6 +42,9 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         self.client_dir.mkdir()
         self.client_dir.chmod(0o700)
         self.state_root = self.root / "state"
+        self.campaign_not_after = (
+            datetime.now(timezone.utc) + timedelta(minutes=10)
+        ).isoformat().replace("+00:00", "Z")
         self.fi_secret = "f" * 64
         self.ir_secret = "i" * 64
         self.runtime.write_text(
@@ -94,8 +98,17 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         )
         for guard in self.guards:
             guard.start()
+        self._original_prepare = rotation.prepare
+
+        def campaign_aware_prepare(*args, **kwargs):
+            if kwargs.get("campaign_tag") is not None:
+                kwargs.setdefault("campaign_not_after", self.campaign_not_after)
+            return self._original_prepare(*args, **kwargs)
+
+        rotation.prepare = campaign_aware_prepare
 
     def tearDown(self):
+        rotation.prepare = self._original_prepare
         for guard in reversed(self.guards):
             guard.stop()
         self.temporary.cleanup()
@@ -996,6 +1009,7 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
                 "recover",
                 return_value={"site": "webapp_fi", "phase": "already_clean"},
             ) as recover_mock,
+            patch.object(rotation, "_assert_isolated_runtime"),
             contextlib.redirect_stdout(output),
         ):
             self.assertEqual(rotation.main(), 0)
@@ -1206,6 +1220,52 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         finished = rotation.finish("webapp_fi", self.state_root)
         self.assertEqual(finished["phase"], "finished")
         self.assertFalse((self.state_root / "webapp_fi").exists())
+
+    def test_campaign_prepare_requires_and_persists_bounded_expiry(self):
+        with self.assertRaisesRegex(rotation.RotationError, "missing or invalid"):
+            self._original_prepare(
+                "webapp_fi",
+                0,
+                self.runtime,
+                self.client_dir,
+                self.state_root,
+                campaign_tag="wwm_0123456789ab",
+            )
+
+        prepared = self._original_prepare(
+            "webapp_fi",
+            0,
+            self.runtime,
+            self.client_dir,
+            self.state_root,
+            campaign_tag="wwm_0123456789ab",
+            campaign_not_after=self.campaign_not_after,
+        )
+        runtime = self._values(self.runtime)
+        self.assertEqual(
+            runtime["WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER"],
+            self.campaign_not_after,
+        )
+        self.assertEqual(prepared["campaign_not_after"], self.campaign_not_after)
+        rotation.revoke(
+            "webapp_fi", 0, self.runtime, self.client_dir, self.state_root
+        )
+        runtime = self._values(self.runtime)
+        self.assertEqual(
+            runtime["WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER"],
+            self.campaign_not_after,
+        )
+        self.assertNotIn(
+            "WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_NOT_AFTER",
+            runtime,
+        )
+        rotation.rollback(
+            "webapp_fi", 0, self.runtime, self.client_dir, self.state_root
+        )
+        self.assertNotIn(
+            "WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER",
+            self._values(self.runtime),
+        )
 
     def test_rollback_restores_original_runtime_and_client(self):
         runtime_before = self.runtime.read_bytes()

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -678,7 +679,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         reused = controller._reserve_transport_budget(
             role="webapp_fi", kind="ssh", payload_bytes=4
         )
-        self.assertEqual(first - reused, runner.SSH_MASTER_BYTES_UPPER_BOUND)
+        self.assertEqual(first, reused)
 
     def test_failed_transport_forgets_master_before_next_budget_reservation(self):
         controller = object.__new__(runner.Controller)
@@ -732,6 +733,25 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 )
         controller._forget_transport_master.assert_called_once_with("webapp_fi")
         controller._mark_transport_master.assert_not_called()
+
+    def test_cleanup_command_timeout_is_clamped_to_remaining_deadline(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 102.0
+        controller.event = mock.Mock(return_value=True)
+        controller.redact_command_output = lambda value: value
+        controller.secret_output_detected = False
+        completed = subprocess.CompletedProcess(["true"], 0, "", "")
+        with (
+            mock.patch.object(runner.time, "monotonic", return_value=100.0),
+            mock.patch.object(
+                runner.subprocess,
+                "run",
+                return_value=completed,
+            ) as run_mock,
+        ):
+            controller.command("bounded_cleanup", ["true"], timeout=900)
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 2.0)
 
     def test_expired_control_master_reserves_a_new_handshake(self):
         controller = object.__new__(runner.Controller)
@@ -1398,14 +1418,24 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
 
                 def local_remote(_role, _label, command, **_kwargs):
                     arguments = shlex.split(command)
+                    helper_index = arguments.index(
+                        "/usr/local/sbin/writer-witness-matrix-campaign"
+                    )
                     return subprocess.run(
                         [
-                            "python3",
+                            sys.executable,
+                            "-I",
+                            "-S",
+                            "-B",
+                            "-X",
+                            "utf8",
+                            "-X",
+                            "pycache_prefix=/dev/null",
                             str(helper),
                             "--test-mode",
                             "--state-root",
                             str(state_root),
-                            *arguments[1:],
+                            *arguments[helper_index + 1 :],
                         ],
                         capture_output=True,
                         text=True,
@@ -1418,7 +1448,14 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             exact.claim_remote_campaign()
             released = subprocess.run(
                 [
-                    "python3",
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    "-B",
+                    "-X",
+                    "utf8",
+                    "-X",
+                    "pycache_prefix=/dev/null",
                     str(helper),
                     "--test-mode",
                     "--state-root",
@@ -1464,14 +1501,24 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
 
             def absent_remote(_role, _label, command, **_kwargs):
                 arguments = shlex.split(command)
+                helper_index = arguments.index(
+                    "/usr/local/sbin/writer-witness-matrix-campaign"
+                )
                 return subprocess.run(
                     [
-                        "python3",
+                        sys.executable,
+                        "-I",
+                        "-S",
+                        "-B",
+                        "-X",
+                        "utf8",
+                        "-X",
+                        "pycache_prefix=/dev/null",
                         str(helper),
                         "--test-mode",
                         "--state-root",
                         str(absent_root),
-                        *arguments[1:],
+                        *arguments[helper_index + 1 :],
                     ],
                     capture_output=True,
                     text=True,
@@ -1777,6 +1824,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             persisted = json.loads(journal_path.read_text(encoding="utf-8"))
             self.assertTrue(persisted["evidence_loss_detected"])
             self.assertEqual(persisted["original_artifact_dir"], str(missing_artifact))
+            fake_controller.enter_cleanup_mode.assert_called_once()
             fake_controller.cleanup.assert_called_once()
 
     def test_active_restore_journal_is_recovered_before_runtime_resume(self):

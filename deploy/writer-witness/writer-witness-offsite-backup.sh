@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
 BACKUP_DIR="${WRITER_WITNESS_BACKUP_DIR:-/var/backups/trading-bot-witness}"
 RECIPIENT_FILE="${WRITER_WITNESS_OFFSITE_RECIPIENT_FILE:-/etc/trading-bot-witness/offsite-age-recipient.txt}"
-S3_PUT_HELPER="${WRITER_WITNESS_OFFSITE_S3_PUT_HELPER:-/usr/local/sbin/writer-witness-s3-put}"
+S3_PUT_HELPER=/usr/local/sbin/writer-witness-s3-put
 MAX_BACKUP_AGE_SECONDS="${WRITER_WITNESS_OFFSITE_MAX_BACKUP_AGE_SECONDS:-129600}"
+
+isolated_system_python() {
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null "$@"
+}
+s3_put() {
+    /usr/bin/env -i \
+        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        WRITER_WITNESS_S3_ENDPOINT="${WRITER_WITNESS_S3_ENDPOINT:?}" \
+        WRITER_WITNESS_S3_REGION="${WRITER_WITNESS_S3_REGION:?}" \
+        WRITER_WITNESS_S3_BUCKET="${WRITER_WITNESS_S3_BUCKET:?}" \
+        WRITER_WITNESS_S3_ACCESS_KEY="${WRITER_WITNESS_S3_ACCESS_KEY:?}" \
+        WRITER_WITNESS_S3_SECRET_KEY="${WRITER_WITNESS_S3_SECRET_KEY:?}" \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$S3_PUT_HELPER" "$@"
+}
 
 if [[ ! "$MAX_BACKUP_AGE_SECONDS" =~ ^[0-9]+$ ]] \
     || (( MAX_BACKUP_AGE_SECONDS < 3600 || MAX_BACKUP_AGE_SECONDS > 604800 )); then
@@ -43,7 +59,7 @@ fi
 sha256sum --check "$backup_path.sha256" >/dev/null
 source_sha="$(sha256sum "$backup_path" | awk '{print $1}')"
 marker="$backup_path.offsite.json"
-if [[ -f "$marker" ]] && python3 - "$marker" "$source_sha" <<'PY'
+if [[ -f "$marker" ]] && isolated_system_python - "$marker" "$source_sha" <<'PY'
 from pathlib import Path
 import json
 import sys
@@ -75,10 +91,10 @@ encrypted_name="$backup_name.age"
 encrypted_sha="$(sha256sum "$encrypted_path" | awk '{print $1}')"
 encrypted_size="$(stat -c '%s' "$encrypted_path")"
 object_key="witness/$encrypted_name"
-upload_json="$("$S3_PUT_HELPER" --file "$encrypted_path" --key "$object_key")"
+upload_json="$(s3_put --file "$encrypted_path" --key "$object_key")"
 
 marker_tmp="$marker.$$"
-python3 - \
+isolated_system_python - \
     "$marker_tmp" "$upload_json" "$backup_name" "$source_sha" \
     "$encrypted_name" "$encrypted_sha" "$encrypted_size" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<'PY'

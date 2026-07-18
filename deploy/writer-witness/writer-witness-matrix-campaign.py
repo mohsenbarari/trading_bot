@@ -42,14 +42,34 @@ COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 SCENARIO_PATTERN = re.compile(r"RH-(?:00[1-9]|01[0-2])\Z")
 NONCE_PATTERN = re.compile(r"[0-9a-f]{32}\Z")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+MAX_CAMPAIGN_SECONDS = 900
 TIMESTAMP_PATTERN = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z\Z"
 )
 TEMP_PATTERN = re.compile(r"\.campaign-write\.[0-9]+\.[0-9a-f]{32}\.tmp\Z")
+FORBIDDEN_RUNTIME_ENV = frozenset(
+    {"PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT", "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH"}
+)
 
 
 class CampaignError(RuntimeError):
     """A campaign ownership or durability condition could not be proven."""
+
+
+def _assert_isolated_runtime(*, test_mode: bool) -> None:
+    if not test_mode and Path(sys.executable).resolve(strict=True) != Path("/usr/bin/python3.12"):
+        raise CampaignError("campaign helper is not using the pinned system Python")
+    if (
+        not sys.flags.isolated
+        or not sys.flags.no_site
+        or not sys.flags.ignore_environment
+        or not sys.flags.dont_write_bytecode
+        or not sys.flags.utf8_mode
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise CampaignError("campaign helper startup is not isolated")
+    if any(os.environ.get(name) for name in FORBIDDEN_RUNTIME_ENV):
+        raise CampaignError("campaign helper inherited a forbidden runtime environment")
 
 
 def _utc_now() -> str:
@@ -699,8 +719,10 @@ class CampaignStore:
         identity = _identity_payload(tag, expected_commit, scenario, not_after)
         expiry = _parse_timestamp(not_after, label="campaign expiry")
         now = datetime.now(timezone.utc)
-        if expiry <= now or expiry > now + timedelta(seconds=3630):
-            raise CampaignError("campaign expiry is outside the server-enforced one-hour window")
+        if expiry <= now or expiry > now + timedelta(seconds=MAX_CAMPAIGN_SECONDS):
+            raise CampaignError(
+                f"campaign expiry must be within the next {MAX_CAMPAIGN_SECONDS} seconds"
+            )
         release = self.release_path(tag)
         if release.exists() or release.is_symlink():
             self._read_and_validate(
@@ -1033,6 +1055,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        _assert_isolated_runtime(test_mode=args.test_mode)
         if args.test_mode:
             if args.state_root is None:
                 raise CampaignError("test mode requires an explicit state root")

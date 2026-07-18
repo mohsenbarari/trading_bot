@@ -259,7 +259,13 @@ print(json.dumps({"offsite_upload_attested": "yes"}, sort_keys=True))
 
 
 def python_inline(source: str, *arguments: str) -> str:
-    return shlex.join(("python3", "-c", source, *arguments))
+    return shlex.join(
+        (
+            "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+            "/usr/bin/python3.12", "-I", "-S", "-B", "-X", "utf8",
+            "-X", "pycache_prefix=/dev/null", "-c", source, *arguments,
+        )
+    )
 
 
 def rendered_nginx_sha256() -> str:
@@ -541,7 +547,7 @@ def remote_check_specs(
         )
     )
     installed_release_attestation = (
-        shlex.join(("python3", "-c", REMOTE_SECURE_FILE_ATTESTATION, "release-map"))
+        python_inline(REMOTE_SECURE_FILE_ATTESTATION, "release-map")
         + ' "$release" '
         + shlex.quote(json.dumps(installed_release_artifacts, separators=(",", ":")))
     )
@@ -560,7 +566,7 @@ def remote_check_specs(
         "0644",
     )
     offsite_marker_attestation = (
-        shlex.join(("python3", "-c", REMOTE_OFFSITE_MARKER_ATTESTATION))
+        python_inline(REMOTE_OFFSITE_MARKER_ATTESTATION)
         + ' "$latest.offsite.json" "$(basename "$latest")" "$backup_sha"'
     )
     if expected_active_campaign_tag is not None:
@@ -577,6 +583,8 @@ def remote_check_specs(
         except ValueError as exc:
             raise ValueError("expected_active_campaign_not_after is required and invalid") from exc
         campaign_guard = (
+            "/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin "
+            "/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null "
             "/usr/local/sbin/writer-witness-matrix-campaign assert "
             f"--tag {shlex.quote(expected_active_campaign_tag)} "
             f"--expected-commit {shlex.quote(expected_commit)} "
@@ -796,9 +804,15 @@ def remote_check_specs(
                 "printf '%s' \"$runtime_provenance_attestation\" "
                 "| grep -F '\"runtime_provenance_attested\":\"yes\"' >/dev/null; "
                 "systemctl show -p ExecStart --value writer-witness.service "
-                "| grep -F '/opt/trading-bot-witness/active/venv/bin/uvicorn' >/dev/null; "
+                "| grep -F '/opt/trading-bot-witness/active/venv/bin/python' >/dev/null; "
+                "test \"$(readlink -f /proc/$pid/exe)\" = \"$(readlink -f \"$venv_real/bin/python\")\"; "
+                "for forbidden in PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE LD_PRELOAD LD_LIBRARY_PATH; do "
+                "! tr '\\0' '\\n' </proc/$pid/environ | grep -q \"^$forbidden=\"; done; "
                 "tr '\\0' '\\n' </proc/$pid/cmdline "
-                "| grep -F '/opt/trading-bot-witness/active/venv/bin/uvicorn' >/dev/null; "
+                "| grep -F '/opt/trading-bot-witness/active/venv/bin/python' >/dev/null; "
+                "tr '\\0' '\\n' </proc/$pid/cmdline | grep -Fx -- '-I' >/dev/null; "
+                "tr '\\0' '\\n' </proc/$pid/cmdline | grep -Fx -- '-B' >/dev/null; "
+                "tr '\\0' '\\n' </proc/$pid/cmdline | grep -Fx -- 'uvicorn' >/dev/null; "
                 "latest=$(find /var/backups/trading-bot-witness -maxdepth 1 -type f -name 'writer-witness-*.dump' "
                 "-printf '%T@|%p\\n' | sort -nr | head -1 | cut -d'|' -f2-); test -n \"$latest\"; "
                 "sha256sum --check \"$latest.sha256\" >/dev/null; "
@@ -834,9 +848,8 @@ def remote_check_specs(
                 "! grep -Eq '^WITNESS_(FI|IR)_(KEY_ID|HMAC_SECRET)=' \"$bootstrap\"; "
                 "test \"$(systemctl is-enabled writer-witness-activation-watchdog.timer)\" = enabled; "
                 "test \"$(systemctl is-active writer-witness-activation-watchdog.timer)\" = active; "
-                "test \"$(systemctl show -p ExecStart --value writer-witness-activation-recovery.service)\" = "
-                "'{ path=/usr/local/sbin/writer-witness-activation-watchdog ; argv[]=/usr/local/sbin/writer-witness-activation-watchdog ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }' || "
-                "systemctl cat writer-witness-activation-recovery.service | grep -Fx 'ExecStart=/usr/local/sbin/writer-witness-activation-watchdog' >/dev/null; "
+                "systemctl cat writer-witness-activation-recovery.service | grep -Fx "
+                "'ExecStart=/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null /usr/local/sbin/writer-witness-activation recover-boot' >/dev/null; "
                 "test ! -e /var/lib/trading-bot-witness/restore-state/active.env; "
                 "test ! -L /var/lib/trading-bot-witness/restore-state/active.env; "
                 "test -z \"$(find /var/lib/trading-bot-witness/restore-state -mindepth 1 -maxdepth 1 -name '.active.*.env' -print -quit)\"; "

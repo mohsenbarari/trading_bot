@@ -68,6 +68,10 @@ MAX_SCENARIO_TRANSPORT_OPERATIONS = 1_024
 CLEANUP_TRANSPORT_BYTES_RESERVE = 16 * 1024 * 1024
 MAX_CLEANUP_TRANSPORT_OPERATIONS = 512
 MIN_DPI_BYTE_BUDGET = 64 * 1024 * 1024
+REMOTE_ISOLATED_PYTHON = (
+    "/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin "
+    "/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null"
+)
 REQUIRED_PREFLIGHT_CHECK_IDS = frozenset(
     {
         "git_branch_clean",
@@ -1072,6 +1076,14 @@ class Controller:
         if time.monotonic() > getattr(self, "_cleanup_deadline", float("inf")):
             raise MatrixAbort("Matrix cleanup exceeded its separate 900-second recovery bound")
 
+    def enter_cleanup_mode(self) -> None:
+        """Start one non-renewable cleanup allowance for this controller run."""
+
+        self._cleanup_mode = True
+        if not hasattr(self, "_cleanup_deadline"):
+            self._cleanup_deadline = time.monotonic() + MAX_CLEANUP_SECONDS
+        self.raise_if_cleanup_deadline_exceeded()
+
     def _reserve_transport_budget(
         self,
         *,
@@ -1098,10 +1110,11 @@ class Controller:
             if role in roles and not reusable:
                 roles.discard(role)
                 deadlines.pop(role, None)
-            reserve_master = force_master_reservation or not reusable
             amount = base + payload_bytes + transfer_bytes
-            if reserve_master:
-                amount += SSH_MASTER_BYTES_UPPER_BOUND
+            # OpenSSH may transparently replace a dead ControlMaster and still
+            # return success. Charge one complete handshake on every operation
+            # so accounting never depends on observing that internal reconnect.
+            amount += SSH_MASTER_BYTES_UPPER_BOUND
             if self._cleanup_mode:
                 next_operations = self.cleanup_transport_operations + 1
                 next_bytes = self.cleanup_transport_bytes_upper_bound + amount
@@ -1292,6 +1305,9 @@ class Controller:
         preflight_sha256: str | None = None,
     ) -> str:
         arguments = [
+            "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+            "/usr/bin/python3.12", "-I", "-S", "-B", "-X", "utf8",
+            "-X", "pycache_prefix=/dev/null",
             "/usr/local/sbin/writer-witness-matrix-campaign",
             operation,
             "--tag",
@@ -1696,8 +1712,13 @@ class Controller:
     ) -> subprocess.CompletedProcess[str]:
         if self._cleanup_mode:
             self.raise_if_cleanup_deadline_exceeded()
+            remaining_cleanup_seconds = self._cleanup_deadline - time.monotonic()
+            if remaining_cleanup_seconds <= 0:
+                self.raise_if_cleanup_deadline_exceeded()
+            effective_timeout: float = min(float(timeout), remaining_cleanup_seconds)
         else:
             self.raise_if_abort_requested()
+            effective_timeout = float(timeout)
         intent_recorded = self.event(
             "command.start",
             name=name,
@@ -1716,7 +1737,11 @@ class Controller:
             )
         try:
             completed = subprocess.run(
-                args, cwd=ROOT, capture_output=True, text=True, timeout=timeout
+                args,
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=effective_timeout,
             )
         except BaseException:
             if transport_role is not None:
@@ -1747,7 +1772,9 @@ class Controller:
             raise MatrixError("command output contained Matrix secret material and was redacted")
         if check and completed.returncode != 0:
             raise MatrixError(f"{name} failed with exit code {completed.returncode}")
-        if not self._cleanup_mode:
+        if self._cleanup_mode:
+            self.raise_if_cleanup_deadline_exceeded()
+        else:
             self.raise_if_abort_requested()
         return completed
 
@@ -1843,8 +1870,9 @@ class Controller:
             self.remote(
                 "matrix_witness",
                 f"prepare_{site}_matrix_credential",
-                f"/usr/local/sbin/writer-witness-rotate-hmac prepare --site {site} "
-                f"--expected-epoch 0 --campaign-tag {self.tag}",
+                f"{REMOTE_ISOLATED_PYTHON} /usr/local/sbin/writer-witness-rotate-hmac "
+                f"prepare --site {site} --expected-epoch 0 --campaign-tag {self.tag} "
+                f"--campaign-not-after {shlex.quote(self.campaign_not_after)}",
             )
         self.claim("staged_sites", site)
         self.staged_sites.add(site)
@@ -1965,7 +1993,8 @@ class Controller:
                 dirty=True,
             )
         parts = [
-            "python3", f"{self.remote_root}/client.py", command,
+            "/usr/bin/python3", "-I", "-S", "-B", "-X", "utf8",
+            "-X", "pycache_prefix=/dev/null", f"{self.remote_root}/client.py", command,
             "--env-file", f"{self.remote_root}/{env_name}",
             "--ca-bundle", f"{self.remote_root}/witness-ca.crt",
             "--site", site,
@@ -2469,7 +2498,8 @@ class Controller:
             raise MatrixError("exact durable request did not replay across HMAC key generations")
         self.remote(
             "matrix_witness", "revoke_old_fi_hmac",
-            "/usr/local/sbin/writer-witness-rotate-hmac revoke --site webapp_fi --expected-epoch 0",
+            f"{REMOTE_ISOLATED_PYTHON} /usr/local/sbin/writer-witness-rotate-hmac "
+            "revoke --site webapp_fi --expected-epoch 0",
         )
         self.client(
             "webapp_fi", "status", env_name="old.env", request_id=f"{self.tag}-old-revoked",
@@ -2484,7 +2514,8 @@ class Controller:
             "\"SELECT authority, writer_epoch, lease_status, COALESCE(holder_site, '') "
             "FROM webapp_writer_witness_state WHERE authority='webapp';\")\" = "
             "'webapp|0|vacant|'; "
-            f"/usr/local/sbin/writer-witness-rotate-hmac recover --leave-service-stopped "
+            f"{REMOTE_ISOLATED_PYTHON} /usr/local/sbin/writer-witness-rotate-hmac "
+            f"recover --leave-service-stopped "
             f"--site webapp_fi --expected-epoch 0 --campaign-tag {self.tag}; "
             "systemctl start writer-witness.service; "
             "curl --fail --silent --show-error --retry 20 --retry-delay 1 "
@@ -2680,7 +2711,8 @@ class Controller:
                 "systemctl stop writer-witness.service; "
                 "state=$(systemctl is-active writer-witness.service || true); "
                 "test \"$state\" = inactive -o \"$state\" = failed; "
-                f"/usr/local/sbin/writer-witness-rotate-hmac recover --leave-service-stopped "
+                f"{REMOTE_ISOLATED_PYTHON} /usr/local/sbin/writer-witness-rotate-hmac "
+                f"recover --leave-service-stopped "
                 f"--site {site} --expected-epoch 0 --campaign-tag {self.tag}; "
                 "state=$(systemctl is-active writer-witness.service || true); "
                 "test \"$state\" = inactive -o \"$state\" = failed; "
@@ -2871,9 +2903,7 @@ class Controller:
         self.event("cleanup.owned_aux_databases_removed")
 
     def cleanup(self) -> None:
-        self._cleanup_mode = True
-        if not hasattr(self, "_cleanup_deadline"):
-            self._cleanup_deadline = time.monotonic() + MAX_CLEANUP_SECONDS
+        self.enter_cleanup_mode()
         if (
             self.journal.payload.get("remote_campaign_protocol") == "atomic-helper-v1"
             and self.journal.payload.get("lifecycle_phase")
@@ -3377,6 +3407,7 @@ def main() -> int:
                 existing_journal=journal,
             )
             try:
+                controller.enter_cleanup_mode()
                 if recovery_entry_phase in {
                     "postflight_verified_release_pending",
                     "remote_campaign_released",

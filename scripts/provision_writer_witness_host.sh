@@ -9,6 +9,59 @@ isolated_system_python() {
         "$WRITER_WITNESS_SYSTEM_PYTHON" \
         -I -S -B -X utf8 -X pycache_prefix=/dev/null "$@"
 }
+installed_activation() {
+    isolated_system_python /usr/local/sbin/writer-witness-activation "$@"
+}
+
+wait_for_writer_witness_ready() {
+    for attempt in $(seq 1 30); do
+        if curl --fail --silent --show-error \
+            http://127.0.0.1:8011/health/ready >/dev/null; then
+            return 0
+        fi
+        [[ "$attempt" -lt 30 ]] || {
+            echo "reconciled Writer Witness generation did not become ready" >&2
+            return 1
+        }
+        sleep 1
+    done
+}
+
+reconcile_installed_activation() {
+    local result release_id
+    result="$(installed_activation recover)"
+    case "$result" in
+        activation_recovered=no)
+            return 0
+            ;;
+        activation_recovered=yes)
+            systemctl daemon-reload
+            systemctl enable --now \
+                nginx \
+                writer-witness.service \
+                writer-witness-backup.timer \
+                writer-witness-offsite-backup.timer
+            systemctl restart nginx writer-witness.service
+            wait_for_writer_witness_ready
+            ;;
+        activation_recovered=committed-pending-service-completion)
+            release_id="$(installed_activation active-release-id)"
+            systemctl daemon-reload
+            systemctl enable --now \
+                nginx \
+                writer-witness.service \
+                writer-witness-backup.timer \
+                writer-witness-offsite-backup.timer
+            systemctl restart nginx writer-witness.service
+            wait_for_writer_witness_ready
+            installed_activation complete --release-id "$release_id" >/dev/null
+            ;;
+        *)
+            echo "unexpected Writer Witness activation recovery result: $result" >&2
+            return 70
+            ;;
+    esac
+}
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "provision_writer_witness_host.sh must run as root" >&2
@@ -407,7 +460,7 @@ if ! id -u writer-witness >/dev/null 2>&1; then
 fi
 install -d -m 0755 -o root -g root /opt/trading-bot-witness /srv/trading-bot-witness/releases
 install -d -m 0750 -o root -g writer-witness /etc/trading-bot-witness
-install -d -m 0700 -o root -g root /etc/trading-bot-witness/tls /root/writer-witness-client-material
+install -d -m 0700 -o root -g root /root/writer-witness-client-material
 install -d -m 0700 -o root -g root /var/lib/trading-bot-witness/hmac-rotation
 install -d -m 0700 -o root -g root \
     /var/lib/trading-bot-witness/restore-state \
@@ -559,14 +612,7 @@ if [[ -e /usr/local/sbin/writer-witness-activation || -L /usr/local/sbin/writer-
         echo "installed Writer Witness activation helper metadata is unsafe" >&2
         exit 2
     }
-    previous_recovery_result="$(/usr/local/sbin/writer-witness-activation recover)"
-    if grep -Fx 'activation_recovered=yes' <<<"$previous_recovery_result" >/dev/null; then
-        systemctl daemon-reload
-        systemctl restart nginx writer-witness.service
-        curl --fail --silent --show-error \
-            --retry 30 --retry-delay 1 --retry-all-errors \
-            http://127.0.0.1:8011/health/ready >/dev/null
-    fi
+    reconcile_installed_activation
 fi
 
 # Recovery infrastructure is installed atomically before the first durable
@@ -595,25 +641,10 @@ atomic_install_file \
 systemctl daemon-reload
 systemctl enable writer-witness-activation-recovery.service
 systemctl enable --now writer-witness-activation-watchdog.timer
-/usr/local/sbin/writer-witness-activation-watchdog
 
 # Reconcile a previous power-loss journal before accepting another release.
 # The operation is idempotent; a second invocation reports recovered=no.
-activation_recovery_result="$(/usr/local/sbin/writer-witness-activation recover)"
-if grep -Fx 'activation_recovered=yes' <<<"$activation_recovery_result" >/dev/null; then
-    systemctl daemon-reload
-    systemctl restart nginx writer-witness.service
-    for attempt in $(seq 1 30); do
-        if curl --fail --silent --show-error http://127.0.0.1:8011/health/ready >/dev/null; then
-            break
-        fi
-        [[ "$attempt" -lt 30 ]] || {
-            echo "recovered Writer Witness generation did not become ready" >&2
-            exit 1
-        }
-        sleep 1
-    done
-fi
+reconcile_installed_activation
 
 # Bootstrap credentials must predate the activation journal so the helper can
 # restore their complete pre-finalization bytes after any crash.  The renderer
@@ -638,7 +669,7 @@ rollback_activation_transaction() {
             systemctl stop writer-witness.service >/dev/null 2>&1 || true
         fi
         recovery_status=0
-        /usr/local/sbin/writer-witness-activation recover >/dev/null || recovery_status=$?
+        installed_activation recover >/dev/null || recovery_status=$?
         if [[ "$recovery_status" -ne 0 ]]; then
             echo "Writer Witness activation rollback failed; refusing to restart services" >&2
             exit 70
@@ -683,7 +714,7 @@ done
 # candidate path. Arm the shell rollback first so that this ambiguous response
 # is reconciled immediately rather than being left solely to boot recovery.
 activation_transaction_open=true
-activation_candidates="$(/usr/local/sbin/writer-witness-activation begin \
+activation_candidates="$(installed_activation begin \
     --release-id "$RELEASE_ID" \
     --release-dir "$release_dir" \
     --venv-dir "$venv_dir" \
@@ -862,17 +893,52 @@ rm -f "$database_env"
     exit 2
 }
 
+postgres_scram_verifier() {
+    local password="$1"
+    printf '%s' "$password" | isolated_system_python -c '
+import base64
+import hashlib
+import hmac
+import os
+import sys
+
+password = sys.stdin.buffer.read()
+if len(password) != 64 or any(byte not in b"0123456789abcdef" for byte in password):
+    raise SystemExit("invalid Writer Witness database password")
+iterations = 4096
+salt = os.urandom(16)
+salted_password = hashlib.pbkdf2_hmac("sha256", password, salt, iterations)
+client_key = hmac.new(salted_password, b"Client Key", hashlib.sha256).digest()
+stored_key = hashlib.sha256(client_key).digest()
+server_key = hmac.new(salted_password, b"Server Key", hashlib.sha256).digest()
+encoded = lambda value: base64.b64encode(value).decode("ascii")
+print(
+    f"SCRAM-SHA-256${iterations}:{encoded(salt)}$"
+    f"{encoded(stored_key)}:{encoded(server_key)}"
+)
+'
+}
+
+WITNESS_DB_MIGRATOR_VERIFIER="$(postgres_scram_verifier "$WITNESS_DB_MIGRATOR_PASSWORD")"
+WITNESS_DB_RUNTIME_VERIFIER="$(postgres_scram_verifier "$WITNESS_DB_RUNTIME_PASSWORD")"
+for verifier in "$WITNESS_DB_MIGRATOR_VERIFIER" "$WITNESS_DB_RUNTIME_VERIFIER"; do
+    [[ "$verifier" =~ ^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$ ]] || {
+        echo "invalid generated Writer Witness PostgreSQL SCRAM verifier" >&2
+        exit 2
+    }
+done
+
 systemctl enable --now postgresql
 if ! runuser -u postgres -- psql -XAtqc \
     "SELECT 1 FROM pg_roles WHERE rolname = 'writer_witness_migrator'" \
     | grep -qx 1
 then
     runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
-CREATE ROLE writer_witness_migrator LOGIN PASSWORD '$WITNESS_DB_MIGRATOR_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+CREATE ROLE writer_witness_migrator LOGIN PASSWORD '$WITNESS_DB_MIGRATOR_VERIFIER' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 SQL
 else
     runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
-ALTER ROLE writer_witness_migrator PASSWORD '$WITNESS_DB_MIGRATOR_PASSWORD';
+ALTER ROLE writer_witness_migrator PASSWORD '$WITNESS_DB_MIGRATOR_VERIFIER';
 SQL
 fi
 if ! runuser -u postgres -- psql -XAtqc \
@@ -880,13 +946,14 @@ if ! runuser -u postgres -- psql -XAtqc \
     | grep -qx 1
 then
     runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
-CREATE ROLE writer_witness_runtime LOGIN PASSWORD '$WITNESS_DB_RUNTIME_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+CREATE ROLE writer_witness_runtime LOGIN PASSWORD '$WITNESS_DB_RUNTIME_VERIFIER' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 SQL
 else
     runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
-ALTER ROLE writer_witness_runtime PASSWORD '$WITNESS_DB_RUNTIME_PASSWORD';
+ALTER ROLE writer_witness_runtime PASSWORD '$WITNESS_DB_RUNTIME_VERIFIER';
 SQL
 fi
+unset WITNESS_DB_MIGRATOR_VERIFIER WITNESS_DB_RUNTIME_VERIFIER verifier
 if ! runuser -u postgres -- psql -XAtqc \
     "SELECT 1 FROM pg_database WHERE datname = 'writer_witness'" \
     | grep -qx 1
@@ -918,37 +985,64 @@ SQL
 
 private_key_file=/etc/trading-bot-witness/writer-witness-ed25519
 public_key_file=/etc/trading-bot-witness/writer-witness-ed25519.pub
-if [[ -e "$private_key_file" || -L "$private_key_file" || -e "$public_key_file" || -L "$public_key_file" ]]; then
-    [[ -f "$private_key_file" && ! -L "$private_key_file" \
-        && -f "$public_key_file" && ! -L "$public_key_file" ]] || {
-        echo "Writer Witness signing keypair is incomplete or unsafe" >&2
-        exit 2
-    }
-else
-    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-        "$venv_dir/bin/python" -I -B -X utf8 -X pycache_prefix=/dev/null \
-        - "$private_key_file" "$public_key_file" <<'PY'
+signing_init_root=/etc/trading-bot-witness/signing-key-initialization
+install -d -m 0700 -o root -g root "$signing_init_root"
+/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+    "$venv_dir/bin/python" -I -B -X utf8 -X pycache_prefix=/dev/null \
+    - "$private_key_file" "$public_key_file" "$signing_init_root" \
+    "$(id -u writer-witness)" <<'PY'
 from pathlib import Path
 import base64
 import os
+import re
+import shutil
+import stat
 import sys
+import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-private_path, public_path = map(Path, sys.argv[1:])
-key = Ed25519PrivateKey.generate()
-private_raw = key.private_bytes(
-    serialization.Encoding.Raw,
-    serialization.PrivateFormat.Raw,
-    serialization.NoEncryption(),
-)
-public_raw = key.public_key().public_bytes(
-    serialization.Encoding.Raw,
-    serialization.PublicFormat.Raw,
-)
+private_path = Path(sys.argv[1])
+public_path = Path(sys.argv[2])
+initialization_root = Path(sys.argv[3])
+writer_uid = int(sys.argv[4])
 
 
-def create_exact(path: Path, payload: bytes, mode: int) -> None:
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def read_private(path: Path) -> Ed25519PrivateKey:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid not in {0, writer_uid}
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+            or metadata.st_size < 1
+            or metadata.st_size > 256
+        ):
+            raise SystemExit("Writer Witness signing private key is unsafe")
+        raw = os.read(descriptor, 257)
+    finally:
+        os.close(descriptor)
+    try:
+        decoded = base64.b64decode(raw.strip(), validate=True)
+        if len(decoded) != 32:
+            raise ValueError("unexpected private-key length")
+        return Ed25519PrivateKey.from_private_bytes(decoded)
+    except ValueError as exc:
+        raise SystemExit("Writer Witness signing private key is invalid") from exc
+
+
+def create_exact(path: Path, payload: bytes, mode: int, uid: int) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags, mode)
@@ -960,24 +1054,108 @@ def create_exact(path: Path, payload: bytes, mode: int) -> None:
             if count < 1:
                 raise RuntimeError("short signing key write")
             written += count
+        os.fchown(descriptor, uid, 0)
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
 
 
-create_exact(private_path, base64.b64encode(private_raw) + b"\n", 0o600)
-try:
-    create_exact(public_path, base64.b64encode(public_raw) + b"\n", 0o600)
-except BaseException:
-    private_path.unlink(missing_ok=True)
-    raise
-directory = os.open(private_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-try:
-    os.fsync(directory)
-finally:
-    os.close(directory)
+root_meta = initialization_root.lstat()
+if (
+    not stat.S_ISDIR(root_meta.st_mode)
+    or initialization_root.is_symlink()
+    or root_meta.st_uid != 0
+    or root_meta.st_gid != 0
+    or stat.S_IMODE(root_meta.st_mode) != 0o700
+):
+    raise SystemExit("Writer Witness signing initialization root is unsafe")
+
+# Every child belongs exclusively to this one initialization primitive.  A
+# crash before publication can therefore be reclaimed without touching either
+# stable key path or any foreign file.
+for child in initialization_root.iterdir():
+    metadata = child.lstat()
+    if (
+        not re.fullmatch(r"[0-9a-f]{32}", child.name)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or child.is_symlink()
+        or metadata.st_uid != 0
+        or metadata.st_gid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise SystemExit("Writer Witness signing initialization residue is unsafe")
+    shutil.rmtree(child)
+fsync_directory(initialization_root)
+
+private_exists = private_path.exists() or private_path.is_symlink()
+public_exists = public_path.exists() or public_path.is_symlink()
+if public_exists and not private_exists:
+    raise SystemExit("Writer Witness signing public key lacks its private owner")
+
+if private_exists:
+    if private_path.is_symlink():
+        raise SystemExit("Writer Witness signing private key is unsafe")
+    key = read_private(private_path)
+else:
+    key = Ed25519PrivateKey.generate()
+
+public_raw = key.public_key().public_bytes(
+    serialization.Encoding.Raw,
+    serialization.PublicFormat.Raw,
+)
+
+if public_exists:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(public_path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) not in {0o600, 0o644}
+            or metadata.st_nlink != 1
+            or metadata.st_size < 1
+            or metadata.st_size > 256
+        ):
+            raise SystemExit("Writer Witness signing public key is unsafe")
+        observed_public = os.read(descriptor, 257)
+    finally:
+        os.close(descriptor)
+    try:
+        decoded_public = base64.b64decode(observed_public.strip(), validate=True)
+    except ValueError as exc:
+        raise SystemExit("Writer Witness signing public key is invalid") from exc
+    if decoded_public != public_raw:
+        raise SystemExit("Writer Witness signing keypair does not match")
+
+if not private_exists or not public_exists:
+    operation = initialization_root / uuid.uuid4().hex
+    operation.mkdir(mode=0o700)
+    fsync_directory(operation)
+    fsync_directory(initialization_root)
+    if not private_exists:
+        private_raw = key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+        staged_private = operation / "private"
+        create_exact(
+            staged_private,
+            base64.b64encode(private_raw) + b"\n",
+            0o600,
+            writer_uid,
+        )
+        os.replace(staged_private, private_path)
+        fsync_directory(private_path.parent)
+    if not public_exists:
+        staged_public = operation / "public"
+        create_exact(staged_public, base64.b64encode(public_raw) + b"\n", 0o644, 0)
+        os.replace(staged_public, public_path)
+        fsync_directory(public_path.parent)
+    shutil.rmtree(operation)
+    fsync_directory(initialization_root)
 PY
-fi
 chown writer-witness:writer-witness "$private_key_file"
 chmod 0600 "$private_key_file"
 chown root:root "$public_key_file"
@@ -993,6 +1171,9 @@ for tls_file in ca.key ca.crt server.key server.crt; do
 done
 if [[ "$tls_complete" != true ]]; then
     tls_present=false
+    if [[ -e "$tls_dir" || -L "$tls_dir" ]]; then
+        tls_present=true
+    fi
     for tls_file in ca.key ca.crt server.key server.crt ca.srl server.csr; do
         if [[ -e "$tls_dir/$tls_file" || -L "$tls_dir/$tls_file" ]]; then
             tls_present=true
@@ -1008,31 +1189,99 @@ if [[ "$tls_complete" != true ]]; then
         echo "TLS material is incomplete; release activation refuses to rotate or repair live TLS" >&2
         exit 2
     }
+    tls_generations=/etc/trading-bot-witness/tls-generations
+    install -d -m 0700 -o root -g root "$tls_generations"
+    isolated_system_python - "$tls_generations" /etc/trading-bot-witness <<'PY'
+from pathlib import Path
+import os
+import re
+import shutil
+import stat
+import sys
+
+root = Path(sys.argv[1])
+parent = Path(sys.argv[2])
+metadata = root.lstat()
+if (
+    not stat.S_ISDIR(metadata.st_mode)
+    or root.is_symlink()
+    or metadata.st_uid != 0
+    or metadata.st_gid != 0
+    or stat.S_IMODE(metadata.st_mode) != 0o700
+):
+    raise SystemExit("Writer Witness TLS generation root is unsafe")
+for child in root.iterdir():
+    child_metadata = child.lstat()
+    if (
+        not re.fullmatch(r"(?:initializing|generation)-[0-9a-f]{32}", child.name)
+        or not stat.S_ISDIR(child_metadata.st_mode)
+        or child.is_symlink()
+        or child_metadata.st_uid != 0
+        or child_metadata.st_gid != 0
+        or stat.S_IMODE(child_metadata.st_mode) != 0o700
+    ):
+        raise SystemExit("Writer Witness TLS generation residue is unsafe")
+    shutil.rmtree(child)
+for temporary in parent.glob(".tls.initialize-*"):
+    temporary_metadata = temporary.lstat()
+    if (
+        not re.fullmatch(r"\.tls\.initialize-[0-9a-f]{32}", temporary.name)
+        or not stat.S_ISLNK(temporary_metadata.st_mode)
+        or temporary_metadata.st_uid != 0
+        or temporary_metadata.st_gid != 0
+    ):
+        raise SystemExit("Writer Witness TLS symlink residue is unsafe")
+    temporary.unlink()
+for directory in (root, parent):
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+PY
+    tls_token="$(openssl rand -hex 16)"
+    [[ "$tls_token" =~ ^[0-9a-f]{32}$ ]]
+    tls_staging="$tls_generations/initializing-$tls_token"
+    tls_generation="$tls_generations/generation-$tls_token"
+    install -d -m 0700 -o root -g root "$tls_staging"
     openssl req -x509 -newkey rsa:3072 -sha256 -nodes \
         -days 3650 \
         -subj '/CN=Trading Bot Private Writer Witness CA' \
         -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
         -addext 'keyUsage=critical,keyCertSign,cRLSign' \
         -addext 'subjectKeyIdentifier=hash' \
-        -keyout "$tls_dir/ca.key" \
-        -out "$tls_dir/ca.crt"
+        -keyout "$tls_staging/ca.key" \
+        -out "$tls_staging/ca.crt"
     openssl req -new -newkey rsa:3072 -sha256 -nodes \
         -subj '/CN=writer-witness.internal' \
         -addext "subjectAltName=IP:$WITNESS_PUBLIC_IP" \
         -addext 'basicConstraints=critical,CA:FALSE' \
         -addext 'keyUsage=critical,digitalSignature,keyEncipherment' \
         -addext 'extendedKeyUsage=serverAuth' \
-        -keyout "$tls_dir/server.key" \
-        -out "$tls_dir/server.csr"
+        -keyout "$tls_staging/server.key" \
+        -out "$tls_staging/server.csr"
     openssl x509 -req \
-        -in "$tls_dir/server.csr" \
-        -CA "$tls_dir/ca.crt" \
-        -CAkey "$tls_dir/ca.key" \
+        -in "$tls_staging/server.csr" \
+        -CA "$tls_staging/ca.crt" \
+        -CAkey "$tls_staging/ca.key" \
         -CAcreateserial \
         -days 397 \
         -sha256 \
         -copy_extensions copyall \
-        -out "$tls_dir/server.crt"
+        -out "$tls_staging/server.crt"
+    rm -f "$tls_staging/server.csr" "$tls_staging/ca.srl"
+    chmod 0600 "$tls_staging/ca.key" "$tls_staging/server.key"
+    chmod 0644 "$tls_staging/ca.crt" "$tls_staging/server.crt"
+    openssl verify -CAfile "$tls_staging/ca.crt" "$tls_staging/server.crt"
+    openssl x509 -in "$tls_staging/server.crt" -purpose -noout \
+        | grep -q '^SSL server : Yes$'
+    fsync_trees "$tls_staging"
+    mv -T "$tls_staging" "$tls_generation"
+    fsync_directories "$tls_generations"
+    tls_link_tmp="/etc/trading-bot-witness/.tls.initialize-$tls_token"
+    ln -s "$tls_generation" "$tls_link_tmp"
+    mv -T "$tls_link_tmp" "$tls_dir"
+    fsync_directories /etc/trading-bot-witness
 fi
 chmod 0600 "$tls_dir/ca.key" "$tls_dir/server.key"
 chmod 0644 "$tls_dir/ca.crt" "$tls_dir/server.crt"
@@ -1206,13 +1455,24 @@ fsync_directories \
 # Nginx remains stopped; the watchdog reconciles a killed provisioner within
 # one timer interval after the provision lock is released.
 activation_service_stopped=true
-systemctl stop \
+for unit in \
     nginx \
     writer-witness.service \
     writer-witness-backup.timer \
-    writer-witness-offsite-backup.timer \
-    >/dev/null 2>&1 || true
-/usr/local/sbin/writer-witness-activation publish --release-id "$RELEASE_ID" >/dev/null
+    writer-witness-offsite-backup.timer
+do
+    load_state="$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)"
+    if [[ "$load_state" == not-found || -z "$load_state" ]]; then
+        continue
+    fi
+    systemctl stop "$unit"
+    active_state="$(systemctl show -p ActiveState --value "$unit")"
+    [[ "$active_state" == inactive || "$active_state" == failed ]] || {
+        echo "Writer Witness activation could not quiesce $unit" >&2
+        exit 70
+    }
+done
+installed_activation publish --release-id "$RELEASE_ID" >/dev/null
 nginx -t
 systemctl daemon-reload
 assert_no_writer_witness_systemd_dropins
@@ -1238,7 +1498,7 @@ do
     [[ "$(systemctl show -p "$key" --value writer-witness.service)" == "$expected" ]]
 done
 systemctl show -p ExecStart --value writer-witness.service \
-    | grep -F '/opt/trading-bot-witness/active/venv/bin/uvicorn' >/dev/null
+    | grep -F '/opt/trading-bot-witness/active/venv/bin/python' >/dev/null
 test "$(readlink -f /opt/trading-bot-witness/active)" = "$activation_dir"
 test "$(readlink -f /srv/trading-bot-witness/current)" = "$release_dir"
 test "$(readlink -f /opt/trading-bot-witness/venv)" = "$venv_dir"
@@ -1285,7 +1545,7 @@ runtime_super="$(runuser -u postgres -- psql -XAtqc \
     --hmac-state-root /var/lib/trading-bot-witness/hmac-rotation \
     --rotation-lock-fd "$rotation_lock_fd" \
     >/dev/null
-/usr/local/sbin/writer-witness-activation commit --release-id "$RELEASE_ID" >/dev/null
+installed_activation commit --release-id "$RELEASE_ID" >/dev/null
 activation_transaction_open=false
 
 # A committed journal remains durable until the public daemons and timers are
@@ -1300,7 +1560,7 @@ systemctl restart nginx writer-witness.service
 curl --fail --silent --show-error \
     --retry 30 --retry-delay 1 --retry-all-errors \
     http://127.0.0.1:8011/health/ready >/dev/null
-/usr/local/sbin/writer-witness-activation complete --release-id "$RELEASE_ID" >/dev/null
+installed_activation complete --release-id "$RELEASE_ID" >/dev/null
 activation_service_stopped=false
 flock -u "$rotation_lock_fd"
 exec {rotation_lock_fd}>&-

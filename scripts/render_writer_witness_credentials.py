@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+from datetime import datetime
 import fcntl
 import functools
 import json
@@ -15,6 +16,7 @@ import re
 import secrets
 import stat
 import tempfile
+import uuid
 from urllib.parse import urlsplit
 
 
@@ -36,12 +38,16 @@ RUNTIME_SITE_KEYS = {
         "WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET",
         "WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_KEY_ID",
         "WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_SECRET",
+        "WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER",
+        "WRITER_WITNESS_SERVICE_WEBAPP_FI_PREVIOUS_NOT_AFTER",
     ),
     "webapp_ir": (
         "WRITER_WITNESS_SERVICE_WEBAPP_IR_KEY_ID",
         "WRITER_WITNESS_SERVICE_WEBAPP_IR_SECRET",
         "WRITER_WITNESS_SERVICE_WEBAPP_IR_PREVIOUS_KEY_ID",
         "WRITER_WITNESS_SERVICE_WEBAPP_IR_PREVIOUS_SECRET",
+        "WRITER_WITNESS_SERVICE_WEBAPP_IR_NOT_AFTER",
+        "WRITER_WITNESS_SERVICE_WEBAPP_IR_PREVIOUS_NOT_AFTER",
     ),
 }
 CLIENT_FILES = {
@@ -54,6 +60,28 @@ SECRET_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 class CredentialRenderError(RuntimeError):
     """A credential-state invariant was not satisfied."""
+
+
+def _reclaim_bootstrap_initializers(path: Path, *, expected_uid: int) -> None:
+    prefix = f".{path.name}.initialize-"
+    changed = False
+    for candidate in path.parent.iterdir():
+        if not re.fullmatch(re.escape(prefix) + r"[0-9a-f]{32}", candidate.name):
+            continue
+        metadata = candidate.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+            or metadata.st_size > 1_048_576
+        ):
+            raise CredentialRenderError("unsafe bootstrap initialization residue")
+        candidate.unlink()
+        changed = True
+    if changed:
+        _fsync_directory(path.parent)
 
 
 def initialize_bootstrap(
@@ -71,6 +99,7 @@ def initialize_bootstrap(
     )
     created = False
     if not path.exists() and not path.is_symlink():
+        _reclaim_bootstrap_initializers(path, expected_uid=expected_uid)
         payload = (
             "\n".join(
                 (
@@ -84,11 +113,12 @@ def initialize_bootstrap(
                 )
             )
         ).encode("utf-8")
+        temporary = path.parent / f".{path.name}.initialize-{uuid.uuid4().hex}"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         try:
-            descriptor = os.open(path, flags, 0o600)
+            descriptor = os.open(temporary, flags, 0o600)
         except OSError as exc:
             raise CredentialRenderError("cannot create bootstrap credential file") from exc
         try:
@@ -97,10 +127,17 @@ def initialize_bootstrap(
             if os.write(descriptor, payload) != len(payload):
                 raise CredentialRenderError("short bootstrap credential write")
             os.fsync(descriptor)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         finally:
             os.close(descriptor)
         _fsync_directory(path.parent)
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
         created = True
+    else:
+        _reclaim_bootstrap_initializers(path, expected_uid=expected_uid)
     _, values = _read_env(
         path,
         expected_uid=expected_uid,
@@ -320,37 +357,66 @@ def _credential_pair(key_id: str | None, secret: str | None, *, label: str) -> t
     return key_id, secret
 
 
-def _credentials_from_runtime(values: dict[str, str]) -> dict[str, tuple[str, str]]:
-    result: dict[str, tuple[str, str]] = {}
-    for site, (key_name, secret_name, previous_key, previous_secret) in RUNTIME_SITE_KEYS.items():
-        if previous_key in values or previous_secret in values:
+def _credentials_from_runtime(
+    values: dict[str, str],
+) -> dict[str, tuple[str, str, str | None]]:
+    result: dict[str, tuple[str, str, str | None]] = {}
+    for site, (
+        key_name,
+        secret_name,
+        previous_key,
+        previous_secret,
+        not_after_key,
+        previous_not_after_key,
+    ) in RUNTIME_SITE_KEYS.items():
+        if any(
+            key in values
+            for key in (previous_key, previous_secret, previous_not_after_key)
+        ):
             raise CredentialRenderError("cannot provision while an HMAC overlap is active")
-        result[site] = _credential_pair(
+        key_id, secret = _credential_pair(
             values.get(key_name),
             values.get(secret_name),
             label=site,
         )
+        not_after = values.get(not_after_key)
+        expected_campaign_key = re.fullmatch(
+            rf"matrix-wwm_[0-9a-f]{{12}}-{site.removeprefix('webapp_')}",
+            key_id,
+        ) is not None
+        if expected_campaign_key != bool(not_after):
+            raise CredentialRenderError("campaign credential expiry is missing or unexpected")
+        if not_after:
+            try:
+                parsed = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise CredentialRenderError("campaign credential expiry is invalid") from exc
+            if not not_after.endswith("Z") or parsed.tzinfo is None:
+                raise CredentialRenderError("campaign credential expiry is invalid")
+        result[site] = (key_id, secret, not_after)
     return result
 
 
-def _credentials_from_bootstrap(values: dict[str, str]) -> dict[str, tuple[str, str]]:
+def _credentials_from_bootstrap(
+    values: dict[str, str],
+) -> dict[str, tuple[str, str, str | None]]:
     return {
-        "webapp_fi": _credential_pair(
+        "webapp_fi": (*_credential_pair(
             values.get("WITNESS_FI_KEY_ID"),
             values.get("WITNESS_FI_HMAC_SECRET"),
             label="bootstrap webapp_fi",
-        ),
-        "webapp_ir": _credential_pair(
+        ), None),
+        "webapp_ir": (*_credential_pair(
             values.get("WITNESS_IR_KEY_ID"),
             values.get("WITNESS_IR_HMAC_SECRET"),
             label="bootstrap webapp_ir",
-        ),
+        ), None),
     }
 
 
 def _validate_client(
     values: dict[str, str],
-    expected: tuple[str, str],
+    expected: tuple[str, str, str | None],
     *,
     site: str,
 ) -> None:
@@ -359,7 +425,7 @@ def _validate_client(
         values.get("WRITER_WITNESS_CLIENT_SECRET"),
         label=f"{site} client",
     )
-    if actual != expected:
+    if actual != expected[:2]:
         raise CredentialRenderError(f"{site} client credential does not match runtime")
 
 
@@ -686,8 +752,8 @@ def render_credentials(
         else:
             source = "initial"
 
-    fi_key, fi_secret = credentials["webapp_fi"]
-    ir_key, ir_secret = credentials["webapp_ir"]
+    fi_key, fi_secret, fi_not_after = credentials["webapp_fi"]
+    ir_key, ir_secret, ir_not_after = credentials["webapp_ir"]
     runtime_payload = (
         "\n".join(
             (
@@ -702,8 +768,10 @@ def render_credentials(
                 f"WRITER_WITNESS_PUBLIC_KEY={public_key}",
                 f"WRITER_WITNESS_SERVICE_WEBAPP_FI_KEY_ID={fi_key}",
                 f"WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET={fi_secret}",
+                *((f"WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER={fi_not_after}",) if fi_not_after else ()),
                 f"WRITER_WITNESS_SERVICE_WEBAPP_IR_KEY_ID={ir_key}",
                 f"WRITER_WITNESS_SERVICE_WEBAPP_IR_SECRET={ir_secret}",
+                *((f"WRITER_WITNESS_SERVICE_WEBAPP_IR_NOT_AFTER={ir_not_after}",) if ir_not_after else ()),
                 "WRITER_WITNESS_LEASE_DURATION_SECONDS=180",
                 "WRITER_WITNESS_RENEW_INTERVAL_SECONDS=30",
                 "WRITER_WITNESS_SAFETY_MARGIN_SECONDS=15",

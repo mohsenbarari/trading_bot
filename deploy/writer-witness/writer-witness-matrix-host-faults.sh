@@ -16,13 +16,20 @@ tag="$3"
     echo "unsafe matrix ownership tag" >&2
     exit 2
 }
-state_helper="/usr/local/sbin/writer-witness-matrix-host-fault-state"
-[[ -x "$state_helper" ]] || {
+state_helper_path="/usr/local/sbin/writer-witness-matrix-host-fault-state"
+[[ -x "$state_helper_path" ]] || {
     echo "durable host-fault recovery helper is unavailable" >&2
     exit 1
 }
+isolated_system_python() {
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null "$@"
+}
+state_helper() {
+    isolated_system_python "$state_helper_path" "$@"
+}
 if [[ "$action" == "recover" ]]; then
-    "$state_helper" recover --tag "$tag" --caller-pid "$$"
+    state_helper recover --tag "$tag" --caller-pid "$$"
     exit 0
 fi
 
@@ -43,12 +50,12 @@ cleanup() {
     local status=$?
     trap - EXIT
     set +e
-    "$state_helper" recover --tag "$tag" --kind "$suffix" --caller-pid "$$" || status=70
+    state_helper recover --tag "$tag" --kind "$suffix" --caller-pid "$$" || status=70
     exit "$status"
 }
 
 process_start_ticks() {
-    python3 - "$1" <<'PY'
+    isolated_system_python - "$1" <<'PY'
 from pathlib import Path
 import sys
 
@@ -122,16 +129,16 @@ if ss -H -ltn | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
     echo "isolated PostgreSQL port is already in use" >&2
     exit 1
 fi
-"$state_helper" claim --tag "$tag" --kind "$suffix" --helper-pid "$$"
+state_helper claim --tag "$tag" --kind "$suffix" --helper-pid "$$"
 trap cleanup EXIT
 install -d -m 0700 -o postgres -g postgres "$root"
 mount -t tmpfs -o size=96m,mode=0700,uid="$(id -u postgres)",gid="$(id -g postgres)" \
     "$tag" "$root"
-"$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" --phase mounted
+state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" --phase mounted
 install -d -m 0700 -o postgres -g postgres "$data" "$socket_dir"
 runuser -u postgres -- "$bindir/initdb" -D "$data" \
     --auth-local=peer --auth-host=reject --no-locale >/dev/null
-"$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" --phase initialized
+state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" --phase initialized
 
 postgres_program="$bindir/postgres"
 postgres_start_program="$postgres_program"
@@ -189,7 +196,7 @@ start_isolated_postgres() {
         -w start >/dev/null
     postgres_pid="$(head -1 "$data/postmaster.pid")"
     [[ "$postgres_pid" =~ ^[0-9]+$ && "$postgres_pid" -gt 1 ]]
-    "$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+    state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
         --phase postgres_started --postgres-pid "$postgres_pid"
 }
 
@@ -200,7 +207,7 @@ stop_isolated_postgres() {
 start_isolated_postgres
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -f /srv/trading-bot-witness/current/deploy/writer-witness/001_initial.sql >/dev/null
-"$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
     --phase running --postgres-pid "$postgres_pid"
 
 if [[ "$action" == "clock-jump" ]]; then
@@ -209,7 +216,7 @@ if [[ "$action" == "clock-jump" ]]; then
     phase_one="$root/clock-phase-one.json"
     phase_two="$root/clock-phase-two.json"
     capture_production_state "$production_before"
-    production_system_identifier="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["system_identifier"])' "$production_before")"
+    production_system_identifier="$(isolated_system_python -c 'import json,sys; print(json.load(open(sys.argv[1]))["system_identifier"])' "$production_before")"
     first_postgres_pid="$postgres_pid"
     first_postgres_ticks="$(process_start_ticks "$postgres_pid")"
     runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
@@ -232,7 +239,7 @@ if [[ "$action" == "clock-jump" ]]; then
         echo "isolated PostgreSQL restart identity did not change" >&2
         exit 1
     fi
-    "$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+    state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
         --phase running --postgres-pid "$postgres_pid"
     runuser -u postgres -- /opt/trading-bot-witness/venv/bin/python \
         /srv/trading-bot-witness/current/scripts/run_writer_witness_clock_jump_probe.py \
@@ -255,9 +262,9 @@ if [[ "$action" == "clock-jump" ]]; then
         echo "production Witness state changed during the isolated clock probe" >&2
         exit 1
     }
-    "$state_helper" update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
+    state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
         --phase completed --postgres-pid "$postgres_pid"
-    python3 - "$phase_one" "$phase_two" "$production_before" "$production_after" \
+    isolated_system_python - "$phase_one" "$phase_two" "$production_before" "$production_after" \
         "$tag" "$faketime_library" "$faketime_library_sha256" \
         "$first_postgres_pid" "$first_postgres_ticks" \
         "$second_postgres_pid" "$second_postgres_ticks" <<'PY'
@@ -332,7 +339,7 @@ cmp --silent "$production_before" "$production_after" || {
     echo "production Witness state changed during the isolated disk-full probe" >&2
     exit 1
 }
-python3 - "$production_before" "$production_after" "$tag" <<'PY'
+isolated_system_python - "$production_before" "$production_after" "$tag" <<'PY'
 import json
 from pathlib import Path
 import sys

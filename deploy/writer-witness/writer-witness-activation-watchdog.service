@@ -1,8 +1,9 @@
 [Unit]
 Description=Reconcile an interrupted Writer Witness activation
-After=local-fs.target
+After=local-fs.target nginx.service writer-witness.service
 
 [Service]
 Type=oneshot
+UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE LD_PRELOAD LD_LIBRARY_PATH
 ExecStart=/usr/local/sbin/writer-witness-activation-watchdog
 UMask=0077

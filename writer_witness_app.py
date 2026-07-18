@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any, Awaitable, Callable
 
 from cryptography.hazmat.primitives import serialization
@@ -37,6 +38,7 @@ from core.writer_witness_control import (
     WITNESS_ACTIONS,
     WITNESS_COMMAND_VERSION,
     WriterWitnessError,
+    WriterWitnessCampaignExpiredError,
     load_witness_snapshot,
     persist_witness_rejection,
     transition_witness_state,
@@ -106,10 +108,14 @@ class WriterWitnessServiceSettings(BaseSettings):
     writer_witness_service_webapp_fi_secret: str | None = None
     writer_witness_service_webapp_fi_previous_key_id: str | None = None
     writer_witness_service_webapp_fi_previous_secret: str | None = None
+    writer_witness_service_webapp_fi_not_after: str | None = None
+    writer_witness_service_webapp_fi_previous_not_after: str | None = None
     writer_witness_service_webapp_ir_key_id: str | None = None
     writer_witness_service_webapp_ir_secret: str | None = None
     writer_witness_service_webapp_ir_previous_key_id: str | None = None
     writer_witness_service_webapp_ir_previous_secret: str | None = None
+    writer_witness_service_webapp_ir_not_after: str | None = None
+    writer_witness_service_webapp_ir_previous_not_after: str | None = None
     writer_witness_lease_duration_seconds: int = 180
     writer_witness_renew_interval_seconds: int = 30
     writer_witness_safety_margin_seconds: int = 15
@@ -230,32 +236,40 @@ def _service_credentials(
             "current",
             service_settings.writer_witness_service_webapp_fi_key_id,
             service_settings.writer_witness_service_webapp_fi_secret,
+            service_settings.writer_witness_service_webapp_fi_not_after,
         ),
         (
             "webapp_ir",
             "current",
             service_settings.writer_witness_service_webapp_ir_key_id,
             service_settings.writer_witness_service_webapp_ir_secret,
+            service_settings.writer_witness_service_webapp_ir_not_after,
         ),
         (
             "webapp_fi",
             "previous",
             service_settings.writer_witness_service_webapp_fi_previous_key_id,
             service_settings.writer_witness_service_webapp_fi_previous_secret,
+            service_settings.writer_witness_service_webapp_fi_previous_not_after,
         ),
         (
             "webapp_ir",
             "previous",
             service_settings.writer_witness_service_webapp_ir_previous_key_id,
             service_settings.writer_witness_service_webapp_ir_previous_secret,
+            service_settings.writer_witness_service_webapp_ir_previous_not_after,
         ),
     )
     result: dict[str, WitnessClientCredential] = {}
     used_secrets: set[str] = set()
-    for site, slot, raw_key_id, raw_secret in configured:
+    for site, slot, raw_key_id, raw_secret, raw_not_after in configured:
         key_id = str(raw_key_id or "").strip()
         secret = str(raw_secret or "")
         if slot == "previous" and not key_id and not secret:
+            if raw_not_after:
+                raise WitnessServiceConfigurationError(
+                    f"orphan witness credential expiry exists for {site}:{slot}"
+                )
             continue
         if not key_id or len(key_id) > 64 or len(secret.encode("utf-8")) < 32:
             raise WitnessServiceConfigurationError(
@@ -265,7 +279,37 @@ def _service_credentials(
             raise WitnessServiceConfigurationError("writer witness key ids must be unique")
         if secret in used_secrets:
             raise WitnessServiceConfigurationError("writer witness HMAC secrets must be unique")
-        result[key_id] = WitnessClientCredential(key_id=key_id, site=site, secret=secret)
+        not_after: datetime | None = None
+        not_after_text = str(raw_not_after or "").strip()
+        expected_short_site = site.removeprefix("webapp_")
+        campaign_key = re.fullmatch(
+            rf"matrix-wwm_[0-9a-f]{{12}}-{expected_short_site}",
+            key_id,
+        ) is not None
+        if campaign_key != bool(not_after_text):
+            raise WitnessServiceConfigurationError(
+                f"campaign expiry does not match the witness credential for {site}:{slot}"
+            )
+        if not_after_text:
+            if not_after_text.endswith("Z"):
+                not_after_text = not_after_text[:-1] + "+00:00"
+            try:
+                not_after = datetime.fromisoformat(not_after_text)
+            except ValueError as exc:
+                raise WitnessServiceConfigurationError(
+                    f"writer witness campaign expiry is invalid for {site}:{slot}"
+                ) from exc
+            if not_after.tzinfo is None:
+                raise WitnessServiceConfigurationError(
+                    f"writer witness campaign expiry lacks timezone for {site}:{slot}"
+                )
+            not_after = not_after.astimezone(timezone.utc)
+        result[key_id] = WitnessClientCredential(
+            key_id=key_id,
+            site=site,
+            secret=secret,
+            not_after=not_after,
+        )
         used_secrets.add(secret)
     return result
 
@@ -463,6 +507,7 @@ def create_writer_witness_app(
                 # collide with their own persisted receipt.
                 operator = f"hmac:{caller.site}"
                 try:
+                    transition_now = await service_runtime.clock(session)
                     result = await transition_witness_state(
                         session,
                         action=command.action,
@@ -478,7 +523,14 @@ def create_writer_witness_app(
                             else None
                         ),
                         lease_duration_seconds=command.lease_duration_seconds,
-                        now=witness_now,
+                        now=transition_now,
+                        authorization_not_after=caller.credential_not_after,
+                    )
+                except WriterWitnessCampaignExpiredError as exc:
+                    await session.rollback()
+                    return _json_response(
+                        {"accepted": False, "code": exc.code},
+                        401,
                     )
                 except WriterWitnessError as exc:
                     rejection = await persist_witness_rejection(

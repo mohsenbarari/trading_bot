@@ -32,6 +32,28 @@ class UploadError(RuntimeError):
     pass
 
 
+def _assert_isolated_runtime() -> None:
+    if Path(sys.executable).resolve(strict=True) != Path("/usr/bin/python3.12"):
+        raise UploadError("S3 helper is not using the pinned system Python")
+    if (
+        not sys.flags.isolated
+        or not sys.flags.no_site
+        or not sys.flags.ignore_environment
+        or not sys.flags.dont_write_bytecode
+        or not sys.flags.utf8_mode
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise UploadError("S3 helper startup is not isolated")
+    if any(
+        os.environ.get(name)
+        for name in (
+            "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+            "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH",
+        )
+    ):
+        raise UploadError("S3 helper inherited a forbidden runtime environment")
+
+
 def required_environment(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -152,6 +174,7 @@ def upload(source: Path, object_key: str) -> dict[str, object]:
 
 
 def main() -> int:
+    _assert_isolated_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=Path, required=True)
     parser.add_argument("--key", required=True)

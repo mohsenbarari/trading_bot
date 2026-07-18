@@ -2977,3 +2977,88 @@ Current-main Alembic/semantic integration remains explicitly outside this
 branch-remediation step. It must be resolved in a later integration candidate;
 `main` must not be merged into this independent branch merely to run the dark
 install or its guarded prerequisites.
+
+### 47.9 Exact-SHA rejection at `21aae1de` and second source remediation - 2026-07-18
+
+The two supplied exact-SHA ChatGPT reports for `21aae1de` both reject dark
+installation and the guarded live prerequisites, classify RH-001 as not yet
+authorizable, and require an explicit later current-main integration. The
+reports authorize no SSH, installation, service/database/firewall/TLS mutation,
+RH execution, merge, deployment, CDN/DNS change, or traffic movement. This
+roadmap adopts that fail-closed verdict; no such action was taken while
+remediating the source.
+
+Mechanical verification confirmed these immediate source findings:
+
+- a different-release `begin` could archive the only committed-but-not-service-
+  complete activation journal, and boot recovery could synchronously start the
+  services it was ordered before;
+- watchdog recovery released the provision capability before service effects,
+  while activation recovery did not share the HMAC-rotation lock;
+- bootstrap, signing-key, and first-install TLS publication could be left in a
+  non-reclaimable partial state after power loss;
+- privileged installed helpers and the actual Writer process were not bound to
+  the same isolated interpreter/runtime contract attested by the release;
+- PostgreSQL clear passwords could enter statement/audit logs through role DDL;
+- the campaign helper accepted up to 3,630 seconds and campaign expiry was not
+  connected to the actual transition transaction;
+- cleanup subprocesses could outlive their separate deadline, and delayed
+  postflight-pending recovery entered remote inspection before cleanup mode;
+- a transparently recreated OpenSSH ControlMaster could succeed without a new
+  handshake reservation;
+- candidate quiescence/publication still lacked strict inactive-state proof,
+  durable per-candidate digest binding, and one crash point after every managed
+  publication.
+
+The current source remediation closes those code paths as follows:
+
+1. A committed activation journal refuses every new `begin` until explicit
+   service completion. Boot recovery now performs only direct rollback
+   reconciliation before Nginx/Writer; the separately ordered watchdog handles
+   service completion. Provision and HMAC locks remain held through recovery,
+   daemon restart, health proof, and journal completion.
+2. Candidate mode, size, and SHA-256 bindings are persisted before publication;
+   every managed file and Nginx publication has a SIGKILL point. All loaded
+   public units must prove `inactive` or `failed` before publication starts.
+3. Bootstrap, signing-key, and TLS first publication use private helper-owned
+   initialization/generation namespaces with fsynced atomic publication and
+   narrowly validated retry reclamation. A surviving private signing key can
+   deterministically recreate and validate its exact public key.
+4. Installed root Python helpers self-reject ambient startup and run through the
+   pinned system Python with `env -i`, `-I -S -B`, UTF-8 mode, and disabled
+   bytecode. The Writer unit runs `uvicorn` through the exact activation venv
+   Python with isolated environment handling; preflight binds its `/proc`
+   executable, argv, and forbidden environment. The offsite S3 configurator
+   also parses credential sources through the pinned clean interpreter, while
+   the wheelhouse builder uses isolated pip and a closed verifier startup.
+5. PostgreSQL role DDL receives locally generated SCRAM-SHA-256 verifiers, not
+   clear passwords. Clear credentials remain limited to the actual authenticated
+   client checks and never enter the DDL statement text.
+6. Campaign claim and HMAC preparation both cap `not_after` at 900 Witness
+   seconds. Scenario credentials persist that expiry in `runtime.env`; service
+   startup validates the key/expiry pairing, and a fresh database-clock check
+   inside the transition transaction rejects expiry before receipt lookup or
+   Writer-state mutation. Reprovision preserves, rather than silently strips,
+   an active campaign credential expiry.
+7. Cleanup has one non-renewable deadline, every subprocess timeout is clamped
+   to its remaining allowance, and every recovery path enters cleanup mode
+   before postflight/release reconciliation. SSH/SCP accounting now reserves a
+   complete handshake upper bound on every operation, independent of cached
+   ControlMaster state.
+
+These remain source changes only. The second-remediation worktree passed the
+closed hermetic gate with `404` unit tests and zero skips, followed by all `4`
+guarded real-PostgreSQL tests and the complete four-database failure drill. A
+fresh minimal release passed closed-manifest verification with
+`release-manifest.json` SHA-256
+`bc36beda23a49a9423aef26a60dee9eeb417b4136dcb664ab4bac56ff498562b`;
+`git diff --check` also passed. A new clean exact commit and independent
+exact-delta review are still required before reconsidering a dark install.
+Real systemd boot/timer behavior, fresh-host crash/retry and concurrency
+evidence remain live prerequisites, not facts established by unit tests.
+
+The independent signer-custody/source-pin gate remains `BEFORE_RH001`; the
+controller-loss recovery capsule remains `BEFORE_REMAINING_MATRIX`; signer
+policy, RH-007 topology proof, product fencing/identity, current-main migration
+lineage, and Arvan/WebApp activation remain unchanged later gates. Full Matrix,
+`main` integration, first lease, and traffic/CDN changes are still forbidden.

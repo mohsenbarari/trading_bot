@@ -39,6 +39,13 @@ class WriterWitnessHostFaultRecoveryTests(unittest.TestCase):
         completed = subprocess.run(
             [
                 sys.executable,
+                "-I",
+                "-S",
+                "-B",
+                "-X",
+                "utf8",
+                "-X",
+                "pycache_prefix=/dev/null",
                 str(STATE_HELPER),
                 command,
                 "--tag",
@@ -221,9 +228,9 @@ class WriterWitnessHostFaultRecoveryTests(unittest.TestCase):
             ROOT / "scripts/plan_writer_witness_real_host_matrix.py"
         ).read_text(encoding="utf-8")
         self.assertIn("writer-witness-matrix-host-fault-state", helper)
-        self.assertIn('"$state_helper" claim', helper)
-        self.assertIn('"$state_helper" update', helper)
-        self.assertIn('"$state_helper" recover', helper)
+        self.assertIn("state_helper claim", helper)
+        self.assertIn("state_helper update", helper)
+        self.assertIn("state_helper recover", helper)
         self.assertIn("writer-witness-matrix-host-faults recover --tag", controller)
         self.assertNotIn('set +e; for root in /run/{self.tag}-disk', controller)
         self.assertIn("matrix-host-faults", preflight)

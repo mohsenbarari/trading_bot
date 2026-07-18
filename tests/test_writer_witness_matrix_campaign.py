@@ -42,7 +42,7 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.state_root = self.base / "state"
         self.not_after = (
-            datetime.now(timezone.utc) + timedelta(minutes=30)
+            datetime.now(timezone.utc) + timedelta(minutes=10)
         ).isoformat().replace("+00:00", "Z")
 
     def tearDown(self):
@@ -71,6 +71,13 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         arguments = [
             sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-X",
+            "utf8",
+            "-X",
+            "pycache_prefix=/dev/null",
             str(HELPER),
             "--test-mode",
             "--state-root",
@@ -165,6 +172,29 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
                         preflight_sha256=PREFLIGHT,
                     )
                 self.assertEqual(store.release(**identity)["status"], "released")
+
+    def test_claim_caps_campaign_to_exact_900_server_seconds(self):
+        server_now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return server_now if tz is not None else server_now.replace(tzinfo=None)
+
+        accepted = self.identity(tag="wwm_111111111111")
+        accepted["not_after"] = (
+            server_now + timedelta(seconds=900)
+        ).isoformat().replace("+00:00", "Z")
+        rejected = self.identity(tag="wwm_222222222222")
+        rejected["not_after"] = (
+            server_now + timedelta(seconds=901)
+        ).isoformat().replace("+00:00", "Z")
+        with mock.patch.object(campaign, "datetime", FrozenDateTime):
+            with campaign.CampaignStore(self.base / "accepted") as store:
+                self.assertEqual(store.claim(**accepted)["status"], "claimed")
+            with campaign.CampaignStore(self.base / "rejected") as store:
+                with self.assertRaisesRegex(campaign.CampaignError, "900 seconds"):
+                    store.claim(**rejected)
 
     def test_claim_hard_kill_before_and_after_atomic_publication_is_recoverable(self):
         before_root = self.base / "claim-before"

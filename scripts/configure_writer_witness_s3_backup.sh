@@ -11,6 +11,13 @@ CREDENTIAL_SOURCE="${WRITER_WITNESS_S3_CREDENTIAL_SOURCE:-}"
 BUCKET_SOURCE="${WRITER_WITNESS_S3_BUCKET_SOURCE:-}"
 RECIPIENT_SOURCE="${WRITER_WITNESS_S3_RECIPIENT_SOURCE:-}"
 ASSET_DIR="$ROOT_DIR/deploy/writer-witness"
+readonly WRITER_WITNESS_SYSTEM_PYTHON=/usr/bin/python3.12
+isolated_system_python() {
+    /usr/bin/env -i \
+        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        "$WRITER_WITNESS_SYSTEM_PYTHON" \
+        -I -S -B -X utf8 -X pycache_prefix=/dev/null "$@"
+}
 
 for source in "$CREDENTIAL_SOURCE" "$BUCKET_SOURCE" "$RECIPIENT_SOURCE"; do
     if [[ -z "$source" || ! -f "$source" ]]; then
@@ -37,7 +44,7 @@ apt-get -o Acquire::Retries=5 install -y --no-install-recommends age ca-certific
 install -d -m 0750 -o root -g writer-witness /etc/trading-bot-witness
 recipient_target=/etc/trading-bot-witness/offsite-age-recipient.txt
 environment_target=/etc/trading-bot-witness/offsite-backup.env
-python3 - \
+isolated_system_python - \
     "$CREDENTIAL_SOURCE" "$BUCKET_SOURCE" "$RECIPIENT_SOURCE" \
     "$environment_target" "$recipient_target" <<'PY'
 from pathlib import Path

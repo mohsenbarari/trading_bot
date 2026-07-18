@@ -161,6 +161,39 @@ SPECIAL_PATHS = {
 
 RELEASE_ID_RE = re.compile(r"[A-Za-z0-9._-]+")
 SCHEMA = "writer_witness_activation_v1"
+DANGEROUS_RUNTIME_ENV = frozenset(
+    {
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+        "PYTHONUSERBASE",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+    }
+)
+
+
+def _assert_isolated_runtime(*, test_mode: bool) -> None:
+    expected = Path("/usr/bin/python3.12")
+    observed = Path(sys.executable).resolve(strict=True)
+    if not test_mode and observed != expected:
+        raise ActivationError("activation helper is not using the pinned system Python")
+    if (
+        not sys.flags.isolated
+        or not sys.flags.no_site
+        or not sys.flags.ignore_environment
+        or not sys.flags.dont_write_bytecode
+        or not sys.flags.utf8_mode
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise ActivationError("activation helper startup is not isolated")
+    present = sorted(name for name in DANGEROUS_RUNTIME_ENV if os.environ.get(name))
+    if present:
+        raise ActivationError(
+            "activation helper inherited forbidden runtime environment: "
+            + ",".join(present)
+        )
 
 
 def _mapped(root: Path, absolute: str | Path) -> Path:
@@ -578,8 +611,12 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
     with store.locked():
         existing = store.read_journal()
         if existing is not None:
-            if existing.get("phase") in {"rolled_back", "committed"}:
+            if existing.get("phase") == "rolled_back":
                 _archive_and_remove(store, existing)
+            elif existing.get("phase") == "committed":
+                raise ActivationError(
+                    "committed activation requires service completion before a new begin"
+                )
             else:
                 raise ActivationError("unfinished activation exists; recover it before beginning")
         else:
@@ -794,12 +831,44 @@ def _normalize_initial(store: ActivationStore, journal: dict[str, object]) -> Pa
     return legacy_activation
 
 
+def _candidate_bindings(candidates: Path) -> dict[str, dict[str, object]]:
+    bindings: dict[str, dict[str, object]] = {}
+    for item in MANAGED_FILES:
+        payload, metadata = _read_regular(candidates / item.candidate)
+        if (
+            metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != item.mode
+        ):
+            raise ActivationError(f"candidate metadata is unsafe: {item.candidate}")
+        bindings[item.candidate] = {
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size": len(payload),
+            "mode": item.mode,
+        }
+    return bindings
+
+
 def _install_candidates(store: ActivationStore, journal: dict[str, object]) -> None:
     _, candidates, _ = _operation_paths(store, journal)
     operation_id = str(journal["operation_id"])
+    bindings = journal.get("candidate_bindings")
+    if not isinstance(bindings, dict) or set(bindings) != {
+        item.candidate for item in MANAGED_FILES
+    }:
+        raise ActivationError("activation candidate bindings are incomplete")
     for item in MANAGED_FILES:
         payload, metadata = _read_regular(candidates / item.candidate)
-        if metadata.st_uid != os.geteuid() or metadata.st_gid != os.getegid():
+        expected = bindings.get(item.candidate)
+        if (
+            metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != item.mode
+            or not isinstance(expected, dict)
+            or expected.get("sha256") != hashlib.sha256(payload).hexdigest()
+            or expected.get("size") != len(payload)
+            or expected.get("mode") != item.mode
+        ):
             raise ActivationError(f"candidate ownership is unsafe: {item.candidate}")
         _atomic_write(
             _mapped(store.root, item.destination),
@@ -809,12 +878,15 @@ def _install_candidates(store: ActivationStore, journal: dict[str, object]) -> N
             gid=os.getegid(),
             token=operation_id,
         )
+        _kill_after(f"candidate_published_{item.candidate}")
     _atomic_symlink(
         _mapped(store.root, SPECIAL_PATHS["nginx_enabled"]),
         str(_mapped(store.root, "/etc/nginx/sites-available/writer-witness")),
         token=operation_id,
     )
+    _kill_after("nginx_enabled_published")
     _remove_path_entry(_mapped(store.root, SPECIAL_PATHS["nginx_default"]))
+    _kill_after("nginx_default_removed")
 
 
 def publish(store: ActivationStore, args: argparse.Namespace) -> None:
@@ -838,11 +910,10 @@ def publish(store: ActivationStore, args: argparse.Namespace) -> None:
         if (activation_dir / "venv").resolve(strict=True) != venv_dir.resolve(strict=True):
             raise ActivationError("prepared activation venv target drifted")
         _, candidates, _ = _operation_paths(store, journal)
-        for item in MANAGED_FILES:
-            _read_regular(candidates / item.candidate)
-
+        journal["candidate_bindings"] = _candidate_bindings(candidates)
         journal["phase"] = "publishing"
         store.write_journal(journal)
+        _kill_after("candidates_bound")
         if bool(journal["initial_migration"]):
             previous = _normalize_initial(store, journal)
         elif bool(journal.get("fresh_install")):
@@ -1077,14 +1148,19 @@ def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
 
 
 def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
-    """Recover at service start unless a live provisioner owns the host lock."""
+    """Recover at boot while excluding both provision and HMAC rotation."""
 
     store.initialize()
     provision_lock = store.state / ".provision.lock"
+    rotation_lock = _mapped(
+        store.root,
+        "/var/lib/trading-bot-witness/hmac-rotation/.runtime.lock",
+    )
     flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(provision_lock, flags, 0o600)
+    provision_descriptor = os.open(provision_lock, flags, 0o600)
+    rotation_descriptor = -1
     try:
-        metadata = os.fstat(descriptor)
+        metadata = os.fstat(provision_descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_uid != os.geteuid()
@@ -1094,19 +1170,47 @@ def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
         ):
             raise ActivationError("activation provision lock metadata is unsafe")
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(provision_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             if exc.errno not in {errno.EACCES, errno.EAGAIN}:
                 raise
             print("activation_recovered=deferred-live-provision")
             return
+        rotation_descriptor = os.open(
+            rotation_lock,
+            os.O_RDWR
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        rotation_metadata = os.fstat(rotation_descriptor)
+        if (
+            not stat.S_ISREG(rotation_metadata.st_mode)
+            or rotation_metadata.st_uid != os.geteuid()
+            or rotation_metadata.st_gid != os.getegid()
+            or stat.S_IMODE(rotation_metadata.st_mode) != 0o600
+            or rotation_metadata.st_nlink != 1
+        ):
+            raise ActivationError("HMAC rotation lock metadata is unsafe")
+        try:
+            fcntl.flock(rotation_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN}:
+                raise
+            print("activation_recovered=deferred-live-rotation")
+            return
         recover(store, args)
     finally:
+        if rotation_descriptor >= 0:
+            try:
+                fcntl.flock(rotation_descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(rotation_descriptor)
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            fcntl.flock(provision_descriptor, fcntl.LOCK_UN)
         except OSError:
             pass
-        os.close(descriptor)
+        os.close(provision_descriptor)
 
 
 def commit(store: ActivationStore, args: argparse.Namespace) -> None:
@@ -1186,7 +1290,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     root = Path(args.root).resolve(strict=True)
-    if root != Path("/") and os.environ.get("WRITER_WITNESS_ACTIVATION_TEST_MODE") != "1":
+    test_mode = os.environ.get("WRITER_WITNESS_ACTIVATION_TEST_MODE") == "1"
+    _assert_isolated_runtime(test_mode=test_mode)
+    if root != Path("/") and not test_mode:
         raise ActivationError("non-root activation trees require explicit test mode")
     store = ActivationStore(root)
     commands = {

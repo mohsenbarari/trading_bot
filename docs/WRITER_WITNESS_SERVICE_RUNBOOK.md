@@ -15,7 +15,7 @@ new release was installed on `185.206.95.94`, that its live state was attested,
 that the twelve restore crash points or RH-010 ran, that Full Matrix ran, or
 that external reviewers approved the final delta.
 
-At the current worktree snapshot, the focused release/deployment/Matrix verifier
+At the earlier reviewed snapshot, the focused release/deployment/Matrix verifier
 groups completed `39`, `140`, and `97` tests with zero failures and zero skips.
 A real
 offline smoke also installed all `45` locked distributions and attested `2,771`
@@ -24,11 +24,16 @@ RECORD files inside a closed `3,087`-entry venv inventory before and after
 release-bound system ELF objects. This is component-level source verification, not the final
 combined exact-SHA source gate and not live-host evidence.
 
-The hermetic combined gate passed from the feature worktree:
-`397` explicitly listed unit tests with zero skips, all `4` guarded
-real-PostgreSQL tests, and the complete four-database failure drill. This closes
-the local source gate only; it is not deployment, live-host, preflight, or
-real-host Matrix evidence.
+The two exact-SHA reviews of `21aae1de` subsequently rejected dark installation
+and exposed the second-remediation defects recorded in roadmap Section 47.9.
+After those source changes, the hermetic combined gate passed from the current
+feature worktree: `404` explicitly listed unit tests with zero skips, all `4`
+guarded real-PostgreSQL tests, and the complete four-database failure drill. A
+fresh minimal release also passed its closed manifest verification; the
+SHA-256 of `release-manifest.json` is
+`bc36beda23a49a9423aef26a60dee9eeb417b4136dcb664ab4bac56ff498562b`.
+This closes the local source gate only; it is not deployment, live-host,
+preflight, external approval, or real-host Matrix evidence.
 
 The reviewed deployment contract is:
 
@@ -72,19 +77,35 @@ The reviewed deployment contract is:
 - activation is a journaled `begin -> publish -> credential finalize -> commit
   -> service completion` transaction over the
   code, venv, runtime provenance, runtime/client env, Nginx, systemd, and helper
-  files. Errors and handled signals roll back immediately. A mandatory boot
-  recovery unit plus a periodic watchdog runs before/alongside Nginx and Writer
-  Witness. An uncommitted generation is rolled back; a committed generation is
-  completed only after the exact services are healthy. SIGKILL or power loss
-  therefore cannot leave an unowned partially published generation serving;
+  files. Candidate mode/size/digest bindings are written durably before the
+  first publication, every managed publication has a crash-injection point,
+  and all public units must be proven inactive before publication starts.
+  Errors and handled signals roll back immediately. A mandatory boot recovery
+  unit performs only rollback reconciliation before Nginx/Writer start; a
+  separately ordered periodic watchdog owns service completion. Both paths
+  serialize with provision and HMAC rotation. An uncommitted generation is
+  rolled back; a committed generation is completed only after the exact
+  services are healthy. SIGKILL or power loss therefore cannot leave an
+  unowned partially published generation serving;
 - credentials use an independent two-phase prepare/finalize contract. The
   root-only bootstrap file is created exclusively, existing rotated HMAC state
   wins over bootstrap state, finalize and durable bootstrap-HMAC scrubbing occur
   before activation commit, and a committed journal is retained until service
   completion. A descriptor-held rotation
   lock spans the entire operation; reprovision cannot race HMAC rotation or
-  resurrect a scrubbed key. Database credentials are parsed from a closed
-  rendered schema and are never evaluated by shell `source`;
+  resurrect a scrubbed key. Bootstrap, signing-key, and first-install TLS
+  publication use reclaimable initialization namespaces so a crash cannot
+  wedge a fresh retry. Database credentials are parsed from a closed rendered
+  schema, are never evaluated by shell `source`, and PostgreSQL receives only
+  generated SCRAM verifiers in role DDL rather than clear passwords;
+- all installed privileged Python helpers use the pinned system interpreter
+  under `env -i`, `-I -S -B`, UTF-8 mode, and disabled bytecode, and reject an
+  unisolated direct start. The Writer service starts through its exact
+  activation venv Python with isolated environment handling; preflight binds
+  `/proc` executable, argv, and forbidden-environment absence to that runtime.
+  The offsite configurator parses S3 credentials through the same pinned clean
+  system interpreter, and the online wheelhouse builder uses isolated pip then
+  runs the verifier through the closed trust-anchor startup;
 - attestation checks the effective systemd service, not only the unit file:
   its fragment path, absence of drop-ins, effective user/group/working
   directory/command, and required hardening properties must match the frozen
@@ -108,12 +129,15 @@ The reviewed deployment contract is:
   calls. The minimum is `64 MiB`, including conservative HTTP, SSH handshake
   and command, SCP, reconnect, abort-probe, cleanup, and final-postflight upper
   bounds; `16 MiB` is reserved only for cleanup. Every scenario has a
-  Witness-clock `not_after` no later than 900 seconds after start, and cleanup
-  has a separate bounded 900-second recovery window. Expiry blocks new
-  authorization/mutation checks but never blocks exact credential revocation,
-  rollback, or campaign-tombstone release.
-  SSH ControlMaster sockets live only on verified tmpfs and are counted as
-  reusable only after successful establishment;
+  Witness-clock `not_after` no later than 900 seconds after start. That expiry
+  is carried by each scenario HMAC credential and is checked again with fresh
+  database time inside the transition transaction before any state or receipt
+  mutation. Cleanup has a separate non-renewable 900-second recovery window;
+  every subprocess timeout is clamped to its remaining allowance. Expiry never
+  blocks exact credential revocation, rollback, or campaign-tombstone release.
+  SSH ControlMaster sockets live only on verified tmpfs, but DPI accounting
+  charges a complete handshake upper bound for every SSH/SCP operation because
+  OpenSSH can transparently recreate a dead master and still report success;
 - the source gate re-executes under `env -i`, supplies only non-secret
   placeholders, checks a closed shell/Python syntax list without bytecode, and
   treats any unit skip, guarded PostgreSQL failure, or four-database drill
@@ -635,9 +659,12 @@ The controller keeps an owner-safe descriptor-held `flock`, a local durable
 campaign journal, and a matching remote claim. The remote claim is one complete
 owner-only `active.json` file published atomically and durably before any fault;
 its identity is the exact `tag + commit + scenario + not_after` tuple. New
-claims, authorization consumption, and active mutation fail closed after the
-replacement-Witness clock reaches `not_after`; exact cleanup ownership and
-release remain available. Release atomically moves that same record to the exact append-only
+claims and authorization consumption fail closed after the replacement-Witness
+clock reaches `not_after`. The scenario HMAC credential carries that same
+expiry, and the transition transaction rechecks fresh database time before
+reading/writing a receipt or changing Writer state, so a request delayed across
+expiry cannot commit. Exact cleanup ownership and release remain available.
+Release atomically moves that same record to the exact append-only
 `releases/<tag>.json` tombstone. A lost SSH response is resolved by inspecting
 and repeating only that exact identity; generic path absence is never accepted
 as release proof. Intent is fsynced before each credential, firewall, restore,

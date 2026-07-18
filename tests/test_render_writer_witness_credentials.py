@@ -143,6 +143,45 @@ class WriterWitnessCredentialRendererTests(unittest.TestCase):
         self.assertNotIn(self.fi_secret, combined)
         self.assertNotIn("webapp-fi-v1", combined)
 
+    def test_reprovision_preserves_campaign_credential_expiry(self):
+        self._render()
+        campaign_key = "matrix-wwm_0123456789ab-fi"
+        campaign_secret = "c" * 64
+        not_after = "2099-01-01T00:00:00Z"
+        self._replace(
+            self.runtime,
+            "WRITER_WITNESS_SERVICE_WEBAPP_FI_KEY_ID=webapp-fi-v1",
+            f"WRITER_WITNESS_SERVICE_WEBAPP_FI_KEY_ID={campaign_key}",
+        )
+        self._replace(
+            self.runtime,
+            f"WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET={self.fi_secret}",
+            f"WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET={campaign_secret}",
+        )
+        with self.runtime.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER={not_after}\n"
+            )
+        fi_client = self.clients / "webapp-fi.env"
+        self._replace(
+            fi_client,
+            "WRITER_WITNESS_CLIENT_KEY_ID=webapp-fi-v1",
+            f"WRITER_WITNESS_CLIENT_KEY_ID={campaign_key}",
+        )
+        self._replace(
+            fi_client,
+            f"WRITER_WITNESS_CLIENT_SECRET={self.fi_secret}",
+            f"WRITER_WITNESS_CLIENT_SECRET={campaign_secret}",
+        )
+
+        self.assertEqual(self._render()["credential_source"], "preserved")
+        self.assertEqual(
+            self._values(self.runtime)[
+                "WRITER_WITNESS_SERVICE_WEBAPP_FI_NOT_AFTER"
+            ],
+            not_after,
+        )
+
     def test_initialized_marker_blocks_reconstruction_when_files_are_missing(self):
         self._render()
         self.runtime.unlink()
@@ -324,12 +363,18 @@ class WriterWitnessCredentialRendererTests(unittest.TestCase):
         bootstrap_dir = self.root / "bootstrap-group-readable"
         bootstrap_dir.mkdir(mode=0o750)
         fresh = bootstrap_dir / "bootstrap.env"
+        crashed_initializer = (
+            bootstrap_dir / f".{fresh.name}.initialize-{'a' * 32}"
+        )
+        crashed_initializer.write_bytes(b"partial")
+        crashed_initializer.chmod(0o600)
         created = renderer.initialize_bootstrap(
             fresh,
             expected_uid=self.uid,
             expected_gid=self.gid,
         )
         self.assertTrue(created["bootstrap_created"])
+        self.assertFalse(crashed_initializer.exists())
         first = fresh.read_bytes()
         repeated = renderer.initialize_bootstrap(
             fresh,
