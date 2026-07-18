@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
+
+readonly WRITER_WITNESS_SYSTEM_PYTHON=/usr/bin/python3.12
+isolated_system_python() {
+    /usr/bin/env -i \
+        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        "$WRITER_WITNESS_SYSTEM_PYTHON" \
+        -I -S -B -X utf8 -X pycache_prefix=/dev/null "$@"
+}
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     echo "provision_writer_witness_host.sh must run as root" >&2
@@ -41,11 +50,15 @@ if [[ "$ROTATE_TLS" != "true" && "$ROTATE_TLS" != "false" ]]; then
     echo "WRITER_WITNESS_ROTATE_TLS must be true or false" >&2
     exit 2
 fi
+if [[ "$ROTATE_TLS" == "true" ]]; then
+    echo "TLS rotation is a separate host transaction and is not allowed during release activation" >&2
+    exit 2
+fi
 if [[ ! -d "$WHEELHOUSE" || -L "$WHEELHOUSE" ]]; then
     echo "WRITER_WITNESS_WHEELHOUSE must be one real offline wheel directory" >&2
     exit 2
 fi
-python3 - "$WITNESS_PUBLIC_IP" "$WEBAPP_FI_SOURCE_IP" "$WEBAPP_IR_SOURCE_IP" "$SSH_SOURCE_IP" <<'PY'
+isolated_system_python - "$WITNESS_PUBLIC_IP" "$WEBAPP_FI_SOURCE_IP" "$WEBAPP_IR_SOURCE_IP" "$SSH_SOURCE_IP" <<'PY'
 from ipaddress import ip_address
 import sys
 for value in sys.argv[1:]:
@@ -67,6 +80,9 @@ for required in \
     "$ASSET_DIR/nginx.conf.template" \
     "$ASSET_DIR/writer-witness-activation.py" \
     "$ASSET_DIR/writer-witness-activation-recovery.service" \
+    "$ASSET_DIR/writer-witness-activation-watchdog.sh" \
+    "$ASSET_DIR/writer-witness-activation-watchdog.service" \
+    "$ASSET_DIR/writer-witness-activation-watchdog.timer" \
     "$ASSET_DIR/writer-witness.service" \
     "$ASSET_DIR/writer-witness-matrix-campaign.py" \
     "$ASSET_DIR/writer-witness-matrix-host-faults.sh" \
@@ -87,7 +103,7 @@ do
 done
 bootstrap_attest_release() {
     local release_root="$1"
-    python3 - "$release_root" "$EXPECTED_MANIFEST_SHA256" <<'PY'
+    isolated_system_python - "$release_root" "$EXPECTED_MANIFEST_SHA256" <<'PY'
 from pathlib import Path
 import hashlib
 import json
@@ -177,7 +193,7 @@ if hashlib.sha256(verifier_raw).hexdigest() != manifest[verifier_relative]:
 PY
 }
 fsync_directories() {
-    python3 - "$@" <<'PY'
+    isolated_system_python - "$@" <<'PY'
 import os
 import sys
 
@@ -190,7 +206,7 @@ for value in sys.argv[1:]:
 PY
 }
 fsync_trees() {
-    python3 - "$@" <<'PY'
+    isolated_system_python - "$@" <<'PY'
 import os
 from pathlib import Path
 import stat
@@ -267,7 +283,7 @@ atomic_install_file() {
     local mode="$3"
     local uid="${4:-0}"
     local gid="${5:-0}"
-    python3 - "$source" "$destination" "$mode" "$uid" "$gid" <<'PY'
+    isolated_system_python - "$source" "$destination" "$mode" "$uid" "$gid" <<'PY'
 from pathlib import Path
 import os
 import stat
@@ -365,7 +381,7 @@ assert_no_writer_witness_systemd_dropins() {
     done
 }
 bootstrap_attest_release "$SOURCE_DIR"
-python3 "$SOURCE_DIR/scripts/verify_writer_witness_release.py" \
+isolated_system_python "$SOURCE_DIR/scripts/verify_writer_witness_release.py" \
     --release-root "$SOURCE_DIR" \
     --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
     --expected-uid 0 \
@@ -405,7 +421,7 @@ install -d -m 0700 -o root -g root \
     /var/lib/trading-bot-witness/matrix-campaign/consumed-preflights
 install -d -m 0700 -o root -g root /var/backups/trading-bot-witness
 install -d -m 0700 -o root -g root /var/lib/trading-bot-witness/activation-state
-python3 - <<'PY'
+isolated_system_python - <<'PY'
 from pathlib import Path
 import os
 import stat
@@ -448,7 +464,7 @@ activation_dir="$activation_root/$RELEASE_ID"
 install -d -m 0755 -o root -g root /opt/trading-bot-witness/venvs "$activation_root"
 
 provision_lock=/var/lib/trading-bot-witness/activation-state/.provision.lock
-python3 - "$provision_lock" <<'PY'
+isolated_system_python - "$provision_lock" <<'PY'
 from pathlib import Path
 import os
 import stat
@@ -493,7 +509,7 @@ flock -n "$provision_lock_fd" || {
 # inherited descriptor is attested by both renderer phases, so no rotation can
 # land between credential prepare and post-commit finalization.
 rotation_lock=/var/lib/trading-bot-witness/hmac-rotation/.runtime.lock
-python3 - "$rotation_lock" <<'PY'
+isolated_system_python - "$rotation_lock" <<'PY'
 from pathlib import Path
 import os
 import stat
@@ -564,8 +580,22 @@ atomic_install_file \
     "$ASSET_DIR/writer-witness-activation-recovery.service" \
     /etc/systemd/system/writer-witness-activation-recovery.service \
     0644
+atomic_install_file \
+    "$ASSET_DIR/writer-witness-activation-watchdog.sh" \
+    /usr/local/sbin/writer-witness-activation-watchdog \
+    0755
+atomic_install_file \
+    "$ASSET_DIR/writer-witness-activation-watchdog.service" \
+    /etc/systemd/system/writer-witness-activation-watchdog.service \
+    0644
+atomic_install_file \
+    "$ASSET_DIR/writer-witness-activation-watchdog.timer" \
+    /etc/systemd/system/writer-witness-activation-watchdog.timer \
+    0644
 systemctl daemon-reload
 systemctl enable writer-witness-activation-recovery.service
+systemctl enable --now writer-witness-activation-watchdog.timer
+/usr/local/sbin/writer-witness-activation-watchdog
 
 # Reconcile a previous power-loss journal before accepting another release.
 # The operation is idempotent; a second invocation reports recovered=no.
@@ -585,6 +615,18 @@ if grep -Fx 'activation_recovered=yes' <<<"$activation_recovery_result" >/dev/nu
     done
 fi
 
+# Bootstrap credentials must predate the activation journal so the helper can
+# restore their complete pre-finalization bytes after any crash.  The renderer
+# is executed from the externally bound release under the isolated system
+# interpreter; no ambient Python startup state participates in this trust step.
+secrets_file=/etc/trading-bot-witness/bootstrap-secrets.env
+credential_marker=/var/lib/trading-bot-witness/activation-state/credential-state.json
+isolated_system_python \
+    "$SOURCE_DIR/scripts/render_writer_witness_credentials.py" \
+    --mode initialize-bootstrap \
+    --bootstrap-secrets "$secrets_file" \
+    >/dev/null
+
 activation_transaction_open=false
 activation_service_stopped=false
 rollback_activation_transaction() {
@@ -603,6 +645,11 @@ rollback_activation_transaction() {
         fi
         if [[ "$activation_service_stopped" == true ]]; then
             systemctl daemon-reload
+            systemctl enable --now \
+                nginx \
+                writer-witness.service \
+                writer-witness-backup.timer \
+                writer-witness-offsite-backup.timer
             systemctl restart nginx writer-witness.service
             curl --fail --silent --show-error \
                 --retry 30 --retry-delay 1 --retry-all-errors \
@@ -656,7 +703,7 @@ chmod 0755 \
     "$release_dir/scripts/verify_writer_witness_wheelhouse.py"
 chown -R root:root "$release_dir"
 bootstrap_attest_release "$release_dir"
-python3 "$release_dir/scripts/verify_writer_witness_release.py" \
+isolated_system_python "$release_dir/scripts/verify_writer_witness_release.py" \
     --release-root "$release_dir" \
     --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
     --expected-uid 0 \
@@ -666,7 +713,7 @@ python3 "$release_dir/scripts/verify_writer_witness_release.py" \
 # copied, externally bound release that was just attested.
 SOURCE_DIR="$release_dir"
 ASSET_DIR="$release_dir/deploy/writer-witness"
-python3 "$release_dir/scripts/verify_writer_witness_wheelhouse.py" \
+isolated_system_python "$release_dir/scripts/verify_writer_witness_wheelhouse.py" \
     --wheelhouse "$WHEELHOUSE" \
     --manifest "$ASSET_DIR/wheelhouse.sha256" \
     --expected-uid 0 \
@@ -784,14 +831,6 @@ runtime_attestation="$(attest_writer_witness_runtime)"
     exit 2
 }
 
-secrets_file=/etc/trading-bot-witness/bootstrap-secrets.env
-credential_marker=/var/lib/trading-bot-witness/activation-state/credential-state.json
-/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-    "$expected_python_path" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
-    "$release_dir/scripts/render_writer_witness_credentials.py" \
-    --mode initialize-bootstrap \
-    --bootstrap-secrets "$secrets_file" \
-    >/dev/null
 database_env="$activation_candidates/database.env"
 /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
     "$expected_python_path" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
@@ -828,21 +867,25 @@ if ! runuser -u postgres -- psql -XAtqc \
     "SELECT 1 FROM pg_roles WHERE rolname = 'writer_witness_migrator'" \
     | grep -qx 1
 then
-    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -c \
-        "CREATE ROLE writer_witness_migrator LOGIN PASSWORD '$WITNESS_DB_MIGRATOR_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION"
+    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
+CREATE ROLE writer_witness_migrator LOGIN PASSWORD '$WITNESS_DB_MIGRATOR_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+SQL
 else
-    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -c \
-        "ALTER ROLE writer_witness_migrator PASSWORD '$WITNESS_DB_MIGRATOR_PASSWORD'"
+    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
+ALTER ROLE writer_witness_migrator PASSWORD '$WITNESS_DB_MIGRATOR_PASSWORD';
+SQL
 fi
 if ! runuser -u postgres -- psql -XAtqc \
     "SELECT 1 FROM pg_roles WHERE rolname = 'writer_witness_runtime'" \
     | grep -qx 1
 then
-    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -c \
-        "CREATE ROLE writer_witness_runtime LOGIN PASSWORD '$WITNESS_DB_RUNTIME_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION"
+    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
+CREATE ROLE writer_witness_runtime LOGIN PASSWORD '$WITNESS_DB_RUNTIME_PASSWORD' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+SQL
 else
-    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -c \
-        "ALTER ROLE writer_witness_runtime PASSWORD '$WITNESS_DB_RUNTIME_PASSWORD'"
+    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 <<SQL
+ALTER ROLE writer_witness_runtime PASSWORD '$WITNESS_DB_RUNTIME_PASSWORD';
+SQL
 fi
 if ! runuser -u postgres -- psql -XAtqc \
     "SELECT 1 FROM pg_database WHERE datname = 'writer_witness'" \
@@ -875,12 +918,19 @@ SQL
 
 private_key_file=/etc/trading-bot-witness/writer-witness-ed25519
 public_key_file=/etc/trading-bot-witness/writer-witness-ed25519.pub
-if [[ ! -f "$private_key_file" || ! -f "$public_key_file" ]]; then
+if [[ -e "$private_key_file" || -L "$private_key_file" || -e "$public_key_file" || -L "$public_key_file" ]]; then
+    [[ -f "$private_key_file" && ! -L "$private_key_file" \
+        && -f "$public_key_file" && ! -L "$public_key_file" ]] || {
+        echo "Writer Witness signing keypair is incomplete or unsafe" >&2
+        exit 2
+    }
+else
     /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         "$venv_dir/bin/python" -I -B -X utf8 -X pycache_prefix=/dev/null \
         - "$private_key_file" "$public_key_file" <<'PY'
 from pathlib import Path
 import base64
+import os
 import sys
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -896,8 +946,36 @@ public_raw = key.public_key().public_bytes(
     serialization.Encoding.Raw,
     serialization.PublicFormat.Raw,
 )
-private_path.write_text(base64.b64encode(private_raw).decode("ascii") + "\n")
-public_path.write_text(base64.b64encode(public_raw).decode("ascii") + "\n")
+
+
+def create_exact(path: Path, payload: bytes, mode: int) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, mode)
+    try:
+        os.fchmod(descriptor, mode)
+        written = 0
+        while written < len(payload):
+            count = os.write(descriptor, payload[written:])
+            if count < 1:
+                raise RuntimeError("short signing key write")
+            written += count
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+create_exact(private_path, base64.b64encode(private_raw) + b"\n", 0o600)
+try:
+    create_exact(public_path, base64.b64encode(public_raw) + b"\n", 0o600)
+except BaseException:
+    private_path.unlink(missing_ok=True)
+    raise
+directory = os.open(private_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
 PY
 fi
 chown writer-witness:writer-witness "$private_key_file"
@@ -907,16 +985,29 @@ chmod 0644 "$public_key_file"
 public_key="$(tr -d '\r\n' <"$public_key_file")"
 
 tls_dir=/etc/trading-bot-witness/tls
-if [[ "$ROTATE_TLS" == "true" ]]; then
-    rm -f \
-        "$tls_dir/ca.key" \
-        "$tls_dir/ca.crt" \
-        "$tls_dir/ca.srl" \
-        "$tls_dir/server.key" \
-        "$tls_dir/server.csr" \
-        "$tls_dir/server.crt"
-fi
-if [[ ! -f "$tls_dir/ca.key" || ! -f "$tls_dir/ca.crt" ]]; then
+tls_complete=true
+for tls_file in ca.key ca.crt server.key server.crt; do
+    if [[ ! -f "$tls_dir/$tls_file" || -L "$tls_dir/$tls_file" ]]; then
+        tls_complete=false
+    fi
+done
+if [[ "$tls_complete" != true ]]; then
+    tls_present=false
+    for tls_file in ca.key ca.crt server.key server.crt ca.srl server.csr; do
+        if [[ -e "$tls_dir/$tls_file" || -L "$tls_dir/$tls_file" ]]; then
+            tls_present=true
+        fi
+    done
+    [[ "$tls_present" == false \
+        && ! -e /opt/trading-bot-witness/active \
+        && ! -L /opt/trading-bot-witness/active \
+        && ! -e /srv/trading-bot-witness/current \
+        && ! -L /srv/trading-bot-witness/current \
+        && ! -e /opt/trading-bot-witness/venv \
+        && ! -L /opt/trading-bot-witness/venv ]] || {
+        echo "TLS material is incomplete; release activation refuses to rotate or repair live TLS" >&2
+        exit 2
+    }
     openssl req -x509 -newkey rsa:3072 -sha256 -nodes \
         -days 3650 \
         -subj '/CN=Trading Bot Private Writer Witness CA' \
@@ -925,8 +1016,6 @@ if [[ ! -f "$tls_dir/ca.key" || ! -f "$tls_dir/ca.crt" ]]; then
         -addext 'subjectKeyIdentifier=hash' \
         -keyout "$tls_dir/ca.key" \
         -out "$tls_dir/ca.crt"
-fi
-if [[ ! -f "$tls_dir/server.key" || ! -f "$tls_dir/server.crt" ]]; then
     openssl req -new -newkey rsa:3072 -sha256 -nodes \
         -subj '/CN=writer-witness.internal' \
         -addext "subjectAltName=IP:$WITNESS_PUBLIC_IP" \
@@ -978,15 +1067,9 @@ sed \
     "$ASSET_DIR/nginx.conf.template" >"$nginx_target"
 chmod 0644 "$nginx_target"
 
-# The exact effective ingress policy is established and attested while the
-# previous dark service generation is still in place. The new activation is
-# never exposed before this gate passes.
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow from "$SSH_SOURCE_IP" to any port 22 proto tcp comment 'writer-witness-control-ssh'
-ufw allow from "$WEBAPP_FI_SOURCE_IP" to any port 443 proto tcp comment 'writer-witness-webapp-fi'
-ufw allow from "$WEBAPP_IR_SOURCE_IP" to any port 443 proto tcp comment 'writer-witness-webapp-ir'
-ufw --force enable
+# Firewall mutation is intentionally outside release activation.  The host
+# bootstrap/rotation transaction must establish the approved policy first;
+# this release step is read-only and fails closed on any effective drift.
 nft -j list ruleset \
     | /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         "$expected_python_path" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
@@ -1118,11 +1201,17 @@ fsync_directories \
     /opt/trading-bot-witness/venvs \
     "$activation_root"
 
-# No process may auto-restart through a pointer while it is being committed.
-# A live error invokes the trap above; a power loss is recovered by the boot
-# unit before either Writer Witness or Nginx starts.
+# No public process or backup timer may observe the serial host-global file
+# publication.  The Writer Witness candidate is validated on loopback while
+# Nginx remains stopped; the watchdog reconciles a killed provisioner within
+# one timer interval after the provision lock is released.
 activation_service_stopped=true
-systemctl stop writer-witness.service
+systemctl stop \
+    nginx \
+    writer-witness.service \
+    writer-witness-backup.timer \
+    writer-witness-offsite-backup.timer \
+    >/dev/null 2>&1 || true
 /usr/local/sbin/writer-witness-activation publish --release-id "$RELEASE_ID" >/dev/null
 nginx -t
 systemctl daemon-reload
@@ -1154,8 +1243,13 @@ test "$(readlink -f /opt/trading-bot-witness/active)" = "$activation_dir"
 test "$(readlink -f /srv/trading-bot-witness/current)" = "$release_dir"
 test "$(readlink -f /opt/trading-bot-witness/venv)" = "$venv_dir"
 
-systemctl enable --now nginx writer-witness.service writer-witness-backup.timer
-systemctl restart nginx writer-witness.service
+systemctl enable \
+    nginx \
+    writer-witness.service \
+    writer-witness-backup.timer \
+    writer-witness-offsite-backup.timer
+systemctl start writer-witness.service
+systemctl restart writer-witness.service
 
 for attempt in $(seq 1 30); do
     if curl --fail --silent --show-error http://127.0.0.1:8011/health/ready >/dev/null; then
@@ -1180,9 +1274,6 @@ runtime_super="$(runuser -u postgres -- psql -XAtqc \
 [[ "$runtime_ddl" == "f" ]]
 [[ "$runtime_super" == "f" ]]
 
-/usr/local/sbin/writer-witness-activation commit --release-id "$RELEASE_ID" >/dev/null
-activation_transaction_open=false
-activation_service_stopped=false
 /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
     "$expected_python_path" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
     "$release_dir/scripts/render_writer_witness_credentials.py" \
@@ -1194,6 +1285,23 @@ activation_service_stopped=false
     --hmac-state-root /var/lib/trading-bot-witness/hmac-rotation \
     --rotation-lock-fd "$rotation_lock_fd" \
     >/dev/null
+/usr/local/sbin/writer-witness-activation commit --release-id "$RELEASE_ID" >/dev/null
+activation_transaction_open=false
+
+# A committed journal remains durable until the public daemons and timers are
+# running.  If this shell dies in the gap, the periodic watchdog performs this
+# same idempotent completion path.
+systemctl enable --now \
+    nginx \
+    writer-witness.service \
+    writer-witness-backup.timer \
+    writer-witness-offsite-backup.timer
+systemctl restart nginx writer-witness.service
+curl --fail --silent --show-error \
+    --retry 30 --retry-delay 1 --retry-all-errors \
+    http://127.0.0.1:8011/health/ready >/dev/null
+/usr/local/sbin/writer-witness-activation complete --release-id "$RELEASE_ID" >/dev/null
+activation_service_stopped=false
 flock -u "$rotation_lock_fd"
 exec {rotation_lock_fd}>&-
 trap - ERR HUP INT TERM EXIT

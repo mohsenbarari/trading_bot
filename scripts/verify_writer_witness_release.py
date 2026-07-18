@@ -15,6 +15,7 @@ from typing import Iterable, Sequence
 
 
 MANIFEST_NAME = "release-manifest.json"
+TRUSTED_SYSTEM_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 DIRECTORY_MODE = 0o755
 REGULAR_FILE_MODE = 0o644
@@ -37,6 +38,23 @@ EXECUTABLE_RELEASE_PATHS = frozenset(
 
 class AttestationError(RuntimeError):
     """The release tree cannot be proven to match its bound manifest."""
+
+
+def _require_isolated_startup() -> None:
+    flags = sys.flags
+    if (
+        not flags.isolated
+        or not flags.no_site
+        or not flags.dont_write_bytecode
+        or flags.utf8_mode != 1
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise AttestationError("release verifier requires isolated clean Python startup")
+    allowed = {"PATH": TRUSTED_SYSTEM_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise AttestationError("release verifier did not start with a clean environment")
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -471,8 +489,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
     try:
+        _require_isolated_startup()
+        args = parse_args(argv)
         result = attest_release(
             args.release_root,
             args.expected_manifest_sha256,

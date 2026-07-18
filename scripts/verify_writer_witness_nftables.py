@@ -13,12 +13,14 @@ import argparse
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 import re
 import sys
 from typing import BinaryIO, Iterable, Mapping, Sequence, TextIO
 
 
 MAXIMUM_INPUT_BYTES = 8 * 1024 * 1024
+TRUSTED_SYSTEM_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 MAXIMUM_JSON_DEPTH = 64
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 EXPECTED_TABLES = frozenset({("ip", "filter"), ("ip6", "filter")})
@@ -45,6 +47,27 @@ RULE_KEYS = frozenset({"family", "table", "chain", "handle", "expr", "comment"})
 
 class NftablesAttestationError(RuntimeError):
     """The supplied ruleset cannot be proven to match the pinned policy."""
+
+
+def _require_isolated_startup() -> None:
+    flags = sys.flags
+    if (
+        not flags.isolated
+        or not flags.no_site
+        or not flags.dont_write_bytecode
+        or flags.utf8_mode != 1
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise NftablesAttestationError(
+            "nftables verifier requires isolated clean Python startup"
+        )
+    allowed = {"PATH": TRUSTED_SYSTEM_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise NftablesAttestationError(
+            "nftables verifier did not start with a clean environment"
+        )
 
 
 @dataclass(frozen=True)
@@ -417,7 +440,13 @@ def attest_ruleset(value: bytes, expected_policy_sha256: str) -> dict[str, objec
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--expected-policy-sha256", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--expected-policy-sha256")
+    mode.add_argument(
+        "--emit-policy-binding",
+        action="store_true",
+        help="emit a source-reviewable binding for an intentional host-policy re-pin",
+    )
     return parser.parse_args(argv)
 
 
@@ -431,10 +460,21 @@ def _binary_stdin(stream: TextIO | BinaryIO) -> BinaryIO:
 
 
 def main(argv: Sequence[str] | None = None, *, stdin: BinaryIO | None = None) -> int:
-    args = parse_args(argv)
     try:
+        _require_isolated_startup()
+        args = parse_args(argv)
         value = read_bounded_input(stdin if stdin is not None else _binary_stdin(sys.stdin))
-        result = attest_ruleset(value, args.expected_policy_sha256)
+        snapshot = inspect_ruleset(value)
+        if args.emit_policy_binding:
+            result = {
+                "chain_count": snapshot.chain_count,
+                "policy_sha256": snapshot.policy_sha256,
+                "rule_count": snapshot.rule_count,
+                "schema_version": "writer_witness_nftables_policy_v1",
+                "table_count": snapshot.table_count,
+            }
+        else:
+            result = attest_ruleset(value, args.expected_policy_sha256)
     except NftablesAttestationError as exc:
         print(f"nftables policy attestation failed: {exc}", file=sys.stderr)
         return 1

@@ -16,6 +16,7 @@ from typing import Mapping, Sequence
 
 
 MAXIMUM_MANIFEST_BYTES = 16 * 1024 * 1024
+TRUSTED_SYSTEM_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 SAFE_WHEEL_BASENAME_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._+!-]*\.whl\Z", re.ASCII
@@ -24,6 +25,27 @@ SAFE_WHEEL_BASENAME_PATTERN = re.compile(
 
 class WheelhouseAttestationError(RuntimeError):
     """The wheelhouse cannot be proven to match its release-bound manifest."""
+
+
+def _require_isolated_startup() -> None:
+    flags = sys.flags
+    if (
+        not flags.isolated
+        or not flags.no_site
+        or not flags.dont_write_bytecode
+        or flags.utf8_mode != 1
+        or sys.pycache_prefix != "/dev/null"
+    ):
+        raise WheelhouseAttestationError(
+            "wheelhouse verifier requires isolated clean Python startup"
+        )
+    allowed = {"PATH": TRUSTED_SYSTEM_PATH}
+    if os.environ.get("LC_CTYPE") == "C.UTF-8":
+        allowed["LC_CTYPE"] = "C.UTF-8"
+    if dict(os.environ) != allowed:
+        raise WheelhouseAttestationError(
+            "wheelhouse verifier did not start with a clean environment"
+        )
 
 
 @dataclass(frozen=True)
@@ -477,8 +499,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
     try:
+        _require_isolated_startup()
+        args = parse_args(argv)
         result = attest_wheelhouse(
             args.wheelhouse, args.manifest, expected_uid=args.expected_uid
         )

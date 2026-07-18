@@ -15,17 +15,17 @@ new release was installed on `185.206.95.94`, that its live state was attested,
 that the twelve restore crash points or RH-010 ran, that Full Matrix ran, or
 that external reviewers approved the final delta.
 
-At the current worktree snapshot, the five focused verifier modules for release
-metadata, installed runtime, runtime provenance, offline wheelhouse, and
-nftables policy completed `113` tests with zero failures and zero skips. A real
+At the current worktree snapshot, the focused release/deployment/Matrix verifier
+groups completed `39`, `140`, and `97` tests with zero failures and zero skips.
+A real
 offline smoke also installed all `45` locked distributions and attested `2,771`
 RECORD files inside a closed `3,087`-entry venv inventory before and after
 `pip check`; that run also closed `22` installed venv ELF objects against `72`
 release-bound system ELF objects. This is component-level source verification, not the final
 combined exact-SHA source gate and not live-host evidence.
 
-The hermetic combined gate passed from a clean committed feature checkout:
-`384` explicitly listed unit tests with zero skips, all `4` guarded
+The hermetic combined gate passed from the feature worktree:
+`397` explicitly listed unit tests with zero skips, all `4` guarded
 real-PostgreSQL tests, and the complete four-database failure drill. This closes
 the local source gate only; it is not deployment, live-host, preflight, or
 real-host Matrix evidence.
@@ -69,15 +69,19 @@ The reviewed deployment contract is:
   staged release/runtime/provenance file and containing directory is fsynced
   before the active pointer is changed, and the exact nftables gate passes
   before the new generation is exposed;
-- activation is a journaled `begin -> publish -> commit` transaction over the
+- activation is a journaled `begin -> publish -> credential finalize -> commit
+  -> service completion` transaction over the
   code, venv, runtime provenance, runtime/client env, Nginx, systemd, and helper
   files. Errors and handled signals roll back immediately. A mandatory boot
-  recovery unit runs before Nginx and Writer Witness, so SIGKILL or power loss
-  cannot leave a partially published generation active;
+  recovery unit plus a periodic watchdog runs before/alongside Nginx and Writer
+  Witness. An uncommitted generation is rolled back; a committed generation is
+  completed only after the exact services are healthy. SIGKILL or power loss
+  therefore cannot leave an unowned partially published generation serving;
 - credentials use an independent two-phase prepare/finalize contract. The
   root-only bootstrap file is created exclusively, existing rotated HMAC state
-  wins over bootstrap state, finalize occurs only after activation commit, and
-  bootstrap HMAC values are then durably scrubbed. A descriptor-held rotation
+  wins over bootstrap state, finalize and durable bootstrap-HMAC scrubbing occur
+  before activation commit, and a committed journal is retained until service
+  completion. A descriptor-held rotation
   lock spans the entire operation; reprovision cannot race HMAC rotation or
   resurrect a scrubbed key. Database credentials are parsed from a closed
   rendered schema and are never evaluated by shell `source`;
@@ -103,14 +107,27 @@ The reviewed deployment contract is:
 - the Matrix authorization budget covers all network transports, not only API
   calls. The minimum is `64 MiB`, including conservative HTTP, SSH handshake
   and command, SCP, reconnect, abort-probe, cleanup, and final-postflight upper
-  bounds; `16 MiB` is reserved only for cleanup. Every scenario and its
-  recovery share one non-resettable `900`-second deadline from journal creation.
+  bounds; `16 MiB` is reserved only for cleanup. Every scenario has a
+  Witness-clock `not_after` no later than 900 seconds after start, and cleanup
+  has a separate bounded 900-second recovery window. Expiry blocks new
+  authorization/mutation checks but never blocks exact credential revocation,
+  rollback, or campaign-tombstone release.
   SSH ControlMaster sockets live only on verified tmpfs and are counted as
   reusable only after successful establishment;
 - the source gate re-executes under `env -i`, supplies only non-secret
   placeholders, checks a closed shell/Python syntax list without bytecode, and
   treats any unit skip, guarded PostgreSQL failure, or four-database drill
   failure as fatal.
+
+The two-person Matrix approval policy has an additional source-level custody
+gate. `/etc/trading-bot-witness-matrix/allowed_signers` is not trusted merely
+because it is root-owned: its exact bytes must also match
+`TRUSTED_ALLOWED_SIGNERS_SHA256` in the reviewed Matrix runner source. That pin
+is intentionally `UNCONFIGURED` until two independently custodied public keys
+are supplied. Dark installation and guarded restore prerequisites do not need
+those keys, but RH-001 and every later RH scenario fail closed until a separate
+reviewed commit pins the canonical policy. Neither private key may exist on the
+controller or in the repository.
 
 Deployment of this exact reviewed release to the replacement dark Witness,
 read-only live attestation, offsite configuration/proof, all twelve guarded
@@ -180,6 +197,13 @@ attestation independently parses every installed native ELF file and rejects a
 `DT_NEEDED` dependency or ELF interpreter not closed by either a RECORD-bound
 venv ELF object or the release-bound system manifest. Hashing native wheel
 files without closing their external shared libraries is not sufficient.
+
+An intentional firewall-policy change is re-pinned explicitly, never during
+provisioning. Capture `nft -j list ruleset` on the approved host and pipe it to
+the isolated verifier with `--emit-policy-binding`; review the semantic diff,
+then replace `deploy/writer-witness/nftables-policy.json` in a separate source
+commit. The ordinary verify path still requires `--expected-policy-sha256` and
+cannot self-approve observed host state.
 
 ## Purpose And Boundary
 
@@ -610,8 +634,10 @@ credential-bundle hash before reconnect/restore success is possible.
 The controller keeps an owner-safe descriptor-held `flock`, a local durable
 campaign journal, and a matching remote claim. The remote claim is one complete
 owner-only `active.json` file published atomically and durably before any fault;
-its identity is the exact `tag + commit + scenario` tuple. Release atomically
-moves that same record to the exact append-only
+its identity is the exact `tag + commit + scenario + not_after` tuple. New
+claims, authorization consumption, and active mutation fail closed after the
+replacement-Witness clock reaches `not_after`; exact cleanup ownership and
+release remain available. Release atomically moves that same record to the exact append-only
 `releases/<tag>.json` tombstone. A lost SSH response is resolved by inspecting
 and repeating only that exact identity; generic path absence is never accepted
 as release proof. Intent is fsynced before each credential, firewall, restore,

@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -969,7 +970,7 @@ def _quarantine_unclaimed_rotation_directory(
     client_dir: Path,
     state_root: Path,
 ) -> str:
-    """Preserve a legacy metadata-less claim after proving no mutation occurred."""
+    """Reclaim a metadata-less owned claim after proving no mutation occurred."""
 
     key_name, secret_name, previous_key_name, previous_secret_name, client_name = _site_keys(site)
     rotation_dir = state_root / site
@@ -990,11 +991,15 @@ def _quarantine_unclaimed_rotation_directory(
         scenario_key_id = f"matrix-{campaign_tag}-{site.removeprefix('webapp_')}"
         if runtime.get(key_name) == scenario_key_id:
             raise RotationError("unclaimed rotation state may have activated the campaign key")
+    if not _state_children_are_deletable(rotation_dir):
+        raise RotationError("unclaimed rotation state contains foreign or unsafe entries")
 
     quarantine = state_root / (
         f".unclaimed-{site}-{int(time.time())}-{secrets.token_hex(6)}"
     )
     _rename_directory_noreplace(rotation_dir, quarantine)
+    _fsync_directory(state_root)
+    shutil.rmtree(quarantine)
     _fsync_directory(state_root)
     return quarantine.name
 
@@ -1391,7 +1396,7 @@ def recover(
         )
         return {
             "site": site,
-            "phase": "quarantined_unclaimed",
+            "phase": "reclaimed_unclaimed",
             "campaign_tag": campaign_tag,
             "quarantine_name": quarantine_name,
             "cleaned_staging": cleaned_staging,

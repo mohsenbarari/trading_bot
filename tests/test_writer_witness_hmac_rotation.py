@@ -1054,7 +1054,7 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         self.assertEqual(payload.read_bytes(), b"foreign-state-must-survive\n")
         self.assertEqual(unrecognized_payload.read_bytes(), b"do-not-delete")
 
-    def test_metadata_less_active_directory_is_preserved_in_quarantine(self):
+    def test_metadata_less_foreign_active_directory_fails_closed_without_quarantine(self):
         campaign_tag = "wwm_0123456789ab"
         runtime_before = self.runtime.read_bytes()
         self.state_root.mkdir(mode=0o700)
@@ -1062,6 +1062,29 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
         active.mkdir(mode=0o700)
         foreign_payload = active / "unknown-state.bin"
         foreign_payload.write_bytes(b"preserve-exactly")
+
+        with self.assertRaisesRegex(
+            rotation.RotationError, "foreign or unsafe entries"
+        ):
+            rotation.recover(
+                "webapp_fi",
+                0,
+                campaign_tag,
+                self.runtime,
+                self.client_dir,
+                self.state_root,
+            )
+        self.assertEqual(foreign_payload.read_bytes(), b"preserve-exactly")
+        self.assertEqual(self.runtime.read_bytes(), runtime_before)
+
+    def test_owned_metadata_write_remnant_is_reclaimed_without_wedging_root(self):
+        campaign_tag = "wwm_0123456789ab"
+        self.state_root.mkdir(mode=0o700)
+        active = self.state_root / "webapp_fi"
+        active.mkdir(mode=0o700)
+        remnant = active / ".metadata.json.owned123"
+        remnant.write_bytes(b"incomplete non-secret metadata")
+        remnant.chmod(0o600)
 
         recovered = rotation.recover(
             "webapp_fi",
@@ -1071,14 +1094,9 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
             self.client_dir,
             self.state_root,
         )
-        self.assertEqual(recovered["phase"], "quarantined_unclaimed")
+        self.assertEqual(recovered["phase"], "reclaimed_unclaimed")
         self.assertFalse(active.exists())
-        quarantine = self.state_root / recovered["quarantine_name"]
-        self.assertEqual(
-            (quarantine / "unknown-state.bin").read_bytes(),
-            b"preserve-exactly",
-        )
-        self.assertEqual(self.runtime.read_bytes(), runtime_before)
+        self.assertFalse(any(self.state_root.glob(".unclaimed-*")))
 
         rotation.prepare(
             "webapp_fi",
@@ -1096,7 +1114,7 @@ class WriterWitnessHmacRotationTests(unittest.TestCase):
             self.client_dir,
             self.state_root,
         )
-        self.assertTrue(quarantine.is_dir())
+        self.assertFalse(any(self.state_root.glob(".unclaimed-*")))
 
     def test_metadata_less_state_is_not_quarantined_after_possible_mutation(self):
         campaign_tag = "wwm_0123456789ab"

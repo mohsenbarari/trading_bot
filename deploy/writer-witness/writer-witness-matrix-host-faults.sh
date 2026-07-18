@@ -305,6 +305,9 @@ PY
     exit 0
 fi
 
+production_before="$root/production-before.json"
+production_after="$root/production-after.json"
+capture_production_state "$production_before"
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -c "CREATE TABLE matrix_disk_probe(id bigserial PRIMARY KEY, payload bytea NOT NULL);" \
     -c "INSERT INTO matrix_disk_probe(payload) VALUES (repeat('a', 1048576)::bytea);" >/dev/null
@@ -324,5 +327,26 @@ if ! grep -Eqi 'No space left|could not extend|disk full|PANIC|I/O error' "$erro
     sed -n '1,20p' "$error_log" >&2
     exit 1
 fi
+capture_production_state "$production_after"
+cmp --silent "$production_before" "$production_after" || {
+    echo "production Witness state changed during the isolated disk-full probe" >&2
+    exit 1
+}
+python3 - "$production_before" "$production_after" "$tag" <<'PY'
+import json
+from pathlib import Path
+import sys
 
-printf '{"status":"passed","scenario":"isolated-postgresql-disk-full","tag":"%s","production_database_touched":false}\n' "$tag"
+before = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+after = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+if before != after:
+    raise SystemExit("production state evidence changed during disk-full probe")
+print(json.dumps({
+    "status": "passed",
+    "scenario": "isolated-postgresql-disk-full",
+    "tag": sys.argv[3],
+    "production_before": before,
+    "production_after": after,
+    "production_state_unchanged": True,
+}, sort_keys=True))
+PY

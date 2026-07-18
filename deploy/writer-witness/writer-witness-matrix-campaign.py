@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import errno
 import fcntl
 import hashlib
@@ -306,13 +306,39 @@ def _publish_record(
     _kill_at(failpoint, after_point or "", 92)
 
 
-def _identity_payload(tag: str, expected_commit: str, scenario: str) -> dict[str, str]:
+def _parse_timestamp(value: str, *, label: str) -> datetime:
+    if not TIMESTAMP_PATTERN.fullmatch(value):
+        raise CampaignError(f"{label} timestamp is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CampaignError(f"{label} timestamp is invalid") from exc
+    if parsed.tzinfo is None:
+        raise CampaignError(f"{label} timestamp is invalid")
+    return parsed.astimezone(timezone.utc)
+
+
+def _identity_payload(
+    tag: str,
+    expected_commit: str,
+    scenario: str,
+    not_after: str,
+) -> dict[str, str]:
     _require_identity(tag, expected_commit, scenario)
+    _parse_timestamp(not_after, label="campaign expiry")
     return {
         "tag": tag,
         "expected_commit": expected_commit,
         "scenario": scenario,
+        "not_after": not_after,
     }
+
+
+def _require_unexpired(identity: dict[str, str]) -> None:
+    if datetime.now(timezone.utc) >= _parse_timestamp(
+        identity["not_after"], label="campaign expiry"
+    ):
+        raise CampaignError("Matrix campaign authorization has expired")
 
 
 def _validate_record(
@@ -366,6 +392,7 @@ def _validated_identity(
         str(payload.get("tag") or ""),
         str(payload.get("expected_commit") or ""),
         str(payload.get("scenario") or ""),
+        str(payload.get("not_after") or ""),
     )
     binding: dict[str, str] = {}
     if binding_required:
@@ -665,10 +692,15 @@ class CampaignStore:
         tag: str,
         expected_commit: str,
         scenario: str,
+        not_after: str,
         failpoint: str | None = None,
     ) -> dict[str, Any]:
         self._require_lock()
-        identity = _identity_payload(tag, expected_commit, scenario)
+        identity = _identity_payload(tag, expected_commit, scenario, not_after)
+        expiry = _parse_timestamp(not_after, label="campaign expiry")
+        now = datetime.now(timezone.utc)
+        if expiry <= now or expiry > now + timedelta(seconds=3630):
+            raise CampaignError("campaign expiry is outside the server-enforced one-hour window")
         release = self.release_path(tag)
         if release.exists() or release.is_symlink():
             self._read_and_validate(
@@ -697,11 +729,12 @@ class CampaignStore:
         tag: str,
         expected_commit: str,
         scenario: str,
+        not_after: str,
     ) -> dict[str, Any]:
         """Return a validated, machine-readable ownership classification."""
 
         self._require_lock()
-        identity = _identity_payload(tag, expected_commit, scenario)
+        identity = _identity_payload(tag, expected_commit, scenario, not_after)
         active_identity: dict[str, str] | None = None
         released_identity: dict[str, str] | None = None
 
@@ -756,6 +789,9 @@ class CampaignStore:
             "release_relation": released_relation,
             **identity,
         }
+        result["expired"] = datetime.now(timezone.utc) >= _parse_timestamp(
+            identity["not_after"], label="campaign expiry"
+        )
         if active_relation == "foreign":
             result["active_identity"] = active_identity
         if released_relation == "foreign":
@@ -768,11 +804,14 @@ class CampaignStore:
         tag: str,
         expected_commit: str,
         scenario: str,
+        not_after: str,
         expect: str,
     ) -> dict[str, Any]:
         self._require_lock()
-        identity = _identity_payload(tag, expected_commit, scenario)
-        if expect == "active":
+        identity = _identity_payload(tag, expected_commit, scenario, not_after)
+        if expect in {"active", "active-cleanup"}:
+            if expect == "active":
+                _require_unexpired(identity)
             if self.release_path(tag).exists() or self.release_path(tag).is_symlink():
                 raise CampaignError("campaign has conflicting active and released records")
             if not self.active_path.exists() or self.active_path.is_symlink():
@@ -809,12 +848,14 @@ class CampaignStore:
         tag: str,
         expected_commit: str,
         scenario: str,
+        not_after: str,
         authorization_nonce: str,
         preflight_sha256: str,
         failpoint: str | None = None,
     ) -> dict[str, Any]:
         self._require_lock()
-        identity = _identity_payload(tag, expected_commit, scenario)
+        identity = _identity_payload(tag, expected_commit, scenario, not_after)
+        _require_unexpired(identity)
         if not NONCE_PATTERN.fullmatch(authorization_nonce):
             raise CampaignError("invalid one-time authorization nonce")
         if not SHA256_PATTERN.fullmatch(preflight_sha256):
@@ -899,10 +940,11 @@ class CampaignStore:
         tag: str,
         expected_commit: str,
         scenario: str,
+        not_after: str,
         failpoint: str | None = None,
     ) -> dict[str, Any]:
         self._require_lock()
-        identity = _identity_payload(tag, expected_commit, scenario)
+        identity = _identity_payload(tag, expected_commit, scenario, not_after)
         release = self.release_path(tag)
         active_exists = self.active_path.exists() or self.active_path.is_symlink()
         release_exists = release.exists() or release.is_symlink()
@@ -949,6 +991,7 @@ def _add_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--scenario", required=True)
+    parser.add_argument("--not-after", required=True)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -975,7 +1018,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     _add_identity_arguments(assert_parser)
     assert_parser.add_argument(
         "--expect",
-        choices=("active", "released", "absent"),
+        choices=("active", "active-cleanup", "released", "absent"),
         required=True,
     )
     consume_parser = subparsers.add_parser("consume")
@@ -1008,6 +1051,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "tag": args.tag,
             "expected_commit": args.expected_commit,
             "scenario": args.scenario,
+            "not_after": args.not_after,
         }
         with CampaignStore(
             state_root,

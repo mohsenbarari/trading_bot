@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import stat
 import subprocess
@@ -40,16 +41,19 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="wwm-campaign-")
         self.base = Path(self.temporary.name)
         self.state_root = self.base / "state"
+        self.not_after = (
+            datetime.now(timezone.utc) + timedelta(minutes=30)
+        ).isoformat().replace("+00:00", "Z")
 
     def tearDown(self):
         self.temporary.cleanup()
 
-    @staticmethod
-    def identity(tag: str = "wwm_0123456789ab", scenario: str = "RH-001"):
+    def identity(self, tag: str = "wwm_0123456789ab", scenario: str = "RH-001"):
         return {
             "tag": tag,
             "expected_commit": COMMIT,
             "scenario": scenario,
+            "not_after": self.not_after,
         }
 
     def run_cli(
@@ -83,6 +87,8 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
                 COMMIT,
                 "--scenario",
                 scenario,
+                "--not-after",
+                self.not_after,
             )
         )
         if nonce is not None:
@@ -120,6 +126,7 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
                     tag=identity["tag"],
                     expected_commit="d" * 40,
                     scenario=identity["scenario"],
+                    not_after=identity["not_after"],
                     expect="active",
                 )
             self.assertEqual(store.release(**identity)["status"], "released")
@@ -132,6 +139,32 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
         tombstone = self.state_root / "releases" / f"{identity['tag']}.json"
         self.assertTrue(tombstone.is_file())
         self.assertEqual(stat.S_IMODE(tombstone.stat().st_mode), 0o600)
+
+    def test_server_clock_expiry_blocks_authorization_but_not_cleanup_release(self):
+        identity = self.identity()
+        with campaign.CampaignStore(self.state_root) as store:
+            store.claim(**identity)
+
+        real_datetime = datetime
+
+        class ExpiredDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = real_datetime.now(timezone.utc) + timedelta(hours=2)
+                return value if tz is not None else value.replace(tzinfo=None)
+
+        with mock.patch.object(campaign, "datetime", ExpiredDateTime):
+            with campaign.CampaignStore(self.state_root) as store:
+                with self.assertRaisesRegex(campaign.CampaignError, "has expired"):
+                    store.assert_state(**identity, expect="active")
+                store.assert_state(**identity, expect="active-cleanup")
+                with self.assertRaisesRegex(campaign.CampaignError, "has expired"):
+                    store.consume(
+                        **identity,
+                        authorization_nonce=NONCE,
+                        preflight_sha256=PREFLIGHT,
+                    )
+                self.assertEqual(store.release(**identity)["status"], "released")
 
     def test_claim_hard_kill_before_and_after_atomic_publication_is_recoverable(self):
         before_root = self.base / "claim-before"

@@ -559,7 +559,21 @@ publish_owned_input() {
     set +o noclobber
     chmod 0600 "$input_path"
     maybe_kill_input_primitive input_opened
-    cat >&"$input_fd"
+    # Bound the durable copy itself. A hostile/accidental oversized stream is
+    # rejected after at most 64 MiB reaches disk; the one-byte overflow probe
+    # remains on stdin and is never persisted.
+    if ! dd iflag=fullblock bs=1048576 count=64 status=none >&"$input_fd"; then
+        exec {input_fd}>&-
+        echo "restore input stream could not be copied safely" >&2
+        return 1
+    fi
+    local overflow_bytes
+    overflow_bytes="$(dd bs=1 count=1 status=none | wc -c)"
+    if [[ "$overflow_bytes" != 0 ]]; then
+        exec {input_fd}>&-
+        echo "writer witness restore input exceeds the 64 MiB durable limit" >&2
+        return 1
+    fi
     exec {input_fd}>&-
     validate_owned_input
     sync -f "$input_path"

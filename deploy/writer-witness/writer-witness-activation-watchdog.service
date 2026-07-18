@@ -1,0 +1,8 @@
+[Unit]
+Description=Reconcile an interrupted Writer Witness activation
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/writer-witness-activation-watchdog
+UMask=0077

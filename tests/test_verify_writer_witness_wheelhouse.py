@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -74,6 +75,16 @@ class WheelhouseFixture(unittest.TestCase):
 
 
 class SuccessfulAttestationTests(WheelhouseFixture):
+    def test_cli_rejects_unisolated_python_before_argument_parsing(self) -> None:
+        completed = subprocess.run(
+            ["/usr/bin/python3.12", str(MODULE_PATH)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("requires isolated clean Python startup", completed.stderr)
+
     def test_internal_manifest_attests_exact_inventory(self) -> None:
         manifest, entries = self.valid_fixture()
         result = wheelhouse.attest_wheelhouse(
@@ -111,7 +122,7 @@ class SuccessfulAttestationTests(WheelhouseFixture):
         manifest, _ = self.valid_fixture()
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
+        with mock.patch.object(wheelhouse, "_require_isolated_startup"), redirect_stdout(stdout), redirect_stderr(stderr):
             status = wheelhouse.main(
                 [
                     "--wheelhouse",

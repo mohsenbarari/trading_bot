@@ -65,6 +65,9 @@ PINNED_SOURCE_PATHS = (
     "deploy/writer-witness/writer-witness-live-restore.sh",
     "deploy/writer-witness/writer-witness-activation.py",
     "deploy/writer-witness/writer-witness-activation-recovery.service",
+    "deploy/writer-witness/writer-witness-activation-watchdog.sh",
+    "deploy/writer-witness/writer-witness-activation-watchdog.service",
+    "deploy/writer-witness/writer-witness-activation-watchdog.timer",
     "deploy/writer-witness/writer-witness-matrix-campaign.py",
     "deploy/writer-witness/writer-witness-matrix-host-faults.sh",
     "deploy/writer-witness/writer-witness-matrix-host-fault-state.py",
@@ -415,6 +418,8 @@ def remote_check_specs(
     expected_release_manifest_sha256: str | None = None,
     expected_active_campaign_tag: str | None = None,
     expected_active_campaign_scenario: str | None = None,
+    expected_active_campaign_not_after: str | None = None,
+    allow_expired_active_campaign: bool = False,
 ) -> list[CheckSpec]:
     expected_commit = str(expected_commit or "").strip()
     if not expected_commit:
@@ -505,6 +510,20 @@ def remote_check_specs(
         )
     ]
     installed_release_artifacts.extend(
+        (
+            {
+                "installed": "/usr/local/sbin/writer-witness-activation",
+                "source": "deploy/writer-witness/writer-witness-activation.py",
+                "mode": "0755",
+            },
+            {
+                "installed": "/usr/local/sbin/writer-witness-activation-watchdog",
+                "source": "deploy/writer-witness/writer-witness-activation-watchdog.sh",
+                "mode": "0755",
+            },
+        )
+    )
+    installed_release_artifacts.extend(
         {
             "installed": f"/etc/systemd/system/{unit}",
             "source": f"deploy/writer-witness/{unit}",
@@ -516,6 +535,9 @@ def remote_check_specs(
             "writer-witness-backup.timer",
             "writer-witness-offsite-backup.service",
             "writer-witness-offsite-backup.timer",
+            "writer-witness-activation-recovery.service",
+            "writer-witness-activation-watchdog.service",
+            "writer-witness-activation-watchdog.timer",
         )
     )
     installed_release_attestation = (
@@ -546,16 +568,30 @@ def remote_check_specs(
             raise ValueError("expected_active_campaign_tag is invalid")
         if not re.fullmatch(r"RH-(?:00[1-9]|01[0-2])", str(expected_active_campaign_scenario or "")):
             raise ValueError("expected_active_campaign_scenario is required and invalid")
+        try:
+            campaign_expiry = datetime.fromisoformat(
+                str(expected_active_campaign_not_after or "").replace("Z", "+00:00")
+            )
+            if campaign_expiry.tzinfo is None:
+                raise ValueError("timezone required")
+        except ValueError as exc:
+            raise ValueError("expected_active_campaign_not_after is required and invalid") from exc
         campaign_guard = (
             "/usr/local/sbin/writer-witness-matrix-campaign assert "
             f"--tag {shlex.quote(expected_active_campaign_tag)} "
             f"--expected-commit {shlex.quote(expected_commit)} "
             f"--scenario {shlex.quote(str(expected_active_campaign_scenario))} "
-            "--expect active >/dev/null; campaign_state=owned"
+            f"--not-after {shlex.quote(str(expected_active_campaign_not_after))} "
+            f"--expect {'active-cleanup' if allow_expired_active_campaign else 'active'} "
+            ">/dev/null; campaign_state=owned"
         )
     else:
-        if expected_active_campaign_scenario is not None:
-            raise ValueError("expected_active_campaign_scenario requires a campaign tag")
+        if (
+            expected_active_campaign_scenario is not None
+            or expected_active_campaign_not_after is not None
+            or allow_expired_active_campaign
+        ):
+            raise ValueError("active campaign options require a campaign tag")
         campaign_guard = (
             "test ! -e /var/lib/trading-bot-witness/matrix-campaign/active; "
             "test ! -L /var/lib/trading-bot-witness/matrix-campaign/active; "
@@ -591,14 +627,15 @@ def remote_check_specs(
                 "test \"$(findmnt -n -o FSTYPE -T /run)\" = tmpfs; "
                 "curl -fsS http://127.0.0.1:8000/api/config >/dev/null; "
                 "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' "
-                "/srv/trading-bot/current/.env; docker inspect trading_bot_app --format "
-                "'{{range .Config.Env}}{{println .}}{{end}}' | sed -n "
+                "/srv/trading-bot/current/.env; for c in trading_bot_app trading_bot_sync_worker; do "
+                "docker inspect \"$c\" --format '{{range .Config.Env}}{{println .}}{{end}}'; done | sed -n "
                 "'/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
                 "| awk -F= '{v=tolower($2); gsub(/[[:space:]]/,\"\",v); "
                 "if (v ~ /^(1|true|t|yes|y|on)$/) found=1} END {exit found ? 0 : 1}'; then exit 41; fi; "
                 "! grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))=' /srv/trading-bot/current/.env; "
-                "! docker inspect trading_bot_app --format '{{range .Config.Env}}{{println .}}{{end}}' "
-                "| grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; "
+                "for c in trading_bot_app trading_bot_sync_worker; do ! docker inspect \"$c\" "
+                "--format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Eq "
+                "'^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; done; "
                 "test -z \"$(find /run/writer-witness-matrix -mindepth 1 -maxdepth 2 -print -quit 2>/dev/null)\"; "
                 f"timeout 5 bash -c '</dev/tcp/{MATRIX_WITNESS}/443'; "
                 f"cert=$(timeout 8 openssl s_client -connect {MATRIX_WITNESS}:443 "
@@ -634,14 +671,15 @@ def remote_check_specs(
                 "test \"$(docker inspect -f '{{.State.Health.Status}}' \"$db\")\" = healthy; "
                 "test \"$(findmnt -n -o FSTYPE -T /run)\" = tmpfs; "
                 "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' "
-                "/srv/trading-bot/current/.env; docker inspect \"$app\" --format "
-                "'{{range .Config.Env}}{{println .}}{{end}}' | sed -n "
+                "/srv/trading-bot/current/.env; for c in \"$app\" \"$sync\"; do docker inspect \"$c\" "
+                "--format '{{range .Config.Env}}{{println .}}{{end}}'; done | sed -n "
                 "'/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
                 "| awk -F= '{v=tolower($2); gsub(/[[:space:]]/,\"\",v); "
                 "if (v ~ /^(1|true|t|yes|y|on)$/) found=1} END {exit found ? 0 : 1}'; then exit 42; fi; "
                 "! grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))=' /srv/trading-bot/current/.env; "
-                "! docker inspect \"$app\" --format '{{range .Config.Env}}{{println .}}{{end}}' "
-                "| grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; "
+                "for c in \"$app\" \"$sync\"; do ! docker inspect \"$c\" --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}' | grep -Eq "
+                "'^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; done; "
                 "test -z \"$(find /run/writer-witness-matrix -mindepth 1 -maxdepth 2 -print -quit 2>/dev/null)\"; "
                 f"timeout 5 bash -c '</dev/tcp/{MATRIX_WITNESS}/443'; "
                 f"cert=$(timeout 8 openssl s_client -connect {MATRIX_WITNESS}:443 "
@@ -690,7 +728,8 @@ def remote_check_specs(
                 f"\"{expected_release_manifest_sha256}\"; "
                 "test \"$(sha256sum \"$release/scripts/verify_writer_witness_release.py\" | awk '{print $1}')\" = "
                 f"\"{release_verifier_sha256}\"; "
-                "python3 \"$release/scripts/verify_writer_witness_release.py\" "
+                f"{clean_python_prefix} {shlex.quote(expected_python_executable)} "
+                f"{clean_python_flags} \"$release/scripts/verify_writer_witness_release.py\" "
                 "--release-root \"$release\" "
                 f"--expected-manifest-sha256 \"{expected_release_manifest_sha256}\" "
                 "--expected-uid 0 --expected-gid 0; "
@@ -781,6 +820,23 @@ def remote_check_specs(
                 "test -z \"$(find \"$rotation_root\" -mindepth 1 -maxdepth 1 ! -name '.runtime.lock' -print -quit)\"; "
                 "test -z \"$(find /etc/trading-bot-witness -mindepth 1 -maxdepth 1 -name '.runtime.env.*' -print -quit)\"; "
                 "test -z \"$(find /root/writer-witness-client-material -mindepth 1 -maxdepth 1 -name '.webapp-*.env.*' -print -quit)\"; "
+                "activation_state=/var/lib/trading-bot-witness/activation-state; "
+                "test ! -e \"$activation_state/active.json\"; test ! -L \"$activation_state/active.json\"; "
+                "test -z \"$(find \"$activation_state\" -mindepth 1 -maxdepth 1 -name '.active.json.activation-*' -print -quit)\"; "
+                "for lock in \"$activation_state/.activation.lock\" \"$activation_state/.provision.lock\" \"$rotation_root/.runtime.lock\"; do "
+                "test -f \"$lock\"; test ! -L \"$lock\"; test \"$(stat -c %u \"$lock\")\" = 0; "
+                "test \"$(stat -c %a \"$lock\")\" = 600; test \"$(stat -c %h \"$lock\")\" = 1; flock -n \"$lock\" -c true; done; "
+                "marker=\"$activation_state/credential-state.json\"; bootstrap=/etc/trading-bot-witness/bootstrap-secrets.env; "
+                "for file in \"$marker\" \"$bootstrap\"; do test -f \"$file\"; test ! -L \"$file\"; "
+                "test \"$(stat -c %u \"$file\")\" = 0; test \"$(stat -c %a \"$file\")\" = 600; test \"$(stat -c %h \"$file\")\" = 1; done; "
+                "test \"$(tr -d '\\n' <\"$marker\")\" = '{\"initialized\": true, \"schema_version\": \"writer_witness_credential_state_v1\"}'; "
+                "test \"$(grep -Ec '^WITNESS_DB_(MIGRATOR|RUNTIME)_PASSWORD=[0-9a-f]{64}$' \"$bootstrap\")\" = 2; "
+                "! grep -Eq '^WITNESS_(FI|IR)_(KEY_ID|HMAC_SECRET)=' \"$bootstrap\"; "
+                "test \"$(systemctl is-enabled writer-witness-activation-watchdog.timer)\" = enabled; "
+                "test \"$(systemctl is-active writer-witness-activation-watchdog.timer)\" = active; "
+                "test \"$(systemctl show -p ExecStart --value writer-witness-activation-recovery.service)\" = "
+                "'{ path=/usr/local/sbin/writer-witness-activation-watchdog ; argv[]=/usr/local/sbin/writer-witness-activation-watchdog ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }' || "
+                "systemctl cat writer-witness-activation-recovery.service | grep -Fx 'ExecStart=/usr/local/sbin/writer-witness-activation-watchdog' >/dev/null; "
                 "test ! -e /var/lib/trading-bot-witness/restore-state/active.env; "
                 "test ! -L /var/lib/trading-bot-witness/restore-state/active.env; "
                 "test -z \"$(find /var/lib/trading-bot-witness/restore-state -mindepth 1 -maxdepth 1 -name '.active.*.env' -print -quit)\"; "
@@ -853,7 +909,8 @@ def remote_check_specs(
                 f"printf '%s\\n' \"$ufw_rules\" | grep -Fx '22/tcp ALLOW IN {CONTROL_SSH_SOURCE} # writer-witness-control-ssh' >/dev/null; "
                 f"printf '%s\\n' \"$ufw_rules\" | grep -Fx '443/tcp ALLOW IN {WEBAPP_FI} # writer-witness-webapp-fi' >/dev/null; "
                 f"printf '%s\\n' \"$ufw_rules\" | grep -Fx '443/tcp ALLOW IN {WEBAPP_IR} # writer-witness-webapp-ir' >/dev/null; "
-                "nftables_attestation=$(nft -j list ruleset | python3 "
+                f"nftables_attestation=$(nft -j list ruleset | {clean_python_prefix} "
+                f"{shlex.quote(expected_python_executable)} {clean_python_flags} "
                 "\"$release/scripts/verify_writer_witness_nftables.py\" "
                 f"--expected-policy-sha256 {shlex.quote(expected_nftables_policy_sha256)}); "
                 "printf '%s' \"$nftables_attestation\" "
@@ -1065,6 +1122,8 @@ def build_plan(
     expected_commit: str | None = None,
     expected_active_campaign_tag: str | None = None,
     expected_active_campaign_scenario: str | None = None,
+    expected_active_campaign_not_after: str | None = None,
+    allow_expired_active_campaign: bool = False,
 ) -> dict[str, object]:
     git = git_metadata(expected_commit)
     expected_release_manifest_sha256 = witness_release_manifest_sha256()
@@ -1074,6 +1133,8 @@ def build_plan(
         expected_release_manifest_sha256=expected_release_manifest_sha256,
         expected_active_campaign_tag=expected_active_campaign_tag,
         expected_active_campaign_scenario=expected_active_campaign_scenario,
+        expected_active_campaign_not_after=expected_active_campaign_not_after,
+        allow_expired_active_campaign=allow_expired_active_campaign,
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1094,6 +1155,8 @@ def build_plan(
             "nftables_policy": nftables_policy_binding(),
             "expected_active_campaign_tag": expected_active_campaign_tag,
             "expected_active_campaign_scenario": expected_active_campaign_scenario,
+            "expected_active_campaign_not_after": expected_active_campaign_not_after,
+            "allow_expired_active_campaign": allow_expired_active_campaign,
             "source_gate_requires_zero_skips": True,
             "source_gate_requires_guarded_postgres_tests": 4,
             "source_gate_requires_four_database_drill": True,
@@ -1207,6 +1270,14 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
             if bundle.get("expected_active_campaign_scenario") is not None
             else None
         ),
+        expected_active_campaign_not_after=(
+            str(bundle.get("expected_active_campaign_not_after"))
+            if bundle.get("expected_active_campaign_not_after") is not None
+            else None
+        ),
+        allow_expired_active_campaign=(
+            bundle.get("allow_expired_active_campaign") is True
+        ),
     ):
         completed = subprocess.run(
             spec.command,
@@ -1319,6 +1390,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--expected-active-campaign-scenario",
         help="Postflight-only exact scenario bound to the active remote campaign.",
     )
+    parser.add_argument(
+        "--expected-active-campaign-not-after",
+        help="Postflight-only server-clock expiry bound to the active remote campaign.",
+    )
+    parser.add_argument(
+        "--allow-expired-active-campaign",
+        action="store_true",
+        help="Cleanup postflight only: prove exact ownership even after server expiry.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1333,6 +1413,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         expected_commit=args.expected_commit,
         expected_active_campaign_tag=args.expected_active_campaign_tag,
         expected_active_campaign_scenario=args.expected_active_campaign_scenario,
+        expected_active_campaign_not_after=args.expected_active_campaign_not_after,
+        allow_expired_active_campaign=args.allow_expired_active_campaign,
     )
     exit_code = 0
     if args.mode == "preflight":

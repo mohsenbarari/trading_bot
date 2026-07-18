@@ -7,7 +7,9 @@ import io
 import json
 from pathlib import Path
 import sys
+import subprocess
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +99,16 @@ def encode(payload: object) -> bytes:
 
 
 class SuccessfulAttestationTests(unittest.TestCase):
+    def test_cli_rejects_unisolated_python_before_argument_parsing(self) -> None:
+        completed = subprocess.run(
+            ["/usr/bin/python3.12", str(MODULE_PATH)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("requires isolated clean Python startup", completed.stderr)
+
     def test_exact_policy_passes_and_emits_deterministic_counts(self) -> None:
         value = encode(valid_payload())
         snapshot = nft.inspect_ruleset(value)
@@ -142,7 +154,7 @@ class SuccessfulAttestationTests(unittest.TestCase):
         expected = nft.inspect_ruleset(value).policy_sha256
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
+        with mock.patch.object(nft, "_require_isolated_startup"), redirect_stdout(stdout), redirect_stderr(stderr):
             status = nft.main(
                 ["--expected-policy-sha256", expected], stdin=io.BytesIO(value)
             )
@@ -153,6 +165,22 @@ class SuccessfulAttestationTests(unittest.TestCase):
         self.assertEqual(
             raw, json.dumps(json.loads(raw), separators=(",", ":"), sort_keys=True) + "\n"
         )
+
+    def test_emit_binding_produces_a_reviewable_non_self_approving_pin(self) -> None:
+        value = encode(valid_payload())
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(nft, "_require_isolated_startup"),
+            redirect_stdout(stdout),
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(
+                nft.main(["--emit-policy-binding"], stdin=io.BytesIO(value)),
+                0,
+            )
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["schema_version"], "writer_witness_nftables_policy_v1")
+        self.assertEqual(payload["policy_sha256"], nft.inspect_ruleset(value).policy_sha256)
 
 
 class SemanticDriftTests(unittest.TestCase):

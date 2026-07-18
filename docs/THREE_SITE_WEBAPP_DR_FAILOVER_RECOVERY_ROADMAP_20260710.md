@@ -2685,8 +2685,10 @@ an allowed-signers override away from the canonical path.
 
 The replacement Witness campaign claim is a complete owner-only `active.json`
 published with no-replace atomicity and directory fsync before side effects. Its
-identity is the exact `tag + expected commit + scenario` tuple. Successful
-release atomically moves that same claim to an exact append-only
+identity is the exact `tag + expected commit + scenario + not_after` tuple.
+Claim, authorization consumption, and active mutation fail closed after the
+replacement-Witness clock reaches `not_after`, while exact cleanup ownership
+and release remain available. Successful release atomically moves that same claim to an exact append-only
 `releases/<tag>.json` tombstone and fsyncs both directories. Recovery classifies
 exact active, exact released, foreign, absent, and transport-ambiguous states;
 generic absence cannot substitute for the exact release tombstone. Before
@@ -2695,10 +2697,14 @@ both the approval nonce and preflight SHA-256. Either value therefore remains
 single-use across all campaign tags, including a crash after only part of the
 consumption sequence.
 
-The abort path is a single ordered safety contract:
+The abort path is a single ordered safety contract. Steps 1 through 4 are the
+unconditional containment/revocation phase. An ambiguous requester stop is
+recorded as critical but cannot prevent restore recovery or transient-HMAC
+revocation. Steps 5 through 9 run only after every critical result is clear and
+requester absence is proven:
 
-1. Stop and join all Matrix requesters and prove their sockets/retries absent
-   while isolation remains.
+1. Attempt to stop and join all Matrix requesters and inspect their
+   sockets/retries while isolation remains.
 2. Capture, redact, hash, and retain failure evidence before restoration.
 3. Recover any active live restore by PostgreSQL OID and reconcile only its
    exact journal-owned input.
@@ -2747,7 +2753,7 @@ Arvan/CDN mutation remain prohibited.
 The current feature-worktree remediation extends Section 47.6 with an exact
 installation trust chain. The implementation is present at source level and
 the focused verifier/deployment checks plus the hermetic combined source gate
-have passed from a clean committed feature checkout. This subsection does not
+have passed in the isolated feature worktree. This subsection does not
 claim that the hardened release is
 installed or attested on the replacement dark Witness.
 
@@ -2770,8 +2776,10 @@ The source-level contract is now:
 3. **Exact host and venv runtime bytes.** `python-runtime.json` is a
    release-bound Ubuntu 24.04 manifest for the canonical CPython executable,
    complete active stdlib and `lib-dynload` tree, external symlink targets,
-   transitive ELF/shared-library closure, loader cache/config/preload state,
-   OS identity, and exact dpkg package identities/metadata. Venv attestation
+   transitive ELF/shared-library closure using the pinned loader's actual
+   `--list` resolution, loader cache/config/preload state, OS identity, and
+   exact dpkg package identities plus verification of every packaged md5sums
+   entry. `DT_RPATH`, `DT_RUNPATH`, and any `ld.so.preload` are rejected. Venv attestation
    then requires an exact lock-to-distribution match and verifies every
    RECORD-listed path, owner, metadata, size and digest while closing all other
    runtime nodes. Both host and venv inventories feed deterministic digests.
@@ -2803,17 +2811,21 @@ base and is outside what this Python verifier can prove.
    independent pointers; compatibility links and the running command must
    resolve through that same activation. Release, venv, provenance, activation,
    and their containing directories are fsynced before the pointer changes;
-   nftables is established and attested before exposure. `begin`, `publish`,
-   and `commit` are recorded in a root-only, fsynced journal. Any error or
-   handled signal rolls back the complete code/runtime/config generation, and
-   an ordering-constrained boot recovery unit completes rollback after an
-   uncatchable kill or power loss before Nginx or the Witness can start.
+   nftables is attested before exposure. `begin`, `publish`, credential
+   `finalize`, `commit`, and service `complete` are recorded across a root-only,
+   fsynced journal. Nginx, Writer Witness, and backup timers are quiesced during
+   publication. Any error or handled signal rolls back the complete
+   code/runtime/config generation; a boot recovery unit and periodic watchdog
+   roll back uncommitted state or finish a committed generation only after its
+   services pass health checks. Genuine first install is a separately tested
+   transaction rather than an implicit legacy migration.
 6. **Credential publication is a separate two-phase transaction.** Initial
    database and pairwise HMAC material is created exclusively in a root-only
    bootstrap file. `prepare` renders candidate runtime and client files while
-   preserving the currently rotated pairwise HMAC state; only after the
-   activation journal is durably committed may `finalize` record the live
-   credential generation and scrub bootstrap HMAC material. A process-held
+   preserving the currently rotated pairwise HMAC state; `finalize` records the
+   live credential generation and durably scrubs bootstrap HMAC material before
+   the activation commit. A committed journal remains recoverable until public
+   services complete. A process-held
    descriptor lock covers the entire prepare-to-finalize interval and is the
    same lock used by HMAC rotation. Partial schemas, unknown fields, linked or
    unsafe files, a concurrent rotation, and any attempt to resurrect a scrubbed
@@ -2830,7 +2842,9 @@ base and is outside what this Python verifier can prove.
    totals are normalized; tables, chains, rules, expressions, order, and every
    other policy-bearing value remain bound. The expected IPv4/IPv6 policy is
    exclusive, so an added permissive table or rule cannot hide behind matching
-   UFW text.
+   UFW text. An intentional host-policy change uses the isolated verifier's
+   explicit `--emit-policy-binding` output, requires semantic review, and is
+   committed separately; provisioning never re-pins itself.
 9. **Exact restore-database ownership.** A database created or retained by a
    live-restore campaign is journal-owned only as its exact `name + PostgreSQL
    OID` pair. Cleanup rechecks that pair immediately before deletion and refuses
@@ -2846,8 +2860,11 @@ base and is outside what this Python verifier can prove.
    marker must jointly bind the latest local backup basename and checksum. A
    configured timer without proof of the latest upload is not ready.
 12. **DPI authorization covers every transport byte.** One scenario is bounded
-   to `900` seconds from its original durable journal creation time, including
-   recovery; restarting recovery cannot reset the deadline. Approval requires
+   to `900` seconds locally and by a server-clock `not_after` durably embedded
+   in the replacement Witness campaign identity. Claim/consume/active mutation
+   assertions reject expiry; cleanup-only ownership remains available for
+   revocation and rollback. Cleanup has its own bounded 900-second recovery
+   window. Approval requires
    at least `64 MiB` and reserves `16 MiB` exclusively for cleanup. The journal
    conservatively charges HTTP control traffic, SSH handshakes and commands,
    SCP sessions and maximum file payloads, reboot reconnect attempts, abort
@@ -2860,17 +2877,25 @@ base and is outside what this Python verifier can prove.
    the explicit unit-module list with zero skips, then requires four guarded
    PostgreSQL tests and the four-database failure drill.
 
+14. **Signer trust is source-pinned, not controller-selected.** The canonical
+   root-owned `allowed_signers` bytes must match an exact SHA-256 in the reviewed
+   runner source in addition to containing two different public keys. The pin
+   is intentionally unconfigured until the observer and incident commander
+   supply independently custodied public keys. This blocks RH execution but
+   does not block dark installation or restore prerequisites.
+
 | Gate | Current status |
 |---|---|
 | Design and implementation in isolated feature worktree | Implemented at source level |
-| Release, installed-runtime, provenance, wheelhouse, and nftables verifier tests | `113` passed, zero failures/skips; real offline 45-package/2,771-RECORD/3,087-tree-entry attestation closed 22 venv ELF objects against 72 system ELF objects and also passed at the current worktree snapshot |
-| Clean exact-SHA hermetic source gate | `384` unit tests passed with zero skips, followed by `4` guarded PostgreSQL tests and the four-database failure drill |
-| Final zero-skip source gate on the committed feature checkout | Passed |
-| Commit/push of the final remediation SHA | Completed on the isolated feature branch only; no `main` integration |
+| Focused release/deployment/Matrix verifier groups | `39 + 140 + 97` passed, zero failures/skips |
+| Current-worktree hermetic source gate | `397` unit tests passed with zero skips, followed by `4` guarded PostgreSQL tests and the four-database failure drill |
+| Final zero-skip source gate on the committed feature checkout | Pending final commit and exact-SHA rerun if reviewers require it |
+| Commit/push of the current remediation SHA | Pending; isolated feature branch only, no `main` integration |
 | Install exact release and offline wheelhouse on `185.206.95.94` | Pending |
 | Live runtime/provenance, effective-systemd, nftables, and offsite proof | Pending |
 | Twelve hard-kill live-restore prerequisite points | Pending |
 | Fresh exact-SHA preflight and external re-review | Pending |
+| Independently custodied signer policy and reviewed source SHA pin | Pending external key-custody input; RH execution fails closed |
 | RH-001/RH-010 or any other real-host scenario | Not authorized and not executed |
 | Full Matrix, merge with `main`, writer activation, WebApp or Arvan mutation | Not authorized and not executed |
 
@@ -2882,3 +2907,73 @@ external approval of that exact delta. A successful
 source gate or dark-host attestation still does not authorize Full Matrix,
 `main` integration, a first lease, production WebApp changes, or CDN routing
 changes.
+
+### 47.8 Four-agent review reconciliation at `2675cb0c` - 2026-07-18
+
+Four independent reports reviewed the exact `2675cb0c` feature snapshot.
+Gemini approved the dark install; Claude, ChatGPT Pro, and ChatGPT Ultra
+rejected that exact snapshot. Mechanical source verification confirmed the
+shared install findings, so this roadmap treats the majority reject as the
+correct gate. No install, live prerequisite, RH scenario, merge, deployment, or
+CDN mutation occurred while remediating them.
+
+The current worktree closes the validated source defects as follows:
+
+- release, wheelhouse, runtime, and nftables verification starts only through
+  the pinned system Python under `env -i`, `-I -S -B`, UTF-8 mode, and disabled
+  bytecode; the trust-anchor CLIs also reject an unisolated direct invocation;
+- PostgreSQL role passwords no longer appear in process argv, Ed25519 private
+  key creation is exclusive/owner-only from its first inode, and ordinary
+  release activation neither rotates TLS nor mutates firewall policy;
+- fresh install, legacy migration, uncommitted rollback, committed service
+  completion, and power-loss/SIGKILL recovery are separate activation states.
+  Credential finalize/scrub precedes commit, and a periodic watchdog owns the
+  commit-to-service-completion gap;
+- preflight now proves terminal activation, clean locks/journals, exact
+  credential marker/bootstrap state, installed recovery/watchdog bytes and
+  enabled watchdog timer before it can bless the dark host;
+- system-runtime evidence verifies packaged file hashes and actual pinned-loader
+  selection, rejects runtime search paths/preload, and suppresses service
+  bytecode creation;
+- restore input publication is capped while copying, metadata-less owned HMAC
+  crash state is reclaimed without a permanent quarantine wedge, RH-011 proves
+  exact vacancy with the service stopped, and RH-009 compares full production
+  evidence before/after the disk-full probe;
+- a failed/ambiguous requester stop cannot prevent attempted transient-HMAC
+  revocation. Isolation remains until revocation/recovery is proven; reconnect
+  and baseline restoration still stop on any critical ambiguity;
+- ControlMaster accounting expires conservatively and forgets ambiguous
+  sessions after timeout/failure. Scenario authorization is also bounded by a
+  durable replacement-Witness `not_after`, while cleanup has a separate bounded
+  recovery deadline;
+- FI and IR preflight/continuous probes inspect both application and sync-worker
+  containers for disabled Witness flags and absence of client credentials;
+- the closed source list now covers every release-executed helper, with a unit
+  equivalence guard to prevent a later helper addition from silently escaping
+  syntax coverage.
+
+Local evidence for this worktree is a passing `397`-test zero-skip hermetic
+unit gate, `4` real PostgreSQL tests, and the four-database failure drill. A
+fresh release build and `git diff --check` also pass. Those results are source
+evidence only and must be repeated/bound to the final committed SHA when the
+new review package is produced.
+
+Two gates deliberately remain external or later-phase:
+
+1. **Independent signer custody (`BEFORE_RH001`).** Two people must provide
+   distinct public keys while retaining the private keys on separate devices.
+   The canonical `allowed_signers` SHA-256 must then replace the current
+   `UNCONFIGURED` source pin in a separately reviewed commit. Until then approve
+   and execute modes fail closed. The agent must not generate or custody both
+   private keys.
+2. **Total controller-host-loss capsule (`BEFORE_REMAINING_MATRIX`).** Current
+   cleanup is safe with the durable controller journal and target-side
+   operation journals, but a complete loss of the controller still lacks an
+   independently retained, non-secret capsule that can reconstruct the tooling
+   entrypoint. Select and prove an independent capsule destination before the
+   Matrix advances beyond the scenarios whose approved gate requires it.
+
+Current-main Alembic/semantic integration remains explicitly outside this
+branch-remediation step. It must be resolved in a later integration candidate;
+`main` must not be merged into this independent branch merely to run the dark
+install or its guarded prerequisites.

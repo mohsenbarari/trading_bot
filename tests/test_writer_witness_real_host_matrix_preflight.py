@@ -85,6 +85,7 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
                 expected_release_manifest_sha256="b" * 64,
                 expected_active_campaign_tag="wwm_0123456789ab",
                 expected_active_campaign_scenario="RH-001",
+                expected_active_campaign_not_after="2099-01-01T00:00:00Z",
             )
             if spec.check_id == "matrix_witness_dark_baseline"
         )

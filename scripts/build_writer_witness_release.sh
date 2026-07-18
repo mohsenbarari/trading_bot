@@ -121,6 +121,9 @@ for source in \
     nginx.conf.template \
     writer-witness-activation.py \
     writer-witness-activation-recovery.service \
+    writer-witness-activation-watchdog.sh \
+    writer-witness-activation-watchdog.service \
+    writer-witness-activation-watchdog.timer \
     writer-witness.service \
     writer-witness-backup.sh \
     writer-witness-offsite-backup.sh \

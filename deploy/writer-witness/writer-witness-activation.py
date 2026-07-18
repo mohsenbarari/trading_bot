@@ -141,6 +141,19 @@ MANAGED_FILES = (
     ),
 )
 
+# These files are mutated only by the credential finalization phase.  They are
+# snapshotted with the activation journal, but are never populated from the
+# candidates directory.  Keeping their pre-transaction bytes in the same
+# durable operation makes "finalize, then commit" crash safe: an interruption
+# before commit restores the bootstrap HMAC material and initialization marker
+# together with the previous code/runtime generation.
+ROLLBACK_ONLY_FILES = {
+    "bootstrap-secrets": "/etc/trading-bot-witness/bootstrap-secrets.env",
+    "credential-state": (
+        "/var/lib/trading-bot-witness/activation-state/credential-state.json"
+    ),
+}
+
 SPECIAL_PATHS = {
     "nginx_enabled": "/etc/nginx/sites-enabled/writer-witness",
     "nginx_default": "/etc/nginx/sites-enabled/default",
@@ -612,6 +625,13 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
             name: _snapshot(_mapped(store.root, path), snapshots / f"{name}.snapshot")
             for name, path in SPECIAL_PATHS.items()
         }
+        rollback_only = {
+            name: _snapshot(
+                _mapped(store.root, destination),
+                snapshots / f"rollback-only-{name}.snapshot",
+            )
+            for name, destination in ROLLBACK_ONLY_FILES.items()
+        }
 
         active = _mapped(store.root, "/opt/trading-bot-witness/active")
         current = _mapped(store.root, "/srv/trading-bot-witness/current")
@@ -619,8 +639,14 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
         active_descriptor = _path_descriptor(active)
         current_descriptor = _path_descriptor(current)
         venv_descriptor = _path_descriptor(compatibility_venv, allow_directory=True)
-        initial = active_descriptor["kind"] == "absent"
-        if initial:
+        active_absent = active_descriptor["kind"] == "absent"
+        fresh_install = (
+            active_absent
+            and current_descriptor["kind"] == "absent"
+            and venv_descriptor["kind"] == "absent"
+        )
+        initial_migration = active_absent and not fresh_install
+        if initial_migration:
             if current_descriptor["kind"] != "symlink":
                 raise ActivationError("initial migration requires the legacy current symlink")
             if venv_descriptor["kind"] not in {"symlink", "directory"}:
@@ -645,7 +671,7 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
                 raise ActivationError(
                     f"legacy migration path predates activation intent: {planned}"
                 )
-        else:
+        elif not fresh_install:
             resolved = Path(str(active_descriptor.get("resolved", "")))
             expected_parent = _mapped(store.root, "/opt/trading-bot-witness/activations")
             if resolved.parent != expected_parent:
@@ -668,7 +694,8 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
             "operation_id": operation_id,
             "release_id": args.release_id,
             "phase": "prepared",
-            "initial_migration": initial,
+            "initial_migration": initial_migration,
+            "fresh_install": fresh_install,
             "initial_normalization_started": False,
             "release_dir": str(release_dir.relative_to(store.root)),
             "venv_dir": str(venv_dir.relative_to(store.root)),
@@ -678,6 +705,7 @@ def begin(store: ActivationStore, args: argparse.Namespace) -> None:
             "previous_venv": venv_descriptor,
             "managed": managed,
             "special": special,
+            "rollback_only": rollback_only,
         }
         store.write_journal(journal)
         _kill_after("begin_journal")
@@ -817,6 +845,8 @@ def publish(store: ActivationStore, args: argparse.Namespace) -> None:
         store.write_journal(journal)
         if bool(journal["initial_migration"]):
             previous = _normalize_initial(store, journal)
+        elif bool(journal.get("fresh_install")):
+            previous = None
         else:
             previous = Path(str(journal["previous_active"]["resolved"]))
             active = _mapped(store.root, "/opt/trading-bot-witness/active")
@@ -844,7 +874,9 @@ def publish(store: ActivationStore, args: argparse.Namespace) -> None:
             token=str(journal["operation_id"]),
         )
         journal["phase"] = "activated"
-        journal["previous_activation"] = str(previous.relative_to(store.root))
+        journal["previous_activation"] = (
+            str(previous.relative_to(store.root)) if previous is not None else None
+        )
         store.write_journal(journal)
         _kill_after("activation_published")
         print("activation_published=yes")
@@ -871,6 +903,24 @@ def _restore_managed(store: ActivationStore, journal: dict[str, object]) -> None
         snapshot = special.get(name)
         if not isinstance(snapshot, dict):
             raise ActivationError(f"activation special snapshot is missing: {name}")
+        _restore_snapshot(
+            _mapped(store.root, destination),
+            snapshot,
+            snapshots,
+            token=operation_id,
+        )
+
+
+def _restore_rollback_only(store: ActivationStore, journal: dict[str, object]) -> None:
+    _, _, snapshots = _operation_paths(store, journal)
+    operation_id = str(journal["operation_id"])
+    rollback_only = journal.get("rollback_only")
+    if not isinstance(rollback_only, dict):
+        raise ActivationError("activation rollback-only snapshots are invalid")
+    for name, destination in ROLLBACK_ONLY_FILES.items():
+        snapshot = rollback_only.get(name)
+        if not isinstance(snapshot, dict):
+            raise ActivationError(f"activation rollback-only snapshot is missing: {name}")
         _restore_snapshot(
             _mapped(store.root, destination),
             snapshot,
@@ -919,7 +969,14 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
     operation_id = str(journal["operation_id"])
     active = _mapped(store.root, "/opt/trading-bot-witness/active")
     normalization_started = bool(journal.get("initial_normalization_started"))
-    if bool(journal.get("initial_migration")) and normalization_started:
+    if bool(journal.get("fresh_install")):
+        for destination in (
+            "/opt/trading-bot-witness/active",
+            "/srv/trading-bot-witness/current",
+            "/opt/trading-bot-witness/venv",
+        ):
+            _remove_path_entry(_mapped(store.root, destination))
+    elif bool(journal.get("initial_migration")) and normalization_started:
         previous_raw = journal.get("previous_activation") or journal.get("legacy_activation")
         if not isinstance(previous_raw, str):
             raise ActivationError("legacy activation recovery target is missing")
@@ -975,6 +1032,7 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
         )
     _kill_after("rollback_active_switched")
     _restore_managed(store, journal)
+    _restore_rollback_only(store, journal)
     _cleanup_owned_publication_temps(store, journal)
     journal["phase"] = "rolled_back"
     store.write_journal(journal)
@@ -1004,8 +1062,11 @@ def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
             print("activation_recovered=no")
             return
         if journal.get("phase") == "committed":
-            _archive_and_remove(store, journal)
-            print("activation_recovered=no")
+            # The generation and credentials are durable, but the surrounding
+            # service supervisor may have died before restarting public
+            # daemons.  Keep the journal until the watchdog (or provisioner)
+            # confirms service completion explicitly.
+            print("activation_recovered=committed-pending-service-completion")
             return
         _rollback(store, journal)
         journal = store.read_journal()
@@ -1063,8 +1124,24 @@ def commit(store: ActivationStore, args: argparse.Namespace) -> None:
         journal["phase"] = "committed"
         store.write_journal(journal)
         _kill_after("commit_recorded")
+        print("activation_committed=pending-service-completion")
+
+
+def complete(store: ActivationStore, args: argparse.Namespace) -> None:
+    """Archive a committed journal only after public services are healthy."""
+
+    with store.locked():
+        journal = store.read_journal()
+        if journal is None or journal.get("release_id") != args.release_id:
+            raise ActivationError("matching committed activation journal is missing")
+        if journal.get("phase") != "committed":
+            raise ActivationError("activation is not committed")
+        activation_dir = _journal_absolute(store, journal, "activation_dir")
+        active = _mapped(store.root, "/opt/trading-bot-witness/active")
+        if not active.is_symlink() or active.resolve(strict=True) != activation_dir.resolve(strict=True):
+            raise ActivationError("active generation changed before completion")
         _archive_and_remove(store, journal)
-        print("activation_committed=yes")
+        print("activation_completed=yes")
 
 
 def candidate_dir(store: ActivationStore, args: argparse.Namespace) -> None:
@@ -1076,6 +1153,18 @@ def candidate_dir(store: ActivationStore, args: argparse.Namespace) -> None:
         print(candidates)
 
 
+def active_release_id(store: ActivationStore, _args: argparse.Namespace) -> None:
+    with store.locked():
+        journal = store.read_journal()
+        if journal is None or journal.get("phase") != "committed":
+            raise ActivationError("committed activation journal is missing")
+        release_id = journal.get("release_id")
+        if not isinstance(release_id, str):
+            raise ActivationError("activation release id is invalid")
+        _validate_release_id(release_id)
+        print(release_id)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default="/")
@@ -1085,11 +1174,12 @@ def parse_args() -> argparse.Namespace:
     begin_parser.add_argument("--release-dir", required=True)
     begin_parser.add_argument("--venv-dir", required=True)
     begin_parser.add_argument("--activation-dir", required=True)
-    for name in ("publish", "commit", "candidate-dir"):
+    for name in ("publish", "commit", "complete", "candidate-dir"):
         child = subparsers.add_parser(name)
         child.add_argument("--release-id", required=True)
     subparsers.add_parser("recover")
     subparsers.add_parser("recover-boot")
+    subparsers.add_parser("active-release-id")
     return parser.parse_args()
 
 
@@ -1105,7 +1195,9 @@ def main() -> None:
         "recover": recover,
         "recover-boot": recover_boot,
         "commit": commit,
+        "complete": complete,
         "candidate-dir": candidate_dir,
+        "active-release-id": active_release_id,
     }
     commands[args.command](store, args)
 

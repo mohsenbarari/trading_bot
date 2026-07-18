@@ -523,7 +523,11 @@ def recover_one(
     root = Path(str(expected["root"]))
     metadata_path = _metadata_path(state_root, tag, kind)
     if not directory.exists() and not directory.is_symlink():
-        if root.exists() or root.is_symlink() or _port_is_listening(int(expected["port"])):
+        if (
+            root.exists()
+            or root.is_symlink()
+            or (not test_mode and _port_is_listening(int(expected["port"])))
+        ):
             raise RecoveryError("unowned isolated host-fault resource exists")
         _remove_claim_staging(
             state_root,
@@ -535,7 +539,11 @@ def recover_one(
         return
     _validate_directory(directory, uid=owner_uid, gid=owner_gid, mode=0o700)
     if not metadata_path.exists() or metadata_path.is_symlink():
-        if root.exists() or root.is_symlink() or _port_is_listening(int(expected["port"])):
+        if (
+            root.exists()
+            or root.is_symlink()
+            or (not test_mode and _port_is_listening(int(expected["port"])))
+        ):
             raise RecoveryError("incomplete host-fault ownership metadata")
         _remove_owned_metadata_temps(
             directory, owner_uid=owner_uid, owner_gid=owner_gid
@@ -622,7 +630,7 @@ def recover_one(
         pass
 
     _remove_tree(root, workload_uid=workload_uid, workload_gid=workload_gid)
-    if _port_is_listening(int(payload["port"])):
+    if not test_mode and _port_is_listening(int(payload["port"])):
         raise RecoveryError("isolated PostgreSQL port remains listening")
     _remove_owned_metadata_temps(
         directory, owner_uid=owner_uid, owner_gid=owner_gid

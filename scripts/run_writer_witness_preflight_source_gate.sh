@@ -38,6 +38,10 @@ shell_sources=( \
     deploy/writer-witness/writer-witness-live-restore.sh \
     deploy/writer-witness/writer-witness-matrix-host-faults.sh \
     deploy/writer-witness/writer-witness-state-manifest.sh \
+    deploy/writer-witness/writer-witness-backup.sh \
+    deploy/writer-witness/writer-witness-offsite-backup.sh \
+    deploy/writer-witness/writer-witness-restore-drill.sh \
+    deploy/writer-witness/writer-witness-activation-watchdog.sh \
 )
 
 python_sources=( \
@@ -53,11 +57,13 @@ python_sources=( \
     scripts/verify_writer_witness_wheelhouse.py \
     scripts/verify_writer_witness_nftables.py \
     scripts/writer_witness_matrix_client.py \
+    scripts/smoke_writer_witness_client.py \
     writer_witness_app.py \
     deploy/writer-witness/writer-witness-activation.py \
     deploy/writer-witness/writer-witness-matrix-campaign.py \
     deploy/writer-witness/writer-witness-matrix-host-fault-state.py \
     deploy/writer-witness/writer-witness-rotate-hmac.py \
+    deploy/writer-witness/writer-witness-s3-put.py \
 )
 
 for source in "${shell_sources[@]}"; do

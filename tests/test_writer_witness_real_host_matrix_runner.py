@@ -339,9 +339,9 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
         controller.verify_complete_baseline = mock.Mock()
         with self.assertRaisesRegex(runner.MatrixError, "preserve fault isolation"):
             controller.cleanup()
-        controller.capture_pre_recovery.assert_not_called()
-        controller.recover_rotation.assert_not_called()
-        controller.recover_active_live_restore.assert_not_called()
+        controller.capture_pre_recovery.assert_called_once()
+        controller.recover_rotation.assert_called_once()
+        controller.recover_active_live_restore.assert_called_once()
         controller.resume_witness_runtime.assert_not_called()
         controller.remove_partition.assert_not_called()
         controller.restore_once.assert_not_called()
@@ -706,6 +706,60 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         controller._forget_transport_master.assert_called_once_with("webapp_fi")
         controller._mark_transport_master.assert_not_called()
 
+    def test_timed_out_transport_forgets_ambiguous_master_before_retry(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = False
+        controller.raise_if_abort_requested = mock.Mock()
+        controller.event = mock.Mock(return_value=True)
+        controller._reserve_transport_budget = mock.Mock()
+        controller._mark_transport_master = mock.Mock()
+        controller._forget_transport_master = mock.Mock()
+        controller.redact_command_output = lambda value: value
+        controller.secret_output_detected = False
+
+        with mock.patch.object(
+            runner.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["ssh"], 8),
+        ):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                controller.command(
+                    "timed_out_transport",
+                    ["ssh", "example.invalid", "true"],
+                    transport_role="webapp_fi",
+                    transport_kind="ssh",
+                    transport_payload_bytes=4,
+                )
+        controller._forget_transport_master.assert_called_once_with("webapp_fi")
+        controller._mark_transport_master.assert_not_called()
+
+    def test_expired_control_master_reserves_a_new_handshake(self):
+        controller = object.__new__(runner.Controller)
+        controller._budget_lock = __import__("threading").Lock()
+        controller._cleanup_mode = False
+        controller.control_requests = 0
+        controller.control_bytes_upper_bound = 0
+        controller.transport_operations = 0
+        controller.transport_bytes_upper_bound = 0
+        controller.cleanup_transport_operations = 0
+        controller.cleanup_transport_bytes_upper_bound = 0
+        controller._transport_master_roles = {"webapp_fi"}
+        controller._transport_master_deadlines = {"webapp_fi": 99.0}
+        controller.dpi_byte_budget = runner.MIN_DPI_BYTE_BUDGET
+        controller.journal = mock.Mock()
+
+        with mock.patch.object(runner.time, "monotonic", return_value=100.0):
+            reserved = controller._reserve_transport_budget(
+                role="webapp_fi", kind="ssh", payload_bytes=4
+            )
+        self.assertEqual(
+            reserved,
+            runner.SSH_COMMAND_BYTES_UPPER_BOUND
+            + runner.SSH_MASTER_BYTES_UPPER_BOUND
+            + 4,
+        )
+        self.assertNotIn("webapp_fi", controller._transport_master_roles)
+
     def test_reboot_reconnect_accounts_every_direct_ssh_attempt(self):
         controller = object.__new__(runner.Controller)
         controller._forget_transport_master = mock.Mock()
@@ -784,6 +838,12 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             self.assertGreaterEqual(remaining, 0)
             self.assertLess(remaining, 2)
 
+    def test_cleanup_has_an_independent_bounded_recovery_deadline(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_deadline = __import__("time").monotonic() - 1
+        with self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"):
+            controller.raise_if_cleanup_deadline_exceeded()
+
     def test_approve_mode_derives_a_deterministic_sub_hour_expiry(self):
         now = datetime.now(timezone.utc)
         with tempfile.TemporaryDirectory(prefix="matrix-approval-") as directory:
@@ -830,6 +890,11 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 mock.patch.object(runner, "DEFAULT_ARTIFACT_ROOT", artifact_root),
                 mock.patch.object(runner, "DEFAULT_CAMPAIGN_ROOT", campaign_root),
                 mock.patch.object(runner, "TRUSTED_ALLOWED_SIGNERS", trusted_signers),
+                mock.patch.object(
+                    runner,
+                    "TRUSTED_ALLOWED_SIGNERS_SHA256",
+                    hashlib.sha256(trusted_signers.read_bytes()).hexdigest(),
+                ),
                 mock.patch.dict(
                     os.environ,
                     {runner.OBSERVER_CONFIRM_ENV: runner.OBSERVER_CONFIRM_VALUE},
@@ -841,6 +906,20 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             expires = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00"))
             self.assertEqual(expires - approved, timedelta(minutes=45))
             self.assertLessEqual(expires, approved + timedelta(hours=1))
+
+    def test_signer_policy_is_fail_closed_until_an_external_source_pin_exists(self):
+        with self.assertRaisesRegex(runner.MatrixError, "not yet pinned"):
+            runner.assert_source_pinned_signer_policy(b"two locally selected keys\n")
+        value = b"observer ssh-ed25519 AAAA\ncommander ssh-ed25519 BBBB\n"
+        with mock.patch.object(
+            runner,
+            "TRUSTED_ALLOWED_SIGNERS_SHA256",
+            hashlib.sha256(value).hexdigest(),
+        ):
+            self.assertEqual(
+                runner.assert_source_pinned_signer_policy(value),
+                hashlib.sha256(value).hexdigest(),
+            )
 
     def test_approve_mode_rejects_a_caller_selected_trust_store(self):
         now = datetime.now(timezone.utc)
@@ -1068,16 +1147,16 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         names = [call[0] for call in ordered.mock_calls]
         self.assertLess(names.index("prove"), names.index("first_mutation"))
 
-    def test_cleanup_never_recovers_credentials_or_network_after_requester_stop_failure(self):
+    def test_cleanup_revokes_credentials_but_keeps_network_isolated_after_requester_stop_failure(self):
         controller = self._bare_cleanup_controller(claimed=True)
         controller.stop_and_remove_requesters.side_effect = runner.MatrixError(
             "requester still running"
         )
         with self.assertRaisesRegex(runner.MatrixError, "preserve fault isolation"):
             controller.cleanup()
-        controller.capture_pre_recovery.assert_not_called()
-        controller.recover_active_live_restore.assert_not_called()
-        controller.recover_rotation.assert_not_called()
+        controller.capture_pre_recovery.assert_called_once()
+        controller.recover_active_live_restore.assert_called_once()
+        controller.recover_rotation.assert_called_once()
         controller.resume_witness_runtime.assert_not_called()
         controller.remove_isolated_pressure.assert_not_called()
         controller.remove_partition.assert_not_called()
@@ -1138,6 +1217,8 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             "tag": controller.tag,
             "expected_commit": HEAD,
             "scenario": controller.scenario,
+            "not_after": controller.campaign_not_after,
+            "expired": False,
             "active_identity": {
                 "tag": "wwm_aaaaaaaaaaaa",
                 "expected_commit": "b" * 40,
@@ -1349,6 +1430,8 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                     exact.expected_head,
                     "--scenario",
                     exact.scenario,
+                    "--not-after",
+                    exact.campaign_not_after,
                 ],
                 capture_output=True,
                 text=True,
@@ -1436,6 +1519,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             command_args = controller.command.call_args.args[1]
             self.assertIn("--expected-active-campaign-tag", command_args)
             self.assertIn("--expected-active-campaign-scenario", command_args)
+            self.assertIn("--expected-active-campaign-not-after", command_args)
             self.assertIn(controller.tag, command_args)
 
             controller.journal.payload.update(

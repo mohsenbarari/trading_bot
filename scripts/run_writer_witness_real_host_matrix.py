@@ -45,6 +45,11 @@ LOCK_PATH = DEFAULT_CONTROLLER_ROOT / "active.lock"
 DEFAULT_CAMPAIGN_ROOT = Path("/var/lib/trading-bot-witness-matrix/campaigns")
 DEFAULT_SECRET_ROOT = Path("/run/writer-witness-matrix-controller")
 TRUSTED_ALLOWED_SIGNERS = Path("/etc/trading-bot-witness-matrix/allowed_signers")
+# Deliberately fail-closed until two independently custodied public keys are
+# selected and their canonical allowed_signers bytes are pinned by a reviewed
+# source commit. Root on the Matrix controller cannot choose this value at run
+# time, so replacing both keys and signatures is no longer self-authorizing.
+TRUSTED_ALLOWED_SIGNERS_SHA256 = "UNCONFIGURED-INDEPENDENT-SIGNER-POLICY"
 REMOTE_CAMPAIGN_ROOT = "/var/lib/trading-bot-witness/matrix-campaign"
 ROLLBACK_STATE_MANIFEST_SHA256 = (
     "0be506962c48d6e19b9f13b8e8f4f5961fade0d4a852de0dcea9d2819a7d61a7"
@@ -52,6 +57,7 @@ ROLLBACK_STATE_MANIFEST_SHA256 = (
 CONTROL_REQUEST_BYTES_UPPER_BOUND = 32_768
 MAX_CONTROL_REQUESTS = 100
 MAX_SCENARIO_SECONDS = 900
+MAX_CLEANUP_SECONDS = 900
 ABORT_MONITOR_INTERVAL_SECONDS = 10.0
 SSH_MASTER_BYTES_UPPER_BOUND = 131_072
 SSH_COMMAND_BYTES_UPPER_BOUND = 32_768
@@ -746,6 +752,18 @@ def assert_independent_signer_keys(
         raise MatrixError("observer and incident commander must use independent signing keys")
 
 
+def assert_source_pinned_signer_policy(allowed_signers_raw: bytes) -> str:
+    expected = TRUSTED_ALLOWED_SIGNERS_SHA256
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise MatrixError(
+            "independent signer policy is not yet pinned by the reviewed source"
+        )
+    observed = hashlib.sha256(allowed_signers_raw).hexdigest()
+    if observed != expected:
+        raise MatrixError("trusted signer policy differs from the reviewed source pin")
+    return observed
+
+
 def consume_approval(payload: dict[str, Any], root: Path) -> Path:
     nonce = str(payload["authorization_nonce"])
     consumed = secure_durable_child_directory(root, "consumed-approvals")
@@ -780,6 +798,14 @@ def consume_preflight(preflight_sha256: str, scenario: str, root: Path) -> Path:
 
 
 class Controller:
+    # Safe bounded defaults keep deliberately bare unit-test controllers on the
+    # production wire schema; normal construction always installs instance
+    # values derived from the signed approval or durable journal.
+    campaign_not_after = (
+        datetime.now(timezone.utc) + timedelta(seconds=MAX_SCENARIO_SECONDS)
+    ).isoformat().replace("+00:00", "Z")
+    remote_campaign_expired = False
+
     def __init__(
         self,
         *,
@@ -794,6 +820,7 @@ class Controller:
         artifact_dir: Path,
         campaign_root: Path = DEFAULT_CAMPAIGN_ROOT,
         dpi_byte_budget: int = MIN_DPI_BYTE_BUDGET,
+        campaign_not_after: str | None = None,
         tag: str | None = None,
         existing_journal: CampaignJournal | None = None,
     ) -> None:
@@ -847,10 +874,55 @@ class Controller:
         self.cleanup_transport_operations = 0
         self.cleanup_transport_bytes_upper_bound = 0
         self._transport_master_roles: set[str] = set()
+        self._transport_master_deadlines: dict[str, float] = {}
         self.dpi_byte_budget = int(dpi_byte_budget)
         if self.dpi_byte_budget < MIN_DPI_BYTE_BUDGET:
             raise MatrixError("campaign DPI byte budget is below the closed transport minimum")
         self.started_at = utc_now()
+        now = datetime.now(timezone.utc)
+        if existing_journal is not None:
+            campaign_not_after = str(
+                existing_journal.payload.get("campaign_not_after") or ""
+            )
+            if not campaign_not_after:
+                try:
+                    legacy_created_at = datetime.fromisoformat(
+                        str(existing_journal.payload.get("created_at") or "").replace(
+                            "Z", "+00:00"
+                        )
+                    )
+                    if legacy_created_at.tzinfo is None:
+                        raise ValueError("timezone is required")
+                    campaign_not_after = (
+                        legacy_created_at.astimezone(timezone.utc)
+                        + timedelta(seconds=MAX_SCENARIO_SECONDS)
+                    ).isoformat().replace("+00:00", "Z")
+                except (TypeError, ValueError) as exc:
+                    raise MatrixError(
+                        "legacy campaign journal cannot derive a bounded Witness expiry"
+                    ) from exc
+        elif campaign_not_after is None:
+            # Unit-level callers use the same bounded default. Production
+            # execute mode supplies the independently signed approval bound.
+            campaign_not_after = (now + timedelta(seconds=MAX_SCENARIO_SECONDS)).isoformat().replace(
+                "+00:00", "Z"
+            )
+        try:
+            parsed_not_after = datetime.fromisoformat(
+                str(campaign_not_after).replace("Z", "+00:00")
+            )
+            if parsed_not_after.tzinfo is None:
+                raise ValueError("timezone is required")
+            parsed_not_after = parsed_not_after.astimezone(timezone.utc)
+        except (TypeError, ValueError) as exc:
+            raise MatrixError("campaign has an invalid Witness-enforced expiry") from exc
+        if existing_journal is None and (
+            parsed_not_after <= now
+            or parsed_not_after > now + timedelta(seconds=MAX_SCENARIO_SECONDS + 30)
+        ):
+            raise MatrixError("campaign Witness expiry is outside the approved runtime")
+        self.campaign_not_after = parsed_not_after.isoformat().replace("+00:00", "Z")
+        self.remote_campaign_expired = False
         self._scenario_deadline = time.monotonic() + MAX_SCENARIO_SECONDS
         self.remote_campaign_claimed = False
         self.remote_campaign_conflict = False
@@ -878,6 +950,7 @@ class Controller:
                     "reason": reason,
                     "dpi_byte_budget": self.dpi_byte_budget,
                     "max_scenario_seconds": MAX_SCENARIO_SECONDS,
+                    "campaign_not_after": self.campaign_not_after,
                     "control_requests": 0,
                     "control_bytes_upper_bound": 0,
                     "transport_operations": 0,
@@ -995,6 +1068,10 @@ class Controller:
             self._abort_reason = "Matrix scenario exceeded its approved 900-second runtime"
             raise MatrixAbort(self._abort_reason)
 
+    def raise_if_cleanup_deadline_exceeded(self) -> None:
+        if time.monotonic() > getattr(self, "_cleanup_deadline", float("inf")):
+            raise MatrixAbort("Matrix cleanup exceeded its separate 900-second recovery bound")
+
     def _reserve_transport_budget(
         self,
         *,
@@ -1013,11 +1090,18 @@ class Controller:
         if transfer_bytes < 0 or transfer_bytes > SCP_FILE_BYTES_MAX:
             raise MatrixError("transport file exceeds its closed transfer bound")
         base = SSH_COMMAND_BYTES_UPPER_BOUND if kind == "ssh" else SCP_SESSION_BYTES_UPPER_BOUND
-        reserve_master = force_master_reservation or role not in self._transport_master_roles
-        amount = base + payload_bytes + transfer_bytes
-        if reserve_master:
-            amount += SSH_MASTER_BYTES_UPPER_BOUND
         with self._budget_lock:
+            roles = self._transport_master_roles
+            deadlines = getattr(self, "_transport_master_deadlines", {})
+            now = time.monotonic()
+            reusable = role in roles and now < deadlines.get(role, 0.0)
+            if role in roles and not reusable:
+                roles.discard(role)
+                deadlines.pop(role, None)
+            reserve_master = force_master_reservation or not reusable
+            amount = base + payload_bytes + transfer_bytes
+            if reserve_master:
+                amount += SSH_MASTER_BYTES_UPPER_BOUND
             if self._cleanup_mode:
                 next_operations = self.cleanup_transport_operations + 1
                 next_bytes = self.cleanup_transport_bytes_upper_bound + amount
@@ -1054,11 +1138,20 @@ class Controller:
         """Record a reusable SSH master only after a successful transport operation."""
         with self._budget_lock:
             self._transport_master_roles.add(role)
+            deadlines = getattr(self, "_transport_master_deadlines", None)
+            if deadlines is None:
+                deadlines = {}
+                self._transport_master_deadlines = deadlines
+            # OpenSSH ControlPersist is 30 seconds.  Expire our accounting five
+            # seconds earlier so a command can never reuse a logically cached
+            # master after sshd has already removed the socket.
+            deadlines[role] = time.monotonic() + 25.0
 
     def _forget_transport_master(self, role: str) -> None:
         """Force the next operation to reserve a fresh SSH handshake."""
         with self._budget_lock:
             self._transport_master_roles.discard(role)
+            getattr(self, "_transport_master_deadlines", {}).pop(role, None)
 
     def _abort_probe(self) -> None:
         true_pattern = "^(1|true|t|yes|y|on)$"
@@ -1073,13 +1166,15 @@ class Controller:
                 "test \"$(docker inspect -f '{{.State.Health.Status}}' trading_bot_db)\" = healthy; "
                 "curl -fsS http://127.0.0.1:8000/api/config >/dev/null; "
                 "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' /srv/trading-bot/current/.env; "
-                "docker inspect trading_bot_app --format '{{range .Config.Env}}{{println .}}{{end}}' "
+                "for c in trading_bot_app trading_bot_sync_worker; do docker inspect \"$c\" --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}'; done "
                 "| sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
                 f"| awk -F= '{{v=tolower($2); gsub(/[[:space:]]/,\"\",v); if (v ~ /{true_pattern}/) found=1}} END {{exit found ? 0 : 1}}'; "
                 "then exit 41; fi; "
                 "! grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))=' /srv/trading-bot/current/.env; "
-                "! docker inspect trading_bot_app --format '{{range .Config.Env}}{{println .}}{{end}}' "
-                "| grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='",
+                "for c in trading_bot_app trading_bot_sync_worker; do ! docker inspect \"$c\" --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}' | grep -Eq "
+                "'^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; done",
             ),
             (
                 "webapp_ir",
@@ -1094,13 +1189,15 @@ class Controller:
                 "test \"$(docker inspect -f '{{.State.Status}}' \"$db\")\" = running; "
                 "test \"$(docker inspect -f '{{.State.Health.Status}}' \"$db\")\" = healthy; "
                 "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' /srv/trading-bot/current/.env; "
-                "docker inspect \"$app\" --format '{{range .Config.Env}}{{println .}}{{end}}' "
+                "for c in \"$app\" \"$sync\"; do docker inspect \"$c\" --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}'; done "
                 "| sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
                 f"| awk -F= '{{v=tolower($2); gsub(/[[:space:]]/,\"\",v); if (v ~ /{true_pattern}/) found=1}} END {{exit found ? 0 : 1}}'; "
                 "then exit 42; fi; "
                 "! grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))=' /srv/trading-bot/current/.env; "
-                "! docker inspect \"$app\" --format '{{range .Config.Env}}{{println .}}{{end}}' "
-                "| grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='",
+                "for c in \"$app\" \"$sync\"; do ! docker inspect \"$c\" --format "
+                "'{{range .Config.Env}}{{println .}}{{end}}' | grep -Eq "
+                "'^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; done",
             ),
             (
                 "rollback_witness",
@@ -1119,13 +1216,17 @@ class Controller:
                 kind="ssh",
                 payload_bytes=len(command.encode("utf-8")),
             )
-            completed = subprocess.run(
-                self.ssh_args(HOSTS[role], command),
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
+            try:
+                completed = subprocess.run(
+                    self.ssh_args(HOSTS[role], command),
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                )
+            except BaseException:
+                self._forget_transport_master(role)
+                raise
             if completed.returncode != 0:
                 self._forget_transport_master(role)
                 raise MatrixAbort(f"continuous abort probe failed for {role}")
@@ -1174,6 +1275,10 @@ class Controller:
         self.journal.claim(resource, value)
 
     def mark_witness_may_mutate(self) -> None:
+        # Every state-changing Witness path must reacquire a server-clock
+        # authorization decision. The controller deadline is only an
+        # additional abort mechanism, never the authority clock.
+        self.assert_remote_campaign_owned()
         if not self.witness_mutated:
             self.witness_mutated = True
             self.journal.update(witness_mutated=True, status="active", dirty=True)
@@ -1195,6 +1300,8 @@ class Controller:
             self.expected_head,
             "--scenario",
             self.scenario,
+            "--not-after",
+            self.campaign_not_after,
         ]
         if expect is not None:
             arguments.extend(("--expect", expect))
@@ -1224,6 +1331,7 @@ class Controller:
             "tag": self.tag,
             "expected_commit": self.expected_head,
             "scenario": self.scenario,
+            "not_after": self.campaign_not_after,
         }
         if (
             not isinstance(payload, dict)
@@ -1232,6 +1340,7 @@ class Controller:
         ):
             raise MatrixError("replacement Witness campaign inspection identity is invalid")
         state = payload.get("state")
+        expired = payload.get("expired")
         active_relation = payload.get("active_relation")
         release_relation = payload.get("release_relation")
         valid_relations = {"absent", "exact", "foreign"}
@@ -1246,6 +1355,7 @@ class Controller:
             state not in valid_states
             or active_relation not in valid_relations
             or release_relation not in valid_relations
+            or not isinstance(expired, bool)
         ):
             raise MatrixError("replacement Witness campaign inspection classification is invalid")
         if (
@@ -1259,7 +1369,12 @@ class Controller:
             )
         ):
             raise MatrixError("replacement Witness campaign inspection is internally inconsistent")
-        self.journal.update(remote_campaign_inspection_state=state, dirty=True)
+        self.remote_campaign_expired = expired
+        self.journal.update(
+            remote_campaign_inspection_state=state,
+            remote_campaign_expired=expired,
+            dirty=True,
+        )
         return str(state)
 
     def mark_remote_campaign_ambiguous(self, state: str, *, conflict: bool = False) -> None:
@@ -1331,7 +1446,7 @@ class Controller:
             dirty=True,
         )
 
-    def assert_remote_campaign_owned(self) -> None:
+    def assert_remote_campaign_owned(self, *, allow_expired_cleanup: bool = False) -> None:
         try:
             inspected_state = self.inspect_remote_campaign(
                 "verify_remote_campaign_ownership"
@@ -1345,6 +1460,8 @@ class Controller:
                 conflict=inspected_state != "absent",
             )
             raise MatrixError("replacement Witness campaign ownership is not proven")
+        if self.remote_campaign_expired and not allow_expired_cleanup:
+            raise MatrixError("replacement Witness campaign authorization has expired")
         self.remote_campaign_claimed = True
         self.remote_campaign_ambiguous = False
         self.journal.update(
@@ -1439,13 +1556,15 @@ class Controller:
             "test \"$(docker inspect -f '{{.State.Health.Status}}' trading_bot_db)\" = healthy; "
             "test \"$(findmnt -n -o FSTYPE -T /run)\" = tmpfs; "
             "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' /srv/trading-bot/current/.env; "
-            "docker inspect trading_bot_app --format '{{range .Config.Env}}{{println .}}{{end}}' "
+            "for c in trading_bot_app trading_bot_sync_worker; do docker inspect \"$c\" --format "
+            "'{{range .Config.Env}}{{println .}}{{end}}'; done "
             "| sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
             f"| awk -F= '{{v=tolower($2); gsub(/[[:space:]]/,\"\",v); if (v ~ /{true_pattern}/) found=1}} END {{exit found ? 0 : 1}}'; "
             "then exit 41; fi; "
             "! grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))=' /srv/trading-bot/current/.env; "
-            "! docker inspect trading_bot_app --format '{{range .Config.Env}}{{println .}}{{end}}' "
-            "| grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; "
+            "for c in trading_bot_app trading_bot_sync_worker; do ! docker inspect \"$c\" --format "
+            "'{{range .Config.Env}}{{println .}}{{end}}' | grep -Eq "
+            "'^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; done; "
             "test -z \"$(find /run/writer-witness-matrix -mindepth 1 -print -quit 2>/dev/null)\"",
         )
         self.remote(
@@ -1459,13 +1578,15 @@ class Controller:
             "test \"$(docker inspect -f '{{.State.Status}}' \"$app\")\" != running; "
             "test \"$(docker inspect -f '{{.State.Status}}' \"$sync\")\" != running; "
             "if { sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p' /srv/trading-bot/current/.env; "
-            "docker inspect \"$app\" --format '{{range .Config.Env}}{{println .}}{{end}}' "
+            "for c in \"$app\" \"$sync\"; do docker inspect \"$c\" --format "
+            "'{{range .Config.Env}}{{println .}}{{end}}'; done "
             "| sed -n '/^WRITER_WITNESS_\\(REQUIRED\\|AUTO_RENEW_ENABLED\\|SERVICE_ENABLED\\)=/p'; } "
             f"| awk -F= '{{v=tolower($2); gsub(/[[:space:]]/,\"\",v); if (v ~ /{true_pattern}/) found=1}} END {{exit found ? 0 : 1}}'; "
             "then exit 42; fi; "
             "! grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))=' /srv/trading-bot/current/.env; "
-            "! docker inspect \"$app\" --format '{{range .Config.Env}}{{println .}}{{end}}' "
-            "| grep -Eq '^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; "
+            "for c in \"$app\" \"$sync\"; do ! docker inspect \"$c\" --format "
+            "'{{range .Config.Env}}{{println .}}{{end}}' | grep -Eq "
+            "'^WRITER_WITNESS_(INTERNAL_URL|CLIENT_(KEY_ID|SECRET))='; done; "
             "test -z \"$(find /run/writer-witness-matrix -mindepth 1 -print -quit 2>/dev/null)\"",
         )
         matrix = self.witness_state("matrix_witness")
@@ -1573,7 +1694,9 @@ class Controller:
         transport_payload_bytes: int = 0,
         transport_file_bytes: int = 0,
     ) -> subprocess.CompletedProcess[str]:
-        if not self._cleanup_mode:
+        if self._cleanup_mode:
+            self.raise_if_cleanup_deadline_exceeded()
+        else:
             self.raise_if_abort_requested()
         intent_recorded = self.event(
             "command.start",
@@ -1591,7 +1714,17 @@ class Controller:
                 payload_bytes=transport_payload_bytes,
                 transfer_bytes=transport_file_bytes,
             )
-        completed = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+        try:
+            completed = subprocess.run(
+                args, cwd=ROOT, capture_output=True, text=True, timeout=timeout
+            )
+        except BaseException:
+            if transport_role is not None:
+                # Timeout, cancellation, and local execution failures make the
+                # multiplexed connection state ambiguous.  The next attempt
+                # must reserve a full handshake before any retry.
+                self._forget_transport_master(transport_role)
+            raise
         if transport_role is not None:
             if completed.returncode == 0:
                 self._mark_transport_master(transport_role)
@@ -2198,10 +2331,14 @@ class Controller:
                 payload_bytes=len(command.encode("utf-8")),
                 force_master_reservation=True,
             )
-            completed = subprocess.run(
-                self.ssh_args(HOSTS[role], command),
-                cwd=ROOT, capture_output=True, text=True, timeout=12,
-            )
+            try:
+                completed = subprocess.run(
+                    self.ssh_args(HOSTS[role], command),
+                    cwd=ROOT, capture_output=True, text=True, timeout=12,
+                )
+            except BaseException:
+                self._forget_transport_master(role)
+                raise
             if completed.returncode != 0:
                 saw_down = True
             elif saw_down:
@@ -2227,14 +2364,22 @@ class Controller:
 
     def scenario_RH_009(self) -> None:
         self.claim("isolated_pressure", self.tag)
-        self.remote(
+        before = self.witness_state()
+        completed = self.remote(
             "matrix_witness", "isolated_postgres_disk_full",
             f"/usr/local/sbin/writer-witness-matrix-host-faults disk-full --tag {self.tag}",
             timeout=180,
         )
-        current = self.witness_state()
-        expected = self.baseline["matrix_witness_dark_baseline"]
-        if current["manifest_sha256"] != expected["manifest_sha256"]:
+        evidence = parse_last_json(completed.stdout)
+        if (
+            evidence.get("status") != "passed"
+            or evidence.get("tag") != self.tag
+            or evidence.get("production_state_unchanged") is not True
+            or evidence.get("production_before") != evidence.get("production_after")
+        ):
+            raise MatrixError("isolated disk-full evidence did not prove its production boundary")
+        after = self.witness_state()
+        if after != before:
             raise MatrixError("isolated disk-full scenario touched the production Witness database")
 
     def scenario_RH_010(self) -> None:
@@ -2333,8 +2478,17 @@ class Controller:
         self.client("webapp_fi", "status", request_id=f"{self.tag}-new-active")
         self.remote(
             "matrix_witness", "recover_fi_hmac_rotation",
-            f"/usr/local/sbin/writer-witness-rotate-hmac recover --site webapp_fi "
-            f"--expected-epoch 0 --campaign-tag {self.tag}",
+            "set -Eeuo pipefail; "
+            "systemctl stop writer-witness.service; "
+            "test \"$(runuser -u postgres -- psql -XAt -F '|' -d writer_witness -c "
+            "\"SELECT authority, writer_epoch, lease_status, COALESCE(holder_site, '') "
+            "FROM webapp_writer_witness_state WHERE authority='webapp';\")\" = "
+            "'webapp|0|vacant|'; "
+            f"/usr/local/sbin/writer-witness-rotate-hmac recover --leave-service-stopped "
+            f"--site webapp_fi --expected-epoch 0 --campaign-tag {self.tag}; "
+            "systemctl start writer-witness.service; "
+            "curl --fail --silent --show-error --retry 20 --retry-delay 1 "
+            "--retry-all-errors http://127.0.0.1:8011/health/ready >/dev/null",
         )
         self.rotation_sites.discard("webapp_fi")
         self.client("webapp_fi", "status", env_name="old.env", request_id=f"{self.tag}-old-restored")
@@ -2718,6 +2872,8 @@ class Controller:
 
     def cleanup(self) -> None:
         self._cleanup_mode = True
+        if not hasattr(self, "_cleanup_deadline"):
+            self._cleanup_deadline = time.monotonic() + MAX_CLEANUP_SECONDS
         if (
             self.journal.payload.get("remote_campaign_protocol") == "atomic-helper-v1"
             and self.journal.payload.get("lifecycle_phase")
@@ -2767,7 +2923,7 @@ class Controller:
                 cleanup_errors=["remote_campaign_ownership:not_proven"],
             )
             raise MatrixError("cleanup refused every remote mutation without proven campaign ownership")
-        self.assert_remote_campaign_owned()
+        self.assert_remote_campaign_owned(allow_expired_cleanup=True)
         if not isinstance(self.journal.payload.get("initial_database_inventory"), list):
             if self.journal.payload.get("lifecycle_phase") != "remote_claimed":
                 raise MatrixError(
@@ -2784,13 +2940,15 @@ class Controller:
         # retained before any recovery, an interrupted live restore is reconciled
         # before HMAC material can touch/restart the service, and the HMAC helper
         # deliberately leaves the runtime stopped until the explicit resume step.
+        # Capability revocation is a safety action, not a reconnect action. If
+        # requester termination is ambiguous we keep isolation in place but
+        # still stop the Witness and remove the campaign HMAC, so an orphaned
+        # retry process cannot retain an accepted credential indefinitely.
         for name, action, critical in (
             ("stop_and_join_requesters", self.stop_and_remove_requesters, True),
             ("retain_pre_recovery_evidence", self.capture_pre_recovery, False),
             ("recover_active_live_restore", self.recover_active_live_restore, True),
             ("revoke_transient_capability", self.recover_rotation, True),
-            ("resume_paused_runtime", self.resume_witness_runtime, True),
-            ("remove_isolated_pressure", self.remove_isolated_pressure, True),
         ):
             try:
                 action()
@@ -2803,8 +2961,27 @@ class Controller:
                 else:
                     assurance_errors.append(rendered)
                 self.event("cleanup.step", step=name, status="failed", error=str(exc))
-                if critical:
-                    break
+                # Do not break before the credential-revocation boundary.
+        if critical_errors:
+            shutil.rmtree(self.local_secret_root, ignore_errors=True)
+            self.journal.update(status="failed", dirty=True, cleanup_errors=errors)
+            raise MatrixError(
+                "cleanup stopped before reconnect/restore to preserve fault isolation: "
+                + "; ".join(critical_errors)
+            )
+        for name, action in (
+            ("resume_paused_runtime", self.resume_witness_runtime),
+            ("remove_isolated_pressure", self.remove_isolated_pressure),
+        ):
+            try:
+                action()
+                self.event("cleanup.step", step=name, status="passed")
+            except Exception as exc:
+                rendered = f"{name}:{exc}"
+                errors.append(rendered)
+                critical_errors.append(rendered)
+                self.event("cleanup.step", step=name, status="failed", error=str(exc))
+                break
         if critical_errors:
             shutil.rmtree(self.local_secret_root, ignore_errors=True)
             self.journal.update(status="failed", dirty=True, cleanup_errors=errors)
@@ -2926,8 +3103,12 @@ class Controller:
                     self.tag,
                     "--expected-active-campaign-scenario",
                     self.scenario,
+                    "--expected-active-campaign-not-after",
+                    self.campaign_not_after,
                 )
             )
+            if getattr(self, "_cleanup_mode", False):
+                arguments.append("--allow-expired-active-campaign")
         arguments.extend(("--output", str(output)))
         # The pinned preflight helper opens one independent SSH session to each
         # of the four fixed roles. It is intentionally treated as an opaque,
@@ -2960,7 +3141,7 @@ class Controller:
     def finalize_campaign(self) -> None:
         if self.journal.payload.get("lifecycle_phase") != "postflight_verified_release_pending":
             raise MatrixError("campaign cannot release ownership before exact postflight")
-        self.assert_remote_campaign_owned()
+        self.assert_remote_campaign_owned(allow_expired_cleanup=True)
         self.release_remote_campaign()
         self.journal.update(
             status="completed",
@@ -3261,6 +3442,7 @@ def main() -> int:
             TRUSTED_ALLOWED_SIGNERS,
             label="trusted signer policy",
         )
+        assert_source_pinned_signer_policy(allowed_signers_raw)
         preflight_raw = read_secure_regular(args.preflight, label="preflight artifact")
         preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
         validate_preflight(preflight, expected_head)
@@ -3343,6 +3525,7 @@ def main() -> int:
         TRUSTED_ALLOWED_SIGNERS,
         label="trusted signer policy",
     )
+    assert_source_pinned_signer_policy(allowed_signers_raw)
     preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
     baseline = validate_preflight(preflight, expected_head)
     approval = parse_json_bytes(approval_raw, label="observer approval")
@@ -3370,6 +3553,13 @@ def main() -> int:
         identity=incident_commander,
         allowed_signers_raw=allowed_signers_raw,
     )
+    approval_expiry = datetime.fromisoformat(
+        str(approval["expires_at"]).replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+    campaign_not_after = min(
+        approval_expiry,
+        datetime.now(timezone.utc) + timedelta(seconds=MAX_SCENARIO_SECONDS),
+    ).isoformat().replace("+00:00", "Z")
 
     lock_descriptor = acquire_local_lock(args.scenario, expected_head)
     controller: Controller | None = None
@@ -3400,6 +3590,7 @@ def main() -> int:
             artifact_dir=artifact_dir,
             campaign_root=campaign_root,
             dpi_byte_budget=int(approval["dpi_byte_budget"]),
+            campaign_not_after=campaign_not_after,
         )
         controller.journal.update(
             approval_path=str(args.approval),

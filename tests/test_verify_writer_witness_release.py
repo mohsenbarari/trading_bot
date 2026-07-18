@@ -30,6 +30,16 @@ EXPECTED_EXECUTABLE_PATHS = {
 
 
 class WriterWitnessReleaseMetadataTests(unittest.TestCase):
+    def test_cli_rejects_unisolated_python_before_argument_parsing(self):
+        completed = subprocess.run(
+            ["/usr/bin/python3.12", str(VERIFIER_PATH)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("requires isolated clean Python startup", completed.stderr)
+
     def _build_release(self, parent: Path) -> tuple[Path, str]:
         release = parent / "release"
         release.mkdir(mode=0o755)
@@ -56,7 +66,17 @@ class WriterWitnessReleaseMetadataTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
-                "python3",
+                "/usr/bin/env",
+                "-i",
+                "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+                "/usr/bin/python3.12",
+                "-I",
+                "-S",
+                "-B",
+                "-X",
+                "utf8",
+                "-X",
+                "pycache_prefix=/dev/null",
                 str(VERIFIER_PATH),
                 "--release-root",
                 str(release),

@@ -21,6 +21,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
+import subprocess
 import stat
 import struct
 import sys
@@ -77,6 +78,8 @@ SYSTEM_PACKAGE_FIELDS = frozenset(
         "info_stem",
         "list_sha256",
         "md5sums_sha256",
+        "md5_verified_file_count",
+        "md5_verified_paths_sha256",
         "name",
         "status",
         "version",
@@ -709,6 +712,8 @@ def _parse_elf_identity(value: bytes) -> ElfIdentity:
     strtab_sizes = [item for tag, item in tags if tag == 10]
     if len(strtab_addresses) != 1 or len(strtab_sizes) != 1:
         raise RuntimeAttestationError("ELF dynamic string table is ambiguous")
+    if any(tag in {15, 29} for tag, _ in tags):
+        raise RuntimeAttestationError("ELF runtime object contains RPATH or RUNPATH")
     address = strtab_addresses[0]
     size = strtab_sizes[0]
     strtab_offset: int | None = None
@@ -779,6 +784,58 @@ def _resolve_elf_dependency(name: str, requester: Path, architecture: str) -> Pa
         if stat.S_ISREG(metadata.st_mode):
             return resolved
     raise RuntimeAttestationError("cannot close the ELF dependency inventory")
+
+
+def _actual_elf_dependencies(
+    path: Path, identity: ElfIdentity, architecture: str
+) -> tuple[Path, ...]:
+    """Ask the pinned glibc loader which exact files it would map."""
+
+    if architecture != "x86_64":
+        raise RuntimeAttestationError("system runtime architecture is unsupported")
+    loader = Path("/lib64/ld-linux-x86-64.so.2").resolve(strict=True)
+    try:
+        completed = subprocess.run(
+            [loader.as_posix(), "--list", path.as_posix()],
+            env={"PATH": TRUSTED_SYSTEM_PATH},
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeAttestationError("cannot reproduce dynamic-loader resolution") from exc
+    if completed.returncode != 0 or completed.stderr:
+        raise RuntimeAttestationError("dynamic-loader resolution failed closed")
+    resolved_by_name: dict[str, Path] = {}
+    for raw_line in completed.stdout.splitlines():
+        line = raw_line.strip()
+        if not line or line == "statically linked" or line.startswith("linux-vdso.so.1 "):
+            continue
+        if " => " in line:
+            name, remainder = line.split(" => ", 1)
+            if "/" in name:
+                name = Path(name).name
+            raw_path = remainder.rsplit(" (0x", 1)[0]
+            if raw_path == "not found":
+                raise RuntimeAttestationError("dynamic-loader dependency is missing")
+        else:
+            raw_path = line.rsplit(" (0x", 1)[0]
+            name = Path(raw_path).name
+        if not raw_path.startswith("/"):
+            raise RuntimeAttestationError("dynamic-loader output is unsafe")
+        try:
+            resolved = Path(raw_path).resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise RuntimeAttestationError("dynamic-loader output cannot be resolved") from exc
+        if name in resolved_by_name and resolved_by_name[name] != resolved:
+            raise RuntimeAttestationError("dynamic-loader output is ambiguous")
+        resolved_by_name[name] = resolved
+    missing = set(identity.needed).difference(resolved_by_name)
+    if missing:
+        raise RuntimeAttestationError("dynamic-loader output is incomplete")
+    return tuple(resolved_by_name[name] for name in identity.needed)
 
 
 def _wheelhouse_system_elf_roots(
@@ -970,20 +1027,66 @@ def _package_document(
         )
         md5_path = Path("/var/lib/dpkg/info") / f"{info_stem}.md5sums"
         if md5_path.exists():
-            md5_sha256, _ = _stable_hash_file(
+            md5_raw, md5_sha256 = _stable_read_runtime_file(
                 md5_path,
                 expected_uid=0 if expected_uid is not None else None,
-                require_single_link=True,
+                maximum_bytes=64 * 1024 * 1024,
                 subject="dpkg package checksum list",
             )
+            verified_paths: list[str] = []
+            for raw_line in md5_raw.decode("utf-8").splitlines():
+                match = re.fullmatch(r"([0-9a-f]{32})  ([^\x00\r\n]+)", raw_line)
+                if match is None:
+                    raise RuntimeAttestationError("dpkg package checksum entry is invalid")
+                relative = PurePosixPath(match.group(2))
+                if (
+                    relative.is_absolute()
+                    or not relative.parts
+                    or any(part in {"", ".", ".."} for part in relative.parts)
+                ):
+                    raise RuntimeAttestationError("dpkg package checksum path is unsafe")
+                target = Path("/").joinpath(*relative.parts)
+                try:
+                    descriptor = os.open(target, _safe_open_flags())
+                except OSError as exc:
+                    raise RuntimeAttestationError("dpkg-owned file is missing") from exc
+                digest = hashlib.md5(usedforsecurity=False)
+                try:
+                    before = os.fstat(descriptor)
+                    if not stat.S_ISREG(before.st_mode):
+                        raise RuntimeAttestationError("dpkg-owned path is not a regular file")
+                    _safe_metadata(
+                        before,
+                        expected_uid=0 if expected_uid is not None else None,
+                        subject="dpkg-owned file",
+                    )
+                    while True:
+                        chunk = os.read(descriptor, 1024 * 1024)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                    _assert_stable_metadata(
+                        before, os.fstat(descriptor), subject="dpkg-owned file"
+                    )
+                finally:
+                    os.close(descriptor)
+                if digest.hexdigest() != match.group(1):
+                    raise RuntimeAttestationError("dpkg-owned file checksum mismatch")
+                verified_paths.append(relative.as_posix())
+            md5_verified_file_count = len(verified_paths)
+            md5_verified_paths_sha256 = _canonical_json_sha256(verified_paths)
         else:
             md5_sha256 = None
+            md5_verified_file_count = 0
+            md5_verified_paths_sha256 = _canonical_json_sha256([])
         result.append(
             {
                 "architecture": architecture,
                 "info_stem": info_stem,
                 "list_sha256": list_sha256,
                 "md5sums_sha256": md5_sha256,
+                "md5_verified_file_count": md5_verified_file_count,
+                "md5_verified_paths_sha256": md5_verified_paths_sha256,
                 "name": package_name,
                 "status": fields["Status"],
                 "version": version,
@@ -1025,8 +1128,7 @@ def _elf_closure_document(
             except (OSError, RuntimeError) as exc:
                 raise RuntimeAttestationError("cannot resolve the ELF interpreter") from exc
             pending.append(loader)
-        for name in identity.needed:
-            pending.append(_resolve_elf_dependency(name, path, architecture))
+        pending.extend(_actual_elf_dependencies(path, identity, architecture))
     documents = [observed[path] for path in sorted(observed, key=os.fspath)]
     sonames: dict[str, str] = {}
     for item in documents:
@@ -1206,14 +1308,8 @@ def observe_system_runtime_manifest(
     )
     preload_path = Path("/etc/ld.so.preload")
     if preload_path.exists() or preload_path.is_symlink():
-        preload_sha256, _ = _stable_hash_file(
-            preload_path,
-            expected_uid=expected_uid,
-            require_single_link=True,
-            subject="dynamic-loader preload configuration",
-        )
-    else:
-        preload_sha256 = None
+        raise RuntimeAttestationError("dynamic-loader preload configuration is forbidden")
+    preload_sha256 = None
 
     return {
         "architecture": architecture,

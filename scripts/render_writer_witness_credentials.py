@@ -890,6 +890,10 @@ def main() -> int:
     parser.add_argument("--expected-gid", type=int, default=0)
     parser.add_argument("--rotation-lock-fd", type=int)
     args = parser.parse_args()
+    if args.mode in {"prepare", "finalize"} and args.rotation_lock_fd is None:
+        parser.error(
+            "prepare/finalize require a caller-owned --rotation-lock-fd acquired before credential rendering"
+        )
     if args.mode == "initialize-bootstrap":
         result = initialize_bootstrap(
             args.bootstrap_secrets,
