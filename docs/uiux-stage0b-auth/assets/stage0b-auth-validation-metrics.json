@@ -1,187 +1,5668 @@
 {
-  "document": {
-    "scrollWidth": 2000,
-    "scrollHeight": 5743
+  "schemaVersion": 3,
+  "generatedAt": "2026-07-18T09:08:14.124Z",
+  "authoringWidth": 390,
+  "captureSemantics": {
+    "phoneElement": "The mock device element itself; expected outer dimensions are 390x844 at the authoring width.",
+    "scenarioPng": "A locator screenshot of the complete scenario article, including its label and the phone element; its PNG dimensions are therefore larger than 390x844.",
+    "keyboardIllustration": "Static CSS illustrations only; not an operating-system keyboard, browser keyboard, or runtime focus/viewport test."
   },
-  "phones": [
+  "captures": {
+    "overview": {
+      "filename": "stage0b-auth-overview.png",
+      "captureKind": "full-design-board",
+      "pixelDimensions": {
+        "width": 2000,
+        "height": 7968
+      }
+    },
+    "groups": [
+      {
+        "id": "mobile-scenarios",
+        "selector": "#mobile-scenarios",
+        "filename": "stage0b-auth-mobile-scenarios.png",
+        "captureKind": "group-section",
+        "pixelDimensions": {
+          "width": 1920,
+          "height": 3831
+        }
+      },
+      {
+        "id": "keyboard-states",
+        "selector": "#keyboard-states",
+        "filename": "stage0b-auth-keyboard-states.png",
+        "captureKind": "group-section",
+        "pixelDimensions": {
+          "width": 1920,
+          "height": 814
+        }
+      },
+      {
+        "id": "state-atlas",
+        "selector": "#state-atlas",
+        "filename": "stage0b-auth-state-atlas.png",
+        "captureKind": "group-section",
+        "pixelDimensions": {
+          "width": 1920,
+          "height": 1851
+        }
+      },
+      {
+        "id": "adaptive-desktop",
+        "selector": "#adaptive-desktop",
+        "filename": "stage0b-auth-adaptive-desktop.png",
+        "captureKind": "group-section",
+        "pixelDimensions": {
+          "width": 1440,
+          "height": 901
+        }
+      }
+    ],
+    "scenarioPngs": [
+      {
+        "id": "auth-login-mobile",
+        "selector": "#auth-login-mobile",
+        "filename": "auth-01-login-mobile.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-login-otp",
+        "selector": "#auth-login-otp",
+        "filename": "auth-02-login-otp.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-device-approval",
+        "selector": "#auth-device-approval",
+        "filename": "auth-03-device-approval.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-recovery-waiting",
+        "selector": "#auth-recovery-waiting",
+        "filename": "auth-04-recovery-waiting.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-invite-valid",
+        "selector": "#auth-invite-valid",
+        "filename": "auth-05-invite-valid.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-register-review",
+        "selector": "#auth-register-review",
+        "filename": "auth-06-register-review.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-register-otp",
+        "selector": "#auth-register-otp",
+        "filename": "auth-07-register-otp.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-register-address",
+        "selector": "#auth-register-address",
+        "filename": "auth-08-register-address.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-register-telegram",
+        "selector": "#auth-register-telegram",
+        "filename": "auth-09-register-telegram.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-recovery-identity",
+        "selector": "#auth-recovery-identity",
+        "filename": "auth-10-recovery-identity.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-setup-password",
+        "selector": "#auth-setup-password",
+        "filename": "auth-11-setup-password.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-invite-web-only",
+        "selector": "#auth-invite-web-only",
+        "filename": "auth-12-invite-web-only.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-recovery-unavailable",
+        "selector": "#auth-recovery-unavailable",
+        "filename": "auth-13-recovery-unavailable.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-register-direct",
+        "selector": "#auth-register-direct",
+        "filename": "auth-14-register-direct.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      },
+      {
+        "id": "auth-setup-password-error",
+        "selector": "#auth-setup-password-error",
+        "filename": "auth-15-setup-password-error.png",
+        "captureKind": "full-scenario-article-including-label-and-390x844-phone-element",
+        "pixelDimensions": {
+          "width": 432,
+          "height": 933
+        }
+      }
+    ]
+  },
+  "stateAtlas": {
+    "stateCardCount": 41,
+    "exampleActionCount": 12
+  },
+  "phoneElementsAtAuthoringWidth": [
     {
       "id": "auth-login-mobile",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-login-otp",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-device-approval",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-recovery-unavailable",
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-recovery-waiting",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-invite-valid",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-invite-web-only",
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-register-review",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-register-otp",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-register-address",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-register-direct",
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-register-telegram",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-recovery-identity",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     },
     {
       "id": "auth-setup-password",
-      "width": 390,
-      "height": 844,
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-setup-password-error",
+      "outerWidth": 390,
+      "outerHeight": 844,
+      "clientWidth": 388,
+      "clientHeight": 842,
       "scrollWidth": 388,
       "scrollHeight": 842
     }
   ],
-  "screens": [
+  "screensAtAuthoringWidth": [
     {
       "id": "auth-login-mobile",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 481,
+      "slack": 199,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-login-otp",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 546,
+      "slack": 134,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-device-approval",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 456,
+      "slack": 224,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
+    },
+    {
+      "id": "auth-recovery-unavailable",
+      "availableHeight": 680,
+      "naturalHeight": 471,
+      "slack": 209,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-recovery-waiting",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 500,
+      "slack": 180,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-invite-valid",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 498,
+      "slack": 182,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
+    },
+    {
+      "id": "auth-invite-web-only",
+      "availableHeight": 680,
+      "naturalHeight": 382,
+      "slack": 298,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-review",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 484,
+      "slack": 196,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-otp",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 404,
+      "slack": 276,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-address",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 530,
+      "slack": 150,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
+    },
+    {
+      "id": "auth-register-direct",
+      "availableHeight": 680,
+      "naturalHeight": 474,
+      "slack": 206,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-register-telegram",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 478,
+      "slack": 202,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-recovery-identity",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 477,
+      "slack": 203,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     },
     {
       "id": "auth-setup-password",
-      "clientHeight": 680,
-      "scrollHeight": 680,
-      "verticallyClipped": false
+      "availableHeight": 680,
+      "naturalHeight": 557,
+      "slack": 123,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
+    },
+    {
+      "id": "auth-setup-password-error",
+      "availableHeight": 680,
+      "naturalHeight": 534,
+      "slack": 146,
+      "naturalContentClipped": false,
+      "renderedClientHeight": 680,
+      "renderedScrollHeight": 680,
+      "renderedOverflowDetected": false
     }
   ],
-  "touchTargets": {
-    "count": 32,
-    "minimumWidth": 84,
+  "actionableTargetsAtAuthoringWidth": {
+    "count": 41,
+    "semanticCount": 41,
+    "minimumWidth": 49,
     "minimumHeight": 44,
-    "below44": []
+    "below44": [],
+    "unmarked": [],
+    "all": [
+      {
+        "id": "auth-login-mobile:button:0",
+        "context": "auth-login-mobile",
+        "tag": "button",
+        "role": null,
+        "label": "دریافت کد تأیید",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-login-mobile:button:1",
+        "context": "auth-login-mobile",
+        "tag": "button",
+        "role": null,
+        "label": "راهنمای نصب اپ",
+        "width": 98,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-login-otp:button:2",
+        "context": "auth-login-otp",
+        "tag": "button",
+        "role": null,
+        "label": "ویرایش شماره",
+        "width": 84,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-login-otp:button:3",
+        "context": "auth-login-otp",
+        "tag": "button",
+        "role": null,
+        "label": "تأیید و ادامه",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-device-approval:button:4",
+        "context": "auth-device-approval",
+        "tag": "button",
+        "role": null,
+        "label": "به دستگاه قبلی دسترسی ندارم",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-device-approval:button:5",
+        "context": "auth-device-approval",
+        "tag": "button",
+        "role": null,
+        "label": "بازگشت به مرحله کد تأیید",
+        "width": 352,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-unavailable:button:6",
+        "context": "auth-recovery-unavailable",
+        "tag": "button",
+        "role": null,
+        "label": "ادامه انتظار برای تأیید دستگاه",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-waiting:button:7",
+        "context": "auth-recovery-waiting",
+        "tag": "button",
+        "role": null,
+        "label": "انصراف از درخواست بازیابی",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-invite-valid:button:8",
+        "context": "auth-invite-valid",
+        "tag": "button",
+        "role": null,
+        "label": "ثبت‌نام با تلگرام",
+        "width": 352,
+        "height": 62,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-invite-valid:button:9",
+        "context": "auth-invite-valid",
+        "tag": "button",
+        "role": null,
+        "label": "ثبت‌نام از طریق وب",
+        "width": 352,
+        "height": 62,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-invite-web-only:button:10",
+        "context": "auth-invite-web-only",
+        "tag": "button",
+        "role": null,
+        "label": "ادامه ثبت‌نام از طریق وب",
+        "width": 352,
+        "height": 62,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-review:button:11",
+        "context": "auth-register-review",
+        "tag": "button",
+        "role": null,
+        "label": "ارسال کد تأیید",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-review:button:12",
+        "context": "auth-register-review",
+        "tag": "button",
+        "role": null,
+        "label": "بازگشت به دعوت‌نامه",
+        "width": 352,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-otp:button:13",
+        "context": "auth-register-otp",
+        "tag": "button",
+        "role": null,
+        "label": "تأیید کد",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-otp:button:14",
+        "context": "auth-register-otp",
+        "tag": "button",
+        "role": null,
+        "label": "بازگشت به اطلاعات دعوت",
+        "width": 352,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-address:button:15",
+        "context": "auth-register-address",
+        "tag": "button",
+        "role": null,
+        "label": "تکمیل ثبت‌نام",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-address:button:16",
+        "context": "auth-register-address",
+        "tag": "button",
+        "role": null,
+        "label": "بازگشت به مرحله قبل",
+        "width": 352,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-direct:button:17",
+        "context": "auth-register-direct",
+        "tag": "button",
+        "role": null,
+        "label": "تکمیل ثبت‌نام",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-telegram:button:18",
+        "context": "auth-register-telegram",
+        "tag": "button",
+        "role": null,
+        "label": "اتصال به ربات تلگرام",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-register-telegram:button:19",
+        "context": "auth-register-telegram",
+        "tag": "button",
+        "role": null,
+        "label": "فعلاً رد می‌کنم",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:20",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "▧گالری",
+        "width": 112,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:21",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "◉دوربین",
+        "width": 112,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:22",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "↥فایل",
+        "width": 112,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:23",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "ارسال مدرک برای بررسی",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-recovery-identity:button:24",
+        "context": "auth-recovery-identity",
+        "tag": "button",
+        "role": null,
+        "label": "انصراف از درخواست بازیابی",
+        "width": 352,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password:button:25",
+        "context": "auth-setup-password",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش رمز عبور",
+        "width": 49,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password:button:26",
+        "context": "auth-setup-password",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش تکرار رمز عبور",
+        "width": 49,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password:button:27",
+        "context": "auth-setup-password",
+        "tag": "button",
+        "role": null,
+        "label": "ثبت رمز و ورود",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password-error:button:28",
+        "context": "auth-setup-password-error",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش رمز عبور",
+        "width": 49,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password-error:button:29",
+        "context": "auth-setup-password-error",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش تکرار رمز عبور",
+        "width": 49,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "auth-setup-password-error:button:30",
+        "context": "auth-setup-password-error",
+        "tag": "button",
+        "role": null,
+        "label": "ثبت رمز و ورود",
+        "width": 352,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "static-keyboard-illustration:button:31",
+        "context": "static-keyboard-illustration",
+        "tag": "button",
+        "role": null,
+        "label": "دریافت کد تأیید",
+        "width": 360,
+        "height": 46,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "static-keyboard-illustration:button:32",
+        "context": "static-keyboard-illustration",
+        "tag": "button",
+        "role": null,
+        "label": "تأیید و ادامه",
+        "width": 360,
+        "height": 46,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "static-keyboard-illustration:button:33",
+        "context": "static-keyboard-illustration",
+        "tag": "button",
+        "role": null,
+        "label": "تکمیل ثبت‌نام",
+        "width": 360,
+        "height": 46,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "static-keyboard-illustration:button:34",
+        "context": "static-keyboard-illustration",
+        "tag": "button",
+        "role": null,
+        "label": "نمایش رمز عبور",
+        "width": 49,
+        "height": 44,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "static-keyboard-illustration:button:35",
+        "context": "static-keyboard-illustration",
+        "tag": "button",
+        "role": null,
+        "label": "ثبت رمز و ورود",
+        "width": 360,
+        "height": 46,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "adaptive-desktop-proof:button:36",
+        "context": "adaptive-desktop-proof",
+        "tag": "button",
+        "role": null,
+        "label": "▧انتخاب از گالری",
+        "width": 213,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "adaptive-desktop-proof:button:37",
+        "context": "adaptive-desktop-proof",
+        "tag": "button",
+        "role": null,
+        "label": "◉گرفتن تصویر",
+        "width": 213,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "adaptive-desktop-proof:button:38",
+        "context": "adaptive-desktop-proof",
+        "tag": "button",
+        "role": null,
+        "label": "↥انتخاب فایل",
+        "width": 213,
+        "height": 60,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "adaptive-desktop-proof:button:39",
+        "context": "adaptive-desktop-proof",
+        "tag": "button",
+        "role": null,
+        "label": "ارسال مدرک برای بررسی",
+        "width": 524,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      },
+      {
+        "id": "adaptive-desktop-proof:button:40",
+        "context": "adaptive-desktop-proof",
+        "tag": "button",
+        "role": null,
+        "label": "انصراف",
+        "width": 120,
+        "height": 50,
+        "semantic": true,
+        "explicitlyDeclared": true,
+        "markedTouchTarget": true
+      }
+    ]
   },
-  "font": "Vazirmatn, Tahoma, Arial, sans-serif",
+  "atlasActionSamples": {
+    "count": 12,
+    "unexpectedlyInteractive": [],
+    "samples": [
+      {
+        "id": "atlas-action-sample:0",
+        "label": "نمونه اقدام: بازگشت به ورود",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:1",
+        "label": "نمونه اقدام: اصلاح کد",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:2",
+        "label": "نمونه اقدام: ارسال مجدد کد",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:3",
+        "label": "نمونه اقدام: بارگذاری مجدد",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:4",
+        "label": "نمونه اقدام: ادامه با کد",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:5",
+        "label": "نمونه اقدام: دریافت کد",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:6",
+        "label": "نمونه اقدام: تلاش دوباره",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:7",
+        "label": "نمونه اقدام: ورود به سامانه",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:8",
+        "label": "نمونه اقدام: تلاش دوباره",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:9",
+        "label": "نمونه اقدام: ثبت دوباره",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:10",
+        "label": "نمونه اقدام: اتصال یا ردکردن",
+        "semanticOrDeclaredAction": false
+      },
+      {
+        "id": "atlas-action-sample:11",
+        "label": "نمونه اقدام: تلاش دوباره",
+        "semanticOrDeclaredAction": false
+      }
+    ],
+    "classification": "Static visual/copy samples only; excluded from actionable-target acceptance unless made semantic or explicitly actionable."
+  },
+  "staticKeyboardIllustrations": {
+    "classification": "Static CSS illustrations only; not an operating-system keyboard, browser keyboard, or runtime focus/viewport test.",
+    "cases": [
+      {
+        "id": "keyboard-illustration:0",
+        "label": "شماره موبایل",
+        "viewportElementDimensions": {
+          "width": 390,
+          "height": 590
+        },
+        "simulatedAppDimensions": {
+          "width": 388,
+          "height": 330
+        },
+        "simulatedKeyboardPanelDimensions": {
+          "width": 388,
+          "height": 260
+        }
+      },
+      {
+        "id": "keyboard-illustration:1",
+        "label": "OTP و WebOTP",
+        "viewportElementDimensions": {
+          "width": 390,
+          "height": 590
+        },
+        "simulatedAppDimensions": {
+          "width": 388,
+          "height": 330
+        },
+        "simulatedKeyboardPanelDimensions": {
+          "width": 388,
+          "height": 260
+        }
+      },
+      {
+        "id": "keyboard-illustration:2",
+        "label": "آدرس چندخطی",
+        "viewportElementDimensions": {
+          "width": 390,
+          "height": 590
+        },
+        "simulatedAppDimensions": {
+          "width": 388,
+          "height": 330
+        },
+        "simulatedKeyboardPanelDimensions": {
+          "width": 388,
+          "height": 260
+        }
+      },
+      {
+        "id": "keyboard-illustration:3",
+        "label": "رمز انگلیسی",
+        "viewportElementDimensions": {
+          "width": 390,
+          "height": 590
+        },
+        "simulatedAppDimensions": {
+          "width": 388,
+          "height": 330
+        },
+        "simulatedKeyboardPanelDimensions": {
+          "width": 388,
+          "height": 260
+        }
+      }
+    ]
+  },
+  "fontLoad": {
+    "loaded": true,
+    "checks": [
+      {
+        "weight": 400,
+        "loaded": true
+      },
+      {
+        "weight": 500,
+        "loaded": true
+      },
+      {
+        "weight": 600,
+        "loaded": true
+      },
+      {
+        "weight": 700,
+        "loaded": true
+      }
+    ],
+    "faces": [
+      {
+        "family": "Vazirmatn",
+        "weight": "400",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn",
+        "weight": "500",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn",
+        "weight": "600",
+        "style": "normal",
+        "status": "loaded"
+      },
+      {
+        "family": "Vazirmatn",
+        "weight": "700",
+        "style": "normal",
+        "status": "loaded"
+      }
+    ],
+    "computedBodyFamily": "Vazirmatn, Tahoma, Arial, sans-serif"
+  },
+  "contrast": {
+    "threshold": 4.5,
+    "standard": "WCAG AA normal-text contrast for the scoped token/background pairs listed here.",
+    "checks": [
+      {
+        "id": "muted-on-page",
+        "foregroundToken": "--text-muted",
+        "foreground": "#5d7188",
+        "backgroundToken": "--page",
+        "background": "#f3f6fa",
+        "ratio": 4.632,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "muted-on-surface",
+        "foregroundToken": "--text-muted",
+        "foreground": "#5d7188",
+        "backgroundToken": "--surface",
+        "background": "#ffffff",
+        "ratio": 5.02,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "placeholder-on-surface",
+        "foregroundToken": "--text-placeholder",
+        "foreground": "#5d7188",
+        "backgroundToken": "--surface",
+        "background": "#ffffff",
+        "ratio": 5.02,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "secondary-on-page",
+        "foregroundToken": "--text-secondary",
+        "foreground": "#52677e",
+        "backgroundToken": "--page",
+        "background": "#f3f6fa",
+        "ratio": 5.381,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "secondary-on-surface",
+        "foregroundToken": "--text-secondary",
+        "foreground": "#52677e",
+        "backgroundToken": "--surface",
+        "background": "#ffffff",
+        "ratio": 5.833,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "action-on-action-surface",
+        "foregroundToken": "--blue-700",
+        "foreground": "#1f5ed8",
+        "backgroundToken": "--blue-50",
+        "background": "#eef4ff",
+        "ratio": 5.21,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "success-on-success-surface",
+        "foregroundToken": "--success",
+        "foreground": "#087a58",
+        "backgroundToken": "--success-bg",
+        "background": "#e9f8f2",
+        "ratio": 4.873,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "warning-on-warning-surface",
+        "foregroundToken": "--warning",
+        "foreground": "#95610e",
+        "backgroundToken": "--warning-bg",
+        "background": "#fff7df",
+        "ratio": 4.913,
+        "passesWcagAaNormalText": true
+      },
+      {
+        "id": "danger-on-danger-surface",
+        "foregroundToken": "--danger",
+        "foreground": "#bd3448",
+        "backgroundToken": "--danger-bg",
+        "background": "#fff0f2",
+        "ratio": 5.068,
+        "passesWcagAaNormalText": true
+      }
+    ],
+    "failures": []
+  },
   "responsiveWidths": [
     {
       "width": 360,
-      "framesWithHorizontalOverflow": [],
-      "maximumScrollWidth": 358
+      "phoneElements": [
+        {
+          "id": "auth-login-mobile",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-login-otp",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-device-approval",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-valid",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-web-only",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-review",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-otp",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-address",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-direct",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-telegram",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-identity",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password-error",
+          "outerWidth": 360,
+          "outerHeight": 844,
+          "clientWidth": 358,
+          "clientHeight": 842,
+          "scrollWidth": 358,
+          "scrollHeight": 842
+        }
+      ],
+      "horizontalOverflow": {
+        "frameIds": [],
+        "maximumScrollWidth": 358
+      },
+      "screenNaturalFit": [
+        {
+          "id": "auth-login-mobile",
+          "availableHeight": 680,
+          "naturalHeight": 504,
+          "slack": 176,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-login-otp",
+          "availableHeight": 680,
+          "naturalHeight": 546,
+          "slack": 134,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-device-approval",
+          "availableHeight": 680,
+          "naturalHeight": 456,
+          "slack": 224,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "availableHeight": 680,
+          "naturalHeight": 471,
+          "slack": 209,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "availableHeight": 680,
+          "naturalHeight": 500,
+          "slack": 180,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-valid",
+          "availableHeight": 680,
+          "naturalHeight": 498,
+          "slack": 182,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-web-only",
+          "availableHeight": 680,
+          "naturalHeight": 427,
+          "slack": 253,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-review",
+          "availableHeight": 680,
+          "naturalHeight": 484,
+          "slack": 196,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-otp",
+          "availableHeight": 680,
+          "naturalHeight": 449,
+          "slack": 231,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-address",
+          "availableHeight": 680,
+          "naturalHeight": 551,
+          "slack": 129,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-direct",
+          "availableHeight": 680,
+          "naturalHeight": 474,
+          "slack": 206,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-telegram",
+          "availableHeight": 680,
+          "naturalHeight": 478,
+          "slack": 202,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-identity",
+          "availableHeight": 680,
+          "naturalHeight": 477,
+          "slack": 203,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password",
+          "availableHeight": 680,
+          "naturalHeight": 557,
+          "slack": 123,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password-error",
+          "availableHeight": 680,
+          "naturalHeight": 558,
+          "slack": 122,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        }
+      ],
+      "naturalFitSummary": {
+        "minimumSlack": 122,
+        "clippedFrameIds": []
+      },
+      "actionableTargets": {
+        "count": 41,
+        "semanticCount": 41,
+        "minimumWidth": 49,
+        "minimumHeight": 44,
+        "below44": [],
+        "unmarked": [],
+        "all": [
+          {
+            "id": "auth-login-mobile:button:0",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-mobile:button:1",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "راهنمای نصب اپ",
+            "width": 98,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:2",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "ویرایش شماره",
+            "width": 84,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:3",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:4",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "به دستگاه قبلی دسترسی ندارم",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:5",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله کد تأیید",
+            "width": 322,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-unavailable:button:6",
+            "context": "auth-recovery-unavailable",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه انتظار برای تأیید دستگاه",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-waiting:button:7",
+            "context": "auth-recovery-waiting",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:8",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام با تلگرام",
+            "width": 322,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:9",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام از طریق وب",
+            "width": 322,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-web-only:button:10",
+            "context": "auth-invite-web-only",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه ثبت‌نام از طریق وب",
+            "width": 322,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:11",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال کد تأیید",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:12",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به دعوت‌نامه",
+            "width": 322,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:13",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید کد",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:14",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به اطلاعات دعوت",
+            "width": 322,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:15",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:16",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله قبل",
+            "width": 322,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-direct:button:17",
+            "context": "auth-register-direct",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:18",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "اتصال به ربات تلگرام",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:19",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "فعلاً رد می‌کنم",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "▧گالری",
+            "width": 102,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:21",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "◉دوربین",
+            "width": 102,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:22",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "↥فایل",
+            "width": 102,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:23",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:24",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 322,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:25",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:26",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:27",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:28",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:29",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:30",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 322,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:31",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:32",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:33",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:34",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:35",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:36",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "▧انتخاب از گالری",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:37",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "◉گرفتن تصویر",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:38",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "↥انتخاب فایل",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:39",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 524,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:40",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف",
+            "width": 120,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          }
+        ]
+      },
+      "atlasActionSamples": {
+        "count": 12,
+        "unexpectedlyInteractive": [],
+        "samples": [
+          {
+            "id": "atlas-action-sample:0",
+            "label": "نمونه اقدام: بازگشت به ورود",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:1",
+            "label": "نمونه اقدام: اصلاح کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:2",
+            "label": "نمونه اقدام: ارسال مجدد کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:3",
+            "label": "نمونه اقدام: بارگذاری مجدد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:4",
+            "label": "نمونه اقدام: ادامه با کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:5",
+            "label": "نمونه اقدام: دریافت کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:6",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:7",
+            "label": "نمونه اقدام: ورود به سامانه",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:8",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:9",
+            "label": "نمونه اقدام: ثبت دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:10",
+            "label": "نمونه اقدام: اتصال یا ردکردن",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:11",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          }
+        ],
+        "classification": "Static visual/copy samples only; excluded from actionable-target acceptance unless made semantic or explicitly actionable."
+      }
     },
     {
       "width": 375,
-      "framesWithHorizontalOverflow": [],
-      "maximumScrollWidth": 373
+      "phoneElements": [
+        {
+          "id": "auth-login-mobile",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-login-otp",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-device-approval",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-valid",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-web-only",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-review",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-otp",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-address",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-direct",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-telegram",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-identity",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password-error",
+          "outerWidth": 375,
+          "outerHeight": 844,
+          "clientWidth": 373,
+          "clientHeight": 842,
+          "scrollWidth": 373,
+          "scrollHeight": 842
+        }
+      ],
+      "horizontalOverflow": {
+        "frameIds": [],
+        "maximumScrollWidth": 373
+      },
+      "screenNaturalFit": [
+        {
+          "id": "auth-login-mobile",
+          "availableHeight": 680,
+          "naturalHeight": 481,
+          "slack": 199,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-login-otp",
+          "availableHeight": 680,
+          "naturalHeight": 546,
+          "slack": 134,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-device-approval",
+          "availableHeight": 680,
+          "naturalHeight": 456,
+          "slack": 224,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "availableHeight": 680,
+          "naturalHeight": 471,
+          "slack": 209,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "availableHeight": 680,
+          "naturalHeight": 500,
+          "slack": 180,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-valid",
+          "availableHeight": 680,
+          "naturalHeight": 498,
+          "slack": 182,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-web-only",
+          "availableHeight": 680,
+          "naturalHeight": 427,
+          "slack": 253,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-review",
+          "availableHeight": 680,
+          "naturalHeight": 484,
+          "slack": 196,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-otp",
+          "availableHeight": 680,
+          "naturalHeight": 425,
+          "slack": 255,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-address",
+          "availableHeight": 680,
+          "naturalHeight": 551,
+          "slack": 129,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-direct",
+          "availableHeight": 680,
+          "naturalHeight": 474,
+          "slack": 206,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-telegram",
+          "availableHeight": 680,
+          "naturalHeight": 478,
+          "slack": 202,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-identity",
+          "availableHeight": 680,
+          "naturalHeight": 477,
+          "slack": 203,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password",
+          "availableHeight": 680,
+          "naturalHeight": 557,
+          "slack": 123,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password-error",
+          "availableHeight": 680,
+          "naturalHeight": 558,
+          "slack": 122,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        }
+      ],
+      "naturalFitSummary": {
+        "minimumSlack": 122,
+        "clippedFrameIds": []
+      },
+      "actionableTargets": {
+        "count": 41,
+        "semanticCount": 41,
+        "minimumWidth": 49,
+        "minimumHeight": 44,
+        "below44": [],
+        "unmarked": [],
+        "all": [
+          {
+            "id": "auth-login-mobile:button:0",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-mobile:button:1",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "راهنمای نصب اپ",
+            "width": 98,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:2",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "ویرایش شماره",
+            "width": 84,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:3",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:4",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "به دستگاه قبلی دسترسی ندارم",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:5",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله کد تأیید",
+            "width": 337,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-unavailable:button:6",
+            "context": "auth-recovery-unavailable",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه انتظار برای تأیید دستگاه",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-waiting:button:7",
+            "context": "auth-recovery-waiting",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:8",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام با تلگرام",
+            "width": 337,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:9",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام از طریق وب",
+            "width": 337,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-web-only:button:10",
+            "context": "auth-invite-web-only",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه ثبت‌نام از طریق وب",
+            "width": 337,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:11",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال کد تأیید",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:12",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به دعوت‌نامه",
+            "width": 337,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:13",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید کد",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:14",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به اطلاعات دعوت",
+            "width": 337,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:15",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:16",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله قبل",
+            "width": 337,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-direct:button:17",
+            "context": "auth-register-direct",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:18",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "اتصال به ربات تلگرام",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:19",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "فعلاً رد می‌کنم",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "▧گالری",
+            "width": 107,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:21",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "◉دوربین",
+            "width": 107,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:22",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "↥فایل",
+            "width": 107,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:23",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:24",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 337,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:25",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:26",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:27",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:28",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:29",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:30",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 337,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:31",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:32",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:33",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:34",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:35",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:36",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "▧انتخاب از گالری",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:37",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "◉گرفتن تصویر",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:38",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "↥انتخاب فایل",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:39",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 524,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:40",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف",
+            "width": 120,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          }
+        ]
+      },
+      "atlasActionSamples": {
+        "count": 12,
+        "unexpectedlyInteractive": [],
+        "samples": [
+          {
+            "id": "atlas-action-sample:0",
+            "label": "نمونه اقدام: بازگشت به ورود",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:1",
+            "label": "نمونه اقدام: اصلاح کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:2",
+            "label": "نمونه اقدام: ارسال مجدد کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:3",
+            "label": "نمونه اقدام: بارگذاری مجدد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:4",
+            "label": "نمونه اقدام: ادامه با کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:5",
+            "label": "نمونه اقدام: دریافت کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:6",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:7",
+            "label": "نمونه اقدام: ورود به سامانه",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:8",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:9",
+            "label": "نمونه اقدام: ثبت دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:10",
+            "label": "نمونه اقدام: اتصال یا ردکردن",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:11",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          }
+        ],
+        "classification": "Static visual/copy samples only; excluded from actionable-target acceptance unless made semantic or explicitly actionable."
+      }
     },
     {
       "width": 390,
-      "framesWithHorizontalOverflow": [],
-      "maximumScrollWidth": 388
+      "phoneElements": [
+        {
+          "id": "auth-login-mobile",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-login-otp",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-device-approval",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-valid",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-web-only",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-review",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-otp",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-address",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-direct",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-telegram",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-identity",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password-error",
+          "outerWidth": 390,
+          "outerHeight": 844,
+          "clientWidth": 388,
+          "clientHeight": 842,
+          "scrollWidth": 388,
+          "scrollHeight": 842
+        }
+      ],
+      "horizontalOverflow": {
+        "frameIds": [],
+        "maximumScrollWidth": 388
+      },
+      "screenNaturalFit": [
+        {
+          "id": "auth-login-mobile",
+          "availableHeight": 680,
+          "naturalHeight": 481,
+          "slack": 199,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-login-otp",
+          "availableHeight": 680,
+          "naturalHeight": 546,
+          "slack": 134,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-device-approval",
+          "availableHeight": 680,
+          "naturalHeight": 456,
+          "slack": 224,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "availableHeight": 680,
+          "naturalHeight": 471,
+          "slack": 209,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "availableHeight": 680,
+          "naturalHeight": 500,
+          "slack": 180,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-valid",
+          "availableHeight": 680,
+          "naturalHeight": 498,
+          "slack": 182,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-web-only",
+          "availableHeight": 680,
+          "naturalHeight": 382,
+          "slack": 298,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-review",
+          "availableHeight": 680,
+          "naturalHeight": 484,
+          "slack": 196,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-otp",
+          "availableHeight": 680,
+          "naturalHeight": 404,
+          "slack": 276,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-address",
+          "availableHeight": 680,
+          "naturalHeight": 530,
+          "slack": 150,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-direct",
+          "availableHeight": 680,
+          "naturalHeight": 474,
+          "slack": 206,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-telegram",
+          "availableHeight": 680,
+          "naturalHeight": 478,
+          "slack": 202,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-identity",
+          "availableHeight": 680,
+          "naturalHeight": 477,
+          "slack": 203,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password",
+          "availableHeight": 680,
+          "naturalHeight": 557,
+          "slack": 123,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password-error",
+          "availableHeight": 680,
+          "naturalHeight": 534,
+          "slack": 146,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        }
+      ],
+      "naturalFitSummary": {
+        "minimumSlack": 123,
+        "clippedFrameIds": []
+      },
+      "actionableTargets": {
+        "count": 41,
+        "semanticCount": 41,
+        "minimumWidth": 49,
+        "minimumHeight": 44,
+        "below44": [],
+        "unmarked": [],
+        "all": [
+          {
+            "id": "auth-login-mobile:button:0",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-mobile:button:1",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "راهنمای نصب اپ",
+            "width": 98,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:2",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "ویرایش شماره",
+            "width": 84,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:3",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:4",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "به دستگاه قبلی دسترسی ندارم",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:5",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله کد تأیید",
+            "width": 352,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-unavailable:button:6",
+            "context": "auth-recovery-unavailable",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه انتظار برای تأیید دستگاه",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-waiting:button:7",
+            "context": "auth-recovery-waiting",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:8",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام با تلگرام",
+            "width": 352,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:9",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام از طریق وب",
+            "width": 352,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-web-only:button:10",
+            "context": "auth-invite-web-only",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه ثبت‌نام از طریق وب",
+            "width": 352,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:11",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال کد تأیید",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:12",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به دعوت‌نامه",
+            "width": 352,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:13",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید کد",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:14",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به اطلاعات دعوت",
+            "width": 352,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:15",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:16",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله قبل",
+            "width": 352,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-direct:button:17",
+            "context": "auth-register-direct",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:18",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "اتصال به ربات تلگرام",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:19",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "فعلاً رد می‌کنم",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "▧گالری",
+            "width": 112,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:21",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "◉دوربین",
+            "width": 112,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:22",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "↥فایل",
+            "width": 112,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:23",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:24",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 352,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:25",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:26",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:27",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:28",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:29",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:30",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 352,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:31",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:32",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:33",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:34",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:35",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:36",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "▧انتخاب از گالری",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:37",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "◉گرفتن تصویر",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:38",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "↥انتخاب فایل",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:39",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 524,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:40",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف",
+            "width": 120,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          }
+        ]
+      },
+      "atlasActionSamples": {
+        "count": 12,
+        "unexpectedlyInteractive": [],
+        "samples": [
+          {
+            "id": "atlas-action-sample:0",
+            "label": "نمونه اقدام: بازگشت به ورود",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:1",
+            "label": "نمونه اقدام: اصلاح کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:2",
+            "label": "نمونه اقدام: ارسال مجدد کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:3",
+            "label": "نمونه اقدام: بارگذاری مجدد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:4",
+            "label": "نمونه اقدام: ادامه با کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:5",
+            "label": "نمونه اقدام: دریافت کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:6",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:7",
+            "label": "نمونه اقدام: ورود به سامانه",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:8",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:9",
+            "label": "نمونه اقدام: ثبت دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:10",
+            "label": "نمونه اقدام: اتصال یا ردکردن",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:11",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          }
+        ],
+        "classification": "Static visual/copy samples only; excluded from actionable-target acceptance unless made semantic or explicitly actionable."
+      }
     },
     {
       "width": 414,
-      "framesWithHorizontalOverflow": [],
-      "maximumScrollWidth": 412
+      "phoneElements": [
+        {
+          "id": "auth-login-mobile",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-login-otp",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-device-approval",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-valid",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-web-only",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-review",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-otp",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-address",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-direct",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-telegram",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-identity",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password-error",
+          "outerWidth": 414,
+          "outerHeight": 844,
+          "clientWidth": 412,
+          "clientHeight": 842,
+          "scrollWidth": 412,
+          "scrollHeight": 842
+        }
+      ],
+      "horizontalOverflow": {
+        "frameIds": [],
+        "maximumScrollWidth": 412
+      },
+      "screenNaturalFit": [
+        {
+          "id": "auth-login-mobile",
+          "availableHeight": 680,
+          "naturalHeight": 481,
+          "slack": 199,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-login-otp",
+          "availableHeight": 680,
+          "naturalHeight": 546,
+          "slack": 134,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-device-approval",
+          "availableHeight": 680,
+          "naturalHeight": 456,
+          "slack": 224,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "availableHeight": 680,
+          "naturalHeight": 471,
+          "slack": 209,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "availableHeight": 680,
+          "naturalHeight": 500,
+          "slack": 180,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-valid",
+          "availableHeight": 680,
+          "naturalHeight": 474,
+          "slack": 206,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-web-only",
+          "availableHeight": 680,
+          "naturalHeight": 382,
+          "slack": 298,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-review",
+          "availableHeight": 680,
+          "naturalHeight": 460,
+          "slack": 220,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-otp",
+          "availableHeight": 680,
+          "naturalHeight": 404,
+          "slack": 276,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-address",
+          "availableHeight": 680,
+          "naturalHeight": 530,
+          "slack": 150,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-direct",
+          "availableHeight": 680,
+          "naturalHeight": 474,
+          "slack": 206,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-telegram",
+          "availableHeight": 680,
+          "naturalHeight": 478,
+          "slack": 202,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-identity",
+          "availableHeight": 680,
+          "naturalHeight": 477,
+          "slack": 203,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password",
+          "availableHeight": 680,
+          "naturalHeight": 536,
+          "slack": 144,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password-error",
+          "availableHeight": 680,
+          "naturalHeight": 534,
+          "slack": 146,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        }
+      ],
+      "naturalFitSummary": {
+        "minimumSlack": 134,
+        "clippedFrameIds": []
+      },
+      "actionableTargets": {
+        "count": 41,
+        "semanticCount": 41,
+        "minimumWidth": 49,
+        "minimumHeight": 44,
+        "below44": [],
+        "unmarked": [],
+        "all": [
+          {
+            "id": "auth-login-mobile:button:0",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-mobile:button:1",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "راهنمای نصب اپ",
+            "width": 98,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:2",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "ویرایش شماره",
+            "width": 84,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:3",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:4",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "به دستگاه قبلی دسترسی ندارم",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:5",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله کد تأیید",
+            "width": 376,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-unavailable:button:6",
+            "context": "auth-recovery-unavailable",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه انتظار برای تأیید دستگاه",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-waiting:button:7",
+            "context": "auth-recovery-waiting",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:8",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام با تلگرام",
+            "width": 376,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:9",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام از طریق وب",
+            "width": 376,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-web-only:button:10",
+            "context": "auth-invite-web-only",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه ثبت‌نام از طریق وب",
+            "width": 376,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:11",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال کد تأیید",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:12",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به دعوت‌نامه",
+            "width": 376,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:13",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید کد",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:14",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به اطلاعات دعوت",
+            "width": 376,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:15",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:16",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله قبل",
+            "width": 376,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-direct:button:17",
+            "context": "auth-register-direct",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:18",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "اتصال به ربات تلگرام",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:19",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "فعلاً رد می‌کنم",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "▧گالری",
+            "width": 120,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:21",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "◉دوربین",
+            "width": 120,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:22",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "↥فایل",
+            "width": 120,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:23",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:24",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 376,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:25",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:26",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:27",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:28",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:29",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:30",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 376,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:31",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:32",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:33",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:34",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:35",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:36",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "▧انتخاب از گالری",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:37",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "◉گرفتن تصویر",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:38",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "↥انتخاب فایل",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:39",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 524,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:40",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف",
+            "width": 120,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          }
+        ]
+      },
+      "atlasActionSamples": {
+        "count": 12,
+        "unexpectedlyInteractive": [],
+        "samples": [
+          {
+            "id": "atlas-action-sample:0",
+            "label": "نمونه اقدام: بازگشت به ورود",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:1",
+            "label": "نمونه اقدام: اصلاح کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:2",
+            "label": "نمونه اقدام: ارسال مجدد کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:3",
+            "label": "نمونه اقدام: بارگذاری مجدد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:4",
+            "label": "نمونه اقدام: ادامه با کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:5",
+            "label": "نمونه اقدام: دریافت کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:6",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:7",
+            "label": "نمونه اقدام: ورود به سامانه",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:8",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:9",
+            "label": "نمونه اقدام: ثبت دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:10",
+            "label": "نمونه اقدام: اتصال یا ردکردن",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:11",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          }
+        ],
+        "classification": "Static visual/copy samples only; excluded from actionable-target acceptance unless made semantic or explicitly actionable."
+      }
     },
     {
       "width": 430,
-      "framesWithHorizontalOverflow": [],
-      "maximumScrollWidth": 428
+      "phoneElements": [
+        {
+          "id": "auth-login-mobile",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-login-otp",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-device-approval",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-valid",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-invite-web-only",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-review",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-otp",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-address",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-direct",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-register-telegram",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-recovery-identity",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        },
+        {
+          "id": "auth-setup-password-error",
+          "outerWidth": 430,
+          "outerHeight": 844,
+          "clientWidth": 428,
+          "clientHeight": 842,
+          "scrollWidth": 428,
+          "scrollHeight": 842
+        }
+      ],
+      "horizontalOverflow": {
+        "frameIds": [],
+        "maximumScrollWidth": 428
+      },
+      "screenNaturalFit": [
+        {
+          "id": "auth-login-mobile",
+          "availableHeight": 680,
+          "naturalHeight": 461,
+          "slack": 219,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-login-otp",
+          "availableHeight": 680,
+          "naturalHeight": 546,
+          "slack": 134,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-device-approval",
+          "availableHeight": 680,
+          "naturalHeight": 456,
+          "slack": 224,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-unavailable",
+          "availableHeight": 680,
+          "naturalHeight": 471,
+          "slack": 209,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-waiting",
+          "availableHeight": 680,
+          "naturalHeight": 500,
+          "slack": 180,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-valid",
+          "availableHeight": 680,
+          "naturalHeight": 453,
+          "slack": 227,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-invite-web-only",
+          "availableHeight": 680,
+          "naturalHeight": 382,
+          "slack": 298,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-review",
+          "availableHeight": 680,
+          "naturalHeight": 460,
+          "slack": 220,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-otp",
+          "availableHeight": 680,
+          "naturalHeight": 404,
+          "slack": 276,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-address",
+          "availableHeight": 680,
+          "naturalHeight": 530,
+          "slack": 150,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-direct",
+          "availableHeight": 680,
+          "naturalHeight": 474,
+          "slack": 206,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-register-telegram",
+          "availableHeight": 680,
+          "naturalHeight": 478,
+          "slack": 202,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-recovery-identity",
+          "availableHeight": 680,
+          "naturalHeight": 454,
+          "slack": 226,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password",
+          "availableHeight": 680,
+          "naturalHeight": 536,
+          "slack": 144,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        },
+        {
+          "id": "auth-setup-password-error",
+          "availableHeight": 680,
+          "naturalHeight": 534,
+          "slack": 146,
+          "naturalContentClipped": false,
+          "renderedClientHeight": 680,
+          "renderedScrollHeight": 680,
+          "renderedOverflowDetected": false
+        }
+      ],
+      "naturalFitSummary": {
+        "minimumSlack": 134,
+        "clippedFrameIds": []
+      },
+      "actionableTargets": {
+        "count": 41,
+        "semanticCount": 41,
+        "minimumWidth": 49,
+        "minimumHeight": 44,
+        "below44": [],
+        "unmarked": [],
+        "all": [
+          {
+            "id": "auth-login-mobile:button:0",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-mobile:button:1",
+            "context": "auth-login-mobile",
+            "tag": "button",
+            "role": null,
+            "label": "راهنمای نصب اپ",
+            "width": 98,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:2",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "ویرایش شماره",
+            "width": 84,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-login-otp:button:3",
+            "context": "auth-login-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:4",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "به دستگاه قبلی دسترسی ندارم",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-device-approval:button:5",
+            "context": "auth-device-approval",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله کد تأیید",
+            "width": 392,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-unavailable:button:6",
+            "context": "auth-recovery-unavailable",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه انتظار برای تأیید دستگاه",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-waiting:button:7",
+            "context": "auth-recovery-waiting",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:8",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام با تلگرام",
+            "width": 392,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-valid:button:9",
+            "context": "auth-invite-valid",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت‌نام از طریق وب",
+            "width": 392,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-invite-web-only:button:10",
+            "context": "auth-invite-web-only",
+            "tag": "button",
+            "role": null,
+            "label": "ادامه ثبت‌نام از طریق وب",
+            "width": 392,
+            "height": 62,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:11",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال کد تأیید",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-review:button:12",
+            "context": "auth-register-review",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به دعوت‌نامه",
+            "width": 392,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:13",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید کد",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-otp:button:14",
+            "context": "auth-register-otp",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به اطلاعات دعوت",
+            "width": 392,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:15",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-address:button:16",
+            "context": "auth-register-address",
+            "tag": "button",
+            "role": null,
+            "label": "بازگشت به مرحله قبل",
+            "width": 392,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-direct:button:17",
+            "context": "auth-register-direct",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:18",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "اتصال به ربات تلگرام",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-register-telegram:button:19",
+            "context": "auth-register-telegram",
+            "tag": "button",
+            "role": null,
+            "label": "فعلاً رد می‌کنم",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:20",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "▧گالری",
+            "width": 125,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:21",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "◉دوربین",
+            "width": 125,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:22",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "↥فایل",
+            "width": 125,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:23",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-recovery-identity:button:24",
+            "context": "auth-recovery-identity",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف از درخواست بازیابی",
+            "width": 392,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:25",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:26",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password:button:27",
+            "context": "auth-setup-password",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:28",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:29",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش تکرار رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "auth-setup-password-error:button:30",
+            "context": "auth-setup-password-error",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 392,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:31",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "دریافت کد تأیید",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:32",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تأیید و ادامه",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:33",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "تکمیل ثبت‌نام",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:34",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "نمایش رمز عبور",
+            "width": 49,
+            "height": 44,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "static-keyboard-illustration:button:35",
+            "context": "static-keyboard-illustration",
+            "tag": "button",
+            "role": null,
+            "label": "ثبت رمز و ورود",
+            "width": 360,
+            "height": 46,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:36",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "▧انتخاب از گالری",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:37",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "◉گرفتن تصویر",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:38",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "↥انتخاب فایل",
+            "width": 213,
+            "height": 60,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:39",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "ارسال مدرک برای بررسی",
+            "width": 524,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          },
+          {
+            "id": "adaptive-desktop-proof:button:40",
+            "context": "adaptive-desktop-proof",
+            "tag": "button",
+            "role": null,
+            "label": "انصراف",
+            "width": 120,
+            "height": 50,
+            "semantic": true,
+            "explicitlyDeclared": true,
+            "markedTouchTarget": true
+          }
+        ]
+      },
+      "atlasActionSamples": {
+        "count": 12,
+        "unexpectedlyInteractive": [],
+        "samples": [
+          {
+            "id": "atlas-action-sample:0",
+            "label": "نمونه اقدام: بازگشت به ورود",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:1",
+            "label": "نمونه اقدام: اصلاح کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:2",
+            "label": "نمونه اقدام: ارسال مجدد کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:3",
+            "label": "نمونه اقدام: بارگذاری مجدد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:4",
+            "label": "نمونه اقدام: ادامه با کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:5",
+            "label": "نمونه اقدام: دریافت کد",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:6",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:7",
+            "label": "نمونه اقدام: ورود به سامانه",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:8",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:9",
+            "label": "نمونه اقدام: ثبت دوباره",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:10",
+            "label": "نمونه اقدام: اتصال یا ردکردن",
+            "semanticOrDeclaredAction": false
+          },
+          {
+            "id": "atlas-action-sample:11",
+            "label": "نمونه اقدام: تلاش دوباره",
+            "semanticOrDeclaredAction": false
+          }
+        ],
+        "classification": "Static visual/copy samples only; excluded from actionable-target acceptance unless made semantic or explicitly actionable."
+      }
     }
-  ]
+  ],
+  "summary": {
+    "scenarioCaptureCount": 15,
+    "stateCardCount": 41,
+    "phoneElementCount": 15,
+    "phoneElementDimensionMismatches": [],
+    "minimumNaturalSlackAtAuthoringWidth": 123,
+    "naturallyClippedAtAuthoringWidth": [],
+    "widthsWithHorizontalOverflow": [],
+    "naturalFitByWidth": [
+      {
+        "width": 360,
+        "minimumSlack": 122,
+        "clippedFrameIds": []
+      },
+      {
+        "width": 375,
+        "minimumSlack": 122,
+        "clippedFrameIds": []
+      },
+      {
+        "width": 390,
+        "minimumSlack": 123,
+        "clippedFrameIds": []
+      },
+      {
+        "width": 414,
+        "minimumSlack": 134,
+        "clippedFrameIds": []
+      },
+      {
+        "width": 430,
+        "minimumSlack": 134,
+        "clippedFrameIds": []
+      }
+    ],
+    "actionableBelow44AtAuthoringWidth": [],
+    "actionableUnmarkedAtAuthoringWidth": [],
+    "vazirmatnLoaded": true,
+    "contrastFailures": []
+  }
 }

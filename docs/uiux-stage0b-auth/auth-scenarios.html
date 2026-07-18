@@ -55,12 +55,13 @@
       --surface-subtle: #f8fafc;
       --text: #10243b;
       --text-secondary: #52677e;
-      --text-muted: #718197;
+      --text-muted: #5d7188;
+      --text-placeholder: #5d7188;
       --border: #d6e1ec;
       --border-strong: #b9cadb;
       --success: #087a58;
       --success-bg: #e9f8f2;
-      --warning: #9a6812;
+      --warning: #95610e;
       --warning-bg: #fff7df;
       --danger: #bd3448;
       --danger-bg: #fff0f2;
@@ -74,7 +75,7 @@
       margin: 0;
       background:
         radial-gradient(circle at 90% -5%, rgba(47, 111, 237, 0.12), transparent 34rem),
-        radial-gradient(circle at 5% 28%, rgba(213, 168, 75, 0.08), transparent 25rem),
+        radial-gradient(circle at 5% 28%, rgba(18, 49, 74, 0.06), transparent 25rem),
         #e9eef4;
     }
 
@@ -123,7 +124,7 @@
       font-weight: 700;
       white-space: nowrap;
     }
-    .board-badge--gold { border-color: #ead7a8; background: #fff9e8; color: #7b5b14; }
+    .board-badge--meta { border-color: #bed1e5; background: var(--blue-50); color: var(--blue-700); }
 
     .contract-note {
       grid-column: 1 / -1;
@@ -138,7 +139,7 @@
       font-size: 12px;
       line-height: 1.8;
     }
-    .contract-note::before { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--gold-500); content: ""; }
+    .contract-note::before { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--blue-600); content: ""; }
 
     .mobile-section { margin-top: 28px; }
     .scenarios-grid {
@@ -153,8 +154,8 @@
     .scenario-label { min-height: 88px; padding: 4px 18px 14px; }
     .scenario-label__top { display: flex; align-items: center; gap: 9px; }
     .scenario-label h2 { margin: 0; color: var(--navy-950); font-size: 18px; line-height: 1.6; }
-    .scenario-label p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.8; }
-    .scenario-code { display: inline-flex; padding: 4px 7px; border-radius: 7px; background: #dfe9f3; color: #45617b; font-size: 9px; font-weight: 700; direction: ltr; }
+    .scenario-label p { margin: 3px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.8; }
+    .scenario-code { display: inline-flex; padding: 4px 7px; border-radius: 7px; background: #dfe9f3; color: #45617b; font-size: 10px; font-weight: 700; direction: ltr; }
 
     .phone {
       position: relative;
@@ -198,7 +199,7 @@
     .brand { display: flex; align-items: center; gap: 8px; color: var(--navy-950); font-size: 13px; font-weight: 700; }
     .brand-mark { position: relative; width: 26px; height: 26px; border-radius: 8px; background: var(--navy-900); }
     .brand-mark::after { position: absolute; right: 5px; bottom: 5px; width: 8px; height: 8px; border-radius: 3px; background: var(--gold-500); content: ""; }
-    .surface-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; background: var(--blue-50); color: var(--blue-700); font-size: 11.5px; font-weight: 700; }
+    .surface-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; background: var(--blue-50); color: var(--blue-700); font-size: 12px; font-weight: 700; }
 
     .phone-body {
       min-height: 0;
@@ -213,15 +214,15 @@
     .screen-heading p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.8; }
 
     .step-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .step-copy { color: var(--text-muted); font-size: 11.5px; font-weight: 600; }
-    .progress { display: flex; gap: 5px; direction: ltr; }
+    .step-copy { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+    .progress { display: flex; gap: 5px; direction: rtl; }
     .progress span { width: 30px; height: 4px; border-radius: 999px; background: #dbe4ee; }
     .progress span.is-complete { background: var(--navy-700); }
     .progress span.is-active { width: 42px; background: var(--blue-600); }
 
     .field { display: grid; gap: 6px; }
-    .field-label { display: flex; align-items: center; justify-content: space-between; color: var(--navy-900); font-size: 12.5px; font-weight: 700; }
-    .field-hint { color: var(--text-muted); font-size: 11px; font-weight: 500; line-height: 1.6; }
+    .field-label { display: flex; align-items: center; justify-content: space-between; color: var(--navy-900); font-size: 13px; font-weight: 700; }
+    .field-hint { color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 1.65; }
     .input-shell,
     .textarea-shell {
       display: flex;
@@ -236,11 +237,11 @@
     .input-shell { min-height: 52px; padding: 0 13px; }
     .input-shell--focus { border-color: var(--blue-600); box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.12); }
     .input-shell--error { border-color: var(--danger); background: #fffafb; }
-    .input-icon { display: grid; width: 26px; height: 26px; place-items: center; margin-left: 8px; border-radius: 8px; background: var(--blue-50); color: var(--blue-700); font-size: 11px; font-weight: 800; }
+    .input-icon { display: grid; width: 26px; height: 26px; place-items: center; margin-left: 8px; border-radius: 8px; background: var(--blue-50); color: var(--blue-700); font-size: 12px; font-weight: 800; }
     .input-value { flex: 1; color: var(--navy-950); font-size: 14px; font-weight: 600; }
-    .input-placeholder { flex: 1; color: #95a2b2; font-size: 13px; }
-    .textarea-shell { min-height: 104px; align-items: flex-start; padding: 12px 13px; color: #8290a2; font-size: 12.5px; line-height: 1.75; }
-    .field-error { display: flex; gap: 5px; align-items: center; color: var(--danger); font-size: 11.5px; line-height: 1.6; }
+    .input-placeholder { flex: 1; color: var(--text-placeholder); font-size: 13px; }
+    .textarea-shell { min-height: 104px; align-items: flex-start; padding: 12px 13px; color: var(--text-muted); font-size: 13px; line-height: 1.75; }
+    .field-error { display: flex; gap: 5px; align-items: center; color: var(--danger); font-size: 12px; line-height: 1.65; }
     .field-error::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; }
 
     .button {
@@ -261,7 +262,14 @@
     .button--secondary { border-color: #b8cce0; background: var(--surface); color: var(--blue-700); }
     .button--ghost { background: transparent; color: var(--text-secondary); }
     .button--danger-soft { border-color: #f0b8c0; background: var(--danger-bg); color: var(--danger); }
+    .button:disabled,
+    .button.is-disabled { border-color: #d2dce7; background: #e3eaf1; color: #65798f; box-shadow: none; }
     .link-button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 6px 8px; border: 0; background: transparent; color: var(--blue-700); font-size: 12px; font-weight: 700; }
+    .button:focus-visible,
+    .link-button:focus-visible,
+    .route-card:focus-visible,
+    .picker:focus-visible,
+    .password-eye:focus-visible { outline: 3px solid rgba(47, 111, 237, 0.34); outline-offset: 2px; }
 
     .notice {
       display: flex;
@@ -272,84 +280,88 @@
       border-radius: 12px;
       background: #f8fbff;
       color: var(--text-secondary);
-      font-size: 11.5px;
+      font-size: 12px;
       line-height: 1.75;
     }
     .notice__mark { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border-radius: 7px; background: var(--blue-100); color: var(--blue-700); font-weight: 800; }
-    .notice strong { display: block; margin-bottom: 1px; color: var(--navy-900); font-size: 12px; }
+    .notice strong { display: block; margin-bottom: 1px; color: var(--navy-900); font-size: 13px; }
     .notice--warning { border-color: #ead79f; background: var(--warning-bg); }
     .notice--warning .notice__mark { background: #f8e8b7; color: var(--warning); }
 
-    .phone-footer { display: flex; align-items: center; justify-content: center; gap: 7px; border-top: 1px solid rgba(214, 225, 236, 0.82); background: rgba(255, 255, 255, 0.84); color: var(--text-muted); font-size: 10.5px; }
+    .phone-footer { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border-top: 1px solid rgba(214, 225, 236, 0.82); background: rgba(255, 255, 255, 0.84); color: var(--text-muted); font-size: 12px; text-align: center; }
     .phone-footer::before { width: 6px; height: 6px; border-radius: 50%; background: var(--success); content: ""; }
 
     .install-card { margin-top: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 13px; background: rgba(255, 255, 255, 0.72); }
     .install-card strong { display: block; color: var(--navy-900); font-size: 12px; }
-    .install-card p { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.65; }
+    .install-card p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.65; }
 
-    .otp-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 11px; background: #e9f0f7; color: var(--text-secondary); font-size: 11.5px; }
+    .otp-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 11px; background: #e9f0f7; color: var(--text-secondary); font-size: 12px; }
     .otp-cells { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; direction: ltr; }
     .otp-cell { display: grid; height: 58px; place-items: center; border: 1px solid var(--border-strong); border-radius: 13px; background: #fff; color: var(--navy-950); font-size: 22px; font-weight: 700; }
     .otp-cell.is-active { border-color: var(--blue-600); box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.11); }
     .delivery-card { padding: 11px 12px; border: 1px solid #c3d5e7; border-radius: 13px; background: var(--blue-50); }
     .delivery-card__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .delivery-card strong { color: var(--navy-900); font-size: 12px; }
-    .timer { display: inline-flex; align-items: center; min-height: 27px; padding: 3px 8px; border-radius: 999px; background: #dbe8ff; color: var(--blue-700); font-size: 11.5px; font-weight: 800; direction: ltr; }
-    .delivery-card p { margin: 4px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
+    .delivery-card strong { color: var(--navy-900); font-size: 13px; }
+    .timer { display: inline-flex; align-items: center; min-height: 27px; padding: 3px 8px; border-radius: 999px; background: #dbe8ff; color: var(--blue-700); font-size: 12px; font-weight: 800; direction: ltr; }
+    .delivery-card p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
 
     .status-hero { display: grid; justify-items: center; gap: 8px; padding-top: 5px; text-align: center; }
     .status-orb { position: relative; display: grid; width: 72px; height: 72px; place-items: center; border: 1px solid #bdd0e4; border-radius: 24px; background: linear-gradient(145deg, #fff, #eaf2fb); color: var(--blue-700); font-size: 25px; font-weight: 800; box-shadow: 0 12px 26px rgba(24, 48, 75, 0.08); }
-    .status-orb::after { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; border: 4px solid var(--page); border-radius: 50%; background: var(--gold-500); content: ""; }
+    .status-orb::after { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; border: 4px solid var(--page); border-radius: 50%; background: var(--blue-600); content: ""; }
     .status-hero h3 { margin: 0; color: var(--navy-950); font-size: 21px; }
     .status-hero p { max-width: 300px; margin: 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.75; }
     .countdown-block { display: grid; justify-items: center; gap: 2px; padding: 10px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
     .countdown-block strong { color: var(--navy-950); font-size: 23px; line-height: 1.4; direction: ltr; }
-    .countdown-block span { color: var(--text-muted); font-size: 11px; }
+    .countdown-block span { color: var(--text-muted); font-size: 12px; }
     .status-track { display: grid; gap: 8px; }
-    .status-track__row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 9px; align-items: center; color: var(--text-secondary); font-size: 11.5px; }
-    .status-track__dot { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: #dce7f2; color: #668099; font-size: 9px; font-weight: 800; }
+    .status-track__row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 9px; align-items: center; color: var(--text-secondary); font-size: 12px; }
+    .status-track__dot { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: #dce7f2; color: #49647e; font-size: 12px; font-weight: 800; }
     .status-track__row.is-active { color: var(--navy-900); font-weight: 700; }
     .status-track__row.is-active .status-track__dot { background: var(--blue-600); color: #fff; }
 
     .valid-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid #a8d8c8; border-radius: 13px; background: var(--success-bg); }
     .valid-banner strong { color: var(--success); font-size: 12px; }
-    .valid-banner span { color: #4e7468; font-size: 10.5px; }
+    .valid-banner span { color: #365f53; font-size: 12px; }
     .summary-card { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
-    .summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; padding: 7px 11px; border-bottom: 1px solid #e7edf3; font-size: 11px; }
+    .summary-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; padding: 7px 11px; border-bottom: 1px solid #e7edf3; font-size: 12px; }
     .summary-row:last-child { border-bottom: 0; }
     .summary-row span { color: var(--text-muted); }
-    .summary-row strong { color: var(--navy-950); font-size: 11.5px; }
-    .route-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) 22px; gap: 10px; align-items: center; min-height: 62px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
+    .summary-row strong { color: var(--navy-950); font-size: 12.5px; }
+    .route-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) 22px; gap: 10px; align-items: center; width: 100%; min-height: 62px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 14px; appearance: none; background: #fff; color: inherit; text-align: right; }
     .route-card--primary { border-color: #9fbee4; background: #f6f9ff; }
     .route-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: var(--blue-50); color: var(--blue-700); font-size: 12px; font-weight: 800; }
     .route-copy { min-width: 0; display: grid; gap: 1px; }
     .route-copy strong { color: var(--navy-950); font-size: 12.5px; }
-    .route-copy span { color: var(--text-muted); font-size: 10.5px; }
+    .route-copy span { color: var(--text-muted); font-size: 12px; }
     .route-arrow { color: var(--blue-700); font-size: 20px; }
 
     .mini-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
     .mini-summary div { display: grid; gap: 1px; }
-    .mini-summary span { color: var(--text-muted); font-size: 11px; }
-    .mini-summary strong { color: var(--navy-950); font-size: 11.5px; }
-    .mini-summary__role { display: inline-flex; min-height: 25px; align-items: center; padding: 3px 8px; border-radius: 999px; background: var(--blue-50); color: var(--blue-700); font-size: 11px; font-weight: 700; }
+    .mini-summary span { color: var(--text-muted); font-size: 12px; }
+    .mini-summary strong { color: var(--navy-950); font-size: 12.5px; }
+    .mini-summary__role { display: inline-flex; min-height: 25px; align-items: center; padding: 3px 8px; border-radius: 999px; background: var(--blue-50); color: var(--blue-700); font-size: 12px; font-weight: 700; }
 
     .picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-    .picker { display: grid; min-height: 60px; place-items: center; gap: 1px; padding: 7px 4px; border: 1px solid var(--border-strong); border-radius: 12px; background: #fff; color: var(--blue-700); font-size: 11px; font-weight: 700; }
+    .picker { display: grid; min-height: 60px; place-items: center; gap: 1px; padding: 7px 4px; border: 1px solid var(--border-strong); border-radius: 12px; background: #fff; color: var(--blue-700); font-size: 12px; font-weight: 700; }
     .picker b { font-size: 16px; line-height: 1; }
     .file-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) 24px; gap: 9px; align-items: center; padding: 8px 10px; border: 1px solid #b9d5c9; border-radius: 12px; background: #f3fbf7; }
-    .file-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; background: #dff4e9; color: var(--success); font-size: 11px; font-weight: 800; }
+    .file-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; background: #dff4e9; color: var(--success); font-size: 12px; font-weight: 800; }
     .file-copy { min-width: 0; display: grid; gap: 1px; }
-    .file-copy strong { overflow: hidden; color: var(--navy-950); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: right; }
-    .file-copy span { color: var(--text-muted); font-size: 11px; }
+    .file-copy strong { overflow: hidden; color: var(--navy-950); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: right; }
+    .file-copy span { color: var(--text-muted); font-size: 12px; }
     .file-check { color: var(--success); font-size: 16px; font-weight: 800; }
 
-    .password-shell { display: flex; align-items: center; gap: 8px; min-height: 49px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 13px; background: #fff; }
+    .password-shell { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 8px 0 11px; border: 1px solid var(--border-strong); border-radius: 13px; background: #fff; }
+    .password-shell--error { border-color: var(--danger); background: #fffafb; }
     .password-dots { flex: 1; color: var(--navy-950); font-size: 17px; letter-spacing: 0.18em; direction: ltr; }
     .password-icon { color: var(--blue-700); font-size: 13px; font-weight: 800; }
-    .password-eye { color: var(--text-muted); font-size: 11.5px; }
+    .password-eye { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--blue-700); font-size: 12px; font-weight: 700; }
     .rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-    .rule { display: flex; align-items: center; gap: 5px; min-height: 30px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text-secondary); font-size: 10.5px; }
-    .rule::before { display: grid; width: 14px; height: 14px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #d7f2e5; color: var(--success); content: "✓"; font-size: 8px; font-weight: 800; }
+    .rule { display: flex; align-items: center; gap: 5px; min-height: 32px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text-secondary); font-size: 12px; }
+    .rule::before { display: grid; width: 16px; height: 16px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #e8eef4; color: var(--text-muted); content: "•"; font-size: 9px; font-weight: 800; }
+    .rule.is-passed::before { background: #d7f2e5; color: var(--success); content: "✓"; }
+    .rule.is-failed { border-color: #efbdc5; background: #fffafb; color: var(--danger); }
+    .rule.is-failed::before { background: var(--danger-bg); color: var(--danger); content: "×"; }
 
     .keyboard-section,
     .state-section,
@@ -363,20 +375,20 @@
     .keyboard-grid { display: grid; grid-template-columns: repeat(4, 390px); gap: 20px; justify-content: center; direction: ltr; }
     .keyboard-case { direction: rtl; }
     .keyboard-case h3 { margin: 0 8px 8px; color: var(--navy-950); font-size: 13px; }
-    .keyboard-case p { min-height: 36px; margin: 0 8px 10px; color: var(--text-muted); font-size: 10.5px; line-height: 1.7; }
+    .keyboard-case p { min-height: 40px; margin: 0 8px 10px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
     .keyboard-viewport { width: 390px; height: 590px; overflow: hidden; border: 1px solid #b9cadb; border-radius: 24px; background: var(--page); box-shadow: 0 12px 30px rgba(24, 48, 75, 0.09); }
     .keyboard-app { display: grid; grid-template-rows: 50px minmax(0, 1fr) 58px; height: 330px; background: var(--page); }
-    .keyboard-app__top { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--border); background: #fff; color: var(--navy-950); font-size: 11.5px; font-weight: 700; }
+    .keyboard-app__top { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--border); background: #fff; color: var(--navy-950); font-size: 12px; font-weight: 700; }
     .keyboard-app__body { display: flex; min-height: 0; flex-direction: column; gap: 8px; overflow: hidden; padding: 12px 14px 8px; }
     .keyboard-app__body h4 { margin: 0; color: var(--navy-950); font-size: 16px; }
-    .keyboard-app__body > p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+    .keyboard-app__body > p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
     .keyboard-app__cta { display: flex; align-items: center; padding: 6px 14px; border-top: 1px solid var(--border); background: rgba(255, 255, 255, 0.96); }
     .keyboard-app__cta .button { min-height: 46px; }
     .keyboard-panel { height: 260px; padding: 10px 8px 8px; background: #d9dee5; direction: ltr; }
     .keyboard-suggestion { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
     .keyboard-suggestion span { display: grid; height: 28px; place-items: center; border-radius: 7px; background: rgba(255, 255, 255, 0.62); color: #566372; font-size: 8px; }
     .keyboard-row { display: flex; justify-content: center; gap: 5px; margin-bottom: 6px; }
-    .keyboard-key { display: grid; min-width: 30px; height: 38px; flex: 1; place-items: center; border-radius: 7px; background: #fff; color: #253241; font-size: 11px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12); }
+    .keyboard-key { display: grid; min-width: 30px; height: 38px; flex: 1; place-items: center; border-radius: 7px; background: #fff; color: #253241; font-size: 12px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.12); }
     .keyboard-key--wide { flex: 2.6; }
     .keyboard-key--action { background: #8ca0b4; color: #fff; }
     .keyboard-panel--numeric .keyboard-row { max-width: 250px; margin-right: auto; margin-left: auto; }
@@ -385,10 +397,10 @@
     .state-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
     .state-card { min-height: 142px; padding: 14px; border: 1px solid var(--border); border-right: 4px solid var(--state-color, var(--blue-600)); border-radius: 15px; background: #fff; }
     .state-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .state-card__top strong { color: var(--navy-950); font-size: 11px; }
+    .state-card__top strong { color: var(--navy-950); font-size: 12px; }
     .state-tag { display: inline-flex; min-height: 24px; align-items: center; padding: 3px 7px; border-radius: 999px; background: var(--state-bg, var(--blue-50)); color: var(--state-color, var(--blue-700)); font-size: 10px; font-weight: 700; }
-    .state-card p { margin: 9px 0 0; color: var(--text-secondary); font-size: 11.5px; line-height: 1.75; }
-    .state-card__action { display: inline-flex; margin-top: 9px; color: var(--state-color, var(--blue-700)); font-size: 10.5px; font-weight: 700; }
+    .state-card p { margin: 9px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.75; }
+    .state-card__example { display: inline-flex; margin-top: 9px; color: var(--state-color, var(--blue-700)); font-size: 11.5px; font-weight: 700; }
     .state-card--success { --state-color: var(--success); --state-bg: var(--success-bg); }
     .state-card--warning { --state-color: var(--warning); --state-bg: var(--warning-bg); }
     .state-card--danger { --state-color: var(--danger); --state-bg: var(--danger-bg); }
@@ -408,27 +420,27 @@
       direction: rtl;
     }
     .desktop-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 34px; border-bottom: 1px solid var(--border); background: #fff; }
-    .desktop-top__meta { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 11px; }
-    .desktop-layout { display: grid; grid-template-columns: minmax(0, 1fr) 520px; gap: 32px; padding: 36px; }
-    .desktop-context { display: grid; grid-template-rows: auto auto 1fr; gap: 20px; padding: 34px; border-radius: 22px; background: linear-gradient(145deg, var(--navy-950), #173d5d); color: #fff; }
-    .desktop-context h3 { max-width: 560px; margin: 0; font-size: 34px; line-height: 1.55; letter-spacing: -0.03em; }
-    .desktop-context > p { max-width: 600px; margin: 0; color: #c6d3df; font-size: 13px; line-height: 2; }
-    .desktop-progress { align-self: end; display: grid; gap: 12px; }
-    .desktop-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; align-items: center; color: #aebfce; font-size: 11px; }
+    .desktop-top__meta { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 12px; }
+    .desktop-layout { display: grid; grid-template-columns: 400px minmax(0, 720px); gap: 28px; justify-content: center; padding: 36px 60px; direction: ltr; }
+    .desktop-context { display: flex; flex-direction: column; gap: 18px; padding: 26px; border-radius: 22px; background: linear-gradient(145deg, var(--navy-950), #173d5d); color: #fff; direction: rtl; }
+    .desktop-context h3 { margin: 0; font-size: 24px; line-height: 1.65; letter-spacing: -0.02em; }
+    .desktop-context > p { margin: 0; color: #d2dde7; font-size: 13px; line-height: 1.9; }
+    .desktop-progress { display: grid; gap: 10px; margin-top: 8px; }
+    .desktop-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; align-items: center; color: #c4d1dc; font-size: 12px; }
     .desktop-step__number { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 10px; }
     .desktop-step.is-complete { color: #fff; }
     .desktop-step.is-complete .desktop-step__number { border-color: #78a5ff; background: #2f6fed; }
     .desktop-step.is-active { color: #fff; font-weight: 700; }
-    .desktop-step.is-active .desktop-step__number { border-color: #e6c878; background: var(--gold-500); color: var(--navy-950); }
-    .desktop-form { display: flex; flex-direction: column; gap: 18px; padding: 30px; border: 1px solid var(--border); border-radius: 22px; background: #fff; box-shadow: 0 14px 34px rgba(24, 48, 75, 0.07); }
+    .desktop-step.is-active .desktop-step__number { border-color: #8eb2ff; background: var(--blue-600); color: #fff; }
+    .desktop-form { display: flex; flex-direction: column; gap: 18px; padding: 32px; border: 1px solid #b9cadb; border-radius: 22px; background: #fff; box-shadow: 0 18px 42px rgba(24, 48, 75, 0.12); direction: rtl; }
     .desktop-form .screen-heading h3 { font-size: 27px; }
     .desktop-form .textarea-shell { min-height: 150px; }
     .desktop-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: auto; }
     .desktop-actions .button--ghost { width: 120px; }
     .desktop-deadline { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-subtle); }
     .desktop-deadline div { display: grid; gap: 2px; }
-    .desktop-deadline span { color: var(--text-muted); font-size: 11px; }
-    .desktop-deadline strong { color: var(--navy-950); font-size: 11px; }
+    .desktop-deadline span { color: var(--text-muted); font-size: 12px; }
+    .desktop-deadline strong { color: var(--navy-950); font-size: 12px; }
     .desktop-deadline bdi { color: var(--blue-700); font-size: 12px; font-weight: 700; }
 
     @media (prefers-reduced-motion: no-preference) {
@@ -464,7 +476,7 @@
       </div>
       <div class="board-badges">
         <span class="board-badge">جهت مصوب: مالی مدرن</span>
-        <span class="board-badge board-badge--gold">Design-only · بدون کد محصول</span>
+        <span class="board-badge board-badge--meta">Design-only · بدون کد محصول</span>
       </div>
       <div class="contract-note">رفتار API، OTP، session approval، recovery و registration ثابت است. این نمونه فقط hierarchy، چگالی، state و تعامل را تصمیم‌پذیر می‌کند؛ بازار و پیام‌رسان خارج از دامنه‌اند.</div>
     </header>
@@ -485,7 +497,7 @@
                 <div class="install-card"><strong>استفاده سریع‌تر در دفعات بعد</strong><p>نصب اپ فقط در مرورگرهای پشتیبانی‌شده پیشنهاد می‌شود و مانع ورود نیست.</p><button class="link-button touch-target">راهنمای نصب اپ</button></div>
               </div>
             </div>
-            <footer class="phone-footer">ارتباط امن و رمزگذاری‌شده</footer>
+            <footer class="phone-footer">ورود با کد یک‌بارمصرف و زمان‌دار انجام می‌شود</footer>
           </div>
         </article>
 
@@ -496,12 +508,12 @@
             <div class="phone-body">
               <div class="screen">
                 <div class="step-row"><span class="step-copy">مرحله ۲ از ۲</span><div class="progress"><span class="is-complete"></span><span class="is-active"></span></div></div>
-                <div class="screen-heading"><h3>کد تأیید را وارد کنید</h3><p>کد ارسال‌شده را در کنترل واحد زیر وارد کنید؛ پس از تکمیل، بررسی خودکار انجام می‌شود.</p></div>
+                <div class="screen-heading"><h3>کد تأیید را وارد کنید</h3><p>کد ارسال‌شده را در کنترل واحد زیر وارد کنید و پس از تکمیل، «تأیید و ادامه» را بزنید.</p></div>
                 <div class="otp-meta"><span class="ltr">0912 345 6789</span><button class="link-button touch-target">ویرایش شماره</button></div>
                 <div class="otp-cells" aria-label="نمایش بخش‌بندی‌شده یک ورودی واحد کد تأیید"><span class="otp-cell">1</span><span class="otp-cell">3</span><span class="otp-cell">8</span><span class="otp-cell">4</span><span class="otp-cell is-active">2</span></div>
                 <div class="delivery-card"><div class="delivery-card__top"><strong>کد ابتدا در تلگرام ارسال شد</strong><span class="timer">00:24</span></div><p>پس از پایان زمان، همان کد به‌صورت خودکار پیامک می‌شود؛ نیازی به درخواست دوباره نیست.</p></div>
-                <button class="button button--primary touch-target">ورود به سامانه</button>
-                <div class="notice"><span class="notice__mark">✓</span><div><strong>تلاش فعال حفظ می‌شود</strong>اگر صفحه را تازه کنید، درخواست امن بازیابی می‌شود؛ شماره موبایل در حافظه موقت مرورگر ذخیره نمی‌شود.</div></div>
+                <button class="button button--primary touch-target">تأیید و ادامه</button>
+                <div class="notice"><span class="notice__mark">✓</span><div><strong>تلاش فعال حفظ می‌شود</strong>اگر صفحه را تازه کنید، شناسه opaque، روش تحویل و deadline معتبر درخواست بازیابی می‌شوند؛ شماره موبایل در session storage ذخیره نمی‌شود.</div></div>
               </div>
             </div>
             <footer class="phone-footer">کد یک‌بارمصرف و زمان‌دار</footer>
@@ -521,7 +533,24 @@
                 <button class="link-button touch-target">بازگشت به مرحله کد تأیید</button>
               </div>
             </div>
-            <footer class="phone-footer">هیچ تأییدی از این دستگاه جعل نمی‌شود</footer>
+            <footer class="phone-footer">ورود فقط پس از پاسخ مرجع تأیید دستگاه ادامه پیدا می‌کند</footer>
+          </div>
+        </article>
+
+        <article id="auth-recovery-unavailable" class="scenario">
+          <div class="scenario-label"><div class="scenario-label__top"><h2>بازیابی در دسترس نیست</h2><span class="scenario-code">AUTH-02D</span></div><p>رد authoritative بدون ساخت درخواست یا خروج از context دستگاه</p></div>
+          <div class="phone">
+            <header class="phone-top"><div class="brand"><span class="brand-mark"></span><span>سامانه معاملات</span></div><span class="surface-chip">امنیت نشست</span></header>
+            <div class="phone-body">
+              <div class="screen screen--dense">
+                <div class="status-hero"><span class="status-orb">!</span><h3>بازیابی برای این حساب فعال نیست</h3><p>درخواست بازیابی ساخته نشد. امکان این مسیر بر اساس نقش حساب و وضعیت نشست‌ها از سمت مرجع سرور تعیین می‌شود.</p></div>
+                <div class="notice notice--warning"><span class="notice__mark">i</span><div><strong>تأیید دستگاه هنوز فعال است</strong>تا پایان مهلت می‌توانید منتظر پاسخ دستگاه اصلی بمانید.</div></div>
+                <div class="countdown-block"><strong>01:18</strong><span>مهلت باقی‌مانده برای تأیید دستگاه</span></div>
+                <div class="status-track"><div class="status-track__row is-active"><span class="status-track__dot">1</span><span>انتظار برای پاسخ دستگاه اصلی ادامه دارد</span></div><div class="status-track__row"><span class="status-track__dot">2</span><span>در صورت پایان مهلت، ورود را دوباره شروع کنید</span></div></div>
+                <button class="button button--secondary touch-target">ادامه انتظار برای تأیید دستگاه</button>
+              </div>
+            </div>
+            <footer class="phone-footer">این پیام نتیجه پاسخ مرجع سرور است و مسیر تازه‌ای ایجاد نمی‌کند</footer>
           </div>
         </article>
 
@@ -533,12 +562,12 @@
               <div class="screen screen--dense">
                 <div class="status-hero"><span class="status-orb">…</span><h3>در حال بررسی مدیریت</h3><p>درخواست بازیابی ثبت شده است. نتیجه بدون نیاز به به‌روزرسانی دستی از همین صفحه اعلام می‌شود.</p></div>
                 <div class="countdown-block"><strong>01:48:16</strong><span>مهلت بررسی این درخواست</span></div>
-                <div class="notice notice--warning"><span class="notice__mark">!</span><div><strong>این مسیر برای همه حساب‌ها تضمین‌شده نیست</strong>امکان بازیابی بر اساس نوع حساب و وضعیت نشست‌های فعال بررسی می‌شود و ممکن است مجاز نباشد.</div></div>
+                <div class="notice"><span class="notice__mark">i</span><div><strong>درخواست بازیابی ثبت شده است</strong>مدیریت ممکن است برای ادامه مدرک بخواهد؛ نتیجه فقط از پاسخ معتبر همان درخواست اعلام می‌شود.</div></div>
                 <div class="status-track"><div class="status-track__row is-active"><span class="status-track__dot">1</span><span>بررسی اولیه درخواست</span></div><div class="status-track__row"><span class="status-track__dot">2</span><span>در صورت نیاز، درخواست مدرک</span></div><div class="status-track__row"><span class="status-track__dot">3</span><span>اعلام نتیجه نهایی</span></div></div>
                 <button class="button button--danger-soft touch-target">انصراف از درخواست بازیابی</button>
               </div>
             </div>
-            <footer class="phone-footer">وضعیت درخواست هر دو ثانیه بررسی می‌شود</footer>
+            <footer class="phone-footer">وضعیت درخواست به‌صورت خودکار بررسی و در همین صفحه به‌روزرسانی می‌شود</footer>
           </div>
         </article>
 
@@ -550,13 +579,30 @@
               <div class="screen screen--dense">
                 <div class="screen-heading"><h3>دعوت‌نامه اختصاصی</h3><p>مشخصات را بررسی کنید و یکی از مسیرهای فعال ثبت‌نام را انتخاب کنید.</p></div>
                 <div class="valid-banner"><strong>دعوت‌نامه معتبر است</strong><span>تا ۲۴ تیر، ۱۸:۳۰</span></div>
-                <div class="summary-card"><div class="summary-row"><span>نوع لینک</span><strong>دعوت‌نامه اختصاصی</strong></div><div class="summary-row"><span>مهلت ثبت‌نام</span><strong>۲۴ تیر، ساعت ۱۸:۳۰</strong></div><div class="summary-row"><span>حریم خصوصی</span><strong>اطلاعات حساس نمایش داده نمی‌شود</strong></div></div>
-                <div class="route-card route-card--primary touch-target"><span class="route-icon">TG</span><span class="route-copy"><strong>ثبت‌نام با تلگرام</strong><span>ورود مستقیم به ربات و ادامه ثبت‌نام</span></span><span class="route-arrow">‹</span></div>
-                <div class="route-card touch-target"><span class="route-icon">W</span><span class="route-copy"><strong>ثبت‌نام از طریق وب</strong><span>تأیید موبایل و تکمیل اطلاعات در وب‌اپ</span></span><span class="route-arrow">‹</span></div>
+                <div class="summary-card"><div class="summary-row"><span>نوع لینک</span><strong>دعوت‌نامه اختصاصی</strong></div><div class="summary-row"><span>مهلت ثبت‌نام</span><strong>۲۴ تیر، ساعت ۱۸:۳۰</strong></div><div class="summary-row"><span>اطلاعات این قاب</span><strong>مهلت و مسیرهای فعال</strong></div></div>
+                <button type="button" class="route-card route-card--primary touch-target" aria-label="ثبت‌نام با تلگرام"><span class="route-icon" aria-hidden="true">TG</span><span class="route-copy"><strong>ثبت‌نام با تلگرام</strong><span>ورود مستقیم به ربات و ادامه ثبت‌نام</span></span><span class="route-arrow" aria-hidden="true">‹</span></button>
+                <button type="button" class="route-card touch-target" aria-label="ثبت‌نام از طریق وب"><span class="route-icon" aria-hidden="true">W</span><span class="route-copy"><strong>ثبت‌نام از طریق وب</strong><span>تأیید موبایل و تکمیل اطلاعات در وب‌اپ</span></span><span class="route-arrow" aria-hidden="true">‹</span></button>
                 <div class="notice notice--warning"><span class="notice__mark">!</span><div><strong>مسیرها از سرور تعیین می‌شوند</strong>اگر تلگرام در دسترس نباشد، فقط مسیر معتبر وب نمایش داده می‌شود.</div></div>
               </div>
             </div>
-            <footer class="phone-footer">دعوت‌نامه شخصی و غیرقابل‌انتقال</footer>
+            <footer class="phone-footer">برای حفظ اطلاعات حساب، لینک دعوت را با دیگران به اشتراک نگذارید</footer>
+          </div>
+        </article>
+
+        <article id="auth-invite-web-only" class="scenario">
+          <div class="scenario-label"><div class="scenario-label__top"><h2>دعوت‌نامه فقط وب</h2><span class="scenario-code">INV-01W</span></div><p>یک مسیر server-owned بدون جای خالی یا CTA غیرفعال تلگرام</p></div>
+          <div class="phone">
+            <header class="phone-top"><div class="brand"><span class="brand-mark"></span><span>سامانه معاملات</span></div><span class="surface-chip">دعوت‌نامه</span></header>
+            <div class="phone-body">
+              <div class="screen screen--dense">
+                <div class="screen-heading"><h3>ثبت‌نام از طریق وب</h3><p>این دعوت‌نامه معتبر است و مسیر فعال آن در وب‌اپ ادامه پیدا می‌کند.</p></div>
+                <div class="valid-banner"><strong>دعوت‌نامه معتبر است</strong><span>تا ۲۴ تیر، ۱۸:۳۰</span></div>
+                <div class="summary-card"><div class="summary-row"><span>نوع لینک</span><strong>دعوت‌نامه اختصاصی</strong></div><div class="summary-row"><span>مهلت ثبت‌نام</span><strong>۲۴ تیر، ساعت ۱۸:۳۰</strong></div><div class="summary-row"><span>مسیر فعال</span><strong>ثبت‌نام وب</strong></div></div>
+                <button type="button" class="route-card route-card--primary touch-target" aria-label="ادامه ثبت‌نام از طریق وب"><span class="route-icon" aria-hidden="true">W</span><span class="route-copy"><strong>ادامه ثبت‌نام در وب‌اپ</strong><span>تأیید موبایل و تکمیل اطلاعات در وب</span></span><span class="route-arrow" aria-hidden="true">‹</span></button>
+                <div class="notice"><span class="notice__mark">i</span><div><strong>فقط مسیرهای فعال نمایش داده می‌شوند</strong>برای این دعوت‌نامه مسیر تلگرام از پاسخ سرور ارائه نشده است.</div></div>
+              </div>
+            </div>
+            <footer class="phone-footer">مسیر قابل استفاده از پاسخ معتبر همین دعوت‌نامه می‌آید</footer>
           </div>
         </article>
 
@@ -598,7 +644,7 @@
         </article>
 
         <article id="auth-register-address" class="scenario">
-          <div class="scenario-label"><div class="scenario-label__top"><h2>اطلاعات نهایی ثبت‌نام</h2><span class="scenario-code">REG-01/02</span></div><p>در مسیر registration_token، OTP تکراری نمایش داده نمی‌شود</p></div>
+          <div class="scenario-label"><div class="scenario-label__top"><h2>اطلاعات نهایی ثبت‌نام</h2><span class="scenario-code">REG-01C</span></div><p>سومین و آخرین مرحله الزامی مسیر دعوت‌نامه وب</p></div>
           <div class="phone">
             <header class="phone-top"><div class="brand"><span class="brand-mark"></span><span>سامانه معاملات</span></div><span class="surface-chip">ثبت‌نام وب</span></header>
             <div class="phone-body">
@@ -608,16 +654,33 @@
                 <div class="mini-summary"><div><span>حساب دعوت‌شده</span><strong>حساب مشتری · <bdi>0912 *** 6789</bdi></strong></div><span class="mini-summary__role">مشتری سطح ۱</span></div>
                 <div class="field"><div class="field-label"><span>آدرس دقیق پستی</span><span class="field-hint">حداقل ۱۰ کاراکتر</span></div><div class="textarea-shell">استان، شهر، خیابان، کوچه، پلاک و هر توضیح لازم را وارد کنید…</div><div class="field-hint">اطلاعات این مرحله با بازگشت یا خطای موقت از بین نمی‌رود.</div></div>
                 <button class="button button--primary touch-target">تکمیل ثبت‌نام</button>
-                <div class="notice"><span class="notice__mark">4</span><div><strong>مرحله بعد اختیاری است</strong>در صورت مجازبودن حساب، اتصال تلگرام پیشنهاد می‌شود و گزینه «فعلاً رد می‌کنم» همیشه در دسترس است.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">↗</span><div><strong>ثبت‌نام با همین مرحله کامل می‌شود</strong>پس از ساخت حساب، در صورت مجازبودن اتصال تلگرام جداگانه پیشنهاد می‌شود و «فعلاً رد می‌کنم» همیشه در دسترس است.</div></div>
                 <button class="link-button touch-target">بازگشت به مرحله قبل</button>
               </div>
             </div>
-            <footer class="phone-footer">اطلاعات فقط برای تکمیل حساب استفاده می‌شود</footer>
+            <footer class="phone-footer">آدرس در حساب ذخیره می‌شود و بعداً در بخش پروفایل نمایش داده می‌شود</footer>
+          </div>
+        </article>
+
+        <article id="auth-register-direct" class="scenario">
+          <div class="scenario-label"><div class="scenario-label__top"><h2>تکمیل مستقیم پس از ورود</h2><span class="scenario-code">REG-02</span></div><p>بدون OTP تکراری و بدون نمایش progress طی‌نشده</p></div>
+          <div class="phone">
+            <header class="phone-top"><div class="brand"><span class="brand-mark"></span><span>سامانه معاملات</span></div><span class="surface-chip">تکمیل حساب</span></header>
+            <div class="phone-body">
+              <div class="screen screen--dense">
+                <div class="screen-heading"><h3>تکمیل اطلاعات پس از ورود</h3><p>شماره موبایل شما در مرحله ورود تأیید شد؛ برای همین کد ثبت‌نام دیگری لازم نیست.</p></div>
+                <div class="notice"><span class="notice__mark">✓</span><div><strong>تأیید موبایل انجام شده است</strong>این مسیر مستقیماً اطلاعات نهایی را باز می‌کند و شما را به OTP دعوت‌نامه برنمی‌گرداند.</div></div>
+                <div class="mini-summary"><div><span>حساب در حال تکمیل</span><strong>حساب مشتری · <bdi>0912 *** 6789</bdi></strong></div><span class="mini-summary__role">مشتری سطح ۱</span></div>
+                <div class="field"><div class="field-label"><span>آدرس دقیق پستی</span><span class="field-hint">حداقل ۱۰ کاراکتر</span></div><div class="textarea-shell">استان، شهر، خیابان، کوچه، پلاک و هر توضیح لازم را وارد کنید…</div><div class="field-hint">در خطای موقت، متن واردشده در همین مرحله حفظ می‌شود.</div></div>
+                <button class="button button--primary touch-target">تکمیل ثبت‌نام</button>
+              </div>
+            </div>
+            <footer class="phone-footer">آدرس در حساب ذخیره می‌شود و بعداً در بخش پروفایل نمایش داده می‌شود</footer>
           </div>
         </article>
 
         <article id="auth-register-telegram" class="scenario">
-          <div class="scenario-label"><div class="scenario-label__top"><h2>اتصال اختیاری تلگرام</h2><span class="scenario-code">REG-01C</span></div><p>پس از صدور نشست؛ skip روشن و غیرمسدودکننده</p></div>
+          <div class="scenario-label"><div class="scenario-label__top"><h2>اتصال اختیاری تلگرام</h2><span class="scenario-code">REG-01D</span></div><p>پس از صدور نشست؛ skip روشن و غیرمسدودکننده</p></div>
           <div class="phone">
             <header class="phone-top"><div class="brand"><span class="brand-mark"></span><span>سامانه معاملات</span></div><span class="surface-chip">گام اختیاری</span></header>
             <div class="phone-body">
@@ -649,7 +712,7 @@
                 <button class="link-button touch-target" style="color:var(--danger)">انصراف از درخواست بازیابی</button>
               </div>
             </div>
-            <footer class="phone-footer">فایل فقط در فرایند بررسی هویت استفاده می‌شود</footer>
+            <footer class="phone-footer">مدرک برای بررسی همین درخواست در اختیار بررسی‌کنندگان مجاز بازیابی قرار می‌گیرد</footer>
           </div>
         </article>
 
@@ -661,14 +724,32 @@
               <div class="screen screen--dense">
                 <div class="screen-heading"><h3>رمز عبور اختصاصی</h3><p>برای ورود مدیریتی از دستگاه‌های جدید، یک رمز قوی تعریف کنید.</p></div>
                 <div class="notice"><span class="notice__mark">S</span><div><strong>مخصوص نشست‌های مدیریتی</strong>این رمز جایگزین ورود با کد تأیید یا سیاست تأیید دستگاه نمی‌شود.</div></div>
-                <div class="field"><div class="field-label"><span>رمز عبور جدید</span></div><div class="password-shell"><span class="password-icon">⌕</span><span class="password-dots">••••••••••••</span><span class="password-eye">نمایش</span></div></div>
-                <div class="rule-grid"><span class="rule">حداقل ۸ کاراکتر</span><span class="rule">حرف بزرگ</span><span class="rule">حرف کوچک</span><span class="rule">عدد</span><span class="rule">نویسه ویژه</span></div>
-                <div class="field"><div class="field-label"><span>تکرار رمز عبور</span><span class="field-hint" style="color:var(--success)">منطبق است</span></div><div class="password-shell"><span class="password-icon">⌕</span><span class="password-dots">••••••••••••</span><span class="password-eye">نمایش</span></div></div>
+                <div class="field"><div class="field-label"><span>رمز عبور جدید</span></div><div class="password-shell"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش رمز عبور">نمایش</button></div></div>
+                <div class="rule-grid"><span class="rule is-passed">حداقل ۸ کاراکتر</span><span class="rule is-passed">حرف بزرگ انگلیسی</span><span class="rule is-passed">حرف کوچک انگلیسی</span><span class="rule is-passed">عدد</span><span class="rule is-passed">نویسه ویژه</span></div>
+                <div class="field"><div class="field-label"><span>تکرار رمز عبور</span><span class="field-hint" style="color:var(--success)">منطبق است</span></div><div class="password-shell"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش تکرار رمز عبور">نمایش</button></div></div>
                 <button class="button button--primary touch-target">ثبت رمز و ورود</button>
                 <div class="field-hint">Password manager و autocomplete مرورگر باید بدون تغییر قرارداد امنیتی قابل استفاده بماند.</div>
               </div>
             </div>
             <footer class="phone-footer">تا ثبت رمز، ورود مدیریتی کامل نمی‌شود</footer>
+          </div>
+        </article>
+
+        <article id="auth-setup-password-error" class="scenario">
+          <div class="scenario-label"><div class="scenario-label__top"><h2>اصلاح رمز مدیر</h2><span class="scenario-code">SEC-01E</span></div><p>قاعده‌های خنثی/قبول/رد و mismatch پیش از submit</p></div>
+          <div class="phone">
+            <header class="phone-top"><div class="brand"><span class="brand-mark"></span><span>سامانه معاملات</span></div><span class="surface-chip">گیت اجباری مدیر</span></header>
+            <div class="phone-body">
+              <div class="screen screen--dense">
+                <div class="screen-heading"><h3>رمز عبور را اصلاح کنید</h3><p>همه قواعد باید برقرار باشند و تکرار رمز دقیقاً با رمز جدید یکسان باشد.</p></div>
+                <div class="field"><div class="field-label"><span>رمز عبور جدید</span></div><div class="password-shell"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش رمز عبور">نمایش</button></div></div>
+                <div class="rule-grid"><span class="rule is-passed">حداقل ۸ کاراکتر</span><span class="rule is-passed">حرف بزرگ انگلیسی</span><span class="rule is-failed">حرف کوچک انگلیسی</span><span class="rule is-passed">عدد</span><span class="rule">نویسه ویژه</span></div>
+                <div class="field"><div class="field-label"><span>تکرار رمز عبور</span></div><div class="password-shell password-shell--error"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">•••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش تکرار رمز عبور">نمایش</button></div><div class="field-error">رمز عبور و تکرار آن یکسان نیستند</div></div>
+                <button class="button button--primary touch-target" disabled aria-disabled="true">ثبت رمز و ورود</button>
+                <div class="notice notice--warning"><span class="notice__mark">i</span><div><strong>ورودی‌ها حفظ می‌شوند</strong>پس از خطای اعتبارسنجی یا پاسخ API، کاربر همان فیلد را اصلاح می‌کند و مرحله از ابتدا شروع نمی‌شود.</div></div>
+              </div>
+            </div>
+            <footer class="phone-footer">خطا کنار همان ورودی و بدون اتکا به رنگ نمایش داده می‌شود</footer>
           </div>
         </article>
       </div>
@@ -688,7 +769,7 @@
         <article class="keyboard-case">
           <h3>OTP و WebOTP</h3><p>یک input معنایی، ترتیب LTR و CTA بدون پوشانده‌شدن.</p>
           <div class="keyboard-viewport">
-            <div class="keyboard-app"><header class="keyboard-app__top"><span>کد تأیید</span><span class="timer">00:24</span></header><div class="keyboard-app__body"><h4>کد ارسال‌شده</h4><p>نمای بخش‌بندی‌شده برای یک کنترل واحد</p><div class="otp-cells"><span class="otp-cell" style="height:48px">1</span><span class="otp-cell" style="height:48px">3</span><span class="otp-cell" style="height:48px">8</span><span class="otp-cell" style="height:48px">4</span><span class="otp-cell is-active" style="height:48px"></span></div></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">ورود به سامانه</button></footer></div>
+            <div class="keyboard-app"><header class="keyboard-app__top"><span>کد تأیید</span><span class="timer">00:24</span></header><div class="keyboard-app__body"><h4>کد ارسال‌شده</h4><p>نمای بخش‌بندی‌شده برای یک کنترل واحد</p><div class="otp-cells"><span class="otp-cell" style="height:48px">1</span><span class="otp-cell" style="height:48px">3</span><span class="otp-cell" style="height:48px">8</span><span class="otp-cell" style="height:48px">4</span><span class="otp-cell is-active" style="height:48px"></span></div></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target" disabled aria-disabled="true">تأیید و ادامه</button></footer></div>
             <div class="keyboard-panel keyboard-panel--numeric"><div class="keyboard-row"><span class="keyboard-key">1</span><span class="keyboard-key">2</span><span class="keyboard-key">3</span></div><div class="keyboard-row"><span class="keyboard-key">4</span><span class="keyboard-key">5</span><span class="keyboard-key">6</span></div><div class="keyboard-row"><span class="keyboard-key">7</span><span class="keyboard-key">8</span><span class="keyboard-key">9</span></div><div class="keyboard-row"><span class="keyboard-key">⌫</span><span class="keyboard-key">0</span><span class="keyboard-key keyboard-key--action">✓</span></div></div>
           </div>
         </article>
@@ -704,7 +785,7 @@
         <article class="keyboard-case">
           <h3>رمز انگلیسی</h3><p>قاعده حروف انگلیسی، toggle و CTA در visual viewport حفظ می‌شوند.</p>
           <div class="keyboard-viewport">
-            <div class="keyboard-app"><header class="keyboard-app__top"><span>امنیت حساب</span><span>رمز مدیر</span></header><div class="keyboard-app__body"><h4>رمز عبور جدید</h4><div class="password-shell input-shell--focus"><span class="password-icon">⌕</span><span class="password-dots">••••••••••</span><span class="password-eye">نمایش</span></div><div class="rule-grid"><span class="rule">حرف انگلیسی</span><span class="rule">عدد و نویسه</span></div></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">ثبت رمز و ورود</button></footer></div>
+            <div class="keyboard-app"><header class="keyboard-app__top"><span>امنیت حساب</span><span>رمز مدیر</span></header><div class="keyboard-app__body"><h4>رمز عبور جدید</h4><div class="password-shell input-shell--focus"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش رمز عبور">نمایش</button></div><div class="rule-grid"><span class="rule is-passed">حروف انگلیسی</span><span class="rule is-passed">عدد و نویسه</span></div></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">ثبت رمز و ورود</button></footer></div>
             <div class="keyboard-panel"><div class="keyboard-suggestion"><span>Strong</span><span>Password</span><span>Secure</span></div><div class="keyboard-row"><span class="keyboard-key">Q</span><span class="keyboard-key">W</span><span class="keyboard-key">E</span><span class="keyboard-key">R</span><span class="keyboard-key">T</span><span class="keyboard-key">Y</span><span class="keyboard-key">U</span><span class="keyboard-key">I</span></div><div class="keyboard-row"><span class="keyboard-key">A</span><span class="keyboard-key">S</span><span class="keyboard-key">D</span><span class="keyboard-key">F</span><span class="keyboard-key">G</span><span class="keyboard-key">H</span><span class="keyboard-key">J</span></div><div class="keyboard-row"><span class="keyboard-key">Z</span><span class="keyboard-key">X</span><span class="keyboard-key">C</span><span class="keyboard-key">V</span><span class="keyboard-key">B</span><span class="keyboard-key">N</span></div><div class="keyboard-row"><span class="keyboard-key keyboard-key--action">123</span><span class="keyboard-key keyboard-key--wide">space</span><span class="keyboard-key keyboard-key--action">done</span></div></div>
           </div>
         </article>
@@ -712,22 +793,54 @@
     </section>
 
     <section id="state-atlas" class="state-section">
-      <header class="section-heading"><div><h2>State atlas — نتیجه باید قابل تشخیص بماند</h2><p>این stateها در قاب‌های اصلی تکرار نشده‌اند، اما قرارداد بصری آن‌ها برای پیاده‌سازی بعدی الزام‌آور است. رنگ همیشه همراه با عنوان، متن و اقدام صریح استفاده می‌شود.</p></div><span class="section-kicker">۱۲ state نماینده</span></header>
+      <header class="section-heading"><div><h2>State atlas — نتیجه باید قابل تشخیص بماند</h2><p>این ماتریس، حالت‌های الزام‌آور هر مسیر را کنار قاب‌های اصلی ثبت می‌کند. رنگ همیشه همراه با عنوان و متن صریح است؛ عبارت‌های «نمونه اقدام» فقط برچسب مستنداتی‌اند و کنترل تعاملی نیستند.</p></div><span class="section-kicker">۴۱ حالت الزام‌آور</span></header>
       <div class="state-grid">
-        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>بررسی دعوت‌نامه</strong><span class="state-tag">Loading</span></div><p>اسکلت کوتاه و متن «در حال بررسی دعوت‌نامه»؛ هیچ مسیر ثبت‌نامی تا پاسخ معتبر نمایش داده نمی‌شود.</p></article>
-        <article class="state-card state-card--danger"><div class="state-card__top"><strong>دعوت‌نامه منقضی</strong><span class="state-tag">Expired</span></div><p>مهلت پایان یافته است؛ فرم یا CTA ثبت‌نام پنهان و درخواست دعوت‌نامه جدید پیشنهاد می‌شود.</p><span class="state-card__action">دریافت دعوت‌نامه جدید</span></article>
-        <article class="state-card state-card--success"><div class="state-card__top"><strong>ثبت‌نام قبلاً تکمیل شده</strong><span class="state-tag">Completed</span></div><p>کاربر به سطح ورود OTP منتقل می‌شود؛ فرم ثبت‌نام تکراری نمایش داده نمی‌شود.</p><span class="state-card__action">ادامه ورود</span></article>
-        <article class="state-card state-card--danger"><div class="state-card__top"><strong>شماره موبایل نامعتبر</strong><span class="state-tag">Field error</span></div><p>خطا کنار همان فیلد می‌ماند و مقدار واردشده حذف نمی‌شود. focus به اولین خطای واقعی برمی‌گردد.</p></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>دعوت‌نامه · بررسی</strong><span class="state-tag">Loading</span></div><p>اسکلت کوتاه و «در حال بررسی دعوت‌نامه» نمایش داده می‌شود؛ پیش از پاسخ معتبر، هیچ مسیر ثبت‌نامی دیده نمی‌شود.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>دعوت‌نامه · نامعتبر یا منقضی</strong><span class="state-tag">Denied</span></div><p>فرم ثبت‌نام پنهان می‌ماند و کاربر برای دریافت راهنمایی به دعوت‌کننده یا مدیر مجموعه ارجاع داده می‌شود.</p><span class="state-card__example">نمونه اقدام: بازگشت به ورود</span></article>
+        <article class="state-card state-card--success"><div class="state-card__top"><strong>دعوت‌نامه · تکمیل‌شده</strong><span class="state-tag">Redirect</span></div><p>بدون ساخت صفحه موفقیت مستقل، کاربر به ورود OTP هدایت می‌شود و فرم ثبت‌نام دوباره نمایش داده نمی‌شود.</p></article>
+        <article class="state-card"><div class="state-card__top"><strong>دعوت‌نامه · فقط وب‌اپ</strong><span class="state-tag">Full frame</span></div><p>قاب کامل <bdi>auth-invite-web-only</bdi> فقط مسیر وب‌اپ را نشان می‌دهد؛ جای خالی تلگرام ساخته نمی‌شود.</p></article>
+        <article class="state-card"><div class="state-card__top"><strong>دعوت‌نامه · هر دو مسیر</strong><span class="state-tag">Full frame</span></div><p>قاب کامل <bdi>auth-invite-valid</bdi> وب‌اپ و تلگرام را به‌عنوان دو انتخاب واقعی و هم‌سطح نمایش می‌دهد.</p></article>
 
-        <article class="state-card state-card--warning"><div class="state-card__top"><strong>کد تأیید نادرست</strong><span class="state-tag">Retryable</span></div><p>کد پاک یا flow reset نمی‌شود؛ پیام دقیق و امکان اصلاح در همان مرحله باقی می‌ماند.</p><span class="state-card__action">اصلاح کد</span></article>
-        <article class="state-card"><div class="state-card__top"><strong>Resend قرارداد legacy</strong><span class="state-tag">Timed action</span></div><p>فقط پس از deadline و فقط وقتی fallback خودکار فعال نیست، «ارسال مجدد کد» نمایش داده می‌شود.</p><span class="state-card__action">ارسال مجدد کد</span></article>
-        <article class="state-card state-card--danger"><div class="state-card__top"><strong>خطای شبکه یا PWA stale</strong><span class="state-tag">Recovery</span></div><p>ابتدا retry عادی؛ پاک‌سازی امن cache فقط برای خطاهای شبکه‌مانند و با توضیح اثر اقدام ارائه می‌شود.</p><span class="state-card__action">پاک‌سازی و بارگذاری مجدد</span></article>
-        <article class="state-card state-card--warning"><div class="state-card__top"><strong>تأیید دستگاه رد یا منقضی</strong><span class="state-tag">Terminal</span></div><p>علت عمومی و نتیجه قطعی اعلام می‌شود و کاربر با context حفظ‌شده به OTP یا شروع دوباره برمی‌گردد.</p><span class="state-card__action">شروع دوباره</span></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>ورود · موبایل نامعتبر</strong><span class="state-tag">Field error</span></div><p>خطا کنار همان فیلد می‌ماند، مقدار حذف نمی‌شود و focus به نخستین خطای واقعی برمی‌گردد.</p></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>ورود · درخواست کد</strong><span class="state-tag">Loading</span></div><p>CTA وضعیت در حال انجام دارد و ارسال تکراری غیرفعال است؛ شماره تلفن در قاب باقی می‌ماند.</p></article>
+        <article class="state-card"><div class="state-card__top"><strong>ورود · کد بازیابی‌شده</strong><span class="state-tag">Restored</span></div><p>پس از بازگشت به صفحه، شناسه opaque، روش تحویل و deadline معتبر بازیابی می‌شوند؛ شماره موبایل در session storage ذخیره نشده است.</p></article>
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>ورود · کد نادرست</strong><span class="state-tag">Retryable</span></div><p>کد یا flow پاک نمی‌شود؛ پیام دقیق و امکان اصلاح در همان مرحله باقی می‌ماند.</p><span class="state-card__example">نمونه اقدام: اصلاح کد</span></article>
+        <article class="state-card"><div class="state-card__top"><strong>ورود · fallback خودکار</strong><span class="state-tag">Automatic</span></div><p>با پایان انتظار مسیر فعال بعدی خودکار اعمال می‌شود و متن همان صفحه تغییر را اعلام می‌کند.</p></article>
+        <article class="state-card"><div class="state-card__top"><strong>ورود · ارسال مجدد legacy</strong><span class="state-tag">Timed action</span></div><p>فقط پس از deadline و فقط وقتی fallback خودکار وجود ندارد، اقدام ارسال مجدد آشکار می‌شود.</p><span class="state-card__example">نمونه اقدام: ارسال مجدد کد</span></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>ورود · شبکه یا PWA stale</strong><span class="state-tag">Recovery</span></div><p>ابتدا retry عادی؛ پاک‌سازی cache فقط برای خطای شبکه‌مانند و همراه با توضیح اثر اقدام پیشنهاد می‌شود.</p><span class="state-card__example">نمونه اقدام: بارگذاری مجدد</span></article>
 
-        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>مدرک ارسال شد</strong><span class="state-tag">Submitted</span></div><p>نام فایل از فرم حذف و وضعیت polling با deadline و متن «نتیجه از همین صفحه» جایگزین می‌شود.</p></article>
-        <article class="state-card state-card--success"><div class="state-card__top"><strong>بازیابی تأیید شد</strong><span class="state-tag">Approved</span></div><p>به کاربر گفته می‌شود نشست قدیمی منقضی شده و تنها CTA، ورود با token تأییدشده است.</p><span class="state-card__action">ورود به سامانه</span></article>
-        <article class="state-card state-card--danger"><div class="state-card__top"><strong>آدرس ناقص</strong><span class="state-tag">Validation</span></div><p>حداقل طول و مثال ساختاری پیش از submit روشن است؛ آدرس تایپ‌شده پس از خطا حفظ می‌شود.</p></article>
-        <article class="state-card state-card--success"><div class="state-card__top"><strong>اتصال اختیاری تلگرام</strong><span class="state-tag">Optional</span></div><p>مزیت اتصال گفته می‌شود، اما «فعلاً رد می‌کنم» هم‌سطح دسترسی‌پذیر است و ورود را مسدود نمی‌کند.</p><span class="state-card__action">اتصال / فعلاً رد می‌کنم</span></article>
+        <article class="state-card state-card--success"><div class="state-card__top"><strong>تأیید دستگاه · پذیرفته</strong><span class="state-tag">Redirect</span></div><p>نتیجه کوتاه اعلام و بدون صفحه موفقیت مستقل، ادامه ورود از پاسخ معتبر سرور انجام می‌شود.</p></article>
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>تأیید دستگاه · ردشده</strong><span class="state-tag">To OTP</span></div><p>علت عمومی گفته می‌شود و کاربر با شماره حفظ‌شده به مسیر OTP برمی‌گردد.</p><span class="state-card__example">نمونه اقدام: ادامه با کد</span></article>
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>تأیید دستگاه · منقضی</strong><span class="state-tag">To OTP</span></div><p>پایان مهلت از رد مدیریتی تفکیک می‌شود و ادامه فقط از مسیر OTP ممکن است.</p><span class="state-card__example">نمونه اقدام: دریافت کد</span></article>
+
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>بازیابی · در انتظار</strong><span class="state-tag">Full frame</span></div><p>قاب اصلی انتظار، زمان باقیمانده و به‌روزرسانی خودکار همان صفحه را نشان می‌دهد.</p></article>
+        <article class="state-card"><div class="state-card__top"><strong>بازیابی · درخواست مدرک</strong><span class="state-tag">Full frame</span></div><p>قاب اصلی نوع مدرک، مهلت و ارسال برای بررسی‌کنندگان مجاز همین درخواست را توضیح می‌دهد.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>بازیابی · فاقد شرایط</strong><span class="state-tag">Full frame</span></div><p>قاب <bdi>auth-recovery-unavailable</bdi> می‌گوید درخواست ساخته نشده و مسیر تأیید دستگاه را حفظ می‌کند.</p></article>
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>بازیابی · بازبین در دسترس نیست</strong><span class="state-tag">Temporary</span></div><p>نبود بازبین مجاز از فاقدشرایط‌بودن حساب تفکیک می‌شود؛ درخواست بازیابی ساخته نمی‌شود و انتظار تأیید دستگاه، اگر معتبر باشد، ادامه دارد.</p></article>
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>بازیابی · درخواست ورود منقضی</strong><span class="state-tag">Expired before start</span></div><p>پایان مهلت درخواست ورود پیش از ساخت recovery اعلام می‌شود و کاربر فقط به شروع دوباره مسیر ورود هدایت می‌شود.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>بازیابی · فایل نامعتبر</strong><span class="state-tag">Validation</span></div><p>نوع یا اندازه نامعتبر کنار انتخاب‌گر توضیح داده می‌شود؛ توضیح متنی کاربر حفظ می‌ماند.</p></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>بازیابی · بارگذاری مدرک</strong><span class="state-tag">Loading</span></div><p>پیشرفت ارسال مشخص است، انتخاب دوباره و ثبت تکراری موقتاً غیرفعال‌اند و نام فایل دیده می‌شود.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>بازیابی · خطای بارگذاری</strong><span class="state-tag">Retryable</span></div><p>فایل و توضیح حفظ می‌شوند، علت قابل‌فهم نمایش داده می‌شود و ارسال مجدد همان فایل ممکن است.</p><span class="state-card__example">نمونه اقدام: تلاش دوباره</span></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>بازیابی · مدرک ارسال‌شده</strong><span class="state-tag">Submitted</span></div><p>فرم جای خود را به وضعیت انتظار می‌دهد؛ نتیجه به‌صورت خودکار در همین صفحه تازه می‌شود.</p></article>
+        <article class="state-card state-card--success"><div class="state-card__top"><strong>بازیابی · تأییدشده</strong><span class="state-tag">Approved</span></div><p>نتیجه مرجع سرور اعلام و تنها ادامه مجاز با token همان درخواست ارائه می‌شود؛ صفحه موفقیت جدا ساخته نمی‌شود.</p><span class="state-card__example">نمونه اقدام: ورود به سامانه</span></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>بازیابی · ردشده</strong><span class="state-tag">Rejected</span></div><p>نتیجه قطعی و راه بازگشت به ورود نمایش داده می‌شود؛ رابط دلیل تأییدنشده تولید نمی‌کند.</p></article>
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>بازیابی · منقضی</strong><span class="state-tag">Expired</span></div><p>مهلت پایان‌یافته با رد درخواست اشتباه نمی‌شود و ادامه به شروع مسیر معتبر هدایت می‌شود.</p></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>بازیابی · لغوشده</strong><span class="state-tag">Cancelled</span></div><p>لغو ثبت‌شده اعلام و ورودی‌های مدرک از قاب حذف می‌شوند؛ بازگشت به ورود باقی می‌ماند.</p></article>
+
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>ثبت‌نام · بررسی دعوت</strong><span class="state-tag">Loading</span></div><p>پیش از نمایش مراحل، اعتبار دعوت‌نامه بررسی و ساختار فرم در حالت انتظار کوتاه نگه داشته می‌شود.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>ثبت‌نام · خطای بررسی دعوت</strong><span class="state-tag">Retryable</span></div><p>خطای شبکه از دعوت‌نامه نامعتبر تفکیک می‌شود و retry بدون پاک‌کردن context لینک انجام می‌شود.</p><span class="state-card__example">نمونه اقدام: تلاش دوباره</span></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>ثبت‌نام · آدرس نامعتبر</strong><span class="state-tag">Validation</span></div><p>معیار ساختاری و خطا کنار فیلد روشن است؛ آدرس تایپ‌شده پس از پاسخ API حفظ می‌شود.</p></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>ثبت‌نام · ثبت نهایی</strong><span class="state-tag">Loading</span></div><p>CTA در حال انجام است، ثبت تکراری غیرفعال می‌شود و progress فقط در مسیر سه‌مرحله‌ای باقی می‌ماند.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>ثبت‌نام · خطای API</strong><span class="state-tag">Retryable</span></div><p>اطلاعات واردشده و مرحله جاری حفظ می‌شوند؛ پیام عمومی جای خطای فیلدی دقیق را نمی‌گیرد.</p><span class="state-card__example">نمونه اقدام: ثبت دوباره</span></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>ثبت‌نام · خطای اتصال تلگرام</strong><span class="state-tag">Optional error</span></div><p>شکست اتصال، ثبت‌نام تکمیل‌شده را برنمی‌گرداند و امکان retry یا ردکردن مرحله باقی می‌ماند.</p></article>
+        <article class="state-card"><div class="state-card__top"><strong>ثبت‌نام · مرحله اختیاری</strong><span class="state-tag">Optional</span></div><p>اتصال تلگرام خارج از سه مرحله اصلی است؛ «فعلاً رد می‌کنم» در دسترس و مانع ورود نیست.</p><span class="state-card__example">نمونه اقدام: اتصال یا ردکردن</span></article>
+        <article class="state-card state-card--success"><div class="state-card__top"><strong>ثبت‌نام · پایان مسیر</strong><span class="state-tag">Redirect</span></div><p>چه پس از اتصال و چه پس از ردکردن، کاربر مستقیماً به مقصد معتبر هدایت می‌شود؛ صفحه موفقیت مستقل ساخته نمی‌شود.</p></article>
+
+        <article class="state-card state-card--warning"><div class="state-card__top"><strong>رمز عبور · ناقص</strong><span class="state-tag">Disabled</span></div><p>قواعد هنوز برآورده‌نشده خنثی یا ناموفق‌اند و CTA تا کامل‌شدن ورودی غیرفعال می‌ماند.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>رمز عبور · عدم تطابق</strong><span class="state-tag">Full frame</span></div><p>قاب <bdi>auth-setup-password-error</bdi> تفاوت دو فیلد را نشان می‌دهد و هر دو مقدار را برای اصلاح حفظ می‌کند.</p></article>
+        <article class="state-card state-card--neutral"><div class="state-card__top"><strong>رمز عبور · ثبت</strong><span class="state-tag">Loading</span></div><p>CTA در حال انجام و ورودی‌ها موقتاً قفل‌اند؛ تغییر مسیر تا پاسخ معتبر سرور انجام نمی‌شود.</p></article>
+        <article class="state-card state-card--danger"><div class="state-card__top"><strong>رمز عبور · خطای API</strong><span class="state-tag">Retryable</span></div><p>پیام در سطح فرم نمایش داده می‌شود، ورودی‌ها حفظ می‌شوند و کاربر می‌تواند دوباره ثبت کند.</p><span class="state-card__example">نمونه اقدام: تلاش دوباره</span></article>
+        <article class="state-card state-card--success"><div class="state-card__top"><strong>رمز عبور · ثبت موفق</strong><span class="state-tag">Redirect</span></div><p>بدون ساخت صفحه موفقیت مستقل، کاربر بر اساس پاسخ سرور به مقصد بعدی هدایت می‌شود.</p></article>
       </div>
     </section>
 
@@ -747,7 +860,7 @@
             <div class="picker-grid"><button class="picker touch-target"><b>▧</b><span>انتخاب از گالری</span></button><button class="picker touch-target"><b>◉</b><span>گرفتن تصویر</span></button><button class="picker touch-target"><b>↥</b><span>انتخاب فایل</span></button></div>
             <div class="file-card"><span class="file-icon">PDF</span><span class="file-copy"><strong>identity-document.pdf</strong><span>۲.۱ مگابایت · آماده ارسال</span></span><span class="file-check">✓</span></div>
             <div class="field"><div class="field-label"><span>توضیح اختیاری</span><span class="field-hint">در صورت نیاز به توضیح بیشتر</span></div><div class="textarea-shell">توضیح تکمیلی درباره مدرک انتخاب‌شده…</div></div>
-            <div class="notice notice--warning"><span class="notice__mark">!</span><div><strong>تصمیم امنیتی خارج از این فرم است</strong>ارسال مدرک به معنی تأیید بازیابی نیست و نتیجه فقط از پاسخ مرجع سرور اعلام می‌شود.</div></div>
+            <div class="notice notice--warning"><span class="notice__mark">!</span><div><strong>تصمیم امنیتی خارج از این فرم است</strong>مدرک برای بررسی همین درخواست در اختیار بررسی‌کنندگان مجاز قرار می‌گیرد؛ ارسال آن به معنی تأیید بازیابی نیست و نتیجه از پاسخ مرجع سرور اعلام می‌شود.</div></div>
             <div class="desktop-actions"><button class="button button--primary touch-target">ارسال مدرک برای بررسی</button><button class="button button--ghost touch-target" style="color:var(--danger)">انصراف</button></div>
           </main>
         </div>
