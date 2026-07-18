@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from core.services.telegram_admin_broadcast_queue_feedback import (
@@ -85,6 +86,10 @@ from core.telegram_delivery_scheduled_operation_freshness import (
     SCHEDULED_OPERATION_FRESHNESS_ACTIONS,
     ScheduledOperationTelegramDeliveryFreshnessValidator,
 )
+from core.telegram_delivery_credentials import (
+    TelegramDeliveryCredentialRegistry,
+    configured_telegram_delivery_credentials,
+)
 
 
 class TelegramDeliveryRuntimeCompositionError(RuntimeError):
@@ -95,6 +100,14 @@ class TelegramDeliveryRuntimeCompositionError(RuntimeError):
 class TelegramDeliveryLaneAdapters:
     freshness: TelegramDeliveryFreshnessRouter
     lifecycle: TelegramDeliveryLifecycleRouter
+
+
+@dataclass(frozen=True, slots=True)
+class ConfiguredTelegramDeliveryRuntime:
+    credential_registry: TelegramDeliveryCredentialRegistry
+    bot_identities: tuple[str, ...]
+    freshness_validators: Mapping[str, TelegramDeliveryFreshnessRouter]
+    lifecycle_feedbacks: Mapping[str, TelegramDeliveryLifecycleRouter]
 
 
 def _channel_id(value: Any) -> int:
@@ -250,4 +263,34 @@ def build_configured_telegram_delivery_lane_adapters(
     return TelegramDeliveryLaneAdapters(
         freshness=freshness_registry.build_lane_router(bot_identity),
         lifecycle=lifecycle_registry.build_lane_router(bot_identity),
+    )
+
+
+def build_configured_telegram_delivery_runtime(
+    *,
+    settings: Any,
+) -> ConfiguredTelegramDeliveryRuntime:
+    """Compose every fail-closed dependency before a queue task is created."""
+
+    credential_registry = configured_telegram_delivery_credentials(settings)
+    bot_identities = credential_registry.bot_identities
+    if not bot_identities:
+        raise TelegramDeliveryRuntimeCompositionError(
+            "telegram_runtime_lane_set_empty"
+        )
+    channel_id = getattr(settings, "channel_id", None)
+    freshness: dict[str, TelegramDeliveryFreshnessRouter] = {}
+    lifecycle: dict[str, TelegramDeliveryLifecycleRouter] = {}
+    for bot_identity in bot_identities:
+        adapters = build_configured_telegram_delivery_lane_adapters(
+            channel_id=channel_id,
+            bot_identity=bot_identity,
+        )
+        freshness[bot_identity] = adapters.freshness
+        lifecycle[bot_identity] = adapters.lifecycle
+    return ConfiguredTelegramDeliveryRuntime(
+        credential_registry=credential_registry,
+        bot_identities=bot_identities,
+        freshness_validators=MappingProxyType(freshness),
+        lifecycle_feedbacks=MappingProxyType(lifecycle),
     )

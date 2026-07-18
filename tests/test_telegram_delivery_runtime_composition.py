@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from core.telegram_delivery_freshness_router import (
     TelegramDeliveryFreshnessRoutingError,
@@ -9,12 +10,31 @@ from core.telegram_delivery_lifecycle_router import (
 from core.telegram_delivery_runtime_composition import (
     TelegramDeliveryRuntimeCompositionError,
     build_configured_telegram_delivery_lane_adapters,
+    build_configured_telegram_delivery_runtime,
     configured_telegram_delivery_freshness_registry,
     configured_telegram_delivery_lifecycle_registry,
 )
 
 
 class TelegramDeliveryRuntimeCompositionTests(unittest.TestCase):
+    def test_full_runtime_composition_binds_only_credential_enabled_lanes(self):
+        runtime = build_configured_telegram_delivery_runtime(
+            settings=SimpleNamespace(
+                bot_token="primary:test-token",
+                telegram_delivery_queue_channel_editor_enabled=True,
+                telegram_delivery_queue_channel_editor_bot_token="editor:test-token",
+                channel_id=-1001234567890,
+            )
+        )
+
+        self.assertEqual(runtime.bot_identities, ("primary", "channel_editor"))
+        self.assertEqual(set(runtime.freshness_validators), set(runtime.bot_identities))
+        self.assertEqual(set(runtime.lifecycle_feedbacks), set(runtime.bot_identities))
+        self.assertEqual(
+            runtime.credential_registry.bot_identities,
+            runtime.bot_identities,
+        )
+
     def test_current_editor_lane_has_complete_source_authoritative_adapters(self):
         adapters = build_configured_telegram_delivery_lane_adapters(
             channel_id=-1001234567890,

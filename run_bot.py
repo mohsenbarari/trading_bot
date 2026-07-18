@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import redis.asyncio as redis
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from core.config import settings
@@ -37,6 +38,12 @@ from core.telegram_admin_broadcast_worker import telegram_admin_broadcast_delive
 from core.telegram_notification_outbox_worker import telegram_notification_outbox_delivery_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop
 from core.telegram_delivery_queue_worker import telegram_delivery_queue_loop
+from core.telegram_delivery_queue_limiter import (
+    configured_redis_telegram_delivery_limiter,
+)
+from core.telegram_delivery_runtime_composition import (
+    build_configured_telegram_delivery_runtime,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeDecision,
@@ -53,8 +60,38 @@ class BotRuntimeSurfaceError(RuntimeError):
     """Raised when the Telegram bot entrypoint is started on a forbidden surface."""
 
 
+def configured_telegram_delivery_queue_worker_factory(settings_obj):
+    """Return a zero-argument queue runner with all production dependencies bound."""
+
+    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+
+    async def run_configured_telegram_delivery_queue() -> None:
+        redis_client = redis.Redis.from_url(
+            str(getattr(settings_obj, "redis_url", "") or ""),
+            decode_responses=True,
+        )
+        limiter = configured_redis_telegram_delivery_limiter(
+            redis_client,
+            settings=settings_obj,
+        )
+        try:
+            await telegram_delivery_queue_loop(
+                freshness_validators=composition.freshness_validators,
+                lifecycle_feedbacks=composition.lifecycle_feedbacks,
+                credential_registry=composition.credential_registry,
+                dispatch_limiter=limiter,
+                bot_identities=composition.bot_identities,
+            )
+        finally:
+            await redis_client.aclose()
+
+    return run_configured_telegram_delivery_queue
+
+
 def telegram_execution_worker_factories(
     runtime: TelegramDeliveryRuntimeDecision,
+    *,
+    settings_obj=settings,
 ):
     """Return exactly one ownership set without creating coroutine objects."""
     if runtime.mode == TelegramDeliveryRuntimeMode.LEGACY:
@@ -73,7 +110,7 @@ def telegram_execution_worker_factories(
             raise TelegramDeliveryRuntimeConfigurationError(
                 "inconsistent_queue_runtime_decision"
             )
-        return (telegram_delivery_queue_loop,)
+        return (configured_telegram_delivery_queue_worker_factory(settings_obj),)
     raise TelegramDeliveryRuntimeConfigurationError("unknown_runtime_decision_mode")
 
 
