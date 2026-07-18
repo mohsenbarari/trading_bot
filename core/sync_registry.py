@@ -374,6 +374,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "and must never be copied to Iran."
         ),
     ),
+    "telegram_delivery_resume_operations": _entry(
+        "telegram_delivery_resume_operations",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue_operations",),
+        "foreign local Telegram execution control owner",
+        "never cross-sync operator identity, pause evidence, or activation phases",
+        "Foreign-only Telegram channel resume audit and crash recovery",
+        notes=(
+            "This operation is the foreign-local fail-closed boundary between PostgreSQL pause "
+            "evidence, Telegram preflight, and Redis activation."
+        ),
+    ),
     "trading_settings": _entry(
         "trading_settings",
         SyncPolicy.SYNC,

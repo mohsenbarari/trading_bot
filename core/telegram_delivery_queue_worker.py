@@ -39,6 +39,7 @@ from core.services.telegram_delivery_queue_service import (
     claim_next_telegram_delivery_job,
     defer_unstarted_telegram_delivery_lease,
     load_active_telegram_limiter_evidence,
+    load_incomplete_telegram_resume_destination_keys,
     mark_telegram_delivery_dispatch_started,
     recover_expired_telegram_delivery_leases,
     release_unstarted_telegram_delivery_lease,
@@ -304,12 +305,18 @@ async def rehydrate_telegram_delivery_limiter_state(
             current_server=current_server(),
             now=sampled_at,
         )
+        incomplete_resume_destinations = (
+            await load_incomplete_telegram_resume_destination_keys(
+                db,
+                current_server=current_server(),
+            )
+        )
         await db.rollback()
 
-    restored = 0
+    restored = len(incomplete_resume_destinations)
     blocked_bot_identities: set[str] = set()
     cooldown_destination_keys: set[str] = set()
-    hard_blocked_destination_keys: set[str] = set()
+    hard_blocked_destination_keys: set[str] = set(incomplete_resume_destinations)
     gateway_blocked = False
     pause_decisions = {
         TelegramDeliveryState.BLOCKED_BOT: TelegramDeliveryOutcome.BOT_PAUSED,

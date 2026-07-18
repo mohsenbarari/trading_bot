@@ -70,9 +70,18 @@ class TelegramDeliveryPreflightRateLimitedError(
 ):
     """Carries Telegram's authoritative preflight retry delay without provider text."""
 
-    def __init__(self, reason: str, *, retry_after_seconds: float) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        retry_after_seconds: float,
+        bot_identity: str | None = None,
+        method: str | None = None,
+    ) -> None:
         super().__init__(reason)
         self.retry_after_seconds = retry_after_seconds
+        self.bot_identity = bot_identity
+        self.method = method
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +175,8 @@ def _result_payload(
                 raise TelegramDeliveryPreflightRateLimitedError(
                     f"telegram_preflight_rate_limited:{role}:{method}",
                     retry_after_seconds=retry_after,
+                    bot_identity=role,
+                    method=method,
                 )
     if (
         result_method != method

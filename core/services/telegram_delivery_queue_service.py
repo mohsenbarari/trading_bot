@@ -42,6 +42,10 @@ from core.telegram_delivery_queue_contract import (
 )
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_resume_operation import (
+    ACTIVE_TELEGRAM_DELIVERY_RESUME_STATES,
+    TelegramDeliveryResumeOperation,
+)
 
 
 TELEGRAM_DELIVERY_QUEUE_WORKER_ID = "telegram-delivery-queue-v1"
@@ -157,20 +161,39 @@ def _dispatch_scope_advisory_key(scope: str) -> int:
     )
 
 
+async def acquire_telegram_delivery_scope_locks(
+    db: AsyncSession,
+    *,
+    bot_identities: tuple[str, ...] = (),
+    destination_keys: tuple[str, ...] = (),
+    include_gateway: bool = True,
+) -> None:
+    """Serialize dispatch/control mutations with one deterministic lock order."""
+    scopes: list[str] = []
+    if include_gateway:
+        scopes.append("gateway")
+    scopes.extend(f"bot:{identity}" for identity in sorted(set(bot_identities)))
+    scopes.extend(
+        f"destination:{destination}"
+        for destination in sorted(set(destination_keys))
+    )
+    for scope in scopes:
+        await db.execute(
+            select(func.pg_advisory_xact_lock(_dispatch_scope_advisory_key(scope)))
+        )
+
+
 async def _acquire_dispatch_scope_locks(
     db: AsyncSession,
     *,
     record: TelegramDeliveryJobRecord,
 ) -> None:
     """Serialize result persistence and final markers in a fixed order."""
-    for scope in (
-        "gateway",
-        f"bot:{record.bot_identity}",
-        f"destination:{record.destination_key}",
-    ):
-        await db.execute(
-            select(func.pg_advisory_xact_lock(_dispatch_scope_advisory_key(scope)))
-        )
+    await acquire_telegram_delivery_scope_locks(
+        db,
+        bot_identities=(str(record.bot_identity),),
+        destination_keys=(str(record.destination_key),),
+    )
 
 
 def _is_trade_result_job(record: TelegramDeliveryJobRecord) -> bool:
@@ -207,6 +230,27 @@ async def _assert_durable_dispatch_gate(
     # Result persistence acquires the same locks. Therefore a marker either
     # linearizes before a newly known pause, or waits and observes its commit.
     await _acquire_dispatch_scope_locks(db, record=record)
+
+    incomplete_resume_id = (
+        await db.execute(
+            select(TelegramDeliveryResumeOperation.id)
+            .where(
+                TelegramDeliveryResumeOperation.destination_key
+                == str(record.destination_key),
+                TelegramDeliveryResumeOperation.state.in_(
+                    ACTIVE_TELEGRAM_DELIVERY_RESUME_STATES
+                ),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if incomplete_resume_id is not None:
+        raise TelegramDeliveryDispatchDeferredError(
+            retry_after_seconds=30.0,
+            reason="durable_dispatch_gate:resume_incomplete",
+            cooldown_until=now + timedelta(seconds=30.0),
+            scope="destination",
+        )
 
     blockers = list(
         (
@@ -397,6 +441,27 @@ async def load_active_telegram_limiter_evidence(
         )
         for record in records
     )
+
+
+async def load_incomplete_telegram_resume_destination_keys(
+    db: AsyncSession,
+    *,
+    current_server: str,
+) -> tuple[str, ...]:
+    """Return fail-closed destination gates for unfinished resume sagas."""
+    _require_foreign(current_server)
+    rows = (
+        await db.execute(
+            select(TelegramDeliveryResumeOperation.destination_key)
+            .where(
+                TelegramDeliveryResumeOperation.state.in_(
+                    ACTIVE_TELEGRAM_DELIVERY_RESUME_STATES
+                )
+            )
+            .order_by(TelegramDeliveryResumeOperation.destination_key.asc())
+        )
+    ).scalars()
+    return tuple(dict.fromkeys(str(value) for value in rows))
 
 
 def _enum_value(value: Any) -> str:

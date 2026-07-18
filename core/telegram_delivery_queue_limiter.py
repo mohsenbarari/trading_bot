@@ -213,6 +213,11 @@ class TelegramDeliveryDispatchLimiter(Protocol):
 
     async def preflight_gate_open(self, bot_identity: str) -> bool: ...
 
+    async def clear_destination_gate_after_database_resume(
+        self,
+        destination_key: str,
+    ) -> None: ...
+
 
 def _epoch_ms(value: datetime) -> int:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -621,7 +626,10 @@ class RedisTelegramDeliveryLimiter:
             keys["probe_inflight"],
         )
 
-    async def resume_destination(self, destination_key: str) -> None:
+    async def clear_destination_gate_after_database_resume(
+        self,
+        destination_key: str,
+    ) -> None:
         destination = str(destination_key or "").strip()
         if not destination:
             raise TelegramDeliveryLimiterUnavailableError(
@@ -633,6 +641,10 @@ class RedisTelegramDeliveryLimiter:
             keys["destination_block"],
             keys["destination_next"],
         )
+
+    async def resume_destination(self, destination_key: str) -> None:
+        """Compatibility primitive; this alone never authorizes activation."""
+        await self.clear_destination_gate_after_database_resume(destination_key)
 
     async def resume_gateway(self) -> None:
         keys = self._keys("primary", "unused")

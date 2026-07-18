@@ -188,7 +188,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f5e0b1c2d3ea"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f6f1c2d3e4fb"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -232,7 +232,12 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             autoflush=False,
         )
         async with self.Session() as db:
-            await db.execute(text("TRUNCATE TABLE telegram_delivery_jobs RESTART IDENTITY CASCADE"))
+            await db.execute(
+                text(
+                    "TRUNCATE TABLE telegram_delivery_resume_operations, "
+                    "telegram_delivery_jobs RESTART IDENTITY CASCADE"
+                )
+            )
             await db.execute(text("ALTER SEQUENCE telegram_delivery_jobs_enqueued_seq_seq RESTART WITH 1"))
             await db.commit()
 

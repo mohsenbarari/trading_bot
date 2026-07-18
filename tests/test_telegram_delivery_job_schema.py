@@ -5,6 +5,7 @@ from core.config import Settings
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.telegram_delivery_queue_contract import TelegramDeliveryState
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
 
 
 class TelegramDeliveryJobSchemaTests(unittest.TestCase):
@@ -227,6 +228,55 @@ class TelegramDeliveryJobSchemaTests(unittest.TestCase):
         self.assertIn('"ix_telegram_delivery_jobs_bot_probe_gate"', source)
         self.assertIn("postgresql_where", source)
         self.assertNotIn("drop_table", source)
+
+    def test_resume_operation_is_durable_foreign_local_control_state(self):
+        columns = TelegramDeliveryResumeOperation.__table__.columns
+        self.assertTrue(
+            {
+                "request_id",
+                "destination_key",
+                "bot_identities",
+                "pause_job_ids",
+                "pause_evidence_hash",
+                "requested_by",
+                "attempt_history",
+                "preflight_evidence",
+                "state",
+                "attempt_count",
+                "failure_class",
+                "db_applied_at",
+                "redis_applied_at",
+                "completed_at",
+            }.issubset(columns.keys())
+        )
+        index_names = {
+            index.name
+            for index in TelegramDeliveryResumeOperation.__table__.indexes
+        }
+        self.assertIn(
+            "ux_telegram_delivery_resume_active_destination",
+            index_names,
+        )
+        entry = get_sync_registry_entry("telegram_delivery_resume_operations")
+        self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+        self.assertIn("foreign", entry.authority)
+
+    def test_resume_operation_migration_is_linear_reversible_and_scoped(self):
+        source = Path(
+            "migrations/versions/"
+            "f6f1c2d3e4fb_add_telegram_delivery_resume_operations.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f5e0b1c2d3ea"',
+            source,
+        )
+        self.assertIn('"telegram_delivery_resume_operations"', source)
+        self.assertIn(
+            '"ux_telegram_delivery_resume_active_destination"',
+            source,
+        )
+        self.assertIn("postgresql_where", source)
+        self.assertIn('op.drop_table("telegram_delivery_resume_operations")', source)
 
 
 if __name__ == "__main__":
