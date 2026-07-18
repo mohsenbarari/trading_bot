@@ -360,7 +360,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "telegram_notification_outbox": _entry(
         "telegram_notification_outbox",
         SyncPolicy.SYNC,
-        ("webapp_notification_producer", "telegram_notification_outbox_worker"),
+        (
+            "webapp_notification_producer",
+            "telegram_notification_outbox_worker",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign Telegram delivery owner",
         "dedupe key plus terminal-state precedence; local lease fields are not cross-server execution authority",
         "Generic Telegram private-message notification delivery audit and repair",

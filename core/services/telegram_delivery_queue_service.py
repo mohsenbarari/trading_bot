@@ -202,6 +202,7 @@ def _require_lifecycle_callback(
     *,
     reason: str,
     admin_broadcast_reason: str,
+    new_user_membership_reason: str,
 ) -> None:
     if callable(callback):
         return
@@ -210,6 +211,8 @@ def _require_lifecycle_callback(
         raise TelegramDeliveryQueueValidationError(reason)
     if action == TelegramDeliveryAction.ADMIN_BROADCAST.value:
         raise TelegramDeliveryQueueValidationError(admin_broadcast_reason)
+    if action == TelegramDeliveryAction.NEW_USER_MEMBERSHIP.value:
+        raise TelegramDeliveryQueueValidationError(new_user_membership_reason)
 
 
 def _require_foreign(current_server: str) -> None:
@@ -868,6 +871,7 @@ async def mark_telegram_delivery_dispatch_started(
         dispatch_guard,
         reason="trade_result_dispatch_guard_required",
         admin_broadcast_reason="admin_broadcast_dispatch_guard_required",
+        new_user_membership_reason="new_user_membership_dispatch_guard_required",
     )
     if dispatch_guard is not None:
         await dispatch_guard(db, record, dispatch_linearized_at)
@@ -919,6 +923,7 @@ async def apply_telegram_delivery_freshness_result(
         feedback,
         reason="trade_result_freshness_feedback_required",
         admin_broadcast_reason="admin_broadcast_freshness_feedback_required",
+        new_user_membership_reason="new_user_membership_freshness_feedback_required",
     )
     contract_job = _record_to_contract(record)
     apply_freshness_decision(contract_job, decision)
@@ -1145,6 +1150,7 @@ async def resolve_telegram_delivery_result(
         feedback,
         reason="trade_result_delivery_feedback_required",
         admin_broadcast_reason="admin_broadcast_delivery_feedback_required",
+        new_user_membership_reason="new_user_membership_delivery_feedback_required",
     )
     await _acquire_dispatch_scope_locks(db, record=record)
     result_linearized_at = utc_now()

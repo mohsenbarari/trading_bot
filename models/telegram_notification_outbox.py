@@ -11,6 +11,7 @@ import enum
 from sqlalchemy import (
     BigInteger,
     Column,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -72,6 +73,28 @@ class TelegramNotificationOutbox(Base):
             "id",
             postgresql_where=text("status = 'sending' AND lease_until IS NOT NULL"),
         ),
+        Index(
+            "ix_telegram_notification_outbox_queue_handoff",
+            "next_retry_at",
+            "id",
+            postgresql_where=text(
+                "status IN ('pending', 'retryable_failed') "
+                "AND source_type = 'project_user_joined' "
+                "AND queue_job_id IS NULL AND worker_id IS NULL "
+                "AND lease_until IS NULL"
+            ),
+        ),
+        Index(
+            "ux_telegram_notification_outbox_queue_job",
+            "queue_job_id",
+            unique=True,
+            postgresql_where=text("queue_job_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "((queue_job_id IS NULL AND queue_handed_off_at IS NULL) OR "
+            "(queue_job_id IS NOT NULL AND queue_handed_off_at IS NOT NULL))",
+            name="ck_telegram_notification_outbox_queue_binding",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -100,6 +123,12 @@ class TelegramNotificationOutbox(Base):
     last_error_message = Column(Text, nullable=True)
     worker_id = Column(String(128), nullable=True)
     lease_until = Column(DateTime(timezone=True), nullable=True)
+    queue_job_id = Column(
+        BigInteger,
+        ForeignKey("telegram_delivery_jobs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    queue_handed_off_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
     terminal_at = Column(DateTime(timezone=True), nullable=True)
     extra_payload = Column(JSON, nullable=True)

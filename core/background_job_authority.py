@@ -279,6 +279,7 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "trade_delivery_receipts",
             "telegram_admin_broadcasts",
             "telegram_admin_broadcast_receipts",
+            "telegram_notification_outbox",
         ),
         allowed_servers=(SERVER_FOREIGN,),
         authority_rule=(
@@ -290,8 +291,9 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "blindly replay an ambiguous send"
         ),
         sync_outbox_behavior=(
-            "telegram_delivery_jobs is foreign-local no-sync execution state; trade and admin-broadcast "
-            "receipts remain sync-visible domain audit while queue bindings and lease fields are local-only"
+            "telegram_delivery_jobs is foreign-local no-sync execution state; trade, admin-broadcast, and "
+            "notification-outbox receipts remain sync-visible domain audit while queue bindings and lease "
+            "fields are local-only"
         ),
         local_runtime=True,
         external_state=("Telegram Bot API",),

@@ -14,6 +14,10 @@ from core import telegram_gateway
 from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
 from core.services.customer_relation_service import get_active_customer_relation_for_user
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import utc_now
 from models.telegram_notification_outbox import (
     TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
@@ -77,6 +81,14 @@ _MALFORMED_PAYLOAD_PATTERNS = (
 )
 
 TelegramSendCallable = Callable[..., Awaitable[telegram_gateway.TelegramGatewayResult]]
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_notification_outbox_direct_sender_is_not_runtime_owner"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,6 +426,10 @@ async def claim_next_telegram_notification_outbox(
                     TelegramNotificationOutboxStatus.RETRYABLE_FAILED,
                 ]
             ),
+            TelegramNotificationOutbox.queue_job_id.is_(None),
+            TelegramNotificationOutbox.queue_handed_off_at.is_(None),
+            TelegramNotificationOutbox.worker_id.is_(None),
+            TelegramNotificationOutbox.lease_until.is_(None),
             or_(
                 TelegramNotificationOutbox.next_retry_at.is_(None),
                 TelegramNotificationOutbox.next_retry_at <= current_time,
@@ -489,6 +505,7 @@ async def deliver_claimed_telegram_notification_outbox(
     bot_token: str | None = None,
     now: datetime | None = None,
 ) -> TelegramNotificationDeliveryResult:
+    _assert_legacy_direct_delivery_owner()
     normalized_server = str(current_server or "").strip().lower()
     recipient_user_id = _coerce_int(getattr(outbox, "recipient_user_id", None))
     if normalized_server != SERVER_FOREIGN:

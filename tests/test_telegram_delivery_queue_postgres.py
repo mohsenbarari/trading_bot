@@ -188,7 +188,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f7a2b3c4d5ec"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "f8b3c4d5e6fd"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,

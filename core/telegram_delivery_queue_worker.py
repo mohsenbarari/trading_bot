@@ -71,6 +71,9 @@ from core.telegram_trade_result_queue_feeder import (
 from core.telegram_admin_broadcast_queue_feeder import (
     telegram_admin_broadcast_queue_handoff_loop,
 )
+from core.telegram_notification_outbox_queue_feeder import (
+    telegram_notification_outbox_queue_handoff_loop,
+)
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
@@ -1299,6 +1302,12 @@ async def telegram_delivery_queue_loop(
         asyncio.create_task(
             telegram_admin_broadcast_queue_handoff_loop(),
             name="telegram-admin-broadcast-queue-feeder",
+        )
+    )
+    tasks.append(
+        asyncio.create_task(
+            telegram_notification_outbox_queue_handoff_loop(),
+            name="telegram-notification-outbox-queue-feeder",
         )
     )
     try:

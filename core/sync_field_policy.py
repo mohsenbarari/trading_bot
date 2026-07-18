@@ -350,6 +350,21 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         action=SyncFieldAction.DROP,
         reason="local Telegram notification outbox lease deadline; opposite server must not use it for execution",
     ),
+    ("telegram_notification_outbox", "queue_job_id"): _entry(
+        "telegram_notification_outbox",
+        "queue_job_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        references_no_sync_table="telegram_delivery_jobs",
+        reason="foreign-local binding to the no-sync shared Telegram execution queue",
+    ),
+    ("telegram_notification_outbox", "queue_handed_off_at"): _entry(
+        "telegram_notification_outbox",
+        "queue_handed_off_at",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="foreign-local handoff timestamp for shared Telegram queue ownership",
+    ),
     ("accountant_relations", "mobile_number"): _entry(
         "accountant_relations",
         "mobile_number",

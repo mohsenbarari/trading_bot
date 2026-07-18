@@ -188,6 +188,7 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
                 "trade_delivery_receipts",
                 "telegram_admin_broadcasts",
                 "telegram_admin_broadcast_receipts",
+                "telegram_notification_outbox",
             ),
         )
         self.assertTrue(queue.local_runtime)

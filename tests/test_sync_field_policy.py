@@ -165,6 +165,34 @@ class SyncFieldPolicyTests(unittest.TestCase):
         )
         self.assertEqual(broadcast, {"id": 7, "content": "پیام"})
 
+    def test_notification_outbox_queue_binding_is_dropped_from_sync_payload(self):
+        payload = {
+            "id": 91,
+            "dedupe_key": "telegram-notification:project_user_joined:9:7",
+            "source_type": "project_user_joined",
+            "recipient_user_id": 7,
+            "text": "پیام عضویت",
+            "worker_id": "foreign-local-worker",
+            "lease_until": "2026-07-18T12:00:00Z",
+            "queue_job_id": 811,
+            "queue_handed_off_at": "2026-07-18T11:59:00Z",
+        }
+
+        sanitized = sanitize_sync_payload("telegram_notification_outbox", payload)
+
+        self.assertEqual(
+            sanitized["dedupe_key"],
+            "telegram-notification:project_user_joined:9:7",
+        )
+        self.assertEqual(sanitized["text"], "پیام عضویت")
+        for field in {
+            "worker_id",
+            "lease_until",
+            "queue_job_id",
+            "queue_handed_off_at",
+        }:
+            self.assertNotIn(field, sanitized)
+
     def test_required_sensitive_fields_have_explicit_classification(self):
         expectations = {
             ("users", "admin_password_hash"): SyncFieldClassification.NO_SYNC,
@@ -196,6 +224,8 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("telegram_admin_broadcast_receipts", "queue_job_id"): SyncFieldClassification.NO_SYNC,
             ("telegram_admin_broadcast_receipts", "queue_handed_off_at"): SyncFieldClassification.NO_SYNC,
             ("telegram_admin_broadcasts", "queue_last_handed_off_at"): SyncFieldClassification.NO_SYNC,
+            ("telegram_notification_outbox", "queue_job_id"): SyncFieldClassification.NO_SYNC,
+            ("telegram_notification_outbox", "queue_handed_off_at"): SyncFieldClassification.NO_SYNC,
             ("trade_delivery_receipts", "last_error"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "audit_payload"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "trade_id"): SyncFieldClassification.NO_SYNC,

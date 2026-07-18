@@ -1,0 +1,279 @@
+"""Atomic feeder handoff for project-user membership notifications."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.server_routing import SERVER_FOREIGN
+from core.services.bot_access_policy import evaluate_bot_access
+from core.services.customer_relation_service import (
+    get_active_customer_relation_for_user,
+)
+from core.services.telegram_delivery_queue_service import (
+    enqueue_telegram_delivery_job,
+)
+from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+)
+from core.telegram_delivery_new_user_membership_freshness import (
+    NEW_USER_MEMBERSHIP_TEMPLATE_VERSION,
+    build_new_user_membership_payload,
+    telegram_new_user_membership_campaign_id,
+    telegram_new_user_membership_destination_key,
+    telegram_new_user_membership_source_natural_id,
+    telegram_new_user_membership_source_version,
+)
+from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryAction,
+    TelegramDestinationClass,
+    TelegramFeederKind,
+)
+from core.utils import utc_now
+from models.telegram_notification_outbox import (
+    TelegramNotificationOutbox,
+    TelegramNotificationOutboxStatus,
+)
+from models.user import User
+
+
+NOTIFICATION_OUTBOX_QUEUE_HANDOFF = "handed_off"
+NOTIFICATION_OUTBOX_QUEUE_SKIPPED = "skipped"
+NOTIFICATION_OUTBOX_QUEUE_TERMINAL_FAILED = "terminal_failed"
+NOTIFICATION_OUTBOX_QUEUE_REQUIRES_RECONCILIATION = "requires_reconciliation"
+
+_ACTIVE_STATUSES = (
+    TelegramNotificationOutboxStatus.PENDING,
+    TelegramNotificationOutboxStatus.RETRYABLE_FAILED,
+)
+
+
+class TelegramNotificationOutboxQueueHandoffError(RuntimeError):
+    """Raised before cross-server or unsafe queue handoff."""
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramNotificationOutboxQueueHandoffResult:
+    outbox_id: int
+    disposition: str
+    job_id: int | None = None
+    job_created: bool = False
+    reason: str | None = None
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+async def _flush(db: AsyncSession | Any) -> None:
+    flush = getattr(db, "flush", None)
+    if callable(flush):
+        await flush()
+
+
+async def _select_next_due_outbox(
+    db: AsyncSession,
+    *,
+    now: datetime,
+) -> TelegramNotificationOutbox | None:
+    return (
+        await db.execute(
+            select(TelegramNotificationOutbox)
+            .where(
+                TelegramNotificationOutbox.source_type
+                == TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
+                TelegramNotificationOutbox.status.in_(_ACTIVE_STATUSES),
+                TelegramNotificationOutbox.queue_job_id.is_(None),
+                TelegramNotificationOutbox.queue_handed_off_at.is_(None),
+                TelegramNotificationOutbox.worker_id.is_(None),
+                TelegramNotificationOutbox.lease_until.is_(None),
+                or_(
+                    TelegramNotificationOutbox.next_retry_at.is_(None),
+                    TelegramNotificationOutbox.next_retry_at <= now,
+                ),
+            )
+            .order_by(
+                TelegramNotificationOutbox.next_retry_at.asc().nullsfirst(),
+                TelegramNotificationOutbox.id.asc(),
+            )
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _finalize_unhandoffable_outbox(
+    db: AsyncSession,
+    *,
+    outbox: TelegramNotificationOutbox,
+    status: TelegramNotificationOutboxStatus,
+    reason: str,
+    error_class: str,
+    now: datetime,
+) -> TelegramNotificationOutboxQueueHandoffResult:
+    outbox.status = status
+    outbox.reason = reason[:120]
+    outbox.telegram_id_at_send = None
+    outbox.telegram_message_id = None
+    outbox.next_retry_at = None
+    outbox.last_error_class = error_class[:120]
+    outbox.last_error_message = reason[:500]
+    outbox.worker_id = None
+    outbox.lease_until = None
+    outbox.queue_job_id = None
+    outbox.queue_handed_off_at = None
+    outbox.sent_at = None
+    outbox.terminal_at = now
+    outbox.updated_at = now
+    await _flush(db)
+    return TelegramNotificationOutboxQueueHandoffResult(
+        outbox_id=int(outbox.id),
+        disposition=(
+            NOTIFICATION_OUTBOX_QUEUE_SKIPPED
+            if status == TelegramNotificationOutboxStatus.SKIPPED
+            else NOTIFICATION_OUTBOX_QUEUE_TERMINAL_FAILED
+        ),
+        reason=reason,
+    )
+
+
+async def handoff_next_due_telegram_notification_outbox(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    now: datetime | None = None,
+) -> TelegramNotificationOutboxQueueHandoffResult | None:
+    """Bind one eligible membership outbox row to one main-queue job."""
+    if str(current_server or "").strip().lower() != SERVER_FOREIGN:
+        raise TelegramNotificationOutboxQueueHandoffError(
+            "telegram_notification_outbox_queue_handoff_is_foreign_only"
+        )
+    current_time = now or utc_now()
+    outbox = await _select_next_due_outbox(db, now=current_time)
+    if outbox is None:
+        return None
+
+    recipient_user_id = _positive_int(outbox.recipient_user_id)
+    if recipient_user_id is None:
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason="telegram_user_missing_current",
+            error_class="TelegramUserUnavailable",
+            now=current_time,
+        )
+    user = await db.get(User, recipient_user_id)
+    if user is None:
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason="telegram_user_missing_current",
+            error_class="TelegramUserUnavailable",
+            now=current_time,
+        )
+    if _positive_int(user.telegram_id) is None:
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason="telegram_unlinked_current",
+            error_class="TelegramUserUnavailable",
+            now=current_time,
+        )
+    access = await evaluate_bot_access(db, user)
+    if not access.allowed:
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason=str(access.reason or "bot_access_denied_current")[:120],
+            error_class="BotAccessDenied",
+            now=current_time,
+        )
+    if await get_active_customer_relation_for_user(db, recipient_user_id) is not None:
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason="customer_excluded_current",
+            error_class="CustomerExcluded",
+            now=current_time,
+        )
+
+    try:
+        source_natural_id = telegram_new_user_membership_source_natural_id(
+            outbox
+        )
+        source_version = telegram_new_user_membership_source_version(user)
+        destination_key = telegram_new_user_membership_destination_key(
+            recipient_user_id
+        )
+        payload = build_new_user_membership_payload(outbox, user)
+        source_id = int(str(outbox.source_id or "").strip())
+        campaign_id = telegram_new_user_membership_campaign_id(source_id)
+    except (TypeError, ValueError, OverflowError) as exc:
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+            reason=str(exc)[:120] or "new_user_membership_payload_invalid",
+            error_class="TelegramPayloadError",
+            now=current_time,
+        )
+
+    enqueue_result = await enqueue_telegram_delivery_job(
+        db,
+        current_server=current_server,
+        feeder=TelegramFeederKind.ADMIN_SYSTEM,
+        source_natural_id=source_natural_id,
+        source_version=source_version,
+        action=TelegramDeliveryAction.NEW_USER_MEMBERSHIP,
+        bot_identity="primary",
+        destination_key=destination_key,
+        destination_class=TelegramDestinationClass.PRIVATE,
+        method="sendMessage",
+        payload=payload,
+        template_version=NEW_USER_MEMBERSHIP_TEMPLATE_VERSION,
+        campaign_id=campaign_id,
+    )
+    job_id = int(enqueue_result.job.id)
+    if not enqueue_result.created:
+        outbox.worker_id = f"telegram-delivery-reconcile:membership:{job_id}"[:128]
+        outbox.lease_until = None
+        outbox.reason = "notification_outbox_queue_orphan_requires_reconciliation"
+        outbox.next_retry_at = None
+        outbox.updated_at = current_time
+        await _flush(db)
+        return TelegramNotificationOutboxQueueHandoffResult(
+            outbox_id=int(outbox.id),
+            disposition=NOTIFICATION_OUTBOX_QUEUE_REQUIRES_RECONCILIATION,
+            job_id=job_id,
+            job_created=False,
+            reason="notification_outbox_queue_orphan_requires_reconciliation",
+        )
+
+    outbox.queue_job_id = job_id
+    outbox.queue_handed_off_at = current_time
+    outbox.worker_id = None
+    outbox.lease_until = None
+    outbox.reason = "notification_outbox_handed_to_main_queue"
+    outbox.updated_at = current_time
+    await _flush(db)
+    return TelegramNotificationOutboxQueueHandoffResult(
+        outbox_id=int(outbox.id),
+        disposition=NOTIFICATION_OUTBOX_QUEUE_HANDOFF,
+        job_id=job_id,
+        job_created=True,
+        reason="notification_outbox_handed_to_main_queue",
+    )
