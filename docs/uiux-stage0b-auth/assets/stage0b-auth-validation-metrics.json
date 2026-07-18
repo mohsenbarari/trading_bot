@@ -1,0 +1,119 @@
+{
+  "document": {
+    "scrollWidth": 2000,
+    "scrollHeight": 5743
+  },
+  "phones": [
+    {
+      "id": "auth-login-mobile",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-login-otp",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-device-approval",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-recovery-waiting",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-invite-valid",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-register-review",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-register-otp",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-register-address",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-register-telegram",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-recovery-identity",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    },
+    {
+      "id": "auth-setup-password",
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 388,
+      "scrollHeight": 842
+    }
+  ],
+  "touchTargets": {
+    "count": 32,
+    "minimumWidth": 74,
+    "minimumHeight": 44,
+    "below44": []
+  },
+  "font": "Vazirmatn, Tahoma, Arial, sans-serif",
+  "responsiveWidths": [
+    {
+      "width": 360,
+      "framesWithHorizontalOverflow": [],
+      "maximumScrollWidth": 358
+    },
+    {
+      "width": 375,
+      "framesWithHorizontalOverflow": [],
+      "maximumScrollWidth": 373
+    },
+    {
+      "width": 390,
+      "framesWithHorizontalOverflow": [],
+      "maximumScrollWidth": 388
+    },
+    {
+      "width": 414,
+      "framesWithHorizontalOverflow": [],
+      "maximumScrollWidth": 412
+    },
+    {
+      "width": 430,
+      "framesWithHorizontalOverflow": [],
+      "maximumScrollWidth": 428
+    }
+  ]
+}
