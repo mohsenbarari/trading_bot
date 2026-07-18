@@ -9,7 +9,9 @@ from core.telegram_delivery_interaction_result_contract import (
     build_delivery_result_target,
     build_interaction_result_contract,
     build_known_message_target,
+    parse_interaction_result_contract,
     resolve_interaction_target,
+    serialize_interaction_result_contract,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryState,
@@ -32,6 +34,28 @@ def make_capture_contract(**overrides):
 
 
 class TelegramInteractionResultContractTests(unittest.TestCase):
+    def test_serialized_contract_round_trip_is_exact(self):
+        contract = make_capture_contract(
+            anchor_effect=TelegramInteractionAnchorEffect.SET_CURRENT,
+            anchor_generation=3,
+            persistent_menu_present=True,
+            temporary_context_keyboard=True,
+            flow_exit=TelegramFlowExit.SUCCESS,
+        )
+
+        parsed = parse_interaction_result_contract(
+            serialize_interaction_result_contract(contract)
+        )
+
+        self.assertEqual(parsed, contract)
+
+    def test_serialized_contract_rejects_unknown_keys_and_non_boolean_flags(self):
+        payload = serialize_interaction_result_contract(make_capture_contract())
+        with self.assertRaisesRegex(ValueError, "serialized_contract_invalid"):
+            parse_interaction_result_contract({**payload, "unknown": True})
+        with self.assertRaisesRegex(ValueError, "boolean_invalid"):
+            parse_interaction_result_contract({**payload, "authenticated": 1})
+
     def test_authenticated_anchor_requires_real_send_result_and_menu(self):
         contract = make_capture_contract(
             anchor_effect=TelegramInteractionAnchorEffect.SET_CURRENT,
@@ -63,6 +87,10 @@ class TelegramInteractionResultContractTests(unittest.TestCase):
     def test_non_anchor_cannot_carry_anchor_generation(self):
         with self.assertRaisesRegex(ValueError, "generation_without_set"):
             make_capture_contract(anchor_generation=1)
+
+    def test_authenticated_persistent_menu_cannot_bypass_anchor_tracking(self):
+        with self.assertRaisesRegex(ValueError, "persistent_menu_requires_anchor"):
+            make_capture_contract(persistent_menu_present=True)
 
     def test_edit_cannot_claim_a_new_message_result(self):
         with self.assertRaisesRegex(ValueError, "edit_cannot_capture"):

@@ -37,6 +37,12 @@ from core.telegram_delivery_notification_action_contract import (
     telegram_notification_action_policy,
     telegram_notification_action_policy_from_source,
 )
+from core.telegram_delivery_interaction_result_contract import (
+    TelegramInteractionAnchorEffect,
+    TelegramInteractionResultContract,
+    parse_interaction_result_contract,
+    serialize_interaction_result_contract,
+)
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDestinationClass,
@@ -44,6 +50,7 @@ from core.telegram_delivery_queue_contract import (
     TelegramFreshnessOutcome,
 )
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_interaction_anchor_state import TelegramInteractionAnchorState
 from models.telegram_notification_outbox import (
     TelegramNotificationOutbox,
     TelegramNotificationOutboxStatus,
@@ -86,6 +93,7 @@ class TelegramNotificationActionSource:
     restriction_snapshot: dict[str, Any] | None
     deleted_account_snapshot: dict[str, str] | None
     not_before: datetime | None
+    interaction_result: TelegramInteractionResultContract | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +163,15 @@ def _parse_utc_datetime(value: Any) -> datetime:
     return _utc(parsed)
 
 
+def _reply_markup_has_persistent_menu(
+    reply_markup: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(reply_markup, Mapping):
+        return False
+    keyboard = reply_markup.get("keyboard")
+    return isinstance(keyboard, list) and bool(keyboard)
+
+
 def _validate_source_contract(
     outbox: TelegramNotificationOutbox | Any,
 ) -> TelegramNotificationActionSource:
@@ -194,6 +211,7 @@ def _validate_source_contract(
     restriction_snapshot: dict[str, Any] | None = None
     deleted_account_snapshot: dict[str, str] | None = None
     not_before: datetime | None = None
+    interaction_result: TelegramInteractionResultContract | None = None
     expected_user_sync_version = _strict_positive_int(
         extra_payload.get("user_sync_version")
     )
@@ -269,10 +287,12 @@ def _validate_source_contract(
         not_before = _parse_utc_datetime(extra_payload.get("not_before"))
         reply_markup = None
     else:
-        if set(extra_payload) not in (
-            {"queue_action", "user_sync_version"},
-            {"queue_action", "reply_markup", "user_sync_version"},
-        ):
+        allowed_keys = {"queue_action", "user_sync_version"}
+        if "reply_markup" in extra_payload:
+            allowed_keys.add("reply_markup")
+        if "interaction_result" in extra_payload:
+            allowed_keys.add("interaction_result")
+        if set(extra_payload) != allowed_keys:
             raise ValueError("notification_action_extra_payload_invalid")
         raw_reply_markup = extra_payload.get("reply_markup")
         if raw_reply_markup is None:
@@ -281,6 +301,24 @@ def _validate_source_contract(
             reply_markup = dict(raw_reply_markup)
         else:
             raise ValueError("notification_action_reply_markup_invalid")
+        raw_interaction_result = extra_payload.get("interaction_result")
+        if raw_interaction_result is not None:
+            interaction_result = parse_interaction_result_contract(
+                raw_interaction_result
+            )
+            if (
+                interaction_result.method != "sendMessage"
+                or interaction_result.destination_class
+                != TelegramDestinationClass.PRIVATE
+                or not interaction_result.authenticated
+            ):
+                raise ValueError("notification_action_interaction_route_invalid")
+            if interaction_result.persistent_menu_present != (
+                _reply_markup_has_persistent_menu(reply_markup)
+            ):
+                raise ValueError(
+                    "notification_action_interaction_persistent_menu_mismatch"
+                )
 
     payload: dict[str, Any] = {
         "chat_id": int(getattr(outbox, "telegram_id_at_enqueue", 0) or 0),
@@ -306,6 +344,7 @@ def _validate_source_contract(
         restriction_snapshot=restriction_snapshot,
         deleted_account_snapshot=deleted_account_snapshot,
         not_before=not_before,
+        interaction_result=interaction_result,
     )
 
 
@@ -320,6 +359,11 @@ def telegram_notification_action_source_natural_id(
             "deleted_account_snapshot": source.deleted_account_snapshot,
             "dedupe_key": source.dedupe_key,
             "messenger_blocked": source.expected_messenger_blocked,
+            "interaction_result": (
+                serialize_interaction_result_contract(source.interaction_result)
+                if source.interaction_result
+                else None
+            ),
             "parse_mode": source.parse_mode,
             "reply_markup": source.reply_markup,
             "template_version": source.policy.template_version,
@@ -459,6 +503,12 @@ def telegram_notification_action_outbox_waits_for_current_user(
     )
 
 
+def telegram_notification_action_interaction_result_contract(
+    outbox: TelegramNotificationOutbox | Any,
+) -> TelegramInteractionResultContract | None:
+    return _validate_source_contract(outbox).interaction_result
+
+
 def telegram_notification_action_outbox_is_deleted_account_notice(
     outbox: TelegramNotificationOutbox | Any,
 ) -> bool:
@@ -527,6 +577,11 @@ def build_telegram_notification_action_snapshot(
             "account_status": _current_account_status(user),
             "deleted_account_snapshot": source.deleted_account_snapshot,
             "messenger_blocked": bool(getattr(user, "messenger_blocked_at", None)),
+            "interaction_result": (
+                serialize_interaction_result_contract(source.interaction_result)
+                if source.interaction_result
+                else None
+            ),
             "not_before": (
                 source.not_before.isoformat() if source.not_before else None
             ),
@@ -549,6 +604,64 @@ def build_telegram_notification_action_snapshot(
         payload=normalized_payload,
         source_version=source_version or 1,
     )
+
+
+async def _validate_interaction_anchor_freshness(
+    db: AsyncSession,
+    *,
+    job: TelegramDeliveryJobRecord,
+    outbox: TelegramNotificationOutbox,
+    source: TelegramNotificationActionSource,
+) -> TelegramFreshnessDecision | None:
+    contract = source.interaction_result
+    if (
+        contract is None
+        or contract.anchor_effect != TelegramInteractionAnchorEffect.SET_CURRENT
+    ):
+        return None
+    chat_id = _strict_positive_int(getattr(outbox, "telegram_id_at_enqueue", None))
+    outbox_id = _strict_positive_int(getattr(outbox, "id", None))
+    if chat_id is None or outbox_id is None or contract.anchor_generation is None:
+        return _quarantined("notification_action_interaction_anchor_identity_invalid")
+    job_payload = getattr(job, "payload", None)
+    job_chat_id = (
+        _strict_positive_int(job_payload.get("chat_id"))
+        if isinstance(job_payload, Mapping)
+        else None
+    )
+    if job_chat_id is None:
+        return _quarantined("notification_action_interaction_anchor_route_invalid")
+    if job_chat_id != chat_id:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_anchor_route_changed",
+        )
+    anchor = await db.get(TelegramInteractionAnchorState, chat_id)
+    if anchor is None:
+        return _quarantined("notification_action_interaction_anchor_state_missing")
+    anchor_recipient_user_id = _strict_positive_int(
+        getattr(anchor, "recipient_user_id", None)
+    )
+    if anchor_recipient_user_id is None:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_recipient_missing",
+        )
+    if anchor_recipient_user_id != source.recipient_user_id:
+        return _quarantined("notification_action_interaction_anchor_recipient_mismatch")
+    if (
+        _strict_positive_int(getattr(anchor, "desired_generation", None))
+        != contract.anchor_generation
+        or _strict_positive_int(getattr(anchor, "desired_outbox_id", None))
+        != outbox_id
+        or str(getattr(anchor, "desired_logical_message_key", "") or "")
+        != contract.logical_message_key
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_anchor_superseded",
+        )
+    return None
 
 
 def _validate_static_route(
@@ -624,6 +737,14 @@ async def validate_notification_action_telegram_delivery_freshness(
         source.recipient_user_id
     ):
         return _quarantined("notification_action_freshness_destination_mismatch")
+    anchor_decision = await _validate_interaction_anchor_freshness(
+        db,
+        job=job,
+        outbox=outbox,
+        source=source,
+    )
+    if anchor_decision is not None:
+        return anchor_decision
 
     status = _enum_value(outbox.status)
     if status == TelegramNotificationOutboxStatus.SENT.value:

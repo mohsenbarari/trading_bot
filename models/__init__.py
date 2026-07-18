@@ -65,6 +65,7 @@ from .telegram_delivery_job import TelegramDeliveryJobRecord
 from .telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from .telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
 from .telegram_scheduled_operation import TelegramScheduledOperation
+from .telegram_interaction_anchor_state import TelegramInteractionAnchorState
 from .chat import Chat
 from .chat_member import ChatMember
 from .message import Message

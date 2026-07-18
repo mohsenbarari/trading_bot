@@ -123,6 +123,23 @@ class TelegramDeliveryNotificationActionContractTests(
             },
         )
 
+    async def test_persistent_menu_requires_interaction_anchor_metadata(self):
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+
+        with self.assertRaisesRegex(ValueError, "persistent_menu_requires_interaction"):
+            await outbox_service.enqueue_telegram_action_notification_once(
+                object(),
+                recipient=recipient,
+                action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                source_id="menu:7:untracked",
+                text="منوی اصلی",
+                user_sync_version=5,
+                reply_markup={"keyboard": [[{"text": "منوی اصلی"}]]},
+            )
+
     async def test_account_enqueue_requires_explicit_state_snapshot(self):
         recipient = outbox_service.TelegramNotificationRecipient(
             user_id=8,

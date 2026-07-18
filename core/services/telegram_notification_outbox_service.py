@@ -30,6 +30,10 @@ from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
     telegram_notification_action_policy,
 )
+from core.telegram_delivery_interaction_result_contract import (
+    TelegramInteractionResultContract,
+    serialize_interaction_result_contract,
+)
 from core.telegram_delivery_offer_success_contract import (
     TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
     build_offer_success_text,
@@ -505,6 +509,7 @@ async def enqueue_telegram_action_notification_once(
     user_sync_version: int,
     parse_mode: str | None = None,
     reply_markup: Mapping[str, Any] | None = None,
+    interaction_result: TelegramInteractionResultContract | None = None,
 ) -> TelegramNotificationEnqueueResult:
     """Persist one allowlisted private ``sendMessage`` action intent."""
     policy = telegram_notification_action_policy(action)
@@ -528,6 +533,27 @@ async def enqueue_telegram_action_notification_once(
         if not isinstance(reply_markup, Mapping):
             raise ValueError("telegram_notification_action_reply_markup_invalid")
         extra_payload["reply_markup"] = dict(reply_markup)
+    persistent_menu_present = bool(
+        isinstance(reply_markup, Mapping)
+        and isinstance(reply_markup.get("keyboard"), list)
+        and reply_markup.get("keyboard")
+    )
+    if persistent_menu_present and interaction_result is None:
+        raise ValueError("telegram_notification_persistent_menu_requires_interaction")
+    if interaction_result is not None:
+        if (
+            interaction_result.method != "sendMessage"
+            or interaction_result.destination_class.value != "private"
+            or not interaction_result.authenticated
+        ):
+            raise ValueError("telegram_notification_interaction_route_invalid")
+        if interaction_result.persistent_menu_present != persistent_menu_present:
+            raise ValueError(
+                "telegram_notification_interaction_persistent_menu_mismatch"
+            )
+        extra_payload["interaction_result"] = (
+            serialize_interaction_result_contract(interaction_result)
+        )
     return await enqueue_telegram_notification_once(
         db,
         recipient=recipient,

@@ -401,6 +401,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "it must never be copied to Iran."
         ),
     ),
+    "telegram_interaction_anchor_states": _entry(
+        "telegram_interaction_anchor_states",
+        SyncPolicy.NO_SYNC,
+        ("telegram_bot_runtime", "telegram_delivery_queue"),
+        "foreign local Telegram interaction anchor owner",
+        "never cross-sync private Telegram message ids or anchor generations",
+        "Foreign-only durable Bot reply-keyboard anchor state",
+        notes=(
+            "The state fences asynchronous send results and contains no credential; "
+            "it must never be copied to Iran."
+        ),
+    ),
     "telegram_delivery_feeder_states": _entry(
         "telegram_delivery_feeder_states",
         SyncPolicy.NO_SYNC,

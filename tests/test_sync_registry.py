@@ -61,6 +61,7 @@ class SyncRegistryTests(unittest.TestCase):
             "telegram_delivery_jobs",
             "telegram_delivery_feeder_states",
             "telegram_delivery_resume_operations",
+            "telegram_interaction_anchor_states",
         }:
             with self.subTest(table_name=table_name):
                 entry = get_sync_registry_entry(table_name)

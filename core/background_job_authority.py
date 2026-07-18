@@ -284,6 +284,7 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "telegram_admin_broadcasts",
             "telegram_admin_broadcast_receipts",
             "telegram_notification_outbox",
+            "telegram_interaction_anchor_states",
             "market_channel_notice_receipts",
         ),
         allowed_servers=(SERVER_FOREIGN,),

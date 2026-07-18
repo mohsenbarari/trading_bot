@@ -189,6 +189,7 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
                 "telegram_admin_broadcasts",
                 "telegram_admin_broadcast_receipts",
                 "telegram_notification_outbox",
+                "telegram_interaction_anchor_states",
                 "market_channel_notice_receipts",
             ),
         )

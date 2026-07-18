@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from collections.abc import Mapping
 
 from core.telegram_delivery_queue_contract import (
     FINAL_DELIVERY_STATES,
@@ -136,6 +137,22 @@ class TelegramInteractionResultDecision:
     reason: str | None = None
 
 
+_SERIALIZED_CONTRACT_KEYS = frozenset(
+    {
+        "anchor_effect",
+        "anchor_generation",
+        "authenticated",
+        "destination_class",
+        "flow_exit",
+        "logical_message_key",
+        "method",
+        "persistent_menu_present",
+        "result_requirement",
+        "temporary_context_keyboard",
+    }
+)
+
+
 def build_interaction_result_contract(
     *,
     logical_message_key: object,
@@ -205,6 +222,8 @@ def build_interaction_result_contract(
             raise ValueError("telegram_interaction_anchor_requires_persistent_menu")
     elif normalized_generation is not None:
         raise ValueError("telegram_interaction_anchor_generation_without_set")
+    elif authenticated and normalized_method == "sendMessage" and persistent_menu_present:
+        raise ValueError("telegram_interaction_persistent_menu_requires_anchor")
 
     if normalized_exit is not None:
         keyboard = authenticated_keyboard_policy(
@@ -227,6 +246,49 @@ def build_interaction_result_contract(
         temporary_context_keyboard=bool(temporary_context_keyboard),
         flow_exit=normalized_exit,
         persistent_menu_present=bool(persistent_menu_present),
+    )
+
+
+def serialize_interaction_result_contract(
+    contract: TelegramInteractionResultContract,
+) -> dict[str, object]:
+    return {
+        "anchor_effect": contract.anchor_effect.value,
+        "anchor_generation": contract.anchor_generation,
+        "authenticated": contract.authenticated,
+        "destination_class": contract.destination_class.value,
+        "flow_exit": contract.flow_exit.value if contract.flow_exit else None,
+        "logical_message_key": contract.logical_message_key,
+        "method": contract.method,
+        "persistent_menu_present": contract.persistent_menu_present,
+        "result_requirement": contract.result_requirement.value,
+        "temporary_context_keyboard": contract.temporary_context_keyboard,
+    }
+
+
+def parse_interaction_result_contract(
+    payload: Mapping[str, object] | object,
+) -> TelegramInteractionResultContract:
+    if not isinstance(payload, Mapping) or set(payload) != _SERIALIZED_CONTRACT_KEYS:
+        raise ValueError("telegram_interaction_serialized_contract_invalid")
+    for key in (
+        "authenticated",
+        "persistent_menu_present",
+        "temporary_context_keyboard",
+    ):
+        if not isinstance(payload.get(key), bool):
+            raise ValueError("telegram_interaction_serialized_contract_boolean_invalid")
+    return build_interaction_result_contract(
+        logical_message_key=payload.get("logical_message_key"),
+        method=payload.get("method"),
+        destination_class=payload.get("destination_class"),
+        result_requirement=payload.get("result_requirement"),
+        anchor_effect=payload.get("anchor_effect"),
+        anchor_generation=payload.get("anchor_generation"),
+        authenticated=bool(payload["authenticated"]),
+        temporary_context_keyboard=bool(payload["temporary_context_keyboard"]),
+        flow_exit=payload.get("flow_exit"),
+        persistent_menu_present=bool(payload["persistent_menu_present"]),
     )
 
 

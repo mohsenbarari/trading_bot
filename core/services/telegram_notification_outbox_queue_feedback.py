@@ -16,8 +16,14 @@ from core.telegram_delivery_notification_action_contract import (
     telegram_notification_action_policy,
 )
 from core.telegram_delivery_notification_action_freshness import (
+    telegram_notification_action_interaction_result_contract,
     telegram_notification_action_outbox_dedupe_from_source,
     validate_notification_action_telegram_delivery_freshness,
+)
+from core.telegram_delivery_interaction_result_contract import (
+    TelegramInteractionAnchorEffect,
+    TelegramInteractionResultOutcome,
+    apply_interaction_delivery_result,
 )
 from core.telegram_delivery_offer_success_contract import (
     TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
@@ -43,6 +49,7 @@ from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
 from models.offer import Offer
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_interaction_anchor_state import TelegramInteractionAnchorState
 from models.telegram_notification_outbox import (
     TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES,
     TelegramNotificationOutbox,
@@ -75,6 +82,8 @@ _SUPERSEDED_SKIP_REASONS = {
     "notification_action_freshness_recipient_unlinked",
     "notification_action_freshness_recipient_access_denied",
     "notification_action_freshness_source_state_changed",
+    "notification_action_freshness_anchor_superseded",
+    "notification_action_freshness_anchor_route_changed",
     "offer_success_freshness_recipient_missing",
     "offer_success_freshness_recipient_access_denied",
     "offer_success_freshness_source_state_changed",
@@ -292,6 +301,74 @@ async def _finalize_active_outbox(
     await db.flush()
 
 
+async def _apply_interaction_anchor_result(
+    db: AsyncSession,
+    *,
+    outbox: TelegramNotificationOutbox,
+    job: TelegramDeliveryJobRecord,
+    now: datetime,
+) -> None:
+    if _enum_value(job.action_kind) not in TELEGRAM_NOTIFICATION_ACTION_VALUES:
+        return
+    contract = telegram_notification_action_interaction_result_contract(outbox)
+    if (
+        contract is None
+        or contract.anchor_effect != TelegramInteractionAnchorEffect.SET_CURRENT
+    ):
+        return
+    chat_id = _payload_chat_id(job)
+    if chat_id is None:
+        raise TelegramNotificationOutboxQueueFeedbackError(
+            "notification_outbox_queue_anchor_chat_id_missing"
+        )
+    anchor = (
+        await db.execute(
+            select(TelegramInteractionAnchorState)
+            .where(TelegramInteractionAnchorState.chat_id == chat_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if anchor is None:
+        raise TelegramNotificationOutboxQueueFeedbackError(
+            "notification_outbox_queue_anchor_state_missing"
+        )
+    if _positive_int(anchor.recipient_user_id) != _positive_int(
+        outbox.recipient_user_id
+    ):
+        raise TelegramNotificationOutboxQueueFeedbackError(
+            "notification_outbox_queue_anchor_recipient_mismatch"
+        )
+    result = apply_interaction_delivery_result(
+        contract,
+        delivery_state=job.state,
+        telegram_message_id=job.telegram_message_id,
+        desired_anchor_generation=anchor.desired_generation,
+    )
+    if result.outcome == TelegramInteractionResultOutcome.APPLIED_STALE_ANCHOR:
+        return
+    if (
+        result.outcome != TelegramInteractionResultOutcome.APPLIED
+        or not result.activate_anchor
+        or result.telegram_message_id is None
+    ):
+        raise TelegramNotificationOutboxQueueFeedbackError(
+            "notification_outbox_queue_anchor_result_invalid:"
+            f"{result.outcome.value}:{result.reason or 'unspecified'}"
+        )
+    if (
+        _positive_int(anchor.desired_outbox_id) != _positive_int(outbox.id)
+        or anchor.desired_logical_message_key != contract.logical_message_key
+    ):
+        raise TelegramNotificationOutboxQueueFeedbackError(
+            "notification_outbox_queue_anchor_desired_identity_mismatch"
+        )
+    anchor.active_generation = contract.anchor_generation
+    anchor.active_outbox_id = outbox.id
+    anchor.active_message_id = result.telegram_message_id
+    anchor.active_logical_message_key = contract.logical_message_key
+    anchor.updated_at = now
+
+
 class TelegramNotificationOutboxQueueLifecycleFeedback:
     """Feedback adapter invoked inside each fenced main-queue transaction."""
 
@@ -461,6 +538,12 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
                 reason="telegram_sent",
                 now=now,
                 telegram_message_id=job.telegram_message_id,
+            )
+            await _apply_interaction_anchor_result(
+                db,
+                outbox=outbox,
+                job=job,
+                now=now,
             )
         elif outcome in _HOLD_OUTCOMES:
             _require_active_binding(outbox, job=job)
