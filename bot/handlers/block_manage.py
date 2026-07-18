@@ -23,6 +23,7 @@ from core.services.block_service import (
     search_users_for_block
 )
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import answer_incoming_message_via_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,12 @@ async def reject_delegated_block_management_message(message: types.Message, user
     if not rejection_message:
         return False
 
-    await message.answer(f"❌ {rejection_message}")
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        f"❌ {rejection_message}",
+        source_key="block-delegated-rejection",
+    )
     return True
 
 
@@ -286,7 +292,12 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
     query = message.text.strip()
     
     if len(query) < 2:
-        await message.answer("❌ حداقل 2 کاراکتر وارد کنید.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "❌ حداقل 2 کاراکتر وارد کنید.",
+            source_key="block-search-short",
+        )
         return
 
     if await reject_delegated_block_management_message(message, user):
@@ -297,9 +308,12 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
         users = await search_users_for_block(session, query, user.id, limit=10)
     
     if not users:
-        await message.answer(
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
             "❌ کاربری یافت نشد.\n"
             "دوباره جستجو کنید:",
+            source_key="block-search-empty",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
                     text="🔙 بازگشت",
@@ -317,8 +331,11 @@ async def handle_search_query(message: types.Message, state: FSMContext, user: O
         f"✅ = کلیک برای رفع مسدودیت\n"
     )
     
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         text,
+        source_key="block-search-results",
         parse_mode="Markdown",
         reply_markup=get_search_results_keyboard(users)
     )

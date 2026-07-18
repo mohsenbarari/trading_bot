@@ -1,11 +1,14 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from core.enums import UserAccountStatus
+from bot import telegram_interaction_message as interaction_adapter
 from core.services.telegram_delivery_queue_service import (
     apply_telegram_delivery_freshness_result,
     claim_next_telegram_delivery_job,
@@ -38,6 +41,9 @@ from core.telegram_delivery_queue_contract import (
     TelegramDeliveryOutcome,
     TelegramDeliveryState,
     TelegramFreshnessOutcome,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
 )
 from core.telegram_gateway import TelegramGatewayResult
 from core.utils import utc_now
@@ -256,6 +262,56 @@ class TelegramInteractionAnchorPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(anchor.active_outbox_id, outbox_id)
         self.assertEqual(anchor.active_message_id, 91_001)
         self.assertEqual(anchor.active_logical_message_key, "user:anchor:sent")
+
+    async def test_runtime_adapter_persists_and_delivers_non_anchor_reply(self):
+        async with self.Session() as db:
+            user = await db.get(User, self.user_id)
+            message = SimpleNamespace(
+                chat=SimpleNamespace(id=CHAT_ID),
+                message_id=701,
+                answer=AsyncMock(),
+            )
+            with (
+                patch.object(
+                    interaction_adapter,
+                    "configured_telegram_delivery_runtime",
+                    return_value=SimpleNamespace(
+                        mode=TelegramDeliveryRuntimeMode.QUEUE_V1
+                    ),
+                ),
+                patch.object(
+                    interaction_adapter,
+                    "current_server",
+                    return_value="foreign",
+                ),
+            ):
+                result = await interaction_adapter.answer_incoming_message_via_runtime(
+                    message,
+                    user,
+                    "کاربری یافت نشد",
+                    source_key="block-search-empty",
+                    reply_markup={"inline_keyboard": []},
+                    session=db,
+                    commit=False,
+                )
+            outbox_id = int(result.notification.outbox.id)
+            await db.commit()
+
+        message.answer.assert_not_awaited()
+        self.assertIsNone(result.anchor_state)
+        job = await self._handoff_and_claim(worker_id="interaction-adapter-non-anchor")
+        decision = await self._send_success(
+            job,
+            worker_id="interaction-adapter-non-anchor",
+            message_id=91_003,
+        )
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.SENT)
+        async with self.Session() as db:
+            outbox = await db.get(TelegramNotificationOutbox, outbox_id)
+            anchor = await db.get(TelegramInteractionAnchorState, CHAT_ID)
+        self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SENT)
+        self.assertEqual(outbox.telegram_message_id, 91_003)
+        self.assertIsNone(anchor)
 
     async def test_physical_schema_rejects_active_outbox_without_active_anchor(self):
         await self._enqueue_anchor(
