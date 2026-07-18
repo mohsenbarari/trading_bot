@@ -274,7 +274,7 @@ def _publication_identity_shape_decision(
     return None
 
 
-def _expected_payload(
+def build_authoritative_offer_delivery_payload(
     offer: Offer,
     *,
     action: TelegramDeliveryAction,
@@ -330,7 +330,7 @@ def _authoritative_payload_decision(
         if action not in OFFER_PUBLISH_ACTIONS
         else None
     )
-    expected_payload = _expected_payload(
+    expected_payload = build_authoritative_offer_delivery_payload(
         offer,
         action=action,
         expected_channel_id=expected_channel_id,

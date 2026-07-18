@@ -57,7 +57,14 @@ from core.services.trade_service import (
     get_available_trade_amounts,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
-from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
+from core.services.telegram_offer_publication_service import (
+    get_or_create_telegram_publication_state,
+    publish_offer_to_telegram_channel_once,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import to_jalali_str, check_user_limits
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
@@ -1107,6 +1114,10 @@ async def _handle_trade_confirm_core(
         await callback.answer()
         return
 
+    queue_owns_telegram_delivery = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
     try:
         async with AsyncSessionLocal() as session:
             if republish_source_public_id:
@@ -1156,8 +1167,17 @@ async def _handle_trade_confirm_core(
                 quota_policy=OfferCreationQuotaPolicy(
                     max_active_offers=ts.max_active_offers,
                 ),
+                commit=not queue_owns_telegram_delivery,
+                refresh=not queue_owns_telegram_delivery,
             )
             new_offer = creation_outcome.offer
+            if queue_owns_telegram_delivery:
+                # Offer acceptance and its Telegram publication intent are one
+                # transaction.  A failure here means no accepted Offer is
+                # exposed to the user and no publication obligation is lost.
+                await session.flush()
+                await get_or_create_telegram_publication_state(session, new_offer)
+                await session.commit()
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
 
@@ -1228,70 +1248,79 @@ async def _handle_trade_confirm_core(
                 notes=getattr(offer, "notes", None) or notes,
             )
 
-            async def send_created_offer_to_channel(_offer, _user):
-                nonlocal published_channel_message, published_channel_message_id
-                published_channel_message = canonical_channel_message
-                sent_msg = await bot.send_message(
-                    chat_id=settings.channel_id,
-                    text=canonical_channel_message,
-                    reply_markup=trade_keyboard,
-                )
-                published_channel_message_id = int(sent_msg.message_id)
-                return published_channel_message_id
+            if queue_owns_telegram_delivery:
+                # Intent was committed atomically with the Offer above.
+                # Telegram latency, 429, or an editor outage never leaks into
+                # this ordinary successful interaction.
+                pass
+            else:
+                async def send_created_offer_to_channel(_offer, _user):
+                    nonlocal published_channel_message, published_channel_message_id
+                    published_channel_message = canonical_channel_message
+                    sent_msg = await bot.send_message(
+                        chat_id=settings.channel_id,
+                        text=canonical_channel_message,
+                        reply_markup=trade_keyboard,
+                    )
+                    published_channel_message_id = int(sent_msg.message_id)
+                    return published_channel_message_id
 
-            for publication_attempt in range(2):
-                try:
-                    publish_result = await publish_offer_to_telegram_channel_once(
-                        session,
-                        offer,
-                        user,
-                        send_offer_to_channel=send_created_offer_to_channel,
-                        raise_send_errors=True,
-                    )
-                    await session.commit()
-                    break
-                except StaleDataError:
-                    await session.rollback()
-                    if publication_attempt > 0:
-                        raise
-                    logger.warning(
-                        "Retrying offer publication after concurrent offer update",
-                        extra={
-                            "event": "telegram.offer_publication_stale_retry",
-                            "offer_id": offer_id,
-                        },
-                    )
-                    offer = await session.get(Offer, offer_id)
-                    if offer is None:
-                        raise RuntimeError("offer_not_found_after_publication_retry")
-                    # Telegram side effects cannot be rolled back. If this
-                    # handler sent the message before its DB commit conflicted,
-                    # reuse that message instead of sending a duplicate.
-                    if published_channel_message_id and not offer.channel_message_id:
-                        offer.channel_message_id = published_channel_message_id
-                except Exception:
-                    # A Telegram send exception leaves a valid transaction with
-                    # a FAILED publication state that should be persisted. A DB
-                    # flush exception leaves an inactive Session and must only
-                    # be rolled back.
-                    if getattr(session, "is_active", True):
-                        try:
-                            await session.commit()
-                        except Exception as publication_state_commit_error:
-                            await session.rollback()
-                            logger.warning(
-                                "Could not persist failed Telegram publication state",
-                                exc_info=publication_state_commit_error,
-                                extra={
-                                    "event": "telegram.offer_publication_failure_state_commit_failed",
-                                    "offer_id": offer_id,
-                                },
-                            )
-                    else:
+                for publication_attempt in range(2):
+                    try:
+                        publish_result = await publish_offer_to_telegram_channel_once(
+                            session,
+                            offer,
+                            user,
+                            send_offer_to_channel=send_created_offer_to_channel,
+                            raise_send_errors=True,
+                        )
+                        await session.commit()
+                        break
+                    except StaleDataError:
                         await session.rollback()
-                    raise
-            if not publish_result.message_id:
-                raise RuntimeError(publish_result.error_code or "telegram_channel_publication_failed")
+                        if publication_attempt > 0:
+                            raise
+                        logger.warning(
+                            "Retrying offer publication after concurrent offer update",
+                            extra={
+                                "event": "telegram.offer_publication_stale_retry",
+                                "offer_id": offer_id,
+                            },
+                        )
+                        offer = await session.get(Offer, offer_id)
+                        if offer is None:
+                            raise RuntimeError("offer_not_found_after_publication_retry")
+                        # Telegram side effects cannot be rolled back. If this
+                        # handler sent the message before its DB commit conflicted,
+                        # reuse that message instead of sending a duplicate.
+                        if published_channel_message_id and not offer.channel_message_id:
+                            offer.channel_message_id = published_channel_message_id
+                    except Exception:
+                        # A Telegram send exception leaves a valid transaction with
+                        # a FAILED publication state that should be persisted. A DB
+                        # flush exception leaves an inactive Session and must only
+                        # be rolled back.
+                        if getattr(session, "is_active", True):
+                            try:
+                                await session.commit()
+                            except Exception as publication_state_commit_error:
+                                await session.rollback()
+                                logger.warning(
+                                    "Could not persist failed Telegram publication state",
+                                    exc_info=publication_state_commit_error,
+                                    extra={
+                                        "event": "telegram.offer_publication_failure_state_commit_failed",
+                                        "offer_id": offer_id,
+                                    },
+                                )
+                        else:
+                            await session.rollback()
+                        raise
+                if not publish_result.message_id:
+                    raise RuntimeError(
+                        publish_result.error_code
+                        or "telegram_channel_publication_failed"
+                    )
 
         if published_channel_message is None:
             published_channel_message = canonical_channel_message
@@ -1307,10 +1336,8 @@ async def _handle_trade_confirm_core(
         except Exception as push_error:
             logger.warning(f"Market offer Web Push schedule error: {push_error}")
 
-        await callback.message.edit_text(success_message_text, parse_mode="Markdown")
-        await bot.send_message(
-            chat_id=callback.from_user.id,
-            text=f"**لفظ شما:**\n\n{published_channel_message}",
+        await callback.message.edit_text(
+            f"{success_message_text}\n\n**لفظ شما:**\n\n{published_channel_message}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[

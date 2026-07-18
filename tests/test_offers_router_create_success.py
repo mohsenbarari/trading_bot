@@ -10,6 +10,7 @@ from core.services.market_transition_service import MarketOfferAdmissionClosedEr
 from core.services.offer_creation_service import OfferCreationLimitExceededError
 from core.services.offer_republish_service import OfferNotRepeatableError
 from core.enums import UserRole
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from models.offer import OfferStatus, OfferType
 from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
@@ -44,7 +45,9 @@ class FakeDB:
         self.get_results = list(get_results or [])
         self.execute_results = list(execute_results or [])
         self.scalar_results = list(scalar_results or [])
-        self.commit = AsyncMock()
+        self.events = []
+        self.commit = AsyncMock(side_effect=self._commit)
+        self.flush = AsyncMock(side_effect=self._flush)
         self.rollback = AsyncMock()
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
@@ -75,6 +78,12 @@ class FakeDB:
 
     def add(self, item):
         self.added.append(item)
+
+    async def _commit(self):
+        self.events.append("commit")
+
+    async def _flush(self):
+        self.events.append("flush")
 
     async def _refresh(self, item):
         if getattr(item, "id", None) is None:
@@ -806,6 +815,84 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             viewer_customer_relation=None,
         )
         self.assertEqual(result, {"id": 120, "user_id": 5})
+
+    async def test_queue_mode_commits_offer_and_publication_intent_in_one_transaction(self):
+        commodity = SimpleNamespace(id=1)
+        current_user = make_user(id=5, home_server="iran")
+        reloaded_offer = make_reloaded_offer(offer_id=121)
+        db = FakeDB(
+            get_results=[commodity],
+            scalar_results=[0],
+            execute_results=[
+                FakeExecuteResult(reloaded_offer),
+                *empty_customer_read_context_results(),
+            ],
+        )
+        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+        async_settings = SimpleNamespace(offer_expiry_minutes=30)
+
+        async def persist_intent(intent_db, offer):
+            self.assertIs(intent_db, db)
+            self.assertIs(offer, db.added[0])
+            db.events.append("intent")
+            return SimpleNamespace(status="pending")
+
+        with patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=5),
+        ), patch(
+            "core.cache.get_active_offer_count",
+            new=AsyncMock(return_value=0),
+        ), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch(
+            "core.services.trade_service.validate_price",
+            return_value=(True, None),
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.configured_telegram_delivery_runtime",
+            return_value=runtime,
+        ), patch(
+            "api.routers.offers.get_or_create_telegram_publication_state",
+            new=AsyncMock(side_effect=persist_intent),
+        ) as intent_mock, patch(
+            "api.routers.offers.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as direct_publish, patch(
+            "core.cache.set_active_offer_count",
+            new=AsyncMock(),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch(
+            "api.routers.realtime.publish_event",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 121},
+        ):
+            result = await create_offer(
+                make_offer(),
+                db=db,
+                context=make_context(current_user),
+            )
+
+        self.assertEqual(result, {"id": 121})
+        self.assertEqual(db.events, ["flush", "intent", "commit"])
+        db.flush.assert_awaited_once()
+        db.commit.assert_awaited_once()
+        db.refresh.assert_not_awaited()
+        intent_mock.assert_awaited_once()
+        direct_publish.assert_not_awaited()
 
     async def test_create_offer_flags_acknowledged_warning_offers_for_competitive_exclusion(self):
         commodity = SimpleNamespace(id=1)

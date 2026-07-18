@@ -89,6 +89,10 @@ from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, n
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 from core.trading_observability import log_trading_event
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -1855,6 +1859,11 @@ async def update_channel_buttons(offer: Offer) -> bool:
     """آپدیت دکمه‌های پست کانال"""
     if current_server() != "foreign":
         return False
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
 
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
@@ -2182,6 +2191,11 @@ def _queue_trade_channel_buttons_update(background_tasks: BackgroundTasks, offer
 
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
     from core.db import AsyncSessionLocal
     import asyncio
     
@@ -2218,6 +2232,11 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
 
 async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, offer_status, lot_sizes) -> bool:
     """Helper async function - باید offer را از دیتابیس بخواند"""
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
     from core.db import AsyncSessionLocal
     
     bot_token = os.getenv("BOT_TOKEN")

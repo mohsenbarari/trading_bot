@@ -119,7 +119,7 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         )
         create_session = FakeSession()
         update_session = FakeSession()
-        bot = SimpleNamespace(send_message=AsyncMock(side_effect=[SimpleNamespace(message_id=900), SimpleNamespace(message_id=901)]))
+        bot = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(message_id=900)))
 
         async def update_get(model, key):
             if create_session.added and model.__name__ == "Offer":
@@ -160,11 +160,14 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
 
         self.assertEqual(create_session.added[0].channel_message_id, 900)
         channel_text = bot.send_message.await_args_list[0].kwargs["text"]
-        private_text = bot.send_message.await_args_list[1].kwargs["text"]
+        self.assertEqual(bot.send_message.await_count, 1)
+        private_text = callback.message.edit_text.await_args.args[0]
         self.assertIn("🟢خرید ربع بهار 12 عدد فردا 📆 123,456", channel_text)
         self.assertNotIn("🟢خرید ربع 12 عدد", channel_text)
         self.assertIn("🟢خرید ربع بهار 12 عدد فردا 📆 123,456", private_text)
+        self.assertIn("لفظ شما", private_text)
         self.assertIn("منتشر شد", callback.message.edit_text.await_args.args[0])
+        self.assertIsNotNone(callback.message.edit_text.await_args.kwargs["reply_markup"])
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
 

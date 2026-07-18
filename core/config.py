@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_lease_seconds: float = 30.0
     telegram_delivery_queue_worker_recover_limit: int = 100
+    telegram_offer_queue_feeder_batch_limit: int = 25
+    telegram_offer_queue_feeder_interval_seconds: float = 0.5
     telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
     telegram_delivery_queue_retry_base_seconds: float = 1.0
     telegram_delivery_queue_retry_max_seconds: float = 300.0

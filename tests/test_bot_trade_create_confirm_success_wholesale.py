@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.orm.exc import StaleDataError
 
 from bot.handlers.trade_create import handle_trade_confirm
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from tests.offer_creation_quota_test_helpers import bypass_local_offer_quota
 
 
@@ -17,6 +18,7 @@ class FakeSession:
         self.commit_side_effect = list(commit_side_effect or [])
         self.rollbacks = 0
         self.is_active = True
+        self.events = []
 
     async def scalar(self, stmt):
         return self.scalar_values.pop(0)
@@ -27,6 +29,7 @@ class FakeSession:
         self.added.append(value)
 
     async def commit(self):
+        self.events.append("commit")
         self.commits += 1
         if self.commit_side_effect:
             error = self.commit_side_effect.pop(0)
@@ -40,6 +43,9 @@ class FakeSession:
 
     async def refresh(self, value):
         return None
+
+    async def flush(self):
+        self.events.append("flush")
 
     async def get(self, model, key):
         return self.get_map.get((model, key))
@@ -128,7 +134,7 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         db_user = SimpleNamespace(id=1)
         create_session = FakeSession()
         update_session = FakeSession(get_map={(None, 0): None})
-        bot = SimpleNamespace(send_message=AsyncMock(side_effect=[SimpleNamespace(message_id=777), SimpleNamespace(message_id=778)]))
+        bot = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(message_id=777)))
 
         async def update_get(model, key):
             if create_session.added and model.__name__ == "Offer":
@@ -173,11 +179,105 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         first_call = bot.send_message.await_args_list[0]
         self.assertEqual(first_call.kwargs["chat_id"], -100)
         self.assertEqual(first_call.kwargs["reply_markup"].inline_keyboard[0][0].text, "12 عدد")
-        second_call = bot.send_message.await_args_list[1]
-        self.assertEqual(second_call.kwargs["chat_id"], 555)
-        self.assertIn("با موفقیت در کانال ارسال شد", callback.message.edit_text.await_args.args[0])
+        self.assertEqual(bot.send_message.await_count, 1)
+        private_text = callback.message.edit_text.await_args.args[0]
+        self.assertIn("با موفقیت در کانال ارسال شد", private_text)
+        self.assertIn("لفظ شما", private_text)
+        self.assertIn("🟢خرید سکه 12 عدد", private_text)
+        self.assertIsNotNone(callback.message.edit_text.await_args.kwargs["reply_markup"])
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
+
+    async def test_queue_mode_commits_offer_and_intent_atomically_without_direct_telegram_send(self):
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=555),
+        )
+        state = SimpleNamespace(
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 12,
+                    "trade_type": "buy",
+                    "commodity_name": "سکه",
+                    "price": 123456,
+                    "commodity_id": 7,
+                    "is_wholesale": True,
+                    "lot_sizes": None,
+                    "notes": None,
+                }
+            ),
+            clear=AsyncMock(),
+        )
+        create_session = FakeSession()
+        read_session = FakeSession()
+
+        async def read_get(model, _key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            if model.__name__ == "User":
+                return SimpleNamespace(id=1)
+            return None
+
+        read_session.get = read_get
+
+        async def persist_intent(session, offer):
+            self.assertIs(session, create_session)
+            self.assertIs(offer, create_session.added[0])
+            session.events.append("intent")
+            return SimpleNamespace(status="pending")
+
+        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        with patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=3),
+        ), patch(
+            "bot.handlers.trade_create.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeSession([0])),
+                FakeSessionContext(FakeSession()),
+                FakeSessionContext(create_session),
+                FakeSessionContext(read_session),
+            ],
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=runtime,
+        ), patch(
+            "bot.handlers.trade_create.get_or_create_telegram_publication_state",
+            new=AsyncMock(side_effect=persist_intent),
+        ) as intent_mock, patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as direct_publish, patch(
+            "bot.handlers.trade_create.settings",
+            SimpleNamespace(channel_id=-100, bot_username="botname"),
+        ):
+            await handle_trade_confirm(
+                callback,
+                state,
+                user=SimpleNamespace(id=1, limitations_expire_at=None),
+                bot=bot,
+            )
+
+        self.assertEqual(create_session.events, ["flush", "intent", "commit"])
+        self.assertEqual(create_session.commits, 1)
+        intent_mock.assert_awaited_once()
+        direct_publish.assert_not_awaited()
+        bot.send_message.assert_not_awaited()
+        response_text = callback.message.edit_text.await_args.args[0]
+        self.assertIn("لفظ شما", response_text)
+        self.assertIn("🟢خرید سکه 12 عدد", response_text)
+        self.assertIsNotNone(callback.message.edit_text.await_args.kwargs["reply_markup"])
 
     async def test_handle_trade_confirm_retries_stale_publication_without_duplicate_send_or_expiry(self):
         callback = SimpleNamespace(
@@ -249,10 +349,11 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(publish_calls, 2)
         self.assertEqual(publish_session.rollbacks, 1)
         self.assertEqual(publish_session.commits, 2)
-        self.assertEqual(bot.send_message.await_count, 2)
+        self.assertEqual(bot.send_message.await_count, 1)
         self.assertEqual(create_session.added[0].status.value, "active")
         self.assertEqual(create_session.added[0].channel_message_id, 777)
         self.assertIn("با موفقیت در کانال ارسال شد", callback.message.edit_text.await_args.args[0])
+        self.assertIn("لفظ شما", callback.message.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

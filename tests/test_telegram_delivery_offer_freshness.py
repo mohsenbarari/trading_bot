@@ -60,7 +60,7 @@ def make_job(action=TelegramDeliveryAction.OFFER_PUBLISH, **overrides):
         freshness.TelegramDeliveryAction.EXPIRED_OFFER_EDIT: OfferStatus.EXPIRED,
         freshness.TelegramDeliveryAction.CANCELLED_OFFER_EDIT: OfferStatus.CANCELLED,
     }.get(action, OfferStatus.ACTIVE)
-    payload = freshness._expected_payload(
+    payload = freshness.build_authoritative_offer_delivery_payload(
         make_offer(status=status),
         action=action,
         expected_channel_id=CHANNEL_ID,

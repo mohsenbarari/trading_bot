@@ -245,7 +245,8 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
         self.assertIn("منتشر شد", callback.message.edit_text.await_args_list[-1].args[0])
         self.assertIsNone(state.current_state)
         self.assertEqual(state.data, {})
-        self.assertEqual(bot.send_message.await_count, 2)
+        self.assertEqual(bot.send_message.await_count, 1)
+        self.assertIn("لفظ شما", callback.message.edit_text.await_args_list[-1].args[0])
         warning_confirm_callback.answer.assert_awaited_once_with()
 
 

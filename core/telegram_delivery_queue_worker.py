@@ -77,6 +77,7 @@ from core.telegram_notification_outbox_queue_feeder import (
 from core.telegram_market_notice_queue_feeder import (
     telegram_market_notice_queue_handoff_loop,
 )
+from core.telegram_offer_queue_feeder import telegram_offer_queue_handoff_loop
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
@@ -1293,6 +1294,12 @@ async def telegram_delivery_queue_loop(
         asyncio.create_task(
             telegram_delivery_queue_recovery_loop(),
             name="telegram-delivery-lease-recovery",
+        )
+    )
+    tasks.append(
+        asyncio.create_task(
+            telegram_offer_queue_handoff_loop(),
+            name="telegram-offer-queue-feeder",
         )
     )
     tasks.append(

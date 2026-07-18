@@ -1,0 +1,217 @@
+import unittest
+from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from core.services import telegram_offer_queue_service as service
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+from core.utils import utc_now
+from models.offer import OfferStatus, OfferType
+from models.offer_publication_state import OfferPublicationSurface
+
+
+def make_offer(**overrides):
+    data = {
+        "id": 10,
+        "offer_public_id": "ofr_queue_10",
+        "version_id": 3,
+        "status": OfferStatus.ACTIVE,
+        "offer_type": OfferType.BUY,
+        "settlement_type": "cash",
+        "commodity": SimpleNamespace(name="سکه"),
+        "quantity": 20,
+        "remaining_quantity": 20,
+        "price": 100_000,
+        "is_wholesale": True,
+        "lot_sizes": None,
+        "notes": None,
+        "created_at": utc_now() - timedelta(seconds=10),
+        "updated_at": utc_now() - timedelta(seconds=1),
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def make_state(**overrides):
+    data = {
+        "surface": OfferPublicationSurface.TELEGRAM_CHANNEL,
+        "publisher_bot_identity": "primary",
+        "telegram_chat_id": -1001234567890,
+        "telegram_message_id": 777,
+        "surface_resource_id": "777",
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_action_mapping_covers_publish_partial_and_terminal(self):
+        self.assertEqual(
+            service.offer_delivery_action(
+                make_offer(),
+                make_state(telegram_message_id=None, surface_resource_id=None),
+            ),
+            TelegramDeliveryAction.OFFER_PUBLISH,
+        )
+        self.assertEqual(
+            service.offer_delivery_action(
+                make_offer(remaining_quantity=10),
+                make_state(),
+            ),
+            TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+        )
+        self.assertEqual(
+            service.offer_delivery_action(
+                make_offer(status=OfferStatus.COMPLETED, remaining_quantity=0),
+                make_state(),
+            ),
+            TelegramDeliveryAction.TRADED_OFFER_EDIT,
+        )
+        self.assertIsNone(
+            service.offer_delivery_action(
+                make_offer(status=OfferStatus.EXPIRED),
+                make_state(telegram_message_id=None, surface_resource_id=None),
+            )
+        )
+
+    def test_active_zero_remaining_fails_closed(self):
+        with self.assertRaisesRegex(
+            service.TelegramOfferQueueError,
+            "active_zero_remaining",
+        ):
+            service.offer_delivery_action(
+                make_offer(remaining_quantity=0),
+                make_state(),
+            )
+
+    async def test_publish_is_primary_with_offer_deadline(self):
+        offer = make_offer()
+        state = make_state(telegram_message_id=None, surface_resource_id=None)
+        enqueue = AsyncMock(
+            return_value=SimpleNamespace(created=True, job=SimpleNamespace(id=1))
+        )
+        with patch.object(
+            service,
+            "enqueue_telegram_delivery_job",
+            new=enqueue,
+        ), patch.object(
+            service,
+            "_supersede_obsolete_offer_jobs",
+            new=AsyncMock(return_value=0),
+        ):
+            result = await service.enqueue_current_offer_delivery(
+                object(),
+                current_server="foreign",
+                offer=offer,
+                state=state,
+                expected_channel_id=-1001234567890,
+                offer_expiry_minutes=2,
+            )
+
+        self.assertTrue(result.queue_result.created)
+        kwargs = enqueue.await_args.kwargs
+        self.assertEqual(kwargs["action"], TelegramDeliveryAction.OFFER_PUBLISH)
+        self.assertEqual(kwargs["bot_identity"], "primary")
+        self.assertEqual(kwargs["method"], "sendMessage")
+        self.assertEqual(
+            kwargs["freshness_deadline_at"],
+            service.offer_publication_freshness_deadline(
+                offer,
+                offer_expiry_minutes=2,
+            ),
+        )
+        self.assertNotIn("message_id", kwargs["payload"])
+
+    async def test_edit_uses_editor_only_when_enabled(self):
+        offer = make_offer(remaining_quantity=10)
+        enqueue = AsyncMock(
+            return_value=SimpleNamespace(created=True, job=SimpleNamespace(id=2))
+        )
+        with patch.object(
+            service.settings,
+            "telegram_delivery_queue_channel_editor_enabled",
+            True,
+        ), patch.object(
+            service,
+            "enqueue_telegram_delivery_job",
+            new=enqueue,
+        ), patch.object(
+            service,
+            "_supersede_obsolete_offer_jobs",
+            new=AsyncMock(return_value=0),
+        ):
+            await service.enqueue_current_offer_delivery(
+                object(),
+                current_server="foreign",
+                offer=offer,
+                state=make_state(),
+                expected_channel_id=-1001234567890,
+                offer_expiry_minutes=2,
+            )
+
+        kwargs = enqueue.await_args.kwargs
+        self.assertEqual(kwargs["action"], TelegramDeliveryAction.PARTIAL_OFFER_EDIT)
+        self.assertEqual(kwargs["bot_identity"], "channel_editor")
+        self.assertEqual(kwargs["method"], "editMessageText")
+        self.assertEqual(kwargs["payload"]["message_id"], 777)
+
+    async def test_expired_unpublished_offer_is_not_enqueued(self):
+        enqueue = AsyncMock()
+        supersede = AsyncMock(return_value=1)
+        with patch.object(
+            service,
+            "enqueue_telegram_delivery_job",
+            new=enqueue,
+        ), patch.object(
+            service,
+            "_supersede_obsolete_offer_jobs",
+            new=supersede,
+        ):
+            result = await service.enqueue_current_offer_delivery(
+                object(),
+                current_server="foreign",
+                offer=make_offer(status=OfferStatus.EXPIRED),
+                state=make_state(
+                    telegram_message_id=None,
+                    surface_resource_id=None,
+                ),
+                expected_channel_id=-1001234567890,
+                offer_expiry_minutes=2,
+            )
+
+        self.assertEqual(
+            result.skipped_reason,
+            "offer_not_publishable_and_never_published",
+        )
+        enqueue.assert_not_awaited()
+        supersede.assert_awaited_once()
+
+    async def test_publication_after_deadline_is_not_enqueued(self):
+        enqueue = AsyncMock()
+        with patch.object(
+            service,
+            "enqueue_telegram_delivery_job",
+            new=enqueue,
+        ), patch.object(
+            service,
+            "_supersede_obsolete_offer_jobs",
+            new=AsyncMock(return_value=0),
+        ):
+            result = await service.enqueue_current_offer_delivery(
+                object(),
+                current_server="foreign",
+                offer=make_offer(created_at=utc_now() - timedelta(minutes=3)),
+                state=make_state(
+                    telegram_message_id=None,
+                    surface_resource_id=None,
+                ),
+                expected_channel_id=-1001234567890,
+                offer_expiry_minutes=2,
+            )
+
+        self.assertEqual(result.skipped_reason, "offer_publication_deadline_passed")
+        enqueue.assert_not_awaited()
+
+
+if __name__ == "__main__":
+    unittest.main()

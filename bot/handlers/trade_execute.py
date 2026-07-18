@@ -36,6 +36,10 @@ from core.services.telegram_offer_channel_service import apply_offer_channel_sta
 from core.server_routing import current_server, is_remote_home
 from core.trade_forwarding import forward_trade_to_home_server
 from core.trading_observability import log_trading_event
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from bot.utils.trade_suggestion_messages import (
     PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
     build_offer_trade_buttons,
@@ -314,6 +318,11 @@ def _schedule_remote_trade_success_recovery(
 async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
     """همیشه دکمه‌های کانال را با channel_message_id واقعی به‌روزرسانی کن."""
     if not offer.channel_message_id:
+        return
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
         return
 
     if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
