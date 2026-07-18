@@ -25,6 +25,7 @@ from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.services.block_service import is_trade_blocked_by_principals
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively_with_transient_retry
 from core.services.trade_service import (
@@ -576,7 +577,11 @@ async def _execute_confirmed_channel_trade_via_shared_command(
             request_pre_gated=request_pre_gated,
         )
     except HTTPException as exc:
-        await callback.answer(f"❌ {exc.detail or 'امکان انجام این معامله وجود ندارد.'}", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            f"❌ {exc.detail or 'امکان انجام این معامله وجود ندارد.'}",
+            show_alert=True,
+        )
         return
 
     if isinstance(result, JSONResponse):
@@ -589,10 +594,18 @@ async def _execute_confirmed_channel_trade_via_shared_command(
                 target_chat_id=target_chat_id,
                 payload=body,
             )
-            await callback.answer("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
+            await answer_callback_query_via_runtime(
+                callback,
+                "پیشنهاد جدید برای شما ارسال شد.",
+                show_alert=False,
+            )
             return
         detail = body.get("detail") if isinstance(body, dict) else None
-        await callback.answer(f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}",
+            show_alert=True,
+        )
         return
 
     try:
@@ -602,7 +615,11 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     except Exception as exc:
         logger.debug(f"Failed to clear private suggestion buttons: {exc}")
 
-    await callback.answer("معامله ثبت شد ✅", show_alert=False)
+    await answer_callback_query_via_runtime(
+        callback,
+        "معامله ثبت شد ✅",
+        show_alert=False,
+    )
 
     try:
         await background_tasks()
@@ -659,17 +676,25 @@ async def _handle_channel_trade(
 ):
     """کلیک روی دکمه پست کانال - دابل‌کلیک برای تایید"""
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     local_access = evaluate_bot_access_local_state(user)
     if not local_access.allowed:
-        await callback.answer(bot_access_denial_message(local_access.reason), show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            bot_access_denial_message(local_access.reason),
+            show_alert=True,
+        )
         return
     
     # ===== بررسی مسدودیت کاربر =====
     if user.trading_restricted_until and user.trading_restricted_until > datetime.utcnow():
-        await callback.answer("⛔ حساب شما مسدود است", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "⛔ حساب شما مسدود است",
+            show_alert=True,
+        )
         return
     
     # پارس callback_data
@@ -680,14 +705,22 @@ async def _handle_channel_trade(
     # باید قبل از قفل offer انجام شود
     allowed, error_msg = check_user_limits(user, 'trade', trade_amount or 1)
     if not allowed:
-        await callback.answer(f"⚠️ {error_msg}", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            f"⚠️ {error_msg}",
+            show_alert=True,
+        )
         return
     
     async with AsyncSessionLocal() as session:
         if getattr(user, "id", None) is not None and isinstance(user, User):
             bot_access = await evaluate_bot_access(session, user)
             if not bot_access.allowed:
-                await callback.answer(bot_access_denial_message(bot_access.reason), show_alert=True)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    bot_access_denial_message(bot_access.reason),
+                    show_alert=True,
+                )
                 return
 
         offer = await _load_callback_offer(session, callback_data, lock_for_update=False)
@@ -701,7 +734,11 @@ async def _handle_channel_trade(
                 await attach_customer_management_names(session, [offer_user])
         
         if not offer:
-            await callback.answer(OFFER_UNAVAILABLE_CALLBACK_MESSAGE, show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                OFFER_UNAVAILABLE_CALLBACK_MESSAGE,
+                show_alert=True,
+            )
             return
 
         resolved_offer_id = getattr(offer, "id", None)
@@ -714,11 +751,15 @@ async def _handle_channel_trade(
                 offer,
                 invalid_active_action=False,
             )
-            await callback.answer(OFFER_INACTIVE_CALLBACK_MESSAGE, show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                OFFER_INACTIVE_CALLBACK_MESSAGE,
+                show_alert=True,
+            )
             return
         
         if offer.user_id == user.id:
-            await callback.answer()
+            await answer_callback_query_via_runtime(callback)
             return
         
         # ===== بررسی بلاک =====
@@ -730,10 +771,18 @@ async def _handle_channel_trade(
         if is_blocked_check:
             if blocker_id == user.id:
                 # کاربر فعلی این لفظ‌دهنده را بلاک کرده
-                await callback.answer("⚠️ شما این کاربر را مسدود کرده‌اید!", show_alert=True)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "⚠️ شما این کاربر را مسدود کرده‌اید!",
+                    show_alert=True,
+                )
             else:
                 # لفظ‌دهنده کاربر فعلی را بلاک کرده
-                await callback.answer("❌ این لفظ در دسترس نیست.", show_alert=True)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "❌ این لفظ در دسترس نیست.",
+                    show_alert=True,
+                )
             return
         # =======================
         
@@ -780,7 +829,11 @@ async def _handle_channel_trade(
                         schedule_trade_suggestion_pending_reset(bot, offer.id)
                     except Exception as exc:
                         logger.debug(f"Failed to set pending state for remote-home offer: {exc}")
-                await callback.answer("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "برای تایید دوباره روی همان دکمه بزنید ☑️",
+                    show_alert=False,
+                )
                 return
 
             idempotency_key = _channel_trade_idempotency_key(
@@ -828,7 +881,11 @@ async def _handle_channel_trade(
                     target_chat_id=target_chat_id,
                     payload=body,
                 )
-                await callback.answer("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "پیشنهاد جدید برای شما ارسال شد.",
+                    show_alert=False,
+                )
                 return
 
             if 200 <= status_code < 300:
@@ -839,7 +896,11 @@ async def _handle_channel_trade(
                 except Exception as exc:
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
                 try:
-                    await callback.answer("معامله ثبت شد ✅", show_alert=False)
+                    await answer_callback_query_via_runtime(
+                        callback,
+                        "معامله ثبت شد ✅",
+                        show_alert=False,
+                    )
                 except Exception as exc:
                     logger.debug(f"Failed to answer remote-home trade callback: {exc}")
                 await _notify_remote_trade_success(
@@ -866,14 +927,19 @@ async def _handle_channel_trade(
                     idempotency_key=idempotency_key,
                     fallback_chat_id=callback_chat_id,
                 )
-                await callback.answer(
+                await answer_callback_query_via_runtime(
+                    callback,
                     "درخواست معامله ارسال شد؛ نتیجه تا چند لحظه دیگر همگام می‌شود.",
                     show_alert=False,
                 )
                 return
 
             detail = body.get("detail") if isinstance(body, dict) else None
-            await callback.answer(f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}", show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}",
+                show_alert=True,
+            )
             return
 
         
@@ -913,9 +979,17 @@ async def _handle_channel_trade(
                     target_chat_id=target_chat_id,
                     payload=suggestion_payload,
                 )
-                await callback.answer("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "پیشنهاد جدید برای شما ارسال شد.",
+                    show_alert=False,
+                )
             else:
-                await callback.answer(f"❌ {amount_error}", show_alert=True)
+                await answer_callback_query_via_runtime(
+                    callback,
+                    f"❌ {amount_error}",
+                    show_alert=True,
+                )
             return
         
         # بررسی دابل‌کلیک با Redis (0.5 ثانیه)
@@ -960,4 +1034,8 @@ async def _handle_channel_trade(
                     schedule_trade_suggestion_pending_reset(bot, offer.id)
                 except Exception as exc:
                     logger.debug(f"Failed to set pending confirmation state for suggestion message: {exc}")
-            await callback.answer("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
+            await answer_callback_query_via_runtime(
+                callback,
+                "برای تایید دوباره روی همان دکمه بزنید ☑️",
+                show_alert=False,
+            )
