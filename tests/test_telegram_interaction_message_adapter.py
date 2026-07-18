@@ -27,6 +27,13 @@ def _user(*, telegram_id=7007):
     return SimpleNamespace(id=7, telegram_id=telegram_id, sync_version=4)
 
 
+def _callback(*, callback_id="callback-raw-secret", chat_id=7007, message_id=91):
+    return SimpleNamespace(
+        id=callback_id,
+        message=_message(chat_id=chat_id, message_id=message_id),
+    )
+
+
 class TelegramInteractionMessageAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_legacy_mode_preserves_exact_aiogram_call_and_result(self):
         message = _message()
@@ -162,6 +169,103 @@ class TelegramInteractionMessageAdapterTests(unittest.IsolatedAsyncioTestCase):
                     _user(),
                     "پاسخ",
                     source_key="block-search-short",
+                    session=session,
+                )
+
+        enqueue.assert_not_awaited()
+        session.commit.assert_not_awaited()
+
+    async def test_callback_legacy_mode_preserves_exact_aiogram_call(self):
+        callback = _callback()
+        markup = object()
+        with patch.object(
+            adapter,
+            "configured_telegram_delivery_runtime",
+            return_value=_runtime(TelegramDeliveryRuntimeMode.LEGACY),
+        ):
+            result = await adapter.answer_callback_message_via_runtime(
+                callback,
+                _user(),
+                "پاسخ",
+                source_key="history-excel-empty",
+                parse_mode="Markdown",
+                reply_markup=markup,
+            )
+
+        self.assertEqual(result.message_id, 92)
+        callback.message.answer.assert_awaited_once_with(
+            "پاسخ",
+            parse_mode="Markdown",
+            reply_markup=markup,
+        )
+
+    async def test_callback_queue_identity_is_hashed_and_update_specific(self):
+        session = SimpleNamespace(commit=AsyncMock())
+        with (
+            patch.object(
+                adapter,
+                "configured_telegram_delivery_runtime",
+                return_value=_runtime(TelegramDeliveryRuntimeMode.QUEUE_V1),
+            ),
+            patch.object(adapter, "current_server", return_value="foreign"),
+            patch.object(
+                adapter,
+                "enqueue_private_interaction_once",
+                new=AsyncMock(return_value=object()),
+            ) as enqueue,
+        ):
+            for callback_id in ("callback-raw-secret-a", "callback-raw-secret-b"):
+                await adapter.answer_callback_message_via_runtime(
+                    _callback(callback_id=callback_id),
+                    _user(),
+                    "پاسخ",
+                    source_key="history-excel-empty",
+                    action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+                    session=session,
+                )
+
+        source_ids = [call.kwargs["source_id"] for call in enqueue.await_args_list]
+        logical_keys = [
+            call.kwargs["logical_message_key"] for call in enqueue.await_args_list
+        ]
+        self.assertEqual(len(set(source_ids)), 2)
+        self.assertEqual(len(set(logical_keys)), 2)
+        self.assertTrue(all(":cb-" in value for value in source_ids))
+        self.assertTrue(
+            all("callback-raw-secret" not in value for value in source_ids)
+        )
+        self.assertTrue(
+            all(
+                call.kwargs["action"] == TelegramDeliveryAction.TRADE_NONCRITICAL
+                for call in enqueue.await_args_list
+            )
+        )
+        self.assertEqual(session.commit.await_count, 2)
+
+    async def test_callback_queue_rejects_missing_callback_identity(self):
+        callback = _callback(callback_id="")
+        session = SimpleNamespace(commit=AsyncMock())
+        with (
+            patch.object(
+                adapter,
+                "configured_telegram_delivery_runtime",
+                return_value=_runtime(TelegramDeliveryRuntimeMode.QUEUE_V1),
+            ),
+            patch.object(
+                adapter,
+                "enqueue_private_interaction_once",
+                new=AsyncMock(),
+            ) as enqueue,
+        ):
+            with self.assertRaisesRegex(
+                adapter.TelegramInteractionMessageRouteError,
+                "callback_identity_invalid",
+            ):
+                await adapter.answer_callback_message_via_runtime(
+                    callback,
+                    _user(),
+                    "پاسخ",
+                    source_key="history-excel-empty",
                     session=session,
                 )
 

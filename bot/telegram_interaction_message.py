@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from hashlib import sha256
 from typing import Any
 
 from core.db import AsyncSessionLocal
@@ -74,52 +75,49 @@ def _serialized_reply_markup(value: Any) -> Mapping[str, Any] | None:
     )
 
 
-async def answer_incoming_message_via_runtime(
+def _normalized_source_key(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if _SOURCE_KEY_PATTERN.fullmatch(normalized) is None:
+        raise TelegramInteractionMessageRouteError(
+            "telegram_interaction_message_source_key_invalid"
+        )
+    return normalized
+
+
+def _callback_event_key(callback: Any) -> str:
+    callback_id = str(getattr(callback, "id", "") or "").strip()
+    if not callback_id or len(callback_id) > 256:
+        raise TelegramInteractionMessageRouteError(
+            "telegram_interaction_callback_identity_invalid"
+        )
+    digest = sha256(callback_id.encode("utf-8")).hexdigest()[:32]
+    return f"cb-{digest}"
+
+
+async def _enqueue_interaction_message(
     message: Any,
     user: Any,
     text: str,
     *,
     source_key: str,
-    action: TelegramDeliveryAction | str = TelegramDeliveryAction.GENERAL_IMMEDIATE,
-    parse_mode: Any = _UNSET,
-    reply_markup: Any = _UNSET,
-    set_persistent_anchor: bool = False,
-    temporary_context_keyboard: bool = False,
-    flow_exit: TelegramFlowExit | str | None = None,
-    session: Any = None,
-    commit: bool = True,
+    event_key: str,
+    action: TelegramDeliveryAction | str,
+    parse_mode: Any,
+    reply_markup: Any,
+    set_persistent_anchor: bool,
+    temporary_context_keyboard: bool,
+    flow_exit: TelegramFlowExit | str | None,
+    session: Any,
+    commit: bool,
 ):
-    """Preserve legacy ``message.answer`` or persist one private interaction.
-
-    This adapter is intentionally limited to replies whose caller does not
-    need an immediate aiogram ``Message`` result.  Result-dependent edits use
-    the separate receipt/dependency contract.
-    """
-    if (
-        configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
-        kwargs: dict[str, Any] = {}
-        if parse_mode is not _UNSET:
-            kwargs["parse_mode"] = parse_mode
-        if reply_markup is not _UNSET:
-            kwargs["reply_markup"] = reply_markup
-        return await message.answer(text, **kwargs)
-
-    normalized_source_key = str(source_key or "").strip().lower()
-    if _SOURCE_KEY_PATTERN.fullmatch(normalized_source_key) is None:
-        raise TelegramInteractionMessageRouteError(
-            "telegram_interaction_message_source_key_invalid"
-        )
-    user_id, telegram_id, sync_version, message_id = _private_message_identity(
+    normalized_source_key = _normalized_source_key(source_key)
+    user_id, telegram_id, sync_version, _ = _private_message_identity(
         message,
         user,
     )
     normalized_markup = _serialized_reply_markup(reply_markup)
-    source_id = (
-        f"interaction:{normalized_source_key}:{user_id}:{message_id}"
-    )
-    logical_key = f"private:{user_id}:{normalized_source_key}:{message_id}"
+    source_id = f"interaction:{normalized_source_key}:{user_id}:{event_key}"
+    logical_key = f"private:{user_id}:{normalized_source_key}:{event_key}"
     result_requirement = (
         TelegramInteractionResultRequirement.CAPTURE_MESSAGE_ID
         if set_persistent_anchor
@@ -159,3 +157,103 @@ async def answer_incoming_message_via_runtime(
         return await _enqueue(session)
     async with AsyncSessionLocal() as db:
         return await _enqueue(db)
+
+
+async def answer_incoming_message_via_runtime(
+    message: Any,
+    user: Any,
+    text: str,
+    *,
+    source_key: str,
+    action: TelegramDeliveryAction | str = TelegramDeliveryAction.GENERAL_IMMEDIATE,
+    parse_mode: Any = _UNSET,
+    reply_markup: Any = _UNSET,
+    set_persistent_anchor: bool = False,
+    temporary_context_keyboard: bool = False,
+    flow_exit: TelegramFlowExit | str | None = None,
+    session: Any = None,
+    commit: bool = True,
+):
+    """Preserve legacy ``message.answer`` or persist one private interaction.
+
+    This adapter is intentionally limited to replies whose caller does not
+    need an immediate aiogram ``Message`` result.  Result-dependent edits use
+    the separate receipt/dependency contract.
+    """
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        kwargs: dict[str, Any] = {}
+        if parse_mode is not _UNSET:
+            kwargs["parse_mode"] = parse_mode
+        if reply_markup is not _UNSET:
+            kwargs["reply_markup"] = reply_markup
+        return await message.answer(text, **kwargs)
+
+    _, _, _, message_id = _private_message_identity(message, user)
+    return await _enqueue_interaction_message(
+        message,
+        user,
+        text,
+        source_key=source_key,
+        event_key=str(message_id),
+        action=action,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        set_persistent_anchor=set_persistent_anchor,
+        temporary_context_keyboard=temporary_context_keyboard,
+        flow_exit=flow_exit,
+        session=session,
+        commit=commit,
+    )
+
+
+async def answer_callback_message_via_runtime(
+    callback: Any,
+    user: Any,
+    text: str,
+    *,
+    source_key: str,
+    action: TelegramDeliveryAction | str = TelegramDeliveryAction.GENERAL_IMMEDIATE,
+    parse_mode: Any = _UNSET,
+    reply_markup: Any = _UNSET,
+    set_persistent_anchor: bool = False,
+    temporary_context_keyboard: bool = False,
+    flow_exit: TelegramFlowExit | str | None = None,
+    session: Any = None,
+    commit: bool = True,
+):
+    """Reply below a callback's private message without callback collisions.
+
+    Queue identity hashes ``callback.id`` so two callback updates on the same
+    Telegram message remain distinct while the raw provider identifier never
+    enters durable storage.
+    """
+    message = getattr(callback, "message", None)
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        kwargs: dict[str, Any] = {}
+        if parse_mode is not _UNSET:
+            kwargs["parse_mode"] = parse_mode
+        if reply_markup is not _UNSET:
+            kwargs["reply_markup"] = reply_markup
+        return await message.answer(text, **kwargs)
+
+    return await _enqueue_interaction_message(
+        message,
+        user,
+        text,
+        source_key=source_key,
+        event_key=_callback_event_key(callback),
+        action=action,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        set_persistent_anchor=set_persistent_anchor,
+        temporary_context_keyboard=temporary_context_keyboard,
+        flow_exit=flow_exit,
+        session=session,
+        commit=commit,
+    )

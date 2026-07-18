@@ -27,6 +27,11 @@ from core.services.trade_history_export_service import (
 from core.utils import to_jalali_str
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import (
+    answer_callback_message_via_runtime,
+    answer_incoming_message_via_runtime,
+)
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from bot.utils.public_profile import (
     PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK,
     build_bot_public_profile_keyboard,
@@ -232,8 +237,12 @@ async def show_my_trade_history(message: types.Message, state: FSMContext, user:
     
     # برای تاریخچه شخصی، دکمه بازگشت باید به پنل اصلی برگردد
     # اما get_trade_history_keyboard نیاز به target_user_id دارد. 0 را به عنوان نشانه خود استفاده می‌کنیم.
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         text,
+        source_key="history-main",
+        action=TelegramDeliveryAction.TRADE_NONCRITICAL,
         reply_markup=get_trade_history_keyboard(user.id) # استفاده از آیدی خود کاربر
     )
 
@@ -377,7 +386,13 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
     if not trades:
-        msg = await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "⚠️ معامله‌ای برای دانلود وجود ندارد.",
+            source_key="history-excel-empty",
+            action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+        )
         return
     
     try:
@@ -396,7 +411,13 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
         os.remove(filename)
         
     except Exception as e:
-        msg = await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            f"❌ خطا در ایجاد فایل: {str(e)}",
+            source_key="history-excel-error",
+            action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+        )
 
 
 # --- دانلود PDF ---
@@ -419,7 +440,13 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
     if not trades:
-        msg = await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "⚠️ معامله‌ای برای دانلود وجود ندارد.",
+            source_key="history-pdf-empty",
+            action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+        )
         return
     
     try:
@@ -438,7 +465,13 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
         os.remove(filename)
         
     except Exception as e:
-        msg = await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            f"❌ خطا در ایجاد فایل: {str(e)}",
+            source_key="history-pdf-error",
+            action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+        )
 
 
 @router.callback_query(ProfileTradePdfCallback.filter())
@@ -463,7 +496,13 @@ async def export_profile_trade_pdf(
 
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
     if not trades:
-        await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "⚠️ معامله‌ای برای دانلود وجود ندارد.",
+            source_key="history-profile-pdf-empty",
+            action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+        )
         return
 
     try:
@@ -476,7 +515,13 @@ async def export_profile_trade_pdf(
         )
         os.remove(filename)
     except Exception as e:
-        await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            f"❌ خطا در ایجاد فایل: {str(e)}",
+            source_key="history-profile-pdf-error",
+            action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+        )
 
 
 # --- بازگشت به پروفایل ---

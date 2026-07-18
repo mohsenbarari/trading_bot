@@ -27,6 +27,7 @@
 - checkpoint چهارم cutover پیام‌ساز interaction در `2026-07-18`: سه پاسخ تک‌پیامی و مستقل پنل، یعنی خلاصه تنظیمات کاربری، placeholder تنظیمات ساده و اطلاعات پشتیبانی، به `GENERAL_IMMEDIATE/M1` منتقل شدند. inline keyboard تنظیمات در payload canonical حفظ می‌شود، هیچ persistent keyboard یا anchor جدیدی تولید نمی‌شود و کیبورد فعال کاربر حفظ می‌گردد. `31` تست کامل panel و `570` تست گسترده Telegram با `152` skip پاس شدند؛ inventory جاری total=`424` و `remaining_interactive_direct=321` است.
 - checkpoint پنجم cutover پیام‌ساز interaction در `2026-07-18`: هفت پاسخ پایان‌دهنده دیگر پنل شامل قفل حساب، عدم مجوز لیست همکاران، خالی‌بودن تاریخچه اخیر، خطای ساخت PDF، مقدار نامعتبر تنظیم و رد authority به `GENERAL_IMMEDIATE/M1` منتقل شدند. خود `answer_document` عمداً باقی ماند، چون فایل موقت در `finally` پاک می‌شود و صفی‌سازی آن بدون storage/retention contract منجر به job بدون فایل می‌شود. `32` تست panel و `570` تست گسترده Telegram با `152` skip پاس شدند؛ inventory جاری total=`417` و `remaining_interactive_direct=314` است.
 - checkpoint ششم cutover پیام‌ساز interaction در `2026-07-18`: سه منوی persistent اصلی پنل کاربر، پروفایل و پنل مدیریت اولین handlerهایی شدند که از `SET_CURRENT/CAPTURE_MESSAGE_ID` پایدار استفاده می‌کنند. در queue mode لنگر قبلی پیش از تحویل موفق منوی جدید حذف نمی‌شود و فقط feedback `SENT` با message id واقعی لنگر جدید را فعال می‌کند؛ legacy همچنان delayed cleanup و `set_anchor` حافظه‌ای فعلی را دارد. `33` تست panel، هر شش تست PostgreSQL anchor و `570` تست گسترده Telegram با `152` skip پاس شدند؛ دیتابیس scratch پاک شد و inventory جاری total=`414` و `remaining_interactive_direct=311` است.
+- checkpoint هفتم cutover پیام‌ساز interaction در `2026-07-18`: adapter مستقل `answer_callback_message_via_runtime` افزوده شد تا پیام جدید ناشی از callback را با identity هش‌شده و update-specific ثبت کند. raw `callback.id` هرگز وارد source/logical key نمی‌شود، دو callback روی یک message collision ندارند و identity ناقص پیش از persistence fail-closed می‌شود. پیام اولیه تاریخچه و شش پاسخ empty/error خروجی Excel/PDF به `TRADE_NONCRITICAL/M5` منتقل شدند؛ خود `sendDocument` و فایل موقت تغییری نکردند. `30` تست تاریخچه، `13` تست adapter/inventory و `573` تست گسترده Telegram با `152` skip پاس شدند؛ inventory جاری total=`408` و `remaining_interactive_direct=304` است.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -701,6 +702,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - برای checkpoint چهارم cutover پیام‌ساز interaction Stage 3 در `2026-07-18`، سه پاسخ مستقل panel source key جداگانه و `PRESERVE_CURRENT/NONE` دارند. مسیر settings همچنان inline keyboard خود را حمل می‌کند، اما این markup به‌عنوان persistent menu طبقه‌بندی نمی‌شود. budget از `324` به `321` و total از `427` به `424` رسید؛ `31` تست panel و suite گسترده `570` تست Telegram سبز شدند.
 - برای checkpoint پنجم cutover پیام‌ساز interaction Stage 3 در `2026-07-18`، هفت terminal feedback پنل source key مستقل و `PRESERVE_CURRENT/NONE` گرفتند. برش فقط `sendMessage` را پوشش می‌دهد؛ `sendDocument` تا قرارداد فایل بادوام fail-closed و خارج cutover است. budget از `321` به `314` و total از `424` به `417` رسید؛ `32` تست panel و `570` تست گسترده Telegram پاس شدند.
 - برای checkpoint ششم cutover پیام‌ساز interaction Stage 3 در `2026-07-18`، سه منوی persistent panel با سه source key مستقل، generation تراکنشی و receipt پیام واقعی پوشش داده شدند. شاخه queue هیچ cleanup لنگر قبلی را پیش از activation انجام نمی‌دهد. budget از `314` به `311` و total از `417` به `414` رسید؛ `33` تست panel، شش تست PostgreSQL و `570` تست گسترده Telegram پاس شدند.
+- برای checkpoint هفتم cutover پیام‌ساز interaction Stage 3 در `2026-07-18`، callback-message adapter پس از شاخه legacy تنها route خصوصی authenticated کامل را می‌پذیرد و digest ۳۲ کاراکتری SHA-256 را به‌جای raw callback id در source identity می‌گذارد. هفت پاسخ تاریخچه `PRESERVE_CURRENT/NONE` و action صریح `TRADE_NONCRITICAL` دارند. با افزوده‌شدن یک مرز legacy داخل adapter و حذف هفت bypass، budget از `311` به `304`، total از `414` به `408` و `legacy_mode_guarded` از `63` به `64` رسید. `30+13+573` تست هدفمند/گسترده سبز شدند.
 - readback زنده و فقط‌خواندنی editor در staging، حق پیام `can_edit_messages=true` و همه حقوق post/delete/invite/restrict/promote/change-info/video/direct-message را false گزارش کرد؛ بااین‌حال `can_post_stories`, `can_edit_stories`, `can_delete_stories` هنوز true بودند. Bot API این سه را حق مستقل ادمین تعریف می‌کند، بنابراین preflight سخت‌گیرانه تا false شدن آن‌ها یا تصمیم صریح امنیتی جدید fail-closed باقی می‌ماند. این وضعیت به معنی مجازشدن editor برای ارسال پیام نیست؛ allowlist کد و constraint دیتابیس همچنان فقط edit کانال را می‌پذیرند.
 - در ادامه همان روز مالک محصول اعلام کرد هر سه دسترسی Story از editor گرفته شده‌اند. این تغییر تا readback زنده بعدی staging «گزارش‌شده ولی تأییدنشده» است؛ Stage 4 باید پیش از هر smoke یا بار، `can_post_stories=false`, `can_edit_stories=false`, `can_delete_stories=false` را همراه سایر permissionهای ممنوع دوباره بخواند و در غیر این صورت fail-closed بماند.
 - این foundation مجوز deploy یا شروع Stage 4 نیست و runtime عمداً غیرفعال باقی مانده است.
@@ -714,20 +716,20 @@ python3 scripts/audit_telegram_delivery_calls.py --check
 python3 scripts/audit_telegram_delivery_calls.py --format json
 ```
 
-baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint callback، ۳۲ فراخوانی `callback.message.answer` که پیام جدید می‌سازند از callback deadlineدار جدا و به interaction منتقل شدند؛ سپس هر `260` callback واقعی با دو ingress اختصاصی موجود یا adapter legacy مشترک پوشش داده شد. پس از شش cutover پیام‌ساز، خروجی جاری `414` مرز دارد و هیچ `remaining_callback_direct` ندارد. این ممیزی محافظه‌کارانه است: reachable بودن هر مسیر در یک deployment را ادعا نمی‌کند، اما هیچ فراخوانی را فقط به‌دلیل «احتمالاً بلااستفاده بودن» از inventory حذف نمی‌کند.
+baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint callback، ۳۲ فراخوانی `callback.message.answer` که پیام جدید می‌سازند از callback deadlineدار جدا و به interaction منتقل شدند؛ سپس هر `260` callback واقعی با دو ingress اختصاصی موجود یا adapter legacy مشترک پوشش داده شد. پس از هفت cutover پیام‌ساز، خروجی جاری `408` مرز دارد و هیچ `remaining_callback_direct` ندارد. این ممیزی محافظه‌کارانه است: reachable بودن هر مسیر در یک deployment را ادعا نمی‌کند، اما هیچ فراخوانی را فقط به‌دلیل «احتمالاً بلااستفاده بودن» از inventory حذف نمی‌کند.
 
 | disposition | تعداد | نتیجه |
 | --- | ---: | --- |
 | `queue_execution` | `1` | gateway credential-bound رسمی صف |
 | `legacy_owner_guarded` | `10` | مرز مستقیم فقط زیر ownership قدیمی مجاز است |
-| `legacy_mode_guarded` | `63` | شاخه queue پیش از فراخوانی مستقیم خارج می‌شود؛ شامل adapterهای مشترک callback و پیام ورودی |
+| `legacy_mode_guarded` | `64` | شاخه queue پیش از فراخوانی مستقیم خارج می‌شود؛ شامل adapterهای مشترک callback، callback-message و پیام ورودی |
 | `legacy_parameter_guarded` | `2` | caller در queue mode شاخه Telegram را صریحاً خاموش می‌کند |
 | `durable_exempt` | `4` | فقط مرزهای transport و relay سخت‌گیرانه OTP کوتاه‌عمر مصوب |
 | `non_message_control` | `2` | ban/unban عضویت و خارج از pacing پیام |
 | `non_delivery_timer` | `1` | در queue mode فقط side effect غیرتلگرامی باقی می‌ماند |
 | `remaining_business_direct` | `0` | بسته‌شده در checkpoint account-control |
 | `remaining_callback_direct` | `0` | بسته‌شده؛ رشد دوباره با budget صفر رد می‌شود |
-| `remaining_interactive_direct` | `311` | blocker Stage 3؛ شامل پیام‌های جدید داخل callback handler |
+| `remaining_interactive_direct` | `304` | blocker Stage 3؛ شامل پیام‌های جدید داخل callback handler |
 | `remaining_cleanup_direct` | `13` | blocker Stage 3 |
 | `remaining_memory_timer` | `7` | blocker Stage 3 |
 
@@ -737,7 +739,7 @@ baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint c
 
 1. **انجام شد:** قراردادهای source/freshness اعمال restriction و حذف حساب، cutover producerهای محلی/sync و محدودکردن relay قدیمی به OTP.
 2. **انجام شد:** تبدیل callbackها به‌صورت خانواده‌ای با ingress مستقیم `M0` و deadline دریافت‌شده؛ budget مستقیم اکنون صفر است.
-3. **foundation pure، persistence/feedback، adapter پایه و شش خانواده انجام شد:** ادامه cutover پیام‌های خصوصی باید خانواده‌ای و بر اساس نیاز به return/anchor/dependency/order انجام شود. تبدیل مکانیکی `message.answer` بدون receipt بادوام، source identity و dependency resolution همچنان ممنوع است.
+3. **foundation pure، persistence/feedback، adapter پایه و هفت خانواده انجام شد:** ادامه cutover پیام‌های خصوصی باید خانواده‌ای و بر اساس نیاز به return/anchor/dependency/order انجام شود. تبدیل مکانیکی `message.answer` بدون receipt بادوام، source identity و dependency resolution همچنان ممنوع است.
 4. انتقال cleanupها و هفت timer حافظه‌ای به `telegram_scheduled_operations` با حفظ anchor و سیاست «عدم حذف پیام لنگر».
 5. تکمیل reconciler عملیاتی `AMBIGUOUS`, `PENDING_RECONCILE`, blocked و اثبات inventory بدون remaining direct پیش از تغییر `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY`.
 
