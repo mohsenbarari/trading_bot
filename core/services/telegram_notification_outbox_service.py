@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 from typing import Any
 
@@ -501,8 +501,8 @@ async def enqueue_telegram_action_notification_once(
 ) -> TelegramNotificationEnqueueResult:
     """Persist one allowlisted private ``sendMessage`` action intent."""
     policy = telegram_notification_action_policy(action)
-    if policy.action == TelegramDeliveryAction.ACCOUNT_STATUS:
-        raise ValueError("telegram_account_status_requires_state_contract")
+    if policy.state_contract != "user_route":
+        raise ValueError("telegram_notification_action_requires_state_contract")
     normalized_source_id = str(source_id or "").strip()
     if not normalized_source_id or len(normalized_source_id) > 120:
         raise ValueError("telegram_notification_action_source_id_invalid")
@@ -542,9 +542,12 @@ async def enqueue_account_status_telegram_notification_once(
     messenger_blocked: bool,
     user_sync_version: int,
     parse_mode: str | None = "Markdown",
+    action: TelegramDeliveryAction | str = TelegramDeliveryAction.ACCOUNT_STATUS,
 ) -> TelegramNotificationEnqueueResult:
     """Persist an account notice tied to the user's current account state."""
-    policy = telegram_notification_action_policy(TelegramDeliveryAction.ACCOUNT_STATUS)
+    policy = telegram_notification_action_policy(action)
+    if policy.state_contract != "account_status":
+        raise ValueError("telegram_account_status_action_invalid")
     normalized_source_id = str(source_id or "").strip()
     if not normalized_source_id or len(normalized_source_id) > 120:
         raise ValueError("telegram_notification_action_source_id_invalid")
@@ -575,6 +578,67 @@ async def enqueue_account_status_telegram_notification_once(
             "user_sync_version": user_sync_version,
         },
     )
+
+
+async def enqueue_delayed_restriction_telegram_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    source_id: str,
+    text: str,
+    restriction_kind: str,
+    not_before: datetime,
+    user_sync_version: int,
+    parse_mode: str | None = "Markdown",
+) -> TelegramNotificationEnqueueResult:
+    """Persist a delayed clear-notice without an in-memory Telegram timer."""
+    policy = telegram_notification_action_policy(
+        TelegramDeliveryAction.DELAYED_RESTRICTION
+    )
+    normalized_source_id = str(source_id or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("telegram_notification_action_source_id_invalid")
+    normalized_kind = str(restriction_kind or "").strip().lower()
+    if normalized_kind not in {"block", "limitations"}:
+        raise ValueError("telegram_delayed_restriction_kind_invalid")
+    if not isinstance(not_before, datetime):
+        raise ValueError("telegram_delayed_restriction_not_before_invalid")
+    normalized_not_before = (
+        not_before.replace(tzinfo=timezone.utc)
+        if not_before.tzinfo is None or not_before.utcoffset() is None
+        else not_before.astimezone(timezone.utc)
+    )
+    if (
+        isinstance(user_sync_version, bool)
+        or not isinstance(user_sync_version, int)
+        or user_sync_version <= 0
+    ):
+        raise ValueError("telegram_notification_action_user_version_invalid")
+    result = await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=text,
+        source_type=policy.source_type,
+        source_id=normalized_source_id,
+        parse_mode=validate_telegram_notification_parse_mode(parse_mode),
+        extra_payload={
+            "not_before": normalized_not_before.isoformat(),
+            "queue_action": policy.action.value,
+            "restriction_kind": normalized_kind,
+            "user_sync_version": user_sync_version,
+        },
+    )
+    existing_due = getattr(result.outbox, "next_retry_at", None)
+    if result.created:
+        result.outbox.next_retry_at = normalized_not_before
+        await db.flush()
+    elif not isinstance(existing_due, datetime) or (
+        existing_due.replace(tzinfo=timezone.utc)
+        if existing_due.tzinfo is None or existing_due.utcoffset() is None
+        else existing_due.astimezone(timezone.utc)
+    ) != normalized_not_before:
+        raise ValueError("telegram_delayed_restriction_due_conflict")
+    return result
 
 
 async def enqueue_telegram_notifications(

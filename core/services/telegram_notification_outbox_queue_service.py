@@ -386,6 +386,7 @@ async def handoff_next_due_telegram_notification_outbox(
             if not telegram_notification_action_outbox_matches_current_user(
                 outbox,
                 user,
+                now=current_time,
             ):
                 return await _finalize_unhandoffable_outbox(
                     db,

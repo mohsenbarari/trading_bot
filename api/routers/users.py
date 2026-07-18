@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 import pytz
 
@@ -14,6 +14,10 @@ from core.services.user_account_status_service import transition_user_account_st
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import delete_user_account
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.services.user_management_context_service import (
     apply_user_management_order,
     attach_user_management_relation_context,
@@ -150,6 +154,7 @@ async def send_delayed_removal_notification_api(
     telegram_id: Optional[int],
     is_block: bool,
     delay_seconds: int = 120,
+    include_telegram: bool = True,
 ) -> None:
     """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر
     
@@ -183,8 +188,47 @@ async def send_delayed_removal_notification_api(
         await create_user_notification(session, user_id, msg, NotificationLevel.INFO, NotificationCategory.SYSTEM)
         break
     
-    if telegram_id is not None and msg is not None:
+    if include_telegram and telegram_id is not None and msg is not None:
         await send_telegram_notification(telegram_id, msg)
+
+
+async def enqueue_delayed_removal_telegram_notification_api(
+    db: AsyncSession,
+    *,
+    user: User,
+    is_block: bool,
+    delay_seconds: int = 120,
+) -> None:
+    if user.telegram_id is None:
+        return
+    from core.services.telegram_notification_outbox_service import (
+        TelegramNotificationRecipient,
+        enqueue_delayed_restriction_telegram_notification_once,
+    )
+
+    kind = "block" if is_block else "limitations"
+    msg = (
+        "ℹ️ *رفع مسدودیت توسط مدیر*\n\nمسدودیت حساب شما توسط مدیر رفع شد."
+        if is_block
+        else "ℹ️ *رفع محدودیت توسط مدیر*\n\nمحدودیت‌های حساب شما توسط مدیر رفع شد."
+    )
+    due_at = datetime.now(timezone.utc) + timedelta(
+        seconds=max(0, int(delay_seconds))
+    )
+    await enqueue_delayed_restriction_telegram_notification_once(
+        db,
+        recipient=TelegramNotificationRecipient(
+            user_id=int(user.id),
+            telegram_id=int(user.telegram_id),
+        ),
+        source_id=(
+            f"delayed-restriction:{kind}:{user.id}:{due_at.isoformat()}"
+        ),
+        text=msg,
+        restriction_kind=kind,
+        not_before=due_at,
+        user_sync_version=int(user.sync_version or 0),
+    )
 
 ADMIN_ROLE_VALUES = {UserRole.SUPER_ADMIN.value, UserRole.MIDDLE_MANAGER.value}
 
@@ -383,11 +427,49 @@ async def update_user(
     
     # رفع مسدودیت (با تاخیر)
     if unblock_notification_needed:
-        asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=True))
+        queue_mode = (
+            configured_telegram_delivery_runtime().mode
+            == TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+        if queue_mode:
+            await enqueue_delayed_removal_telegram_notification_api(
+                db,
+                user=user,
+                is_block=True,
+            )
+            await db.commit()
+        asyncio.create_task(
+            send_delayed_removal_notification_api(
+                get_db,
+                user.id,
+                user.telegram_id,
+                is_block=True,
+                include_telegram=not queue_mode,
+            )
+        )
     
     # رفع محدودیت (با تاخیر)
     if unlimit_needed:
-        asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=False))
+        queue_mode = (
+            configured_telegram_delivery_runtime().mode
+            == TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+        if queue_mode:
+            await enqueue_delayed_removal_telegram_notification_api(
+                db,
+                user=user,
+                is_block=False,
+            )
+            await db.commit()
+        asyncio.create_task(
+            send_delayed_removal_notification_api(
+                get_db,
+                user.id,
+                user.telegram_id,
+                is_block=False,
+                include_telegram=not queue_mode,
+            )
+        )
 
     changed_fields = sorted(update_data.keys())
     if changed_fields:

@@ -36,7 +36,7 @@ class TelegramNotificationOutboxQueueSchemaTests(unittest.TestCase):
         self.assertIn("ix_telegram_notification_outbox_queue_handoff", source)
         self.assertIn("source_type = 'project_user_joined'", source)
 
-    def test_action_queue_index_migration_is_current_head_child(self):
+    def test_base_action_queue_index_migration_follows_feeder_state(self):
         source = pathlib.Path(
             "migrations/versions/"
             "fad4e5f6a7b8_expand_notification_action_queue.py"
@@ -49,7 +49,10 @@ class TelegramNotificationOutboxQueueSchemaTests(unittest.TestCase):
         self.assertIn("queue_action:general_immediate", source)
         self.assertIn("queue_action:offer_validation_response", source)
         self.assertIn("queue_action:trade_unavailable", source)
-        for source_type in TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES:
+        for source_type in TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES - {
+            "queue_action:delayed_restriction",
+            "queue_action:timed_security",
+        }:
             self.assertIn(source_type, source)
         self.assertIn("('project_user_joined', 'offer_repeat_response')", source)
 
@@ -63,6 +66,19 @@ class TelegramNotificationOutboxQueueSchemaTests(unittest.TestCase):
         )
         self.assertIn("offer_success_preview", source)
         self.assertIn("include_offer_success=False", source)
+
+    def test_scheduled_operation_migration_is_current_head_and_adds_timed_sources(self):
+        source = pathlib.Path(
+            "migrations/versions/"
+            "faf6a7b8c9d0_add_telegram_scheduled_operations.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fae5f6a7b8c9"',
+            source,
+        )
+        self.assertIn("telegram_scheduled_operations", source)
+        self.assertIn("queue_action:delayed_restriction", source)
+        self.assertIn("queue_action:timed_security", source)
 
 
 if __name__ == "__main__":

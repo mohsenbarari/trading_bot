@@ -9,12 +9,17 @@ import jdatetime
 import pytz
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
 from core.config import settings
 from core.db import AsyncSessionLocal
+from core.server_routing import current_server
 from core.services.user_account_status_service import get_user_account_status, transition_user_account_status
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.services.user_management_context_service import (
     apply_user_management_order,
     attach_user_management_relation_context,
@@ -140,6 +145,39 @@ async def safe_delete_message(bot: Bot, chat_id: int, message_id: int, delay: in
     except Exception:
         pass
 
+
+async def schedule_temporary_message_cleanup(
+    bot: Bot,
+    *,
+    chat_id: int,
+    message_id: int,
+    delay: int,
+    source_id: str,
+) -> None:
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        from core.services.telegram_scheduled_operation_service import (
+            enqueue_temporary_message_cleanup_once,
+        )
+
+        async with AsyncSessionLocal() as session:
+            await enqueue_temporary_message_cleanup_once(
+                session,
+                current_server=current_server(),
+                chat_id=chat_id,
+                message_id=message_id,
+                source_id=source_id,
+                due_at=datetime.now(timezone.utc)
+                + timedelta(seconds=max(0, int(delay))),
+            )
+            await session.commit()
+        return
+    asyncio.create_task(
+        safe_delete_message(bot, chat_id, message_id, delay=delay)
+    )
+
 async def update_anchor(state: FSMContext, new_message_id: int, bot: Bot, chat_id: int):
     """
     لنگر محتوا (Content Anchor) را آپدیت می‌کند.
@@ -179,7 +217,13 @@ async def delete_user_message(message: types.Message):
     except Exception:
         pass
 
-async def send_delayed_removal_notification(user_id: int, telegram_id: int, is_block: bool, delay_seconds: int = 120):
+async def send_delayed_removal_notification(
+    user_id: int,
+    telegram_id: int,
+    is_block: bool,
+    delay_seconds: int = 120,
+    include_telegram: bool = True,
+):
     """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر (پیش‌فرض ۲ دقیقه)
     
     قبل از ارسال بررسی می‌کند که آیا کاربر هنوز رفع محدودیت/مسدودیت است یا خیر.
@@ -222,7 +266,47 @@ async def send_delayed_removal_notification(user_id: int, telegram_id: int, is_b
             level=NotificationLevel.INFO,
             category=NotificationCategory.SYSTEM
         )
-    await send_telegram_notification(telegram_id, msg)
+    if include_telegram:
+        await send_telegram_notification(telegram_id, msg)
+
+
+async def enqueue_delayed_removal_telegram_notification(
+    session,
+    *,
+    user: User,
+    is_block: bool,
+    delay_seconds: int = 120,
+) -> None:
+    if user.telegram_id is None:
+        return
+    from core.services.telegram_notification_outbox_service import (
+        TelegramNotificationRecipient,
+        enqueue_delayed_restriction_telegram_notification_once,
+    )
+
+    kind = "block" if is_block else "limitations"
+    msg = (
+        "ℹ️ *رفع مسدودیت توسط مدیر*\n\nمسدودیت حساب شما توسط مدیر رفع شد."
+        if is_block
+        else "ℹ️ *رفع محدودیت توسط مدیر*\n\nمحدودیت‌های حساب شما توسط مدیر رفع شد."
+    )
+    due_at = datetime.now(timezone.utc) + timedelta(
+        seconds=max(0, int(delay_seconds))
+    )
+    await enqueue_delayed_restriction_telegram_notification_once(
+        session,
+        recipient=TelegramNotificationRecipient(
+            user_id=int(user.id),
+            telegram_id=int(user.telegram_id),
+        ),
+        source_id=(
+            f"delayed-restriction:{kind}:{user.id}:{due_at.isoformat()}"
+        ),
+        text=msg,
+        restriction_kind=kind,
+        not_before=due_at,
+        user_sync_version=int(user.sync_version or 0),
+    )
 
 # --- توابع نمایش (Views) ---
 
@@ -716,7 +800,25 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
             await session.commit()
             
             # ارسال نوتیفیکیشن با تاخیر ۲ دقیقه
-            asyncio.create_task(send_delayed_removal_notification(target_user.id, telegram_id, is_block=True))
+            queue_mode = (
+                configured_telegram_delivery_runtime().mode
+                == TelegramDeliveryRuntimeMode.QUEUE_V1
+            )
+            if queue_mode:
+                await enqueue_delayed_removal_telegram_notification(
+                    session,
+                    user=target_user,
+                    is_block=True,
+                )
+                await session.commit()
+            asyncio.create_task(
+                send_delayed_removal_notification(
+                    target_user.id,
+                    telegram_id,
+                    is_block=True,
+                    include_telegram=not queue_mode,
+                )
+            )
             
             # بررسی وجود محدودیت
             has_limitations = (
@@ -768,7 +870,25 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
             await session.commit()
             
             # ارسال نوتیفیکیشن با تاخیر ۲ دقیقه
-            asyncio.create_task(send_delayed_removal_notification(target_user.id, telegram_id, is_block=False))
+            queue_mode = (
+                configured_telegram_delivery_runtime().mode
+                == TelegramDeliveryRuntimeMode.QUEUE_V1
+            )
+            if queue_mode:
+                await enqueue_delayed_removal_telegram_notification(
+                    session,
+                    user=target_user,
+                    is_block=False,
+                )
+                await session.commit()
+            asyncio.create_task(
+                send_delayed_removal_notification(
+                    target_user.id,
+                    telegram_id,
+                    is_block=False,
+                    include_telegram=not queue_mode,
+                )
+            )
             
             # بررسی وضعیت مسدودی
             is_restricted = False
@@ -1095,7 +1215,16 @@ async def process_limit_value(message: types.Message, state: FSMContext, user: O
             raise ValueError
     except ValueError:
         temp_msg = await message.answer("❌ لطفاً یک عدد صحیح معتبر وارد کنید.")
-        asyncio.create_task(safe_delete_message(message.bot, message.chat.id, temp_msg.message_id, delay=3))
+        await schedule_temporary_message_cleanup(
+            message.bot,
+            chat_id=message.chat.id,
+            message_id=temp_msg.message_id,
+            delay=3,
+            source_id=(
+                f"admin-user-limit-invalid:{message.chat.id}:"
+                f"{temp_msg.message_id}"
+            ),
+        )
         return
     
     data = await state.get_data()

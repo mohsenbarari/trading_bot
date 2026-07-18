@@ -332,6 +332,68 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
             await created.pop(0)
         sync_offer.assert_awaited_once()
 
+    async def test_queue_mode_persists_markup_cleanup_without_direct_edit_or_sleep(self):
+        queue_runtime = SimpleNamespace(
+            mode=suggestion_messages.TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+        bot = AsyncMock()
+        bot.edit_message_reply_markup = AsyncMock()
+
+        with patch.object(
+            suggestion_messages,
+            'configured_telegram_delivery_runtime',
+            return_value=queue_runtime,
+        ), patch.object(
+            suggestion_messages,
+            '_enqueue_suggestion_markup_cleanup',
+            new=AsyncMock(),
+        ) as enqueue:
+            await suggestion_messages._clear_suggestion_markup(
+                bot,
+                10,
+                20,
+                source_id='trade-suggestion-state:7:10:20',
+            )
+
+        enqueue.assert_awaited_once()
+        self.assertEqual(enqueue.await_args.kwargs['chat_id'], 10)
+        self.assertEqual(enqueue.await_args.kwargs['message_id'], 20)
+        bot.edit_message_reply_markup.assert_not_awaited()
+
+        created = []
+
+        def capture_task(coro):
+            created.append(coro)
+            return MagicMock()
+
+        with patch.object(
+            suggestion_messages,
+            'configured_telegram_delivery_runtime',
+            return_value=queue_runtime,
+        ), patch.object(
+            suggestion_messages,
+            '_enqueue_suggestion_markup_cleanup',
+            new=AsyncMock(),
+        ) as enqueue, patch.object(
+            suggestion_messages.asyncio,
+            'create_task',
+            side_effect=capture_task,
+        ), patch.object(
+            suggestion_messages.asyncio,
+            'sleep',
+            new=AsyncMock(),
+        ) as sleep:
+            suggestion_messages.schedule_trade_suggestion_cleanup(
+                bot,
+                7,
+                10,
+                20,
+            )
+            await created.pop(0)
+
+        enqueue.assert_awaited_once()
+        sleep.assert_not_awaited()
+
     async def test_listen_trade_suggestion_events_processes_valid_messages_and_cleans_up(self):
         pubsub = _FakePubSub(
             [

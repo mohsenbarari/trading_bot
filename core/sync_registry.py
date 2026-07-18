@@ -389,6 +389,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "and must never be copied to Iran."
         ),
     ),
+    "telegram_scheduled_operations": _entry(
+        "telegram_scheduled_operations",
+        SyncPolicy.NO_SYNC,
+        ("telegram_bot_runtime", "telegram_delivery_queue"),
+        "foreign local Telegram scheduled-source owner",
+        "never cross-sync scheduled cleanup or market side-effect receipts",
+        "Foreign-only bounded scheduled Telegram source state",
+        notes=(
+            "The row has no credential and is a source receipt for queue-v1; "
+            "it must never be copied to Iran."
+        ),
+    ),
     "telegram_delivery_feeder_states": _entry(
         "telegram_delivery_feeder_states",
         SyncPolicy.NO_SYNC,

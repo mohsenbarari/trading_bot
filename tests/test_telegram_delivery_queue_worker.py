@@ -450,6 +450,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         admin_feeder_started = asyncio.Event()
         notification_feeder_started = asyncio.Event()
         market_feeder_started = asyncio.Event()
+        scheduled_feeder_started = asyncio.Event()
         offer_feeder_started = asyncio.Event()
         all_started = asyncio.Event()
 
@@ -532,6 +533,10 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 all_started.set()
             await asyncio.Event().wait()
 
+        async def scheduled_feeder_loop():
+            scheduled_feeder_started.set()
+            await asyncio.Event().wait()
+
         async def offer_feeder_loop():
             offer_feeder_started.set()
             if (
@@ -575,6 +580,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
             side_effect=market_feeder_loop,
         ), patch(
+            "core.telegram_delivery_queue_worker.telegram_scheduled_operation_queue_handoff_loop",
+            side_effect=scheduled_feeder_loop,
+        ), patch(
             "core.telegram_delivery_queue_worker.telegram_offer_queue_handoff_loop",
             side_effect=offer_feeder_loop,
         ), patch(
@@ -606,6 +614,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(admin_feeder_started.is_set())
             self.assertTrue(notification_feeder_started.is_set())
             self.assertTrue(market_feeder_started.is_set())
+            self.assertTrue(scheduled_feeder_started.is_set())
             self.assertTrue(offer_feeder_started.is_set())
             self.assertEqual(preflight.await_count, 2)
             self.assertEqual(
@@ -703,16 +712,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
-            "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
-            side_effect=idle_loop,
-        ), patch(
-            "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
-            side_effect=idle_loop,
-        ), patch(
-            "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
-            side_effect=idle_loop,
-        ), patch(
-            "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
+            "core.telegram_delivery_queue_worker.telegram_scheduled_operation_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_offer_queue_handoff_loop",
@@ -795,6 +795,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_scheduled_operation_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_offer_queue_handoff_loop",
@@ -883,6 +886,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
                 side_effect=idle_loop,
             ), patch(
+                "core.telegram_delivery_queue_worker.telegram_scheduled_operation_queue_handoff_loop",
+                side_effect=idle_loop,
+            ), patch(
                 "core.telegram_delivery_queue_worker.telegram_offer_queue_handoff_loop",
                 side_effect=idle_loop,
             ), patch(
@@ -953,6 +959,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_scheduled_operation_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_offer_queue_handoff_loop",
@@ -1302,6 +1311,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_market_notice_queue_handoff_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_scheduled_operation_queue_handoff_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_offer_queue_handoff_loop",

@@ -259,6 +259,23 @@ async def edit_message_reply_markup(
     )
 
 
+async def delete_message(
+    chat_id: int,
+    message_id: int,
+    *,
+    timeout: float = 10,
+    bot_token: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+) -> TelegramGatewayResult:
+    return await post_telegram_method(
+        "deleteMessage",
+        {"chat_id": chat_id, "message_id": message_id},
+        timeout=timeout,
+        bot_token=bot_token,
+        idempotency_key=idempotency_key,
+    )
+
+
 async def edit_message_text(
     chat_id: int,
     message_id: int,

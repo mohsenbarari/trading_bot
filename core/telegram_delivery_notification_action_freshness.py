@@ -5,7 +5,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -71,6 +71,8 @@ class TelegramNotificationActionSource:
     expected_account_status: str | None
     expected_messenger_blocked: bool | None
     expected_user_sync_version: int | None
+    restriction_kind: str | None
+    not_before: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +124,24 @@ def _validated_parse_mode(value: Any) -> str | None:
     return parse_mode
 
 
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_utc_datetime(value: Any) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("notification_action_not_before_invalid")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("notification_action_not_before_invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("notification_action_not_before_invalid")
+    return _utc(parsed)
+
+
 def _validate_source_contract(
     outbox: TelegramNotificationOutbox | Any,
 ) -> TelegramNotificationActionSource:
@@ -156,12 +176,14 @@ def _validate_source_contract(
 
     expected_account_status: str | None = None
     expected_messenger_blocked: bool | None = None
+    restriction_kind: str | None = None
+    not_before: datetime | None = None
     expected_user_sync_version = _strict_positive_int(
         extra_payload.get("user_sync_version")
     )
     if expected_user_sync_version is None:
         raise ValueError("notification_action_user_version_invalid")
-    if policy.action == TelegramDeliveryAction.ACCOUNT_STATUS:
+    if policy.state_contract == "account_status":
         if set(extra_payload) != {
             "account_status",
             "messenger_blocked",
@@ -180,6 +202,21 @@ def _validate_source_contract(
         if not isinstance(extra_payload.get("messenger_blocked"), bool):
             raise ValueError("notification_action_account_block_state_invalid")
         expected_messenger_blocked = bool(extra_payload["messenger_blocked"])
+        reply_markup = None
+    elif policy.state_contract == "restriction_clear":
+        if set(extra_payload) != {
+            "not_before",
+            "queue_action",
+            "restriction_kind",
+            "user_sync_version",
+        }:
+            raise ValueError("notification_action_restriction_payload_invalid")
+        restriction_kind = str(
+            extra_payload.get("restriction_kind") or ""
+        ).strip().lower()
+        if restriction_kind not in {"block", "limitations"}:
+            raise ValueError("notification_action_restriction_kind_invalid")
+        not_before = _parse_utc_datetime(extra_payload.get("not_before"))
         reply_markup = None
     else:
         if set(extra_payload) not in (
@@ -214,6 +251,8 @@ def _validate_source_contract(
         expected_account_status=expected_account_status,
         expected_messenger_blocked=expected_messenger_blocked,
         expected_user_sync_version=expected_user_sync_version,
+        restriction_kind=restriction_kind,
+        not_before=not_before,
     )
 
 
@@ -230,6 +269,10 @@ def telegram_notification_action_source_natural_id(
             "reply_markup": source.reply_markup,
             "template_version": source.policy.template_version,
             "text": source.text,
+            "restriction_kind": source.restriction_kind,
+            "not_before": (
+                source.not_before.isoformat() if source.not_before else None
+            ),
             "user_sync_version": source.expected_user_sync_version,
         },
         ensure_ascii=False,
@@ -271,14 +314,32 @@ def _current_account_status(user: User | Any) -> str:
 def notification_action_source_matches_current_user(
     source: TelegramNotificationActionSource,
     user: User | Any,
+    *,
+    now: datetime | None = None,
 ) -> bool:
-    if source.policy.action != TelegramDeliveryAction.ACCOUNT_STATUS:
-        return True
-    return (
-        _current_account_status(user) == source.expected_account_status
-        and bool(getattr(user, "messenger_blocked_at", None))
-        is source.expected_messenger_blocked
-    )
+    if source.policy.state_contract == "account_status":
+        return (
+            _current_account_status(user) == source.expected_account_status
+            and bool(getattr(user, "messenger_blocked_at", None))
+            is source.expected_messenger_blocked
+        )
+    if source.policy.state_contract == "restriction_clear":
+        if source.restriction_kind == "block":
+            restricted_until = getattr(user, "trading_restricted_until", None)
+            return not isinstance(restricted_until, datetime) or _utc(
+                restricted_until
+            ) <= _utc(now or datetime.now(timezone.utc))
+        if source.restriction_kind == "limitations":
+            return all(
+                getattr(user, field_name, None) is None
+                for field_name in (
+                    "max_daily_trades",
+                    "max_active_commodities",
+                    "max_daily_requests",
+                )
+            )
+        return False
+    return True
 
 
 def notification_action_source_waits_for_current_user(
@@ -296,10 +357,13 @@ def notification_action_source_waits_for_current_user(
 def telegram_notification_action_outbox_matches_current_user(
     outbox: TelegramNotificationOutbox | Any,
     user: User | Any,
+    *,
+    now: datetime | None = None,
 ) -> bool:
     return notification_action_source_matches_current_user(
         _validate_source_contract(outbox),
         user,
+        now=now,
     )
 
 
@@ -338,8 +402,12 @@ def build_telegram_notification_action_snapshot(
         {
             "account_status": _current_account_status(user),
             "messenger_blocked": bool(getattr(user, "messenger_blocked_at", None)),
+            "not_before": (
+                source.not_before.isoformat() if source.not_before else None
+            ),
             "payload_hash": payload_hash,
             "recipient_user_id": source.recipient_user_id,
+            "restriction_kind": source.restriction_kind,
             "telegram_id": telegram_id,
             "user_sync_version": user_sync_version,
         },
@@ -393,7 +461,6 @@ async def validate_notification_action_telegram_delivery_freshness(
     job: TelegramDeliveryJobRecord,
     now: datetime,
 ) -> TelegramFreshnessDecision:
-    del now
     policy, static_decision = _validate_static_route(job)
     if static_decision is not None or policy is None:
         return static_decision or _quarantined(
@@ -447,6 +514,11 @@ async def validate_notification_action_telegram_delivery_freshness(
         )
     if status not in _ACTIVE_STATUSES:
         return _quarantined("notification_action_freshness_outbox_state_invalid")
+    if source.not_before is not None and _utc(now) < source.not_before:
+        return _decision(
+            TelegramFreshnessOutcome.WAIT_DEPENDENCY,
+            reason="notification_action_freshness_not_due",
+        )
     try:
         normalized_stored, stored_hash = canonical_telegram_delivery_payload(job.payload)
         expected_source = telegram_notification_action_source_natural_id(outbox)
@@ -477,7 +549,11 @@ async def validate_notification_action_telegram_delivery_freshness(
             TelegramFreshnessOutcome.WAIT_DEPENDENCY,
             reason="notification_action_freshness_recipient_version_pending",
         )
-    if not notification_action_source_matches_current_user(source, user):
+    if not notification_action_source_matches_current_user(
+        source,
+        user,
+        now=now,
+    ):
         return _decision(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="notification_action_freshness_source_state_changed",

@@ -24,7 +24,7 @@ class TelegramDeliveryRuntimeCompositionTests(unittest.TestCase):
         self.assertEqual(adapters.freshness.bot_identity, "channel_editor")
         self.assertEqual(adapters.lifecycle.bot_identity, "channel_editor")
 
-    def test_primary_freshness_and_lifecycle_report_the_same_open_actions(self):
+    def test_primary_freshness_and_lifecycle_are_complete(self):
         freshness = configured_telegram_delivery_freshness_registry(
             channel_id=-1001234567890
         ).coverage("primary")
@@ -32,16 +32,17 @@ class TelegramDeliveryRuntimeCompositionTests(unittest.TestCase):
             channel_id=-1001234567890
         ).coverage("primary")
 
-        self.assertFalse(freshness.complete)
-        self.assertFalse(lifecycle.complete)
+        self.assertTrue(freshness.complete)
+        self.assertTrue(lifecycle.complete)
         self.assertEqual(freshness.missing_actions, lifecycle.missing_actions)
 
-    def test_primary_lane_cannot_build_while_any_source_family_is_open(self):
-        with self.assertRaises(TelegramDeliveryFreshnessRoutingError):
-            build_configured_telegram_delivery_lane_adapters(
-                channel_id=-1001234567890,
-                bot_identity="primary",
-            )
+    def test_primary_lane_builds_only_after_complete_source_coverage(self):
+        adapters = build_configured_telegram_delivery_lane_adapters(
+            channel_id=-1001234567890,
+            bot_identity="primary",
+        )
+        self.assertEqual(adapters.freshness.bot_identity, "primary")
+        self.assertEqual(adapters.lifecycle.bot_identity, "primary")
 
     def test_bad_channel_and_unknown_lane_fail_before_runtime(self):
         with self.assertRaisesRegex(

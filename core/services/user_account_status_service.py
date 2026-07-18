@@ -19,6 +19,7 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from core.utils import create_user_notification, send_telegram_notification, utc_now
 from models.user import User
 
@@ -139,6 +140,7 @@ async def _send_or_enqueue_account_status_telegram(
     source_id: str,
     account_status: UserAccountStatus,
     messenger_blocked: bool,
+    queue_action: TelegramDeliveryAction = TelegramDeliveryAction.ACCOUNT_STATUS,
 ) -> None:
     user_id = int(getattr(user, "id"))
     telegram_id = int(getattr(user, "telegram_id"))
@@ -169,6 +171,7 @@ async def _send_or_enqueue_account_status_telegram(
             account_status=account_status,
             messenger_blocked=messenger_blocked,
             user_sync_version=user_sync_version,
+            action=queue_action,
         )
     else:
         await send_telegram_notification(telegram_id, message)
@@ -184,6 +187,7 @@ async def _notify_user_and_optional_telegram(
     account_status: UserAccountStatus,
     messenger_blocked: bool,
     include_telegram: bool = True,
+    queue_action: TelegramDeliveryAction = TelegramDeliveryAction.ACCOUNT_STATUS,
 ) -> None:
     user_id = int(getattr(user, "id"))
     telegram_id = getattr(user, "telegram_id", None)
@@ -196,6 +200,7 @@ async def _notify_user_and_optional_telegram(
             source_id=source_id,
             account_status=account_status,
             messenger_blocked=messenger_blocked,
+            queue_action=queue_action,
         )
 
 
@@ -330,6 +335,7 @@ async def mark_due_users_globally_locked(db: AsyncSession, *, limit: int = 100) 
             source_id=f"account-locked:{user.id}:{now.isoformat()}",
             account_status=UserAccountStatus.INACTIVE,
             messenger_blocked=True,
+            queue_action=TelegramDeliveryAction.TIMED_SECURITY,
         )
 
         accountant_relations = await list_active_accountants_for_owner(db, user.id)
@@ -350,6 +356,7 @@ async def mark_due_users_globally_locked(db: AsyncSession, *, limit: int = 100) 
                 messenger_blocked=bool(
                     getattr(accountant_user, "messenger_blocked_at", None)
                 ),
+                queue_action=TelegramDeliveryAction.TIMED_SECURITY,
             )
 
         try:

@@ -60,6 +60,7 @@ SUPPORTED_TELEGRAM_BOT_IDENTITIES = frozenset(
 SUPPORTED_TELEGRAM_QUEUE_METHODS = frozenset(
     {
         "answerCallbackQuery",
+        "deleteMessage",
         "editMessageReplyMarkup",
         "editMessageText",
         "sendMessage",

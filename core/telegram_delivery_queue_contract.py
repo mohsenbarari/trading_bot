@@ -737,6 +737,21 @@ def apply_gateway_result(
             reason="telegram_edit_already_applied",
         )
 
+    if (
+        status_code == 400
+        and job.method == "deleteMessage"
+        and (
+            "message to delete not found" in error_text
+            or "message not found" in error_text
+        )
+    ):
+        job.state = TelegramDeliveryState.SENT_NOOP
+        job.next_retry_at = None
+        return TelegramDeliveryDecision(
+            TelegramDeliveryOutcome.SENT_NOOP,
+            reason="telegram_delete_already_applied",
+        )
+
     if _has_migrate_to_chat_id(result):
         job.state = TelegramDeliveryState.BLOCKED_DESTINATION
         return TelegramDeliveryDecision(

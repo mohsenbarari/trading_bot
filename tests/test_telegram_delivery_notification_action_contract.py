@@ -30,6 +30,7 @@ class TelegramDeliveryNotificationActionContractTests(
             frozenset(
                 {
                     TelegramDeliveryAction.ACCOUNT_STATUS,
+                    TelegramDeliveryAction.DELAYED_RESTRICTION,
                     TelegramDeliveryAction.GENERAL_ANNOUNCEMENT,
                     TelegramDeliveryAction.GENERAL_IMMEDIATE,
                     TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
@@ -38,6 +39,7 @@ class TelegramDeliveryNotificationActionContractTests(
                     TelegramDeliveryAction.TRADE_NONCRITICAL,
                     TelegramDeliveryAction.TRADE_RESPONSE,
                     TelegramDeliveryAction.TRADE_UNAVAILABLE,
+                    TelegramDeliveryAction.TIMED_SECURITY,
                 }
             ),
         )
@@ -68,6 +70,11 @@ class TelegramDeliveryNotificationActionContractTests(
         self.assertFalse(
             TELEGRAM_NOTIFICATION_ACTION_POLICIES[
                 TelegramDeliveryAction.ACCOUNT_STATUS
+            ].require_bot_access
+        )
+        self.assertFalse(
+            TELEGRAM_NOTIFICATION_ACTION_POLICIES[
+                TelegramDeliveryAction.TIMED_SECURITY
             ].require_bot_access
         )
         handoff_index = next(
@@ -153,24 +160,15 @@ class TelegramDeliveryNotificationActionContractTests(
             },
         )
 
-    def test_runtime_coverage_now_leaves_only_source_specific_actions_open(self):
+    def test_runtime_coverage_is_complete_for_primary_lane(self):
         freshness = configured_telegram_delivery_freshness_registry(
             channel_id=-1001234567890
         ).coverage("primary")
         lifecycle = configured_telegram_delivery_lifecycle_registry(
             channel_id=-1001234567890
         ).coverage("primary")
-        expected = {
-            "cosmetic_cleanup",
-            "delayed_restriction",
-            "noncritical_market",
-            "temporary_cleanup",
-            "timed_security",
-        }
-        self.assertEqual(
-            {action.value for action in freshness.missing_actions},
-            expected,
-        )
+        self.assertTrue(freshness.complete)
+        self.assertEqual(freshness.missing_actions, ())
         self.assertEqual(freshness.missing_actions, lifecycle.missing_actions)
 
     def test_feeder_mapping_matches_accepted_priority_families(self):

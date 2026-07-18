@@ -26,6 +26,7 @@ class TelegramNotificationActionPolicy:
     feeder: TelegramFeederKind
     template_version: str
     require_bot_access: bool = True
+    state_contract: str = "user_route"
 
     @property
     def source_type(self) -> str:
@@ -65,6 +66,7 @@ _POLICIES = (
         # Deactivation and grace-expiry notices must still reach the linked
         # user after market access has been disabled.
         require_bot_access=False,
+        state_contract="account_status",
     ),
     TelegramNotificationActionPolicy(
         TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE,
@@ -80,6 +82,21 @@ _POLICIES = (
         TelegramDeliveryAction.GENERAL_IMMEDIATE,
         TelegramFeederKind.DIRECT,
         "general-immediate-v1",
+    ),
+    TelegramNotificationActionPolicy(
+        TelegramDeliveryAction.TIMED_SECURITY,
+        TelegramFeederKind.TIMED_BOT,
+        "timed-security-v1",
+        # A grace-expiry security notice must remain deliverable after the
+        # account lock it describes has taken effect.
+        require_bot_access=False,
+        state_contract="account_status",
+    ),
+    TelegramNotificationActionPolicy(
+        TelegramDeliveryAction.DELAYED_RESTRICTION,
+        TelegramFeederKind.TIMED_BOT,
+        "delayed-restriction-v1",
+        state_contract="restriction_clear",
     ),
 )
 

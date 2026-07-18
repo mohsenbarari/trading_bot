@@ -312,6 +312,65 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(send_telegram.await_count, 2)
         force_clear_sessions.assert_awaited_once_with(db, owner.id)
 
+    async def test_queue_owner_uses_timed_security_for_due_global_lock(self):
+        now = datetime(2026, 5, 18, 12, 0, 0)
+        owner = SimpleNamespace(
+            id=11,
+            telegram_id=111,
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_grace_expires_at=now - timedelta(minutes=5),
+            messenger_blocked_at=None,
+            is_deleted=False,
+            sync_version=8,
+        )
+        accountant_user = SimpleNamespace(
+            id=12,
+            telegram_id=222,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            sync_version=9,
+        )
+        relation = SimpleNamespace(accountant_user=accountant_user)
+        db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult([owner])))
+        queue_runtime = SimpleNamespace(
+            mode=status_service.TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+
+        with patch.object(status_service, "_utcnow_naive", return_value=now), patch.object(
+            status_service,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch.object(
+            status_service,
+            "list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[relation]),
+        ), patch(
+            "core.services.user_account_status_service.force_clear_sessions",
+            new=AsyncMock(return_value=2),
+        ), patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_account_status_service.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send, patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_status_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue:
+            blocked_count = await status_service.mark_due_users_globally_locked(db)
+
+        self.assertEqual(blocked_count, 1)
+        direct_send.assert_not_awaited()
+        self.assertEqual(enqueue.await_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["action"]
+                == status_service.TelegramDeliveryAction.TIMED_SECURITY
+                for call in enqueue.await_args_list
+            )
+        )
+
     async def test_mark_due_users_globally_locked_handles_empty_and_failure_branches(self):
         empty_db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult([])))
         self.assertEqual(await status_service.mark_due_users_globally_locked(empty_db), 0)
