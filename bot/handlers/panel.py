@@ -51,6 +51,10 @@ from core.customer_invite import (
 from core.invitation_creation_contracts import InvitationRequesterIdentity
 from core.customer_invite_forwarding import forward_customer_invite_to_iran
 from core.server_routing import SERVER_FOREIGN, current_server
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 from bot.states import CustomerInvite
 
@@ -196,24 +200,39 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         )
         return
 
-    # حذف پیام کاربر و لنگر قبلی
-    await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
+    # Queue mode keeps the old durable anchor until Telegram confirms the new
+    # persistent menu.  Legacy mode preserves the previous delayed cleanup.
+    if not queue_mode:
+        await delete_previous_anchor(
+            message.bot,
+            message.chat.id,
+            delay=DeleteDelay.DEFAULT.value,
+        )
 
     async with AsyncSessionLocal() as session:
         can_use_customer_panel = await _can_use_customer_panel(session, user)
 
     if can_use_customer_panel:
         show_support = user.role == UserRole.STANDARD
-        anchor_msg = await message.answer(
+        anchor_msg = await answer_incoming_message_via_runtime(
+            message,
+            user,
             "👤 **پنل کاربر**\n\nگزینه مورد نظر را انتخاب کنید:",
+            source_key="panel-user-main-menu",
             parse_mode="Markdown",
             reply_markup=await build_user_panel_navigation_keyboard(
                 user,
                 standard_actions=True,
                 show_support=show_support,
             ),
+            set_persistent_anchor=True,
         )
-        set_anchor(message.chat.id, anchor_msg.message_id)
+        if not queue_mode:
+            set_anchor(message.chat.id, anchor_msg.message_id)
         return
     
     async with AsyncSessionLocal() as session:
@@ -231,12 +250,17 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         f"`{profile_link}`"
     )
     
-    anchor_msg = await message.answer(
+    anchor_msg = await answer_incoming_message_via_runtime(
+        message,
+        user,
         profile_text, 
+        source_key="panel-user-profile-menu",
         parse_mode="Markdown",
-        reply_markup=await build_user_panel_navigation_keyboard(user)
+        reply_markup=await build_user_panel_navigation_keyboard(user),
+        set_persistent_anchor=True,
     )
-    set_anchor(message.chat.id, anchor_msg.message_id)
+    if not queue_mode:
+        set_anchor(message.chat.id, anchor_msg.message_id)
 
 
 # --- هندلر پنل مدیریت ---
@@ -244,14 +268,28 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
 async def show_admin_panel_and_change_keyboard(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role not in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         return
-    
-    await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    
-    anchor_msg = await message.answer(
-        "وارد پنل مدیریت شدید.",
-        reply_markup=await build_admin_panel_navigation_keyboard(user)
+
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
-    set_anchor(message.chat.id, anchor_msg.message_id)
+    if not queue_mode:
+        await delete_previous_anchor(
+            message.bot,
+            message.chat.id,
+            delay=DeleteDelay.DEFAULT.value,
+        )
+
+    anchor_msg = await answer_incoming_message_via_runtime(
+        message,
+        user,
+        "وارد پنل مدیریت شدید.",
+        source_key="panel-admin-main-menu",
+        reply_markup=await build_admin_panel_navigation_keyboard(user),
+        set_persistent_anchor=True,
+    )
+    if not queue_mode:
+        set_anchor(message.chat.id, anchor_msg.message_id)
 
 
 # --- هندلر دکمه تنظیمات کاربری ---
