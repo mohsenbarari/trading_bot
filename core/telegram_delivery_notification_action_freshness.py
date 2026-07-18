@@ -40,8 +40,12 @@ from core.telegram_delivery_notification_action_contract import (
 from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionAnchorEffect,
     TelegramInteractionResultContract,
+    TelegramInteractionTargetKind,
+    TelegramInteractionTargetReference,
     parse_interaction_result_contract,
+    parse_interaction_target_reference,
     serialize_interaction_result_contract,
+    serialize_interaction_target_reference,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -94,12 +98,14 @@ class TelegramNotificationActionSource:
     deleted_account_snapshot: dict[str, str] | None
     not_before: datetime | None
     interaction_result: TelegramInteractionResultContract | None
+    interaction_target: TelegramInteractionTargetReference | None
 
 
 @dataclass(frozen=True, slots=True)
 class TelegramNotificationActionSnapshot:
     payload: dict[str, Any]
     source_version: int
+    method: str
 
 
 def _enum_value(value: Any) -> str:
@@ -212,6 +218,7 @@ def _validate_source_contract(
     deleted_account_snapshot: dict[str, str] | None = None
     not_before: datetime | None = None
     interaction_result: TelegramInteractionResultContract | None = None
+    interaction_target: TelegramInteractionTargetReference | None = None
     expected_user_sync_version = _strict_positive_int(
         extra_payload.get("user_sync_version")
     )
@@ -292,6 +299,8 @@ def _validate_source_contract(
             allowed_keys.add("reply_markup")
         if "interaction_result" in extra_payload:
             allowed_keys.add("interaction_result")
+        if "interaction_target" in extra_payload:
+            allowed_keys.add("interaction_target")
         if set(extra_payload) != allowed_keys:
             raise ValueError("notification_action_extra_payload_invalid")
         raw_reply_markup = extra_payload.get("reply_markup")
@@ -302,12 +311,13 @@ def _validate_source_contract(
         else:
             raise ValueError("notification_action_reply_markup_invalid")
         raw_interaction_result = extra_payload.get("interaction_result")
+        raw_interaction_target = extra_payload.get("interaction_target")
         if raw_interaction_result is not None:
             interaction_result = parse_interaction_result_contract(
                 raw_interaction_result
             )
             if (
-                interaction_result.method != "sendMessage"
+                interaction_result.method not in {"sendMessage", "editMessageText"}
                 or interaction_result.destination_class
                 != TelegramDestinationClass.PRIVATE
                 or not interaction_result.authenticated
@@ -319,6 +329,36 @@ def _validate_source_contract(
                 raise ValueError(
                     "notification_action_interaction_persistent_menu_mismatch"
                 )
+            if interaction_result.method == "sendMessage":
+                if raw_interaction_target is not None:
+                    raise ValueError(
+                        "notification_action_send_target_forbidden"
+                    )
+            else:
+                if raw_interaction_target is None:
+                    raise ValueError(
+                        "notification_action_edit_target_missing"
+                    )
+                interaction_target = parse_interaction_target_reference(
+                    raw_interaction_target
+                )
+                if interaction_target.kind != TelegramInteractionTargetKind.KNOWN_MESSAGE:
+                    raise ValueError(
+                        "notification_action_edit_target_kind_unsupported"
+                    )
+                enqueue_chat_id = _strict_positive_int(
+                    getattr(outbox, "telegram_id_at_enqueue", None)
+                )
+                if interaction_target.chat_id != enqueue_chat_id:
+                    raise ValueError(
+                        "notification_action_edit_target_route_mismatch"
+                    )
+                if _reply_markup_has_persistent_menu(reply_markup):
+                    raise ValueError(
+                        "notification_action_edit_persistent_menu_forbidden"
+                    )
+        elif raw_interaction_target is not None:
+            raise ValueError("notification_action_target_without_interaction")
 
     payload: dict[str, Any] = {
         "chat_id": int(getattr(outbox, "telegram_id_at_enqueue", 0) or 0),
@@ -345,6 +385,7 @@ def _validate_source_contract(
         deleted_account_snapshot=deleted_account_snapshot,
         not_before=not_before,
         interaction_result=interaction_result,
+        interaction_target=interaction_target,
     )
 
 
@@ -362,6 +403,11 @@ def telegram_notification_action_source_natural_id(
             "interaction_result": (
                 serialize_interaction_result_contract(source.interaction_result)
                 if source.interaction_result
+                else None
+            ),
+            "interaction_target": (
+                serialize_interaction_target_reference(source.interaction_target)
+                if source.interaction_target
                 else None
             ),
             "parse_mode": source.parse_mode,
@@ -568,6 +614,21 @@ def build_telegram_notification_action_snapshot(
         "text": source.text,
         "parse_mode": source.parse_mode,
     }
+    method = (
+        source.interaction_result.method
+        if source.interaction_result is not None
+        else "sendMessage"
+    )
+    if method == "editMessageText":
+        target = source.interaction_target
+        if (
+            target is None
+            or target.kind != TelegramInteractionTargetKind.KNOWN_MESSAGE
+            or target.chat_id != telegram_id
+            or _strict_positive_int(target.message_id) is None
+        ):
+            raise ValueError("notification_action_edit_target_invalid")
+        payload["message_id"] = int(target.message_id)
     if source.reply_markup is not None:
         payload["reply_markup"] = source.reply_markup
     normalized_payload, payload_hash = canonical_telegram_delivery_payload(payload)
@@ -580,6 +641,11 @@ def build_telegram_notification_action_snapshot(
             "interaction_result": (
                 serialize_interaction_result_contract(source.interaction_result)
                 if source.interaction_result
+                else None
+            ),
+            "interaction_target": (
+                serialize_interaction_target_reference(source.interaction_target)
+                if source.interaction_target
                 else None
             ),
             "not_before": (
@@ -603,6 +669,7 @@ def build_telegram_notification_action_snapshot(
     return TelegramNotificationActionSnapshot(
         payload=normalized_payload,
         source_version=source_version or 1,
+        method=method,
     )
 
 
@@ -677,7 +744,7 @@ def _validate_static_route(
         return policy, _quarantined(
             "notification_action_freshness_destination_class_mismatch"
         )
-    if str(job.method or "") != "sendMessage":
+    if str(job.method or "") not in {"sendMessage", "editMessageText"}:
         return policy, _quarantined("notification_action_freshness_method_mismatch")
     if str(job.bot_identity or "") != "primary":
         return policy, _quarantined(
@@ -725,6 +792,13 @@ async def validate_notification_action_telegram_delivery_freshness(
         return _quarantined("notification_action_freshness_source_contract_invalid")
     if source.policy != policy:
         return _quarantined("notification_action_freshness_policy_mismatch")
+    expected_method = (
+        source.interaction_result.method
+        if source.interaction_result is not None
+        else "sendMessage"
+    )
+    if str(job.method or "") != expected_method:
+        return _quarantined("notification_action_freshness_method_mismatch")
     if _strict_positive_int(getattr(outbox, "telegram_id_at_enqueue", None)) is None:
         return _quarantined("notification_action_freshness_enqueue_identity_invalid")
     if _strict_positive_int(getattr(outbox, "queue_job_id", None)) != _strict_positive_int(
@@ -835,6 +909,7 @@ async def validate_notification_action_telegram_delivery_freshness(
         return _quarantined("notification_action_freshness_current_payload_invalid")
     if (
         _strict_positive_int(job.source_version) != current.source_version
+        or str(job.method or "") != current.method
         or normalized_stored != current.payload
     ):
         return _decision(

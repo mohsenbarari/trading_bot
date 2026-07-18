@@ -437,6 +437,7 @@ async def handoff_next_due_telegram_notification_outbox(
             snapshot = build_telegram_notification_action_snapshot(outbox, user)
             source_version = snapshot.source_version
             payload = snapshot.payload
+            method = snapshot.method
             campaign_id = None
             feeder = action_policy.feeder
             action = action_policy.action

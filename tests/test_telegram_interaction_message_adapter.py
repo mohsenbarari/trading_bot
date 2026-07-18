@@ -20,6 +20,7 @@ def _message(*, chat_id=7007, message_id=91):
         chat=SimpleNamespace(id=chat_id),
         message_id=message_id,
         answer=AsyncMock(return_value=SimpleNamespace(message_id=92)),
+        edit_text=AsyncMock(return_value=SimpleNamespace(message_id=message_id)),
     )
 
 
@@ -266,6 +267,108 @@ class TelegramInteractionMessageAdapterTests(unittest.IsolatedAsyncioTestCase):
                     _user(),
                     "پاسخ",
                     source_key="history-excel-empty",
+                    session=session,
+                )
+
+        enqueue.assert_not_awaited()
+        session.commit.assert_not_awaited()
+
+    async def test_callback_edit_legacy_mode_preserves_exact_aiogram_call(self):
+        callback = _callback()
+        markup = object()
+        with patch.object(
+            adapter,
+            "configured_telegram_delivery_runtime",
+            return_value=_runtime(TelegramDeliveryRuntimeMode.LEGACY),
+        ):
+            result = await adapter.edit_callback_message_via_runtime(
+                callback,
+                _user(),
+                "متن جدید",
+                source_key="block-menu-main",
+                parse_mode="Markdown",
+                reply_markup=markup,
+            )
+
+        self.assertEqual(result.message_id, 91)
+        callback.message.edit_text.assert_awaited_once_with(
+            "متن جدید",
+            parse_mode="Markdown",
+            reply_markup=markup,
+        )
+
+    async def test_callback_edit_queue_mode_persists_hashed_known_target(self):
+        callback = _callback(callback_id="edit-callback-raw-secret")
+        user = _user()
+        session = SimpleNamespace(commit=AsyncMock())
+        expected = object()
+        markup = SimpleNamespace(
+            model_dump=lambda **_kwargs: {
+                "inline_keyboard": [[{"text": "بازگشت", "callback_data": "back"}]]
+            }
+        )
+        with (
+            patch.object(
+                adapter,
+                "configured_telegram_delivery_runtime",
+                return_value=_runtime(TelegramDeliveryRuntimeMode.QUEUE_V1),
+            ),
+            patch.object(adapter, "current_server", return_value="foreign"),
+            patch.object(
+                adapter,
+                "enqueue_private_interaction_edit_once",
+                new=AsyncMock(return_value=expected),
+            ) as enqueue,
+        ):
+            result = await adapter.edit_callback_message_via_runtime(
+                callback,
+                user,
+                "متن جدید",
+                source_key="block-menu-main",
+                parse_mode="Markdown",
+                reply_markup=markup,
+                session=session,
+            )
+
+        self.assertIs(result, expected)
+        callback.message.edit_text.assert_not_awaited()
+        session.commit.assert_awaited_once()
+        kwargs = enqueue.await_args.kwargs
+        self.assertEqual(kwargs["target_message_id"], 91)
+        self.assertEqual(kwargs["text"], "متن جدید")
+        self.assertEqual(kwargs["parse_mode"], "Markdown")
+        self.assertEqual(
+            kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+            "back",
+        )
+        self.assertIn(":cb-", kwargs["source_id"])
+        self.assertNotIn("edit-callback-raw-secret", kwargs["source_id"])
+        self.assertIn(":cb-", kwargs["logical_message_key"])
+
+    async def test_callback_edit_queue_mode_rejects_route_mismatch(self):
+        callback = _callback(chat_id=8008)
+        session = SimpleNamespace(commit=AsyncMock())
+        with (
+            patch.object(
+                adapter,
+                "configured_telegram_delivery_runtime",
+                return_value=_runtime(TelegramDeliveryRuntimeMode.QUEUE_V1),
+            ),
+            patch.object(
+                adapter,
+                "enqueue_private_interaction_edit_once",
+                new=AsyncMock(),
+            ) as enqueue,
+        ):
+            with self.assertRaisesRegex(
+                adapter.TelegramInteractionMessageRouteError,
+                "route_mismatch",
+            ):
+                await adapter.edit_callback_message_via_runtime(
+                    callback,
+                    _user(),
+                    "متن جدید",
+                    source_key="block-menu-main",
                     session=session,
                 )
 

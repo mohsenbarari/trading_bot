@@ -117,10 +117,19 @@ def _positive_int(value: Any) -> int | None:
 def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
     action = _enum_value(job.action_kind)
     is_offer_success = action == TelegramDeliveryAction.OFFER_SUCCESS.value
+    is_notification_action = action in TELEGRAM_NOTIFICATION_ACTION_VALUES
+    if is_offer_success:
+        method_valid = str(job.method or "") == "editMessageText"
+    elif is_notification_action:
+        method_valid = str(job.method or "") in {
+            "sendMessage",
+            "editMessageText",
+        }
+    else:
+        method_valid = str(job.method or "") == "sendMessage"
     common_route_valid = (
         _enum_value(job.destination_class) == TelegramDestinationClass.PRIVATE.value
-        and str(job.method or "")
-        == ("editMessageText" if is_offer_success else "sendMessage")
+        and method_valid
         and str(job.bot_identity or "") == "primary"
     )
     action_route_valid = (
@@ -236,6 +245,11 @@ def _accumulate_attempts(
 def _payload_chat_id(job: TelegramDeliveryJobRecord) -> int | None:
     payload = getattr(job, "payload", None)
     return _positive_int(payload.get("chat_id")) if isinstance(payload, dict) else None
+
+
+def _payload_message_id(job: TelegramDeliveryJobRecord) -> int | None:
+    payload = getattr(job, "payload", None)
+    return _positive_int(payload.get("message_id")) if isinstance(payload, dict) else None
 
 
 async def _finalize_active_outbox(
@@ -530,6 +544,9 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
         outcome = decision.outcome
         reason = str(decision.reason or outcome.value)
         if outcome == TelegramDeliveryOutcome.SENT:
+            telegram_message_id = _positive_int(job.telegram_message_id)
+            if telegram_message_id is None and str(job.method or "").startswith("edit"):
+                telegram_message_id = _payload_message_id(job)
             await _finalize_active_outbox(
                 db,
                 outbox=outbox,
@@ -537,13 +554,26 @@ class TelegramNotificationOutboxQueueLifecycleFeedback:
                 target=TelegramNotificationOutboxStatus.SENT,
                 reason="telegram_sent",
                 now=now,
-                telegram_message_id=job.telegram_message_id,
+                telegram_message_id=telegram_message_id,
             )
             await _apply_interaction_anchor_result(
                 db,
                 outbox=outbox,
                 job=job,
                 now=now,
+            )
+        elif (
+            outcome == TelegramDeliveryOutcome.SENT_NOOP
+            and str(job.method or "").startswith("edit")
+        ):
+            await _finalize_active_outbox(
+                db,
+                outbox=outbox,
+                job=job,
+                target=TelegramNotificationOutboxStatus.SENT,
+                reason="telegram_edit_already_applied",
+                now=now,
+                telegram_message_id=_payload_message_id(job),
             )
         elif outcome in _HOLD_OUTCOMES:
             _require_active_binding(outbox, job=job)

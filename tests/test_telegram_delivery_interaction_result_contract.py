@@ -5,12 +5,16 @@ from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionDependencyOutcome,
     TelegramInteractionResultOutcome,
     TelegramInteractionResultRequirement,
+    TelegramInteractionTargetKind,
+    TelegramInteractionTargetReference,
     apply_interaction_delivery_result,
     build_delivery_result_target,
     build_interaction_result_contract,
     build_known_message_target,
+    parse_interaction_target_reference,
     parse_interaction_result_contract,
     resolve_interaction_target,
+    serialize_interaction_target_reference,
     serialize_interaction_result_contract,
 )
 from core.telegram_delivery_queue_contract import (
@@ -121,6 +125,36 @@ class TelegramInteractionResultContractTests(unittest.TestCase):
         self.assertEqual(decision.outcome, TelegramInteractionDependencyOutcome.READY)
         self.assertEqual(decision.chat_id, -10011)
         self.assertEqual(decision.message_id, 44)
+
+    def test_serialized_targets_round_trip_without_mixed_identity(self):
+        references = (
+            build_known_message_target(chat_id=11, message_id=44),
+            build_delivery_result_target(chat_id=11, source_receipt_id=9),
+        )
+
+        for reference in references:
+            with self.subTest(kind=reference.kind):
+                self.assertEqual(
+                    parse_interaction_target_reference(
+                        serialize_interaction_target_reference(reference)
+                    ),
+                    reference,
+                )
+
+        known = serialize_interaction_target_reference(references[0])
+        with self.assertRaisesRegex(ValueError, "receipt_forbidden"):
+            parse_interaction_target_reference({**known, "source_receipt_id": 9})
+        result = serialize_interaction_target_reference(references[1])
+        with self.assertRaisesRegex(ValueError, "message_forbidden"):
+            parse_interaction_target_reference({**result, "message_id": 44})
+        malformed = TelegramInteractionTargetReference(
+            kind=TelegramInteractionTargetKind.KNOWN_MESSAGE,
+            chat_id=11,
+            message_id=44,
+            source_receipt_id=9,
+        )
+        with self.assertRaisesRegex(ValueError, "receipt_forbidden"):
+            serialize_interaction_target_reference(malformed)
 
     def test_target_builders_reject_nonpositive_or_boolean_identifiers(self):
         invalid_calls = (

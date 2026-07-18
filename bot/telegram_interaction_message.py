@@ -9,6 +9,7 @@ from typing import Any
 from core.db import AsyncSessionLocal
 from core.server_routing import current_server
 from core.services.telegram_interaction_outbox_service import (
+    enqueue_private_interaction_edit_once,
     enqueue_private_interaction_once,
 )
 from core.services.telegram_notification_outbox_service import (
@@ -257,3 +258,65 @@ async def answer_callback_message_via_runtime(
         session=session,
         commit=commit,
     )
+
+
+async def edit_callback_message_via_runtime(
+    callback: Any,
+    user: Any,
+    text: str,
+    *,
+    source_key: str,
+    action: TelegramDeliveryAction | str = TelegramDeliveryAction.GENERAL_IMMEDIATE,
+    parse_mode: Any = _UNSET,
+    reply_markup: Any = _UNSET,
+    session: Any = None,
+    commit: bool = True,
+):
+    """Edit one known private callback message or persist the exact edit target."""
+    message = getattr(callback, "message", None)
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        kwargs: dict[str, Any] = {}
+        if parse_mode is not _UNSET:
+            kwargs["parse_mode"] = parse_mode
+        if reply_markup is not _UNSET:
+            kwargs["reply_markup"] = reply_markup
+        return await message.edit_text(text, **kwargs)
+
+    normalized_source_key = _normalized_source_key(source_key)
+    user_id, telegram_id, sync_version, message_id = _private_message_identity(
+        message,
+        user,
+    )
+    event_key = _callback_event_key(callback)
+    normalized_markup = _serialized_reply_markup(reply_markup)
+
+    async def _enqueue(db):
+        result = await enqueue_private_interaction_edit_once(
+            db,
+            current_server=current_server(),
+            recipient=TelegramNotificationRecipient(
+                user_id=user_id,
+                telegram_id=telegram_id,
+            ),
+            action=action,
+            source_id=f"iedit:{normalized_source_key}:{user_id}:{event_key}",
+            logical_message_key=(
+                f"private-edit:{user_id}:{normalized_source_key}:{event_key}"
+            ),
+            target_message_id=message_id,
+            text=text,
+            user_sync_version=sync_version,
+            parse_mode=None if parse_mode is _UNSET else parse_mode,
+            reply_markup=normalized_markup,
+        )
+        if commit:
+            await db.commit()
+        return result
+
+    if session is not None:
+        return await _enqueue(session)
+    async with AsyncSessionLocal() as db:
+        return await _enqueue(db)

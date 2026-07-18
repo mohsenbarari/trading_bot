@@ -151,6 +151,14 @@ _SERIALIZED_CONTRACT_KEYS = frozenset(
         "temporary_context_keyboard",
     }
 )
+_SERIALIZED_TARGET_KEYS = frozenset(
+    {
+        "chat_id",
+        "kind",
+        "message_id",
+        "source_receipt_id",
+    }
+)
 
 
 def build_interaction_result_contract(
@@ -317,6 +325,57 @@ def build_delivery_result_target(
         kind=TelegramInteractionTargetKind.DELIVERY_RESULT,
         chat_id=normalized_chat,
         source_receipt_id=normalized_receipt,
+    )
+
+
+def serialize_interaction_target_reference(
+    reference: TelegramInteractionTargetReference,
+) -> dict[str, object]:
+    if reference.kind == TelegramInteractionTargetKind.KNOWN_MESSAGE:
+        if reference.source_receipt_id is not None:
+            raise ValueError("telegram_interaction_known_target_receipt_forbidden")
+        normalized = build_known_message_target(
+            chat_id=reference.chat_id,
+            message_id=reference.message_id,
+        )
+    elif reference.kind == TelegramInteractionTargetKind.DELIVERY_RESULT:
+        if reference.message_id is not None:
+            raise ValueError("telegram_interaction_result_target_message_forbidden")
+        normalized = build_delivery_result_target(
+            chat_id=reference.chat_id,
+            source_receipt_id=reference.source_receipt_id,
+        )
+    else:
+        raise ValueError("telegram_interaction_target_kind_unknown")
+    return {
+        "chat_id": normalized.chat_id,
+        "kind": normalized.kind.value,
+        "message_id": normalized.message_id,
+        "source_receipt_id": normalized.source_receipt_id,
+    }
+
+
+def parse_interaction_target_reference(
+    payload: Mapping[str, object] | object,
+) -> TelegramInteractionTargetReference:
+    if not isinstance(payload, Mapping) or set(payload) != _SERIALIZED_TARGET_KEYS:
+        raise ValueError("telegram_interaction_serialized_target_invalid")
+    try:
+        kind = TelegramInteractionTargetKind(str(payload.get("kind") or ""))
+    except ValueError as exc:
+        raise ValueError("telegram_interaction_serialized_target_kind_invalid") from exc
+    if kind == TelegramInteractionTargetKind.KNOWN_MESSAGE:
+        if payload.get("source_receipt_id") is not None:
+            raise ValueError("telegram_interaction_known_target_receipt_forbidden")
+        return build_known_message_target(
+            chat_id=payload.get("chat_id"),
+            message_id=payload.get("message_id"),
+        )
+    if payload.get("message_id") is not None:
+        raise ValueError("telegram_interaction_result_target_message_forbidden")
+    return build_delivery_result_target(
+        chat_id=payload.get("chat_id"),
+        source_receipt_id=payload.get("source_receipt_id"),
     )
 
 

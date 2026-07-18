@@ -16,7 +16,9 @@ from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionAnchorEffect,
     TelegramInteractionResultRequirement,
     build_interaction_result_contract,
+    build_known_message_target,
     serialize_interaction_result_contract,
+    serialize_interaction_target_reference,
 )
 from core.telegram_delivery_notification_action_freshness import (
     _validate_interaction_anchor_freshness,
@@ -89,7 +91,151 @@ def action_outbox(*, contract, outbox_id=10):
     )
 
 
+def edit_contract(*, logical_key="user:7:block:edit:1"):
+    return build_interaction_result_contract(
+        logical_message_key=logical_key,
+        method="editMessageText",
+        destination_class=TelegramDestinationClass.PRIVATE,
+        result_requirement=TelegramInteractionResultRequirement.NONE,
+        anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
+        authenticated=True,
+    )
+
+
+def edit_action_outbox(*, target_message_id=44, outbox_id=16):
+    source_id = "block:edit:1"
+    contract = edit_contract()
+    target = build_known_message_target(
+        chat_id=7007,
+        message_id=target_message_id,
+    )
+    return SimpleNamespace(
+        id=outbox_id,
+        dedupe_key=telegram_notification_dedupe_key(
+            source_type="queue_action:general_immediate",
+            source_id=source_id,
+            recipient_user_id=7,
+        ),
+        source_type="queue_action:general_immediate",
+        source_id=source_id,
+        recipient_user_id=7,
+        telegram_id_at_enqueue=7007,
+        text="متن ویرایش‌شده",
+        parse_mode="Markdown",
+        status=TelegramNotificationOutboxStatus.PENDING,
+        extra_payload={
+            "interaction_result": serialize_interaction_result_contract(contract),
+            "interaction_target": serialize_interaction_target_reference(target),
+            "queue_action": "general_immediate",
+            "reply_markup": {"inline_keyboard": []},
+            "user_sync_version": 4,
+        },
+    )
+
+
 class TelegramInteractionOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_known_target_edit_persists_method_target_and_no_anchor(self):
+        outbox = SimpleNamespace(id=16)
+        db = SimpleNamespace()
+        with (
+            patch.object(
+                interaction_service,
+                "_find_existing",
+                new=AsyncMock(return_value=None),
+            ),
+            patch.object(
+                interaction_service,
+                "enqueue_telegram_action_notification_once",
+                new=AsyncMock(
+                    return_value=TelegramNotificationEnqueueResult(outbox, True)
+                ),
+            ) as enqueue,
+        ):
+            result = await interaction_service.enqueue_private_interaction_edit_once(
+                db,
+                current_server="foreign",
+                recipient=recipient(),
+                action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                source_id="block:edit:1",
+                logical_message_key="user:7:block:edit:1",
+                target_message_id=44,
+                text="متن ویرایش‌شده",
+                user_sync_version=4,
+                parse_mode="Markdown",
+                reply_markup={"inline_keyboard": []},
+            )
+
+        self.assertEqual(result.contract.method, "editMessageText")
+        self.assertEqual(
+            result.contract.result_requirement,
+            TelegramInteractionResultRequirement.NONE,
+        )
+        self.assertIsNone(result.anchor_state)
+        kwargs = enqueue.await_args.kwargs
+        self.assertEqual(kwargs["interaction_target"].chat_id, 7007)
+        self.assertEqual(kwargs["interaction_target"].message_id, 44)
+        self.assertIs(kwargs["interaction_result"], result.contract)
+
+    async def test_known_target_edit_replay_rejects_a_changed_target(self):
+        existing = edit_action_outbox(target_message_id=44)
+        db = SimpleNamespace()
+        with patch.object(
+            interaction_service,
+            "_find_existing",
+            new=AsyncMock(return_value=existing),
+        ):
+            with self.assertRaisesRegex(ValueError, "replay_target_conflict"):
+                await interaction_service.enqueue_private_interaction_edit_once(
+                    db,
+                    current_server="foreign",
+                    recipient=recipient(),
+                    action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                    source_id="block:edit:1",
+                    logical_message_key="user:7:block:edit:1",
+                    target_message_id=45,
+                    text="متن ویرایش‌شده",
+                    user_sync_version=4,
+                    parse_mode="Markdown",
+                    reply_markup={"inline_keyboard": []},
+                )
+
+    async def test_known_target_edit_rejects_reply_keyboard_and_invalid_target(self):
+        db = SimpleNamespace()
+        for target_message_id, reply_markup, error in (
+            (44, persistent_menu(), "persistent_menu_forbidden"),
+            (True, None, "known_target_invalid"),
+        ):
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                await interaction_service.enqueue_private_interaction_edit_once(
+                    db,
+                    current_server="foreign",
+                    recipient=recipient(),
+                    action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                    source_id="block:edit:invalid",
+                    logical_message_key="user:7:block:edit:invalid",
+                    target_message_id=target_message_id,
+                    text="متن ویرایش‌شده",
+                    user_sync_version=4,
+                    reply_markup=reply_markup,
+                )
+
+    def test_known_target_edit_snapshot_contains_exact_method_and_target(self):
+        outbox = edit_action_outbox(target_message_id=44)
+        user = SimpleNamespace(
+            id=7,
+            telegram_id=7007,
+            sync_version=4,
+            account_status="active",
+            messenger_blocked_at=None,
+        )
+
+        snapshot = build_telegram_notification_action_snapshot(outbox, user)
+
+        self.assertEqual(snapshot.method, "editMessageText")
+        self.assertEqual(snapshot.payload["chat_id"], 7007)
+        self.assertEqual(snapshot.payload["message_id"], 44)
+        self.assertEqual(snapshot.payload["text"], "متن ویرایش‌شده")
+
     async def test_non_anchor_interaction_reuses_notification_outbox_without_anchor_state(self):
         outbox = SimpleNamespace(id=11)
         db = SimpleNamespace()

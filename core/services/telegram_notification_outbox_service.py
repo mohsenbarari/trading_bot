@@ -32,7 +32,10 @@ from core.telegram_delivery_notification_action_contract import (
 )
 from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionResultContract,
+    TelegramInteractionTargetKind,
+    TelegramInteractionTargetReference,
     serialize_interaction_result_contract,
+    serialize_interaction_target_reference,
 )
 from core.telegram_delivery_offer_success_contract import (
     TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
@@ -510,8 +513,9 @@ async def enqueue_telegram_action_notification_once(
     parse_mode: str | None = None,
     reply_markup: Mapping[str, Any] | None = None,
     interaction_result: TelegramInteractionResultContract | None = None,
+    interaction_target: TelegramInteractionTargetReference | None = None,
 ) -> TelegramNotificationEnqueueResult:
-    """Persist one allowlisted private ``sendMessage`` action intent."""
+    """Persist one allowlisted private send or known-target edit intent."""
     policy = telegram_notification_action_policy(action)
     if policy.state_contract != "user_route":
         raise ValueError("telegram_notification_action_requires_state_contract")
@@ -542,7 +546,7 @@ async def enqueue_telegram_action_notification_once(
         raise ValueError("telegram_notification_persistent_menu_requires_interaction")
     if interaction_result is not None:
         if (
-            interaction_result.method != "sendMessage"
+            interaction_result.method not in {"sendMessage", "editMessageText"}
             or interaction_result.destination_class.value != "private"
             or not interaction_result.authenticated
         ):
@@ -551,9 +555,28 @@ async def enqueue_telegram_action_notification_once(
             raise ValueError(
                 "telegram_notification_interaction_persistent_menu_mismatch"
             )
+        if interaction_result.method != "sendMessage" and persistent_menu_present:
+            raise ValueError(
+                "telegram_notification_edit_persistent_menu_forbidden"
+            )
         extra_payload["interaction_result"] = (
             serialize_interaction_result_contract(interaction_result)
         )
+        if interaction_result.method == "sendMessage":
+            if interaction_target is not None:
+                raise ValueError("telegram_notification_send_target_forbidden")
+        else:
+            if interaction_target is None:
+                raise ValueError("telegram_notification_edit_target_required")
+            if interaction_target.kind != TelegramInteractionTargetKind.KNOWN_MESSAGE:
+                raise ValueError("telegram_notification_edit_target_kind_unsupported")
+            if interaction_target.chat_id != recipient.telegram_id:
+                raise ValueError("telegram_notification_edit_target_route_mismatch")
+            extra_payload["interaction_target"] = (
+                serialize_interaction_target_reference(interaction_target)
+            )
+    elif interaction_target is not None:
+        raise ValueError("telegram_notification_target_requires_interaction")
     return await enqueue_telegram_notification_once(
         db,
         recipient=recipient,
