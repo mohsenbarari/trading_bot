@@ -23,6 +23,7 @@ from bot.keyboards import (
     get_admin_panel_keyboard 
 )
 from bot.repeat_offer import build_admin_panel_navigation_keyboard
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -120,7 +121,11 @@ async def start_invitation_creation(message: types.Message, state: FSMContext, u
 @router.callback_query(F.data == "create_invitation_inline")
 async def start_invitation_creation_inline(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not _can_manage_invitations(user):
-        await callback.answer("شما مجاز به این کار نیستید.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "شما مجاز به این کار نیستید.",
+            show_alert=True,
+        )
         return
     
     await state.set_state(InvitationCreation.awaiting_account_name)
@@ -131,7 +136,7 @@ async def start_invitation_creation_inline(callback: types.CallbackQuery, state:
         parse_mode="Markdown"
     )
     await state.update_data(last_prompt_message_id=callback.message.message_id, inviter_role=user.role.value)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 # --- دریافت نام کاربری ---
 @router.message(InvitationCreation.awaiting_account_name)
@@ -210,7 +215,11 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
 @router.callback_query(InvitationCreation.awaiting_role)
 async def process_invitation_role(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     if not _can_manage_invitations(user):
-        await callback.answer("عدم دسترسی", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "عدم دسترسی",
+            show_alert=True,
+        )
         return
 
     data = await state.get_data()
@@ -227,11 +236,19 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
         role_name = callback.data.split("set_role_")[1]
         role = UserRole[role_name]
     except (IndexError, KeyError):
-        await callback.answer("نقش انتخاب شده نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "نقش انتخاب شده نامعتبر است.",
+            show_alert=True,
+        )
         return
 
     if role not in get_invitable_roles_for_admin(user.role):
-        await callback.answer("این نقش برای شما مجاز نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "این نقش برای شما مجاز نیست.",
+            show_alert=True,
+        )
         return
 
     account_name = data.get("account_name")
@@ -267,7 +284,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
     except Exception:
         await callback.message.answer("❌ خطای سیستمی در ارتباط با سرور ایران.")
         await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     if status_code >= 400 or not isinstance(result, dict):
         detail = result.get("detail") if isinstance(result, dict) else None
@@ -292,7 +309,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
             )
             
     await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 # --- هندلر لغو عملیات ---
 @router.callback_query(F.data == "comm_fsm_cancel", StateFilter(InvitationCreation))
@@ -323,4 +340,4 @@ async def cancel_invitation_creation(
         user=user,
         user_role=inviter_role,
     )
-    await callback.answer("لغو شد")
+    await answer_callback_query_via_runtime(callback, "لغو شد")
