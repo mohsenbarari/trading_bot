@@ -532,10 +532,13 @@ def telegram_notification_action_outbox_matches_current_user(
     *,
     now: datetime | None = None,
 ) -> bool:
-    return notification_action_source_matches_current_user(
-        _validate_source_contract(outbox),
-        user,
-        now=now,
+    source = _validate_source_contract(outbox)
+    if not notification_action_source_matches_current_user(source, user, now=now):
+        return False
+    if source.account_notice_kind == ACCOUNT_NOTICE_KIND_DELETED:
+        return True
+    return _strict_positive_int(getattr(user, "telegram_id", None)) == _strict_positive_int(
+        getattr(outbox, "telegram_id_at_enqueue", None)
     )
 
 
@@ -878,6 +881,15 @@ async def validate_notification_action_telegram_delivery_freshness(
         return _decision(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="notification_action_freshness_recipient_unlinked",
+        )
+    if (
+        source.account_notice_kind != ACCOUNT_NOTICE_KIND_DELETED
+        and _strict_positive_int(getattr(user, "telegram_id", None))
+        != _strict_positive_int(getattr(outbox, "telegram_id_at_enqueue", None))
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_recipient_relinked",
         )
     if notification_action_source_waits_for_current_user(source, user):
         return _decision(

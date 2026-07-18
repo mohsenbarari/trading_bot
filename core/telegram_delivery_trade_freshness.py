@@ -561,6 +561,21 @@ async def validate_trade_result_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="trade_freshness_recipient_unlinked",
         )
+    audit_payload = getattr(receipt, "audit_payload", None)
+    telegram_id_at_enqueue = _strict_positive_int(
+        audit_payload.get("telegram_id_at_audience_build")
+        if isinstance(audit_payload, Mapping)
+        else None
+    )
+    if (
+        telegram_id_at_enqueue is None
+        or telegram_id_at_enqueue
+        != _strict_positive_int(getattr(user, "telegram_id", None))
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="trade_freshness_recipient_relinked",
+        )
     access_decision = await evaluate_bot_access(db, user)
     if not access_decision.allowed:
         return _decision(

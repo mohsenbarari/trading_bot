@@ -180,6 +180,15 @@ class TelegramAdminBroadcastFreshnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
         self.assertEqual(decision.reason, "admin_broadcast_freshness_recipient_unlinked")
 
+        relinked = _user(telegram_id=9002)
+        decision = await self._validate(
+            receipt=_receipt(telegram_id_at_enqueue=9001),
+            user=relinked,
+            job=_job(user=_user(telegram_id=9001)),
+        )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
+        self.assertEqual(decision.reason, "admin_broadcast_freshness_recipient_relinked")
+
     async def test_binding_route_and_payload_tampering_quarantine(self):
         receipt = _receipt(queue_job_id=999)
         decision = await self._validate(

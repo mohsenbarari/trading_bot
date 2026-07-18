@@ -185,6 +185,18 @@ class TelegramDeliveryRepeatOfferFreshnessTests(unittest.IsolatedAsyncioTestCase
         decision = await self._validate(user=_user(telegram_id=None))
         self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
 
+    async def test_relinked_recipient_never_receives_old_repeat_response(self):
+        decision = await self._validate(
+            outbox=_outbox(telegram_id_at_enqueue=7007),
+            user=_user(telegram_id=7008),
+            job=_job(user=_user(telegram_id=7007)),
+        )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
+        self.assertEqual(
+            decision.reason,
+            "repeat_offer_response_freshness_recipient_relinked",
+        )
+
     async def test_terminal_sent_outbox_is_idempotent_noop(self):
         outbox = _outbox(
             status=TelegramNotificationOutboxStatus.SENT,

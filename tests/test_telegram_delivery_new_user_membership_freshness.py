@@ -179,6 +179,17 @@ class TelegramNewUserMembershipFreshnessTests(unittest.IsolatedAsyncioTestCase):
             "new_user_membership_freshness_recipient_unlinked",
         )
 
+        decision = await self._validate(
+            outbox=_outbox(telegram_id_at_enqueue=7007),
+            user=_user(telegram_id=7008),
+            job=_job(user=_user(telegram_id=7007)),
+        )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
+        self.assertEqual(
+            decision.reason,
+            "new_user_membership_freshness_recipient_relinked",
+        )
+
         decision = await self._validate(customer=object())
         self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
         self.assertEqual(

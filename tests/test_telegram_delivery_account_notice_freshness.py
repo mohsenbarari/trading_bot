@@ -75,6 +75,16 @@ class TelegramDeliveryAccountNoticeFreshnessTests(unittest.TestCase):
             )
         )
 
+        user.sync_version = 5
+        user.telegram_id = 7008
+        self.assertFalse(
+            telegram_notification_action_outbox_matches_current_user(
+                outbox,
+                user,
+                now=datetime(2026, 7, 18, tzinfo=timezone.utc),
+            )
+        )
+
         user.sync_version = 6
         self.assertFalse(
             telegram_notification_action_outbox_matches_current_user(

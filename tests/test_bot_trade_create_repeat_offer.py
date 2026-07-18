@@ -33,6 +33,11 @@ class FakeScalarSession:
         return self.value
 
 
+class FailingOfferLoadSession:
+    async def get(self, *_args, **_kwargs):
+        raise RuntimeError("synthetic_post_commit_offer_load_failure")
+
+
 class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
     async def test_button_uses_normal_preview_and_records_provenance(self):
         candidate = BotRepeatOfferCandidate(
@@ -309,6 +314,110 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(offer.republished_from_offer_public_id)
         expire.assert_awaited_once()
+
+    async def test_queue_post_commit_failure_never_expires_or_reports_rejection(self):
+        state = SimpleNamespace(
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 5,
+                    "trade_type": "buy",
+                    "settlement_type": "cash",
+                    "commodity_id": 7,
+                    "commodity_name": "ربع",
+                    "price": 178000,
+                    "is_wholesale": True,
+                    "lot_sizes": None,
+                    "notes": None,
+                }
+            ),
+            clear=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            message=SimpleNamespace(
+                message_id=81,
+                chat=SimpleNamespace(id=99),
+                edit_text=AsyncMock(),
+            ),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=99),
+        )
+        user = SimpleNamespace(id=9, limitations_expire_at=None, sync_version=3)
+        offer = SimpleNamespace(
+            id=55,
+            offer_public_id="ofr_post_commit_55",
+            version_id=1,
+            offer_type=SimpleNamespace(value="buy"),
+            settlement_type="cash",
+            commodity_id=7,
+            quantity=5,
+            price=178000,
+            notes=None,
+        )
+        creation_session = SimpleNamespace(
+            flush=AsyncMock(),
+            commit=AsyncMock(),
+        )
+
+        with patch(
+            "bot.handlers.trade_create._bot_market_is_open",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=4),
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeScalarSession(0)),
+                FakeSessionContext(SimpleNamespace()),
+                FakeSessionContext(creation_session),
+                FakeSessionContext(FailingOfferLoadSession()),
+            ],
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.create_authoritative_offer_with_outcome",
+            new=AsyncMock(return_value=SimpleNamespace(offer=offer, created=True)),
+        ), patch(
+            "bot.handlers.trade_create.get_or_create_telegram_publication_state",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.trade_create._canonical_commodity_name_from_session",
+            new=AsyncMock(return_value="ربع"),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_offer_success_preview_notification_once",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ), patch(
+            "bot.handlers.trade_create._expire_offer_after_publication_failure",
+            new=AsyncMock(),
+        ) as expire, patch(
+            "bot.handlers.trade_create.settings",
+            SimpleNamespace(channel_id=-100),
+        ):
+            await _handle_trade_confirm_core(
+                callback,
+                state,
+                user,
+                SimpleNamespace(),
+                check_user_limits_fn=lambda *_args: (True, None),
+                to_jalali_str_fn=lambda *_args: "",
+                success_message_text="OK",
+                unexpected_error_prefix="ERR",
+                warning_confirm_callback_data="confirm_warning",
+                cancel_callback_data="cancel",
+            )
+
+        creation_session.commit.assert_awaited_once_with()
+        expire.assert_not_awaited()
+        callback.message.edit_text.assert_not_awaited()
+        state.clear.assert_awaited_once_with()
+        callback.answer.assert_awaited_once_with()
 
     async def test_final_ineligible_repeat_refreshes_stale_keyboard(self):
         state = SimpleNamespace(

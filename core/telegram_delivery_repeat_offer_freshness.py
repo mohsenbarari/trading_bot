@@ -420,6 +420,13 @@ async def validate_repeat_offer_response_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="repeat_offer_response_freshness_recipient_unlinked",
         )
+    if _strict_positive_int(getattr(user, "telegram_id", None)) != _strict_positive_int(
+        getattr(outbox, "telegram_id_at_enqueue", None)
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="repeat_offer_response_freshness_recipient_relinked",
+        )
     access = await evaluate_bot_access(db, user)
     if not access.allowed:
         return _decision(

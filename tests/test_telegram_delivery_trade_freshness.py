@@ -458,6 +458,19 @@ class TelegramDeliveryTradeFreshnessTests(unittest.IsolatedAsyncioTestCase):
                 TelegramFreshnessOutcome.SUPERSEDED,
             )
 
+    async def test_trade_result_never_follows_recipient_relink(self):
+        receipt = make_receipt()
+        original_user = make_user()
+        relinked_user = make_user(telegram_id=TELEGRAM_ID + 1)
+        decision = await self.decide(
+            make_job(receipt=receipt, user=original_user),
+            receipt=receipt,
+            trade=make_trade(),
+            user=relinked_user,
+        )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
+        self.assertEqual(decision.reason, "trade_freshness_recipient_relinked")
+
     async def test_recipient_version_drift_reconciles_each_recipient_independently(self):
         receipt = make_receipt()
         current = make_user(sync_version=9)

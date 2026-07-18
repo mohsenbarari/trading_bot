@@ -239,7 +239,13 @@ class OfferCreate(BaseModel):
         description="شناسه عمومی لفظ منبع برای تکرار",
     )
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
-    idempotency_key: Optional[str] = Field(default=None, max_length=64, description="شناسه یکتای تلاش ثبت لفظ")
+    idempotency_key: str = Field(
+        ...,
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{7,63}$",
+        description="شناسه یکتای پایدار تلاش ثبت لفظ",
+    )
 
 
 def _build_webapp_offer_creation_command(
@@ -1136,7 +1142,7 @@ async def create_offer(
     _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     actor_user = context.actor_user
-    idempotency_key = (offer_data.idempotency_key or "").strip() or None
+    idempotency_key = offer_data.idempotency_key.strip()
     republish_source_public_id = (offer_data.republished_from_public_id or "").strip()
     creation_command = _build_webapp_offer_creation_command(
         offer_data,

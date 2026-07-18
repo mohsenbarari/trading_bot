@@ -41,10 +41,18 @@ def empty_customer_read_context_results():
 
 
 class FakeDB:
-    def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
+    def __init__(
+        self,
+        *,
+        get_results=None,
+        execute_results=None,
+        scalar_results=None,
+        idempotency_replay_result=None,
+    ):
         self.get_results = list(get_results or [])
         self.execute_results = list(execute_results or [])
         self.scalar_results = list(scalar_results or [])
+        self.idempotency_replay_result = idempotency_replay_result
         self.events = []
         self.commit = AsyncMock(side_effect=self._commit)
         self.flush = AsyncMock(side_effect=self._flush)
@@ -58,6 +66,8 @@ class FakeDB:
         return self.get_results.pop(0)
 
     async def execute(self, _stmt):
+        if "WHERE offers.idempotency_key =" in str(_stmt):
+            return FakeExecuteResult(self.idempotency_replay_result)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -104,6 +114,7 @@ def make_offer(**overrides):
         "notes": "urgent",
         "republished_from_id": None,
         "republished_from_public_id": None,
+        "idempotency_key": "test-offer-request-0001",
     }
     data.update(overrides)
     return OfferCreate(**data)
@@ -232,7 +243,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             get_results=[commodity],
             scalar_results=[0],
             execute_results=[
-                FakeExecuteResult(None),
                 FakeExecuteResult(reloaded_offer),
                 *empty_customer_read_context_results(),
             ],
@@ -419,7 +429,10 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_offer_idempotent_replay_returns_existing_offer_without_side_effects(self):
         existing_offer = make_reloaded_offer(offer_id=72)
-        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer), *empty_customer_read_context_results()])
+        db = FakeDB(
+            idempotency_replay_result=existing_offer,
+            execute_results=empty_customer_read_context_results(),
+        )
         current_user = make_user()
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
@@ -457,7 +470,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_offer_rejects_same_idempotency_key_with_different_payload(self):
         existing_offer = make_reloaded_offer(offer_id=73)
-        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer)])
+        db = FakeDB(idempotency_replay_result=existing_offer)
 
         with patch(
             "api.routers.offers.publish_offer_to_telegram_channel_once",

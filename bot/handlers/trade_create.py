@@ -1283,6 +1283,7 @@ async def _handle_trade_confirm_core(
         configured_telegram_delivery_runtime().mode
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
+    offer_acceptance_committed = False
     try:
         async with AsyncSessionLocal() as session:
             if republish_source_public_id:
@@ -1376,6 +1377,11 @@ async def _handle_trade_confirm_core(
                     user_sync_version=int(getattr(user, "sync_version", 1) or 1),
                 )
                 await session.commit()
+            # Legacy create commits inside the authoritative service; queue-v1
+            # commits above only after publication and success-preview intents.
+            # From this point onward an exception is a background side-effect
+            # failure and must never mutate or misreport the accepted Offer.
+            offer_acceptance_committed = True
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
 
@@ -1649,7 +1655,16 @@ async def _handle_trade_confirm_core(
             exc_info=exc,
             extra={"event": "telegram.offer_publication_rejected", "offer_id": locals().get("offer_id")},
         )
-        if "offer_id" in locals():
+        if queue_owns_telegram_delivery and offer_acceptance_committed:
+            logger.warning(
+                "Accepted offer retained after post-commit Telegram rejection",
+                extra={
+                    "event": "telegram.offer_post_commit_failure_suppressed",
+                    "offer_id": locals().get("offer_id"),
+                    "error_class": type(exc).__name__,
+                },
+            )
+        elif "offer_id" in locals():
             try:
                 async with AsyncSessionLocal() as session:
                     offer = await session.get(Offer, offer_id)
@@ -1657,14 +1672,24 @@ async def _handle_trade_confirm_core(
                         await _expire_offer_after_publication_failure(session, offer, user.id)
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after Telegram error: {rollback_error}")
-        await callback.message.edit_text("❌ خطا در ارسال به کانال. لطفاً مجدداً تلاش کنید.")
+        if not (queue_owns_telegram_delivery and offer_acceptance_committed):
+            await callback.message.edit_text("❌ خطا در ارسال به کانال. لطفاً مجدداً تلاش کنید.")
     except Exception as exc:
         logger.exception(
             "Unexpected offer channel publication failure",
             exc_info=exc,
             extra={"event": "telegram.offer_publication_unexpected_failure", "offer_id": locals().get("offer_id")},
         )
-        if "offer_id" in locals():
+        if queue_owns_telegram_delivery and offer_acceptance_committed:
+            logger.warning(
+                "Accepted offer retained after post-commit auxiliary failure",
+                extra={
+                    "event": "telegram.offer_post_commit_failure_suppressed",
+                    "offer_id": locals().get("offer_id"),
+                    "error_class": type(exc).__name__,
+                },
+            )
+        elif "offer_id" in locals():
             try:
                 async with AsyncSessionLocal() as session:
                     offer = await session.get(Offer, offer_id)
@@ -1672,7 +1697,8 @@ async def _handle_trade_confirm_core(
                         await _expire_offer_after_publication_failure(session, offer, user.id)
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after unexpected error: {rollback_error}")
-        await callback.message.edit_text(f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید.")
+        if not (queue_owns_telegram_delivery and offer_acceptance_committed):
+            await callback.message.edit_text(f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید.")
 
     await state.clear()
     await answer_callback_query_via_runtime(callback)

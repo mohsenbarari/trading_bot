@@ -393,6 +393,19 @@ async def validate_new_user_membership_telegram_delivery_freshness(
     source_version = _strict_positive_int(job.source_version)
     if source_version is None:
         return _quarantined("new_user_membership_freshness_source_version_invalid")
+    current_telegram_id = _strict_positive_int(user.telegram_id)
+    if current_telegram_id is None:
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="new_user_membership_freshness_recipient_unlinked",
+        )
+    if current_telegram_id != _strict_positive_int(
+        getattr(outbox, "telegram_id_at_enqueue", None)
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="new_user_membership_freshness_recipient_relinked",
+        )
     if source_version > current_version:
         return _decision(
             TelegramFreshnessOutcome.WAIT_DEPENDENCY,
@@ -403,11 +416,6 @@ async def validate_new_user_membership_telegram_delivery_freshness(
             TelegramFreshnessOutcome.RECLASSIFY,
             replacement_action=TelegramDeliveryAction.NEW_USER_MEMBERSHIP,
             reason="new_user_membership_freshness_recipient_version_changed",
-        )
-    if _strict_positive_int(user.telegram_id) is None:
-        return _decision(
-            TelegramFreshnessOutcome.SUPERSEDED,
-            reason="new_user_membership_freshness_recipient_unlinked",
         )
     access = await evaluate_bot_access(db, user)
     if not access.allowed:
