@@ -67,7 +67,8 @@ class TelegramScheduledOperationBridgePostgresTests(
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_scheduled_operations, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_scheduled_operations, "
                     "telegram_delivery_jobs, users RESTART IDENTITY CASCADE"
                 )
             )

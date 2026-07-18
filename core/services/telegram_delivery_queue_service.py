@@ -57,6 +57,7 @@ from models.telegram_delivery_resume_operation import (
     ACTIVE_TELEGRAM_DELIVERY_RESUME_STATES,
     TelegramDeliveryResumeOperation,
 )
+from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 
 
 TELEGRAM_DELIVERY_QUEUE_WORKER_ID = "telegram-delivery-queue-v1"
@@ -281,6 +282,45 @@ async def _assert_durable_dispatch_gate(
     # Result persistence acquires the same locks. Therefore a marker either
     # linearizes before a newly known pause, or waits and observes its commit.
     await _acquire_dispatch_scope_locks(db, record=record)
+
+    runtime_gate = (
+        await db.execute(
+            select(TelegramDeliveryRuntimeGate)
+            .where(
+                or_(
+                    TelegramDeliveryRuntimeGate.gate_key
+                    == f"bot:{record.bot_identity}",
+                    TelegramDeliveryRuntimeGate.gate_key == "gateway:telegram",
+                ),
+                or_(
+                    TelegramDeliveryRuntimeGate.state.in_(
+                        {"blocked", "resume_requested", "database_applied"}
+                    ),
+                    and_(
+                        TelegramDeliveryRuntimeGate.state == "cooldown",
+                        TelegramDeliveryRuntimeGate.cooldown_until.is_not(None),
+                        TelegramDeliveryRuntimeGate.cooldown_until > now,
+                    ),
+                ),
+            )
+            .order_by(TelegramDeliveryRuntimeGate.gate_key)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if runtime_gate is not None:
+        scope = str(runtime_gate.scope)
+        cooldown_until = runtime_gate.cooldown_until
+        retry_until = (
+            cooldown_until
+            if cooldown_until is not None and cooldown_until > now
+            else now + timedelta(seconds=30)
+        )
+        raise TelegramDeliveryDispatchDeferredError(
+            retry_after_seconds=max(0.1, (retry_until - now).total_seconds()),
+            reason=f"durable_dispatch_gate:runtime_{scope}",
+            cooldown_until=retry_until,
+            scope=scope,
+        )
 
     incomplete_resume_id = (
         await db.execute(
@@ -1018,6 +1058,25 @@ async def claim_next_telegram_delivery_job(
             ),
         )
     )
+    runtime_gate_blocked = exists(
+        select(TelegramDeliveryRuntimeGate.gate_key).where(
+            or_(
+                TelegramDeliveryRuntimeGate.gate_key
+                == func.concat("bot:", TelegramDeliveryJobRecord.bot_identity),
+                TelegramDeliveryRuntimeGate.gate_key == "gateway:telegram",
+            ),
+            or_(
+                TelegramDeliveryRuntimeGate.state.in_(
+                    {"blocked", "resume_requested", "database_applied"}
+                ),
+                and_(
+                    TelegramDeliveryRuntimeGate.state == "cooldown",
+                    TelegramDeliveryRuntimeGate.cooldown_until.is_not(None),
+                    TelegramDeliveryRuntimeGate.cooldown_until > current_time,
+                ),
+            ),
+        )
+    )
     claim_filters: list[Any] = [
         TelegramDeliveryJobRecord.bot_identity == lane_identity,
         TelegramDeliveryJobRecord.state.in_(tuple(CLAIMABLE_DELIVERY_STATES)),
@@ -1035,6 +1094,7 @@ async def claim_next_telegram_delivery_job(
         ),
         ~destination_or_runtime_blocked,
         ~resume_incomplete,
+        ~runtime_gate_blocked,
     ]
     if normalized_destination_classes is not None:
         claim_filters.append(
@@ -1363,6 +1423,67 @@ async def _persist_durable_rate_limit_evidence(
     )
 
 
+async def _persist_durable_runtime_gate_evidence(
+    db: AsyncSession,
+    *,
+    record: TelegramDeliveryJobRecord,
+    decision: TelegramDeliveryDecision,
+    now: datetime,
+) -> None:
+    if decision.outcome == TelegramDeliveryOutcome.BOT_PAUSED:
+        scope = "bot"
+        bot_identity: str | None = str(record.bot_identity)
+        gate_key = f"bot:{bot_identity}"
+    elif decision.outcome == TelegramDeliveryOutcome.GATEWAY_PAUSED:
+        scope = "gateway"
+        bot_identity = None
+        gate_key = "gateway:telegram"
+    else:
+        return
+    gate = (
+        await db.execute(
+            select(TelegramDeliveryRuntimeGate)
+            .where(TelegramDeliveryRuntimeGate.gate_key == gate_key)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if gate is None:
+        gate = TelegramDeliveryRuntimeGate(
+            gate_key=gate_key,
+            scope=scope,
+            bot_identity=bot_identity,
+            state="blocked",
+            version=0,
+            attempt_count=0,
+            attempt_history=[],
+            resumed_job_ids=[],
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(gate)
+    gate.state = "blocked"
+    gate.cooldown_until = None
+    gate.reason_code = decision.reason
+    gate.provider_status_code = record.provider_status_code
+    gate.evidence_hash = hashlib.sha256(
+        f"{gate_key}:{int(record.id)}:{int(record.lease_token or 0)}:"
+        f"{record.provider_status_code}:{decision.reason}".encode("utf-8")
+    ).hexdigest()
+    gate.version = int(gate.version or 0) + 1
+    gate.request_id = None
+    gate.requested_by_hash = None
+    gate.resumed_job_ids = []
+    gate.preflight_evidence = None
+    gate.resume_requested_at = None
+    gate.database_applied_at = None
+    gate.redis_applied_at = None
+    gate.completed_at = None
+    gate.last_error_class = None
+    gate.last_error_detail = None
+    gate.updated_at = now
+    await db.flush()
+
+
 async def resolve_telegram_delivery_result(
     db: AsyncSession,
     *,
@@ -1462,6 +1583,12 @@ async def resolve_telegram_delivery_result(
         provider_result_at=current_time,
         linearized_at=result_linearized_at,
         global_rate_limit_window_seconds=global_rate_limit_window_seconds,
+    )
+    await _persist_durable_runtime_gate_evidence(
+        db,
+        record=record,
+        decision=decision,
+        now=current_time,
     )
     record.outcome_reason = decision.reason
     record.updated_at = max(current_time, result_linearized_at)

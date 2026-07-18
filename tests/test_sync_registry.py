@@ -61,6 +61,7 @@ class SyncRegistryTests(unittest.TestCase):
             "telegram_delivery_jobs",
             "telegram_delivery_provider_outcomes",
             "telegram_delivery_reconciliation_evidence",
+            "telegram_delivery_runtime_gates",
             "telegram_delivery_feeder_states",
             "telegram_delivery_resume_operations",
             "telegram_interaction_anchor_states",

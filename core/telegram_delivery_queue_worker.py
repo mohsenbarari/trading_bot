@@ -16,6 +16,7 @@ import math
 import os
 import socket
 import time
+from types import SimpleNamespace
 from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,12 @@ from core.services.telegram_delivery_queue_service import (
 )
 from core.services.telegram_delivery_reconciliation_service import (
     reconcile_telegram_delivery_jobs,
+)
+from core.services.telegram_delivery_runtime_gate_service import (
+    TELEGRAM_RUNTIME_GATE_COOLDOWN,
+    load_active_telegram_runtime_gates,
+    mark_telegram_preflight_gate_active,
+    record_telegram_preflight_rate_limit,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryDecision,
@@ -314,6 +321,39 @@ def _retry_after_safety_seconds() -> float:
     )
 
 
+async def _persist_preflight_rate_limit_gate(
+    *,
+    bot_identity: str,
+    retry_after_seconds: float,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        await record_telegram_preflight_rate_limit(
+            db,
+            current_server=current_server(),
+            bot_identity=bot_identity,
+            retry_after_seconds=retry_after_seconds,
+            safety_seconds=_retry_after_safety_seconds(),
+            now=utc_now(),
+        )
+        await db.commit()
+
+
+async def _persist_preflight_success_gate(
+    *,
+    bot_identity: str,
+    report: Any,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        await mark_telegram_preflight_gate_active(
+            db,
+            current_server=current_server(),
+            bot_identity=bot_identity,
+            report=report,
+            now=utc_now(),
+        )
+        await db.commit()
+
+
 async def rehydrate_telegram_delivery_limiter_state(
     dispatch_limiter: TelegramDeliveryDispatchLimiter,
 ) -> TelegramDeliveryLimiterRehydrationReport:
@@ -331,6 +371,11 @@ async def rehydrate_telegram_delivery_limiter_state(
                 current_server=current_server(),
             )
         )
+        runtime_gates = await load_active_telegram_runtime_gates(
+            db,
+            current_server=current_server(),
+            now=sampled_at,
+        )
         await db.rollback()
 
     restored = len(incomplete_resume_destinations)
@@ -347,6 +392,12 @@ async def rehydrate_telegram_delivery_limiter_state(
             TelegramDeliveryOutcome.GATEWAY_PAUSED
         ),
     }
+    runtime_bot_gate_identities = {
+        str(gate.bot_identity)
+        for gate in runtime_gates
+        if gate.scope == "bot" and gate.bot_identity
+    }
+    runtime_gateway_gate = any(gate.scope == "gateway" for gate in runtime_gates)
     for evidence in evidence_rows:
         current_time = utc_now()
         observed_at = evidence.observed_at
@@ -357,6 +408,14 @@ async def rehydrate_telegram_delivery_limiter_state(
         if observed_at > current_time:
             observed_at = current_time
         evidence_restored = False
+        if (
+            evidence.state == TelegramDeliveryState.BLOCKED_BOT
+            and evidence.bot_identity in runtime_bot_gate_identities
+        ) or (
+            evidence.state == TelegramDeliveryState.BLOCKED_GATEWAY
+            and runtime_gateway_gate
+        ):
+            continue
         if evidence.rate_limit_probe:
             blocked_bot_identities.add(evidence.bot_identity)
             probe_gate_until = evidence.lease_until
@@ -414,6 +473,45 @@ async def rehydrate_telegram_delivery_limiter_state(
             evidence_restored = True
         if evidence_restored:
             restored += 1
+    for gate in runtime_gates:
+        current_time = utc_now()
+        if gate.scope == "bot" and gate.bot_identity:
+            blocked_bot_identities.add(gate.bot_identity)
+            if (
+                gate.state == TELEGRAM_RUNTIME_GATE_COOLDOWN
+                and gate.cooldown_until is not None
+                and gate.cooldown_until > current_time
+            ):
+                await dispatch_limiter.extend_bot_cooldown(
+                    gate.bot_identity,
+                    until=gate.cooldown_until,
+                )
+            else:
+                await dispatch_limiter.observe(
+                    SimpleNamespace(
+                        bot_identity=gate.bot_identity,
+                        destination_key=f"runtime:{gate.gate_key}",
+                    ),
+                    TelegramDeliveryDecision(
+                        outcome=TelegramDeliveryOutcome.BOT_PAUSED,
+                        reason=gate.reason_code or gate.state,
+                    ),
+                    now=min(gate.updated_at, current_time),
+                )
+        elif gate.scope == "gateway":
+            gateway_blocked = True
+            await dispatch_limiter.observe(
+                SimpleNamespace(
+                    bot_identity=TELEGRAM_PRIMARY_BOT_IDENTITY,
+                    destination_key="runtime:gateway",
+                ),
+                TelegramDeliveryDecision(
+                    outcome=TelegramDeliveryOutcome.GATEWAY_PAUSED,
+                    reason=gate.reason_code or gate.state,
+                ),
+                now=min(gate.updated_at, current_time),
+            )
+        restored += 1
     return TelegramDeliveryLimiterRehydrationReport(
         restored_count=restored,
         blocked_bot_identities=tuple(sorted(blocked_bot_identities)),
@@ -1414,6 +1512,10 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 rehydration = post_preflight
                 await asyncio.sleep(_worker_interval_seconds())
                 continue
+            await _persist_preflight_success_gate(
+                bot_identity=lane.bot_identity,
+                report=preflight_report,
+            )
             logger.info(
                 "Telegram delivery lane preflight approved",
                 extra={
@@ -1447,9 +1549,14 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 _worker_interval_seconds(),
                 exc.retry_after_seconds + _retry_after_safety_seconds(),
             )
+            rate_limited_identity = str(exc.bot_identity or lane.bot_identity)
+            await _persist_preflight_rate_limit_gate(
+                bot_identity=rate_limited_identity,
+                retry_after_seconds=exc.retry_after_seconds,
+            )
             try:
                 await lane.dispatch_limiter.extend_bot_cooldown(
-                    lane.bot_identity,
+                    rate_limited_identity,
                     until=utc_now() + timedelta(seconds=retry_delay),
                 )
             except asyncio.CancelledError:

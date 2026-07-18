@@ -15,11 +15,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from core.services.telegram_delivery_queue_service import (
-    TelegramDeliveryDispatchDeferredError,
     claim_next_telegram_delivery_job,
     enqueue_telegram_delivery_job,
     load_incomplete_telegram_resume_destination_keys,
-    mark_telegram_delivery_dispatch_started,
 )
 from core.services.telegram_delivery_resume_service import (
     TELEGRAM_RESUME_COMPLETED,
@@ -108,7 +106,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fc18b9d0e2f3"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fd29c0e1f3a4"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -199,7 +197,8 @@ class TelegramDeliveryResumePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_delivery_resume_operations, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_delivery_resume_operations, "
                     "telegram_delivery_jobs RESTART IDENTITY CASCADE"
                 )
             )
@@ -401,21 +400,10 @@ class TelegramDeliveryResumePostgresTests(unittest.IsolatedAsyncioTestCase):
                 now=NOW,
             )
             await db.commit()
-        self.assertIsNotNone(claimed)
-        async with self.Session() as db:
-            with self.assertRaisesRegex(
-                TelegramDeliveryDispatchDeferredError,
-                "resume_incomplete",
-            ):
-                await mark_telegram_delivery_dispatch_started(
-                    db,
-                    current_server="foreign",
-                    job_id=int(claimed.id),
-                    worker_id="resume-gate-worker",
-                    lease_token=int(claimed.lease_token),
-                    now=NOW,
-                )
-            await db.rollback()
+        # The resource-aware scheduler now skips a destination with an
+        # incomplete resume before lease. The final dispatch marker still
+        # repeats this check for claims that linearized before the gate.
+        self.assertIsNone(claimed)
 
         report = await self._resume(
             request_id="resume-postgres-redis-0001",

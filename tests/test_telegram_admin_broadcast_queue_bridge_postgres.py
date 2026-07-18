@@ -75,7 +75,8 @@ class TelegramAdminBroadcastQueueBridgePostgresTests(
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_admin_broadcast_receipts, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_admin_broadcast_receipts, "
                     "telegram_admin_broadcasts, telegram_delivery_jobs, users "
                     "RESTART IDENTITY CASCADE"
                 )

@@ -64,7 +64,8 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_delivery_jobs, trade_delivery_receipts, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_delivery_jobs, trade_delivery_receipts, "
                     "trades, users, commodities RESTART IDENTITY CASCADE"
                 )
             )

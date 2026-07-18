@@ -89,6 +89,15 @@ class _NoopLifecycleFeedback:
 
 
 class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self._preflight_success_patcher = patch.object(
+            worker,
+            "_persist_preflight_success_gate",
+            new=AsyncMock(),
+        )
+        self.persist_preflight_success = self._preflight_success_patcher.start()
+        self.addCleanup(self._preflight_success_patcher.stop)
+
     @staticmethod
     def _queue_runtime():
         return TelegramDeliveryRuntimeDecision(
@@ -1256,6 +1265,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         sampled_now = worker.utc_now()
+        durable_gate = AsyncMock()
         with patch(
             "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
             new=rehydrate,
@@ -1268,6 +1278,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker._retry_after_safety_seconds",
             return_value=0.1,
+        ), patch(
+            "core.telegram_delivery_queue_worker._persist_preflight_rate_limit_gate",
+            new=durable_gate,
         ), patch(
             "core.telegram_delivery_queue_worker.asyncio.sleep",
             new=AsyncMock(),
@@ -1284,6 +1297,10 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(limiter.bot_cooldowns, [
             ("primary", sampled_now + worker.timedelta(seconds=2.6))
         ])
+        durable_gate.assert_awaited_once_with(
+            bot_identity="primary",
+            retry_after_seconds=2.5,
+        )
         sleep.assert_awaited_once_with(2.6)
 
     async def test_preflight_429_keeps_lane_deferred_when_cooldown_persistence_fails(self):
@@ -1304,6 +1321,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 retry_after_seconds=2.5,
             )
         )
+        durable_gate = AsyncMock()
         with patch(
             "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
             new=rehydrate,
@@ -1313,6 +1331,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker._retry_after_safety_seconds",
             return_value=0.1,
+        ), patch(
+            "core.telegram_delivery_queue_worker._persist_preflight_rate_limit_gate",
+            new=durable_gate,
         ), patch(
             "core.telegram_delivery_queue_worker.asyncio.sleep",
             new=AsyncMock(),
@@ -1327,6 +1348,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         preflight.assert_awaited_once()
+        durable_gate.assert_awaited_once()
         sleep.assert_awaited_once_with(2.6)
 
     async def test_editor_preflight_failure_does_not_interrupt_primary_lane(self):

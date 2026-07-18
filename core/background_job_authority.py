@@ -282,6 +282,7 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
             "telegram_delivery_jobs",
             "telegram_delivery_provider_outcomes",
             "telegram_delivery_reconciliation_evidence",
+            "telegram_delivery_runtime_gates",
             "trade_delivery_receipts",
             "telegram_admin_broadcasts",
             "telegram_admin_broadcast_receipts",

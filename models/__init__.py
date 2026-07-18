@@ -66,6 +66,7 @@ from .telegram_delivery_provider_outcome import TelegramDeliveryProviderOutcomeR
 from .telegram_delivery_reconciliation_evidence import (
     TelegramDeliveryReconciliationEvidence,
 )
+from .telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 from .telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from .telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
 from .telegram_scheduled_operation import TelegramScheduledOperation
@@ -152,6 +153,7 @@ __all__ = [
     "TelegramDeliveryJobRecord",
     "TelegramDeliveryProviderOutcomeRecord",
     "TelegramDeliveryReconciliationEvidence",
+    "TelegramDeliveryRuntimeGate",
     "TelegramDeliveryFeederState",
     "TelegramDeliveryResumeOperation",
     "TelegramScheduledOperation",

@@ -90,7 +90,8 @@ class TelegramInteractionAnchorPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_interaction_anchor_states, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_interaction_anchor_states, "
                     "telegram_notification_outbox, telegram_delivery_jobs, users "
                     "RESTART IDENTITY CASCADE"
                 )

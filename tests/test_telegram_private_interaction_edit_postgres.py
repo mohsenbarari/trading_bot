@@ -66,7 +66,8 @@ class TelegramPrivateInteractionEditPostgresTests(unittest.IsolatedAsyncioTestCa
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_notification_outbox, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_notification_outbox, "
                     "telegram_delivery_jobs, users RESTART IDENTITY CASCADE"
                 )
             )

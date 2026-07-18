@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -25,6 +26,12 @@ from core.telegram_delivery_queue_contract import (
 from core.telegram_delivery_queue_limiter import (
     TelegramDeliveryDispatchAdmission,
     TelegramDeliveryLimiterUnavailableError,
+)
+from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_delivery_preflight import (
+    TelegramDeliveryPreflightIdentityReport,
+    TelegramDeliveryPreflightRateLimitedError,
+    TelegramDeliveryPreflightReport,
 )
 from core.telegram_delivery_freshness_router import (
     DURABLE_TELEGRAM_DELIVERY_ACTIONS,
@@ -68,6 +75,15 @@ from core.services.telegram_delivery_reconciliation_service import (
     reconcile_telegram_delivery_jobs,
     resolve_ambiguous_telegram_delivery_job,
 )
+from core.services.telegram_delivery_runtime_gate_service import (
+    TELEGRAM_RUNTIME_GATE_ACTIVE,
+    TELEGRAM_RUNTIME_GATE_DATABASE_APPLIED,
+    TelegramRuntimeGateConflictError,
+    TelegramRuntimeGateResumeIncompleteError,
+    mark_telegram_preflight_gate_active,
+    record_telegram_preflight_rate_limit,
+    resume_telegram_runtime_gate,
+)
 from core.services.telegram_callback_queue_feedback import (
     TelegramCallbackQueueLifecycleFeedback,
 )
@@ -91,6 +107,7 @@ from models.telegram_delivery_provider_outcome import (
 from models.telegram_delivery_reconciliation_evidence import (
     TelegramDeliveryReconciliationEvidence,
 )
+from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
@@ -217,6 +234,22 @@ class _RecordingLimiter(_AllowLimiter):
         self.bot_extensions.append((bot_identity, until))
 
 
+class _ResumeRecordingLimiter(_RecordingLimiter):
+    def __init__(self, *, fail_bot_resume: bool = False):
+        super().__init__()
+        self.fail_bot_resume = fail_bot_resume
+        self.resumed_bots = []
+        self.gateway_resume_count = 0
+
+    async def resume_bot(self, bot_identity):
+        if self.fail_bot_resume:
+            raise RuntimeError("synthetic_redis_resume_failure")
+        self.resumed_bots.append(bot_identity)
+
+    async def resume_gateway(self):
+        self.gateway_resume_count += 1
+
+
 class _ProbeLimiter(_RecordingLimiter):
     async def acquire(self, _job, *, now):
         return TelegramDeliveryDispatchAdmission(
@@ -238,7 +271,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fc18b9d0e2f3"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fd29c0e1f3a4"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -284,7 +317,8 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_delivery_resume_operations, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_delivery_resume_operations, "
                     "telegram_delivery_jobs RESTART IDENTITY CASCADE"
                 )
             )
@@ -359,6 +393,60 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
             return job
+
+    async def _persist_hard_pause(
+        self,
+        source_id: str,
+        *,
+        status_code: int,
+        description: str,
+        bot_identity: str = "primary",
+    ):
+        enqueued = await self._enqueue(
+            source_id,
+            bot_identity=bot_identity,
+            destination=f"private:{source_id}",
+        )
+        now = utc_now()
+        claimed = await self._claim(
+            f"{source_id}-worker",
+            now=now,
+            bot_identity=bot_identity,
+        )
+        async with self.Session() as db:
+            self.assertTrue(
+                await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=claimed.id,
+                    worker_id=claimed.worker_id,
+                    lease_token=claimed.lease_token,
+                    now=now,
+                )
+            )
+            decision = await resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=claimed.id,
+                worker_id=claimed.worker_id,
+                lease_token=claimed.lease_token,
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="sendMessage",
+                    status_code=status_code,
+                    response_json={
+                        "ok": False,
+                        "error_code": status_code,
+                        "description": description,
+                    },
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                now=now,
+            )
+            await db.commit()
+        return enqueued.job, decision
 
     async def test_physical_rate_limit_gate_schema_matches_model(self):
         async with self.Session() as db:
@@ -807,6 +895,49 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
             legacy_workers_enabled=False,
             queue_worker_enabled=True,
+        )
+
+    @staticmethod
+    def _credential_registry(*, editor_enabled: bool = False):
+        return TelegramDeliveryCredentialRegistry.from_values(
+            primary_token="123456:test-primary-runtime-gate-token",
+            editor_enabled=editor_enabled,
+            editor_token=(
+                "654321:test-editor-runtime-gate-token"
+                if editor_enabled
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _preflight_report(
+        registry: TelegramDeliveryCredentialRegistry,
+        identities: tuple[str, ...],
+    ) -> TelegramDeliveryPreflightReport:
+        fingerprints = registry.fingerprints()
+        channel_fingerprint = "test-channel-fingerprint"
+        return TelegramDeliveryPreflightReport(
+            approved_bot_identities=identities,
+            channel_fingerprint=channel_fingerprint,
+            identities=tuple(
+                TelegramDeliveryPreflightIdentityReport(
+                    bot_identity=identity,
+                    credential_fingerprint=fingerprints[identity],
+                    bot_fingerprint=f"test-bot-{identity}",
+                    channel_fingerprint=channel_fingerprint,
+                    member_status="administrator",
+                    effective_permissions=(
+                        (
+                            "can_manage_chat",
+                            "can_post_messages",
+                            "can_edit_messages",
+                        )
+                        if identity == "primary"
+                        else ("can_manage_chat", "can_edit_messages")
+                    ),
+                )
+                for identity in identities
+            ),
         )
 
     async def test_concurrent_enqueue_creates_exactly_one_logical_job(self):
@@ -2472,7 +2603,8 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 async with self.Session() as db:
                     await db.execute(
                         text(
-                            "TRUNCATE TABLE telegram_delivery_jobs "
+                            "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                            "telegram_delivery_jobs "
                             "RESTART IDENTITY CASCADE"
                         )
                     )
@@ -2623,6 +2755,275 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                         )
 
                     self.assertEqual(control_report.status_counts, {"sent": 1})
+
+    async def test_preflight_rate_limit_is_durable_and_blocks_claim_until_deadline(self):
+        now = utc_now()
+        async with self.Session() as db:
+            gate = await record_telegram_preflight_rate_limit(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                retry_after_seconds=7,
+                safety_seconds=0.1,
+                now=now,
+            )
+            await db.commit()
+        expected_until = now + timedelta(seconds=7.1)
+        self.assertEqual(gate.cooldown_until, expected_until)
+
+        await self._enqueue("preflight-rate-limit-candidate")
+        self.assertIsNone(
+            await self._claim("preflight-rate-limit-worker", now=now)
+        )
+        claimed = await self._claim(
+            "preflight-rate-limit-worker",
+            now=expected_until + timedelta(milliseconds=1),
+        )
+        self.assertIsNotNone(claimed)
+
+        limiter = _RecordingLimiter()
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.utc_now",
+            return_value=now + timedelta(seconds=1),
+        ):
+            report = await rehydrate_telegram_delivery_limiter_state(limiter)
+        self.assertEqual(report.blocked_bot_identities, ("primary",))
+        self.assertEqual(limiter.bot_extensions, [("primary", expected_until)])
+
+        credentials = self._credential_registry()
+        async with self.Session() as db:
+            changed = await mark_telegram_preflight_gate_active(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                report=self._preflight_report(credentials, ("primary",)),
+                now=expected_until + timedelta(seconds=1),
+            )
+            await db.commit()
+        self.assertTrue(changed)
+        async with self.Session() as db:
+            active_gate = await db.get(TelegramDeliveryRuntimeGate, "bot:primary")
+        self.assertEqual(active_gate.state, TELEGRAM_RUNTIME_GATE_ACTIVE)
+        self.assertIsNone(active_gate.cooldown_until)
+
+    async def test_bot_pause_gate_resume_is_crash_safe_idempotent_and_audited(self):
+        blocked_job, decision = await self._persist_hard_pause(
+            "runtime-bot-pause",
+            status_code=401,
+            description="Unauthorized",
+        )
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.BOT_PAUSED)
+        credentials = self._credential_registry()
+        preflight = AsyncMock(
+            return_value=self._preflight_report(credentials, ("primary",))
+        )
+        settings = SimpleNamespace(
+            telegram_delivery_queue_retry_after_safety_seconds=0.1,
+        )
+        failing_limiter = _ResumeRecordingLimiter(fail_bot_resume=True)
+        request_id = "runtime-bot-resume-request-0001"
+
+        with self.assertRaisesRegex(
+            TelegramRuntimeGateResumeIncompleteError,
+            "redis_not_cleared",
+        ):
+            await resume_telegram_runtime_gate(
+                session_factory=self.Session,
+                current_server="foreign",
+                settings=settings,
+                credential_registry=credentials,
+                dispatch_limiter=failing_limiter,
+                scope="bot",
+                bot_identity="primary",
+                request_id=request_id,
+                requested_by="operator@example.test",
+                preflight_runner=preflight,
+            )
+
+        async with self.Session() as db:
+            gate = await db.get(TelegramDeliveryRuntimeGate, "bot:primary")
+            row = await db.get(TelegramDeliveryJobRecord, blocked_job.id)
+        self.assertEqual(gate.state, TELEGRAM_RUNTIME_GATE_DATABASE_APPLIED)
+        self.assertEqual(gate.resumed_job_ids, [blocked_job.id])
+        self.assertNotEqual(gate.requested_by_hash, "operator@example.test")
+        self.assertNotIn("operator@example.test", repr(gate.attempt_history))
+        self.assertEqual(row.state, TelegramDeliveryState.PENDING_RETRY)
+
+        limiter = _ResumeRecordingLimiter()
+        report = await resume_telegram_runtime_gate(
+            session_factory=self.Session,
+            current_server="foreign",
+            settings=settings,
+            credential_registry=credentials,
+            dispatch_limiter=limiter,
+            scope="bot",
+            bot_identity="primary",
+            request_id=request_id,
+            requested_by="operator@example.test",
+            preflight_runner=preflight,
+        )
+        self.assertEqual(report.state, TELEGRAM_RUNTIME_GATE_ACTIVE)
+        self.assertEqual(report.resumed_job_ids, (blocked_job.id,))
+        self.assertTrue(report.idempotent_replay)
+        self.assertEqual(limiter.resumed_bots, ["primary"])
+
+        replay = await resume_telegram_runtime_gate(
+            session_factory=self.Session,
+            current_server="foreign",
+            settings=settings,
+            credential_registry=credentials,
+            dispatch_limiter=limiter,
+            scope="bot",
+            bot_identity="primary",
+            request_id=request_id,
+            requested_by="operator@example.test",
+            preflight_runner=preflight,
+        )
+        self.assertTrue(replay.idempotent_replay)
+        self.assertEqual(replay.resumed_job_ids, (blocked_job.id,))
+        self.assertEqual(limiter.resumed_bots, ["primary"])
+
+    async def test_provider_pause_gate_and_job_transition_share_one_transaction(self):
+        await self._enqueue("runtime-gate-rollback")
+        now = utc_now()
+        claimed = await self._claim("runtime-gate-rollback-worker", now=now)
+        async with self.Session() as db:
+            self.assertTrue(
+                await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=claimed.id,
+                    worker_id=claimed.worker_id,
+                    lease_token=claimed.lease_token,
+                    now=now,
+                )
+            )
+            decision = await resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=claimed.id,
+                worker_id=claimed.worker_id,
+                lease_token=claimed.lease_token,
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="sendMessage",
+                    status_code=401,
+                    response_json={
+                        "ok": False,
+                        "error_code": 401,
+                        "description": "Unauthorized",
+                    },
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                now=now,
+            )
+            self.assertEqual(decision.outcome, TelegramDeliveryOutcome.BOT_PAUSED)
+            await db.rollback()
+
+        async with self.Session() as db:
+            gate = await db.get(TelegramDeliveryRuntimeGate, "bot:primary")
+            row = await db.get(TelegramDeliveryJobRecord, claimed.id)
+        self.assertIsNone(gate)
+        self.assertEqual(row.state, TelegramDeliveryState.LEASED)
+
+    async def test_gateway_pause_gate_resume_releases_both_lanes_once(self):
+        blocked_job, decision = await self._persist_hard_pause(
+            "runtime-gateway-pause",
+            status_code=404,
+            description="Not Found: method endpoint",
+        )
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.GATEWAY_PAUSED)
+        credentials = self._credential_registry(editor_enabled=True)
+        identities = ("primary", "channel_editor")
+        preflight = AsyncMock(
+            return_value=self._preflight_report(credentials, identities)
+        )
+        limiter = _ResumeRecordingLimiter()
+        report = await resume_telegram_runtime_gate(
+            session_factory=self.Session,
+            current_server="foreign",
+            settings=SimpleNamespace(
+                telegram_delivery_queue_retry_after_safety_seconds=0.1,
+            ),
+            credential_registry=credentials,
+            dispatch_limiter=limiter,
+            scope="gateway",
+            bot_identity=None,
+            request_id="runtime-gateway-resume-request-0001",
+            requested_by="on-call",
+            preflight_runner=preflight,
+        )
+        self.assertEqual(report.resumed_job_ids, (blocked_job.id,))
+        self.assertEqual(limiter.gateway_resume_count, 1)
+        preflight.assert_awaited_once()
+        self.assertEqual(
+            preflight.await_args.kwargs["bot_identities"],
+            identities,
+        )
+
+    async def test_runtime_resume_persists_preflight_429_and_fences_other_request(self):
+        await self._persist_hard_pause(
+            "runtime-resume-preflight-rate-limit",
+            status_code=401,
+            description="Unauthorized",
+        )
+        credentials = self._credential_registry()
+        rate_limited = AsyncMock(
+            side_effect=TelegramDeliveryPreflightRateLimitedError(
+                "telegram_preflight_rate_limited:primary:getMe",
+                retry_after_seconds=17,
+                bot_identity="primary",
+                method="getMe",
+            )
+        )
+        kwargs = {
+            "session_factory": self.Session,
+            "current_server": "foreign",
+            "settings": SimpleNamespace(
+                telegram_delivery_queue_retry_after_safety_seconds=0.1,
+            ),
+            "credential_registry": credentials,
+            "dispatch_limiter": _ResumeRecordingLimiter(),
+            "scope": "bot",
+            "bot_identity": "primary",
+            "request_id": "runtime-rate-limit-request-0001",
+            "requested_by": "on-call",
+            "preflight_runner": rate_limited,
+        }
+        with self.assertRaises(TelegramDeliveryPreflightRateLimitedError):
+            await resume_telegram_runtime_gate(**kwargs)
+
+        async with self.Session() as db:
+            gate = await db.get(TelegramDeliveryRuntimeGate, "bot:primary")
+        self.assertEqual(gate.state, "resume_requested")
+        self.assertEqual(gate.reason_code, "telegram_preflight_rate_limited")
+        self.assertGreater(gate.cooldown_until, utc_now())
+
+        with self.assertRaisesRegex(
+            TelegramRuntimeGateResumeIncompleteError,
+            "preflight_cooldown_active",
+        ):
+            await resume_telegram_runtime_gate(**kwargs)
+        self.assertEqual(rate_limited.await_count, 1)
+
+        with self.assertRaisesRegex(
+            TelegramRuntimeGateConflictError,
+            "resume_conflict",
+        ):
+            await resume_telegram_runtime_gate(
+                **{
+                    **kwargs,
+                    "request_id": "runtime-rate-limit-request-0002",
+                }
+            )
 
     async def test_committed_429_survives_observe_crash_and_restart_without_resend(self):
         first = await self._enqueue(

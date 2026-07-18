@@ -99,7 +99,8 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
         async with self.Session() as db:
             await db.execute(
                 text(
-                    "TRUNCATE TABLE telegram_notification_outbox, "
+                    "TRUNCATE TABLE telegram_delivery_runtime_gates, "
+                    "telegram_notification_outbox, "
                     "telegram_delivery_jobs, commodities, users "
                     "RESTART IDENTITY CASCADE"
                 )

@@ -8,6 +8,7 @@ from models.telegram_delivery_provider_outcome import (
 from models.telegram_delivery_reconciliation_evidence import (
     TelegramDeliveryReconciliationEvidence,
 )
+from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 
 
 class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
@@ -25,6 +26,7 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
         for table_name in {
             "telegram_delivery_provider_outcomes",
             "telegram_delivery_reconciliation_evidence",
+            "telegram_delivery_runtime_gates",
         }:
             with self.subTest(table_name=table_name):
                 entry = get_sync_registry_entry(table_name)
@@ -52,6 +54,24 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
         self.assertIn('down_revision: Union[str, Sequence[str], None] = "fb07b8c9d0e1"', migration)
         self.assertIn('op.create_table(\n        "telegram_delivery_provider_outcomes"', migration)
         self.assertIn('op.drop_table("telegram_delivery_provider_outcomes")', migration)
+
+        runtime_migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/fd29c0e1f3a4_add_telegram_runtime_gates.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fc18b9d0e2f3"',
+            runtime_migration,
+        )
+        self.assertIn('op.drop_table("telegram_delivery_runtime_gates")', runtime_migration)
+
+    def test_runtime_gate_has_strict_scope_and_identity_constraints(self):
+        table = TelegramDeliveryRuntimeGate.__table__
+        names = {constraint.name for constraint in table.constraints}
+        self.assertIn("ck_telegram_delivery_runtime_gates_scope", names)
+        self.assertIn("ck_telegram_delivery_runtime_gates_identity", names)
+        self.assertIn("ck_telegram_delivery_runtime_gates_state", names)
+        self.assertIn("resumed_job_ids", table.columns)
 
 
 if __name__ == "__main__":

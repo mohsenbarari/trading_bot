@@ -410,6 +410,15 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "Foreign-only redacted ambiguity and retry decision audit",
         notes="Evidence references and operator references are hashed before persistence.",
     ),
+    "telegram_delivery_runtime_gates": _entry(
+        "telegram_delivery_runtime_gates",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue", "telegram_delivery_queue_operations"),
+        "foreign local Telegram bot/gateway control owner",
+        "never cross-sync runtime cooldown, pause, preflight, or resume journal",
+        "Foreign-only durable bot/gateway execution gate",
+        notes="Preflight 429 is committed here before Redis mirroring or sleep.",
+    ),
     "telegram_scheduled_operations": _entry(
         "telegram_scheduled_operations",
         SyncPolicy.NO_SYNC,
