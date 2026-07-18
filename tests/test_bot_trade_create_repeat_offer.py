@@ -38,7 +38,7 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             source_offer_id=41,
             source_offer_public_id="ofr_source_41",
             draft_text="ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری",
-            button_text="🔁 ف ن ف ربع 25 عدد 178000 15 10",
+            button_text="🔁 ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری",
         )
         message = SimpleNamespace(
             text=candidate.button_text,
@@ -94,48 +94,11 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         prepare.assert_not_awaited()
         state.update_data.assert_not_awaited()
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "MENU")
-        self.assertIn("دیگر قابل تکرار نیست", message.answer.await_args.args[0])
+        self.assertIn("دکمه جدید را بزنید", message.answer.await_args.args[0])
 
-    async def test_stale_but_eligible_button_prepares_source_and_refreshes_menu(self):
-        candidate = BotRepeatOfferCandidate(
-            source_offer_id=41,
-            source_offer_public_id="ofr_source_41",
-            draft_text="ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری",
-            button_text="🔁 ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری",
-            legacy_button_text="🔁 ف ن ف ربع 25 عدد 178000 15 10",
-        )
+    async def test_old_numbered_button_never_prepares_different_latest_offer(self):
         message = SimpleNamespace(
-            text=candidate.legacy_button_text,
-            answer=AsyncMock(),
-            bot=SimpleNamespace(),
-            chat=SimpleNamespace(id=99),
-        )
-        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
-        user = SimpleNamespace(id=9)
-
-        with patch(
-            "bot.handlers.trade_create.AsyncSessionLocal",
-            return_value=FakeSessionContext(),
-        ), patch(
-            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
-            new=AsyncMock(return_value=(candidate, True, "legacy_button")),
-        ), patch(
-            "bot.handlers.trade_create._send_repeat_offer_menu_refresh",
-            new=AsyncMock(),
-        ) as refresh, patch(
-            "bot.handlers.trade_create._prepare_text_offer",
-            new=AsyncMock(return_value=True),
-        ) as prepare:
-            await handle_repeat_offer_button(message, state, user, message.bot)
-
-        refresh.assert_awaited_once_with(message.bot, chat_id=99, user=user)
-        self.assertEqual(prepare.await_args.args[3], candidate.draft_text)
-        provenance = state.update_data.await_args.kwargs
-        self.assertEqual(provenance["republished_from_offer_public_id"], "ofr_source_41")
-
-    async def test_ambiguous_legacy_button_requests_new_button_without_preparing(self):
-        message = SimpleNamespace(
-            text="🔁 ف ن ف ربع 25 عدد 178000 15 10",
+            text="🔁 ف ن ف ربع 25 عدد 178000 15 10: تحویل حضوری #225",
             answer=AsyncMock(),
             bot=SimpleNamespace(),
         )
@@ -147,7 +110,7 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeSessionContext(),
         ), patch(
             "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
-            new=AsyncMock(return_value=(None, True, "ambiguous_legacy_button")),
+            new=AsyncMock(return_value=(None, True, "stale_button")),
         ), patch(
             "bot.handlers.trade_create.build_persistent_navigation_keyboard",
             new=AsyncMock(return_value="MENU"),
@@ -158,6 +121,7 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             await handle_repeat_offer_button(message, state, user, message.bot)
 
         prepare.assert_not_awaited()
+        state.update_data.assert_not_awaited()
         self.assertIn("دکمه جدید را بزنید", message.answer.await_args.args[0])
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "MENU")
 
