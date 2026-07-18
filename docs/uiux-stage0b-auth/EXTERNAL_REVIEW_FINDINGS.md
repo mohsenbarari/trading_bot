@@ -2,7 +2,9 @@
 
 Date: 2026-07-18
 
-Design snapshot reviewed: `4058ffb51dfef0194df3ac8b2c824654e51dac2d`
+Initial design snapshot reviewed: `4058ffb51dfef0194df3ac8b2c824654e51dac2d`
+
+Round-two snapshot reviewed: `bb43268c5e3123bc2704cb1f34f403cca98fc58a`
 
 Checkpoint: `docs/WEBAPP_UI_UX_REDESIGN_V2_STAGE0B_AUTH_CHECKPOINT_20260718.md`
 
@@ -102,6 +104,67 @@ These findings are dispositioned because they add or corroborate useful evidence
 | `AUTH-DESKTOP-01` | `accepted` | One recovery proof is sufficient for the 95%-mobile scope, but the current large context panel weakens task/form priority. | Refine the same proof to reduce dead space and strengthen task hierarchy; do not add a second desktop scenario. |
 | `AUTH-DEBT-01` | `deferred` | The backend's six-character minimum is weaker than the approved frontend password gate, but it is pre-existing security debt outside this design-only checkpoint. The design must not be weakened to match it. | Align server validation and add API-level tests in a later authorized security/implementation stage. |
 | `AUTH-EVID-01` | `accepted` | Static frames, manually marked targets, CSS font stacks, and keyboard illustrations do not prove runtime semantics, actual font loading, real keyboard behavior, or exact image-element dimensions unless those items are directly asserted. | Rewrite evidence claims to name exact measured elements and methods; add runtime/browser evidence only at the appropriate implementation acceptance stage. |
+
+## Round-two report provenance and quorum
+
+| Source label used in this register | Raw report SHA-256 | Treatment |
+| --- | --- | --- |
+| Gemini R2 | `7151bd67c999186440ca9a0618cc4c98a5e17237dd8fa0fdfad4d6eac6d75212` | Valid Gemini input, with factual and process corrections recorded below. |
+| Claude R2 | `b90914e87c2e2ac44791040479e0a2f63d2725179e5e119519bf80222991294c` | Valid Claude approval, with bounded evidence corrections recorded below. |
+| ChatGPT Pro R2 canonical (`file 3`) | `45719c16267f93831b9e42fd51e0b394040897b99a347ae31cee1e22a6128858` | Canonical Pro-role report; two formal findings. |
+| ChatGPT Pro R2 supplemental (`file 2`) | `db62c27ddc1fcd94d86afc8ca26a7e53f830764903d4b9f6c8cf03cd427a08c7` | Valid supplemental Pro report; nine unique/corroborating findings retained. |
+
+Both ChatGPT reports declare the `ChatGPT Pro` identity and are valid, independently useful inputs. They nevertheless satisfy only one Pro role slot. No exact-SHA ChatGPT Ultra round-two report was supplied. The round-two role quorum at `bb43268c` is therefore `3/4`: Gemini, Claude, and Pro present; Ultra missing. The remediation recorded below creates a new commit, so none of these reports can approve that later SHA; the next gate must request exact-SHA reports from all four named roles.
+
+## Round-two report-level corrections
+
+### Gemini R2
+
+Gemini's `APPROVE` is retained as a valid design-review input, not accepted verbatim as a runtime attestation:
+
+- current `WebRegister` does not implement the claimed Back/refresh persistence; that remains implementation acceptance;
+- current `App.vue` has not implemented the proposed closed public shell; that remains Stage 0B-2 work;
+- the static masked frames do not prove that current REG-02 runtime masks its token-bearing mobile, and `InviteLanding` does not render the claimed masked preview;
+- static OTP cells do not establish a semantic runtime input, and 15 full frames do not represent every atlas/error/success state;
+- the prior nine contrast pairs did not prove every auth label;
+- the durable register path is `docs/uiux-stage0b-auth/EXTERNAL_REVIEW_FINDINGS.md`, not an `evidence/` subdirectory;
+- the standalone artifact defines tokens in its own document `:root`, not under `.board`; the protected-surface guarantee is that product runtime `:root`, Market, and Messenger were not modified.
+
+Gemini also ran the repository-writing capture generator despite the read-only review contract. That changed the shared metrics `generatedAt`; the mutation was restored before remediation. Its full-suite and capture claims are not used as canonical acceptance evidence without retained raw output. This process defect does not invalidate independently verified observations in the report.
+
+### Claude R2
+
+Claude's `APPROVE` is supported for the design-only snapshot. The following report details are corrected for later prompts:
+
+- package integrity was `27/27`, not `25/25`;
+- the reviewed capture script had `492` lines, not `493`;
+- checkpoint section 11 contained seven decision bullets, not eleven;
+- the tree was clean at the initial gate and became timestamp-dirty after Gemini's shared-checkout capture; the mutation is not evidence of deterministic reproduction;
+- Claude demonstrated that one injected absolute-overflow case was detected, not that every absolute/fixed arrangement is detectable. Natural-height evidence is bounded to the currently authored normal-flow content and measured widths.
+
+Claude's chronological note that other round-two reports were unavailable is superseded by the provenance table above. The only missing R2 role is ChatGPT Ultra.
+
+## Round-two Pro findings
+
+The canonical and supplemental reports count as one Pro role, but every independently verified unique finding is dispositioned.
+
+| Finding | Source | Disposition | Evidence-based reason and closure boundary |
+| --- | --- | --- | --- |
+| `PRO-R2-01` | canonical Pro | `accepted` | The translucent ring was too weak. The artifact now uses a solid `--focus-ring`; three adjacent-surface checks pass at `5.307:1`, `5.752:1`, and `5.210:1`. Synthetic Tab traversal visits `39/39` enabled controls, asserts `:focus-visible`, a 3px outline, and exact computed-color agreement with the tested token. Runtime/WebView/AT focus remains implementation acceptance. |
+| `PRO-R2-A11Y-01` | supplemental Pro | `accepted` | Corroborates `PRO-R2-01`. The same coupled focus evidence closes the static-artifact defect without overstating runtime proof. |
+| `PRO-R2-02` | canonical Pro | `partially accepted` | Warning-marker coverage and decorative semantics were valid gaps. All 14 notice markers are now `aria-hidden`, and the visible pair was conservatively strengthened to `4.913:1`. The original normal-text `4.5:1` premise was overbroad once the glyph is explicitly decorative; the stronger value is nevertheless retained. |
+| `PRO-R2-COPY-02` | supplemental Pro | `accepted` | Internal vocabulary such as opaque identifier, deadline/session storage, API, autocomplete, and password-manager internals was removed from product-facing phone frames and replaced with plain Persian outcomes. Technical language may remain in reviewer annotations, atlas specifications, and tests. |
+| `PRO-R2-STATE-03` | supplemental Pro | `accepted` | In the evaluated password-error frame, every deterministic rule now has an explicit pass/fail state; the special-character rule no longer remains neutral after evaluation begins. |
+| `PRO-R2-PRIV-04` | supplemental Pro | `partially accepted` | Address and identity-document disclosures were moved beside the relevant field/action, and the address disclosure was added to the keyboard illustration. A static illustration cannot prove real-keyboard reachability, so that part remains an implementation acceptance requirement. |
+| `PRO-R2-CONTRAST-05` | supplemental Pro | `accepted` | The neutral state tag was strengthened from `4.026:1` to `5.185:1` and added to fail-closed contrast evidence. |
+| `PRO-R2-TOUCH-06` | supplemental Pro | `accepted` | Keyboard CTAs were raised from 46px to 48px. The capture now audits all 20 `.button` CTA variants separately, reports a 48px minimum, and fails before promotion if any falls below it. |
+| `PRO-R2-NAME-07` | supplemental Pro | `accepted` | Six picker glyphs are `aria-hidden`, all picker buttons have explicit glyph-free Persian `aria-label` values, and the source audit reports zero exposed picker glyphs. Runtime accessibility-tree verification remains later acceptance. |
+| `PRO-R2-ENTRY-08` | supplemental Pro | `accepted` | The duplicate visual `09` affordance was removed from the full login frame and keyboard illustration; the complete value is now unambiguous. |
+| `PRO-R2-STATUS-09` | supplemental Pro | `accepted` | The universal success-green footer dot was replaced by a neutral marker; green remains reserved for affirmative semantic state. |
+
+## Round-two remediation evidence
+
+The schema-4 capture generated all PNGs and metrics in a sibling staging directory and promoted them together only after every hard assertion passed. It records 15 full scenario captures, 41 atlas states, 41 semantic/actionable controls with zero below 44px, 20 CTA buttons with zero below 48px, `39/39` synthetic focus traversal, zero exposed decorative markers, 14 passing scoped contrast pairs, no horizontal overflow, and natural-fit minima of `95/95/116/116/116px` at 360/375/390/414/430px. The out-of-flow, real-keyboard, zoom/font-scaling, screen-reader, and runtime boundaries remain explicit in `VALIDATION.md`.
 
 ## Closure rule
 

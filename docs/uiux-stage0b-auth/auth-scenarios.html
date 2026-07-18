@@ -63,8 +63,13 @@
       --success-bg: #e9f8f2;
       --warning: #95610e;
       --warning-bg: #fff7df;
+      --warning-marker-bg: #fff7df;
       --danger: #bd3448;
       --danger-bg: #fff0f2;
+      --focus-ring: #1f5ed8;
+      --neutral-state: #52677e;
+      --neutral-state-bg: #eef2f6;
+      --footer-marker: #8ca0b4;
       --shadow: 0 20px 54px rgba(24, 48, 75, 0.13);
       background: #e9eef4;
       color: var(--text);
@@ -243,6 +248,7 @@
     .textarea-shell { min-height: 104px; align-items: flex-start; padding: 12px 13px; color: var(--text-muted); font-size: 13px; line-height: 1.75; }
     .field-error { display: flex; gap: 5px; align-items: center; color: var(--danger); font-size: 12px; line-height: 1.65; }
     .field-error::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; }
+    .privacy-hint { padding: 7px 9px; border-radius: 10px; background: var(--blue-50); color: var(--text-secondary); font-size: 12px; font-weight: 500; line-height: 1.65; }
 
     .button {
       display: flex;
@@ -269,7 +275,7 @@
     .link-button:focus-visible,
     .route-card:focus-visible,
     .picker:focus-visible,
-    .password-eye:focus-visible { outline: 3px solid rgba(47, 111, 237, 0.34); outline-offset: 2px; }
+    .password-eye:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 
     .notice {
       display: flex;
@@ -286,10 +292,10 @@
     .notice__mark { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border-radius: 7px; background: var(--blue-100); color: var(--blue-700); font-weight: 800; }
     .notice strong { display: block; margin-bottom: 1px; color: var(--navy-900); font-size: 13px; }
     .notice--warning { border-color: #ead79f; background: var(--warning-bg); }
-    .notice--warning .notice__mark { background: #f8e8b7; color: var(--warning); }
+    .notice--warning .notice__mark { background: var(--warning-marker-bg); color: var(--warning); }
 
     .phone-footer { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border-top: 1px solid rgba(214, 225, 236, 0.82); background: rgba(255, 255, 255, 0.84); color: var(--text-muted); font-size: 12px; text-align: center; }
-    .phone-footer::before { width: 6px; height: 6px; border-radius: 50%; background: var(--success); content: ""; }
+    .phone-footer::before { width: 6px; height: 6px; border-radius: 50%; background: var(--footer-marker); content: ""; }
 
     .install-card { margin-top: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 13px; background: rgba(255, 255, 255, 0.72); }
     .install-card strong { display: block; color: var(--navy-900); font-size: 12px; }
@@ -377,13 +383,13 @@
     .keyboard-case h3 { margin: 0 8px 8px; color: var(--navy-950); font-size: 13px; }
     .keyboard-case p { min-height: 40px; margin: 0 8px 10px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
     .keyboard-viewport { width: 390px; height: 590px; overflow: hidden; border: 1px solid #b9cadb; border-radius: 24px; background: var(--page); box-shadow: 0 12px 30px rgba(24, 48, 75, 0.09); }
-    .keyboard-app { display: grid; grid-template-rows: 50px minmax(0, 1fr) 58px; height: 330px; background: var(--page); }
+    .keyboard-app { display: grid; grid-template-rows: 50px minmax(0, 1fr) 60px; height: 330px; background: var(--page); }
     .keyboard-app__top { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--border); background: #fff; color: var(--navy-950); font-size: 12px; font-weight: 700; }
     .keyboard-app__body { display: flex; min-height: 0; flex-direction: column; gap: 8px; overflow: hidden; padding: 12px 14px 8px; }
     .keyboard-app__body h4 { margin: 0; color: var(--navy-950); font-size: 16px; }
     .keyboard-app__body > p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
     .keyboard-app__cta { display: flex; align-items: center; padding: 6px 14px; border-top: 1px solid var(--border); background: rgba(255, 255, 255, 0.96); }
-    .keyboard-app__cta .button { min-height: 46px; }
+    .keyboard-app__cta .button { min-height: 48px; }
     .keyboard-panel { height: 260px; padding: 10px 8px 8px; background: #d9dee5; direction: ltr; }
     .keyboard-suggestion { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
     .keyboard-suggestion span { display: grid; height: 28px; place-items: center; border-radius: 7px; background: rgba(255, 255, 255, 0.62); color: #566372; font-size: 8px; }
@@ -404,7 +410,7 @@
     .state-card--success { --state-color: var(--success); --state-bg: var(--success-bg); }
     .state-card--warning { --state-color: var(--warning); --state-bg: var(--warning-bg); }
     .state-card--danger { --state-color: var(--danger); --state-bg: var(--danger-bg); }
-    .state-card--neutral { --state-color: #66788d; --state-bg: #eef2f6; }
+    .state-card--neutral { --state-color: var(--neutral-state); --state-bg: var(--neutral-state-bg); }
 
     .desktop-proof {
       display: grid;
@@ -491,9 +497,9 @@
               <div class="screen">
                 <div class="step-row"><span class="step-copy">مرحله ۱ از ۲</span><div class="progress"><span class="is-active"></span><span></span></div></div>
                 <div class="screen-heading"><h3>ورود به سامانه</h3><p>شماره موبایل ثبت‌شده را وارد کنید تا کد تأیید برای شما ارسال شود.</p></div>
-                <div class="field"><div class="field-label"><span>شماره موبایل</span><span class="field-hint">مثال: 0912…</span></div><div class="input-shell input-shell--focus"><span class="input-icon">09</span><span class="input-value ltr">0912 345 6789</span></div></div>
+                <div class="field"><div class="field-label"><span>شماره موبایل</span><span class="field-hint">مثال: 0912…</span></div><div class="input-shell input-shell--focus"><span class="input-value ltr">0912 345 6789</span></div></div>
                 <button class="button button--primary touch-target">دریافت کد تأیید</button>
-                <div class="notice"><span class="notice__mark">i</span><div><strong>تحویل هوشمند کد</strong>اگر تلگرام شما فعال باشد، کد ابتدا همان‌جا می‌رسد و زمان ارسال پشتیبان پیامکی نیز از همین صفحه اعلام می‌شود.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">i</span><div><strong>تحویل هوشمند کد</strong>اگر تلگرام شما فعال باشد، کد ابتدا همان‌جا می‌رسد و زمان ارسال پشتیبان پیامکی نیز از همین صفحه اعلام می‌شود.</div></div>
                 <div class="install-card"><strong>استفاده سریع‌تر در دفعات بعد</strong><p>نصب اپ فقط در مرورگرهای پشتیبانی‌شده پیشنهاد می‌شود و مانع ورود نیست.</p><button class="link-button touch-target">راهنمای نصب اپ</button></div>
               </div>
             </div>
@@ -513,7 +519,7 @@
                 <div class="otp-cells" aria-label="نمایش بخش‌بندی‌شده یک ورودی واحد کد تأیید"><span class="otp-cell">1</span><span class="otp-cell">3</span><span class="otp-cell">8</span><span class="otp-cell">4</span><span class="otp-cell is-active">2</span></div>
                 <div class="delivery-card"><div class="delivery-card__top"><strong>کد ابتدا در تلگرام ارسال شد</strong><span class="timer">00:24</span></div><p>پس از پایان زمان، همان کد به‌صورت خودکار پیامک می‌شود؛ نیازی به درخواست دوباره نیست.</p></div>
                 <button class="button button--primary touch-target">تأیید و ادامه</button>
-                <div class="notice"><span class="notice__mark">✓</span><div><strong>تلاش فعال حفظ می‌شود</strong>اگر صفحه را تازه کنید، شناسه opaque، روش تحویل و deadline معتبر درخواست بازیابی می‌شوند؛ شماره موبایل در session storage ذخیره نمی‌شود.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">✓</span><div><strong>درخواست فعال حفظ می‌شود</strong>اگر صفحه را تازه کنید، درخواست فعال، روش دریافت کد و زمان باقی‌مانده دوباره نمایش داده می‌شوند؛ شماره موبایل روی این دستگاه ذخیره نمی‌شود.</div></div>
               </div>
             </div>
             <footer class="phone-footer">کد یک‌بارمصرف و زمان‌دار</footer>
@@ -544,7 +550,7 @@
             <div class="phone-body">
               <div class="screen screen--dense">
                 <div class="status-hero"><span class="status-orb">!</span><h3>بازیابی برای این حساب فعال نیست</h3><p>درخواست بازیابی ساخته نشد. امکان این مسیر بر اساس نقش حساب و وضعیت نشست‌ها از سمت مرجع سرور تعیین می‌شود.</p></div>
-                <div class="notice notice--warning"><span class="notice__mark">i</span><div><strong>تأیید دستگاه هنوز فعال است</strong>تا پایان مهلت می‌توانید منتظر پاسخ دستگاه اصلی بمانید.</div></div>
+                <div class="notice notice--warning"><span class="notice__mark" aria-hidden="true">i</span><div><strong>تأیید دستگاه هنوز فعال است</strong>تا پایان مهلت می‌توانید منتظر پاسخ دستگاه اصلی بمانید.</div></div>
                 <div class="countdown-block"><strong>01:18</strong><span>مهلت باقی‌مانده برای تأیید دستگاه</span></div>
                 <div class="status-track"><div class="status-track__row is-active"><span class="status-track__dot">1</span><span>انتظار برای پاسخ دستگاه اصلی ادامه دارد</span></div><div class="status-track__row"><span class="status-track__dot">2</span><span>در صورت پایان مهلت، ورود را دوباره شروع کنید</span></div></div>
                 <button class="button button--secondary touch-target">ادامه انتظار برای تأیید دستگاه</button>
@@ -562,7 +568,7 @@
               <div class="screen screen--dense">
                 <div class="status-hero"><span class="status-orb">…</span><h3>در حال بررسی مدیریت</h3><p>درخواست بازیابی ثبت شده است. نتیجه بدون نیاز به به‌روزرسانی دستی از همین صفحه اعلام می‌شود.</p></div>
                 <div class="countdown-block"><strong>01:48:16</strong><span>مهلت بررسی این درخواست</span></div>
-                <div class="notice"><span class="notice__mark">i</span><div><strong>درخواست بازیابی ثبت شده است</strong>مدیریت ممکن است برای ادامه مدرک بخواهد؛ نتیجه فقط از پاسخ معتبر همان درخواست اعلام می‌شود.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">i</span><div><strong>درخواست بازیابی ثبت شده است</strong>مدیریت ممکن است برای ادامه مدرک بخواهد؛ نتیجه فقط از پاسخ معتبر همان درخواست اعلام می‌شود.</div></div>
                 <div class="status-track"><div class="status-track__row is-active"><span class="status-track__dot">1</span><span>بررسی اولیه درخواست</span></div><div class="status-track__row"><span class="status-track__dot">2</span><span>در صورت نیاز، درخواست مدرک</span></div><div class="status-track__row"><span class="status-track__dot">3</span><span>اعلام نتیجه نهایی</span></div></div>
                 <button class="button button--danger-soft touch-target">انصراف از درخواست بازیابی</button>
               </div>
@@ -582,7 +588,7 @@
                 <div class="summary-card"><div class="summary-row"><span>نوع لینک</span><strong>دعوت‌نامه اختصاصی</strong></div><div class="summary-row"><span>مهلت ثبت‌نام</span><strong>۲۴ تیر، ساعت ۱۸:۳۰</strong></div><div class="summary-row"><span>اطلاعات این قاب</span><strong>مهلت و مسیرهای فعال</strong></div></div>
                 <button type="button" class="route-card route-card--primary touch-target" aria-label="ثبت‌نام با تلگرام"><span class="route-icon" aria-hidden="true">TG</span><span class="route-copy"><strong>ثبت‌نام با تلگرام</strong><span>ورود مستقیم به ربات و ادامه ثبت‌نام</span></span><span class="route-arrow" aria-hidden="true">‹</span></button>
                 <button type="button" class="route-card touch-target" aria-label="ثبت‌نام از طریق وب"><span class="route-icon" aria-hidden="true">W</span><span class="route-copy"><strong>ثبت‌نام از طریق وب</strong><span>تأیید موبایل و تکمیل اطلاعات در وب‌اپ</span></span><span class="route-arrow" aria-hidden="true">‹</span></button>
-                <div class="notice notice--warning"><span class="notice__mark">!</span><div><strong>مسیرها از سرور تعیین می‌شوند</strong>اگر تلگرام در دسترس نباشد، فقط مسیر معتبر وب نمایش داده می‌شود.</div></div>
+                <div class="notice notice--warning"><span class="notice__mark" aria-hidden="true">!</span><div><strong>مسیرها از سرور تعیین می‌شوند</strong>اگر تلگرام در دسترس نباشد، فقط مسیر معتبر وب نمایش داده می‌شود.</div></div>
               </div>
             </div>
             <footer class="phone-footer">برای حفظ اطلاعات حساب، لینک دعوت را با دیگران به اشتراک نگذارید</footer>
@@ -599,7 +605,7 @@
                 <div class="valid-banner"><strong>دعوت‌نامه معتبر است</strong><span>تا ۲۴ تیر، ۱۸:۳۰</span></div>
                 <div class="summary-card"><div class="summary-row"><span>نوع لینک</span><strong>دعوت‌نامه اختصاصی</strong></div><div class="summary-row"><span>مهلت ثبت‌نام</span><strong>۲۴ تیر، ساعت ۱۸:۳۰</strong></div><div class="summary-row"><span>مسیر فعال</span><strong>ثبت‌نام وب</strong></div></div>
                 <button type="button" class="route-card route-card--primary touch-target" aria-label="ادامه ثبت‌نام از طریق وب"><span class="route-icon" aria-hidden="true">W</span><span class="route-copy"><strong>ادامه ثبت‌نام در وب‌اپ</strong><span>تأیید موبایل و تکمیل اطلاعات در وب</span></span><span class="route-arrow" aria-hidden="true">‹</span></button>
-                <div class="notice"><span class="notice__mark">i</span><div><strong>فقط مسیرهای فعال نمایش داده می‌شوند</strong>برای این دعوت‌نامه مسیر تلگرام از پاسخ سرور ارائه نشده است.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">i</span><div><strong>فقط مسیرهای فعال نمایش داده می‌شوند</strong>برای این دعوت‌نامه مسیر تلگرام از پاسخ سرور ارائه نشده است.</div></div>
               </div>
             </div>
             <footer class="phone-footer">مسیر قابل استفاده از پاسخ معتبر همین دعوت‌نامه می‌آید</footer>
@@ -615,7 +621,7 @@
                 <div class="step-row"><span class="step-copy">مرحله ۱ از ۳</span><div class="progress"><span class="is-active"></span><span></span><span></span></div></div>
                 <div class="screen-heading"><h3>بررسی اطلاعات دعوت</h3><p>اطلاعات زیر از دعوت‌نامه دریافت شده و در این مرحله قابل ویرایش نیست.</p></div>
                 <div class="summary-card"><div class="summary-row"><span>نام حساب</span><strong>حساب مشتری</strong></div><div class="summary-row"><span>شماره موبایل</span><strong class="ltr">0912 *** 6789</strong></div><div class="summary-row"><span>نقش</span><strong>مشتری سطح ۱</strong></div><div class="summary-row"><span>مهلت ثبت‌نام</span><strong>۲۴ تیر، ساعت ۱۸:۳۰</strong></div></div>
-                <div class="notice"><span class="notice__mark">SMS</span><div><strong>تأیید شماره موبایل</strong>کد پنج‌رقمی ثبت‌نام از طریق پیامک به شماره درج‌شده در دعوت ارسال می‌شود.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">SMS</span><div><strong>تأیید شماره موبایل</strong>کد پنج‌رقمی ثبت‌نام از طریق پیامک به شماره درج‌شده در دعوت ارسال می‌شود.</div></div>
                 <button class="button button--primary touch-target">ارسال کد تأیید</button>
                 <button class="link-button touch-target">بازگشت به دعوت‌نامه</button>
               </div>
@@ -635,7 +641,7 @@
                 <div class="otp-meta"><span>شماره دعوت‌شده</span><span class="ltr">0912 *** 6789</span></div>
                 <div class="otp-cells" aria-label="نمایش بخش‌بندی‌شده یک ورودی واحد پنج‌رقمی ثبت‌نام"><span class="otp-cell">7</span><span class="otp-cell">2</span><span class="otp-cell">5</span><span class="otp-cell">9</span><span class="otp-cell is-active">1</span></div>
                 <button class="button button--primary touch-target">تأیید کد</button>
-                <div class="notice"><span class="notice__mark">i</span><div><strong>کد ثبت‌نام با کد ورود متفاوت است</strong>فقط کد پنج‌رقمی پیامک‌شده برای همین دعوت‌نامه را وارد کنید.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">i</span><div><strong>کد ثبت‌نام با کد ورود متفاوت است</strong>فقط کد پنج‌رقمی پیامک‌شده برای همین دعوت‌نامه را وارد کنید.</div></div>
                 <button class="link-button touch-target">بازگشت به اطلاعات دعوت</button>
               </div>
             </div>
@@ -652,13 +658,13 @@
                 <div class="step-row"><span class="step-copy">مرحله ۳ از ۳ · آخرین مرحله الزامی</span><div class="progress"><span class="is-complete"></span><span class="is-complete"></span><span class="is-active"></span></div></div>
                 <div class="screen-heading"><h3>اطلاعات نهایی</h3><p>آدرس دقیق برای تکمیل پرونده حساب لازم است.</p></div>
                 <div class="mini-summary"><div><span>حساب دعوت‌شده</span><strong>حساب مشتری · <bdi>0912 *** 6789</bdi></strong></div><span class="mini-summary__role">مشتری سطح ۱</span></div>
-                <div class="field"><div class="field-label"><span>آدرس دقیق پستی</span><span class="field-hint">حداقل ۱۰ کاراکتر</span></div><div class="textarea-shell">استان، شهر، خیابان، کوچه، پلاک و هر توضیح لازم را وارد کنید…</div><div class="field-hint">اطلاعات این مرحله با بازگشت یا خطای موقت از بین نمی‌رود.</div></div>
+                <div class="field"><div class="field-label"><span>آدرس دقیق پستی</span><span class="field-hint">حداقل ۱۰ کاراکتر</span></div><div class="textarea-shell">استان، شهر، خیابان، کوچه، پلاک و هر توضیح لازم را وارد کنید…</div><div class="privacy-hint">آدرس در حساب ذخیره و بعداً در پروفایل نمایش داده می‌شود؛ متن واردشده با بازگشت یا خطای موقت حفظ می‌شود.</div></div>
                 <button class="button button--primary touch-target">تکمیل ثبت‌نام</button>
                 <div class="notice"><span class="notice__mark" aria-hidden="true">↗</span><div><strong>ثبت‌نام با همین مرحله کامل می‌شود</strong>پس از ساخت حساب، در صورت مجازبودن اتصال تلگرام جداگانه پیشنهاد می‌شود و «فعلاً رد می‌کنم» همیشه در دسترس است.</div></div>
                 <button class="link-button touch-target">بازگشت به مرحله قبل</button>
               </div>
             </div>
-            <footer class="phone-footer">آدرس در حساب ذخیره می‌شود و بعداً در بخش پروفایل نمایش داده می‌شود</footer>
+            <footer class="phone-footer">این آخرین مرحله الزامی ثبت‌نام وب است</footer>
           </div>
         </article>
 
@@ -669,13 +675,13 @@
             <div class="phone-body">
               <div class="screen screen--dense">
                 <div class="screen-heading"><h3>تکمیل اطلاعات پس از ورود</h3><p>شماره موبایل شما در مرحله ورود تأیید شد؛ برای همین کد ثبت‌نام دیگری لازم نیست.</p></div>
-                <div class="notice"><span class="notice__mark">✓</span><div><strong>تأیید موبایل انجام شده است</strong>این مسیر مستقیماً اطلاعات نهایی را باز می‌کند و شما را به OTP دعوت‌نامه برنمی‌گرداند.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">✓</span><div><strong>تأیید موبایل انجام شده است</strong>این مسیر مستقیماً اطلاعات نهایی را باز می‌کند و شما را به مرحله کد ثبت‌نام برنمی‌گرداند.</div></div>
                 <div class="mini-summary"><div><span>حساب در حال تکمیل</span><strong>حساب مشتری · <bdi>0912 *** 6789</bdi></strong></div><span class="mini-summary__role">مشتری سطح ۱</span></div>
-                <div class="field"><div class="field-label"><span>آدرس دقیق پستی</span><span class="field-hint">حداقل ۱۰ کاراکتر</span></div><div class="textarea-shell">استان، شهر، خیابان، کوچه، پلاک و هر توضیح لازم را وارد کنید…</div><div class="field-hint">در خطای موقت، متن واردشده در همین مرحله حفظ می‌شود.</div></div>
+                <div class="field"><div class="field-label"><span>آدرس دقیق پستی</span><span class="field-hint">حداقل ۱۰ کاراکتر</span></div><div class="textarea-shell">استان، شهر، خیابان، کوچه، پلاک و هر توضیح لازم را وارد کنید…</div><div class="privacy-hint">آدرس در حساب ذخیره و بعداً در پروفایل نمایش داده می‌شود؛ در خطای موقت متن واردشده حفظ می‌شود.</div></div>
                 <button class="button button--primary touch-target">تکمیل ثبت‌نام</button>
               </div>
             </div>
-            <footer class="phone-footer">آدرس در حساب ذخیره می‌شود و بعداً در بخش پروفایل نمایش داده می‌شود</footer>
+            <footer class="phone-footer">تکمیل اطلاعات بدون تکرار مرحله کد انجام می‌شود</footer>
           </div>
         </article>
 
@@ -687,7 +693,7 @@
               <div class="screen">
                 <div class="valid-banner"><strong>ثبت‌نام با موفقیت تکمیل شد</strong><span>نشست فعال است</span></div>
                 <div class="status-hero"><span class="status-orb">TG</span><h3>اتصال تلگرام</h3><p>برای دریافت پیام‌های معاملاتی در ربات می‌توانید حساب را متصل کنید. این کار اجباری نیست.</p></div>
-                <div class="notice"><span class="notice__mark">i</span><div><strong>انتخاب شما قابل ادامه است</strong>اگر لینک آماده نشود، خطا در همین صفحه می‌ماند و می‌توانید دوباره تلاش کنید یا فعلاً عبور کنید.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">i</span><div><strong>انتخاب شما قابل ادامه است</strong>اگر لینک آماده نشود، خطا در همین صفحه می‌ماند و می‌توانید دوباره تلاش کنید یا فعلاً عبور کنید.</div></div>
                 <button class="button button--primary touch-target">اتصال به ربات تلگرام</button>
                 <button class="button button--secondary touch-target">فعلاً رد می‌کنم</button>
                 <div class="field-hint" style="text-align:center">رد این مرحله دسترسی شما به سامانه را محدود نمی‌کند.</div>
@@ -705,14 +711,15 @@
               <div class="screen screen--dense">
                 <div class="step-row"><span class="step-copy">درخواست مدرک توسط مدیریت</span><span class="timer">01:48:16</span></div>
                 <div class="screen-heading"><h3>مدرک احراز هویت</h3><p>تصویر کارت شناسایی یا فایل مدرک را ارسال کنید. توضیح تکمیلی اختیاری است.</p></div>
-                <div class="picker-grid"><button class="picker touch-target"><b>▧</b><span>گالری</span></button><button class="picker touch-target"><b>◉</b><span>دوربین</span></button><button class="picker touch-target"><b>↥</b><span>فایل</span></button></div>
+                <div class="picker-grid"><button class="picker touch-target" aria-label="انتخاب از گالری"><b aria-hidden="true">▧</b><span>گالری</span></button><button class="picker touch-target" aria-label="گرفتن تصویر با دوربین"><b aria-hidden="true">◉</b><span>دوربین</span></button><button class="picker touch-target" aria-label="انتخاب فایل"><b aria-hidden="true">↥</b><span>فایل</span></button></div>
                 <div class="file-card"><span class="file-icon">JPG</span><span class="file-copy"><strong>national-card-front.jpg</strong><span>۱.۸ مگابایت · آماده ارسال</span></span><span class="file-check">✓</span></div>
                 <div class="field"><div class="field-label"><span>توضیح اختیاری</span><span class="field-hint">اختیاری</span></div><div class="textarea-shell" style="min-height:76px">تصویر روی کارت ملی برای بررسی هویت…</div></div>
+                <div class="privacy-hint">مدرک فقط برای بررسی همین درخواست در اختیار بررسی‌کنندگان مجاز بازیابی قرار می‌گیرد.</div>
                 <button class="button button--primary touch-target">ارسال مدرک برای بررسی</button>
                 <button class="link-button touch-target" style="color:var(--danger)">انصراف از درخواست بازیابی</button>
               </div>
             </div>
-            <footer class="phone-footer">مدرک برای بررسی همین درخواست در اختیار بررسی‌کنندگان مجاز بازیابی قرار می‌گیرد</footer>
+            <footer class="phone-footer">نتیجه بررسی از پاسخ معتبر همین درخواست اعلام می‌شود</footer>
           </div>
         </article>
 
@@ -723,12 +730,12 @@
             <div class="phone-body">
               <div class="screen screen--dense">
                 <div class="screen-heading"><h3>رمز عبور اختصاصی</h3><p>برای ورود مدیریتی از دستگاه‌های جدید، یک رمز قوی تعریف کنید.</p></div>
-                <div class="notice"><span class="notice__mark">S</span><div><strong>مخصوص نشست‌های مدیریتی</strong>این رمز جایگزین ورود با کد تأیید یا سیاست تأیید دستگاه نمی‌شود.</div></div>
+                <div class="notice"><span class="notice__mark" aria-hidden="true">S</span><div><strong>مخصوص نشست‌های مدیریتی</strong>این رمز جایگزین ورود با کد تأیید یا سیاست تأیید دستگاه نمی‌شود.</div></div>
                 <div class="field"><div class="field-label"><span>رمز عبور جدید</span></div><div class="password-shell"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش رمز عبور">نمایش</button></div></div>
                 <div class="rule-grid"><span class="rule is-passed">حداقل ۸ کاراکتر</span><span class="rule is-passed">حرف بزرگ انگلیسی</span><span class="rule is-passed">حرف کوچک انگلیسی</span><span class="rule is-passed">عدد</span><span class="rule is-passed">نویسه ویژه</span></div>
                 <div class="field"><div class="field-label"><span>تکرار رمز عبور</span><span class="field-hint" style="color:var(--success)">منطبق است</span></div><div class="password-shell"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش تکرار رمز عبور">نمایش</button></div></div>
                 <button class="button button--primary touch-target">ثبت رمز و ورود</button>
-                <div class="field-hint">Password manager و autocomplete مرورگر باید بدون تغییر قرارداد امنیتی قابل استفاده بماند.</div>
+                <div class="field-hint">می‌توانید از پیشنهاد امن مرورگر برای ساخت و نگهداری رمز استفاده کنید.</div>
               </div>
             </div>
             <footer class="phone-footer">تا ثبت رمز، ورود مدیریتی کامل نمی‌شود</footer>
@@ -743,10 +750,10 @@
               <div class="screen screen--dense">
                 <div class="screen-heading"><h3>رمز عبور را اصلاح کنید</h3><p>همه قواعد باید برقرار باشند و تکرار رمز دقیقاً با رمز جدید یکسان باشد.</p></div>
                 <div class="field"><div class="field-label"><span>رمز عبور جدید</span></div><div class="password-shell"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">••••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش رمز عبور">نمایش</button></div></div>
-                <div class="rule-grid"><span class="rule is-passed">حداقل ۸ کاراکتر</span><span class="rule is-passed">حرف بزرگ انگلیسی</span><span class="rule is-failed">حرف کوچک انگلیسی</span><span class="rule is-passed">عدد</span><span class="rule">نویسه ویژه</span></div>
+                <div class="rule-grid"><span class="rule is-passed">حداقل ۸ کاراکتر</span><span class="rule is-passed">حرف بزرگ انگلیسی</span><span class="rule is-failed">حرف کوچک انگلیسی</span><span class="rule is-passed">عدد</span><span class="rule is-failed">نویسه ویژه</span></div>
                 <div class="field"><div class="field-label"><span>تکرار رمز عبور</span></div><div class="password-shell password-shell--error"><span class="password-icon" aria-hidden="true">⌕</span><span class="password-dots">•••••••</span><button type="button" class="password-eye touch-target" aria-label="نمایش تکرار رمز عبور">نمایش</button></div><div class="field-error">رمز عبور و تکرار آن یکسان نیستند</div></div>
                 <button class="button button--primary touch-target" disabled aria-disabled="true">ثبت رمز و ورود</button>
-                <div class="notice notice--warning"><span class="notice__mark">i</span><div><strong>ورودی‌ها حفظ می‌شوند</strong>پس از خطای اعتبارسنجی یا پاسخ API، کاربر همان فیلد را اصلاح می‌کند و مرحله از ابتدا شروع نمی‌شود.</div></div>
+                <div class="notice notice--warning"><span class="notice__mark" aria-hidden="true">i</span><div><strong>ورودی‌ها حفظ می‌شوند</strong>پس از خطای اعتبارسنجی یا پاسخ ناموفق سامانه، کاربر همان فیلد را اصلاح می‌کند و مرحله از ابتدا شروع نمی‌شود.</div></div>
               </div>
             </div>
             <footer class="phone-footer">خطا کنار همان ورودی و بدون اتکا به رنگ نمایش داده می‌شود</footer>
@@ -761,7 +768,7 @@
         <article class="keyboard-case">
           <h3>شماره موبایل</h3><p>فیلد focused و CTA بلافاصله بالای کیبورد تلفن می‌ماند.</p>
           <div class="keyboard-viewport">
-            <div class="keyboard-app"><header class="keyboard-app__top"><span>ورود به سامانه</span><span>۱ از ۲</span></header><div class="keyboard-app__body"><h4>شماره موبایل</h4><p>شماره ثبت‌شده در سامانه</p><div class="input-shell input-shell--focus"><span class="input-icon">09</span><span class="input-value ltr">0912 345 6789</span></div></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">دریافت کد تأیید</button></footer></div>
+            <div class="keyboard-app"><header class="keyboard-app__top"><span>ورود به سامانه</span><span>۱ از ۲</span></header><div class="keyboard-app__body"><h4>شماره موبایل</h4><p>شماره ثبت‌شده در سامانه</p><div class="input-shell input-shell--focus"><span class="input-value ltr">0912 345 6789</span></div></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">دریافت کد تأیید</button></footer></div>
             <div class="keyboard-panel keyboard-panel--numeric"><div class="keyboard-row"><span class="keyboard-key">1</span><span class="keyboard-key">2</span><span class="keyboard-key">3</span></div><div class="keyboard-row"><span class="keyboard-key">4</span><span class="keyboard-key">5</span><span class="keyboard-key">6</span></div><div class="keyboard-row"><span class="keyboard-key">7</span><span class="keyboard-key">8</span><span class="keyboard-key">9</span></div><div class="keyboard-row"><span class="keyboard-key">+</span><span class="keyboard-key">0</span><span class="keyboard-key keyboard-key--action">✓</span></div></div>
           </div>
         </article>
@@ -777,7 +784,7 @@
         <article class="keyboard-case">
           <h3>آدرس چندخطی</h3><p>فیلد فعال scroll می‌شود و CTA در لایه‌ای جدا روی محتوا نمی‌افتد.</p>
           <div class="keyboard-viewport">
-            <div class="keyboard-app"><header class="keyboard-app__top"><span>اطلاعات نهایی</span><span>۳ از ۳</span></header><div class="keyboard-app__body"><h4>آدرس دقیق پستی</h4><div class="textarea-shell input-shell--focus" style="min-height:92px">استان تهران، تهران، خیابان ولیعصر، کوچه…</div><span class="field-hint">استان، شهر، خیابان، کوچه و پلاک</span></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">تکمیل ثبت‌نام</button></footer></div>
+            <div class="keyboard-app"><header class="keyboard-app__top"><span>اطلاعات نهایی</span><span>۳ از ۳</span></header><div class="keyboard-app__body"><h4>آدرس دقیق پستی</h4><div class="textarea-shell input-shell--focus" style="min-height:88px">استان تهران، تهران، خیابان ولیعصر، کوچه…</div><span class="field-hint">استان، شهر، خیابان، کوچه و پلاک</span><span class="field-hint">در حساب ذخیره و در پروفایل نمایش داده می‌شود</span></div><footer class="keyboard-app__cta"><button class="button button--primary touch-target">تکمیل ثبت‌نام</button></footer></div>
             <div class="keyboard-panel"><div class="keyboard-suggestion"><span>تهران</span><span>خیابان</span><span>پلاک</span></div><div class="keyboard-row"><span class="keyboard-key">ض</span><span class="keyboard-key">ص</span><span class="keyboard-key">ث</span><span class="keyboard-key">ق</span><span class="keyboard-key">ف</span><span class="keyboard-key">غ</span><span class="keyboard-key">ع</span><span class="keyboard-key">ه</span></div><div class="keyboard-row"><span class="keyboard-key">ش</span><span class="keyboard-key">س</span><span class="keyboard-key">ی</span><span class="keyboard-key">ب</span><span class="keyboard-key">ل</span><span class="keyboard-key">ا</span><span class="keyboard-key">ت</span></div><div class="keyboard-row"><span class="keyboard-key">ز</span><span class="keyboard-key">ر</span><span class="keyboard-key">ذ</span><span class="keyboard-key">د</span><span class="keyboard-key">ئ</span><span class="keyboard-key">و</span></div><div class="keyboard-row"><span class="keyboard-key keyboard-key--action">۱۲۳</span><span class="keyboard-key keyboard-key--wide">فاصله</span><span class="keyboard-key keyboard-key--action">تأیید</span></div></div>
           </div>
         </article>
@@ -857,10 +864,10 @@
           <main class="desktop-form">
             <div class="screen-heading"><h3>ارسال مدرک احراز هویت</h3><p>تصویر کارت شناسایی یا فایل مدرک را همراه با توضیح اختیاری ارسال کنید.</p></div>
             <div class="desktop-deadline"><div><span>مهلت این اقدام</span><strong>نتیجه و درخواست بعدی در همین صفحه اعلام می‌شود</strong></div><bdi>01:48:16</bdi></div>
-            <div class="picker-grid"><button class="picker touch-target"><b>▧</b><span>انتخاب از گالری</span></button><button class="picker touch-target"><b>◉</b><span>گرفتن تصویر</span></button><button class="picker touch-target"><b>↥</b><span>انتخاب فایل</span></button></div>
+            <div class="picker-grid"><button class="picker touch-target" aria-label="انتخاب از گالری"><b aria-hidden="true">▧</b><span>انتخاب از گالری</span></button><button class="picker touch-target" aria-label="گرفتن تصویر با دوربین"><b aria-hidden="true">◉</b><span>گرفتن تصویر</span></button><button class="picker touch-target" aria-label="انتخاب فایل"><b aria-hidden="true">↥</b><span>انتخاب فایل</span></button></div>
             <div class="file-card"><span class="file-icon">PDF</span><span class="file-copy"><strong>identity-document.pdf</strong><span>۲.۱ مگابایت · آماده ارسال</span></span><span class="file-check">✓</span></div>
             <div class="field"><div class="field-label"><span>توضیح اختیاری</span><span class="field-hint">در صورت نیاز به توضیح بیشتر</span></div><div class="textarea-shell">توضیح تکمیلی درباره مدرک انتخاب‌شده…</div></div>
-            <div class="notice notice--warning"><span class="notice__mark">!</span><div><strong>تصمیم امنیتی خارج از این فرم است</strong>مدرک برای بررسی همین درخواست در اختیار بررسی‌کنندگان مجاز قرار می‌گیرد؛ ارسال آن به معنی تأیید بازیابی نیست و نتیجه از پاسخ مرجع سرور اعلام می‌شود.</div></div>
+            <div class="notice notice--warning"><span class="notice__mark" aria-hidden="true">!</span><div><strong>تصمیم امنیتی خارج از این فرم است</strong>مدرک برای بررسی همین درخواست در اختیار بررسی‌کنندگان مجاز قرار می‌گیرد؛ ارسال آن به معنی تأیید بازیابی نیست و نتیجه از پاسخ مرجع سرور اعلام می‌شود.</div></div>
             <div class="desktop-actions"><button class="button button--primary touch-target">ارسال مدرک برای بررسی</button><button class="button button--ghost touch-target" style="color:var(--danger)">انصراف</button></div>
           </main>
         </div>

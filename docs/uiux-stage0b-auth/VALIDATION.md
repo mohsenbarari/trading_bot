@@ -6,7 +6,7 @@
 
 ## وضعیت این سند
 
-capture اصلاح‌شده پس از بسته‌شدن HTML اجرا شد. نتیجه‌های زیر مستقیماً از `assets/stage0b-auth-validation-metrics.json` با زمان تولید `2026-07-18T09:08:14.124Z` خوانده شده‌اند.
+capture اصلاح‌شده پس از رسیدگی به یافته‌های دور دوم اجرا شد. نتیجه‌های زیر مستقیماً از `assets/stage0b-auth-validation-metrics.json` با schema نسخه `4` و زمان تولید `2026-07-18T19:01:34.748Z` خوانده شده‌اند.
 
 ## دستور بازتولید
 
@@ -23,7 +23,7 @@ node docs/uiux-stage0b-auth/capture-prototype.cjs
 - تعداد قاب‌های سناریویی مورد انتظار: `15`؛ شامل ۱۱ قاب قبلی و چهار قاب `invite-web-only`، `recovery-unavailable`، `register-direct` و `setup-password-error`.
 - عنصر mock موبایل در عرض مرجع باید outer size برابر `390 × 844` داشته باشد.
 - PNG مستقل هر سناریو از کل `<article>` گرفته می‌شود؛ در نتیجه label سناریو و mock موبایل را با هم دارد و ابعاد PNG آن الزاماً `390 × 844` نیست. ابعاد واقعی هر PNG مستقیماً از header فایل PNG خوانده و جداگانه در JSON ثبت می‌شود.
-- تصاویر بخش keyboard فقط illustration ثابت CSS از app viewport و صفحه‌کلید فرضی‌اند؛ اجرای کیبورد سیستم‌عامل، تغییر visual viewport، focus واقعی یا WebView را اثبات نمی‌کنند. ابعاد اجزای illustration و این محدودیت به‌صورت مستقل در JSON ثبت می‌شود.
+- تصاویر بخش keyboard فقط illustration ثابت CSS از app viewport و صفحه‌کلید فرضی‌اند؛ اجرای کیبورد سیستم‌عامل، تغییر visual viewport یا WebView را اثبات نمی‌کنند. ابعاد اجزای illustration و این محدودیت به‌صورت مستقل در JSON ثبت می‌شود.
 
 نتیجه render جدید:
 
@@ -44,9 +44,11 @@ node docs/uiux-stage0b-auth/capture-prototype.cjs
 
 نتیجه render جدید:
 
-- کمترین slack طبیعی در عرض ۳۹۰: `123px`؛ قاب دارای slack منفی: صفر.
-- حداقل slack به‌ترتیب در عرض‌های ۳۶۰، ۳۷۵، ۳۹۰، ۴۱۴ و ۴۳۰: `122px`، `122px`، `123px`، `134px` و `134px`؛ قاب نامتناسب در همه عرض‌ها: صفر.
+- کمترین slack طبیعی در عرض ۳۹۰: `116px`؛ قاب دارای slack منفی: صفر.
+- حداقل slack به‌ترتیب در عرض‌های ۳۶۰، ۳۷۵، ۳۹۰، ۴۱۴ و ۴۳۰: `95px`، `95px`، `116px`، `116px` و `116px`؛ قاب نامتناسب در همه عرض‌ها: صفر.
 - عرض دارای horizontal overflow: صفر.
+
+این اندازه‌گیری بر محتوای normal-flow قاب‌های فعلی تکیه دارد. descendantهای `absolute` یا `fixed` که در ارتفاع طبیعی containing block مشارکت نمی‌کنند می‌توانند از این روش عبور کنند؛ بنابراین پیاده‌سازی باید علاوه بر این sweep، bounding/viewport assertion مخصوص محتوای out-of-flow داشته باشد یا آن را در این خانواده ممنوع کند.
 
 ## اهداف تعاملی و اندازه لمس
 
@@ -59,6 +61,7 @@ JSON موارد زیر را جداگانه گزارش می‌کند:
 - اهداف actionable که marker `.touch-target` ندارند؛
 - حداقل عرض و ارتفاع مشاهده‌شده؛
 - اهداف illustration کیبورد با context مستقل.
+- CTAهای اصلی به‌صورت مستقل با آستانه ارتفاع `48px`.
 
 متن‌های `.state-card__example` در atlas نمونه copy/ظاهر state هستند و کنترل تعاملی واقعی محسوب نمی‌شوند. آن‌ها جداگانه فهرست می‌شوند و اگر در آینده semantic یا actionable شوند، گزارش آن را به‌عنوان وضعیت غیرمنتظره مشخص می‌کند.
 
@@ -67,7 +70,14 @@ JSON موارد زیر را جداگانه گزارش می‌کند:
 - تعداد اهداف semantic/actionable در عرض مرجع: `41`؛ کمینه `49 × 44` پیکسل.
 - اهداف زیر ۴۴ پیکسل: صفر.
 - اهداف actionable بدون marker: صفر.
+- تعداد دکمه‌های CTA اندازه‌گیری‌شده، شامل variantهای primary، secondary، danger و ghost: `20`؛ کمینه ارتفاع `48px` و مورد زیر آستانه: صفر.
 - ۱۲ نمونه اقدام atlas جداگانه طبقه‌بندی شدند؛ نمونه ناخواسته تعاملی: صفر.
+
+## پیمایش فوکوس و نام‌گذاری تزئینات
+
+پس از render، اسکریپت یک پیمایش مصنوعی `Tab` روی همه کنترل‌های قابل‌مشاهده و فعال artifact انجام می‌دهد. این پیمایش وجود `:focus-visible`، outline پیوسته با ضخامت حداقل `3px`، تطابق رنگ محاسبه‌شده هر outline با token آزموده‌شده `--focus-ring` و کامل‌بودن چرخه را ثبت می‌کند. دو CTA غیرفعال عمداً از شمار focusable کنار گذاشته می‌شوند؛ در نتیجه `39` کنترل مورد انتظار و هر `39` کنترل بازدید شدند، رنگ محاسبه‌شده همه `rgb(31, 94, 216)`، کمینه ضخامت outline برابر `3px` و failure صفر بود.
+
+شش glyph تزئینی picker و ۱۴ marker تزئینی notice نیز از نظر source بررسی شدند. همه با `aria-hidden="true"` از نام دسترس‌پذیر کنار گذاشته شده‌اند و pickerها `aria-label` صریح و بدون glyph دارند؛ exposed decorative count صفر است. این source audit و Tab sweep مربوط به artifact ثابت است و جای accessibility-tree، screen-reader یا runtime WebView test را نمی‌گیرد.
 
 ## اثبات بارگذاری فونت
 
@@ -80,7 +90,18 @@ JSON موارد زیر را جداگانه گزارش می‌کند:
 
 ## کنتراست tokenهای scoped
 
-capture نسبت کنتراست ۹ جفت consequential متن/پس‌زمینه در محدوده همین prototype را با آستانه `4.5:1` برای متن عادی می‌سنجد. همه جفت‌ها عبور کردند؛ کمترین نسبت `4.632:1` برای `--text-muted` روی `--page` بود. نسبت placeholder روی surface برابر `5.020:1` و warning روی warning surface برابر `4.913:1` است. این نتیجه فقط همین tokenها و جفت‌های ثبت‌شده را پوشش می‌دهد و جای audit کامل runtime را نمی‌گیرد.
+capture اکنون ۱۴ جفت consequential را با threshold متناسب با کاربرد می‌سنجد: ۱۱ جفت متن/visible glyph با آستانه محافظه‌کارانه `4.5:1` و سه جفت focus indicator با آستانه `3:1` نسبت به سطح مجاور. همه جفت‌ها عبور کردند:
+
+- کمترین نسبت متن عادی `4.632:1` برای `--text-muted` روی `--page`؛
+- neutral state tag برابر `5.185:1`؛
+- warning marker برابر `4.913:1`، با وجود تزئینی و `aria-hidden` بودن marker؛
+- focus ring روی page، surface و action surface به‌ترتیب `5.307:1`، `5.752:1` و `5.210:1`.
+
+این نتیجه فقط tokenها، سطوح و thresholdهای ثبت‌شده را پوشش می‌دهد و جای audit کامل runtime، forced-colors، zoom یا theme دیگر را نمی‌گیرد.
+
+## رفتار fail-closed شواهد
+
+همه PNGها و metrics ابتدا در یک sibling staging directory تولید می‌شوند. فقط پس از عبور همه assertionهای تعداد و ابعاد قاب‌ها، fit طبیعی در هر پنج عرض، نبود horizontal overflow، حداقل ۴۴ پیکسل برای همه اهداف، marker صریح اهداف، حداقل ۴۸ پیکسل برای CTA، پیمایش کامل فوکوس، semantics تزئینات، بارگذاری فونت و کنتراست scoped، کل مجموعه با directory promotion جایگزین assets قبلی می‌شود. بنابراین اجرای ناموفق، نسل تازه و ناقصی از PNGها را کنار metrics قدیمی باقی نمی‌گذارد.
 
 ## تست قرارداد رفتاری موجود
 
@@ -91,12 +112,12 @@ LoginView + InviteLanding + WebRegister + SetupPassword
 48 passed, 0 failures, 0 errors
 ```
 
-JUnit خام در `/tmp/stage0b-auth-unit-tests-r2.xml` قرار دارد: InviteLanding برابر ۸، LoginView برابر ۳۰، SetupPassword برابر ۴ و WebRegister برابر ۶ تست؛ skipped نیز صفر است. این عدد فقط قرارداد runtime موجود را پوشش می‌دهد و صحت HTML/prototype جدید را ثابت نمی‌کند.
+JUnit خام آخرین rerun در `/tmp/stage0b-auth-unit-tests-r3.xml` قرار دارد: InviteLanding برابر ۸، LoginView برابر ۳۰، SetupPassword برابر ۴ و WebRegister برابر ۶ تست؛ skipped نیز صفر است. این عدد فقط قرارداد runtime موجود را پوشش می‌دهد و صحت HTML/prototype جدید را ثابت نمی‌کند.
 
 ## مرز شواهد
 
 - این شواهد درباره prototype ثابت و قرارداد runtime موجود است؛ runtime جدیدی برای UI طراحی‌شده وجود ندارد.
-- fit طبیعی و horizontal overflow در mock ثابت، جای تست device/WebView، صفحه‌کلید واقعی، screen reader یا full browser matrix را نمی‌گیرد.
-- keyboard illustration مدرک قابلیت دسترسی CTA با کیبورد واقعی نیست؛ آن ادعا باید هنگام پیاده‌سازی با Playwright روی visual viewport و focus واقعی آزموده شود.
+- fit طبیعی و horizontal overflow در mock ثابت، جای تست device/WebView، صفحه‌کلید واقعی، screen reader یا full browser matrix را نمی‌گیرد و out-of-flow content را به‌طور عام اثبات نمی‌کند.
+- keyboard illustration مدرک دسترسی CTA با کیبورد سیستم‌عامل نیست. Tab sweep فقط focus artifact ثابت را می‌سنجد؛ در پیاده‌سازی باید visual viewport، focus retention و کیبورد واقعی جداگانه آزموده شوند.
 - atlas action sampleها کنترل نیستند و از پذیرش touch target کنار گذاشته می‌شوند، مگر اینکه بعداً به عنصر semantic/actionable تبدیل شوند.
 - بازار و پیام‌رسان در این capture بررسی یا بازطراحی نمی‌شوند.
