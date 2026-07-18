@@ -167,7 +167,13 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.db.flush.assert_not_awaited()
 
     async def test_edit_success_advances_rendered_version(self):
-        job = make_job(TelegramDeliveryAction.PARTIAL_OFFER_EDIT)
+        job = make_job(
+            TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+            feeder_kind="offer_edit",
+            feeder_rank=0,
+            eligible_at=utc_now(),
+            created_at=utc_now(),
+        )
         decision = TelegramDeliveryDecision(TelegramDeliveryOutcome.SENT)
         with patch.object(
             feedback_module,
@@ -176,7 +182,11 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             feedback_module,
             "_mark_edit_success",
-        ) as mark_edit:
+        ) as mark_edit, patch.object(
+            feedback_module,
+            "record_offer_edit_delivery_success",
+            new=AsyncMock(return_value={0: 1}),
+        ) as record_fairness:
             await self.feedback.apply_delivery_result(
                 self.db,
                 job,
@@ -185,6 +195,11 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
             )
 
         mark_edit.assert_called_once()
+        record_fairness.assert_awaited_once_with(
+            self.db,
+            job,
+            now=record_fairness.await_args.kwargs["now"],
+        )
         self.db.flush.assert_awaited_once()
 
     async def test_rate_limit_holds_domain_state_for_same_job_retry(self):

@@ -93,6 +93,10 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=publication_candidates),
         ) as load_publication, patch.object(
             feeder,
+            "load_offer_edit_fresh_success_counts",
+            new=AsyncMock(return_value={0: 20}),
+        ) as load_edit_counts, patch.object(
+            feeder,
             "load_offer_edit_queue_candidates",
             new=AsyncMock(return_value=edit_candidates),
         ) as load_edits, patch.object(
@@ -111,7 +115,12 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.savepoint_entries, 2)
         session.rollback.assert_not_awaited()
         load_publication.assert_awaited_once()
+        load_edit_counts.assert_awaited_once()
         load_edits.assert_awaited_once()
+        self.assertEqual(
+            load_edits.await_args.kwargs["catch_up_due_ranks"],
+            frozenset({0}),
+        )
 
     async def test_publication_gate_still_allows_independent_editor_feeder(self):
         session = FakeSession()
@@ -147,6 +156,10 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
             "load_offer_publication_queue_candidates",
             new=AsyncMock(),
         ) as load_publication, patch.object(
+            feeder,
+            "load_offer_edit_fresh_success_counts",
+            new=AsyncMock(return_value={}),
+        ), patch.object(
             feeder,
             "load_offer_edit_queue_candidates",
             new=AsyncMock(return_value=[candidate("ofr_edit")]),

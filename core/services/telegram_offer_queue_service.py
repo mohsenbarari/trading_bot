@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, case, or_, select
+from sqlalchemy import and_, case, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -38,6 +38,8 @@ from core.telegram_delivery_offer_freshness import (
     telegram_channel_destination_key,
 )
 from core.telegram_delivery_queue_contract import (
+    EDIT_CATCH_UP_FRESH_COUNT,
+    EDIT_STALE_AFTER_SECONDS,
     TelegramDeliveryAction,
     TelegramDeliveryState,
     TelegramDestinationClass,
@@ -50,11 +52,17 @@ from models.offer_publication_state import (
     OfferPublicationStatus,
     OfferPublicationSurface,
 )
+from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
 
 OFFER_QUEUE_TEMPLATE_VERSION = "offer-channel-v1"
 OFFER_PUBLICATION_DEADLINE_SAFETY_SECONDS = 5.0
+_OFFER_EDIT_FEEDER_ACTIONS = frozenset(
+    set(OFFER_FRESHNESS_ACTIONS)
+    - set(OFFER_PUBLISH_ACTIONS)
+    - {TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT}
+)
 
 
 class TelegramOfferQueueError(ValueError):
@@ -109,6 +117,113 @@ def configured_offer_edit_bot_identity() -> str:
     if bool(getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)):
         return TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY
     return TELEGRAM_PRIMARY_BOT_IDENTITY
+
+
+def _normalized_fresh_success_counts(value: Any) -> dict[int, int]:
+    if not isinstance(value, dict):
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_fairness_state_invalid"
+        )
+    normalized: dict[int, int] = {}
+    for raw_rank, raw_count in value.items():
+        try:
+            rank = int(raw_rank)
+            count = int(raw_count)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TelegramOfferQueueError(
+                "telegram_offer_edit_fairness_state_invalid"
+            ) from exc
+        if rank < 0 or count < 0 or count > EDIT_CATCH_UP_FRESH_COUNT:
+            raise TelegramOfferQueueError(
+                "telegram_offer_edit_fairness_state_invalid"
+            )
+        normalized[rank] = count
+    return normalized
+
+
+async def load_offer_edit_fresh_success_counts(
+    db: AsyncSession,
+) -> dict[int, int]:
+    row = (
+        await db.execute(
+            select(TelegramDeliveryFeederState).where(
+                TelegramDeliveryFeederState.feeder_kind
+                == TelegramFeederKind.OFFER_EDIT.value
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_fairness_state_missing"
+        )
+    return _normalized_fresh_success_counts(row.fresh_success_counts)
+
+
+async def record_offer_edit_delivery_success(
+    db: AsyncSession,
+    job: TelegramDeliveryJobRecord,
+    *,
+    now: datetime,
+) -> dict[int, int]:
+    if _enum_value(getattr(job, "feeder_kind", None)) != TelegramFeederKind.OFFER_EDIT.value:
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_fairness_feeder_invalid"
+        )
+    try:
+        rank = int(getattr(job, "feeder_rank", None))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_fairness_rank_invalid"
+        ) from exc
+    if rank < 0:
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_fairness_rank_invalid"
+        )
+
+    first_enqueued_at = getattr(job, "eligible_at", None) or getattr(
+        job, "created_at", None
+    )
+    if not isinstance(first_enqueued_at, datetime):
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_first_enqueued_at_missing"
+        )
+    first_enqueued_at = _normalized_time(first_enqueued_at)
+    current_time = _normalized_time(now)
+    if first_enqueued_at > current_time:
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_first_enqueued_at_future"
+        )
+
+    row = (
+        await db.execute(
+            select(TelegramDeliveryFeederState)
+            .where(
+                TelegramDeliveryFeederState.feeder_kind
+                == TelegramFeederKind.OFFER_EDIT.value
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_fairness_state_missing"
+        )
+    counts = _normalized_fresh_success_counts(row.fresh_success_counts)
+    is_stale = (
+        current_time - first_enqueued_at
+    ).total_seconds() >= EDIT_STALE_AFTER_SECONDS
+    counts[rank] = (
+        0
+        if is_stale
+        else min(EDIT_CATCH_UP_FRESH_COUNT, counts.get(rank, 0) + 1)
+    )
+    row.fresh_success_counts = {
+        str(item_rank): item_count
+        for item_rank, item_count in sorted(counts.items())
+    }
+    row.updated_at = current_time
+    await db.flush()
+    return counts
 
 
 def offer_delivery_action(
@@ -201,6 +316,48 @@ async def _supersede_obsolete_offer_jobs(
     return len(rows)
 
 
+async def _offer_edit_first_enqueued_at(
+    db: AsyncSession,
+    *,
+    offer_public_id: str,
+    rendered_source_version: int | None,
+    now: datetime,
+) -> datetime:
+    rendered_version = _positive_int(rendered_source_version) or 0
+    first_enqueued_at = (
+        await db.execute(
+            select(
+                func.min(
+                    func.coalesce(
+                        TelegramDeliveryJobRecord.eligible_at,
+                        TelegramDeliveryJobRecord.created_at,
+                    )
+                )
+            ).where(
+                TelegramDeliveryJobRecord.feeder_kind
+                == TelegramFeederKind.OFFER_EDIT,
+                TelegramDeliveryJobRecord.source_natural_id == offer_public_id,
+                TelegramDeliveryJobRecord.source_version > rendered_version,
+                TelegramDeliveryJobRecord.action_kind.in_(
+                    tuple(_OFFER_EDIT_FEEDER_ACTIONS)
+                ),
+            )
+        )
+    ).scalar_one_or_none()
+    if first_enqueued_at is None:
+        return _normalized_time(now)
+    if not isinstance(first_enqueued_at, datetime):
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_first_enqueued_at_invalid"
+        )
+    normalized = _normalized_time(first_enqueued_at)
+    if normalized > _normalized_time(now):
+        raise TelegramOfferQueueError(
+            "telegram_offer_edit_first_enqueued_at_future"
+        )
+    return normalized
+
+
 async def enqueue_current_offer_delivery(
     db: AsyncSession,
     *,
@@ -286,6 +443,14 @@ async def enqueue_current_offer_delivery(
             else TelegramFeederKind.OFFER_EDIT
         )
     )
+    first_edit_enqueued_at = None
+    if feeder == TelegramFeederKind.OFFER_EDIT:
+        first_edit_enqueued_at = await _offer_edit_first_enqueued_at(
+            db,
+            offer_public_id=offer_public_id,
+            rendered_source_version=getattr(state, "offer_version_id", None),
+            now=current_time,
+        )
     queue_result = await enqueue_telegram_delivery_job(
         db,
         current_server=current_server,
@@ -308,6 +473,7 @@ async def enqueue_current_offer_delivery(
             message_id=message_id,
         ),
         template_version=OFFER_QUEUE_TEMPLATE_VERSION,
+        eligible_at=first_edit_enqueued_at,
         freshness_deadline_at=freshness_deadline_at,
     )
     return TelegramOfferQueueHandoffResult(
@@ -363,8 +529,12 @@ async def load_offer_edit_queue_candidates(
     db: AsyncSession,
     *,
     limit: int,
+    catch_up_due_ranks: frozenset[int] = frozenset(),
+    now: datetime | None = None,
 ) -> list[TelegramOfferQueueCandidate]:
+    current_time = _normalized_time(now or utc_now())
     state = aliased(OfferPublicationState)
+    queued_job = aliased(TelegramDeliveryJobRecord)
     edit_rank = case(
         (
             and_(
@@ -378,6 +548,38 @@ async def load_offer_edit_queue_candidates(
         (Offer.status == OfferStatus.EXPIRED, 2),
         (Offer.status == OfferStatus.CANCELLED, 3),
         else_=4,
+    )
+    first_edit_enqueued_at = (
+        select(
+            func.min(
+                func.coalesce(
+                    queued_job.eligible_at,
+                    queued_job.created_at,
+                )
+            )
+        )
+        .where(
+            queued_job.feeder_kind == TelegramFeederKind.OFFER_EDIT,
+            queued_job.source_natural_id == Offer.offer_public_id,
+            queued_job.source_version > func.coalesce(state.offer_version_id, 0),
+            queued_job.action_kind.in_(tuple(_OFFER_EDIT_FEEDER_ACTIONS)),
+        )
+        .correlate(Offer, state)
+        .scalar_subquery()
+    )
+    is_stale = first_edit_enqueued_at <= current_time - timedelta(
+        seconds=EDIT_STALE_AFTER_SECONDS
+    )
+    due_ranks = tuple(sorted({int(rank) for rank in catch_up_due_ranks if int(rank) >= 0}))
+    catch_up_stale = (
+        and_(edit_rank.in_(due_ranks), is_stale)
+        if due_ranks
+        else false()
+    )
+    freshness_bucket = case(
+        (catch_up_stale, 0),
+        (is_stale, 2),
+        else_=1,
     )
     rows = (
         await db.execute(
@@ -397,9 +599,15 @@ async def load_offer_edit_queue_candidates(
                     state.offer_version_id != Offer.version_id,
                 ),
             )
-            # Internal action rank is resolved before handing work to the main
-            # queue. Within one rank, the newest Offer is always released first.
-            .order_by(edit_rank.asc(), Offer.created_at.desc(), Offer.id.desc())
+            # Internal action rank is resolved before handoff. Fresh edits stay
+            # ahead of stale edits within the same rank, except for the exact
+            # one-in-twenty catch-up slot. Newer Offers lead each bucket.
+            .order_by(
+                edit_rank.asc(),
+                freshness_bucket.asc(),
+                Offer.created_at.desc(),
+                Offer.id.desc(),
+            )
             .limit(max(1, int(limit)))
             .with_for_update(of=Offer, skip_locked=True)
         )

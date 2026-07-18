@@ -19,13 +19,16 @@ from core.services.telegram_offer_queue_service import (
     TelegramOfferQueueError,
     enqueue_current_offer_delivery,
     load_offer_edit_queue_candidates,
+    load_offer_edit_fresh_success_counts,
     load_offer_publication_queue_candidates,
 )
+from core.telegram_delivery_queue_contract import EDIT_CATCH_UP_FRESH_COUNT
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
 from core.trading_settings import get_trading_settings_async
+from core.utils import utc_now
 
 
 logger = logging.getLogger(__name__)
@@ -139,9 +142,17 @@ async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederRe
                 offer_expiry_minutes=expiry_minutes,
             )
 
+        edit_success_counts = await load_offer_edit_fresh_success_counts(db)
+        catch_up_due_ranks = frozenset(
+            rank
+            for rank, count in edit_success_counts.items()
+            if count >= EDIT_CATCH_UP_FRESH_COUNT
+        )
         edit_candidates = await load_offer_edit_queue_candidates(
             db,
             limit=_batch_limit(),
+            catch_up_due_ranks=catch_up_due_ranks,
+            now=utc_now(),
         )
         edit_counts = await _handoff_candidates(
             db,

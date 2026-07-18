@@ -60,8 +60,13 @@ from core.services.telegram_delivery_queue_service import (
     recover_expired_telegram_delivery_leases,
     resolve_telegram_delivery_result,
 )
+from core.services.telegram_offer_queue_service import (
+    load_offer_edit_fresh_success_counts,
+    record_offer_edit_delivery_success,
+)
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
 from models.offer_publication_state import (
@@ -190,7 +195,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fab2c3d4e5f6"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fac3d4e5f6a7"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -241,6 +246,13 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await db.execute(text("ALTER SEQUENCE telegram_delivery_jobs_enqueued_seq_seq RESTART WITH 1"))
+            await db.execute(
+                text(
+                    "UPDATE telegram_delivery_feeder_states "
+                    "SET fresh_success_counts = '{}'::json, updated_at = now() "
+                    "WHERE feeder_kind = 'offer_edit'"
+                )
+            )
             await db.commit()
 
     async def asyncTearDown(self):
@@ -259,6 +271,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         payload: dict | None = None,
         deadline=None,
         freshness_deadline=None,
+        eligible=None,
         bot_identity: str = "primary",
         template_version: str = "test-v1",
         campaign_id: str | None = None,
@@ -278,6 +291,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             "template_version": template_version,
             "delivery_deadline_at": deadline,
             "freshness_deadline_at": freshness_deadline,
+            "eligible_at": eligible,
             "campaign_id": campaign_id,
             "run_id": run_id,
         }
@@ -341,6 +355,59 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(expected_partial_indexes.issubset(indexes))
         for name in expected_partial_indexes:
             self.assertIn(" WHERE ", indexes[name])
+
+    async def test_offer_edit_fairness_counter_survives_transactions_and_resets_on_stale(self):
+        now = utc_now()
+        for index in range(21):
+            enqueued = await self._enqueue(
+                f"fairness-fresh-{index}",
+                feeder=TelegramFeederKind.OFFER_EDIT,
+                action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+                destination="channel:fairness",
+                destination_class=TelegramDestinationClass.CHANNEL,
+                method="editMessageText",
+                payload={
+                    "chat_id": -1001,
+                    "message_id": index + 1,
+                    "text": f"fresh-{index}",
+                },
+                eligible=now - timedelta(seconds=30),
+            )
+            async with self.Session() as db:
+                job = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+                await record_offer_edit_delivery_success(db, job, now=now)
+                await db.commit()
+
+        async with self.Session() as db:
+            counts = await load_offer_edit_fresh_success_counts(db)
+            state = await db.get(
+                TelegramDeliveryFeederState,
+                TelegramFeederKind.OFFER_EDIT.value,
+            )
+        self.assertEqual(counts[0], 20)
+        self.assertEqual(state.fresh_success_counts, {"0": 20})
+
+        stale = await self._enqueue(
+            "fairness-stale",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+            destination="channel:fairness",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            payload={
+                "chat_id": -1001,
+                "message_id": 999,
+                "text": "stale",
+            },
+            eligible=now - timedelta(minutes=6),
+        )
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, stale.job.id)
+            await record_offer_edit_delivery_success(db, job, now=now)
+            await db.commit()
+        async with self.Session() as db:
+            counts = await load_offer_edit_fresh_success_counts(db)
+        self.assertEqual(counts[0], 0)
 
     @staticmethod
     def _queue_runtime():

@@ -17,6 +17,7 @@ from core.services.telegram_offer_publication_service import (
 from core.services.telegram_offer_queue_service import (
     TelegramOfferQueueError,
     enqueue_current_offer_delivery,
+    record_offer_edit_delivery_success,
 )
 from core.telegram_delivery_offer_freshness import (
     OFFER_FRESHNESS_ACTIONS,
@@ -27,6 +28,7 @@ from core.telegram_delivery_offer_freshness import (
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryDecision,
+    TelegramFeederKind,
     TelegramDeliveryOutcome,
     TelegramDeliveryState,
     TelegramFreshnessDecision,
@@ -321,6 +323,20 @@ class TelegramOfferQueueLifecycleFeedback:
                     action=action,
                     now=now,
                 )
+                if (
+                    _enum_value(getattr(job, "feeder_kind", None))
+                    == TelegramFeederKind.OFFER_EDIT.value
+                ):
+                    try:
+                        await record_offer_edit_delivery_success(
+                            db,
+                            job,
+                            now=now,
+                        )
+                    except TelegramOfferQueueError as exc:
+                        raise TelegramOfferQueueFeedbackError(
+                            "telegram_offer_edit_fairness_feedback_failed"
+                        ) from exc
         elif outcome == TelegramDeliveryOutcome.SENT_NOOP:
             if action in OFFER_PUBLISH_ACTIONS:
                 if _positive_int(getattr(state, "telegram_message_id", None)) is None:
