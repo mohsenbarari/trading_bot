@@ -2,11 +2,32 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from aiogram import types as aiogram_types
+
+from bot.callbacks import (
+    AcceptLotsCallback,
+    CommodityCallback,
+    LotTypeCallback,
+    PageCallback,
+    QuantityCallback,
+    SkipNotesCallback,
+    TextOfferActionCallback,
+    TradeActionCallback,
+    TradeSettlementCallback,
+    TradeTypeCallback,
+    TradeWizardActionCallback,
+    TradeWizardEditCallback,
+)
 from bot.handlers.trade_create import (
+    _TEXT_OFFER_EXISTING_HANDOFF_STATES,
+    _TEXT_OFFER_RECOVERY_STATES,
     _disable_pending_text_offer_confirmation,
     _reject_stale_text_offer_callback,
+    handle_stale_trade_creation_callback,
     handle_text_offer,
+    handle_text_offer_from_stale_trade_state,
     handle_text_offer_while_confirmation_pending,
+    handle_unexpected_trade_builder_message,
     handle_lot_sizes_input,
     handle_manual_quantity,
     handle_notes_input,
@@ -17,6 +38,21 @@ from bot.states import AdminBroadcast, Trade
 
 
 class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
+    async def test_every_trade_state_has_a_text_offer_recovery_path(self):
+        covered_states = {
+            state.state
+            for state in (
+                *_TEXT_OFFER_EXISTING_HANDOFF_STATES,
+                *_TEXT_OFFER_RECOVERY_STATES,
+                Trade.awaiting_text_confirm,
+            )
+        }
+
+        self.assertEqual(
+            {state.state for state in Trade.__all_states__},
+            covered_states,
+        )
+
     async def test_text_offer_router_does_not_consume_broadcast_message_state(self):
         handler = next(
             item for item in trade_create.router.message.handlers
@@ -48,6 +84,125 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(pending_match)
         self.assertFalse(idle_match)
+
+    async def test_recovery_router_accepts_offer_text_only_in_missing_trade_states(self):
+        handler = next(
+            item for item in trade_create.router.message.handlers
+            if item.callback is handle_text_offer_from_stale_trade_state
+        )
+        message = SimpleNamespace(text="خرید امام 20 عدد نقد حاضر 176000")
+
+        for trade_state in _TEXT_OFFER_RECOVERY_STATES:
+            matched, _ = await handler.check(message, raw_state=trade_state.state)
+            self.assertTrue(matched, trade_state.state)
+
+        for excluded_state in (
+            None,
+            AdminBroadcast.awaiting_message_text.state,
+            Trade.awaiting_quantity.state,
+            Trade.awaiting_text_confirm.state,
+        ):
+            matched, _ = await handler.check(message, raw_state=excluded_state)
+            self.assertFalse(matched, excluded_state)
+
+    async def test_stale_trade_state_is_cleared_before_normal_text_offer_flow(self):
+        bot = SimpleNamespace(name="bot")
+        message = SimpleNamespace(text="خ امام 12تا 176000", bot=bot)
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=Trade.awaiting_commodity.state),
+            clear=AsyncMock(),
+        )
+        user = SimpleNamespace(id=276)
+
+        with patch("bot.handlers.trade_create.handle_text_offer", new=AsyncMock()) as text_offer:
+            await handle_text_offer_from_stale_trade_state(message, state, user, bot)
+
+        state.clear.assert_awaited_once_with()
+        text_offer.assert_awaited_once_with(message, state, user, bot)
+
+    async def test_unexpected_message_in_callback_only_trade_state_gets_guidance(self):
+        message = SimpleNamespace(text="متن نامعتبر", answer=AsyncMock())
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=Trade.awaiting_trade_type.state),
+            clear=AsyncMock(),
+        )
+
+        await handle_unexpected_trade_builder_message(
+            message,
+            state,
+            user=SimpleNamespace(id=276),
+        )
+
+        message.answer.assert_awaited_once()
+        self.assertIn("دکمه", message.answer.await_args.args[0])
+        state.clear.assert_not_awaited()
+
+    async def test_stale_creation_callback_only_alerts_and_never_mutates_state(self):
+        callback = SimpleNamespace(data="trade_type:buy", answer=AsyncMock())
+        state = SimpleNamespace(
+            get_state=AsyncMock(return_value=None),
+            clear=AsyncMock(),
+            set_state=AsyncMock(),
+        )
+
+        await handle_stale_trade_creation_callback(
+            callback,
+            state,
+            user=SimpleNamespace(id=276),
+        )
+
+        callback.answer.assert_awaited_once_with(
+            "این دکمه دیگر فعال نیست. ثبت آفر را دوباره شروع کنید.",
+            show_alert=True,
+        )
+        state.clear.assert_not_awaited()
+        state.set_state.assert_not_awaited()
+
+    async def test_stale_callback_fallback_is_limited_to_creation_prefixes(self):
+        fallback_handlers = [
+            item for item in trade_create.router.callback_query.handlers
+            if item.callback is handle_stale_trade_creation_callback
+        ]
+        creation_callbacks = (
+            TradeTypeCallback(type="buy").pack(),
+            TradeSettlementCallback(type="cash").pack(),
+            CommodityCallback(id=1).pack(),
+            PageCallback(trade_type="buy", page=1).pack(),
+            QuantityCallback(value="10").pack(),
+            LotTypeCallback(type="wholesale").pack(),
+            AcceptLotsCallback(lots="10_10").pack(),
+            TradeActionCallback(action="back_to_type").pack(),
+            SkipNotesCallback(target="notes").pack(),
+            TextOfferActionCallback(action="confirm").pack(),
+            TradeWizardActionCallback(action="continue").pack(),
+            TradeWizardEditCallback(field="commodity").pack(),
+        )
+
+        self.assertEqual(len(fallback_handlers), len(creation_callbacks))
+        for callback_data in creation_callbacks:
+            event = aiogram_types.CallbackQuery(
+                id="stale-offer-builder",
+                from_user=aiogram_types.User(id=276, is_bot=False, first_name="Test"),
+                chat_instance="test",
+                data=callback_data,
+            )
+            matches = [
+                bool((await handler.check(event, raw_state=None))[0])
+                for handler in fallback_handlers
+            ]
+            self.assertEqual(sum(matches), 1, callback_data)
+
+        channel_trade = aiogram_types.CallbackQuery(
+            id="channel-trade",
+            from_user=aiogram_types.User(id=276, is_bot=False, first_name="Test"),
+            chat_instance="test",
+            data="ct2:ofr_public:10",
+        )
+        channel_matches = [
+            bool((await handler.check(channel_trade, raw_state=None))[0])
+            for handler in fallback_handlers
+        ]
+        self.assertFalse(any(channel_matches))
 
     async def test_replacement_offer_disables_old_preview_and_restarts_text_flow(self):
         bot = SimpleNamespace(edit_message_reply_markup=AsyncMock())
