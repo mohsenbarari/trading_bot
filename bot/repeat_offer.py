@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import time
 
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,22 +19,17 @@ from core.offer_settlement import build_offer_draft_text
 from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
 from core.services.offer_republish_service import (
-    REPEATABLE_EXPIRE_REASONS,
     list_repeatable_offers,
     offer_remaining_lot_sizes,
     offer_remaining_quantity,
 )
-from models.offer import Offer, OfferStatus
-from models.user import User
+from models.offer import Offer
 
 
 logger = logging.getLogger(__name__)
 
 BOT_REPEAT_OFFER_BUTTON_PREFIX = "🔁 "
 BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH = 64
-BOT_REPEAT_OFFER_REFRESH_DEBOUNCE_SECONDS = 2.0
-
-_repeat_offer_refresh_sent_at: dict[int, float] = {}
 
 
 @dataclass(frozen=True)
@@ -135,81 +129,6 @@ async def resolve_bot_repeat_offer_button_candidate(
     if normalized_button != candidate.button_text:
         return None, True, "stale_button"
     return candidate, False, None
-
-
-def _enum_value(value: object) -> str:
-    return str(getattr(value, "value", value) or "").strip().lower()
-
-
-async def refresh_repeat_offer_menu_for_expired_offer(
-    bot: object,
-    offer_id: int,
-) -> bool:
-    """Push a current reply keyboard after an expiry changes the latest offer."""
-    try:
-        async with AsyncSessionLocal() as session:
-            offer = await session.get(Offer, int(offer_id))
-            if offer is None or _enum_value(getattr(offer, "status", None)) != OfferStatus.EXPIRED.value:
-                return False
-            if str(getattr(offer, "expire_reason", "") or "") not in REPEATABLE_EXPIRE_REASONS:
-                return False
-            if (
-                _enum_value(getattr(offer, "home_server", None)) == SERVER_FOREIGN
-                and _enum_value(getattr(offer, "expire_source_surface", None)) == "telegram_bot"
-            ):
-                # The bot's manual-expiry handler already sends the committed keyboard.
-                return False
-
-            owner_user_id = getattr(offer, "user_id", None)
-            if owner_user_id is None:
-                return False
-            user = await session.get(User, int(owner_user_id))
-            telegram_id = getattr(user, "telegram_id", None) if user is not None else None
-            if telegram_id is None:
-                return False
-            access = await evaluate_bot_access(session, user)
-            if not access.allowed:
-                return False
-            candidate = await load_latest_bot_repeat_offer_candidate(
-                session,
-                owner_user_id=int(owner_user_id),
-            )
-
-        now = time.monotonic()
-        previous_sent_at = _repeat_offer_refresh_sent_at.get(int(owner_user_id))
-        if (
-            previous_sent_at is not None
-            and now - previous_sent_at < BOT_REPEAT_OFFER_REFRESH_DEBOUNCE_SECONDS
-        ):
-            return False
-
-        from core.config import settings
-        from core.public_webapp_url import user_facing_webapp_url
-
-        keyboard = prepend_repeat_offer_button(
-            get_persistent_menu_keyboard(
-                getattr(user, "role", None),
-                user_facing_webapp_url(settings_obj=settings),
-            ),
-            candidate,
-        )
-        await bot.send_message(
-            chat_id=int(telegram_id),
-            text="منو با آخرین وضعیت به‌روزرسانی شد.",
-            reply_markup=keyboard,
-        )
-        _repeat_offer_refresh_sent_at[int(owner_user_id)] = now
-        return True
-    except Exception:
-        logger.warning(
-            "Failed to refresh repeat-offer keyboard after offer expiry",
-            exc_info=True,
-            extra={
-                "event": "telegram.repeat_offer.expiry_refresh_failed",
-                "offer_id": offer_id,
-            },
-        )
-        return False
 
 
 def prepend_repeat_offer_button(

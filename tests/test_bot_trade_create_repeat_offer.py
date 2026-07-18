@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch
 from bot.handlers.trade_create import (
     _expire_offer_after_publication_failure,
     _handle_trade_confirm_core,
-    _send_repeat_offer_menu_refresh,
     handle_repeat_offer_button,
 )
 from bot.repeat_offer import BotRepeatOfferCandidate
@@ -291,13 +290,7 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.trade_create.lock_repeatable_offer",
             new=AsyncMock(side_effect=OfferNotRepeatableError("offer_ineligible")),
-        ), patch(
-            "bot.handlers.trade_create._send_repeat_offer_menu_refresh",
-            new=AsyncMock(),
-        ) as refresh, patch(
-            "bot.handlers.trade_create.settings",
-            SimpleNamespace(channel_id=-100),
-        ):
+        ), patch("bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100)):
             await _handle_trade_confirm_core(
                 callback,
                 state,
@@ -312,33 +305,8 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIn("دیگر قابل تکرار نیست", callback.message.edit_text.await_args.args[0])
-        refresh.assert_awaited_once_with(bot, chat_id=99, user=user)
         state.clear.assert_awaited_once_with()
         callback.answer.assert_awaited_once_with()
-
-    async def test_menu_refresh_sends_current_keyboard_and_is_best_effort(self):
-        user = SimpleNamespace(id=9)
-        bot = SimpleNamespace(send_message=AsyncMock())
-        with patch(
-            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
-            new=AsyncMock(return_value="MENU"),
-        ):
-            await _send_repeat_offer_menu_refresh(bot, chat_id=99, user=user)
-
-        bot.send_message.assert_awaited_once_with(
-            chat_id=99,
-            text="منو با آخرین وضعیت به‌روزرسانی شد.",
-            reply_markup="MENU",
-        )
-
-        failing_bot = SimpleNamespace(
-            send_message=AsyncMock(side_effect=RuntimeError("telegram down"))
-        )
-        with patch(
-            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
-            new=AsyncMock(return_value="MENU"),
-        ):
-            await _send_repeat_offer_menu_refresh(failing_bot, chat_id=99, user=user)
 
 
 if __name__ == "__main__":
