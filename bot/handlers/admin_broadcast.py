@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.states import AdminBroadcast
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.services.telegram_admin_broadcast_service import (
@@ -49,7 +50,11 @@ def _is_superadmin(user: User | object | None) -> bool:
 async def _reject_if_not_superadmin_callback(callback: types.CallbackQuery, user: User | object | None) -> bool:
     if _is_superadmin(user):
         return False
-    await callback.answer("عدم دسترسی", show_alert=True)
+    await answer_callback_query_via_runtime(
+        callback,
+        "عدم دسترسی",
+        show_alert=True,
+    )
     return True
 
 
@@ -160,7 +165,7 @@ async def cancel_telegram_admin_broadcast(callback: types.CallbackQuery, state: 
         return
     await state.clear()
     await callback.message.edit_text("فرایند ارسال پیام لغو شد.")
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == f"{CALLBACK_PREFIX}:all")
@@ -173,7 +178,7 @@ async def choose_all_recipients(callback: types.CallbackQuery, state: FSMContext
         selected_user_ids=[],
     )
     await _ask_for_message_text(callback, state)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == f"{CALLBACK_PREFIX}:groups")
@@ -186,7 +191,7 @@ async def choose_group_recipients(callback: types.CallbackQuery, state: FSMConte
         selected_user_ids=[],
     )
     await callback.message.edit_text("گروه‌های دریافت‌کننده را انتخاب کنید:", reply_markup=_groups_keyboard(set()))
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data.startswith(f"{CALLBACK_PREFIX}:gt:"))
@@ -195,7 +200,11 @@ async def toggle_group_recipient(callback: types.CallbackQuery, state: FSMContex
         return
     group = str(callback.data or "").split(":", 2)[2]
     if group not in SUPPORTED_TELEGRAM_ADMIN_BROADCAST_GROUPS:
-        await callback.answer("گروه نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "گروه نامعتبر است.",
+            show_alert=True,
+        )
         return
     data = await state.get_data()
     selected_groups = set(data.get("target_groups") or [])
@@ -208,7 +217,7 @@ async def toggle_group_recipient(callback: types.CallbackQuery, state: FSMContex
         target_groups=sorted(selected_groups),
     )
     await callback.message.edit_reply_markup(reply_markup=_groups_keyboard(selected_groups))
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == f"{CALLBACK_PREFIX}:groups_done")
@@ -217,10 +226,14 @@ async def finish_group_selection(callback: types.CallbackQuery, state: FSMContex
         return
     data = await state.get_data()
     if not data.get("target_groups"):
-        await callback.answer("حداقل یک گروه انتخاب کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "حداقل یک گروه انتخاب کنید.",
+            show_alert=True,
+        )
         return
     await _ask_for_message_text(callback, state)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == f"{CALLBACK_PREFIX}:selected")
@@ -239,7 +252,7 @@ async def choose_selected_recipients(callback: types.CallbackQuery, state: FSMCo
             inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data=f"{CALLBACK_PREFIX}:cancel")]]
         ),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(AdminBroadcast.awaiting_search_query)
@@ -266,7 +279,11 @@ async def toggle_selected_user(callback: types.CallbackQuery, state: FSMContext,
     try:
         target_user_id = int(str(callback.data or "").split(":", 2)[2])
     except (TypeError, ValueError):
-        await callback.answer("کاربر نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "کاربر نامعتبر است.",
+            show_alert=True,
+        )
         return
     data = await state.get_data()
     selected_ids = set(int(user_id) for user_id in data.get("selected_user_ids") or [])
@@ -274,7 +291,11 @@ async def toggle_selected_user(callback: types.CallbackQuery, state: FSMContext,
         selected_ids.remove(target_user_id)
     else:
         if len(selected_ids) >= TELEGRAM_BROADCAST_SELECTED_RECIPIENT_CAP:
-            await callback.answer("تعداد کاربران انتخابی از سقف مجاز بیشتر است.", show_alert=True)
+            await answer_callback_query_via_runtime(
+                callback,
+                "تعداد کاربران انتخابی از سقف مجاز بیشتر است.",
+                show_alert=True,
+            )
             return
         selected_ids.add(target_user_id)
     await state.update_data(selected_user_ids=sorted(selected_ids))
@@ -288,7 +309,7 @@ async def toggle_selected_user(callback: types.CallbackQuery, state: FSMContext,
         f"انتخاب‌شده‌ها: {len(selected_ids)}",
         reply_markup=_search_results_keyboard(recipients, selected_ids=selected_ids),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == f"{CALLBACK_PREFIX}:search_again")
@@ -303,7 +324,7 @@ async def search_again(callback: types.CallbackQuery, state: FSMContext, user: U
             inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data=f"{CALLBACK_PREFIX}:cancel")]]
         ),
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(F.data == f"{CALLBACK_PREFIX}:selected_done")
@@ -312,10 +333,14 @@ async def finish_selected_recipients(callback: types.CallbackQuery, state: FSMCo
         return
     data = await state.get_data()
     if not data.get("selected_user_ids"):
-        await callback.answer("حداقل یک کاربر انتخاب کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "حداقل یک کاربر انتخاب کنید.",
+            show_alert=True,
+        )
         return
     await _ask_for_message_text(callback, state)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(AdminBroadcast.awaiting_message_text)
@@ -374,7 +399,11 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
             receipt_count = result.receipt_count
             await db.commit()
     except TelegramAdminBroadcastValidationError as exc:
-        await callback.answer("درخواست معتبر نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(
+            callback,
+            "درخواست معتبر نیست.",
+            show_alert=True,
+        )
         await callback.message.edit_text(f"خطا در ایجاد پیام: {str(exc)}")
         await state.clear()
         return
@@ -388,4 +417,4 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
         await callback.message.edit_text(
             f"✅ پیام در صف ارسال بات قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}"
         )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)

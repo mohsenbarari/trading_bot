@@ -12,6 +12,7 @@
 - checkpoint نخست callback در `2026-07-18`: ممیزی AST اصلاح شد تا `callback.message.answer` با `answerCallbackQuery` اشتباه نشود؛ baseline معنایی واقعی `260` callback deadlineدار و `344` interaction پیام‌ساز است. middleware جدید زمان دریافت callback را در اولین مرز dispatcher و پیش از Auth/DB در ContextVar ایزوله ثبت و در `finally` پاک می‌کند. adapter مشترک در legacy شکل فراخوانی aiogram را حفظ و در queue mode بدون receipt لبه fail-closed می‌شود. دو outcome صفحه‌بندی کاتالوگ کالا نخستین خانواده‌ای هستند که از همین adapter به ingress مستقیم `CALLBACK_DEADLINE/M0` منتقل شدند؛ inventory جاری callback را به `258` رساند.
 - checkpoint دوم callback در `2026-07-18`: هر `17` پاسخ callback خانواده تاریخچه معامله، شامل نمایش/فیلتر/بازگشت پروفایل، کنترل دسترسی و acknowledgement ساخت Excel/PDF، به همان adapter منتقل شد. پیام‌های جدید، editها و ارسال فایل این خانواده عمداً در دسته interaction باقی ماندند تا قرارداد result/anchor مرحله بعد دور زده نشود. inventory callback به `241` کاهش یافت و `44` تست کامل تاریخچه/خروجی بدون تغییر رفتار legacy پاس شدند.
 - checkpoint سوم callback در `2026-07-18`: هشت پاسخ ساخت/لغو دعوت‌نامه مدیریتی و شانزده پاسخ منو، جست‌وجو، block/unblock و کنترل delegation به adapter مشترک منتقل شدند. mutationهای invitation/block و edit/messageهای همراه تغییری نکردند. `26` تست دامنه این دو خانواده پاس و inventory callback به `217` کاهش یافت.
+- checkpoint چهارم callback در `2026-07-18`: هر `17` پاسخ جریان انتخاب گیرنده، گروه، تایید، لغو و validation پیام همگانی مدیریتی به adapter مشترک منتقل شد. coordinator/receipt اصلی broadcast، FSM، editها و پیام‌های ورودی تغییری نکردند. `30` تست handler/service/feeder/delivery/freshness سبز و inventory callback به `200` کاهش یافت.
 - این سند مجوز deploy به staging یا production نیست.
 - تمام مستندات، تست‌ها و کدنویسی بعدی این موضوع باید در همین شاخه مستقل ادامه پیدا کنند، مگر اینکه مالک محصول صریحاً مسیر دیگری تعیین کند.
 
@@ -671,6 +672,7 @@ goodput = SENT / wall_clock_time_including_cooldowns
 - برای checkpoint نخست callback Stage 3 در `2026-07-18`، timestamp لبه callback مستقل از زمان رسیدن handler ثبت می‌شود؛ ContextVar میان taskها نشت نمی‌کند و queue adapter بدون آن هیچ row یا fallback مستقیم نمی‌سازد. adapter همان ingress/freshness/lifecycle مصوب `answerCallbackQuery` را reuse می‌کند و callback خام فقط در payload اجرایی می‌ماند. کاتالوگ کالا هر دو پاسخ access-denied و acknowledgement عادی را از adapter می‌فرستد. `27` تست middleware/adapter/runtime/catalog/inventory، `55` تست callback-contract/freshness/worker/lifecycle و `525` تست گسترده Telegram با `146` skip پاس شدند؛ schema، migration و Telegram زنده در کار نبود و runtime خاموش ماند.
 - برای checkpoint دوم callback Stage 3 در `2026-07-18`، فقط `callback.answer`های تاریخچه معامله cutover شدند و `callback.message.answer`, `edit_text` و `bot.send_document` برای برش interaction دست‌نخورده ماندند. `44` تست تاریخچه، query، pagination، format و export سبز شدند و audit شمار `remaining_callback_direct=241` را تأیید کرد. runtime و schema تغییری نکردند.
 - برای checkpoint سوم callback Stage 3 در `2026-07-18`، خانواده invitation admin با `12` تست و block management با `14` تست regression سبز شدند. همه `24` پاسخ از receipt لبه یکسان استفاده می‌کنند و در queue mode فقط ingress `CALLBACK_DEADLINE/M0` را می‌سازند؛ side effectهای دامنه و interactionهای غیر-callback به stage خودشان موکول ماندند. audit مقدار `remaining_callback_direct=217` را تأیید کرد.
+- برای checkpoint چهارم callback Stage 3 در `2026-07-18`، `17` پاسخ flow پیام همگانی بدون تغییر coordinator گیرندگان یا receiptهای broadcast cutover شد. `30` تست دامنه و صف broadcast پاس و audit مقدار `remaining_callback_direct=200` را ثبت کرد. هیچ migration یا تغییر runtime وجود نداشت.
 - readback زنده و فقط‌خواندنی editor در staging، حق پیام `can_edit_messages=true` و همه حقوق post/delete/invite/restrict/promote/change-info/video/direct-message را false گزارش کرد؛ بااین‌حال `can_post_stories`, `can_edit_stories`, `can_delete_stories` هنوز true بودند. Bot API این سه را حق مستقل ادمین تعریف می‌کند، بنابراین preflight سخت‌گیرانه تا false شدن آن‌ها یا تصمیم صریح امنیتی جدید fail-closed باقی می‌ماند. این وضعیت به معنی مجازشدن editor برای ارسال پیام نیست؛ allowlist کد و constraint دیتابیس همچنان فقط edit کانال را می‌پذیرند.
 - در ادامه همان روز مالک محصول اعلام کرد هر سه دسترسی Story از editor گرفته شده‌اند. این تغییر تا readback زنده بعدی staging «گزارش‌شده ولی تأییدنشده» است؛ Stage 4 باید پیش از هر smoke یا بار، `can_post_stories=false`, `can_edit_stories=false`, `can_delete_stories=false` را همراه سایر permissionهای ممنوع دوباره بخواند و در غیر این صورت fail-closed بماند.
 - این foundation مجوز deploy یا شروع Stage 4 نیست و runtime عمداً غیرفعال باقی مانده است.
@@ -684,7 +686,7 @@ python3 scripts/audit_telegram_delivery_calls.py --check
 python3 scripts/audit_telegram_delivery_calls.py --format json
 ```
 
-baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint callback، ۳۲ فراخوانی `callback.message.answer` که پیام جدید می‌سازند از callback deadlineدار جدا و به interaction منتقل شدند؛ سپس دو callback کاتالوگ با یک adapter legacy مشترک و `41` callback خانواده‌های تاریخچه، invitation admin و block management با همان adapter جایگزین شدند. خروجی جاری `663` مرز دارد. این ممیزی محافظه‌کارانه است: reachable بودن هر مسیر در یک deployment را ادعا نمی‌کند، اما هیچ فراخوانی را فقط به‌دلیل «احتمالاً بلااستفاده بودن» از inventory حذف نمی‌کند.
+baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint callback، ۳۲ فراخوانی `callback.message.answer` که پیام جدید می‌سازند از callback deadlineدار جدا و به interaction منتقل شدند؛ سپس دو callback کاتالوگ با یک adapter legacy مشترک و `58` callback خانواده‌های تاریخچه، invitation admin، block management و broadcast admin با همان adapter جایگزین شدند. خروجی جاری `646` مرز دارد. این ممیزی محافظه‌کارانه است: reachable بودن هر مسیر در یک deployment را ادعا نمی‌کند، اما هیچ فراخوانی را فقط به‌دلیل «احتمالاً بلااستفاده بودن» از inventory حذف نمی‌کند.
 
 | disposition | تعداد | نتیجه |
 | --- | ---: | --- |
@@ -696,7 +698,7 @@ baseline اولیه `705` مرز syntactic را ثبت کرد. در checkpoint c
 | `non_message_control` | `2` | ban/unban عضویت و خارج از pacing پیام |
 | `non_delivery_timer` | `1` | در queue mode فقط side effect غیرتلگرامی باقی می‌ماند |
 | `remaining_business_direct` | `0` | بسته‌شده در checkpoint account-control |
-| `remaining_callback_direct` | `217` | blocker Stage 3؛ فقط `callback/query.answer` واقعی |
+| `remaining_callback_direct` | `200` | blocker Stage 3؛ فقط `callback/query.answer` واقعی |
 | `remaining_interactive_direct` | `344` | blocker Stage 3؛ شامل پیام‌های جدید داخل callback handler |
 | `remaining_cleanup_direct` | `13` | blocker Stage 3 |
 | `remaining_memory_timer` | `7` | blocker Stage 3 |
