@@ -98,6 +98,7 @@ from bot.repeat_offer import (
     enqueue_repeat_offer_response_if_queue_owner,
     resolve_bot_repeat_offer_button_candidate,
 )
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
@@ -402,7 +403,7 @@ async def handle_trade_type_selection(
 
     trade_type = callback_data.type
     if trade_type not in {"buy", "sell"}:
-        await callback.answer("انتخاب نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "انتخاب نامعتبر است.", show_alert=True)
         return
     data = await state.get_data()
     return_to_review = bool(data.get("wizard_return_to_review"))
@@ -410,7 +411,7 @@ async def handle_trade_type_selection(
     await state.update_data(trade_type=trade_type, trade_type_fa=trade_type_fa)
     if return_to_review:
         await _show_wizard_review(callback.message, state, edit=True)
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     await callback.message.edit_text(
@@ -421,7 +422,7 @@ async def handle_trade_type_selection(
         reply_markup=get_settlement_type_keyboard(),
     )
     await state.set_state(Trade.awaiting_settlement_type)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_settlement_type, TradeSettlementCallback.filter())
@@ -432,12 +433,12 @@ async def handle_settlement_type_selection(
     callback_data: TradeSettlementCallback,
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     settlement_type = callback_data.type
     if settlement_type not in {SettlementType.CASH.value, SettlementType.TOMORROW.value}:
-        await callback.answer("انتخاب نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "انتخاب نامعتبر است.", show_alert=True)
         return
 
     data = await state.get_data()
@@ -445,7 +446,7 @@ async def handle_settlement_type_selection(
     await state.update_data(settlement_type=settlement_type)
     if return_to_review:
         await _show_wizard_review(callback.message, state, edit=True)
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     trade_type = str(data.get("trade_type") or "buy")
@@ -459,7 +460,7 @@ async def handle_settlement_type_selection(
         reply_markup=keyboard,
     )
     await state.set_state(Trade.awaiting_commodity)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_commodity, PageCallback.filter())
@@ -475,7 +476,7 @@ async def handle_commodity_page(
     data = await state.get_data()
     trade_type = str(data.get("trade_type") or "")
     if callback_data.trade_type != trade_type:
-        await callback.answer("این صفحه منقضی شده است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "این صفحه منقضی شده است.", show_alert=True)
         return
     trade_type_fa = "🟢 خرید" if trade_type == "buy" else "🔴 فروش"
     keyboard = await get_commodities_keyboard(
@@ -490,7 +491,7 @@ async def handle_commodity_page(
         parse_mode="Markdown",
         reply_markup=keyboard,
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_commodity, CommodityCallback.filter())
@@ -508,7 +509,7 @@ async def handle_commodity_selection(
         commodity = result.scalar_one_or_none()
 
     if not commodity:
-        await callback.answer("❌ کالا یافت نشد!", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "❌ کالا یافت نشد!", show_alert=True)
         return
 
     from core.trading_settings import get_trading_settings_async
@@ -520,7 +521,7 @@ async def handle_commodity_selection(
     await state.update_data(commodity_id=commodity.id, commodity_name=commodity.name)
     if return_to_review:
         await _show_wizard_review(callback.message, state, edit=True)
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     await callback.message.edit_text(
         f"📈 **ثبت لفظ جدید**\n\n"
@@ -534,7 +535,7 @@ async def handle_commodity_selection(
         ),
     )
     await state.set_state(Trade.awaiting_quantity)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_quantity, QuantityCallback.filter())
@@ -549,7 +550,7 @@ async def handle_quick_quantity(
 
     if callback_data.value == "manual":
         await callback.message.answer("✏️ لطفاً تعداد مورد نظر را به عدد وارد کنید:")
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     from core.trading_settings import get_trading_settings_async
@@ -557,11 +558,12 @@ async def handle_quick_quantity(
     try:
         quantity = int(callback_data.value)
     except (TypeError, ValueError):
-        await callback.answer("تعداد نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "تعداد نامعتبر است.", show_alert=True)
         return
     ts = await get_trading_settings_async()
     if quantity < ts.offer_min_quantity or quantity > ts.offer_max_quantity:
-        await callback.answer(
+        await answer_callback_query_via_runtime(
+            callback,
             f"❌ تعداد مجاز باید بین {ts.offer_min_quantity} تا {ts.offer_max_quantity} باشد.",
             show_alert=True,
         )
@@ -575,7 +577,7 @@ async def handle_quick_quantity(
             await _show_lot_sizes_prompt(callback.message, state, edit=True)
         else:
             await _show_wizard_review(callback.message, state, edit=True)
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     await callback.message.edit_text(
         f"📈 **ثبت لفظ جدید**\n\n"
@@ -587,7 +589,7 @@ async def handle_quick_quantity(
         reply_markup=get_lot_type_keyboard(),
     )
     await state.set_state(Trade.awaiting_lot_type)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(Trade.awaiting_quantity)
@@ -642,7 +644,7 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
 @router.callback_query(Trade.awaiting_lot_type, LotTypeCallback.filter(F.type == "wholesale"))
 async def handle_lot_wholesale(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     data = await state.get_data()
@@ -651,18 +653,18 @@ async def handle_lot_wholesale(callback: types.CallbackQuery, state: FSMContext,
         await _show_wizard_review(callback.message, state, edit=True)
     else:
         await _show_price_prompt(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_lot_type, LotTypeCallback.filter(F.type == "retail"))
 async def handle_lot_split(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     await state.update_data(is_wholesale=False, lot_sizes=None)
     await _show_lot_sizes_prompt(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(Trade.awaiting_lot_sizes)
@@ -722,25 +724,25 @@ async def handle_accept_suggested_lots(
     callback_data: AcceptLotsCallback,
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     data = await state.get_data()
     try:
         lot_sizes = [int(item) for item in callback_data.lots.split("_")]
     except (TypeError, ValueError):
-        await callback.answer("ترکیب بخش‌بندی نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "ترکیب بخش‌بندی نامعتبر است.", show_alert=True)
         return
     is_valid, error_msg, _suggested = validate_lot_sizes(int(data.get("quantity") or 0), lot_sizes)
     if not is_valid:
-        await callback.answer(error_msg or "ترکیب بخش‌بندی نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, error_msg or "ترکیب بخش‌بندی نامعتبر است.", show_alert=True)
         return
     await state.update_data(lot_sizes=lot_sizes)
     if data.get("wizard_return_to_review"):
         await _show_wizard_review(callback.message, state, edit=True)
     else:
         await _show_price_prompt(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(Trade.awaiting_price)
@@ -770,12 +772,12 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
 @router.callback_query(Trade.awaiting_notes, SkipNotesCallback.filter(F.target == "notes"))
 async def handle_skip_notes(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     await state.update_data(notes=None)
     await _show_wizard_review(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.message(Trade.awaiting_notes)
@@ -834,7 +836,7 @@ _TEXT_OFFER_RECOVERY_STATES = (
 async def _wizard_callback_is_current(callback: types.CallbackQuery, state: FSMContext) -> bool:
     if await state.get_state() in _WIZARD_STATE_VALUES:
         return True
-    await callback.answer("این فرآیند دیگر فعال نیست.", show_alert=True)
+    await answer_callback_query_via_runtime(callback, "این فرآیند دیگر فعال نیست.", show_alert=True)
     return False
 
 
@@ -845,7 +847,7 @@ async def handle_wizard_edit(
     user: Optional[User],
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     data = await state.get_data()
     await callback.message.edit_text(
@@ -853,7 +855,7 @@ async def handle_wizard_edit(
         reply_markup=get_wizard_edit_keyboard(is_wholesale=bool(data.get("is_wholesale", True))),
     )
     await state.set_state(Trade.awaiting_wizard_edit)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_wizard_edit, TradeWizardEditCallback.filter())
@@ -864,7 +866,7 @@ async def handle_wizard_edit_field(
     callback_data: TradeWizardEditCallback,
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     field = callback_data.field
@@ -879,12 +881,12 @@ async def handle_wizard_edit_field(
         "notes",
     }
     if field not in allowed_fields:
-        await callback.answer("گزینه اصلاح نامعتبر است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "گزینه اصلاح نامعتبر است.", show_alert=True)
         return
 
     data = await state.get_data()
     if field == "lot_sizes" and data.get("is_wholesale") is not False:
-        await callback.answer("برای آفر یکجا بخش‌بندی وجود ندارد.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "برای آفر یکجا بخش‌بندی وجود ندارد.", show_alert=True)
         return
 
     await state.update_data(wizard_return_to_review=True, wizard_edit_field=field)
@@ -932,7 +934,7 @@ async def handle_wizard_edit_field(
         await _show_price_prompt(callback.message, state, edit=True)
     else:
         await _show_notes_prompt(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(TradeWizardActionCallback.filter(F.action == "review"))
@@ -944,10 +946,10 @@ async def handle_wizard_return_to_review(
     if not user or not await _wizard_callback_is_current(callback, state):
         return
     if not _wizard_data_is_complete(await state.get_data()):
-        await callback.answer("اطلاعات این آفر کامل نیست؛ فرآیند را از ابتدا شروع کنید.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "اطلاعات این آفر کامل نیست؛ فرآیند را از ابتدا شروع کنید.", show_alert=True)
         return
     await _show_wizard_review(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_wizard_review, TradeWizardActionCallback.filter(F.action == "continue"))
@@ -957,12 +959,12 @@ async def handle_wizard_continue(
     user: Optional[User],
 ):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     data = await state.get_data()
     draft_text = str(data.get("generated_offer_text") or "").strip()
     if not draft_text:
-        await callback.answer("متن آفر تولید نشده است.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "متن آفر تولید نشده است.", show_alert=True)
         return
     await _prepare_text_offer(
         callback.message,
@@ -972,7 +974,7 @@ async def handle_wizard_continue(
         edit_response=True,
         wizard_source=True,
     )
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(TradeWizardActionCallback.filter(F.action == "cancel"))
@@ -985,7 +987,7 @@ async def handle_wizard_cancel(
         return
     await state.clear()
     await callback.message.edit_text("❌ فرآیند ثبت آفر لغو شد.")
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 async def _handle_trade_confirm_core(
@@ -1563,7 +1565,7 @@ async def handle_trade_warning_confirm(callback: types.CallbackQuery, state: FSM
 @router.callback_query(Trade.awaiting_settlement_type, TradeActionCallback.filter(F.action == "back_to_type"))
 async def handle_back_to_type(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     await state.update_data(wizard_return_to_review=False)
@@ -1573,26 +1575,26 @@ async def handle_back_to_type(callback: types.CallbackQuery, state: FSMContext, 
         reply_markup=get_trade_type_keyboard(),
     )
     await state.set_state(Trade.awaiting_trade_type)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_commodity, TradeActionCallback.filter(F.action == "back_to_settlement"))
 async def handle_back_to_settlement(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     await callback.message.edit_text(
         "نوع تسویه را انتخاب کنید:",
         reply_markup=get_settlement_type_keyboard(),
     )
     await state.set_state(Trade.awaiting_settlement_type)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_quantity, TradeActionCallback.filter(F.action == "back_to_commodity"))
 async def handle_back_to_commodity(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     data = await state.get_data()
     trade_type = str(data.get("trade_type") or "buy")
@@ -1601,13 +1603,13 @@ async def handle_back_to_commodity(callback: types.CallbackQuery, state: FSMCont
         reply_markup=await get_commodities_keyboard(trade_type),
     )
     await state.set_state(Trade.awaiting_commodity)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_lot_type, TradeActionCallback.filter(F.action == "back_to_quantity"))
 async def handle_back_to_quantity(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     from core.trading_settings import get_trading_settings_async
 
@@ -1620,42 +1622,42 @@ async def handle_back_to_quantity(callback: types.CallbackQuery, state: FSMConte
         ),
     )
     await state.set_state(Trade.awaiting_quantity)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(TradeActionCallback.filter(F.action == "back_to_lot_type"))
 async def handle_back_to_lot_type(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user or await state.get_state() not in {Trade.awaiting_lot_sizes.state, Trade.awaiting_price.state}:
-        await callback.answer("این مرحله دیگر فعال نیست.", show_alert=True)
+        await answer_callback_query_via_runtime(callback, "این مرحله دیگر فعال نیست.", show_alert=True)
         return
     await callback.message.edit_text(
         "نحوه معامله را انتخاب کنید:",
         reply_markup=get_lot_type_keyboard(),
     )
     await state.set_state(Trade.awaiting_lot_type)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_notes, TradeActionCallback.filter(F.action == "back_to_price"))
 async def handle_back_to_price(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
     await _show_price_prompt(callback.message, state, edit=True)
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(TradeActionCallback.filter(F.action == "cancel"))
 async def handle_trade_cancel(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     if not user:
-        await callback.answer()
+        await answer_callback_query_via_runtime(callback)
         return
 
     if not await _wizard_callback_is_current(callback, state):
         return
     await state.clear()
     await callback.message.edit_text("❌ فرآیند ثبت لفظ لغو شد.")
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 # ============================================
 # TEXT OFFER HANDLER
@@ -1857,7 +1859,7 @@ async def _reject_stale_text_offer_callback(
     if not isinstance(expected_message_id, int) or actual_message_id == expected_message_id:
         return False
 
-    await callback.answer("این پیش\u200cنمایش قدیمی است.", show_alert=True)
+    await answer_callback_query_via_runtime(callback, "این پیش\u200cنمایش قدیمی است.", show_alert=True)
     return True
 
 
@@ -2321,7 +2323,7 @@ async def handle_text_offer_cancel(callback: types.CallbackQuery, state: FSMCont
 
     await callback.message.edit_text("❌ لفظ لغو شد.")
     await state.clear()
-    await callback.answer()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(TradeTypeCallback.filter())
