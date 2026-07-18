@@ -461,19 +461,19 @@ production-full-matrix-plan:
 	@python3 ./scripts/plan_production_full_matrix.py $${ARGS}
 
 writer-witness-real-host-matrix-plan:
-	@python3 ./scripts/plan_writer_witness_real_host_matrix.py --mode plan $${ARGS}
+	@./scripts/run_writer_witness_matrix_controller.sh preflight --mode plan $${ARGS}
 
 writer-witness-real-host-matrix-preflight:
-	@python3 ./scripts/plan_writer_witness_real_host_matrix.py --mode preflight $${ARGS}
+	@./scripts/run_writer_witness_matrix_controller.sh preflight --mode preflight $${ARGS}
 
 writer-witness-real-host-scenario-plan:
-	@python3 ./scripts/run_writer_witness_real_host_matrix.py --mode plan $${ARGS}
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode plan $${ARGS}
 
 writer-witness-real-host-scenario-approve:
-	@python3 ./scripts/run_writer_witness_real_host_matrix.py --mode approve $${ARGS}
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode approve $${ARGS}
 
 writer-witness-real-host-scenario-run:
-	@python3 ./scripts/run_writer_witness_real_host_matrix.py --mode execute $${ARGS}
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode execute $${ARGS}
 
 writer-witness-real-host-scenario-recover:
-	@python3 ./scripts/run_writer_witness_real_host_matrix.py --mode recover $${ARGS}
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode recover $${ARGS}

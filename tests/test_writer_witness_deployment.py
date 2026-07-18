@@ -30,7 +30,9 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         kill_after: str | None = None,
         complete_rollback: bool = True,
         unit_states: list[str] | None = None,
+        host_toolchain_sha256: str | None = None,
     ) -> subprocess.CompletedProcess:
+        toolchain_sha256 = host_toolchain_sha256 or self.HOST_TOOLCHAIN_SHA256
         arguments = [
             sys.executable,
             "-I",
@@ -58,7 +60,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                         "--activation-dir",
                         f"/opt/trading-bot-witness/activations/{release_id}",
                         "--host-toolchain-inventory-sha256",
-                        self.HOST_TOOLCHAIN_SHA256,
+                        toolchain_sha256,
                         "--host-toolchain-verifier",
                         str(ROOT / "scripts/verify_writer_witness_host_toolchain.py"),
                         "--package-lock-helper",
@@ -108,11 +110,12 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             "commit",
             "complete",
             "complete-rollback",
+            "recover",
         }:
             arguments.extend(
                 [
                     "--host-toolchain-inventory-sha256",
-                    self.HOST_TOOLCHAIN_SHA256,
+                    toolchain_sha256,
                 ]
             )
         environment = {
@@ -484,6 +487,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             recovery,
         )
         self.assertIn("recover-boot", recovery)
+        self.assertIn("KillMode=control-group", recovery)
         self.assertNotIn("writer-witness-activation-watchdog", recovery)
         self.assertNotIn("systemctl", recovery)
         self.assertIn(
@@ -494,15 +498,19 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn('flock -n "$rotation_lock_fd"', watchdog_script)
         self.assertIn("pending-toolchain-binding", watchdog_script)
         self.assertIn("recovery-package-lock-holder.py", watchdog_script)
+        self.assertIn("--assert-parent-locks", watchdog_script)
+        self.assertIn("--exec /bin/bash", watchdog_script)
         self.assertIn("recovery-host-toolchain-verifier.py", watchdog_script)
         self.assertIn("host_toolchain_inventory_sha256", watchdog_script)
         self.assertLess(
             watchdog_script.index('flock -n "$rotation_lock_fd"'),
-            watchdog_script.index('result="$("${activation_helper[@]}" recover)"'),
+            watchdog_script.index('result="$('
+                '"${activation_helper[@]}" recover'),
         )
         self.assertLess(
             watchdog_script.index("attest_recovery_toolchain"),
-            watchdog_script.index('result="$("${activation_helper[@]}" recover)"'),
+            watchdog_script.index('result="$('
+                '"${activation_helper[@]}" recover'),
         )
         self.assertIn("Environment=PYTHONPYCACHEPREFIX=/dev/null", unit)
         for forbidden in ("BASH_ENV", "SHELLOPTS", "LD_AUDIT", "GLIBC_TUNABLES"):
@@ -520,6 +528,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             "ExecStart=/bin/bash /usr/local/sbin/writer-witness-activation-watchdog",
             watchdog_unit,
         )
+        self.assertIn("KillMode=control-group", watchdog_unit)
 
     def test_provision_refuses_shell_trace_without_exposing_secret_environment(self):
         sentinel = "must-never-appear-writer-witness-secret"
@@ -1102,6 +1111,65 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                     cleaned = self._activation_run(root, "recover")
                     self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
 
+    def test_nonterminal_recovery_rejects_digest_drift_before_any_state_change(self):
+        setups = ("prepared", "unit-intent", "publishing", "activated", "committed")
+        for durable_phase in setups:
+            with self.subTest(durable_phase=durable_phase), tempfile.TemporaryDirectory(
+                prefix="writer-witness-recovery-toolchain-drift-"
+            ) as directory:
+                root = Path(directory)
+                release_id = f"digest-{durable_phase}"
+                self._prepare_activation_host(root, release_id)
+                if durable_phase == "prepared":
+                    begun = self._activation_run(root, "begin", release_id=release_id)
+                    self.assertEqual(begun.returncode, 0, begun.stderr)
+                else:
+                    self._begin_and_stage_activation(root, release_id)
+                    if durable_phase == "publishing":
+                        killed = self._activation_run(
+                            root,
+                            "publish",
+                            release_id=release_id,
+                            kill_after="new_active_switched",
+                        )
+                        self.assertEqual(killed.returncode, -signal.SIGKILL)
+                    elif durable_phase in {"activated", "committed"}:
+                        published = self._activation_run(
+                            root, "publish", release_id=release_id
+                        )
+                        self.assertEqual(published.returncode, 0, published.stderr)
+                        if durable_phase == "committed":
+                            committed = self._activation_run(
+                                root, "commit", release_id=release_id
+                            )
+                            self.assertEqual(committed.returncode, 0, committed.stderr)
+                state_root = root / "var/lib/trading-bot-witness/activation-state"
+                journal = state_root / "active.json"
+                before_journal = journal.read_bytes()
+                current = root / "srv/trading-bot-witness/current"
+                active = root / "opt/trading-bot-witness/active"
+                before_current = os.readlink(current) if current.is_symlink() else None
+                before_active = os.readlink(active) if active.is_symlink() else None
+                rejected = self._activation_run(
+                    root,
+                    "recover",
+                    complete_rollback=False,
+                    host_toolchain_sha256="e" * 64,
+                )
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("journal binding", rejected.stderr)
+                self.assertEqual(journal.read_bytes(), before_journal)
+                self.assertEqual(
+                    os.readlink(current) if current.is_symlink() else None,
+                    before_current,
+                )
+                self.assertEqual(
+                    os.readlink(active) if active.is_symlink() else None,
+                    before_active,
+                )
+                recovered = self._activation_run(root, "recover")
+                self.assertEqual(recovered.returncode, 0, recovered.stderr)
+
     def test_activation_subsequent_sigkill_rolls_back_exact_previous_pair(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-activation-next-") as directory:
             root = Path(directory)
@@ -1175,6 +1243,41 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("startup is not isolated", completed.stderr)
 
+    def test_activation_protocol_adapter_is_bound_to_exact_predecessor_helpers(self):
+        provision = (ROOT / "scripts/provision_writer_witness_host.sh").read_text(
+            encoding="utf-8"
+        )
+        for revision, expected in (
+            (
+                "5bd5c884",
+                "271994f11950d2848360a59dfd080b9856ba01ecd966e212b9e1c5d8fc49e1ea",
+            ),
+            (
+                "2e4dc0b1",
+                "7142c88933f4b6eb355acb066d2045bb083f148ac804d80ba34296d18fc987d6",
+            ),
+        ):
+            completed = subprocess.run(
+                [
+                    "/usr/bin/git",
+                    "show",
+                    f"{revision}:deploy/writer-witness/writer-witness-activation.py",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(hashlib.sha256(completed.stdout).hexdigest(), expected)
+            self.assertIn(expected, provision)
+        self.assertIn("legacy activation recovery requires explicit operator authorization", provision)
+        self.assertIn("complete_installed_activation_protocol", provision)
+        with tempfile.TemporaryDirectory(prefix="writer-witness-protocol-") as directory:
+            current = self._activation_run(Path(directory), "protocol-version")
+        self.assertEqual(current.returncode, 0, current.stderr)
+        self.assertEqual(
+            current.stdout.strip(), "writer_witness_activation_protocol_v2"
+        )
+
     def test_activation_recovery_itself_is_repeatable_across_sigkill(self):
         for rollback_kill in ("rollback_active_switched", "rollback_restored"):
             with self.subTest(rollback_kill=rollback_kill):
@@ -1237,6 +1340,16 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
                 journal["phase"], "rolled_back_pending_service_completion"
             )
             self.assertEqual(set(journal["unit_states"]), set(ACTIVATION_MANAGED_UNITS))
+
+            mismatched = self._activation_run(
+                root,
+                "recover",
+                complete_rollback=False,
+                host_toolchain_sha256="e" * 64,
+            )
+            self.assertNotEqual(mismatched.returncode, 0)
+            self.assertIn("journal binding", mismatched.stderr)
+            self.assertEqual(journal_path.read_bytes(), journal_before)
 
             repeated = self._activation_run(
                 root,

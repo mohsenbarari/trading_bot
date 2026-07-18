@@ -582,7 +582,7 @@ make writer-witness-real-host-matrix-plan
 Execute every read-only entry gate:
 
 ```text
-make writer-witness-real-host-matrix-preflight ARGS='--expected-commit <exact-40-character-sha>'
+make writer-witness-real-host-matrix-preflight ARGS='--expected-commit <exact-40-character-sha> --expected-host-toolchain-inventory-sha256 <replacement-witness-digest> --expected-controller-toolchain-inventory-sha256 <controller-digest>'
 ```
 
 The preflight fails closed unless:
@@ -690,6 +690,24 @@ as a second writer during rollback.
 
 ### One-scenario execution
 
+All Matrix commands must use `scripts/run_writer_witness_matrix_controller.sh`
+through the Make targets below. Direct ambient `python3` execution is not an
+authorized controller. Before preflight, emit and retain the controller's
+canonical inventory, then obtain the exact SHA-256 approved by both custodians:
+
+```text
+/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+  scripts/verify_writer_witness_controller_toolchain.py --emit-inventory \
+  > /secure/evidence/controller-toolchain.json
+/usr/bin/sha256sum /secure/evidence/controller-toolchain.json
+```
+
+Pass that value as
+`--expected-controller-toolchain-inventory-sha256 <controller-digest>` to
+preflight, approval, execute, and recovery. A package/runtime change requires a
+new inventory, preflight, and signatures; it cannot reuse an existing campaign
+journal or approval.
+
 The executor deliberately has no `--all` mode. Render one scenario first:
 
 ```text
@@ -721,7 +739,7 @@ the exact preflight and scenario:
 
 ```text
 WRITER_WITNESS_REAL_HOST_MATRIX_OBSERVER_CONFIRM=approve-one-dark-witness-scenario \
-make writer-witness-real-host-scenario-approve ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --observer <name> --incident-commander <different-name> --reason <exact-incident-reason> --change-id <change-id> --out-of-band-console <provider-session> --alternate-communications <incident-bridge> --maintenance-window-start <timezone-aware-ISO-8601> --maintenance-window-end <timezone-aware-ISO-8601> --dpi-byte-budget <at-least-67108864> --restore-authorized-by <name> --output /tmp/.../rh-001-approval.json'
+make writer-witness-real-host-scenario-approve ARGS='--scenario RH-001 --expected-commit <sha> --expected-controller-toolchain-inventory-sha256 <controller-digest> --preflight /tmp/.../preflight.json --observer <name> --incident-commander <different-name> --reason <exact-incident-reason> --change-id <change-id> --out-of-band-console <provider-session> --alternate-communications <incident-bridge> --maintenance-window-start <timezone-aware-ISO-8601> --maintenance-window-end <timezone-aware-ISO-8601> --dpi-byte-budget <at-least-67108864> --restore-authorized-by <name> --output /tmp/.../rh-001-approval.json'
 ```
 
 The observer and incident commander sign that exact owner-only JSON with their
@@ -736,7 +754,7 @@ and two exact execution confirmations:
 ```text
 WRITER_WITNESS_REAL_HOST_MATRIX_CONFIRM=execute-dark-witness-real-host-matrix \
 WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO=RH-001 \
-make writer-witness-real-host-scenario-run ARGS='--scenario RH-001 --expected-commit <sha> --preflight /tmp/.../preflight.json --approval /tmp/.../rh-001-approval.json --observer-signature /secure/.../observer.sig --commander-signature /secure/.../commander.sig --operator <third-name> --reason <exact-incident-reason> --change-id <change-id>'
+make writer-witness-real-host-scenario-run ARGS='--scenario RH-001 --expected-commit <sha> --expected-controller-toolchain-inventory-sha256 <controller-digest> --preflight /tmp/.../preflight.json --approval /tmp/.../rh-001-approval.json --observer-signature /secure/.../observer.sig --commander-signature /secure/.../commander.sig --operator <third-name> --reason <exact-incident-reason> --change-id <change-id>'
 ```
 
 Every approval nonce and preflight hash is globally single-use, not merely
@@ -769,7 +787,7 @@ the dead controller releases its kernel lock, reconcile only that journal from
 the exact clean commit:
 
 ```text
-make writer-witness-real-host-scenario-recover ARGS='--campaign-journal /var/lib/trading-bot-witness-matrix/campaigns/wwm_<tag>.json'
+make writer-witness-real-host-scenario-recover ARGS='--expected-controller-toolchain-inventory-sha256 <controller-digest> --campaign-journal /var/lib/trading-bot-witness-matrix/campaigns/wwm_<tag>.json'
 ```
 
 Recovery follows the same nine-step abort order above and reruns the exact-SHA

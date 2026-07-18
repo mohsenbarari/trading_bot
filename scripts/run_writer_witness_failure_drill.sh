@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -6,7 +6,7 @@ COMPOSE_FILE="$ROOT_DIR/deploy/writer-witness-drill/docker-compose.yml"
 PROJECT_NAME="writer-witness-drill"
 
 compose() {
-    docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
+    /usr/bin/docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
 }
 
 cleanup() {
@@ -24,7 +24,7 @@ postgres_gate_output="$(
 )"
 printf '%s\n' "$postgres_gate_output"
 guarded_postgres_tests="$(
-    python3 -I -c '
+    /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null -c '
 import json, sys
 documents = []
 for line in sys.stdin:

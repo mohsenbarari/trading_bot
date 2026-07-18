@@ -20,6 +20,7 @@ from scripts.plan_writer_witness_real_host_matrix import abort_and_rollback_cont
 
 HEAD = "a" * 40
 HOST_TOOLCHAIN_SHA256 = "7" * 64
+CONTROLLER_TOOLCHAIN_SHA256 = "8" * 64
 
 
 def lock_worker(path: str, action: str, ready, release, results) -> None:
@@ -96,6 +97,8 @@ def passing_preflight():
             "witness_release_manifest_sha256": release_manifest_sha256,
             "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
             "host_toolchain_inventory_configured": True,
+            "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
+            "controller_toolchain_inventory_configured": True,
             "python_runtime": python_runtime,
             "requirements_lock_sha256": hashlib.sha256(
                 (runner.ROOT / "deploy/writer-witness/requirements.lock").read_bytes()
@@ -274,6 +277,7 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
             "restore_backup_sha256": "d" * 64,
             "restore_authorized_by": "incident-owner",
             "allowed_signers_sha256": "9" * 64,
+            "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
         }
         roles = runner.validate_approval(
             approval,
@@ -285,6 +289,7 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
             change_id="CHG-1234",
             expected_restore_sha256="d" * 64,
             expected_allowed_signers_sha256="9" * 64,
+            expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
         )
         self.assertEqual(roles, ("abort-observer", "incident-owner"))
         approval["preflight_sha256"] = "0" * 64
@@ -299,6 +304,7 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
                 change_id="CHG-1234",
                 expected_restore_sha256="d" * 64,
                 expected_allowed_signers_sha256="9" * 64,
+                expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
             )
 
     def test_lock_owner_survives_two_competing_processes(self):
@@ -642,6 +648,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             "restore_backup_sha256": "d" * 64,
             "restore_authorized_by": "incident-owner",
             "allowed_signers_sha256": "9" * 64,
+            "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
         }
 
     @staticmethod
@@ -656,6 +663,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             change_id="CHG-1234",
             expected_restore_sha256="d" * 64,
             expected_allowed_signers_sha256="9" * 64,
+            expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
         )
 
     def test_approval_accepts_exactly_one_hour_but_rejects_one_microsecond_more(self):
@@ -733,7 +741,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         with mock.patch.object(runner.subprocess, "run", return_value=failed):
             completed = controller.command(
                 "failed_transport",
-                ["ssh", "example.invalid", "true"],
+                [runner.controller_runtime.executable("ssh"), "example.invalid", "true"],
                 check=False,
                 transport_role="webapp_fi",
                 transport_kind="ssh",
@@ -763,7 +771,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 controller.command(
                     "timed_out_transport",
-                    ["ssh", "example.invalid", "true"],
+                    [runner.controller_runtime.executable("ssh"), "example.invalid", "true"],
                     transport_role="webapp_fi",
                     transport_kind="ssh",
                     transport_payload_bytes=4,
@@ -787,8 +795,98 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 return_value=completed,
             ) as run_mock,
         ):
-            controller.command("bounded_cleanup", ["true"], timeout=900)
+            controller.command(
+                "bounded_cleanup",
+                [runner.controller_runtime.executable("bash"), "-c", "true"],
+                timeout=900,
+            )
         self.assertEqual(run_mock.call_args.kwargs["timeout"], 2.0)
+
+    def test_cleanup_timeout_crossing_deadline_becomes_matrix_abort(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 102.0
+        controller.event = mock.Mock(return_value=True)
+        with (
+            mock.patch.object(runner.time, "monotonic", side_effect=(100.0, 103.0)),
+            mock.patch.object(
+                runner.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["ssh"], 2),
+            ),
+            self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"),
+        ):
+            controller.command(
+                "deadline_timeout",
+                [runner.controller_runtime.executable("ssh")],
+                timeout=900,
+            )
+        self.assertEqual(controller.event.call_args.kwargs["outcome"], "exception")
+        self.assertEqual(controller.event.call_args.kwargs["exception_type"], "TimeoutExpired")
+
+    def test_cleanup_shorter_command_timeout_remains_ordinary_before_deadline(self):
+        controller = object.__new__(runner.Controller)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 110.0
+        controller.event = mock.Mock(return_value=True)
+        with (
+            mock.patch.object(runner.time, "monotonic", side_effect=(100.0, 102.0)),
+            mock.patch.object(
+                runner.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["ssh"], 2),
+            ),
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
+            controller.command(
+                "short_timeout",
+                [runner.controller_runtime.executable("ssh")],
+                timeout=2,
+            )
+
+    def test_cleanup_zero_and_nonzero_completion_after_deadline_become_abort(self):
+        for return_code in (0, 41):
+            with self.subTest(return_code=return_code):
+                controller = object.__new__(runner.Controller)
+                controller._cleanup_mode = True
+                controller._cleanup_deadline = 102.0
+                controller.event = mock.Mock(return_value=True)
+                controller.redact_command_output = lambda value: value
+                controller.secret_output_detected = False
+                completed = subprocess.CompletedProcess([], return_code, "", "failed")
+                with (
+                    mock.patch.object(
+                        runner.time, "monotonic", side_effect=(100.0, 103.0)
+                    ),
+                    mock.patch.object(runner.subprocess, "run", return_value=completed),
+                    self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"),
+                ):
+                    controller.command(
+                        "post_deadline_result",
+                        [runner.controller_runtime.executable("bash"), "-c", "true"],
+                    )
+
+    def test_real_cleanup_command_deadline_enters_exact_revocation_path(self):
+        controller = self._bare_cleanup_controller(claimed=True)
+        controller._cleanup_mode = True
+        controller._cleanup_deadline = 102.0
+        controller.enter_cleanup_mode = mock.Mock()
+        controller._revoke_after_expired_cleanup_window = mock.Mock()
+        controller.stop_and_remove_requesters = lambda: controller.command(
+            "stop_requester",
+            [runner.controller_runtime.executable("ssh")],
+            timeout=900,
+        )
+        with (
+            mock.patch.object(runner.time, "monotonic", side_effect=(100.0, 103.0)),
+            mock.patch.object(
+                runner.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["ssh"], 2),
+            ),
+        ):
+            controller.cleanup()
+        controller._revoke_after_expired_cleanup_window.assert_called_once_with()
 
     def test_expired_control_master_reserves_a_new_handshake(self):
         controller = object.__new__(runner.Controller)
@@ -824,7 +922,9 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             return_value=Path(tempfile.mkdtemp()) / "absent.sock"
         )
         controller._reserve_transport_budget = mock.Mock()
-        controller.ssh_args = mock.Mock(return_value=["ssh", "witness", "true"])
+        controller.ssh_args = mock.Mock(
+            return_value=[runner.controller_runtime.executable("ssh"), "witness", "true"]
+        )
         controller.interruptible_sleep = mock.Mock()
         controller._mark_transport_master = mock.Mock()
         controller.event = mock.Mock(return_value=True)
@@ -864,6 +964,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                     "scenario": "RH-001",
                     "expected_commit": HEAD,
                     "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
+                    "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
                     "dpi_byte_budget": runner.MIN_DPI_BYTE_BUDGET,
                     "max_scenario_seconds": runner.MAX_SCENARIO_SECONDS,
                     "created_at": created_at.isoformat(),
@@ -956,7 +1057,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         ):
             controller.command(
                 "exact_revocation_after_expiry",
-                ["true"],
+                [runner.controller_runtime.executable("bash"), "-c", "true"],
                 timeout=900,
                 emergency_revocation=True,
             )
@@ -965,7 +1066,10 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             mock.patch.object(runner.time, "monotonic", return_value=100.0),
             self.assertRaisesRegex(runner.MatrixAbort, "cleanup exceeded"),
         ):
-            controller.command("forbidden_recovery_after_expiry", ["true"])
+            controller.command(
+                "forbidden_recovery_after_expiry",
+                [runner.controller_runtime.executable("bash"), "-c", "true"],
+            )
 
     def test_expired_marker_permission_does_not_consume_emergency_transport(self):
         controller = object.__new__(runner.Controller)
@@ -1106,8 +1210,18 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 return_value=completed,
             ) as run_mock,
         ):
-            controller.command("emergency_one", ["true"], timeout=30, emergency_revocation=True)
-            controller.command("emergency_two", ["true"], timeout=30, emergency_revocation=True)
+            controller.command(
+                "emergency_one",
+                [runner.controller_runtime.executable("bash"), "-c", "true"],
+                timeout=30,
+                emergency_revocation=True,
+            )
+            controller.command(
+                "emergency_two",
+                [runner.controller_runtime.executable("bash"), "-c", "true"],
+                timeout=30,
+                emergency_revocation=True,
+            )
         self.assertEqual(
             [call.kwargs["timeout"] for call in run_mock.call_args_list],
             [5.0, 2.0],
@@ -1184,6 +1298,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 mode="approve",
                 scenario="RH-001",
                 expected_commit=HEAD,
+                expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
                 campaign_journal=None,
                 preflight=preflight,
                 observer="observer",
@@ -1210,6 +1325,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                     "TRUSTED_ALLOWED_SIGNERS_SHA256",
                     hashlib.sha256(trusted_signers.read_bytes()).hexdigest(),
                 ),
+                mock.patch.object(runner.controller_runtime, "assert_runtime"),
                 mock.patch.dict(
                     os.environ,
                     {runner.OBSERVER_CONFIRM_ENV: runner.OBSERVER_CONFIRM_VALUE},
@@ -1242,6 +1358,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             mode="approve",
             scenario="RH-001",
             expected_commit=HEAD,
+            expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
             campaign_journal=None,
             preflight=Path("/not/read/before/trust-check.json"),
             observer="observer",
@@ -1260,6 +1377,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         with (
             mock.patch.object(runner, "parse_args", return_value=args),
             mock.patch.object(runner, "secure_directory"),
+            mock.patch.object(runner.controller_runtime, "assert_runtime"),
             mock.patch.dict(
                 os.environ,
                 {runner.OBSERVER_CONFIRM_ENV: runner.OBSERVER_CONFIRM_VALUE},
@@ -1274,7 +1392,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         allowed_raw = b"observer ssh-ed25519 AAAAC3NzaSnapshot\n"
         observed: dict[str, object] = {}
 
-        def inspect_run(args, *, input, capture_output, pass_fds):
+        def inspect_run(args, *, input, capture_output, pass_fds, env):
             observed["args"] = args
             observed["input"] = input
             observed["fd_bytes"] = tuple(
@@ -1836,6 +1954,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             controller.artifact_dir = Path(directory)
             controller.expected_head = HEAD
             controller.host_toolchain_inventory_sha256 = HOST_TOOLCHAIN_SHA256
+            controller.controller_toolchain_inventory_sha256 = CONTROLLER_TOOLCHAIN_SHA256
             controller.tag = "wwm_0123456789ab"
             controller.scenario = "RH-001"
             controller.journal = mock.Mock()
@@ -2086,6 +2205,8 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                     "tag": tag,
                     "scenario": "RH-001",
                     "expected_commit": HEAD,
+                    "host_toolchain_inventory_sha256": HOST_TOOLCHAIN_SHA256,
+                    "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
                     "operator": "operator",
                     "observer": "observer",
                     "incident_commander": "commander",
@@ -2099,7 +2220,13 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 },
                 create=True,
             )
-            args = SimpleNamespace(mode="recover", campaign_journal=journal_path)
+            args = SimpleNamespace(
+                mode="recover",
+                campaign_journal=journal_path,
+                expected_controller_toolchain_inventory_sha256=(
+                    CONTROLLER_TOOLCHAIN_SHA256
+                ),
+            )
             fake_controller = mock.Mock()
 
             def git_value(*git_args):
@@ -2120,6 +2247,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 mock.patch.object(runner, "acquire_local_lock", return_value=101),
                 mock.patch.object(runner, "release_local_lock"),
                 mock.patch.object(runner, "Controller", return_value=fake_controller) as constructor,
+                mock.patch.object(runner.controller_runtime, "assert_runtime"),
             ):
                 self.assertEqual(runner.main(), 0)
             recovery_artifact = constructor.call_args.kwargs["artifact_dir"]
@@ -2164,7 +2292,10 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             mock.patch.object(runner.subprocess, "run") as run,
             self.assertRaisesRegex(runner.MatrixError, "evidence intent"),
         ):
-            controller.command("must-not-run", ["ssh", "example", "mutate"])
+            controller.command(
+                "must-not-run",
+                [runner.controller_runtime.executable("ssh"), "example", "mutate"],
+            )
         run.assert_not_called()
 
     def test_evidence_result_failure_aborts_before_a_second_mutation(self):
@@ -2179,7 +2310,10 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             mock.patch.object(runner.subprocess, "run", return_value=completed) as run,
             self.assertRaisesRegex(runner.MatrixError, "outcome is ambiguous"),
         ):
-            controller.command("first-mutation", ["ssh", "example", "mutate"])
+            controller.command(
+                "first-mutation",
+                [runner.controller_runtime.executable("ssh"), "example", "mutate"],
+            )
         run.assert_called_once()
 
 

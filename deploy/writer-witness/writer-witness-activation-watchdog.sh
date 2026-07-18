@@ -12,6 +12,53 @@ activation_helper=(
     /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null
     /usr/local/sbin/writer-witness-activation
 )
+package_lock_actor=/usr/local/sbin/writer-witness-package-lock-actor
+
+[[ "${SYSTEMD_EXEC_PID:-}" == "$$" \
+    && -n "${INVOCATION_ID:-}" \
+    && "$(systemctl show -p MainPID --value writer-witness-activation-watchdog.service)" == "$$" \
+    && "$(systemctl show -p KillMode --value writer-witness-activation-watchdog.service)" == control-group ]] || {
+    echo "Writer Witness watchdog must be the exact systemd cgroup main process" >&2
+    exit 70
+}
+
+assert_actor_package_locks() {
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        WRITER_WITNESS_PACKAGE_LOCK_OWNER_PID="${WRITER_WITNESS_PACKAGE_LOCK_OWNER_PID:-}" \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$package_lock_actor" --assert-parent-locks >/dev/null
+}
+
+# First invocation is read-only. Select the journal-owned package-lock actor
+# for a nonterminal operation, then replace this same systemd MainPID with it.
+# The actor acquires native POSIX locks and execs this watchdog back in place.
+if ! assert_actor_package_locks 2>/dev/null; then
+    [[ -z "${WRITER_WITNESS_PACKAGE_LOCK_OWNER_PID:-}" ]] || {
+        echo "Writer Witness watchdog lost its native package-lock capability" >&2
+        exit 70
+    }
+    initial_binding="$("${activation_helper[@]}" pending-toolchain-binding)"
+    selected_package_lock_actor="$package_lock_actor"
+    case "$initial_binding" in
+        none|terminal) ;;
+        *)
+            IFS='|' read -r _initial_release _initial_digest initial_candidates \
+                <<<"$initial_binding"
+            [[ "$initial_candidates" =~ ^/var/lib/trading-bot-witness/activation-state/operations/[0-9a-f]{32}/candidates$ ]] || {
+                echo "Writer Witness watchdog initial recovery binding is unsafe" >&2
+                exit 70
+            }
+            selected_package_lock_actor="$initial_candidates/recovery-package-lock-holder.py"
+            ;;
+    esac
+    exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        INVOCATION_ID="${INVOCATION_ID:-}" \
+        SYSTEMD_EXEC_PID="${SYSTEMD_EXEC_PID:-}" \
+        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$selected_package_lock_actor" \
+        --exec /bin/bash /usr/local/sbin/writer-witness-activation-watchdog
+fi
+assert_actor_package_locks
 
 # Keep both cross-operation capabilities for the complete recovery, service,
 # health, and journal-completion sequence.  A live provision or HMAC rotation
@@ -168,32 +215,10 @@ attest_recovery_toolchain() {
         >/dev/null
 }
 
-coproc WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS {
-    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-        /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
-        "$recovery_candidates/recovery-package-lock-holder.py"
-}
-package_lock_pid="$WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS_PID"
-package_lock_ready_fd="${WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS[0]}"
-package_lock_control_fd="${WRITER_WITNESS_WATCHDOG_PACKAGE_LOCKS[1]}"
-IFS= read -r package_lock_status <&"$package_lock_ready_fd" || {
-    wait "$package_lock_pid" || true
-    echo "Writer Witness watchdog package locks did not become ready" >&2
-    exit 75
-}
-exec {package_lock_ready_fd}<&-
-[[ "$package_lock_status" == package_manager_locks_held=yes ]]
-release_watchdog_package_locks() {
-    if [[ -n "${package_lock_control_fd:-}" ]]; then
-        exec {package_lock_control_fd}>&-
-        package_lock_control_fd=
-        wait "$package_lock_pid"
-    fi
-}
-trap release_watchdog_package_locks EXIT
 attest_recovery_toolchain
 
-result="$("${activation_helper[@]}" recover)"
+result="$("${activation_helper[@]}" recover \
+    --host-toolchain-inventory-sha256 "$host_toolchain_inventory_sha256")"
 case "$result" in
     activation_recovered=no)
         exit 0

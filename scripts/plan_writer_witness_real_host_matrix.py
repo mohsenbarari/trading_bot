@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3.12
 """Build and execute the read-only preflight for the real-host Witness matrix.
 
 This tool deliberately stops before fault injection.  It proves that the dark
@@ -19,11 +19,15 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 from typing import Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts import writer_witness_controller_runtime as controller_runtime
 EXPECTED_BRANCH = "feature/arvan-controlled-origin-failover"
 WEBAPP_FI = "65.109.220.59"
 WEBAPP_IR = "87.236.212.194"
@@ -45,6 +49,7 @@ SOURCE_GATE = ROOT / "scripts/run_writer_witness_preflight_source_gate.sh"
 PINNED_SOURCE_PATHS = (
     "scripts/build_writer_witness_release.sh",
     "scripts/build_writer_witness_wheelhouse.sh",
+    "scripts/generate_writer_witness_command_surfaces.py",
     "scripts/hold_writer_witness_package_locks.py",
     "scripts/plan_writer_witness_real_host_matrix.py",
     "scripts/provision_writer_witness_host.sh",
@@ -58,6 +63,9 @@ PINNED_SOURCE_PATHS = (
     "scripts/verify_writer_witness_release.py",
     "scripts/verify_writer_witness_runtime.py",
     "scripts/verify_writer_witness_host_toolchain.py",
+    "scripts/verify_writer_witness_controller_toolchain.py",
+    "scripts/writer_witness_controller_runtime.py",
+    "scripts/run_writer_witness_matrix_controller.sh",
     "scripts/verify_writer_witness_runtime_provenance.py",
     "scripts/verify_writer_witness_process_maps.py",
     "scripts/verify_writer_witness_wheelhouse.py",
@@ -78,6 +86,7 @@ PINNED_SOURCE_PATHS = (
     "deploy/writer-witness/writer-witness.service",
     "deploy/writer-witness/writer-witness-state-manifest.sh",
     "deploy/writer-witness/python-runtime.json",
+    "deploy/writer-witness/command-surfaces.generated.json",
     "deploy/writer-witness/nftables-policy.json",
     "deploy/writer-witness/requirements.lock",
     "deploy/writer-witness/wheelhouse.sha256",
@@ -406,7 +415,7 @@ def utc_now() -> str:
 
 def ssh_command(host: str, script: str, *, port: int = 22) -> tuple[str, ...]:
     command = [
-        "ssh",
+        controller_runtime.executable("ssh"),
         "-o",
         "BatchMode=yes",
         "-o",
@@ -434,8 +443,9 @@ def remote_check_specs(
     expected_commit = str(expected_commit or "").strip()
     if not expected_commit:
         expected_commit = subprocess.run(
-            ("git", "rev-parse", "HEAD"),
+            (controller_runtime.executable("git"), "rev-parse", "HEAD"),
             cwd=ROOT,
+            env=controller_runtime.clean_environment(),
             check=True,
             capture_output=True,
             text=True,
@@ -541,6 +551,11 @@ def remote_check_specs(
             {
                 "installed": "/usr/local/sbin/writer-witness-activation-watchdog",
                 "source": "deploy/writer-witness/writer-witness-activation-watchdog.sh",
+                "mode": "0755",
+            },
+            {
+                "installed": "/usr/local/sbin/writer-witness-package-lock-actor",
+                "source": "scripts/hold_writer_witness_package_locks.py",
                 "mode": "0755",
             },
         )
@@ -1016,7 +1031,7 @@ def remote_check_specs(
             1,
             CheckSpec(
                 "source_regression_gate",
-                ("bash", str(SOURCE_GATE)),
+                (controller_runtime.executable("bash"), str(SOURCE_GATE)),
                 "control",
             ),
         )
@@ -1116,9 +1131,11 @@ def abort_and_rollback_contract() -> dict[str, object]:
 
 def git_metadata(expected_commit: str | None = None) -> dict[str, object]:
     def output(*command: str) -> str:
+        arguments = (controller_runtime.executable(command[0]), *command[1:])
         return subprocess.run(
-            command,
+            arguments,
             cwd=ROOT,
+            env=controller_runtime.clean_environment(),
             check=True,
             capture_output=True,
             text=True,
@@ -1161,8 +1178,13 @@ def witness_release_manifest_sha256() -> str:
     with tempfile.TemporaryDirectory(prefix="writer-witness-matrix-release-") as parent:
         destination = Path(parent) / "release"
         subprocess.check_call(
-            ("bash", str(ROOT / "scripts/build_writer_witness_release.sh"), str(destination)),
+            (
+                controller_runtime.executable("bash"),
+                str(ROOT / "scripts/build_writer_witness_release.sh"),
+                str(destination),
+            ),
             cwd=ROOT,
+            env=controller_runtime.clean_environment(),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -1174,6 +1196,7 @@ def build_plan(
     include_source_tests: bool = True,
     expected_commit: str | None = None,
     expected_host_toolchain_inventory_sha256: str | None = None,
+    expected_controller_toolchain_inventory_sha256: str | None = None,
     expected_active_campaign_tag: str | None = None,
     expected_active_campaign_scenario: str | None = None,
     expected_active_campaign_not_after: str | None = None,
@@ -1209,6 +1232,12 @@ def build_plan(
             ),
             "host_toolchain_inventory_configured": bool(
                 expected_host_toolchain_inventory_sha256
+            ),
+            "controller_toolchain_inventory_sha256": (
+                expected_controller_toolchain_inventory_sha256
+            ),
+            "controller_toolchain_inventory_configured": bool(
+                expected_controller_toolchain_inventory_sha256
             ),
             "python_runtime": python_runtime_binding(),
             "requirements_lock_sha256": hashlib.sha256(
@@ -1310,7 +1339,6 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
     ):
         plan["status"] = "blocked_git_baseline"
         return plan, 2
-
     bundle = plan.get("run_bundle")
     current_source_manifest = source_manifest()
     if (
@@ -1321,6 +1349,18 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
     ):
         plan["status"] = "blocked_source_bundle_drift"
         return plan, 2
+    expected_controller_toolchain_inventory = str(
+        bundle.get("controller_toolchain_inventory_sha256") or ""
+    )
+    if (
+        bundle.get("controller_toolchain_inventory_configured") is not True
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", expected_controller_toolchain_inventory
+        )
+    ):
+        plan["status"] = "blocked_controller_toolchain_binding"
+        return plan, 2
+    controller_runtime.assert_runtime(expected_controller_toolchain_inventory)
     expected_release_manifest = witness_release_manifest_sha256()
     if bundle.get("witness_release_manifest_sha256") != expected_release_manifest:
         plan["status"] = "blocked_release_bundle_drift"
@@ -1365,6 +1405,7 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
         completed = subprocess.run(
             spec.command,
             cwd=ROOT,
+            env=controller_runtime.clean_environment(),
             capture_output=True,
             text=True,
         )
@@ -1474,6 +1515,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Exact approved immutable toolchain inventory digest for Matrix Witness.",
     )
     parser.add_argument(
+        "--expected-controller-toolchain-inventory-sha256",
+        help="Exact approved immutable toolchain inventory digest for Matrix controller.",
+    )
+    parser.add_argument(
         "--expected-active-campaign-tag",
         help="Postflight-only exact remote campaign tag that must remain owned during inspection.",
     )
@@ -1503,11 +1548,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             "--expected-host-toolchain-inventory-sha256 is mandatory in preflight mode"
         )
+    if args.mode == "preflight" and not args.expected_controller_toolchain_inventory_sha256:
+        raise SystemExit(
+            "--expected-controller-toolchain-inventory-sha256 is mandatory in preflight mode"
+        )
     plan = build_plan(
         include_source_tests=not args.skip_source_tests,
         expected_commit=args.expected_commit,
         expected_host_toolchain_inventory_sha256=(
             args.expected_host_toolchain_inventory_sha256
+        ),
+        expected_controller_toolchain_inventory_sha256=(
+            args.expected_controller_toolchain_inventory_sha256
         ),
         expected_active_campaign_tag=args.expected_active_campaign_tag,
         expected_active_campaign_scenario=args.expected_active_campaign_scenario,

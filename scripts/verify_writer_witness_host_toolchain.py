@@ -68,7 +68,6 @@ TOOL_NAMES = (
     "realpath",
     "rm",
     "runuser",
-    "scp",
     "sed",
     "seq",
     "sha256sum",
@@ -76,7 +75,6 @@ TOOL_NAMES = (
     "sleep",
     "sort",
     "ss",
-    "ssh",
     "sshd",
     "stat",
     "sync",
@@ -96,13 +94,11 @@ POSTGRESQL_WRAPPED_BINARIES = frozenset(
     {"createdb", "dropdb", "pg_dump", "pg_restore", "psql"}
 )
 
-# This is the reviewed, reachable privileged host command surface.  Each tool
-# has an exact source marker outside TOOL_NAMES (except ldd/pg_config, whose
-# subprocess invocations live in this verifier).  The source gate requires
-# exact set equality with TOOL_NAMES: adding an invocation or an inventory
-# entry is therefore one explicit, reviewable contract change rather than a
-# hand-picked subset assertion.
-COMMAND_SURFACE = {
+# This is only the replacement-Witness inventory/source cross-reference.  It
+# must never be interpreted as discovery of controller or other-host calls.
+# `generate_writer_witness_command_surfaces.py` mechanically discovers those
+# actual process call sites and produces the separate host-classified artifact.
+REPLACEMENT_WITNESS_INVENTORY_SOURCES = {
     "age": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "age --encrypt"),
     "awk": ("deploy/writer-witness/writer-witness-state-manifest.sh", "| awk '{print $1}'"),
     "basename": ("scripts/plan_writer_witness_real_host_matrix.py", "basename \"$latest\""),
@@ -147,13 +143,12 @@ COMMAND_SURFACE = {
     "pgrep": ("scripts/run_writer_witness_real_host_matrix.py", "pgrep -f"),
     "psql": ("deploy/writer-witness/writer-witness-state-manifest.sh", "psql -XAt"),
     "postgres": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "postgres"),
-    "python3": ("scripts/run_writer_witness_real_host_matrix.py", '"python3",'),
+    "python3": ("deploy/writer-witness/writer-witness-s3-put.py", "#!/usr/bin/env python3"),
     "python3.12": ("deploy/writer-witness/writer-witness-activation-watchdog.sh", "/usr/bin/python3.12"),
     "readlink": ("scripts/provision_writer_witness_host.sh", "readlink -f"),
     "realpath": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "realpath -e"),
     "rm": ("deploy/writer-witness/writer-witness-live-restore.sh", "rm -f"),
     "runuser": ("deploy/writer-witness/writer-witness-backup.sh", "runuser -u postgres"),
-    "scp": ("scripts/run_writer_witness_real_host_matrix.py", '"scp", "-q"'),
     "sed": ("scripts/provision_writer_witness_host.sh", "sed -n"),
     "seq": ("deploy/writer-witness/writer-witness-live-restore.sh", "seq 1 30"),
     "sha256sum": ("deploy/writer-witness/writer-witness-backup.sh", "sha256sum"),
@@ -161,7 +156,6 @@ COMMAND_SURFACE = {
     "sleep": ("deploy/writer-witness/writer-witness-live-restore.sh", "sleep 1"),
     "sort": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "sort -nr"),
     "ss": ("deploy/writer-witness/writer-witness-matrix-host-faults.sh", "ss -H -ltn"),
-    "ssh": ("scripts/run_writer_witness_real_host_matrix.py", '"ssh", "-o"'),
     "sshd": ("scripts/provision_writer_witness_host.sh", "sshd -t"),
     "stat": ("deploy/writer-witness/writer-witness-offsite-backup.sh", "stat -c"),
     "sync": ("deploy/writer-witness/writer-witness-live-restore.sh", "sync -f"),
@@ -179,7 +173,7 @@ def verify_command_surface(source_root: Path) -> dict[str, object]:
     if not source_root.is_absolute() or not source_root.is_dir():
         raise ToolchainError("command source root must be an absolute directory")
     inventory = set(TOOL_NAMES)
-    declared = set(COMMAND_SURFACE)
+    declared = set(REPLACEMENT_WITNESS_INVENTORY_SOURCES)
     missing = sorted(declared - inventory)
     unbound = sorted(inventory - declared)
     if missing or unbound:
@@ -188,8 +182,8 @@ def verify_command_surface(source_root: Path) -> dict[str, object]:
             f"missing_from_inventory={missing}; missing_source_binding={unbound}"
         )
     covered: list[dict[str, str]] = []
-    for command in sorted(COMMAND_SURFACE):
-        relative, marker = COMMAND_SURFACE[command]
+    for command in sorted(REPLACEMENT_WITNESS_INVENTORY_SOURCES):
+        relative, marker = REPLACEMENT_WITNESS_INVENTORY_SOURCES[command]
         path = source_root / relative
         try:
             payload = path.read_text(encoding="utf-8")
@@ -201,7 +195,7 @@ def verify_command_surface(source_root: Path) -> dict[str, object]:
             )
         covered.append({"command": command, "source": relative})
     return {
-        "command_surface_attested": "yes",
+        "replacement_witness_inventory_cross_reference_attested": "yes",
         "entries": covered,
         "entry_count": len(covered),
     }

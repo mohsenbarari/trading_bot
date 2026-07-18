@@ -3,7 +3,9 @@ import json
 import os
 from pathlib import Path
 import runpy
+import signal
 import tempfile
+import time
 import unittest
 
 
@@ -57,9 +59,7 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
                 "nft",
                 "ufw",
                 "age",
-                "ssh",
                 "sshd",
-                "scp",
                 "flock",
                 "find",
                 "grep",
@@ -75,9 +75,12 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
             }.issubset(tools)
         )
 
-    def test_complete_command_surface_is_mechanically_equal_to_inventory(self):
+    def test_replacement_witness_inventory_has_an_exact_source_cross_reference(self):
         result = MODULE["verify_command_surface"](ROOT)
-        self.assertEqual(result["command_surface_attested"], "yes")
+        self.assertEqual(
+            result["replacement_witness_inventory_cross_reference_attested"],
+            "yes",
+        )
         self.assertEqual(
             {entry["command"] for entry in result["entries"]},
             set(MODULE["TOOL_NAMES"]),
@@ -144,21 +147,74 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
                 os.close(read_fd)
                 os.close(descriptor)
 
-    def test_provisioner_holds_package_locks_and_reattests_each_boundary(self):
+    def test_package_lock_actor_execs_as_the_same_pid_and_sigkill_releases_locks(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-package-actor-") as raw:
+            path = Path(raw) / "dpkg.lock"
+            path.touch(mode=0o600)
+            ready = Path(raw) / "ready"
+            actor = os.fork()
+            if actor == 0:
+                try:
+                    LOCK_MODULE["exec_with_package_locks"](
+                        [path],
+                        [
+                            "/bin/sh",
+                            "-c",
+                            (
+                                "test \"$$\" = \"$WRITER_WITNESS_PACKAGE_LOCK_OWNER_PID\" "
+                                f"&& : > {ready} && exec /bin/sleep 300"
+                            ),
+                        ],
+                        expected_uid=os.getuid(),
+                        expected_gid=os.getgid(),
+                    )
+                finally:
+                    os._exit(71)
+            try:
+                for _attempt in range(100):
+                    if ready.exists():
+                        break
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "exec actor never became ready")
+                LOCK_MODULE["assert_package_locks_owned_by"]([path], owner_pid=actor)
+                with self.assertRaises(BlockingIOError):
+                    LOCK_MODULE["_open_lock"](
+                        path, expected_uid=os.getuid(), expected_gid=os.getgid()
+                    )
+                os.kill(actor, signal.SIGKILL)
+                _pid, status = os.waitpid(actor, 0)
+                self.assertTrue(os.WIFSIGNALED(status))
+                self.assertEqual(os.WTERMSIG(status), signal.SIGKILL)
+                contender = LOCK_MODULE["_open_lock"](
+                    path, expected_uid=os.getuid(), expected_gid=os.getgid()
+                )
+                os.close(contender)
+            finally:
+                try:
+                    os.kill(actor, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(actor, 0)
+                except ChildProcessError:
+                    pass
+
+    def test_provisioner_uses_one_cgroup_main_pid_for_locks_and_mutation(self):
         source = (ROOT / "scripts/provision_writer_witness_host.sh").read_text()
-        self.assertIn("coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER", source)
-        self.assertIn("package_manager_locks_held=yes", source)
-        self.assertIn("release_package_manager_locks", source)
+        helper = (ROOT / "scripts/hold_writer_witness_package_locks.py").read_text()
+        self.assertNotIn("coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER", source)
+        self.assertIn("--property=KillMode=control-group", source)
+        self.assertIn("--assert-parent-locks", source)
+        self.assertIn("--exec /bin/bash", source)
+        self.assertIn('SYSTEMD_EXEC_PID:-}" == "$$"', source)
+        self.assertIn("os.execve", helper)
         self.assertGreaterEqual(source.count("attest_host_toolchain"), 5)
         for operation in ("record-unit-intent", "commit", "complete"):
             self.assertIn(
                 f"installed_activation {operation}",
                 source,
             )
-        self.assertGreater(
-            source.rindex("release_package_manager_locks"),
-            source.index("installed_activation complete"),
-        )
+        self.assertLess(source.index("assert_package_lock_transaction"), source.index("attest_host_toolchain"))
 
 
 if __name__ == "__main__":

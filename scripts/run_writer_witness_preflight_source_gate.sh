@@ -1,11 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "${WRITER_WITNESS_SOURCE_GATE_HERMETIC:-}" != "1" ]]; then
     exec /usr/bin/env -i \
-        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         HOME=/nonexistent \
         USER=writer-witness-source-gate \
         LOGNAME=writer-witness-source-gate \
@@ -36,6 +36,7 @@ shell_sources=( \
     scripts/provision_writer_witness_host.sh \
     scripts/run_writer_witness_preflight_source_gate.sh \
     scripts/run_writer_witness_failure_drill.sh \
+    scripts/run_writer_witness_matrix_controller.sh \
     deploy/writer-witness/writer-witness-live-restore.sh \
     deploy/writer-witness/writer-witness-matrix-host-faults.sh \
     deploy/writer-witness/writer-witness-state-manifest.sh \
@@ -53,6 +54,9 @@ python_sources=( \
     scripts/run_writer_witness_clock_jump_probe.py \
     scripts/run_writer_witness_postgres_gate.py \
     scripts/run_writer_witness_real_host_matrix.py \
+    scripts/generate_writer_witness_command_surfaces.py \
+    scripts/verify_writer_witness_controller_toolchain.py \
+    scripts/writer_witness_controller_runtime.py \
     scripts/verify_writer_witness_release.py \
     scripts/verify_writer_witness_runtime.py \
     scripts/verify_writer_witness_host_toolchain.py \
@@ -72,10 +76,10 @@ python_sources=( \
 
 for source in "${shell_sources[@]}"; do
     test -f "$source"
-    bash -n "$source"
+    /bin/bash -n "$source"
 done
 
-python3 -I - "$ROOT_DIR" "${python_sources[@]}" <<'PY'
+/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null - "$ROOT_DIR" "${python_sources[@]}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -89,9 +93,13 @@ print('{"status":"passed","gate":"writer-witness-closed-source-syntax"}')
 PY
 
 /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-    python3 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+    /usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
     scripts/verify_writer_witness_host_toolchain.py \
     --verify-command-surface "$ROOT_DIR" >/dev/null
+
+/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+    scripts/generate_writer_witness_command_surfaces.py \
+    --verify deploy/writer-witness/command-surfaces.generated.json >/dev/null
 
 unit_modules=( \
     tests.test_writer_witness \
@@ -102,8 +110,10 @@ unit_modules=( \
     tests.test_writer_witness_host_fault_recovery \
     tests.test_writer_witness_matrix_campaign \
     tests.test_writer_witness_matrix_controller_provision \
+    tests.test_writer_witness_command_surfaces \
     tests.test_verify_writer_witness_runtime \
     tests.test_verify_writer_witness_host_toolchain \
+    tests.test_verify_writer_witness_controller_toolchain \
     tests.test_verify_writer_witness_runtime_provenance \
     tests.test_verify_writer_witness_process_maps \
     tests.test_verify_writer_witness_wheelhouse \
@@ -123,7 +133,7 @@ unit_modules=( \
     tests.test_writer_witness_real_host_matrix_runner \
 )
 
-python3 -I - "$ROOT_DIR" "${unit_modules[@]}" <<'PY'
+/usr/bin/python3.12 -I -B -X utf8 -X pycache_prefix=/dev/null - "$ROOT_DIR" "${unit_modules[@]}" <<'PY'
 import json
 import sys
 import unittest
@@ -159,9 +169,9 @@ print(
 )
 PY
 
-failure_drill_output="$(bash "$ROOT_DIR/scripts/run_writer_witness_failure_drill.sh")"
+failure_drill_output="$(/bin/bash "$ROOT_DIR/scripts/run_writer_witness_failure_drill.sh")"
 printf '%s\n' "$failure_drill_output"
-python3 -I - "$failure_drill_output" <<'PY'
+/usr/bin/python3.12 -I -S -B -X utf8 -X pycache_prefix=/dev/null - "$failure_drill_output" <<'PY'
 import json
 import sys
 

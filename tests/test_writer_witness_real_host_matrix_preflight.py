@@ -168,9 +168,11 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         self.assertIn("tests.test_render_writer_witness_credentials", source_gate)
         self.assertIn("WRITER_WITNESS_SOURCE_GATE_HERMETIC", source_gate)
         self.assertIn("exec /usr/bin/env -i", source_gate)
-        self.assertIn("python3 -I", source_gate)
+        self.assertIn("/usr/bin/python3.12 -I", source_gate)
         self.assertIn("bash -n", source_gate)
         self.assertIn("writer-witness-activation.py", source_gate)
+        self.assertIn("generate_writer_witness_command_surfaces.py", source_gate)
+        self.assertIn("tests.test_verify_writer_witness_controller_toolchain", source_gate)
 
     def test_runtime_provenance_and_effective_nftables_are_release_bound(self):
         host_toolchain_sha256 = "7" * 64
@@ -262,6 +264,8 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
                 "witness_release_manifest_sha256": expected_manifest_sha256,
                 "host_toolchain_inventory_sha256": "7" * 64,
                 "host_toolchain_inventory_configured": True,
+                "controller_toolchain_inventory_sha256": "8" * 64,
+                "controller_toolchain_inventory_configured": True,
             },
         }
         completed = [
@@ -280,6 +284,7 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
                 return_value=[item[0] for item in specs_and_stdout],
             ),
             mock.patch.object(preflight.subprocess, "run", side_effect=completed),
+            mock.patch.object(preflight.controller_runtime, "assert_runtime"),
         ):
             result, exit_code = preflight.execute_preflight(plan)
         self.assertEqual(exit_code, 1)
@@ -300,13 +305,15 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
                 "source_manifest": preflight.source_manifest(),
                 "source_sha256": preflight.source_manifest_sha256(),
                 "witness_release_manifest_sha256": "a" * 64,
+                "controller_toolchain_inventory_sha256": "8" * 64,
+                "controller_toolchain_inventory_configured": True,
             },
         }
         with mock.patch.object(
             preflight,
             "witness_release_manifest_sha256",
             return_value="b" * 64,
-        ):
+        ), mock.patch.object(preflight.controller_runtime, "assert_runtime"):
             result, exit_code = preflight.execute_preflight(plan)
         self.assertEqual(exit_code, 2)
         self.assertEqual(result["status"], "blocked_release_bundle_drift")

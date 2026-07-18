@@ -3233,3 +3233,75 @@ signer custody remains `BEFORE_RH001`; controller-loss recovery remains
 activation gates remain later. This work does not authorize Full Matrix,
 `main` integration, a first lease, WebApp mutation, production deployment, or
 traffic changes.
+
+### 47.12 ChatGPT Pro rejection at `5bd5c884` and fifth source remediation - 2026-07-18
+
+The supplied ChatGPT Pro report rejected dark installation, live prerequisites,
+and RH-001 at exact SHA `5bd5c884`. The five reported paths were reproduced in
+source. This remediation therefore remains source-only: it performs no SSH,
+live installation, service/database/firewall/TLS mutation, RH scenario,
+deployment, `main` integration, CDN/DNS change, or traffic movement.
+
+The source dispositions are:
+
+1. Package exclusion and the mutation actor now share one PID. The native
+   apt/dpkg POSIX-lock process `execve`s into provision or watchdog instead of
+   leaving an independently killable coprocess. Provision and watchdog run as
+   the exact systemd `MainPID` under `KillMode=control-group`; child work cannot
+   remain outside the transaction cgroup after actor death. The actor can prove
+   its own four kernel lock records through `/proc/locks`, and preflight binds
+   the installed actor bytes to the release manifest.
+2. Every nonterminal v3 recovery requires the journal's host-toolchain digest
+   at the activation-helper boundary. Ordinary provision recovery first reads
+   the pending binding, requires it to equal the current externally approved
+   digest, runs the journal-owned verifier while package locks are held, and
+   only then permits rollback, service reconciliation, or completion. Digest
+   A/B tests cover prepared, late-unit-intent, partial publication, activated,
+   rollback-pending, and committed journals and require byte-identical journal
+   and pointer state on rejection.
+3. Activation exposes an explicit protocol version. One exact-hash adapter
+   supports the `5bd5c884` bound predecessor and the separately authorized
+   `2e4dc0b1` legacy helper; current completion receives the mandatory digest,
+   while legacy syntax omits the unsupported option. Unknown helper bytes and
+   unauthorized legacy migration fail before service action.
+4. `Controller.command` records exception evidence on every subprocess exit
+   path. A timeout, nonzero result, signal, or cancellation that crosses the
+   persisted ordinary cleanup deadline becomes `MatrixAbort` before a generic
+   error can mask it. Cleanup then enters its once-persisted 30-second exact
+   revocation window. An independent shorter command timeout remains an
+   ordinary failure while cleanup authority is still valid.
+5. Matrix controller execution has a separate toolchain inventory and digest.
+   It binds absolute `git`, `ssh`, `scp`, `ssh-keygen`, `findmnt`, Docker,
+   systemd, exact Python, package metadata, and the complete observed native
+   dependency closure. A clean isolated launcher holds native package locks,
+   becomes the exact controller PID inside one `KillMode=control-group`
+   transient service, and rejects ambient executables/environment. The
+   controller digest is frozen in preflight, dual-signature approval, durable
+   campaign journal, summary, recovery, and postflight.
+6. The replacement-Witness inventory no longer claims controller-side SSH/SCP
+   bytes. A generated AST artifact records every local process funnel and
+   classifies remote call sites as controller, replacement Witness, rollback
+   Witness, WebApp-FI, WebApp-IR, or the closed dynamic `role/site` domain.
+   Source gate compares this artifact to actual call sites, so a new subprocess
+   or host-role path is an explicit reviewed artifact change.
+
+Local verification for this remediation passed `448` explicitly selected unit
+tests with zero failures and zero skips, all `5` guarded real-PostgreSQL tests,
+and the complete four-database failure drill. A real local transient-systemd
+self-check also proved that the isolated controller interpreter was the exact
+service `MainPID`, that `KillMode=control-group` was configured, that the same
+PID owned all four native package locks, and that its canonical controller
+toolchain digest matched. This is source/controller evidence only; it is not a
+replacement for the later dark-host systemd crash matrix or live preflight.
+A fresh minimal Writer Witness release passed closed manifest and metadata
+verification with `87` manifest entries, `9` executable entries, and manifest
+SHA-256 `1cf8051161cf793c613d1850006dc35ba7ceca23c7d2cb3dc702e4fe332a5c70`.
+
+The fifth remediation is not self-authorizing. A clean commit/push, complete
+closed source gate, fresh release verification, and another independent exact-
+SHA review are required before reconsidering dark installation. Native
+systemd/cgroup crash evidence remains a live prerequisite. Independent signer
+custody remains `BEFORE_RH001`; controller-loss recovery remains
+`BEFORE_REMAINING_MATRIX`; Full Matrix, `main` integration, first lease,
+production activation, WebApp mutation, and CDN/traffic changes remain
+forbidden.

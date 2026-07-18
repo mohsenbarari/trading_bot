@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3.12
 """Guarded one-scenario-at-a-time executor for the dark Witness real-host Matrix."""
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -27,10 +28,13 @@ from typing import Any
 import uuid
 from urllib.parse import urlparse
 
-from scripts import plan_writer_witness_real_host_matrix as preflight_plan
-
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from scripts import plan_writer_witness_real_host_matrix as preflight_plan
+from scripts import writer_witness_controller_runtime as controller_runtime
+
+
 CLIENT_SCRIPT = ROOT / "scripts/writer_witness_matrix_client.py"
 PREFLIGHT_SCHEMA = "writer_witness_real_host_matrix_preflight_v1"
 RUNNER_SCHEMA = "writer_witness_real_host_matrix_runner_v1"
@@ -475,7 +479,11 @@ def owner_only_env(path: Path) -> dict[str, str]:
     return values
 
 
-def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str, dict[str, str]]:
+def validate_preflight(
+    payload: dict[str, Any],
+    expected_head: str,
+    expected_controller_toolchain_inventory_sha256: str | None = None,
+) -> dict[str, dict[str, str]]:
     if payload.get("schema_version") != PREFLIGHT_SCHEMA or payload.get("status") != "preflight_passed":
         raise MatrixError("a passing real-host preflight artifact is required")
     try:
@@ -523,11 +531,24 @@ def validate_preflight(payload: dict[str, Any], expected_head: str) -> dict[str,
     host_toolchain_inventory_sha256 = str(
         bundle.get("host_toolchain_inventory_sha256") or ""
     )
+    controller_toolchain_inventory_sha256 = str(
+        bundle.get("controller_toolchain_inventory_sha256") or ""
+    )
     if (
         bundle.get("host_toolchain_inventory_configured") is not True
         or not re.fullmatch(r"[0-9a-f]{64}", host_toolchain_inventory_sha256)
     ):
         raise MatrixError("preflight host toolchain binding is invalid")
+    if (
+        bundle.get("controller_toolchain_inventory_configured") is not True
+        or not re.fullmatch(r"[0-9a-f]{64}", controller_toolchain_inventory_sha256)
+        or (
+            expected_controller_toolchain_inventory_sha256 is not None
+            and controller_toolchain_inventory_sha256
+            != expected_controller_toolchain_inventory_sha256
+        )
+    ):
+        raise MatrixError("preflight controller toolchain binding is invalid")
     if bundle.get("python_runtime") != expected_python_runtime:
         raise MatrixError("preflight run bundle Python runtime binding drifted")
     if bundle.get("nftables_policy") != expected_nftables_policy:
@@ -645,6 +666,7 @@ def validate_approval(
     change_id: str,
     expected_restore_sha256: str,
     expected_allowed_signers_sha256: str,
+    expected_controller_toolchain_inventory_sha256: str,
 ) -> tuple[str, str]:
     if payload.get("schema_version") != APPROVAL_SCHEMA or payload.get("status") != "approved":
         raise MatrixError("independent observer approval is missing or invalid")
@@ -717,6 +739,11 @@ def validate_approval(
         raise MatrixError("approval is not bound to the pinned restore backup")
     if payload.get("allowed_signers_sha256") != expected_allowed_signers_sha256:
         raise MatrixError("approval is not bound to the trusted signer policy")
+    if (
+        payload.get("controller_toolchain_inventory_sha256")
+        != expected_controller_toolchain_inventory_sha256
+    ):
+        raise MatrixError("approval is not bound to the Matrix controller toolchain")
     return observer, commander
 
 
@@ -739,11 +766,13 @@ def verify_approval_signature(
             os.lseek(descriptor, 0, os.SEEK_SET)
         completed = subprocess.run(
             [
-                "ssh-keygen", "-Y", "verify", "-f", f"/proc/self/fd/{descriptors[0]}",
+                controller_runtime.executable("ssh-keygen"),
+                "-Y", "verify", "-f", f"/proc/self/fd/{descriptors[0]}",
                 "-I", identity, "-n", "writer-witness-matrix",
                 "-s", f"/proc/self/fd/{descriptors[1]}",
             ],
             input=approval_raw,
+            env=controller_runtime.clean_environment(),
             capture_output=True,
             pass_fds=tuple(descriptors),
         )
@@ -873,12 +902,28 @@ class Controller:
             # The zero value is reserved for deliberately bare unit fixtures,
             # which never execute remote postflight.
             self.host_toolchain_inventory_sha256 = configured_toolchain or ("0" * 64)
+            configured_controller_toolchain = (
+                str(preflight_bundle.get("controller_toolchain_inventory_sha256") or "")
+                if isinstance(preflight_bundle, dict)
+                else ""
+            )
+            self.controller_toolchain_inventory_sha256 = (
+                configured_controller_toolchain or ("0" * 64)
+            )
         else:
             self.host_toolchain_inventory_sha256 = str(
                 existing_journal.payload.get("host_toolchain_inventory_sha256") or ""
             )
+            self.controller_toolchain_inventory_sha256 = str(
+                existing_journal.payload.get("controller_toolchain_inventory_sha256")
+                or ""
+            )
         if not re.fullmatch(r"[0-9a-f]{64}", self.host_toolchain_inventory_sha256):
             raise MatrixError("campaign host toolchain binding is invalid")
+        if not re.fullmatch(
+            r"[0-9a-f]{64}", self.controller_toolchain_inventory_sha256
+        ):
+            raise MatrixError("campaign controller toolchain binding is invalid")
         seed = f"{scenario}|{operator}|{observer}|{utc_now()}|{uuid.uuid4()}".encode()
         self.tag = tag or ("wwm_" + hashlib.sha256(seed).hexdigest()[:12])
         if not re.fullmatch(r"wwm_[0-9a-f]{12}", self.tag):
@@ -889,7 +934,11 @@ class Controller:
         self.summary_path = artifact_dir / "summary.json"
         secret_parent = secure_directory(DEFAULT_SECRET_ROOT)
         filesystem = subprocess.run(
-            ["findmnt", "-n", "-o", "FSTYPE", "-T", str(secret_parent)],
+            [
+                controller_runtime.executable("findmnt"),
+                "-n", "-o", "FSTYPE", "-T", str(secret_parent),
+            ],
+            env=controller_runtime.clean_environment(),
             check=True,
             capture_output=True,
             text=True,
@@ -1018,6 +1067,9 @@ class Controller:
                     "host_toolchain_inventory_sha256": (
                         self.host_toolchain_inventory_sha256
                     ),
+                    "controller_toolchain_inventory_sha256": (
+                        self.controller_toolchain_inventory_sha256
+                    ),
                     "resources": {},
                 },
                 create=True,
@@ -1128,7 +1180,7 @@ class Controller:
             raise MatrixAbort(self._abort_reason)
 
     def raise_if_cleanup_deadline_exceeded(self) -> None:
-        if time.monotonic() > getattr(self, "_cleanup_deadline", float("inf")):
+        if time.monotonic() >= getattr(self, "_cleanup_deadline", float("inf")):
             raise MatrixAbort("Matrix cleanup exceeded its separate 900-second recovery bound")
 
     def enter_cleanup_mode(self) -> None:
@@ -1402,6 +1454,7 @@ class Controller:
                 completed = subprocess.run(
                     self.ssh_args(HOSTS[role], command),
                     cwd=ROOT,
+                    env=controller_runtime.clean_environment(),
                     capture_output=True,
                     text=True,
                     timeout=8,
@@ -1606,6 +1659,8 @@ class Controller:
             inspected_state = self.inspect_remote_campaign(
                 "inspect_claimed_remote_campaign"
             )
+        except MatrixAbort:
+            raise
         except Exception as exc:
             self.mark_remote_campaign_ambiguous("ambiguous")
             raise MatrixError("replacement Witness campaign ownership is ambiguous") from exc
@@ -1653,6 +1708,8 @@ class Controller:
                 "verify_remote_campaign_ownership",
                 emergency_revocation=use_emergency_transport,
             )
+        except MatrixAbort:
+            raise
         except Exception as exc:
             self.mark_remote_campaign_ambiguous("lost_or_foreign")
             raise MatrixError("replacement Witness campaign ownership is not proven") from exc
@@ -1678,6 +1735,8 @@ class Controller:
             inspected_state = self.inspect_remote_campaign(
                 "verify_remote_campaign_release_tombstone"
             )
+        except MatrixAbort:
+            raise
         except Exception as exc:
             self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
             raise MatrixError("replacement Witness campaign release tombstone is not proven") from exc
@@ -1733,6 +1792,8 @@ class Controller:
                 self.remote_campaign_command("assert", expect="active"),
                 check=False,
             )
+        except MatrixAbort:
+            raise
         except Exception as exc:
             self.journal.update(remote_authorization_consumption="ambiguous", dirty=True)
             raise MatrixError("remote approval/preflight consumption is ambiguous") from exc
@@ -1838,6 +1899,8 @@ class Controller:
                 "inspect_released_remote_campaign",
                 emergency_revocation=emergency_revocation,
             )
+        except MatrixAbort:
+            raise
         except Exception as exc:
             self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
             raise MatrixError("replacement Witness campaign release is ambiguous") from exc
@@ -1860,7 +1923,8 @@ class Controller:
 
     def ssh_args(self, host: Host, command: str) -> list[str]:
         args = [
-            "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+            controller_runtime.executable("ssh"),
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "ControlMaster=auto",
             "-o", "ControlPersist=30",
@@ -1873,7 +1937,8 @@ class Controller:
 
     def scp_args(self, host: Host, source: str, destination: str, *, from_remote: bool) -> list[str]:
         args = [
-            "scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+            controller_runtime.executable("scp"),
+            "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
             "-o", "StrictHostKeyChecking=yes", "-o", "ControlMaster=auto",
             "-o", "ControlPersist=30", "-o", f"ControlPath={self._ssh_control_path(host)}",
         ]
@@ -1899,6 +1964,8 @@ class Controller:
         transport_file_bytes: int = 0,
         emergency_revocation: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        controller_runtime.assert_command(args)
+        ordinary_cleanup_command = self._cleanup_mode and not emergency_revocation
         if self._cleanup_mode:
             remaining_cleanup_seconds = self._cleanup_deadline - time.monotonic()
             if remaining_cleanup_seconds <= 0:
@@ -1942,16 +2009,34 @@ class Controller:
             completed = subprocess.run(
                 args,
                 cwd=ROOT,
+                env=controller_runtime.clean_environment(),
                 capture_output=True,
                 text=True,
                 timeout=effective_timeout,
             )
-        except BaseException:
+        except BaseException as exc:
             if transport_role is not None:
                 # Timeout, cancellation, and local execution failures make the
                 # multiplexed connection state ambiguous.  The next attempt
                 # must reserve a full handshake before any retry.
                 self._forget_transport_master(transport_role)
+            self.event(
+                "command.end",
+                name=name,
+                return_code=None,
+                outcome="exception",
+                exception_type=type(exc).__name__,
+            )
+            if ordinary_cleanup_command:
+                try:
+                    self.raise_if_cleanup_deadline_exceeded()
+                except MatrixAbort as deadline_error:
+                    raise deadline_error from exc
+            elif self._cleanup_mode and emergency_revocation:
+                if time.monotonic() >= self._emergency_revocation_deadline:
+                    raise MatrixAbort(
+                        "Matrix emergency revocation exceeded its aggregate 30-second bound"
+                    ) from exc
             raise
         if transport_role is not None:
             if completed.returncode == 0:
@@ -1967,6 +2052,18 @@ class Controller:
             "command.end", name=name, return_code=completed.returncode,
             stdout=stdout, stderr=stderr,
         )
+        # Deadline authority precedes every generic command outcome.  A real
+        # timeout, nonzero return, signal, or cancellation that crosses the
+        # persisted ordinary window must enter the separately budgeted exact
+        # revocation path instead of being masked as an ordinary failure.
+        if self._cleanup_mode:
+            if emergency_revocation:
+                if time.monotonic() >= self._emergency_revocation_deadline:
+                    raise MatrixAbort(
+                        "Matrix emergency revocation exceeded its aggregate 30-second bound"
+                    )
+            else:
+                self.raise_if_cleanup_deadline_exceeded()
         if not completion_recorded and not self._cleanup_mode:
             raise MatrixError(
                 "command outcome is ambiguous because its evidence result could not be persisted"
@@ -1975,15 +2072,7 @@ class Controller:
             raise MatrixError("command output contained Matrix secret material and was redacted")
         if check and completed.returncode != 0:
             raise MatrixError(f"{name} failed with exit code {completed.returncode}")
-        if self._cleanup_mode:
-            if emergency_revocation:
-                if time.monotonic() > self._emergency_revocation_deadline:
-                    raise MatrixAbort(
-                        "Matrix emergency revocation exceeded its aggregate 30-second bound"
-                    )
-            else:
-                self.raise_if_cleanup_deadline_exceeded()
-        else:
+        if not self._cleanup_mode:
             self.raise_if_abort_requested()
         return completed
 
@@ -2581,7 +2670,9 @@ class Controller:
             try:
                 completed = subprocess.run(
                     self.ssh_args(HOSTS[role], command),
-                    cwd=ROOT, capture_output=True, text=True, timeout=12,
+                    cwd=ROOT,
+                    env=controller_runtime.clean_environment(),
+                    capture_output=True, text=True, timeout=12,
                 )
             except BaseException:
                 self._forget_transport_master(role)
@@ -3368,6 +3459,9 @@ class Controller:
             "incident_commander": self.incident_commander,
             "reason": self.reason,
             "expected_commit": self.expected_head,
+            "controller_toolchain_inventory_sha256": (
+                self.controller_toolchain_inventory_sha256
+            ),
             "started_at": self.started_at,
             "finished_at": utc_now(),
             "error": error,
@@ -3409,7 +3503,7 @@ class Controller:
     def run_full_postflight(self, *, expect_remote_campaign: bool = True) -> None:
         output = self.artifact_dir / "postflight.json"
         arguments = [
-            "python3",
+            controller_runtime.executable("python3.12"),
             str(ROOT / "scripts/plan_writer_witness_real_host_matrix.py"),
             "--mode",
             "preflight",
@@ -3417,6 +3511,8 @@ class Controller:
             self.expected_head,
             "--expected-host-toolchain-inventory-sha256",
             self.host_toolchain_inventory_sha256,
+            "--expected-controller-toolchain-inventory-sha256",
+            self.controller_toolchain_inventory_sha256,
         ]
         if expect_remote_campaign:
             arguments.extend(
@@ -3479,6 +3575,8 @@ class Controller:
             inspected_state = self.inspect_remote_campaign(
                 "recover_postflight_remote_campaign"
             )
+        except MatrixAbort:
+            raise
         except Exception as exc:
             self.journal.update(remote_campaign_release_state="ambiguous", dirty=True)
             raise MatrixError(
@@ -3520,7 +3618,14 @@ class Controller:
 
 
 def git_value(*args: str) -> str:
-    return subprocess.run(("git", *args), cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        (controller_runtime.executable("git"), *args),
+        cwd=ROOT,
+        env=controller_runtime.clean_environment(),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def acquire_local_lock(scenario: str, expected_head: str) -> int:
@@ -3600,6 +3705,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario", choices=tuple(SCENARIOS))
     parser.add_argument("--preflight", type=Path)
     parser.add_argument("--expected-commit")
+    parser.add_argument("--expected-controller-toolchain-inventory-sha256")
     parser.add_argument("--campaign-journal", type=Path)
     parser.add_argument("--operator")
     parser.add_argument("--observer")
@@ -3623,6 +3729,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    controller_toolchain_digest = str(
+        args.expected_controller_toolchain_inventory_sha256 or ""
+    )
+    if args.mode != "plan":
+        if not re.fullmatch(r"[0-9a-f]{64}", controller_toolchain_digest):
+            raise MatrixError(
+                "non-plan mode requires --expected-controller-toolchain-inventory-sha256"
+            )
+        controller_runtime.assert_runtime(controller_toolchain_digest)
     campaign_root = DEFAULT_CAMPAIGN_ROOT
     if args.mode != "plan":
         secure_directory(DEFAULT_CONTROLLER_ROOT)
@@ -3637,6 +3752,11 @@ def main() -> int:
         journal = CampaignJournal.load(journal_path)
         if journal.payload.get("dirty") is not True:
             raise MatrixError("campaign journal is not marked dirty")
+        if (
+            journal.payload.get("controller_toolchain_inventory_sha256")
+            != controller_toolchain_digest
+        ):
+            raise MatrixError("campaign recovery controller toolchain binding drifted")
         scenario = str(journal.payload.get("scenario") or "")
         expected_head = str(journal.payload.get("expected_commit") or "")
         tag = str(journal.payload.get("tag") or "")
@@ -3771,7 +3891,11 @@ def main() -> int:
         assert_source_pinned_signer_policy(allowed_signers_raw)
         preflight_raw = read_secure_regular(args.preflight, label="preflight artifact")
         preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
-        validate_preflight(preflight, expected_head)
+        validate_preflight(
+            preflight,
+            expected_head,
+            controller_toolchain_digest,
+        )
         approval_now = datetime.now(timezone.utc)
         output = args.output or (
             DEFAULT_CONTROLLER_ROOT / "approvals" / f"{args.scenario.lower()}-writer-witness-approval.json"
@@ -3805,6 +3929,7 @@ def main() -> int:
             "restore_backup_sha256": preflight["observed_baseline"]["matrix_witness_dark_baseline"]["backup_sha256"],
             "restore_authorized_by": args.restore_authorized_by.strip(),
             "allowed_signers_sha256": hashlib.sha256(allowed_signers_raw).hexdigest(),
+            "controller_toolchain_inventory_sha256": controller_toolchain_digest,
         }
         output.parent.mkdir(parents=True, exist_ok=True)
         output_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
@@ -3853,7 +3978,11 @@ def main() -> int:
     )
     assert_source_pinned_signer_policy(allowed_signers_raw)
     preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
-    baseline = validate_preflight(preflight, expected_head)
+    baseline = validate_preflight(
+        preflight,
+        expected_head,
+        controller_toolchain_digest,
+    )
     approval = parse_json_bytes(approval_raw, label="observer approval")
     observer, incident_commander = validate_approval(
         approval,
@@ -3865,6 +3994,7 @@ def main() -> int:
         change_id=args.change_id.strip(),
         expected_restore_sha256=baseline["matrix_witness_dark_baseline"]["backup_sha256"],
         expected_allowed_signers_sha256=hashlib.sha256(allowed_signers_raw).hexdigest(),
+        expected_controller_toolchain_inventory_sha256=controller_toolchain_digest,
     )
     assert_independent_signer_keys(allowed_signers_raw, observer, incident_commander)
     verify_approval_signature(

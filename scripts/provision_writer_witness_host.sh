@@ -25,6 +25,148 @@ readonly -a WRITER_WITNESS_MANAGED_UNITS=(
     writer-witness-offsite-backup.service
     writer-witness-offsite-backup.timer
 )
+readonly WRITER_WITNESS_ACTIVATION_PROTOCOL_V2=writer_witness_activation_protocol_v2
+readonly WRITER_WITNESS_BOUND_V1_HELPER_SHA256=271994f11950d2848360a59dfd080b9856ba01ecd966e212b9e1c5d8fc49e1ea
+readonly WRITER_WITNESS_LEGACY_2E4_HELPER_SHA256=7142c88933f4b6eb355acb066d2045bb083f148ac804d80ba34296d18fc987d6
+activation_protocol=
+activation_binding=
+activation_journal_digest=
+activation_recovery_candidates=
+
+secure_file_sha256() {
+    isolated_system_python - "$1" <<'PY'
+import hashlib
+import os
+from pathlib import Path
+import stat
+import sys
+
+path = Path(sys.argv[1])
+descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+try:
+    before = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != 0
+        or before.st_gid != 0
+        or stat.S_IMODE(before.st_mode) not in {0o644, 0o755}
+        or before.st_nlink != 1
+        or before.st_size < 1
+        or before.st_size > 4 * 1024 * 1024
+    ):
+        raise SystemExit("unsafe activation protocol file")
+    payload = b""
+    while len(payload) < before.st_size:
+        chunk = os.read(descriptor, before.st_size - len(payload))
+        if not chunk:
+            raise SystemExit("short activation protocol file read")
+        payload += chunk
+    after = os.fstat(descriptor)
+    identity = lambda value: (
+        value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+        value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+    )
+    if identity(before) != identity(after):
+        raise SystemExit("activation protocol file changed during read")
+    print(hashlib.sha256(payload).hexdigest())
+finally:
+    os.close(descriptor)
+PY
+}
+
+detect_installed_activation_protocol() {
+    local reported installed_sha source_sha
+    installed_sha="$(secure_file_sha256 /usr/local/sbin/writer-witness-activation)"
+    if reported="$(installed_activation protocol-version 2>/dev/null)"; then
+        [[ "$reported" == "$WRITER_WITNESS_ACTIVATION_PROTOCOL_V2" ]] || {
+            echo "unsupported Writer Witness activation protocol: $reported" >&2
+            return 70
+        }
+        source_sha="$(secure_file_sha256 "$ASSET_DIR/writer-witness-activation.py")"
+        [[ "$installed_sha" == "$source_sha" ]] || {
+            echo "installed activation protocol differs from this exact release" >&2
+            return 70
+        }
+        activation_protocol=current-v2
+    elif [[ "$installed_sha" == "$WRITER_WITNESS_BOUND_V1_HELPER_SHA256" ]]; then
+        activation_protocol=bound-v1
+    elif [[ "$installed_sha" == "$WRITER_WITNESS_LEGACY_2E4_HELPER_SHA256" ]]; then
+        activation_protocol=legacy-2e4
+    else
+        echo "installed activation helper has no supported exact protocol identity" >&2
+        return 70
+    fi
+}
+
+prepare_installed_recovery_context() {
+    local release_id
+    detect_installed_activation_protocol
+    activation_binding=
+    activation_journal_digest=
+    activation_recovery_candidates=
+    if [[ "$activation_protocol" == legacy-2e4 ]]; then
+        [[ "$ALLOW_LEGACY_ACTIVATION_RECOVERY" == true ]] || {
+            echo "legacy activation recovery requires explicit operator authorization" >&2
+            return 70
+        }
+        assert_package_lock_transaction
+        attest_host_toolchain
+        return 0
+    fi
+    activation_binding="$(installed_activation pending-toolchain-binding)"
+    case "$activation_binding" in
+        none|terminal) return 0 ;;
+    esac
+    IFS='|' read -r release_id activation_journal_digest activation_recovery_candidates \
+        <<<"$activation_binding"
+    [[ "$release_id" =~ ^[A-Za-z0-9._-]+$ \
+        && "$activation_journal_digest" == "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+        && "$activation_recovery_candidates" =~ ^/var/lib/trading-bot-witness/activation-state/operations/[0-9a-f]{32}/candidates$ ]] || {
+        echo "interrupted activation does not match the currently approved toolchain" >&2
+        return 70
+    }
+    assert_package_lock_transaction
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        "$WRITER_WITNESS_SYSTEM_PYTHON" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$activation_recovery_candidates/recovery-host-toolchain-verifier.py" \
+        --expected-inventory-sha256 "$activation_journal_digest" >/dev/null
+    [[ "$(installed_activation pending-toolchain-binding)" == "$activation_binding" ]] || {
+        echo "interrupted activation binding changed during attestation" >&2
+        return 70
+    }
+}
+
+recover_installed_activation_protocol() {
+    case "$activation_protocol:$activation_binding" in
+        current-v2:none|current-v2:terminal)
+            installed_activation recover
+            ;;
+        current-v2:*)
+            installed_activation recover \
+                --host-toolchain-inventory-sha256 "$activation_journal_digest"
+            ;;
+        bound-v1:*|legacy-2e4:*)
+            installed_activation recover
+            ;;
+        *)
+            echo "activation recovery protocol context is incomplete" >&2
+            return 70
+            ;;
+    esac
+}
+
+complete_installed_activation_protocol() {
+    local action="$1" release_id="$2"
+    shift 2
+    if [[ "$activation_protocol" == legacy-2e4 ]]; then
+        installed_activation "$action" --release-id "$release_id" "$@"
+    else
+        installed_activation "$action" \
+            --release-id "$release_id" \
+            --host-toolchain-inventory-sha256 "$activation_journal_digest" \
+            "$@"
+    fi
+}
 
 wait_for_writer_witness_ready() {
     for attempt in $(seq 1 30); do
@@ -43,6 +185,7 @@ wait_for_writer_witness_ready() {
 restore_rollback_unit_intent() {
     local release_id unit intent load_state active_state unit_file_state current_load current_active
     local -a observed_unit_state_args=()
+    prepare_installed_recovery_context
     release_id="$(installed_activation pending-release-id \
         --phase rolled_back_pending_service_completion)"
     systemctl daemon-reload
@@ -131,16 +274,15 @@ restore_rollback_unit_intent() {
             --unit-state "$unit:$load_state:$active_state:$unit_file_state"
         )
     done
-    installed_activation complete-rollback \
-        --release-id "$release_id" \
-        --host-toolchain-inventory-sha256 \
-            "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+    prepare_installed_recovery_context
+    complete_installed_activation_protocol complete-rollback "$release_id" \
         "${observed_unit_state_args[@]}" >/dev/null
 }
 
 reconcile_installed_activation() {
     local result release_id
-    result="$(installed_activation recover)"
+    prepare_installed_recovery_context
+    result="$(recover_installed_activation_protocol)"
     case "$result" in
         activation_recovered=no)
             return 0
@@ -152,6 +294,7 @@ reconcile_installed_activation() {
             restore_rollback_unit_intent
             ;;
         activation_recovered=committed-pending-service-completion)
+            prepare_installed_recovery_context
             release_id="$(installed_activation active-release-id)"
             systemctl daemon-reload
             systemctl enable --now \
@@ -161,7 +304,8 @@ reconcile_installed_activation() {
                 writer-witness-offsite-backup.timer
             systemctl restart nginx writer-witness.service
             wait_for_writer_witness_ready
-            installed_activation complete --release-id "$release_id" >/dev/null
+            prepare_installed_recovery_context
+            complete_installed_activation_protocol complete "$release_id" >/dev/null
             ;;
         *)
             echo "unexpected Writer Witness activation recovery result: $result" >&2
@@ -187,6 +331,7 @@ WHEELHOUSE="${WRITER_WITNESS_WHEELHOUSE:-}"
 ROTATE_TLS="${WRITER_WITNESS_ROTATE_TLS:-false}"
 EXPECTED_MANIFEST_SHA256="${WRITER_WITNESS_EXPECTED_MANIFEST_SHA256:-}"
 EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="${WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256:-}"
+ALLOW_LEGACY_ACTIVATION_RECOVERY="${WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY:-false}"
 
 for value_name in SOURCE_DIR WITNESS_PUBLIC_IP WEBAPP_FI_SOURCE_IP WEBAPP_IR_SOURCE_IP SSH_SOURCE_IP EXPECTED_MANIFEST_SHA256 EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256 WHEELHOUSE; do
     value="${!value_name}"
@@ -213,6 +358,11 @@ if [[ "$HARDEN_SSH" != "true" && "$HARDEN_SSH" != "false" ]]; then
 fi
 if [[ "$ROTATE_TLS" != "true" && "$ROTATE_TLS" != "false" ]]; then
     echo "WRITER_WITNESS_ROTATE_TLS must be true or false" >&2
+    exit 2
+fi
+if [[ "$ALLOW_LEGACY_ACTIVATION_RECOVERY" != "true" \
+    && "$ALLOW_LEGACY_ACTIVATION_RECOVERY" != "false" ]]; then
+    echo "WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY must be true or false" >&2
     exit 2
 fi
 if [[ "$ROTATE_TLS" == "true" ]]; then
@@ -556,6 +706,73 @@ isolated_system_python "$SOURCE_DIR/scripts/verify_writer_witness_release.py" \
     --expected-gid 0 \
     >/dev/null
 
+# The systemd service cgroup and the native package locks are one indivisible
+# activation capability.  Outside that service, create it and wait.  Its main
+# process is the package-lock helper, which acquires apt/dpkg POSIX locks and
+# execs back into this exact script without changing PID.  If the actor dies,
+# KillMode=control-group also terminates any in-flight child command.
+assert_package_lock_transaction() {
+    /usr/bin/env -i \
+        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        WRITER_WITNESS_PACKAGE_LOCK_OWNER_PID="${WRITER_WITNESS_PACKAGE_LOCK_OWNER_PID:-}" \
+        "$WRITER_WITNESS_SYSTEM_PYTHON" \
+        -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py" \
+        --assert-parent-locks >/dev/null
+}
+
+if ! assert_package_lock_transaction 2>/dev/null; then
+    if [[ -n "${INVOCATION_ID:-}" || -n "${SYSTEMD_EXEC_PID:-}" ]]; then
+        echo "Writer Witness provision transaction lacks its native package locks" >&2
+        exit 70
+    fi
+    transaction_suffix="$(isolated_system_python - "$RELEASE_ID" <<'PY'
+import hashlib
+import sys
+print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:20])
+PY
+)"
+    transaction_unit="writer-witness-provision-$transaction_suffix.service"
+    exec /usr/bin/systemd-run \
+        --wait \
+        --collect \
+        --pipe \
+        --quiet \
+        --service-type=exec \
+        --property=KillMode=control-group \
+        --unit="$transaction_unit" \
+        /usr/bin/env -i \
+        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        WRITER_WITNESS_PROVISION_TRANSACTION_UNIT="$transaction_unit" \
+        WRITER_WITNESS_SOURCE_DIR="$SOURCE_DIR" \
+        WRITER_WITNESS_PUBLIC_IP="$WITNESS_PUBLIC_IP" \
+        WRITER_WITNESS_WEBAPP_FI_SOURCE_IP="$WEBAPP_FI_SOURCE_IP" \
+        WRITER_WITNESS_WEBAPP_IR_SOURCE_IP="$WEBAPP_IR_SOURCE_IP" \
+        WRITER_WITNESS_SSH_SOURCE_IP="$SSH_SOURCE_IP" \
+        WRITER_WITNESS_RELEASE_ID="$RELEASE_ID" \
+        WRITER_WITNESS_HARDEN_SSH="$HARDEN_SSH" \
+        WRITER_WITNESS_SSH_KEY_SOURCE_USER="$SSH_KEY_SOURCE_USER" \
+        WRITER_WITNESS_WHEELHOUSE="$WHEELHOUSE" \
+        WRITER_WITNESS_ROTATE_TLS="$ROTATE_TLS" \
+        WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY="$ALLOW_LEGACY_ACTIVATION_RECOVERY" \
+        WRITER_WITNESS_EXPECTED_MANIFEST_SHA256="$EXPECTED_MANIFEST_SHA256" \
+        WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+        "$WRITER_WITNESS_SYSTEM_PYTHON" \
+        -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py" \
+        --exec /bin/bash "$SOURCE_DIR/scripts/provision_writer_witness_host.sh"
+fi
+
+[[ "${SYSTEMD_EXEC_PID:-}" == "$$" \
+    && "${WRITER_WITNESS_PROVISION_TRANSACTION_UNIT:-}" =~ ^writer-witness-provision-[0-9a-f]{20}\.service$ \
+    && "$(systemctl show -p MainPID --value "$WRITER_WITNESS_PROVISION_TRANSACTION_UNIT")" == "$$" \
+    && "$(systemctl show -p KillMode --value "$WRITER_WITNESS_PROVISION_TRANSACTION_UNIT")" == control-group \
+    && "$(systemctl show -p Type --value "$WRITER_WITNESS_PROVISION_TRANSACTION_UNIT")" == exec ]] || {
+    echo "Writer Witness provision transaction lacks its exact systemd cgroup" >&2
+    exit 70
+}
+assert_package_lock_transaction
+
 # Ordinary release activation is not an OS bootstrap transaction.  Establish
 # the outer host lock before the first mutable operation, then fail closed if
 # the separately approved immutable-image/package baseline is absent or has
@@ -594,32 +811,6 @@ attest_host_toolchain() {
     isolated_system_python "$SOURCE_DIR/scripts/verify_writer_witness_host_toolchain.py" \
         --expected-inventory-sha256 "$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
         >/dev/null
-}
-
-# apt/dpkg use POSIX record locks, which are independent from BSD flock.
-# Keep a dedicated child holding their native lock files for the complete
-# activation; the control pipe closes automatically even if this shell dies.
-coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER {
-    isolated_system_python "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py"
-}
-package_lock_holder_pid="$WRITER_WITNESS_PACKAGE_LOCK_HOLDER_PID"
-package_lock_ready_fd="${WRITER_WITNESS_PACKAGE_LOCK_HOLDER[0]}"
-package_lock_control_fd="${WRITER_WITNESS_PACKAGE_LOCK_HOLDER[1]}"
-IFS= read -r package_lock_status <&"$package_lock_ready_fd" || {
-    wait "$package_lock_holder_pid" || true
-    echo "Writer Witness package-manager lock holder did not become ready" >&2
-    exit 75
-}
-exec {package_lock_ready_fd}<&-
-[[ "$package_lock_status" == package_manager_locks_held=yes ]]
-kill -0 "$package_lock_holder_pid"
-
-release_package_manager_locks() {
-    if [[ -n "${package_lock_control_fd:-}" ]]; then
-        exec {package_lock_control_fd}>&-
-        package_lock_control_fd=
-        wait "$package_lock_holder_pid"
-    fi
 }
 
 attest_host_toolchain
@@ -790,7 +981,10 @@ if [[ -e /usr/local/sbin/writer-witness-activation || -L /usr/local/sbin/writer-
         echo "installed Writer Witness activation helper metadata is unsafe" >&2
         exit 2
     }
-    reconcile_installed_activation
+    if [[ -e /var/lib/trading-bot-witness/activation-state/active.json \
+        || -L /var/lib/trading-bot-witness/activation-state/active.json ]]; then
+        reconcile_installed_activation
+    fi
 fi
 
 # Recovery infrastructure is installed atomically before the first durable
@@ -807,6 +1001,10 @@ atomic_install_file \
 atomic_install_file \
     "$ASSET_DIR/writer-witness-activation-watchdog.sh" \
     /usr/local/sbin/writer-witness-activation-watchdog \
+    0755
+atomic_install_file \
+    "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py" \
+    /usr/local/sbin/writer-witness-package-lock-actor \
     0755
 atomic_install_file \
     "$ASSET_DIR/writer-witness-activation-watchdog.service" \
@@ -847,7 +1045,10 @@ rollback_activation_transaction() {
             systemctl stop writer-witness.service >/dev/null 2>&1 || true
         fi
         recovery_status=0
-        recovery_result="$(installed_activation recover)" || recovery_status=$?
+        prepare_installed_recovery_context || recovery_status=$?
+        if [[ "$recovery_status" -eq 0 ]]; then
+            recovery_result="$(recover_installed_activation_protocol)" || recovery_status=$?
+        fi
         if [[ "$recovery_status" -ne 0 ]]; then
             echo "Writer Witness activation rollback failed; refusing to restart services" >&2
             exit 70
@@ -1867,7 +2068,6 @@ EOF
     attest_host_toolchain
 fi
 
-release_package_manager_locks
 flock -u "$rotation_lock_fd"
 exec {rotation_lock_fd}>&-
 

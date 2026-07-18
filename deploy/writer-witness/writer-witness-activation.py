@@ -171,6 +171,7 @@ PACKAGE_MANAGER_LOCK_PATHS = (
     Path("/var/cache/apt/archives/lock"),
 )
 SCHEMA = "writer_witness_activation_v3"
+ACTIVATION_PROTOCOL = "writer_witness_activation_protocol_v2"
 MANAGED_UNITS = (
     "nginx",
     "writer-witness.service",
@@ -1351,13 +1352,18 @@ def _rollback(store: ActivationStore, journal: dict[str, object]) -> None:
         _archive_and_remove(store, journal)
 
 
-def recover(store: ActivationStore, _args: argparse.Namespace) -> None:
+def recover(store: ActivationStore, args: argparse.Namespace) -> None:
     with store.locked():
         journal = store.read_journal()
         if journal is None:
             _cleanup_orphan_operations(store)
             print("activation_recovered=no")
             return
+        if journal.get("phase") != "rolled_back_without_service_changes":
+            _require_host_toolchain_binding(
+                journal,
+                str(getattr(args, "host_toolchain_inventory_sha256", "") or ""),
+            )
         if journal.get("phase") == "committed":
             # The generation and credentials are durable, but the surrounding
             # service supervisor may have died before restarting public
@@ -1526,12 +1532,12 @@ def recover_boot(store: ActivationStore, args: argparse.Namespace) -> None:
             print("activation_recovered=deferred-live-rotation")
             return
         journal = store.read_journal()
-        if (
-            journal is not None
-            and journal.get("phase") != "rolled_back_without_service_changes"
-            and os.environ.get("WRITER_WITNESS_ACTIVATION_TEST_MODE") != "1"
-        ):
-            package_descriptors = _attest_boot_recovery_toolchain(store, journal)
+        if journal is not None and journal.get("phase") != "rolled_back_without_service_changes":
+            if os.environ.get("WRITER_WITNESS_ACTIVATION_TEST_MODE") != "1":
+                package_descriptors = _attest_boot_recovery_toolchain(store, journal)
+            args.host_toolchain_inventory_sha256 = str(
+                journal["host_toolchain_inventory_sha256"]
+            )
         recover(store, args)
         journal = store.read_journal()
         if (
@@ -1681,6 +1687,10 @@ def pending_toolchain_binding(store: ActivationStore, _args: argparse.Namespace)
         print(f"{release_id}|{digest}|{candidates}")
 
 
+def protocol_version(_store: ActivationStore, _args: argparse.Namespace) -> None:
+    print(ACTIVATION_PROTOCOL)
+
+
 def candidate_dir(store: ActivationStore, args: argparse.Namespace) -> None:
     with store.locked():
         journal = store.read_journal()
@@ -1737,10 +1747,12 @@ def parse_args() -> argparse.Namespace:
         required=True,
         choices=("committed", "rolled_back_pending_service_completion"),
     )
-    subparsers.add_parser("recover")
+    recover_parser = subparsers.add_parser("recover")
+    recover_parser.add_argument("--host-toolchain-inventory-sha256")
     subparsers.add_parser("recover-boot")
     subparsers.add_parser("active-release-id")
     subparsers.add_parser("pending-toolchain-binding")
+    subparsers.add_parser("protocol-version")
     return parser.parse_args()
 
 
@@ -1766,6 +1778,7 @@ def main() -> None:
         "candidate-dir": candidate_dir,
         "active-release-id": active_release_id,
         "pending-toolchain-binding": pending_toolchain_binding,
+        "protocol-version": protocol_version,
     }
     commands[args.command](store, args)
 
