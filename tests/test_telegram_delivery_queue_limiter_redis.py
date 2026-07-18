@@ -145,6 +145,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             _rate_limited(second_until),
             now=now + timedelta(milliseconds=20),
         )
+        await asyncio.sleep(0.22)
         primary_global = await self.limiter.acquire(
             _job("primary", "private:unrelated-c"),
             now=now + timedelta(milliseconds=20),
@@ -155,7 +156,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(primary_global.allowed)
         self.assertEqual(primary_global.wait_reason, "bot_lane")
-        self.assertGreaterEqual(primary_global.retry_after_seconds, 2.97)
+        self.assertGreaterEqual(primary_global.retry_after_seconds, 2.7)
         self.assertTrue(editor_still_independent.allowed)
 
     async def test_explicit_bot_cooldown_applies_with_empty_recent_429_history(self):
@@ -209,6 +210,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         probe_time = now + timedelta(milliseconds=110)
+        await asyncio.sleep(0.11)
         candidates = [
             _job("primary", f"private:probe-candidate-{index}")
             for index in range(50)
@@ -233,6 +235,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(still_waiting.allowed)
         self.assertEqual(still_waiting.wait_reason, "bot_probe_inflight")
 
+        await asyncio.sleep(0.21)
         await self.limiter.observe(
             candidates[allowed_index],
             TelegramDeliveryDecision(
@@ -256,6 +259,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             now=now,
         )
         first_probe_job = _job("primary", "private:cancelled-probe-owner")
+        await asyncio.sleep(0.11)
         first_probe = await self.limiter.acquire(
             first_probe_job,
             now=now + timedelta(milliseconds=110),
@@ -279,6 +283,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(still_owned.allowed)
         self.assertEqual(still_owned.wait_reason, "bot_probe_inflight")
 
+        await asyncio.sleep(0.21)
         await self.limiter.observe(
             first_probe_job,
             cancellation,
@@ -327,6 +332,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             _rate_limited(now + timedelta(seconds=2)),
             now=now,
         )
+        await asyncio.sleep(0.02)
         owner = await limiter.acquire(
             _job("primary", "private:probe-expiry-owner"),
             now=now + timedelta(milliseconds=20),
@@ -342,6 +348,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
                 break
             await asyncio.sleep(0.002)
         self.assertFalse(await self.redis.exists(probe_key))
+        await asyncio.sleep(0.03)
 
         # Use one stable logical instant after the previous pacing window;
         # only the atomic probe election, not wall-clock test scheduling,
@@ -378,6 +385,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             _rate_limited(now + timedelta(seconds=2)),
             now=now,
         )
+        await asyncio.sleep(0.02)
         probe = await limiter.acquire(
             _job("primary", "private:preflight-probe-owner"),
             now=now + timedelta(milliseconds=20),
@@ -427,6 +435,7 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         )
         probe_job = _job("primary", "private:probe-429-destination")
         probe_time = now + timedelta(milliseconds=110)
+        await asyncio.sleep(0.11)
         probe = await self.limiter.acquire(probe_job, now=probe_time)
         self.assertTrue(probe.allowed)
         self.assertTrue(probe.is_rate_limit_probe)
@@ -573,6 +582,44 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         keys = tuple(await self.redis.keys("*"))
         self.assertTrue(keys)
         self.assertNotIn(raw_destination, repr(keys))
+
+    async def test_skewed_worker_clocks_cannot_bypass_atomic_min_interval(self):
+        actual = utc_now()
+        job = _job("primary", "channel:clock-skew-cadence")
+        admissions = await asyncio.gather(
+            self.limiter.acquire(job, now=actual + timedelta(days=365)),
+            self.limiter.acquire(job, now=actual - timedelta(days=365)),
+            *(self.limiter.acquire(job, now=actual) for _ in range(48)),
+        )
+
+        self.assertEqual(sum(item.allowed for item in admissions), 1)
+        self.assertEqual(
+            {item.wait_reason for item in admissions if not item.allowed},
+            {"destination_gate"},
+        )
+
+    async def test_skewed_worker_clock_cannot_bypass_or_extend_cooldown(self):
+        actual = utc_now()
+        job = _job("primary", "channel:clock-skew-cooldown")
+        await self.limiter.extend_destination_cooldown(
+            job,
+            until=actual + timedelta(milliseconds=250),
+        )
+
+        future_clock = await self.limiter.acquire(
+            job,
+            now=actual + timedelta(days=365),
+        )
+        self.assertFalse(future_clock.allowed)
+        self.assertEqual(future_clock.wait_reason, "destination_gate")
+        self.assertGreater(future_clock.retry_after_seconds, 0.15)
+
+        await asyncio.sleep(0.28)
+        past_clock = await self.limiter.acquire(
+            job,
+            now=actual - timedelta(days=365),
+        )
+        self.assertTrue(past_clock.allowed)
 
 
 if __name__ == "__main__":

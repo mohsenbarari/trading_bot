@@ -271,7 +271,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fd29c0e1f3a4"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fe30d1e2f4b5"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -353,7 +353,10 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         template_version: str = "test-v1",
         campaign_id: str | None = None,
         run_id: str | None = "stage3-foundation-test",
+        source_order_at=None,
     ) -> dict:
+        if feeder == TelegramFeederKind.OFFER_EDIT and source_order_at is None:
+            source_order_at = eligible or utc_now()
         return {
             "current_server": "foreign",
             "feeder": feeder,
@@ -371,6 +374,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             "eligible_at": eligible,
             "campaign_id": campaign_id,
             "run_id": run_id,
+            "source_order_at": source_order_at,
         }
 
     async def _enqueue(self, source_id: str, **overrides):
@@ -888,6 +892,113 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             counts = await load_offer_edit_fresh_success_counts(db)
         self.assertEqual(counts[0], 0)
+
+    async def test_offer_edit_claim_is_globally_newest_first_across_feeder_cycles(self):
+        now = utc_now()
+        expected = []
+        for source_id, source_order_at in (
+            ("cycle-one-old", now - timedelta(minutes=4)),
+            ("cycle-one-new", now - timedelta(minutes=2)),
+            ("cycle-two-old", now - timedelta(minutes=3)),
+            ("cycle-two-new", now - timedelta(minutes=1)),
+        ):
+            await self._enqueue(
+                source_id,
+                feeder=TelegramFeederKind.OFFER_EDIT,
+                action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+                destination="channel:global-newest",
+                destination_class=TelegramDestinationClass.CHANNEL,
+                method="editMessageText",
+                payload={"chat_id": -1001, "message_id": len(expected) + 1, "text": source_id},
+                eligible=now - timedelta(seconds=30),
+                source_order_at=source_order_at,
+                bot_identity="channel_editor",
+            )
+            expected.append(source_id)
+
+        claimed = []
+        for index in range(4):
+            job = await self._claim(
+                f"global-newest-worker-{index}",
+                now=now,
+                bot_identity="channel_editor",
+            )
+            self.assertIsNotNone(job)
+            claimed.append(job.source_natural_id)
+        self.assertEqual(
+            claimed,
+            ["cycle-two-new", "cycle-one-new", "cycle-two-old", "cycle-one-old"],
+        )
+
+    async def test_offer_edit_claim_moves_stale_behind_fresh_then_keeps_newest_first(self):
+        now = utc_now()
+        fixtures = (
+            ("fresh-older", now - timedelta(minutes=2), now - timedelta(seconds=20)),
+            ("fresh-newer", now - timedelta(minutes=1), now - timedelta(seconds=10)),
+            ("stale-older", now - timedelta(minutes=4), now - timedelta(minutes=7)),
+            ("stale-newer", now, now - timedelta(minutes=6)),
+        )
+        for index, (source_id, source_order_at, eligible) in enumerate(fixtures):
+            await self._enqueue(
+                source_id,
+                feeder=TelegramFeederKind.OFFER_EDIT,
+                action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+                destination="channel:stale-order",
+                destination_class=TelegramDestinationClass.CHANNEL,
+                method="editMessageText",
+                payload={"chat_id": -1001, "message_id": index + 1, "text": source_id},
+                eligible=eligible,
+                source_order_at=source_order_at,
+                bot_identity="channel_editor",
+            )
+
+        claimed = []
+        for index in range(4):
+            job = await self._claim(
+                f"stale-order-worker-{index}",
+                now=now,
+                bot_identity="channel_editor",
+            )
+            claimed.append(job.source_natural_id)
+        self.assertEqual(
+            claimed,
+            ["fresh-newer", "fresh-older", "stale-newer", "stale-older"],
+        )
+
+    async def test_offer_edit_claim_reserves_stale_catch_up_after_twenty_fresh_successes(self):
+        now = utc_now()
+        async with self.Session() as db:
+            await db.execute(
+                text(
+                    "UPDATE telegram_delivery_feeder_states "
+                    "SET fresh_success_counts = '{\"0\": 20}'::json "
+                    "WHERE feeder_kind = 'offer_edit'"
+                )
+            )
+            await db.commit()
+        for source_id, source_order_at, eligible in (
+            ("catch-up-fresh", now, now - timedelta(seconds=5)),
+            ("catch-up-stale", now - timedelta(minutes=10), now - timedelta(minutes=6)),
+        ):
+            await self._enqueue(
+                source_id,
+                feeder=TelegramFeederKind.OFFER_EDIT,
+                action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+                destination="channel:catch-up-order",
+                destination_class=TelegramDestinationClass.CHANNEL,
+                method="editMessageText",
+                payload={"chat_id": -1001, "message_id": 1, "text": source_id},
+                eligible=eligible,
+                source_order_at=source_order_at,
+                bot_identity="channel_editor",
+            )
+
+        claimed = await self._claim(
+            "catch-up-order-worker",
+            now=now,
+            bot_identity="channel_editor",
+        )
+        self.assertEqual(claimed.source_natural_id, "catch-up-stale")
 
     @staticmethod
     def _queue_runtime():
@@ -3275,6 +3386,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 method="editMessageText",
                 payload=payload,
                 template_version="offer-channel-v1",
+                source_order_at=offer.created_at,
             )
             await db.commit()
             job = enqueued.job

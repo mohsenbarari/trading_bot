@@ -21,6 +21,8 @@ from sqlalchemy.orm import aliased
 from core.server_routing import SERVER_FOREIGN
 from core.telegram_delivery_queue_contract import (
     CLAIMABLE_DELIVERY_STATES,
+    EDIT_CATCH_UP_FRESH_COUNT,
+    EDIT_STALE_AFTER_SECONDS,
     FINAL_DELIVERY_STATES,
     MINIMUM_LEASE_MARGIN_SECONDS,
     NON_DURABLE_TELEGRAM_QUEUE_ACTIONS,
@@ -47,6 +49,7 @@ from core.telegram_delivery_notification_action_contract import (
 from core.telegram_gateway import TelegramGatewayResult
 from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.telegram_delivery_provider_outcome import (
     TELEGRAM_PROVIDER_OUTCOME_APPLIED,
     TELEGRAM_PROVIDER_OUTCOME_PENDING,
@@ -770,6 +773,7 @@ def _record_to_contract(record: TelegramDeliveryJobRecord) -> TelegramDeliveryJo
         action=TelegramDeliveryAction(_enum_value(record.action_kind)),
         created_sequence=int(record.enqueued_seq),
         bot_identity=str(record.bot_identity),
+        source_order_at=record.source_order_at,
         delivery_deadline_at=record.delivery_deadline_at,
         eligible_at=record.eligible_at,
         freshness_deadline_at=record.freshness_deadline_at,
@@ -803,6 +807,7 @@ def _immutable_enqueue_fields(
     delivery_deadline_at: datetime | None,
     eligible_at: datetime | None,
     freshness_deadline_at: datetime | None,
+    source_order_at: datetime | None,
     campaign_id: str | None,
     run_id: str | None,
 ) -> bool:
@@ -821,6 +826,7 @@ def _immutable_enqueue_fields(
         and record.delivery_deadline_at == delivery_deadline_at
         and record.eligible_at == eligible_at
         and record.freshness_deadline_at == freshness_deadline_at
+        and record.source_order_at == source_order_at
         and record.campaign_id == campaign_id
         and record.run_id == run_id
     )
@@ -843,6 +849,7 @@ async def enqueue_telegram_delivery_job(
     delivery_deadline_at: datetime | None = None,
     eligible_at: datetime | None = None,
     freshness_deadline_at: datetime | None = None,
+    source_order_at: datetime | None = None,
     campaign_id: str | None = None,
     run_id: str | None = None,
 ) -> TelegramDeliveryEnqueueResult:
@@ -887,6 +894,19 @@ async def enqueue_telegram_delivery_job(
         or action not in CHANNEL_EDITOR_ACTIONS
     ):
         raise TelegramDeliveryQueueValidationError("channel_editor_route_not_allowlisted")
+    if feeder == TelegramFeederKind.OFFER_EDIT:
+        if (
+            not isinstance(source_order_at, datetime)
+            or source_order_at.tzinfo is None
+            or source_order_at.utcoffset() is None
+        ):
+            raise TelegramDeliveryQueueValidationError(
+                "offer_edit_source_order_at_required"
+            )
+    elif source_order_at is not None:
+        raise TelegramDeliveryQueueValidationError(
+            "source_order_at_forbidden_for_non_offer_edit"
+        )
 
     normalized_payload, payload_hash = canonical_telegram_delivery_payload(payload)
     feeder_rank = feeder_internal_rank(feeder, action)
@@ -920,6 +940,7 @@ async def enqueue_telegram_delivery_job(
         "delivery_deadline_at": delivery_deadline_at,
         "eligible_at": eligible_at,
         "freshness_deadline_at": freshness_deadline_at,
+        "source_order_at": source_order_at,
         "campaign_id": normalized_campaign_id,
         "run_id": normalized_run_id,
         "state": TelegramDeliveryState.PENDING,
@@ -956,6 +977,7 @@ async def enqueue_telegram_delivery_job(
         delivery_deadline_at=delivery_deadline_at,
         eligible_at=eligible_at,
         freshness_deadline_at=freshness_deadline_at,
+        source_order_at=source_order_at,
         campaign_id=normalized_campaign_id,
         run_id=normalized_run_id,
     ):
@@ -1000,6 +1022,55 @@ async def claim_next_telegram_delivery_job(
     )
     effective_priority = case((trade_overdue, 0), else_=TelegramDeliveryJobRecord.priority)
     effective_rank = case((trade_overdue, 1), else_=TelegramDeliveryJobRecord.priority_rank)
+    offer_edit = TelegramDeliveryJobRecord.feeder_kind == TelegramFeederKind.OFFER_EDIT
+    offer_edit_stale = and_(
+        offer_edit,
+        TelegramDeliveryJobRecord.eligible_at.is_not(None),
+        TelegramDeliveryJobRecord.eligible_at
+        <= current_time - timedelta(seconds=EDIT_STALE_AFTER_SECONDS),
+    )
+    feeder_state = (
+        await db.execute(
+            select(TelegramDeliveryFeederState.fresh_success_counts).where(
+                TelegramDeliveryFeederState.feeder_kind
+                == TelegramFeederKind.OFFER_EDIT.value
+            )
+        )
+    ).scalar_one_or_none()
+    if not isinstance(feeder_state, dict):
+        raise TelegramDeliveryQueueValidationError(
+            "telegram_offer_edit_fairness_state_missing_or_invalid"
+        )
+    catch_up_due_ranks: list[int] = []
+    try:
+        for raw_rank, raw_count in feeder_state.items():
+            rank = int(raw_rank)
+            count = int(raw_count)
+            if rank < 0 or count < 0 or count > EDIT_CATCH_UP_FRESH_COUNT:
+                raise ValueError
+            if count >= EDIT_CATCH_UP_FRESH_COUNT:
+                catch_up_due_ranks.append(rank)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TelegramDeliveryQueueValidationError(
+            "telegram_offer_edit_fairness_state_missing_or_invalid"
+        ) from exc
+    catch_up_due = (
+        and_(
+            offer_edit_stale,
+            TelegramDeliveryJobRecord.feeder_rank.in_(tuple(catch_up_due_ranks)),
+        )
+        if catch_up_due_ranks
+        else False
+    )
+    offer_edit_freshness_bucket = case(
+        (catch_up_due, 0),
+        (offer_edit_stale, 2),
+        else_=1,
+    )
+    offer_edit_source_order = case(
+        (offer_edit, TelegramDeliveryJobRecord.source_order_at),
+        else_=None,
+    )
     blocker = aliased(TelegramDeliveryJobRecord)
     destination_or_runtime_blocked = exists(
         select(blocker.id).where(
@@ -1108,6 +1179,8 @@ async def claim_next_telegram_delivery_job(
         .order_by(
             effective_priority.asc(),
             effective_rank.asc(),
+            offer_edit_freshness_bucket.asc(),
+            offer_edit_source_order.desc().nullslast(),
             TelegramDeliveryJobRecord.delivery_deadline_at.asc().nullslast(),
             TelegramDeliveryJobRecord.enqueued_seq.asc(),
         )

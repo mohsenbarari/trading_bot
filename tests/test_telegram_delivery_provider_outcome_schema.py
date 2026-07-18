@@ -65,6 +65,17 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
         )
         self.assertIn('op.drop_table("telegram_delivery_runtime_gates")', runtime_migration)
 
+        order_migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/fe30d1e2f4b5_add_offer_edit_global_order.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fd29c0e1f3a4"',
+            order_migration,
+        )
+        self.assertIn("source_order_at", order_migration)
+        self.assertIn('op.drop_column("telegram_delivery_jobs", "source_order_at")', order_migration)
+
     def test_runtime_gate_has_strict_scope_and_identity_constraints(self):
         table = TelegramDeliveryRuntimeGate.__table__
         names = {constraint.name for constraint in table.constraints}

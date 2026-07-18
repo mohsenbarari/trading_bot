@@ -85,6 +85,18 @@ class TelegramDeliveryJobRecord(Base):
             postgresql_where=text("state IN ('pending', 'pending_retry')"),
         ),
         Index(
+            "ix_telegram_delivery_jobs_offer_edit_order",
+            "bot_identity",
+            "priority",
+            "priority_rank",
+            text("source_order_at DESC"),
+            "enqueued_seq",
+            postgresql_where=text(
+                "state IN ('pending', 'pending_retry') AND "
+                "feeder_kind = 'offer_edit'"
+            ),
+        ),
+        Index(
             "ix_telegram_delivery_jobs_lease_recovery",
             "lease_until",
             "id",
@@ -195,6 +207,10 @@ class TelegramDeliveryJobRecord(Base):
     delivery_deadline_at = Column(DateTime(timezone=True), nullable=True)
     eligible_at = Column(DateTime(timezone=True), nullable=True)
     freshness_deadline_at = Column(DateTime(timezone=True), nullable=True)
+    # Domain creation time used only as a global, cross-feeder-cycle ordering
+    # key. Nullable preserves stop-old/drain/start-new schema compatibility;
+    # every new offer_edit enqueue must provide it.
+    source_order_at = Column(DateTime(timezone=True), nullable=True)
     campaign_id = Column(String(192), nullable=True)
     run_id = Column(String(192), nullable=True)
     state = Column(

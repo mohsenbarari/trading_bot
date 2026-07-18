@@ -362,6 +362,7 @@ class TelegramDeliveryJob:
     action: TelegramDeliveryAction
     created_sequence: int
     bot_identity: str = "primary"
+    source_order_at: datetime | None = None
     delivery_deadline_at: datetime | None = None
     eligible_at: datetime | None = None
     freshness_deadline_at: datetime | None = None

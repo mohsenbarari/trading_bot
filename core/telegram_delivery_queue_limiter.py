@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 import hashlib
 import math
 from typing import Any, Protocol
@@ -17,20 +17,21 @@ from core.telegram_delivery_queue_contract import (
 TELEGRAM_DELIVERY_LIMITER_PREFIX = "telegram:delivery:v1"
 
 _ADMIT_SCRIPT = """
+local server_time = redis.call('TIME')
+local now_ms = (tonumber(server_time[1]) * 1000) + math.floor(tonumber(server_time[2]) / 1000)
 if redis.call('exists', KEYS[5]) == 1 then
-    return {-1, 0, 3}
+    return {-1, 0, 3, now_ms}
 end
 if redis.call('exists', KEYS[3]) == 1 then
-    return {-1, 0, 1}
+    return {-1, 0, 1, now_ms}
 end
 if redis.call('exists', KEYS[4]) == 1 then
-    return {-1, 0, 2}
+    return {-1, 0, 2, now_ms}
 end
-local now_ms = tonumber(ARGV[1])
 if redis.call('exists', KEYS[7]) == 1 then
     local probe_ttl = tonumber(redis.call('pttl', KEYS[7]) or '0')
     if probe_ttl > 0 then
-        return {0, now_ms + probe_ttl, 4}
+        return {0, now_ms + probe_ttl, 4, now_ms}
     end
     redis.call('del', KEYS[7])
 end
@@ -42,16 +43,16 @@ if not_before > now_ms then
     if destination_next >= bot_next then
         reason = 2
     end
-    return {0, not_before, reason}
+    return {0, not_before, reason, now_ms}
 end
-local ttl_ms = tonumber(ARGV[4])
-redis.call('set', KEYS[1], now_ms + tonumber(ARGV[2]), 'PX', ttl_ms)
-redis.call('set', KEYS[2], now_ms + tonumber(ARGV[3]), 'PX', ttl_ms)
+local ttl_ms = tonumber(ARGV[3])
+redis.call('set', KEYS[1], now_ms + tonumber(ARGV[1]), 'PX', ttl_ms)
+redis.call('set', KEYS[2], now_ms + tonumber(ARGV[2]), 'PX', ttl_ms)
 if redis.call('exists', KEYS[6]) == 1 then
-    redis.call('set', KEYS[7], ARGV[5], 'PX', tonumber(ARGV[6]))
-    return {2, now_ms, 0}
+    redis.call('set', KEYS[7], ARGV[4], 'PX', tonumber(ARGV[5]))
+    return {2, now_ms, 0, now_ms}
 end
-return {1, now_ms, 0}
+return {1, now_ms, 0, now_ms}
 """
 
 _RECORD_429_SCRIPT = """
@@ -64,14 +65,19 @@ local function set_max(key, candidate, ttl_ms)
     return current
 end
 
+local server_time = redis.call('TIME')
+local now_ms = (tonumber(server_time[1]) * 1000) + math.floor(tonumber(server_time[2]) / 1000)
 local destination_hash = ARGV[1]
-local retry_until_ms = tonumber(ARGV[2])
-local now_ms = tonumber(ARGV[3])
-local window_ms = tonumber(ARGV[4])
-local probe_delay_ms = tonumber(ARGV[5])
-local durable_bot_until_ms = tonumber(ARGV[6])
-local job_hash = ARGV[7]
-local ttl_ms = tonumber(ARGV[8])
+local retry_until_ms = now_ms + tonumber(ARGV[2])
+local window_ms = tonumber(ARGV[3])
+local probe_delay_ms = tonumber(ARGV[4])
+local durable_bot_delay_ms = tonumber(ARGV[5])
+local durable_bot_until_ms = 0
+if durable_bot_delay_ms > 0 then
+    durable_bot_until_ms = now_ms + durable_bot_delay_ms
+end
+local job_hash = ARGV[6]
+local ttl_ms = tonumber(ARGV[7])
 if redis.call('get', KEYS[5]) == job_hash then
     redis.call('del', KEYS[5])
 end
@@ -136,8 +142,10 @@ _PREPARE_PREFLIGHT_SCRIPT = """
 if redis.call('exists', KEYS[1]) == 1 then
     return 0
 end
+local server_time = redis.call('TIME')
+local now_ms = (tonumber(server_time[1]) * 1000) + math.floor(tonumber(server_time[2]) / 1000)
 local bot_next = tonumber(redis.call('get', KEYS[3]) or '0')
-if bot_next > tonumber(ARGV[1]) then
+if bot_next > now_ms then
     return 0
 end
 redis.call('del', KEYS[2])
@@ -152,10 +160,13 @@ return 1
 """
 
 _SET_MAX_SCRIPT = """
+local server_time = redis.call('TIME')
+local now_ms = (tonumber(server_time[1]) * 1000) + math.floor(tonumber(server_time[2]) / 1000)
 local current = tonumber(redis.call('get', KEYS[1]) or '0')
 local candidate = tonumber(ARGV[1])
 if candidate > current then
-    redis.call('set', KEYS[1], candidate, 'PX', tonumber(ARGV[2]))
+    local ttl_ms = math.max(tonumber(ARGV[2]), candidate - now_ms + 60000)
+    redis.call('set', KEYS[1], candidate, 'PX', ttl_ms)
     return candidate
 end
 return current
@@ -322,13 +333,6 @@ class RedisTelegramDeliveryLimiter:
             int(longest_control_seconds * 1000) + 60_000,
         )
 
-    def _ttl_ms_for_until(self, *, now: datetime, until: datetime) -> int:
-        # Redis expiry is storage cleanup only; it must never shorten the
-        # provider-declared retry_after. Keep one minute beyond the deadline
-        # to absorb clock/worker skew and delayed observation.
-        required_ms = max(0, _epoch_ms(until) - _epoch_ms(now)) + 60_000
-        return max(self._ttl_ms(), required_ms)
-
     def _fail_closed(self, reason: str, exc: Exception | None = None) -> None:
         self._local_block_reason = reason
         error = TelegramDeliveryLimiterUnavailableError(reason)
@@ -347,7 +351,10 @@ class RedisTelegramDeliveryLimiter:
         bot_identity, _destination_key, destination_digest = self._validate_job_identity(job)
         job_digest = _job_digest(job)
         keys = self._keys(bot_identity, destination_digest)
-        now_ms = _epoch_ms(now)
+        # Validate the caller-provided timestamp for API consistency, but never
+        # use it for admission. Every atomic comparison is based on Redis TIME
+        # so skewed workers cannot shorten or bypass pacing/cooldown gates.
+        _epoch_ms(now)
         try:
             raw = await self.redis.eval(
                 _ADMIT_SCRIPT,
@@ -359,7 +366,6 @@ class RedisTelegramDeliveryLimiter:
                 keys["gateway_block"],
                 keys["probe_required"],
                 keys["probe_inflight"],
-                now_ms,
                 max(1, int(float(self.bot_min_interval_seconds) * 1000)),
                 max(1, int(float(self.destination_min_interval_seconds) * 1000)),
                 self._ttl_ms(),
@@ -373,15 +379,17 @@ class RedisTelegramDeliveryLimiter:
             )
         try:
             values = list(raw or ())
-            if len(values) != 3:
+            if len(values) != 4:
                 raise ValueError("unexpected response length")
-            state, not_before_ms, reason_code = (int(value) for value in values)
+            state, not_before_ms, reason_code, redis_now_ms = (
+                int(value) for value in values
+            )
             if state not in {-1, 0, 1, 2}:
                 raise ValueError("unexpected admission state")
             if state in {1, 2} and reason_code != 0:
                 raise ValueError("unexpected allowed reason")
             if state == 0 and (
-                reason_code not in {1, 2, 4} or not_before_ms <= now_ms
+                reason_code not in {1, 2, 4} or not_before_ms <= redis_now_ms
             ):
                 raise ValueError("unexpected wait response")
             if state == -1 and reason_code not in {1, 2, 3}:
@@ -405,7 +413,7 @@ class RedisTelegramDeliveryLimiter:
                 retry_after_seconds=30.0,
                 wait_reason=reason,
             )
-        retry_seconds = max(0.001, (not_before_ms - now_ms) / 1000.0)
+        retry_seconds = max(0.001, (not_before_ms - redis_now_ms) / 1000.0)
         return TelegramDeliveryDispatchAdmission(
             allowed=False,
             retry_after_seconds=retry_seconds,
@@ -452,19 +460,22 @@ class RedisTelegramDeliveryLimiter:
                     keys["probe_required"],
                     keys["probe_inflight"],
                     destination_digest,
-                    _epoch_ms(decision.destination_cooldown_until),
-                    _epoch_ms(now),
+                    max(
+                        1,
+                        _epoch_ms(decision.destination_cooldown_until)
+                        - _epoch_ms(now),
+                    ),
                     max(1, int(float(self.global_rate_limit_window_seconds) * 1000)),
                     max(1, int(float(self.rate_limit_probe_delay_seconds) * 1000)),
                     (
-                        _epoch_ms(decision.bot_cooldown_until)
+                        max(1, _epoch_ms(decision.bot_cooldown_until) - _epoch_ms(now))
                         if decision.bot_cooldown_until is not None
                         else 0
                     ),
                     job_digest,
-                    self._ttl_ms_for_until(
-                        now=now,
-                        until=ttl_until,
+                    max(
+                        self._ttl_ms(),
+                        _epoch_ms(ttl_until) - _epoch_ms(now) + 60_000,
                     ),
                 )
             elif decision.outcome == TelegramDeliveryOutcome.BOT_PAUSED:
@@ -507,7 +518,7 @@ class RedisTelegramDeliveryLimiter:
                 1,
                 keys["destination_next"],
                 _epoch_ms(until),
-                self._ttl_ms_for_until(now=datetime.now(tz=until.tzinfo), until=until),
+                self._ttl_ms(),
             )
         except Exception as exc:
             self._fail_closed(
@@ -533,10 +544,7 @@ class RedisTelegramDeliveryLimiter:
                 1,
                 keys["bot_next"],
                 _epoch_ms(until),
-                self._ttl_ms_for_until(
-                    now=datetime.now(tz=until.tzinfo),
-                    until=until,
-                ),
+                self._ttl_ms(),
             )
         except Exception as exc:
             self._fail_closed(
@@ -565,7 +573,6 @@ class RedisTelegramDeliveryLimiter:
                 keys["probe_inflight"],
                 keys["probe_required"],
                 keys["bot_next"],
-                _epoch_ms(datetime.now(timezone.utc)),
             )
             ready = int(raw)
             if ready not in {0, 1}:

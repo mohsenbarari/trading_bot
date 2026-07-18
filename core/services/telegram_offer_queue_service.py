@@ -475,6 +475,12 @@ async def enqueue_current_offer_delivery(
         template_version=OFFER_QUEUE_TEMPLATE_VERSION,
         eligible_at=first_edit_enqueued_at,
         freshness_deadline_at=freshness_deadline_at,
+        source_order_at=(
+            _normalized_time(getattr(offer, "created_at", None))
+            if feeder == TelegramFeederKind.OFFER_EDIT
+            and isinstance(getattr(offer, "created_at", None), datetime)
+            else None
+        ),
     )
     return TelegramOfferQueueHandoffResult(
         offer_public_id=offer_public_id,
