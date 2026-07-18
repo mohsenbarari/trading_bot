@@ -1,0 +1,163 @@
+name: ${COMPOSE_PROJECT_NAME:-trading_bot_monitoring_dev}
+
+x-app-image: &app_image trading_bot_monitoring_dev_app:${MONITORING_IMAGE_TAG:-local}
+x-app-build: &app_build
+  context: ../..
+  dockerfile: Dockerfile
+  args:
+    FRONTEND_DIST_DIR: ${MONITORING_FRONTEND_DIST_DIR:-mini_app_dist}
+x-default-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
+services:
+  app:
+    image: *app_image
+    build: *app_build
+    logging: *default_logging
+    restart: unless-stopped
+    command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1"
+    env_file:
+      - .env.monitoring.local
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: api
+      RELEASE_SHA: ${MONITORING_RELEASE_SHA:-local}
+      ENVIRONMENT: development
+      SERVER_MODE: foreign
+      BACKGROUND_JOBS_ENABLED: "false"
+      BOT_TOKEN: ""
+      TELEGRAM_MONITORING_CHANNEL_ENABLED: "false"
+      TELEGRAM_MONITORING_BOT_TOKEN: ""
+      WEB_PUSH_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${MONITORING_APP_PORT:-18100}:8000"
+    volumes:
+      - monitoring_uploads:/app/uploads
+      - monitoring_audit:/app/audit_trail
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/config', timeout=5).read(); sys.exit(0)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - monitoring_net
+
+  migration:
+    image: *app_image
+    build: *app_build
+    logging: *default_logging
+    restart: "no"
+    command: sh -c "python manage.py && python scripts/align_trade_number_sequence.py"
+    env_file:
+      - .env.monitoring.local
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: migration
+      RELEASE_SHA: ${MONITORING_RELEASE_SHA:-local}
+      ENVIRONMENT: development
+      SERVER_MODE: foreign
+      BACKGROUND_JOBS_ENABLED: "false"
+      BOT_TOKEN: ""
+      TELEGRAM_MONITORING_CHANNEL_ENABLED: "false"
+      TELEGRAM_MONITORING_BOT_TOKEN: ""
+      WEB_PUSH_ENABLED: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - monitoring_net
+
+  db:
+    image: postgres:15-alpine
+    logging: *default_logging
+    restart: unless-stopped
+    command: postgres -c max_connections=100 -c timezone=UTC -c log_timezone=UTC
+    env_file:
+      - .env.monitoring.local
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - monitoring_postgres_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - monitoring_net
+
+  redis:
+    image: redis:7-alpine
+    logging: *default_logging
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      TZ: UTC
+    volumes:
+      - monitoring_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - monitoring_net
+
+  bot:
+    image: *app_image
+    build: *app_build
+    logging: *default_logging
+    profiles:
+      - monitoring-telegram
+    restart: unless-stopped
+    command: python run_bot.py
+    env_file:
+      - .env.monitoring.local
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: bot
+      RELEASE_SHA: ${MONITORING_RELEASE_SHA:-local}
+      ENVIRONMENT: development
+      SERVER_MODE: foreign
+      BACKGROUND_JOBS_ENABLED: "true"
+      WEB_PUSH_ENABLED: "false"
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - monitoring_net
+
+networks:
+  monitoring_net:
+    driver: bridge
+
+volumes:
+  monitoring_postgres_data:
+  monitoring_redis_data:
+  monitoring_uploads:
+  monitoring_audit:
