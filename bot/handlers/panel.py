@@ -1427,14 +1427,28 @@ async def handle_settings_reset_cancel(callback: types.CallbackQuery, user: Opti
 @router.message(F.text == "🔙 بازگشت")
 async def handle_back_to_main_menu(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
-    
-    await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    
-    anchor_msg = await message.answer(
+
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
+    if not queue_mode:
+        await delete_previous_anchor(
+            message.bot,
+            message.chat.id,
+            delay=DeleteDelay.DEFAULT.value,
+        )
+
+    anchor_msg = await answer_incoming_message_via_runtime(
+        message,
+        user,
         "به منوی اصلی بازگشتید.",
+        source_key="panel-back-main-menu",
         reply_markup=await build_persistent_navigation_keyboard(
             user,
             user_facing_webapp_url(settings_obj=settings),
-        )
+        ),
+        set_persistent_anchor=True,
     )
-    set_anchor(message.chat.id, anchor_msg.message_id)
+    if not queue_mode:
+        set_anchor(message.chat.id, anchor_msg.message_id)

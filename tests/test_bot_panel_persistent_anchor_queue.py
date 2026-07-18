@@ -71,6 +71,14 @@ class BotPanelPersistentAnchorQueueTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value={"keyboard": [[{"text": "admin"}]]}),
             ),
             patch(
+                "bot.handlers.panel.build_persistent_navigation_keyboard",
+                new=AsyncMock(return_value={"keyboard": [[{"text": "main"}]]}),
+            ),
+            patch(
+                "bot.handlers.panel.user_facing_webapp_url",
+                return_value="https://app.example",
+            ),
+            patch(
                 "bot.handlers.panel.attach_customer_management_names",
                 new=AsyncMock(),
             ),
@@ -102,6 +110,11 @@ class BotPanelPersistentAnchorQueueTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(),
                 admin_user,
             )
+            await panel.handle_back_to_main_menu(
+                message,
+                SimpleNamespace(),
+                standard_user,
+            )
 
         self.assertEqual(
             [call.kwargs["source_key"] for call in enqueue.await_args_list],
@@ -109,6 +122,7 @@ class BotPanelPersistentAnchorQueueTests(unittest.IsolatedAsyncioTestCase):
                 "panel-user-main-menu",
                 "panel-user-profile-menu",
                 "panel-admin-main-menu",
+                "panel-back-main-menu",
             ],
         )
         self.assertTrue(
