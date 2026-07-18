@@ -23,7 +23,10 @@ from bot.repeat_offer import (
     is_bot_repeat_offer_button_text,
 )
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
-from bot.telegram_interaction_message import answer_incoming_message_via_runtime
+from bot.telegram_interaction_message import (
+    answer_callback_message_via_runtime,
+    answer_incoming_message_via_runtime,
+)
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -898,15 +901,24 @@ async def start_user_panel_customer_invite_tier1(callback: types.CallbackQuery, 
     await answer_callback_query_via_runtime(callback, "در حال بررسی وضعیت اتصال دو سرور...")
     sync_gate = await check_customer_invite_sync_ready()
     if not sync_gate.ready:
-        await callback.message.answer(sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.",
+            source_key="panel-invite-start-sync-unavailable",
+        )
         return
 
     await state.clear()
     await state.update_data(customer_invite_owner_id=user.id)
     await state.set_state(CustomerInvite.awaiting_management_name)
-    await callback.message.answer(
+    await answer_callback_message_via_runtime(
+        callback,
+        user,
         "نام مشتری سطح۱ را وارد کنید:",
+        source_key="panel-invite-name-prompt",
         reply_markup=_customer_invite_cancel_keyboard(),
+        temporary_context_keyboard=True,
     )
 
 
@@ -915,20 +927,36 @@ async def process_customer_invite_management_name(message: types.Message, state:
     allowed, reason = await _customer_invite_access_allowed(user)
     if not allowed:
         await state.clear()
-        await message.answer(reason or "عدم دسترسی")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            reason or "عدم دسترسی",
+            source_key="panel-invite-name-access-denied",
+        )
         return
 
     try:
         management_name = normalize_customer_invite_management_name(message.text)
     except ValueError as exc:
-        await message.answer(str(exc), reply_markup=_customer_invite_cancel_keyboard())
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            str(exc),
+            source_key="panel-invite-name-invalid",
+            reply_markup=_customer_invite_cancel_keyboard(),
+            temporary_context_keyboard=True,
+        )
         return
 
     await state.update_data(customer_invite_management_name=management_name)
     await state.set_state(CustomerInvite.awaiting_mobile_number)
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         "شماره موبایل مشتری را با فرمت 09123456789 وارد کنید:",
+        source_key="panel-invite-mobile-prompt",
         reply_markup=_customer_invite_cancel_keyboard(),
+        temporary_context_keyboard=True,
     )
 
 
@@ -937,30 +965,51 @@ async def process_customer_invite_mobile(message: types.Message, state: FSMConte
     allowed, reason = await _customer_invite_access_allowed(user)
     if not allowed:
         await state.clear()
-        await message.answer(reason or "عدم دسترسی")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            reason or "عدم دسترسی",
+            source_key="panel-invite-mobile-access-denied",
+        )
         return
 
     try:
         normalized_mobile = normalize_customer_invite_mobile(message.text)
     except ValueError as exc:
-        await message.answer(str(exc), reply_markup=_customer_invite_cancel_keyboard())
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            str(exc),
+            source_key="panel-invite-mobile-invalid",
+            reply_markup=_customer_invite_cancel_keyboard(),
+            temporary_context_keyboard=True,
+        )
         return
 
     data = await state.get_data()
     management_name = data.get("customer_invite_management_name")
     if not management_name:
         await state.clear()
-        await message.answer("اطلاعات دعوت ناقص است. دوباره از بخش مشتریان شروع کنید.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "اطلاعات دعوت ناقص است. دوباره از بخش مشتریان شروع کنید.",
+            source_key="panel-invite-state-incomplete",
+        )
         return
 
     await state.update_data(customer_invite_mobile_number=normalized_mobile)
     await state.set_state(CustomerInvite.awaiting_confirmation)
-    await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         "لطفاً اطلاعات دعوت مشتری سطح۱ را تایید کنید:\n\n"
         f"نام مشتری: {management_name}\n"
         f"شماره موبایل: `{normalized_mobile}`",
+        source_key="panel-invite-confirm-prompt",
         parse_mode="Markdown",
         reply_markup=_customer_invite_confirm_keyboard(),
+        temporary_context_keyboard=True,
     )
 
 
@@ -1002,7 +1051,12 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
     await answer_callback_query_via_runtime(callback, "در حال ارسال دعوت به سرور ایران...")
     sync_gate = await check_customer_invite_sync_ready()
     if not sync_gate.ready:
-        await callback.message.answer(sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            sync_gate.message or "دعوت مشتری فعلاً در دسترس نیست.",
+            source_key="panel-invite-confirm-sync-unavailable",
+        )
         return
 
     try:
@@ -1036,7 +1090,12 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
                 "error_type": type(exc).__name__,
             },
         )
-        await callback.message.answer("خطا در ارسال دعوت مشتری. کمی بعد دوباره تلاش کنید.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "خطا در ارسال دعوت مشتری. کمی بعد دوباره تلاش کنید.",
+            source_key="panel-invite-forward-error",
+        )
         return
 
     await state.clear()
@@ -1048,8 +1107,11 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
             invitation_token=str(invitation_token),
         )
     ):
-        await callback.message.answer(
-            "دعوت در سرور ایران ثبت شد، اما هنوز در بات آماده نیست. کمی بعد دوباره همین دعوت را ارسال کنید."
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "دعوت در سرور ایران ثبت شد، اما هنوز در بات آماده نیست. کمی بعد دوباره همین دعوت را ارسال کنید.",
+            source_key="panel-invite-projection-pending",
         )
         return
     await callback.message.answer(_customer_invite_result_message(status_code, body))
@@ -1063,7 +1125,12 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
 async def cancel_customer_invite_tier1(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
     await state.clear()
     await answer_callback_query_via_runtime(callback, "لغو شد")
-    await callback.message.answer("دعوت مشتری لغو شد.")
+    await answer_callback_message_via_runtime(
+        callback,
+        user,
+        "دعوت مشتری لغو شد.",
+        source_key="panel-invite-cancelled",
+    )
 
 
 @router.callback_query(UserPanelCustomerCallback.filter(F.action == "back"))
