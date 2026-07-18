@@ -104,11 +104,20 @@ async def _reject_settings_callback_if_not_authoritative(callback: types.Callbac
     return True
 
 
-async def _reject_settings_message_if_not_authoritative(message: types.Message, operation: str) -> bool:
+async def _reject_settings_message_if_not_authoritative(
+    message: types.Message,
+    user: User,
+    operation: str,
+) -> bool:
     decision = _settings_admin_write_decision(operation)
     if decision.ok:
         return False
-    await message.answer(f"❌ {admin_write_rejection_message(decision)}")
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        f"❌ {admin_write_rejection_message(decision)}",
+        source_key="panel-settings-not-authoritative",
+    )
     return True
 
 
@@ -179,7 +188,12 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
 async def show_my_profile_and_change_keyboard(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
     if is_user_global_web_locked(user):
-        await message.answer("دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است.",
+            source_key="panel-profile-account-locked",
+        )
         return
 
     # حذف پیام کاربر و لنگر قبلی
@@ -393,12 +407,22 @@ async def show_colleagues_list(message: types.Message, state: FSMContext, user: 
     if not user:
         return
     if is_user_global_web_locked(user):
-        await message.answer("دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است.",
+            source_key="panel-colleagues-account-locked",
+        )
         return
 
     async with AsyncSessionLocal() as session:
         if not await _can_view_colleagues_list(session, user):
-            await message.answer("این بخش فقط برای کاربران عادی فعال است.")
+            await answer_incoming_message_via_runtime(
+                message,
+                user,
+                "این بخش فقط برای کاربران عادی فعال است.",
+                source_key="panel-colleagues-not-allowed",
+            )
             return
         colleagues = await _load_colleagues_for_user(session, user.id)
 
@@ -451,7 +475,12 @@ async def show_recent_trades_pdf(message: types.Message, state: FSMContext, user
     from_date = today - timedelta(days=6)
     trades = await _load_recent_user_trades(user.id, from_date=from_date, to_date=today)
     if not trades:
-        await message.answer("⚠️ در هفت روز گذشته معامله‌ای برای دانلود وجود ندارد.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "⚠️ در هفت روز گذشته معامله‌ای برای دانلود وجود ندارد.",
+            source_key="panel-recent-trades-empty",
+        )
         return
 
     output_path = None
@@ -467,7 +496,12 @@ async def show_recent_trades_pdf(message: types.Message, state: FSMContext, user
             caption="📄 معاملات اخیر شما در هفت روز گذشته",
         )
     except Exception as exc:
-        await message.answer(f"❌ خطا در ایجاد فایل معاملات اخیر: {exc}")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            f"❌ خطا در ایجاد فایل معاملات اخیر: {exc}",
+            source_key="panel-recent-trades-export-error",
+        )
     finally:
         if output_path and os.path.exists(output_path):
             os.remove(output_path)
@@ -1137,10 +1171,15 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
         if new_value < 1:
             raise ValueError()
     except ValueError:
-        await message.answer("❌ لطفاً یک عدد صحیح مثبت وارد کنید.")
+        await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "❌ لطفاً یک عدد صحیح مثبت وارد کنید.",
+            source_key="panel-settings-value-invalid",
+        )
         return
 
-    if await _reject_settings_message_if_not_authoritative(message, "update"):
+    if await _reject_settings_message_if_not_authoritative(message, user, "update"):
         return
     
     # ذخیره
