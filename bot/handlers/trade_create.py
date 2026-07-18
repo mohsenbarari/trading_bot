@@ -84,7 +84,7 @@ from bot.callbacks import (
 from bot.repeat_offer import (
     BOT_REPEAT_OFFER_BUTTON_PREFIX,
     build_persistent_navigation_keyboard,
-    load_latest_bot_repeat_offer_candidate,
+    resolve_bot_repeat_offer_button_candidate,
 )
 
 
@@ -1293,6 +1293,12 @@ async def _handle_trade_confirm_core(
                 ]
             ),
         )
+        if republish_source_public_id:
+            await _send_repeat_offer_menu_refresh(
+                bot,
+                chat_id=callback.from_user.id,
+                user=user,
+            )
     except OfferNotRepeatableError as exc:
         logger.info(
             "Telegram repeat-offer source became ineligible",
@@ -1305,6 +1311,11 @@ async def _handle_trade_confirm_core(
         )
         await callback.message.edit_text(
             "این لفظ دیگر قابل تکرار نیست. منو را دوباره باز کنید."
+        )
+        await _send_repeat_offer_menu_refresh(
+            bot,
+            chat_id=callback.from_user.id,
+            user=user,
         )
     except IntegrityError as exc:
         logger.warning(
@@ -1319,6 +1330,11 @@ async def _handle_trade_confirm_core(
         if republish_source_public_id:
             await callback.message.edit_text(
                 "این لفظ قبلاً از طریق بات تکرار شده است."
+            )
+            await _send_repeat_offer_menu_refresh(
+                bot,
+                chat_id=callback.from_user.id,
+                user=user,
             )
         else:
             await callback.message.edit_text(
@@ -1681,6 +1697,36 @@ async def _text_offer_response(
         await message.answer(text, **kwargs)
 
 
+async def _send_repeat_offer_menu_refresh(
+    bot: Bot,
+    *,
+    chat_id: int,
+    user: User | object,
+) -> None:
+    """Best-effort refresh for Telegram's non-editable reply keyboard."""
+    from core.public_webapp_url import user_facing_webapp_url
+
+    try:
+        keyboard = await build_persistent_navigation_keyboard(
+            user,
+            user_facing_webapp_url(settings_obj=settings),
+        )
+        await bot.send_message(
+            chat_id=chat_id,
+            text="منو با آخرین وضعیت به‌روزرسانی شد.",
+            reply_markup=keyboard,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to refresh repeat-offer navigation keyboard",
+            exc_info=True,
+            extra={
+                "event": "telegram.repeat_offer.menu_refresh_failed",
+                "user_id": getattr(user, "id", None),
+            },
+        )
+
+
 async def _prepare_text_offer(
     message: types.Message,
     state: FSMContext,
@@ -1826,15 +1872,18 @@ async def handle_repeat_offer_button(
     user: Optional[User],
     bot: Optional[Bot] = None,
 ):
-    """Prepare the latest eligible source through the normal text-offer flow."""
+    """Prepare the selected eligible source through the normal text-offer flow."""
     if not user:
         return
 
     try:
         async with AsyncSessionLocal() as session:
-            candidate = await load_latest_bot_repeat_offer_candidate(
-                session,
-                owner_user_id=user.id,
+            candidate, needs_menu_refresh, resolution_reason = (
+                await resolve_bot_repeat_offer_button_candidate(
+                    session,
+                    owner_user_id=user.id,
+                    button_text=message.text or "",
+                )
             )
     except Exception:
         logger.warning(
@@ -1846,19 +1895,34 @@ async def handle_repeat_offer_button(
             },
         )
         candidate = None
+        needs_menu_refresh = True
+        resolution_reason = "resolve_failed"
 
-    if candidate is None or (message.text or "").strip() != candidate.button_text:
+    if candidate is None:
         from core.public_webapp_url import user_facing_webapp_url
 
         await state.clear()
+        response_text = (
+            "چند لفظ قدیمی با این دکمه یکسان هستند. "
+            "منو با آخرین وضعیت به‌روزرسانی شد؛ دکمه جدید را بزنید."
+            if resolution_reason == "ambiguous_legacy_button"
+            else "این لفظ دیگر قابل تکرار نیست. منو با آخرین وضعیت به‌روزرسانی شد."
+        )
         await message.answer(
-            "این لفظ دیگر قابل تکرار نیست. منو با آخرین وضعیت به‌روزرسانی شد.",
+            response_text,
             reply_markup=await build_persistent_navigation_keyboard(
                 user,
                 user_facing_webapp_url(settings_obj=settings),
             ),
         )
         return
+
+    if needs_menu_refresh:
+        await _send_repeat_offer_menu_refresh(
+            bot or message.bot,
+            chat_id=message.chat.id,
+            user=user,
+        )
 
     await state.clear()
     prepared = await _prepare_text_offer(
