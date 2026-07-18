@@ -855,6 +855,25 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(decision.outcome, TelegramDeliveryOutcome.AMBIGUOUS)
 
+    async def test_parseable_incomplete_send_2xx_is_ambiguous_not_retryable(self):
+        for response_json in ({}, {"ok": True}, {"ok": True, "result": None}):
+            with self.subTest(response_json=response_json):
+                queue = InMemoryTelegramDeliveryQueue()
+                job = await self.enqueue(queue, f"incomplete-2xx:{response_json!r}")
+                await self.claim(queue)
+                decision = await self.resolve(
+                    queue,
+                    job,
+                    gateway_result(
+                        ok=False,
+                        status_code=200,
+                        response_json=response_json,
+                    ),
+                )
+                self.assertEqual(decision.outcome, TelegramDeliveryOutcome.AMBIGUOUS)
+                self.assertEqual(job.state, TelegramDeliveryState.AMBIGUOUS)
+                self.assertIsNone(job.next_retry_at)
+
     async def test_ambiguous_send_never_retries_without_explicit_evidence(self):
         queue = InMemoryTelegramDeliveryQueue()
         job = await self.enqueue(queue, "ambiguous")

@@ -67,6 +67,9 @@ from core.services.trade_webapp_delivery_service import (
     repair_webapp_trade_delivery_for_trade,
 )
 from core.services.trade_telegram_delivery_service import repair_telegram_trade_delivery_for_trade
+from core.services.trade_delivery_receipt_service import (
+    persist_trade_completion_delivery_intents,
+)
 from core.services.offer_expiry_service import OfferExpiryReason
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
@@ -3331,6 +3334,7 @@ async def _execute_trade_authoritatively(
                 result_status=OfferRequestStatus.COMPLETED_TRADE,
                 resulting_trade_id=getattr(existing_trade_obj, "id", None),
             )
+            await persist_trade_completion_delivery_intents(db, existing_trade_obj)
             if callable(getattr(db, "commit", None)):
                 await _commit_trade_execution(db)
             _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
@@ -3422,6 +3426,29 @@ async def _execute_trade_authoritatively(
     )
     _apply_trade_counter_increment(owner_user, trade_quantity)
     mark_trade_phase("flushed_trade_state")
+
+    delivery_trade_contexts: list[tuple[Trade, object, object]]
+    if uses_customer_trade_chain:
+        delivery_trade_contexts = [
+            (
+                trade,
+                trade_execution_nodes[index]["user"],
+                trade_execution_nodes[index + 1]["user"],
+            )
+            for index, trade in enumerate(created_chain_trades)
+        ]
+    else:
+        delivery_trade_contexts = [(response_trade_record, offer.user, owner_user)]
+
+    for delivery_trade, delivery_offer_user, delivery_responder_user in delivery_trade_contexts:
+        # The audience builder is read-only. Bind already-loaded relationships
+        # so it can construct the exact durable payload before the Trade commit.
+        delivery_trade.offer = offer
+        delivery_trade.offer_user = delivery_offer_user
+        delivery_trade.responder_user = delivery_responder_user
+        delivery_trade.commodity = offer.commodity
+        await persist_trade_completion_delivery_intents(db, delivery_trade)
+    mark_trade_phase("persisted_delivery_intents")
     
     # Commit با محافظت Optimistic Locking
     await _commit_trade_execution(db)

@@ -718,6 +718,11 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         source = inspect.getsource(trades._execute_trade_authoritatively)
 
         self.assertIn("_queue_trade_completion_delivery_repair", source)
+        self.assertIn("persist_trade_completion_delivery_intents", source)
+        self.assertLess(
+            source.index("persist_trade_completion_delivery_intents"),
+            source.index("_commit_trade_execution"),
+        )
         self.assertNotIn("_queue_trade_telegram_message(", source)
         self.assertNotIn("send_telegram_message_sync", source)
         self.assertNotIn("_legacy_create_user_notification", source)

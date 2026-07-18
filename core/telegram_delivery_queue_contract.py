@@ -845,7 +845,7 @@ def apply_gateway_result(
     if job.method == "sendMessage" and (
         normalized_error in _AMBIGUOUS_SEND_ERRORS
         or (status_code is not None and 500 <= status_code <= 599)
-        or (status_code is not None and 200 <= status_code <= 299 and result.response_json is None)
+        or (status_code is not None and 200 <= status_code <= 299)
     ):
         job.state = TelegramDeliveryState.AMBIGUOUS
         job.next_retry_at = None
