@@ -2886,11 +2886,11 @@ base and is outside what this Python verifier can prove.
 
 | Gate | Current status |
 |---|---|
-| Design and implementation in isolated feature worktree | Implemented at source level |
+| Design and implementation in isolated feature branch | Implemented and committed at source level |
 | Focused release/deployment/Matrix verifier groups | `39 + 140 + 97` passed, zero failures/skips |
-| Current-worktree hermetic source gate | `397` unit tests passed with zero skips, followed by `4` guarded PostgreSQL tests and the four-database failure drill |
-| Final zero-skip source gate on the committed feature checkout | Pending final commit and exact-SHA rerun if reviewers require it |
-| Commit/push of the current remediation SHA | Pending; isolated feature branch only, no `main` integration |
+| Hermetic source gate on the clean committed feature checkout | `397` unit tests passed with zero skips, followed by `4` guarded PostgreSQL tests and the four-database failure drill |
+| Fresh release from the clean committed feature checkout | Passed; `release-manifest.json` SHA-256 is `d1dc462732a24ad8422ce036c83e9685ab2f3450166fcaa15f3e922ca84fd13f` |
+| Commit/push of the source remediation | `273b4a96` pushed to the isolated feature branch; no `main` integration |
 | Install exact release and offline wheelhouse on `185.206.95.94` | Pending |
 | Live runtime/provenance, effective-systemd, nftables, and offsite proof | Pending |
 | Twelve hard-kill live-restore prerequisite points | Pending |
@@ -2899,8 +2899,8 @@ base and is outside what this Python verifier can prove.
 | RH-001/RH-010 or any other real-host scenario | Not authorized and not executed |
 | Full Matrix, merge with `main`, writer activation, WebApp or Arvan mutation | Not authorized and not executed |
 
-The next permitted sequence is limited to: package the exact feature delta for
-external re-review; install that exact release only on the replacement dark
+The next permitted sequence is limited to: obtain external re-review of the
+exact final feature delta; install that exact release only on the replacement dark
 Witness; configure and prove offsite custody; run and recover the twelve restore
 prerequisites; produce a fresh read-only exact-SHA preflight; and obtain
 external approval of that exact delta. A successful
@@ -2917,7 +2917,7 @@ shared install findings, so this roadmap treats the majority reject as the
 correct gate. No install, live prerequisite, RH scenario, merge, deployment, or
 CDN mutation occurred while remediating them.
 
-The current worktree closes the validated source defects as follows:
+The committed feature remediation closes the validated source defects as follows:
 
 - release, wheelhouse, runtime, and nftables verification starts only through
   the pinned system Python under `env -i`, `-I -S -B`, UTF-8 mode, and disabled
@@ -2952,11 +2952,11 @@ The current worktree closes the validated source defects as follows:
   equivalence guard to prevent a later helper addition from silently escaping
   syntax coverage.
 
-Local evidence for this worktree is a passing `397`-test zero-skip hermetic
-unit gate, `4` real PostgreSQL tests, and the four-database failure drill. A
-fresh release build and `git diff --check` also pass. Those results are source
-evidence only and must be repeated/bound to the final committed SHA when the
-new review package is produced.
+Local evidence from the clean committed feature checkout is a passing
+`397`-test zero-skip hermetic unit gate, `4` real PostgreSQL tests, and the
+four-database failure drill. A fresh release build and `git diff --check` also
+pass. Those results remain source evidence only; they are not live-host
+attestation or authorization for an RH scenario.
 
 Two gates deliberately remain external or later-phase:
 
