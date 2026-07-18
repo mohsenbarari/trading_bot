@@ -12,10 +12,12 @@ from bot.repeat_offer import (
     is_bot_repeat_offer_button_text,
     load_latest_bot_repeat_offer_candidate,
     prepend_repeat_offer_button,
+    refresh_repeat_offer_menu_for_expired_offer,
     resolve_bot_repeat_offer_button_candidate,
 )
 from core.enums import SettlementType, UserRole
-from models.offer import OfferType
+from models.offer import Offer, OfferStatus, OfferType
+from models.user import User
 
 
 class FakeSessionContext:
@@ -27,6 +29,19 @@ class FakeSessionContext:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+class FakeLookupSession:
+    def __init__(self, offer, user):
+        self.offer = offer
+        self.user = user
+
+    async def get(self, model, record_id):
+        if model is Offer and int(record_id) == int(self.offer.id):
+            return self.offer
+        if model is User and int(record_id) == int(self.user.id):
+            return self.user
+        return None
 
 
 def make_offer(**overrides):
@@ -57,8 +72,7 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("15 10", candidate.draft_text)
         self.assertIn("تحویل حضوری", candidate.draft_text)
         self.assertIn("تحویل حضوری", candidate.button_text)
-        self.assertTrue(candidate.button_text.endswith("#17"))
-        self.assertNotIn("تحویل حضوری", candidate.legacy_button_text)
+        self.assertNotIn("#17", candidate.button_text)
         self.assertTrue(is_bot_repeat_offer_button_text(candidate.button_text))
         self.assertLessEqual(len(candidate.button_text), BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH)
 
@@ -73,8 +87,7 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(candidate)
         self.assertLessEqual(len(candidate.button_text), BOT_REPEAT_OFFER_BUTTON_MAX_LENGTH)
-        self.assertIn("...", candidate.button_text)
-        self.assertTrue(candidate.button_text.endswith("#17"))
+        self.assertTrue(candidate.button_text.endswith("..."))
 
     async def test_loader_requests_latest_foreign_home_candidate(self):
         offer = make_offer()
@@ -92,7 +105,7 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list_mock.await_args.kwargs["since_hours"], 1)
         self.assertEqual(list_mock.await_args.kwargs["replacement_home_server"], "foreign")
 
-    async def test_resolver_honors_still_eligible_old_and_legacy_buttons(self):
+    async def test_resolver_rejects_stale_button_instead_of_preparing_latest(self):
         latest_offer = make_offer(
             id=19,
             offer_public_id="ofr_repeat_source_19",
@@ -101,28 +114,28 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         )
         older_offer = make_offer()
         older_candidate = bot_repeat_offer_candidate(older_offer)
+        latest_candidate = bot_repeat_offer_candidate(latest_offer)
 
         with patch(
-            "bot.repeat_offer.list_repeatable_offers",
-            new=AsyncMock(return_value=[latest_offer, older_offer]),
-        ) as list_mock:
+            "bot.repeat_offer.load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=latest_candidate),
+        ):
             resolved, needs_refresh, reason = await resolve_bot_repeat_offer_button_candidate(
                 SimpleNamespace(),
                 owner_user_id=9,
-                button_text=older_candidate.legacy_button_text,
+                button_text=older_candidate.button_text,
             )
 
-        self.assertEqual(resolved.source_offer_public_id, older_offer.offer_public_id)
+        self.assertIsNone(resolved)
         self.assertTrue(needs_refresh)
-        self.assertEqual(reason, "legacy_button")
-        self.assertEqual(list_mock.await_args.kwargs["limit"], 50)
+        self.assertEqual(reason, "stale_button")
 
     async def test_resolver_keeps_current_full_button_without_refresh(self):
         offer = make_offer()
         candidate = bot_repeat_offer_candidate(offer)
         with patch(
-            "bot.repeat_offer.list_repeatable_offers",
-            new=AsyncMock(return_value=[offer]),
+            "bot.repeat_offer.load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=candidate),
         ):
             resolved, needs_refresh, reason = await resolve_bot_repeat_offer_button_candidate(
                 SimpleNamespace(),
@@ -134,28 +147,64 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(needs_refresh)
         self.assertIsNone(reason)
 
-    async def test_resolver_rejects_ambiguous_legacy_button(self):
-        latest_offer = make_offer(
-            id=19,
-            offer_public_id="ofr_repeat_source_19",
-            notes="توضیح جدید",
+    async def test_expiry_event_pushes_current_keyboard_and_debounces_batch(self):
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="time_limit",
+            home_server="foreign",
+            expire_source_surface="system",
+            user_id=9,
         )
-        older_offer = make_offer()
-        legacy_button = bot_repeat_offer_candidate(older_offer).legacy_button_text
+        user = SimpleNamespace(id=9, telegram_id=99, role=UserRole.STANDARD)
+        candidate = bot_repeat_offer_candidate(offer)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        session = FakeLookupSession(offer, user)
+
+        from bot import repeat_offer as repeat_offer_module
+
+        repeat_offer_module._repeat_offer_refresh_sent_at.clear()
+        with patch(
+            "bot.repeat_offer.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.repeat_offer.evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True)),
+        ), patch(
+            "bot.repeat_offer.load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=candidate),
+        ), patch(
+            "bot.repeat_offer.time.monotonic",
+            side_effect=[100.0, 100.5],
+        ):
+            first = await refresh_repeat_offer_menu_for_expired_offer(bot, offer.id)
+            second = await refresh_repeat_offer_menu_for_expired_offer(bot, offer.id)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        bot.send_message.assert_awaited_once()
+        keyboard = bot.send_message.await_args.kwargs["reply_markup"]
+        self.assertEqual(keyboard.keyboard[0][0].text, candidate.button_text)
+        self.assertNotIn("#17", keyboard.keyboard[0][0].text)
+
+    async def test_expiry_event_skips_foreign_manual_bot_expiry(self):
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="manual",
+            home_server="foreign",
+            expire_source_surface="telegram_bot",
+            user_id=9,
+        )
+        user = SimpleNamespace(id=9, telegram_id=99, role=UserRole.STANDARD)
+        bot = SimpleNamespace(send_message=AsyncMock())
 
         with patch(
-            "bot.repeat_offer.list_repeatable_offers",
-            new=AsyncMock(return_value=[latest_offer, older_offer]),
+            "bot.repeat_offer.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeLookupSession(offer, user)),
         ):
-            resolved, needs_refresh, reason = await resolve_bot_repeat_offer_button_candidate(
-                SimpleNamespace(),
-                owner_user_id=9,
-                button_text=legacy_button,
-            )
+            sent = await refresh_repeat_offer_menu_for_expired_offer(bot, offer.id)
 
-        self.assertIsNone(resolved)
-        self.assertTrue(needs_refresh)
-        self.assertEqual(reason, "ambiguous_legacy_button")
+        self.assertFalse(sent)
+        bot.send_message.assert_not_awaited()
 
     async def test_decorator_prepends_row_and_fails_open(self):
         keyboard = ReplyKeyboardMarkup(

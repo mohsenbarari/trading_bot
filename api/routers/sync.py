@@ -323,6 +323,25 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
             )
 
 
+async def _publish_foreign_synced_expired_offer_events(
+    db: AsyncSession,
+    terminal_offer_ids: list[int] | tuple[int, ...],
+) -> None:
+    """Wake foreign bot UI listeners after an Iran-owned expiry is committed."""
+    unique_offer_ids = sorted({int(offer_id) for offer_id in terminal_offer_ids if offer_id})
+    if not unique_offer_ids:
+        return
+
+    from core.events import publish_event_sync
+    from models.offer import Offer, OfferStatus
+
+    result = await db.execute(select(Offer).where(Offer.id.in_(unique_offer_ids)))
+    for offer in result.scalars().all():
+        if _enum_value(getattr(offer, "status", None)) != OfferStatus.EXPIRED.value:
+            continue
+        publish_event_sync("offer:expired", {"id": int(offer.id)})
+
+
 async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, offer_ids: list[int] | tuple[int, ...]) -> None:
     unique_offer_ids = sorted({int(offer_id) for offer_id in offer_ids if offer_id})
     if not unique_offer_ids:
@@ -3906,6 +3925,18 @@ async def receive_sync_data(
                         },
                     )
         await db.commit()
+
+        if settings.server_mode != "iran" and terminal_offers:
+            try:
+                await _publish_foreign_synced_expired_offer_events(db, terminal_offers)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to publish foreign bot expiry refresh events after sync",
+                    extra={
+                        "event": "sync.foreign_expired_offer_event_publish_failed",
+                        **_summarize_exception(exc),
+                    },
+                )
 
         if market_runtime_state_changed:
             try:

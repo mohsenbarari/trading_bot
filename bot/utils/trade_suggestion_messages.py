@@ -8,6 +8,7 @@ import redis.asyncio as redis
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.repeat_offer import refresh_repeat_offer_menu_for_expired_offer
 from core.db import AsyncSessionLocal
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.redis import pool
@@ -343,6 +344,13 @@ async def listen_trade_suggestion_events(bot: Bot) -> None:
                 await sync_trade_suggestions_for_offer(bot, int(offer_id))
             except Exception as exc:
                 logger.debug(f"Trade suggestion sync failed for offer={offer_id}: {exc}")
+            raw_channel = message.get("channel", "")
+            channel = raw_channel.decode("utf-8") if isinstance(raw_channel, bytes) else str(raw_channel)
+            if channel == "events:offer:expired":
+                try:
+                    await refresh_repeat_offer_menu_for_expired_offer(bot, int(offer_id))
+                except Exception as exc:
+                    logger.debug(f"Repeat-offer menu refresh failed for offer={offer_id}: {exc}")
             await asyncio.sleep(0.05)
     except asyncio.CancelledError:
         logger.info("🔕 Trade suggestion sync listener stopped")

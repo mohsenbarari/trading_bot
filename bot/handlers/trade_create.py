@@ -1878,7 +1878,7 @@ async def handle_repeat_offer_button(
 
     try:
         async with AsyncSessionLocal() as session:
-            candidate, needs_menu_refresh, resolution_reason = (
+            candidate, _, _ = (
                 await resolve_bot_repeat_offer_button_candidate(
                     session,
                     owner_user_id=user.id,
@@ -1895,34 +1895,20 @@ async def handle_repeat_offer_button(
             },
         )
         candidate = None
-        needs_menu_refresh = True
-        resolution_reason = "resolve_failed"
 
     if candidate is None:
         from core.public_webapp_url import user_facing_webapp_url
 
         await state.clear()
-        response_text = (
-            "چند لفظ قدیمی با این دکمه یکسان هستند. "
-            "منو با آخرین وضعیت به‌روزرسانی شد؛ دکمه جدید را بزنید."
-            if resolution_reason == "ambiguous_legacy_button"
-            else "این لفظ دیگر قابل تکرار نیست. منو با آخرین وضعیت به‌روزرسانی شد."
-        )
         await message.answer(
-            response_text,
+            "متن این دکمه قدیمی است. منو با آخرین وضعیت به‌روزرسانی شد؛ "
+            "دکمه جدید را بزنید.",
             reply_markup=await build_persistent_navigation_keyboard(
                 user,
                 user_facing_webapp_url(settings_obj=settings),
             ),
         )
         return
-
-    if needs_menu_refresh:
-        await _send_repeat_offer_menu_refresh(
-            bot or message.bot,
-            chat_id=message.chat.id,
-            user=user,
-        )
 
     await state.clear()
     prepared = await _prepare_text_offer(
