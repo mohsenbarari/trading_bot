@@ -792,6 +792,23 @@ _WIZARD_STATE_VALUES = {
     Trade.awaiting_wizard_edit.state,
 }
 
+_TEXT_OFFER_EXISTING_HANDOFF_STATES = (
+    Trade.awaiting_quantity,
+    Trade.awaiting_lot_sizes,
+    Trade.awaiting_price,
+    Trade.awaiting_notes,
+)
+
+_TEXT_OFFER_RECOVERY_STATES = (
+    Trade.awaiting_trade_type,
+    Trade.awaiting_settlement_type,
+    Trade.awaiting_commodity,
+    Trade.awaiting_lot_type,
+    Trade.awaiting_wizard_review,
+    Trade.awaiting_wizard_edit,
+    Trade.awaiting_legacy_confirm,
+)
+
 
 async def _wizard_callback_is_current(callback: types.CallbackQuery, state: FSMContext) -> bool:
     if await state.get_state() in _WIZARD_STATE_VALUES:
@@ -2065,6 +2082,54 @@ async def handle_text_offer_while_confirmation_pending(
     await handle_text_offer(message, state, user, runtime_bot)
 
 
+@router.message(StateFilter(*_TEXT_OFFER_RECOVERY_STATES), F.text.func(has_trade_indicator))
+async def handle_text_offer_from_stale_trade_state(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User],
+    bot: Optional[Bot] = None,
+):
+    """Restart normal text-offer processing from a callback-only trade state."""
+    if not user:
+        return
+
+    previous_state = await state.get_state()
+    await state.clear()
+    logger.info(
+        "Recovering text offer from stale trade state",
+        extra={
+            "event": "telegram.offer_fsm_recovered",
+            "previous_state": previous_state,
+            "user_id": user.id,
+        },
+    )
+    await handle_text_offer(message, state, user, bot or message.bot)
+
+
+@router.message(StateFilter(*_TEXT_OFFER_RECOVERY_STATES))
+async def handle_unexpected_trade_builder_message(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User],
+):
+    """Explain callback-only trade states instead of silently consuming input."""
+    if not user:
+        return
+
+    logger.info(
+        "Unexpected message while trade builder awaits a callback",
+        extra={
+            "event": "telegram.offer_fsm_unexpected_message",
+            "trade_state": await state.get_state(),
+            "user_id": user.id,
+        },
+    )
+    await message.answer(
+        "این مرحله با دکمه‌های پیام قبلی ادامه پیدا می‌کند. "
+        "برای شروع مجدد، دکمه «📈 معامله» را بزنید یا لفظ کامل ارسال کنید."
+    )
+
+
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm"))
 async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     """تایید و ارسال لفظ متنی به کانال (از لاجیک مشترک handle_trade_confirm استفاده می‌کند)"""
@@ -2120,3 +2185,41 @@ async def handle_text_offer_cancel(callback: types.CallbackQuery, state: FSMCont
     await callback.message.edit_text("❌ لفظ لغو شد.")
     await state.clear()
     await callback.answer()
+
+
+@router.callback_query(TradeTypeCallback.filter())
+@router.callback_query(TradeSettlementCallback.filter())
+@router.callback_query(CommodityCallback.filter())
+@router.callback_query(PageCallback.filter())
+@router.callback_query(QuantityCallback.filter())
+@router.callback_query(LotTypeCallback.filter())
+@router.callback_query(AcceptLotsCallback.filter())
+@router.callback_query(TradeActionCallback.filter())
+@router.callback_query(SkipNotesCallback.filter())
+@router.callback_query(TextOfferActionCallback.filter())
+@router.callback_query(TradeWizardActionCallback.filter())
+@router.callback_query(TradeWizardEditCallback.filter())
+async def handle_stale_trade_creation_callback(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    """Acknowledge stale offer-builder buttons without changing current state."""
+    if not user:
+        await callback.answer()
+        return
+
+    callback_prefix = str(callback.data or "").partition(":")[0] or None
+    logger.info(
+        "Rejected stale trade creation callback",
+        extra={
+            "event": "telegram.offer_fsm_stale_callback",
+            "callback_prefix": callback_prefix,
+            "trade_state": await state.get_state(),
+            "user_id": user.id,
+        },
+    )
+    await callback.answer(
+        "این دکمه دیگر فعال نیست. ثبت آفر را دوباره شروع کنید.",
+        show_alert=True,
+    )
