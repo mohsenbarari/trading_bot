@@ -23,6 +23,7 @@ from bot.repeat_offer import (
     is_bot_repeat_offer_button_text,
 )
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import answer_incoming_message_via_runtime
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -267,7 +268,14 @@ async def handle_user_settings_button(message: types.Message, state: FSMContext,
         )]
     ])
     
-    await message.answer(settings_text, parse_mode="Markdown", reply_markup=keyboard)
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        settings_text,
+        source_key="panel-user-settings",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
 
 
 # --- هندلر دکمه تنظیمات ساده (برای کاربران عادی) ---
@@ -275,7 +283,12 @@ async def handle_user_settings_button(message: types.Message, state: FSMContext,
 async def handle_simple_settings_button(message: types.Message, user: Optional[User]):
     if not user: return
     
-    await message.answer("🚧 بخش تنظیمات کاربری در حال توسعه است.")
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        "🚧 بخش تنظیمات کاربری در حال توسعه است.",
+        source_key="panel-simple-settings",
+    )
 
 
 async def _can_use_customer_panel(session, user: User) -> bool:
@@ -319,7 +332,12 @@ async def show_support_contact(message: types.Message, user: Optional[User]):
         if not await _can_view_support(session, user):
             return
 
-    await message.answer(USER_PANEL_SUPPORT_MESSAGE)
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        USER_PANEL_SUPPORT_MESSAGE,
+        source_key="panel-support-contact",
+    )
 
 
 async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
