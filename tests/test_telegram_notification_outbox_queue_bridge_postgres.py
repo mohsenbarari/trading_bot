@@ -28,6 +28,8 @@ from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
     TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH,
     TelegramNotificationRecipient,
+    enqueue_account_deletion_telegram_notification_once,
+    enqueue_account_restriction_telegram_notification_once,
     claim_next_telegram_notification_outbox,
     enqueue_account_status_telegram_notification_once,
     enqueue_delayed_restriction_telegram_notification_once,
@@ -1139,6 +1141,168 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             )
             self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SKIPPED)
             self.assertEqual(jobs, 0)
+
+    async def test_stale_active_restriction_is_skipped_before_job_creation(self):
+        async with self.Session() as db:
+            user = self._user(
+                account_name="active_restriction_recipient",
+                mobile="09128887731",
+                telegram_id=8_477_731,
+            )
+            user.trading_restricted_until = (
+                utc_now() + timedelta(hours=2)
+            ).replace(tzinfo=None)
+            db.add(user)
+            await db.flush()
+            result = await enqueue_account_restriction_telegram_notification_once(
+                db,
+                recipient=TelegramNotificationRecipient(
+                    user_id=int(user.id),
+                    telegram_id=int(user.telegram_id),
+                ),
+                source_id=f"restriction-block:{user.id}:1",
+                text="حساب موقتاً محدود شد",
+                user=user,
+                restriction_kind="block",
+                user_sync_version=1,
+            )
+            outbox_id = int(result.outbox.id)
+            user.trading_restricted_until = (
+                utc_now() + timedelta(hours=3)
+            ).replace(tzinfo=None)
+            user.sync_version = 2
+            await db.commit()
+
+        handoff = await self._handoff()
+        self.assertEqual(handoff.disposition, "skipped")
+        self.assertEqual(
+            handoff.reason,
+            "notification_action_source_state_changed",
+        )
+        async with self.Session() as db:
+            outbox = await db.get(TelegramNotificationOutbox, outbox_id)
+            self.assertEqual(
+                outbox.status,
+                TelegramNotificationOutboxStatus.SKIPPED,
+            )
+
+    async def test_deleted_account_notice_uses_predelete_route(self):
+        async with self.Session() as db:
+            user = self._user(
+                account_name="deleted_notice_recipient",
+                mobile="09128887732",
+                telegram_id=8_477_732,
+            )
+            db.add(user)
+            await db.flush()
+            user_id = int(user.id)
+            telegram_id = int(user.telegram_id)
+            user.is_deleted = True
+            user.deleted_at = utc_now().replace(tzinfo=None)
+            user.telegram_id = None
+            user.sync_version = 2
+            result = await enqueue_account_deletion_telegram_notification_once(
+                db,
+                recipient=TelegramNotificationRecipient(
+                    user_id=user_id,
+                    telegram_id=telegram_id,
+                ),
+                source_id=f"account-deleted:{user_id}:2",
+                text="حساب از پروژه حذف شد",
+                user=user,
+                user_sync_version=2,
+            )
+            outbox_id = int(result.outbox.id)
+            await db.commit()
+
+        handoff = await self._handoff()
+        self.assertEqual(handoff.disposition, NOTIFICATION_OUTBOX_QUEUE_HANDOFF)
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, int(handoff.job_id))
+            outbox = await db.get(TelegramNotificationOutbox, outbox_id)
+            decision = await validate_notification_action_telegram_delivery_freshness(
+                db,
+                job,
+                utc_now(),
+            )
+
+        self.assertEqual(job.action_kind, TelegramDeliveryAction.ACCOUNT_STATUS)
+        self.assertEqual(job.payload["chat_id"], telegram_id)
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
+        self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.PENDING)
+
+        async with self.Session() as db:
+            db.add(
+                self._user(
+                    account_name="deleted_notice_reassigned_after_handoff",
+                    mobile="09128887735",
+                    telegram_id=telegram_id,
+                )
+            )
+            await db.commit()
+            job = await db.get(
+                TelegramDeliveryJobRecord,
+                int(handoff.job_id),
+            )
+            reassigned_decision = (
+                await validate_notification_action_telegram_delivery_freshness(
+                    db,
+                    job,
+                    utc_now(),
+                )
+            )
+
+        self.assertEqual(
+            reassigned_decision.outcome,
+            TelegramFreshnessOutcome.SUPERSEDED,
+        )
+        self.assertEqual(
+            reassigned_decision.reason,
+            "notification_action_freshness_deleted_route_reassigned",
+        )
+
+    async def test_deleted_account_notice_skips_reassigned_predelete_route(self):
+        async with self.Session() as db:
+            deleted_user = self._user(
+                account_name="deleted_notice_old_owner",
+                mobile="09128887733",
+                telegram_id=8_477_733,
+            )
+            db.add(deleted_user)
+            await db.flush()
+            deleted_user_id = int(deleted_user.id)
+            telegram_id = int(deleted_user.telegram_id)
+            deleted_user.is_deleted = True
+            deleted_user.deleted_at = utc_now().replace(tzinfo=None)
+            deleted_user.telegram_id = None
+            deleted_user.sync_version = 2
+            await enqueue_account_deletion_telegram_notification_once(
+                db,
+                recipient=TelegramNotificationRecipient(
+                    user_id=deleted_user_id,
+                    telegram_id=telegram_id,
+                ),
+                source_id=f"account-deleted:{deleted_user_id}:2",
+                text="حساب از پروژه حذف شد",
+                user=deleted_user,
+                user_sync_version=2,
+            )
+            db.add(
+                self._user(
+                    account_name="deleted_notice_new_owner",
+                    mobile="09128887734",
+                    telegram_id=telegram_id,
+                )
+            )
+            await db.commit()
+
+        handoff = await self._handoff()
+
+        self.assertEqual(handoff.disposition, "skipped")
+        self.assertEqual(
+            handoff.reason,
+            "notification_action_deleted_route_reassigned",
+        )
 
     async def test_account_notice_waits_for_user_sync_version(self):
         outbox_id, user_id = await self._seed_action_outbox(

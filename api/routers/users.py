@@ -14,6 +14,10 @@ from core.services.user_account_status_service import transition_user_account_st
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import delete_user_account
+from core.services.telegram_notification_outbox_service import (
+    TelegramNotificationRecipient,
+    enqueue_account_restriction_telegram_notification_once,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -106,46 +110,121 @@ def track_limitation_changes(user: User, update_data: Dict[str, Any]) -> Tuple[L
 async def send_block_notification(
     db: AsyncSession, 
     user: User, 
-    restricted_until: datetime
+    restricted_until: datetime,
+    *,
+    telegram_intent_persisted: bool = False,
 ) -> None:
     """ارسال نوتیفیکیشن مسدودیت"""
+    message = _block_notification_message(restricted_until)
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
+    if user.telegram_id is not None and queue_mode and not telegram_intent_persisted:
+        await _enqueue_block_notification_intent(
+            db,
+            user=user,
+            message=message,
+        )
+    await create_user_notification(db, user.id, message, NotificationLevel.WARNING, NotificationCategory.SYSTEM)
+    if user.telegram_id is not None and not queue_mode:
+        await send_telegram_notification(user.telegram_id, message)
+
+
+def _block_notification_message(restricted_until: datetime) -> str:
     jalali_date = to_jalali_str(restricted_until)
-    
     if restricted_until.year > 2100:
-        message = (
+        return (
             f"⛔ *اخطار مسدودیت حساب*\n\n"
             f"حساب کاربری شما به صورت *دائمی* مسدود شده است.\n"
             f"برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
         )
-    else:
-        message = (
-            f"⛔ *اخطار مسدودیت حساب*\n\n"
-            f"حساب کاربری شما موقتاً مسدود شده است.\n\n"
-            f"📅 *پایان مسدودیت:* {jalali_date}\n\n"
-            f"تا زمان رفع مسدودیت امکان انجام معاملات وجود ندارد."
-        )
-    
-    await create_user_notification(db, user.id, message, NotificationLevel.WARNING, NotificationCategory.SYSTEM)
-    if user.telegram_id is not None:
-        await send_telegram_notification(user.telegram_id, message)
+    return (
+        f"⛔ *اخطار مسدودیت حساب*\n\n"
+        f"حساب کاربری شما موقتاً مسدود شده است.\n\n"
+        f"📅 *پایان مسدودیت:* {jalali_date}\n\n"
+        f"تا زمان رفع مسدودیت امکان انجام معاملات وجود ندارد."
+    )
+
+
+async def _enqueue_block_notification_intent(
+    db: AsyncSession,
+    *,
+    user: User,
+    message: str,
+) -> None:
+    user_sync_version = int(getattr(user, "sync_version", 0) or 0)
+    await enqueue_account_restriction_telegram_notification_once(
+        db,
+        recipient=TelegramNotificationRecipient(
+            user_id=int(user.id),
+            telegram_id=int(user.telegram_id),
+        ),
+        source_id=f"restriction-block:{user.id}:{user_sync_version}",
+        text=message,
+        user=user,
+        restriction_kind="block",
+        user_sync_version=user_sync_version,
+    )
 
 
 async def send_limitation_notification(
     db: AsyncSession, 
     user: User, 
-    limitations_changed: List[str]
+    limitations_changed: List[str],
+    *,
+    telegram_intent_persisted: bool = False,
 ) -> None:
     """ارسال نوتیفیکیشن محدودیت"""
+    message = _limitation_notification_message(user, limitations_changed)
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
+    if user.telegram_id is not None and queue_mode and not telegram_intent_persisted:
+        await _enqueue_limitation_notification_intent(
+            db,
+            user=user,
+            message=message,
+        )
+    await create_user_notification(db, user.id, message, NotificationLevel.WARNING, NotificationCategory.SYSTEM)
+    if user.telegram_id is not None and not queue_mode:
+        await send_telegram_notification(user.telegram_id, message)
+
+
+def _limitation_notification_message(
+    user: User,
+    limitations_changed: List[str],
+) -> str:
     expire_jalali = to_jalali_str(user.limitations_expire_at) if user.limitations_expire_at else "نامحدود"
-    
     message = f"⚠️ *اعمال محدودیت*\n\nمحدودیت‌های زیر برای حساب شما اعمال شده است:\n\n"
     for lim in limitations_changed:
         message += f"• {lim}\n"
     message += f"\n📅 *اعتبار تا:* {expire_jalali}"
-    
-    await create_user_notification(db, user.id, message, NotificationLevel.WARNING, NotificationCategory.SYSTEM)
-    if user.telegram_id is not None:
-        await send_telegram_notification(user.telegram_id, message)
+    return message
+
+
+async def _enqueue_limitation_notification_intent(
+    db: AsyncSession,
+    *,
+    user: User,
+    message: str,
+) -> None:
+    user_sync_version = int(getattr(user, "sync_version", 0) or 0)
+    await enqueue_account_restriction_telegram_notification_once(
+        db,
+        recipient=TelegramNotificationRecipient(
+            user_id=int(user.id),
+            telegram_id=int(user.telegram_id),
+        ),
+        source_id=(
+            f"restriction-limitations:{user.id}:{user_sync_version}"
+        ),
+        text=message,
+        user=user,
+        restriction_kind="limitations",
+        user_sync_version=user_sync_version,
+    )
 
 
 async def send_delayed_removal_notification_api(
@@ -405,7 +484,40 @@ async def update_user(
         previous_is_deleted=old_is_deleted,
         previous_deleted_at=old_deleted_at,
     )
-    
+
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
+    block_intent_persisted = False
+    limitation_intent_persisted = False
+    if queue_mode and user.telegram_id is not None and (
+        (block_notification_needed and user.trading_restricted_until)
+        or limitation_needed
+    ):
+        # Flush first so event-driven sync_version changes are part of the
+        # exact source snapshot persisted in the same transaction.
+        await db.flush()
+        if block_notification_needed and user.trading_restricted_until:
+            await _enqueue_block_notification_intent(
+                db,
+                user=user,
+                message=_block_notification_message(
+                    user.trading_restricted_until
+                ),
+            )
+            block_intent_persisted = True
+        if limitation_needed:
+            await _enqueue_limitation_notification_intent(
+                db,
+                user=user,
+                message=_limitation_notification_message(
+                    user,
+                    limitations_changed,
+                ),
+            )
+            limitation_intent_persisted = True
+
     # --- 5. Commit Changes ---
     await db.commit()
     await db.refresh(user)
@@ -419,18 +531,30 @@ async def update_user(
     
     # مسدودیت
     if block_notification_needed and user.trading_restricted_until:
-        await send_block_notification(db, user, user.trading_restricted_until)
+        if queue_mode:
+            await send_block_notification(
+                db,
+                user,
+                user.trading_restricted_until,
+                telegram_intent_persisted=block_intent_persisted,
+            )
+        else:
+            await send_block_notification(db, user, user.trading_restricted_until)
     
     # محدودیت
     if limitation_needed:
-        await send_limitation_notification(db, user, limitations_changed)
+        if queue_mode:
+            await send_limitation_notification(
+                db,
+                user,
+                limitations_changed,
+                telegram_intent_persisted=limitation_intent_persisted,
+            )
+        else:
+            await send_limitation_notification(db, user, limitations_changed)
     
     # رفع مسدودیت (با تاخیر)
     if unblock_notification_needed:
-        queue_mode = (
-            configured_telegram_delivery_runtime().mode
-            == TelegramDeliveryRuntimeMode.QUEUE_V1
-        )
         if queue_mode:
             await enqueue_delayed_removal_telegram_notification_api(
                 db,

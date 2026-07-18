@@ -21,6 +21,16 @@ from core.services.telegram_notification_outbox_service import (
     telegram_notification_dedupe_key,
     validate_telegram_notification_text,
 )
+from core.telegram_delivery_account_notice_contract import (
+    ACCOUNT_NOTICE_KIND_DELETED,
+    ACCOUNT_NOTICE_KIND_RESTRICTION_ACTIVE,
+    ACCOUNT_NOTICE_KIND_STATUS,
+    active_restriction_snapshot_matches_user,
+    deleted_account_snapshot_matches_user,
+    normalize_restriction_kind,
+    validate_active_restriction_snapshot,
+    validate_deleted_account_snapshot,
+)
 from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTIONS,
     TelegramNotificationActionPolicy,
@@ -68,10 +78,13 @@ class TelegramNotificationActionSource:
     text: str
     parse_mode: str | None
     reply_markup: dict[str, Any] | None
+    account_notice_kind: str | None
     expected_account_status: str | None
     expected_messenger_blocked: bool | None
     expected_user_sync_version: int | None
     restriction_kind: str | None
+    restriction_snapshot: dict[str, Any] | None
+    deleted_account_snapshot: dict[str, str] | None
     not_before: datetime | None
 
 
@@ -174,9 +187,12 @@ def _validate_source_contract(
     if str(extra_payload.get("queue_action") or "") != policy.action.value:
         raise ValueError("notification_action_extra_payload_action_mismatch")
 
+    account_notice_kind: str | None = None
     expected_account_status: str | None = None
     expected_messenger_blocked: bool | None = None
     restriction_kind: str | None = None
+    restriction_snapshot: dict[str, Any] | None = None
+    deleted_account_snapshot: dict[str, str] | None = None
     not_before: datetime | None = None
     expected_user_sync_version = _strict_positive_int(
         extra_payload.get("user_sync_version")
@@ -184,24 +200,58 @@ def _validate_source_contract(
     if expected_user_sync_version is None:
         raise ValueError("notification_action_user_version_invalid")
     if policy.state_contract == "account_status":
-        if set(extra_payload) != {
-            "account_status",
-            "messenger_blocked",
-            "queue_action",
-            "user_sync_version",
-        }:
-            raise ValueError("notification_action_account_payload_invalid")
-        expected_account_status = str(
-            extra_payload.get("account_status") or ""
+        account_notice_kind = str(
+            extra_payload.get("account_notice_kind")
+            or ACCOUNT_NOTICE_KIND_STATUS
         ).strip().lower()
-        if expected_account_status not in {
-            UserAccountStatus.ACTIVE.value,
-            UserAccountStatus.INACTIVE.value,
-        }:
-            raise ValueError("notification_action_account_status_invalid")
-        if not isinstance(extra_payload.get("messenger_blocked"), bool):
-            raise ValueError("notification_action_account_block_state_invalid")
-        expected_messenger_blocked = bool(extra_payload["messenger_blocked"])
+        if account_notice_kind == ACCOUNT_NOTICE_KIND_STATUS:
+            if set(extra_payload) != {
+                "account_status",
+                "messenger_blocked",
+                "queue_action",
+                "user_sync_version",
+            }:
+                raise ValueError("notification_action_account_payload_invalid")
+            expected_account_status = str(
+                extra_payload.get("account_status") or ""
+            ).strip().lower()
+            if expected_account_status not in {
+                UserAccountStatus.ACTIVE.value,
+                UserAccountStatus.INACTIVE.value,
+            }:
+                raise ValueError("notification_action_account_status_invalid")
+            if not isinstance(extra_payload.get("messenger_blocked"), bool):
+                raise ValueError("notification_action_account_block_state_invalid")
+            expected_messenger_blocked = bool(extra_payload["messenger_blocked"])
+        elif account_notice_kind == ACCOUNT_NOTICE_KIND_RESTRICTION_ACTIVE:
+            if set(extra_payload) != {
+                "account_notice_kind",
+                "queue_action",
+                "restriction_kind",
+                "restriction_snapshot",
+                "user_sync_version",
+            }:
+                raise ValueError("notification_action_restriction_active_payload_invalid")
+            restriction_kind = normalize_restriction_kind(
+                extra_payload.get("restriction_kind")
+            )
+            restriction_snapshot = validate_active_restriction_snapshot(
+                extra_payload.get("restriction_snapshot"),
+                restriction_kind=restriction_kind,
+            )
+        elif account_notice_kind == ACCOUNT_NOTICE_KIND_DELETED:
+            if set(extra_payload) != {
+                "account_notice_kind",
+                "deleted_account_snapshot",
+                "queue_action",
+                "user_sync_version",
+            }:
+                raise ValueError("notification_action_deleted_payload_invalid")
+            deleted_account_snapshot = validate_deleted_account_snapshot(
+                extra_payload.get("deleted_account_snapshot")
+            )
+        else:
+            raise ValueError("notification_action_account_notice_kind_invalid")
         reply_markup = None
     elif policy.state_contract == "restriction_clear":
         if set(extra_payload) != {
@@ -248,10 +298,13 @@ def _validate_source_contract(
         text=text,
         parse_mode=parse_mode,
         reply_markup=reply_markup,
+        account_notice_kind=account_notice_kind,
         expected_account_status=expected_account_status,
         expected_messenger_blocked=expected_messenger_blocked,
         expected_user_sync_version=expected_user_sync_version,
         restriction_kind=restriction_kind,
+        restriction_snapshot=restriction_snapshot,
+        deleted_account_snapshot=deleted_account_snapshot,
         not_before=not_before,
     )
 
@@ -262,7 +315,9 @@ def telegram_notification_action_source_natural_id(
     source = _validate_source_contract(outbox)
     snapshot = json.dumps(
         {
+            "account_notice_kind": source.account_notice_kind,
             "account_status": source.expected_account_status,
+            "deleted_account_snapshot": source.deleted_account_snapshot,
             "dedupe_key": source.dedupe_key,
             "messenger_blocked": source.expected_messenger_blocked,
             "parse_mode": source.parse_mode,
@@ -270,6 +325,7 @@ def telegram_notification_action_source_natural_id(
             "template_version": source.policy.template_version,
             "text": source.text,
             "restriction_kind": source.restriction_kind,
+            "restriction_snapshot": source.restriction_snapshot,
             "not_before": (
                 source.not_before.isoformat() if source.not_before else None
             ),
@@ -318,11 +374,37 @@ def notification_action_source_matches_current_user(
     now: datetime | None = None,
 ) -> bool:
     if source.policy.state_contract == "account_status":
-        return (
-            _current_account_status(user) == source.expected_account_status
-            and bool(getattr(user, "messenger_blocked_at", None))
-            is source.expected_messenger_blocked
+        if source.account_notice_kind == ACCOUNT_NOTICE_KIND_STATUS:
+            return (
+                _current_account_status(user) == source.expected_account_status
+                and bool(getattr(user, "messenger_blocked_at", None))
+                is source.expected_messenger_blocked
+            )
+        current_version = _strict_positive_int(
+            getattr(user, "sync_version", None)
         )
+        if current_version != source.expected_user_sync_version:
+            return False
+        if source.account_notice_kind == ACCOUNT_NOTICE_KIND_RESTRICTION_ACTIVE:
+            return bool(
+                source.restriction_kind
+                and source.restriction_snapshot
+                and active_restriction_snapshot_matches_user(
+                    source.restriction_snapshot,
+                    user,
+                    restriction_kind=source.restriction_kind,
+                    now=now,
+                )
+            )
+        if source.account_notice_kind == ACCOUNT_NOTICE_KIND_DELETED:
+            return bool(
+                source.deleted_account_snapshot
+                and deleted_account_snapshot_matches_user(
+                    source.deleted_account_snapshot,
+                    user,
+                )
+            )
+        return False
     if source.policy.state_contract == "restriction_clear":
         if source.restriction_kind == "block":
             restricted_until = getattr(user, "trading_restricted_until", None)
@@ -377,6 +459,42 @@ def telegram_notification_action_outbox_waits_for_current_user(
     )
 
 
+def telegram_notification_action_outbox_is_deleted_account_notice(
+    outbox: TelegramNotificationOutbox | Any,
+) -> bool:
+    """Return true only for a fully validated deleted-account notice."""
+    return (
+        _validate_source_contract(outbox).account_notice_kind
+        == ACCOUNT_NOTICE_KIND_DELETED
+    )
+
+
+async def telegram_notification_action_deleted_route_is_reassigned(
+    db: AsyncSession,
+    outbox: TelegramNotificationOutbox | Any,
+) -> bool:
+    """Protect a pre-delete route from being reused by another local account."""
+    source = _validate_source_contract(outbox)
+    if source.account_notice_kind != ACCOUNT_NOTICE_KIND_DELETED:
+        return False
+    telegram_id = _strict_positive_int(
+        getattr(outbox, "telegram_id_at_enqueue", None)
+    )
+    if telegram_id is None:
+        raise ValueError("notification_action_deleted_route_invalid")
+    reassigned_user_id = (
+        await db.execute(
+            select(User.id)
+            .where(
+                User.telegram_id == telegram_id,
+                User.id != source.recipient_user_id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return reassigned_user_id is not None
+
+
 def build_telegram_notification_action_snapshot(
     outbox: TelegramNotificationOutbox | Any,
     user: User | Any,
@@ -384,7 +502,12 @@ def build_telegram_notification_action_snapshot(
     source = _validate_source_contract(outbox)
     if _strict_positive_int(getattr(user, "id", None)) != source.recipient_user_id:
         raise ValueError("notification_action_user_mismatch")
-    telegram_id = _strict_positive_int(getattr(user, "telegram_id", None))
+    if source.account_notice_kind == ACCOUNT_NOTICE_KIND_DELETED:
+        telegram_id = _strict_positive_int(
+            getattr(outbox, "telegram_id_at_enqueue", None)
+        )
+    else:
+        telegram_id = _strict_positive_int(getattr(user, "telegram_id", None))
     user_sync_version = _strict_positive_int(getattr(user, "sync_version", None))
     if telegram_id is None:
         raise ValueError("notification_action_current_chat_id_invalid")
@@ -400,7 +523,9 @@ def build_telegram_notification_action_snapshot(
     normalized_payload, payload_hash = canonical_telegram_delivery_payload(payload)
     version_snapshot = json.dumps(
         {
+            "account_notice_kind": source.account_notice_kind,
             "account_status": _current_account_status(user),
+            "deleted_account_snapshot": source.deleted_account_snapshot,
             "messenger_blocked": bool(getattr(user, "messenger_blocked_at", None)),
             "not_before": (
                 source.not_before.isoformat() if source.not_before else None
@@ -408,6 +533,7 @@ def build_telegram_notification_action_snapshot(
             "payload_hash": payload_hash,
             "recipient_user_id": source.recipient_user_id,
             "restriction_kind": source.restriction_kind,
+            "restriction_snapshot": source.restriction_snapshot,
             "telegram_id": telegram_id,
             "user_sync_version": user_sync_version,
         },
@@ -539,7 +665,21 @@ async def validate_notification_action_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="notification_action_freshness_recipient_missing",
         )
-    if _strict_positive_int(getattr(user, "telegram_id", None)) is None:
+    if (
+        source.account_notice_kind == ACCOUNT_NOTICE_KIND_DELETED
+        and await telegram_notification_action_deleted_route_is_reassigned(
+            db,
+            outbox,
+        )
+    ):
+        return _decision(
+            TelegramFreshnessOutcome.SUPERSEDED,
+            reason="notification_action_freshness_deleted_route_reassigned",
+        )
+    if (
+        source.account_notice_kind != ACCOUNT_NOTICE_KIND_DELETED
+        and _strict_positive_int(getattr(user, "telegram_id", None)) is None
+    ):
         return _decision(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="notification_action_freshness_recipient_unlinked",
@@ -558,7 +698,10 @@ async def validate_notification_action_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="notification_action_freshness_source_state_changed",
         )
-    if policy.require_bot_access:
+    if (
+        policy.require_bot_access
+        and source.account_notice_kind != ACCOUNT_NOTICE_KIND_DELETED
+    ):
         access = await evaluate_bot_access(db, user)
         if not access.allowed:
             return _decision(

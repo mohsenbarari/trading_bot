@@ -26,6 +26,47 @@ class UsersRouterBlockNotificationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("دائمی", notify_mock.await_args.args[2])
 
+    async def test_queue_mode_persists_block_snapshot_without_direct_send(self):
+        restricted_until = datetime(2026, 1, 1, 12, 0, 0)
+        user = SimpleNamespace(
+            id=5,
+            telegram_id=999,
+            sync_version=7,
+            trading_restricted_until=restricted_until,
+        )
+        db = SimpleNamespace()
+        call_order = []
+
+        async def record_web_notification(*args, **kwargs):
+            call_order.append("web_notification_commit_owner")
+
+        async def record_telegram_intent(*args, **kwargs):
+            call_order.append("telegram_intent")
+
+        with patch(
+            "api.routers.users.create_user_notification",
+            new=AsyncMock(side_effect=record_web_notification),
+        ), patch(
+            "api.routers.users.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "api.routers.users.enqueue_account_restriction_telegram_notification_once",
+            new=AsyncMock(side_effect=record_telegram_intent),
+        ) as enqueue, patch(
+            "api.routers.users.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send:
+            await send_block_notification(db, user, restricted_until)
+
+        enqueue.assert_awaited_once()
+        self.assertEqual(enqueue.await_args.kwargs["restriction_kind"], "block")
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 7)
+        direct_send.assert_not_awaited()
+        self.assertEqual(
+            call_order,
+            ["telegram_intent", "web_notification_commit_owner"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,12 +67,35 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         ]
         self.assertEqual(len(otp_calls), 2)
         self.assertEqual(len(membership_calls), 2)
-
-    def test_known_business_gaps_remain_visible_until_their_source_contracts_exist(self):
-        remaining_scopes = {
+        strict_legacy_relay_scopes = {
             (item.path, item.scope)
             for item in self.inventory
+            if item.disposition == "durable_exempt"
+            and item.path in {
+                "api/routers/sync.py",
+                "core/notifications.py",
+            }
+        }
+        self.assertEqual(
+            strict_legacy_relay_scopes,
+            {
+                ("api/routers/sync.py", "receive_sync_data"),
+                ("core/notifications.py", "send_telegram_message"),
+            },
+        )
+
+    def test_business_delivery_boundaries_are_all_owned_or_strictly_exempt(self):
+        remaining = [
+            item
+            for item in self.inventory
             if item.disposition == "remaining_business_direct"
+        ]
+        self.assertEqual(remaining, [])
+
+        guarded_scopes = {
+            (item.path, item.scope)
+            for item in self.inventory
+            if item.disposition == "legacy_mode_guarded"
         }
         self.assertTrue(
             {
@@ -86,7 +109,7 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
                     "api/routers/sync.py",
                     "_run_synced_deleted_user_telegram_effects",
                 ),
-            }.issubset(remaining_scopes)
+            }.issubset(guarded_scopes)
         )
 
 

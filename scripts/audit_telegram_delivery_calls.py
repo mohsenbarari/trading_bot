@@ -88,7 +88,7 @@ LEGACY_OWNER_FILES = frozenset(
 # current inventory monotonic: conversions may reduce a category, while a new
 # bypass must update the reviewed baseline deliberately.
 REMAINING_DISPOSITION_BUDGETS = {
-    "remaining_business_direct": 6,
+    "remaining_business_direct": 0,
     "remaining_callback_direct": 292,
     "remaining_cleanup_direct": 13,
     "remaining_interactive_direct": 312,
@@ -210,8 +210,21 @@ def _classify(
         return "queue_execution", "shared queue credential-bound gateway"
     if path in OTP_EXEMPT_FILES:
         return "durable_exempt", "OTP stays on the signed short-lived transport"
+    if (
+        path == "core/notifications.py"
+        and scope.endswith("send_telegram_message")
+        and "validate_legacy_telegram_otp_relay" in scope_text
+    ):
+        return "durable_exempt", "legacy sender accepts only the strict OTP envelope"
     if path == "api/routers/auth.py" and scope.endswith("request_otp"):
         return "durable_exempt", "registration OTP uses the signed short-lived transport"
+    if (
+        path == "api/routers/sync.py"
+        and scope.endswith("receive_sync_data")
+        and kind == "notification_helper"
+        and "validate_legacy_telegram_otp_relay" in scope_text
+    ):
+        return "durable_exempt", "sync ingress accepts only the strict legacy OTP envelope"
     if kind == "membership_control":
         return "non_message_control", "channel membership mutation is not delivery pacing"
     if path in LEGACY_OWNER_FILES:

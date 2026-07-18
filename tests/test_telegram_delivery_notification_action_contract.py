@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -157,6 +158,75 @@ class TelegramDeliveryNotificationActionContractTests(
                 "messenger_blocked": False,
                 "queue_action": "account_status",
                 "user_sync_version": 9,
+            },
+        )
+
+    async def test_account_restriction_and_deletion_enqueues_capture_authoritative_state(self):
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=8,
+            telegram_id=8008,
+        )
+        restricted_user = SimpleNamespace(
+            trading_restricted_until=datetime(
+                2026,
+                7,
+                20,
+                10,
+                30,
+            )
+        )
+        deleted_user = SimpleNamespace(
+            is_deleted=True,
+            deleted_at=datetime(2026, 7, 18, 12, 0),
+            telegram_id=None,
+        )
+        with patch.object(
+            outbox_service,
+            "enqueue_telegram_notification_once",
+            new=AsyncMock(return_value=SimpleNamespace(created=True)),
+        ) as enqueue:
+            await outbox_service.enqueue_account_restriction_telegram_notification_once(
+                object(),
+                recipient=recipient,
+                source_id="restriction:8:11",
+                text="حساب محدود شد",
+                user=restricted_user,
+                restriction_kind="block",
+                user_sync_version=11,
+            )
+            restriction_payload = enqueue.await_args.kwargs["extra_payload"]
+
+            await outbox_service.enqueue_account_deletion_telegram_notification_once(
+                object(),
+                recipient=recipient,
+                source_id="deleted:8:12",
+                text="حساب حذف شد",
+                user=deleted_user,
+                user_sync_version=12,
+            )
+            deletion_payload = enqueue.await_args.kwargs["extra_payload"]
+
+        self.assertEqual(
+            restriction_payload,
+            {
+                "account_notice_kind": "restriction_active",
+                "queue_action": "account_status",
+                "restriction_kind": "block",
+                "restriction_snapshot": {
+                    "trading_restricted_until": "2026-07-20T10:30:00+00:00"
+                },
+                "user_sync_version": 11,
+            },
+        )
+        self.assertEqual(
+            deletion_payload,
+            {
+                "account_notice_kind": "account_deleted",
+                "deleted_account_snapshot": {
+                    "deleted_at": "2026-07-18T12:00:00+00:00"
+                },
+                "queue_action": "account_status",
+                "user_sync_version": 12,
             },
         )
 

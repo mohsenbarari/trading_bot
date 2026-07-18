@@ -15,6 +15,13 @@ from core import telegram_gateway
 from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
 from core.services.customer_relation_service import get_active_customer_relation_for_user
+from core.telegram_delivery_account_notice_contract import (
+    ACCOUNT_NOTICE_KIND_DELETED,
+    ACCOUNT_NOTICE_KIND_RESTRICTION_ACTIVE,
+    build_active_restriction_snapshot,
+    build_deleted_account_snapshot,
+    normalize_restriction_kind,
+)
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     configured_telegram_delivery_runtime,
@@ -574,6 +581,96 @@ async def enqueue_account_status_telegram_notification_once(
         extra_payload={
             "account_status": normalized_status,
             "messenger_blocked": messenger_blocked,
+            "queue_action": policy.action.value,
+            "user_sync_version": user_sync_version,
+        },
+    )
+
+
+async def enqueue_account_restriction_telegram_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    source_id: str,
+    text: str,
+    user: Any,
+    restriction_kind: str,
+    user_sync_version: int,
+    parse_mode: str | None = "Markdown",
+) -> TelegramNotificationEnqueueResult:
+    """Persist an M5 notice tied to the exact active restriction snapshot."""
+    policy = telegram_notification_action_policy(
+        TelegramDeliveryAction.ACCOUNT_STATUS
+    )
+    if policy.state_contract != "account_status":
+        raise ValueError("telegram_account_restriction_action_invalid")
+    normalized_source_id = str(source_id or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("telegram_notification_action_source_id_invalid")
+    if (
+        isinstance(user_sync_version, bool)
+        or not isinstance(user_sync_version, int)
+        or user_sync_version <= 0
+    ):
+        raise ValueError("telegram_notification_action_user_version_invalid")
+    kind = normalize_restriction_kind(restriction_kind)
+    snapshot = build_active_restriction_snapshot(
+        user,
+        restriction_kind=kind,
+    )
+    return await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=text,
+        source_type=policy.source_type,
+        source_id=normalized_source_id,
+        parse_mode=validate_telegram_notification_parse_mode(parse_mode),
+        extra_payload={
+            "account_notice_kind": ACCOUNT_NOTICE_KIND_RESTRICTION_ACTIVE,
+            "queue_action": policy.action.value,
+            "restriction_kind": kind,
+            "restriction_snapshot": snapshot,
+            "user_sync_version": user_sync_version,
+        },
+    )
+
+
+async def enqueue_account_deletion_telegram_notification_once(
+    db: AsyncSession,
+    *,
+    recipient: TelegramNotificationRecipient,
+    source_id: str,
+    text: str,
+    user: Any,
+    user_sync_version: int,
+    parse_mode: str | None = "Markdown",
+) -> TelegramNotificationEnqueueResult:
+    """Persist an M5 deletion notice using the pre-delete Telegram route."""
+    policy = telegram_notification_action_policy(
+        TelegramDeliveryAction.ACCOUNT_STATUS
+    )
+    if policy.state_contract != "account_status":
+        raise ValueError("telegram_account_deletion_action_invalid")
+    normalized_source_id = str(source_id or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("telegram_notification_action_source_id_invalid")
+    if (
+        isinstance(user_sync_version, bool)
+        or not isinstance(user_sync_version, int)
+        or user_sync_version <= 0
+    ):
+        raise ValueError("telegram_notification_action_user_version_invalid")
+    snapshot = build_deleted_account_snapshot(user)
+    return await enqueue_telegram_notification_once(
+        db,
+        recipient=recipient,
+        text=text,
+        source_type=policy.source_type,
+        source_id=normalized_source_id,
+        parse_mode=validate_telegram_notification_parse_mode(parse_mode),
+        extra_payload={
+            "account_notice_kind": ACCOUNT_NOTICE_KIND_DELETED,
+            "deleted_account_snapshot": snapshot,
             "queue_action": policy.action.value,
             "user_sync_version": user_sync_version,
         },

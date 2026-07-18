@@ -80,6 +80,9 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.notifications import send_telegram_message
+from core.telegram_legacy_otp_relay_contract import (
+    LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
+)
 from core.services.otp_delivery_state_service import (
     OTP_CODE_TTL_SECONDS,
     OTP_DELIVERY_STATE_DECODE_ERRORS,
@@ -1576,7 +1579,11 @@ async def request_otp(
     if is_connected and has_telegram:
         try:
             msg_text = f"🔐 کد ورود شما: `{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
-            await send_telegram_message(result.telegram_id, msg_text)
+            await send_telegram_message(
+                result.telegram_id,
+                msg_text,
+                purpose=LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
+            )
             sent_via_telegram = True
             logger.info("Legacy OTP sent via Telegram", extra={"event": "otp.legacy_telegram_sent"})
         except Exception as e:

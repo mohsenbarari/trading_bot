@@ -34,7 +34,9 @@ from core.telegram_delivery_notification_action_contract import (
 )
 from core.telegram_delivery_notification_action_freshness import (
     build_telegram_notification_action_snapshot,
+    telegram_notification_action_deleted_route_is_reassigned,
     telegram_notification_action_destination_key,
+    telegram_notification_action_outbox_is_deleted_account_notice,
     telegram_notification_action_outbox_matches_current_user,
     telegram_notification_action_outbox_waits_for_current_user,
     telegram_notification_action_source_natural_id,
@@ -218,7 +220,29 @@ async def handoff_next_due_telegram_notification_outbox(
             error_class="TelegramUserUnavailable",
             now=current_time,
         )
-    if _positive_int(user.telegram_id) is None:
+    source_type = str(outbox.source_type or "").strip()
+    try:
+        action_policy = telegram_notification_action_policy_from_source(source_type)
+    except ValueError:
+        action_policy = None
+    deleted_account_notice = False
+    if action_policy is not None:
+        try:
+            deleted_account_notice = (
+                telegram_notification_action_outbox_is_deleted_account_notice(
+                    outbox
+                )
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            return await _finalize_unhandoffable_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+                reason=str(exc)[:120] or "notification_action_payload_invalid",
+                error_class="TelegramPayloadError",
+                now=current_time,
+            )
+    if _positive_int(user.telegram_id) is None and not deleted_account_notice:
         return await _finalize_unhandoffable_outbox(
             db,
             outbox=outbox,
@@ -227,11 +251,21 @@ async def handoff_next_due_telegram_notification_outbox(
             error_class="TelegramUserUnavailable",
             now=current_time,
         )
-    source_type = str(outbox.source_type or "").strip()
-    try:
-        action_policy = telegram_notification_action_policy_from_source(source_type)
-    except ValueError:
-        action_policy = None
+    if (
+        deleted_account_notice
+        and await telegram_notification_action_deleted_route_is_reassigned(
+            db,
+            outbox,
+        )
+    ):
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason="notification_action_deleted_route_reassigned",
+            error_class="TelegramNotificationSuperseded",
+            now=current_time,
+        )
     offer_success_offer = None
     if source_type == TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS:
         try:
@@ -293,7 +327,11 @@ async def handoff_next_due_telegram_notification_outbox(
                 reason="notification_action_recipient_version_pending",
             )
     access = await evaluate_bot_access(db, user)
-    if (action_policy is None or action_policy.require_bot_access) and not access.allowed:
+    if (
+        not deleted_account_notice
+        and (action_policy is None or action_policy.require_bot_access)
+        and not access.allowed
+    ):
         return await _finalize_unhandoffable_outbox(
             db,
             outbox=outbox,
