@@ -12,10 +12,12 @@ from bot.repeat_offer import (
     is_bot_repeat_offer_button_text,
     load_latest_bot_repeat_offer_candidate,
     prepend_repeat_offer_button,
+    refresh_repeat_offer_menu_for_expired_offer,
     resolve_bot_repeat_offer_button_candidate,
 )
 from core.enums import SettlementType, UserRole
-from models.offer import OfferType
+from models.offer import Offer, OfferStatus, OfferType
+from models.user import User
 
 
 class FakeSessionContext:
@@ -27,6 +29,19 @@ class FakeSessionContext:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+class FakeLookupSession:
+    def __init__(self, offer, user):
+        self.offer = offer
+        self.user = user
+
+    async def get(self, model, record_id):
+        if model is Offer and int(record_id) == int(self.offer.id):
+            return self.offer
+        if model is User and int(record_id) == int(self.user.id):
+            return self.user
+        return None
 
 
 def make_offer(**overrides):
@@ -131,6 +146,69 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved.source_offer_public_id, offer.offer_public_id)
         self.assertFalse(needs_refresh)
         self.assertIsNone(reason)
+
+    async def test_expiry_event_pushes_current_keyboard_and_debounces_batch(self):
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="time_limit",
+            home_server="foreign",
+            expire_source_surface="system",
+            user_id=9,
+        )
+        user = SimpleNamespace(id=9, telegram_id=99, role=UserRole.STANDARD)
+        candidate = bot_repeat_offer_candidate(offer)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        session = FakeLookupSession(offer, user)
+
+        from bot import repeat_offer as repeat_offer_module
+
+        repeat_offer_module._repeat_offer_refresh_sent_at.clear()
+        with patch(
+            "bot.repeat_offer.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.repeat_offer.evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True)),
+        ), patch(
+            "bot.repeat_offer.load_latest_bot_repeat_offer_candidate",
+            new=AsyncMock(return_value=candidate),
+        ), patch(
+            "bot.repeat_offer.time.monotonic",
+            side_effect=[100.0, 100.5],
+        ):
+            first = await refresh_repeat_offer_menu_for_expired_offer(bot, offer.id)
+            second = await refresh_repeat_offer_menu_for_expired_offer(bot, offer.id)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        bot.send_message.assert_awaited_once()
+        self.assertEqual(
+            bot.send_message.await_args.kwargs["text"],
+            "منو با آخرین وضعیت به‌روزرسانی شد",
+        )
+        keyboard = bot.send_message.await_args.kwargs["reply_markup"]
+        self.assertEqual(keyboard.keyboard[0][0].text, candidate.button_text)
+        self.assertNotIn("#17", keyboard.keyboard[0][0].text)
+
+    async def test_expiry_event_skips_foreign_manual_bot_expiry(self):
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="manual",
+            home_server="foreign",
+            expire_source_surface="telegram_bot",
+            user_id=9,
+        )
+        user = SimpleNamespace(id=9, telegram_id=99, role=UserRole.STANDARD)
+        bot = SimpleNamespace(send_message=AsyncMock())
+
+        with patch(
+            "bot.repeat_offer.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeLookupSession(offer, user)),
+        ):
+            sent = await refresh_repeat_offer_menu_for_expired_offer(bot, offer.id)
+
+        self.assertFalse(sent)
+        bot.send_message.assert_not_awaited()
 
     async def test_decorator_prepends_row_and_fails_open(self):
         keyboard = ReplyKeyboardMarkup(

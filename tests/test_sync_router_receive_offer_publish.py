@@ -2,7 +2,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
-from api.routers.sync import _publish_synced_offer_created_realtime_after_sync, receive_sync_data
+from api.routers.sync import (
+    _publish_foreign_synced_expired_offer_events,
+    _publish_synced_offer_created_realtime_after_sync,
+    receive_sync_data,
+)
 from core.enums import SettlementType
 
 
@@ -76,6 +80,17 @@ def make_terminal_offer():
 
 
 class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
+    async def test_foreign_synced_expiry_publishes_local_bot_refresh_event(self):
+        expired_offer = SimpleNamespace(id=8, status="expired")
+        db = FakeDB([FakeOfferExecuteResult(expired_offer)])
+
+        with patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "core.events.publish_event_sync"
+        ) as publish_event:
+            await _publish_foreign_synced_expired_offer_events(db, [8, 8])
+
+        publish_event.assert_called_once_with("offer:expired", {"id": 8})
+
     async def test_synced_offer_realtime_payload_preserves_tomorrow_settlement(self):
         offer = SimpleNamespace(
             id=7,
@@ -278,7 +293,10 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
             "api.routers.sync.settings.server_mode", "foreign"
-        ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+        ), patch(
+            "api.routers.sync._publish_foreign_synced_expired_offer_events",
+            new=AsyncMock(),
+        ) as expiry_event_mock, patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "core.services.telegram_offer_publication_service.load_telegram_publication_state_for_update",
@@ -289,6 +307,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(result, {"status": "success", "processed": 2})
+        expiry_event_mock.assert_awaited_once_with(db, [8, 8])
         publish_mock.assert_not_awaited()
         load_publication_state_mock.assert_awaited_once_with(db, terminal_offer)
         apply_state_mock.assert_awaited_once_with(

@@ -349,7 +349,9 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
 
         with patch('bot.utils.trade_suggestion_messages.redis.Redis', return_value=redis_client), patch(
             'bot.utils.trade_suggestion_messages.sync_trade_suggestions_for_offer', AsyncMock(side_effect=[RuntimeError('boom'), None])
-        ) as sync_offer, patch('bot.utils.trade_suggestion_messages.asyncio.sleep', AsyncMock()), patch.object(
+        ) as sync_offer, patch(
+            'bot.utils.trade_suggestion_messages.refresh_repeat_offer_menu_for_expired_offer', AsyncMock()
+        ) as refresh_menu, patch('bot.utils.trade_suggestion_messages.asyncio.sleep', AsyncMock()), patch.object(
             suggestion_messages, 'logger'
         ) as logger:
             with self.assertRaises(asyncio.CancelledError):
@@ -360,6 +362,7 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
         pubsub.close.assert_awaited_once()
         redis_client.aclose.assert_awaited_once()
         sync_offer.assert_awaited_once_with(unittest.mock.ANY, 6)
+        refresh_menu.assert_awaited_once_with(unittest.mock.ANY, 6)
         logger.debug.assert_called_once()
 
 
