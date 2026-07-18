@@ -44,6 +44,7 @@ from bot.repeat_offer import (
     build_users_management_navigation_keyboard,
 )
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import answer_incoming_message_via_runtime
 from bot.states import UserManagement, UserLimitations
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
@@ -70,11 +71,20 @@ async def _reject_users_callback_if_not_authoritative(callback: types.CallbackQu
     return True
 
 
-async def _reject_users_message_if_not_authoritative(message: types.Message, operation: str) -> bool:
+async def _reject_users_message_if_not_authoritative(
+    message: types.Message,
+    user: Optional[User],
+    operation: str,
+) -> bool:
     decision = _users_admin_write_decision(operation)
     if decision.ok:
         return False
-    await message.answer(f"❌ {admin_write_rejection_message(decision)}")
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
+        f"❌ {admin_write_rejection_message(decision)}",
+        source_key="admin-users-not-authoritative",
+    )
     return True
 
 
@@ -505,18 +515,26 @@ async def handle_back_to_admin(message: types.Message, user: Optional[User], sta
     data = await state.get_data()
     content_anchor = data.get("anchor_id")
     menu_anchor = data.get("users_menu_id")
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
     
     await state.clear()
     
-    if content_anchor:
+    if content_anchor and not queue_mode:
         asyncio.create_task(safe_delete_message(message.bot, message.chat.id, content_anchor, delay=30))
     
-    if menu_anchor:
+    if menu_anchor and not queue_mode:
         asyncio.create_task(safe_delete_message(message.bot, message.chat.id, menu_anchor, delay=30))
     
-    msg = await message.answer(
+    await answer_incoming_message_via_runtime(
+        message,
+        user,
         "به پنل مدیریت بازگشتید.",
-        reply_markup=await build_admin_panel_navigation_keyboard(user)
+        source_key="admin-users-back-to-panel",
+        reply_markup=await build_admin_panel_navigation_keyboard(user),
+        set_persistent_anchor=True,
     )
 
 # --- جستجوی کاربر ---
@@ -1610,7 +1628,11 @@ async def process_custom_max_block(message: types.Message, user: Optional[User],
                 msg = await message.answer("❌ شما مجاز به مدیریت این کاربر نیستید.")
                 await update_anchor(state, msg.message_id, message.bot, message.chat.id)
                 return
-            if await _reject_users_message_if_not_authoritative(message, "max_block_update"):
+            if await _reject_users_message_if_not_authoritative(
+                message,
+                user,
+                "max_block_update",
+            ):
                 return
             target_user.max_blocked_users = new_max
             await session.commit()
