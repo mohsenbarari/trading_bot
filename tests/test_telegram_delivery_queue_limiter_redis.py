@@ -312,7 +312,12 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             destination_min_interval_seconds=0.02,
             rate_limit_probe_delay_seconds=0.01,
             global_rate_limit_window_seconds=2.0,
-            rate_limit_probe_lease_seconds=0.05,
+            # Keep the replacement lease comfortably longer than the
+            # concurrent Redis round-trip. The original 50 ms fixture could
+            # expire again while the 30 contenders were still being served,
+            # making a safe pacing rejection appear as ``bot_lane`` and
+            # turning scheduler load into a test-only race.
+            rate_limit_probe_lease_seconds=1.0,
             key_ttl_seconds=60,
             namespace="telegram:delivery:stage3-probe-expiry-test",
         )
@@ -329,8 +334,19 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(owner.allowed)
         self.assertTrue(owner.is_rate_limit_probe)
 
-        await asyncio.sleep(0.08)
-        replacement_time = utc_now()
+        probe_key = f"{limiter.namespace}:bot:primary:probe-inflight"
+        self.assertTrue(await self.redis.exists(probe_key))
+        self.assertTrue(await self.redis.pexpire(probe_key, 1))
+        for _ in range(100):
+            if not await self.redis.exists(probe_key):
+                break
+            await asyncio.sleep(0.002)
+        self.assertFalse(await self.redis.exists(probe_key))
+
+        # Use one stable logical instant after the previous pacing window;
+        # only the atomic probe election, not wall-clock test scheduling,
+        # should decide the 30 concurrent outcomes.
+        replacement_time = now + timedelta(milliseconds=100)
         candidates = [
             _job("primary", f"private:probe-expiry-replacement-{index}")
             for index in range(30)
