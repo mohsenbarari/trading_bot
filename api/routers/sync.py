@@ -1459,17 +1459,18 @@ async def _run_synced_deleted_user_telegram_effects(effects: list[tuple[int, int
                     },
                 )
 
-        try:
-            await remove_user_from_telegram_channel(telegram_id)
-        except Exception as exc:
-            logger.warning(
-                "Could not remove synced deleted Telegram user from channel",
-                extra={
-                    "event": "sync.deleted_user_telegram_channel_remove_failed",
-                    "user_id": user_id,
-                    **_summarize_exception(exc),
-                },
-            )
+        if not queue_mode:
+            try:
+                await remove_user_from_telegram_channel(telegram_id)
+            except Exception as exc:
+                logger.warning(
+                    "Could not remove synced deleted Telegram user from channel",
+                    extra={
+                        "event": "sync.deleted_user_telegram_channel_remove_failed",
+                        "user_id": user_id,
+                        **_summarize_exception(exc),
+                    },
+                )
 
 
 async def _enqueue_synced_deleted_user_telegram_notices(

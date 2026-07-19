@@ -271,7 +271,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "fe30d1e2f4b5"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "ff41e2f3a5b6"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -1040,6 +1040,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     effective_permissions=(
                         (
                             "can_manage_chat",
+                            "can_restrict_members",
                             "can_post_messages",
                             "can_edit_messages",
                         )

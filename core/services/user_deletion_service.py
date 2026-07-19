@@ -536,7 +536,11 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
 
         await publish_session_revocation(effect.user_id, effect.revoked_sessions)
 
-        if effect.telegram_id and current_server() == SERVER_FOREIGN:
+        if (
+            effect.telegram_id
+            and current_server() == SERVER_FOREIGN
+            and not queue_mode
+        ):
             try:
                 await remove_user_from_telegram_channel(effect.telegram_id)
             except Exception as exc:

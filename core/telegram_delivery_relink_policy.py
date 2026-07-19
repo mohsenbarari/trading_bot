@@ -27,6 +27,8 @@ _SUPPRESS = {
     TelegramDeliveryAction.TRADE_NONCRITICAL,
     TelegramDeliveryAction.NEW_USER_MEMBERSHIP,
     TelegramDeliveryAction.ACCOUNT_STATUS,
+    TelegramDeliveryAction.CHANNEL_MEMBER_BAN,
+    TelegramDeliveryAction.CHANNEL_MEMBER_UNBAN,
     TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE,
     TelegramDeliveryAction.ADMIN_BROADCAST,
     TelegramDeliveryAction.GENERAL_ANNOUNCEMENT,

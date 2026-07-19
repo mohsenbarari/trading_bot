@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import settings
 from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
 from core.services.customer_relation_service import (
@@ -15,6 +16,9 @@ from core.services.customer_relation_service import (
 )
 from core.services.telegram_delivery_queue_service import (
     enqueue_telegram_delivery_job,
+)
+from core.services.telegram_channel_membership_saga_service import (
+    ensure_telegram_channel_membership_removal_saga,
 )
 from core.services.telegram_notification_outbox_service import (
     TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
@@ -188,6 +192,7 @@ async def handoff_next_due_telegram_notification_outbox(
     db: AsyncSession,
     *,
     current_server: str,
+    expected_channel_id: int | None = None,
     now: datetime | None = None,
 ) -> TelegramNotificationOutboxQueueHandoffResult | None:
     """Bind one eligible allowlisted outbox row to one main-queue job."""
@@ -326,6 +331,18 @@ async def handoff_next_due_telegram_notification_outbox(
                 disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
                 reason="notification_action_recipient_version_pending",
             )
+        await ensure_telegram_channel_membership_removal_saga(
+            db,
+            current_server=current_server,
+            outbox=outbox,
+            user=user,
+            expected_channel_id=(
+                expected_channel_id
+                if expected_channel_id is not None
+                else getattr(settings, "channel_id", None)
+            ),
+            now=current_time,
+        )
     access = await evaluate_bot_access(db, user)
     if (
         not deleted_account_notice

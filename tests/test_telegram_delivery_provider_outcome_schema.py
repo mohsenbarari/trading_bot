@@ -76,6 +76,17 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
         self.assertIn("source_order_at", order_migration)
         self.assertIn('op.drop_column("telegram_delivery_jobs", "source_order_at")', order_migration)
 
+        membership_migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/ff41e2f3a5b6_add_channel_membership_saga.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fe30d1e2f4b5"',
+            membership_migration,
+        )
+        self.assertIn("telegram_channel_membership_sagas", membership_migration)
+        self.assertIn('op.drop_table("telegram_channel_membership_sagas")', membership_migration)
+
     def test_runtime_gate_has_strict_scope_and_identity_constraints(self):
         table = TelegramDeliveryRuntimeGate.__table__
         names = {constraint.name for constraint in table.constraints}

@@ -42,7 +42,12 @@ def _preflight_report(*, editor_enabled: bool = False, identity_only: bool = Fal
     identities = []
     for role in roles:
         permissions = (
-            ("can_manage_chat", "can_post_messages", "can_edit_messages")
+            (
+                "can_manage_chat",
+                "can_restrict_members",
+                "can_post_messages",
+                "can_edit_messages",
+            )
             if role == "primary"
             else ("can_manage_chat", "can_edit_messages")
         )

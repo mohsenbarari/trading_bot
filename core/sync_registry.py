@@ -419,6 +419,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "Foreign-only durable bot/gateway execution gate",
         notes="Preflight 429 is committed here before Redis mirroring or sleep.",
     ),
+    "telegram_channel_membership_sagas": _entry(
+        "telegram_channel_membership_sagas",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram channel-membership saga owner",
+        "never cross-sync membership targets, job bindings, or provider lifecycle",
+        "Foreign-only ordered ban/unban removal saga and audit",
+        notes=(
+            "The authoritative product intent is the synced account-status notification outbox; "
+            "this derived execution saga exists only on foreign."
+        ),
+    ),
     "telegram_scheduled_operations": _entry(
         "telegram_scheduled_operations",
         SyncPolicy.NO_SYNC,

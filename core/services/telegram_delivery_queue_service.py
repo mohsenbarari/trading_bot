@@ -72,10 +72,12 @@ SUPPORTED_TELEGRAM_BOT_IDENTITIES = frozenset(
 SUPPORTED_TELEGRAM_QUEUE_METHODS = frozenset(
     {
         "answerCallbackQuery",
+        "banChatMember",
         "deleteMessage",
         "editMessageReplyMarkup",
         "editMessageText",
         "sendMessage",
+        "unbanChatMember",
     }
 )
 CHANNEL_EDITOR_METHODS = frozenset({"editMessageReplyMarkup", "editMessageText"})

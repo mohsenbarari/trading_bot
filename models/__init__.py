@@ -70,6 +70,7 @@ from .telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 from .telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from .telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
 from .telegram_scheduled_operation import TelegramScheduledOperation
+from .telegram_channel_membership_saga import TelegramChannelMembershipSaga
 from .telegram_interaction_anchor_state import TelegramInteractionAnchorState
 from .chat import Chat
 from .chat_member import ChatMember
@@ -157,6 +158,7 @@ __all__ = [
     "TelegramDeliveryFeederState",
     "TelegramDeliveryResumeOperation",
     "TelegramScheduledOperation",
+    "TelegramChannelMembershipSaga",
     # Generic Chat
     "Chat",
     "ChatMember",

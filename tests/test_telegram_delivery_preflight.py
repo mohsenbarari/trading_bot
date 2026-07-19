@@ -54,7 +54,7 @@ class _ReadbackGateway:
             "can_manage_chat": True,
             "can_delete_messages": False,
             "can_manage_video_chats": False,
-            "can_restrict_members": False,
+            "can_restrict_members": role == "primary",
             "can_promote_members": False,
             "can_change_info": False,
             "can_invite_users": False,
@@ -144,7 +144,12 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity.bot_identity, "primary")
         self.assertEqual(
             identity.effective_permissions,
-            ("can_manage_chat", "can_post_messages", "can_edit_messages"),
+            (
+                "can_manage_chat",
+                "can_restrict_members",
+                "can_post_messages",
+                "can_edit_messages",
+            ),
         )
         self.assertEqual(
             [call[0] for call in gateway.calls],
@@ -473,11 +478,12 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await _run(primary=gateway)
 
-    async def test_primary_requires_both_post_and_edit_permissions(self):
+    async def test_primary_requires_post_edit_and_restrict_permissions(self):
         for missing, reason in (
             ("can_manage_chat", "manage_permission_missing"),
             ("can_post_messages", "primary_permissions_missing"),
             ("can_edit_messages", "primary_permissions_missing"),
+            ("can_restrict_members", "primary_permissions_missing"),
         ):
             gateway = _ReadbackGateway(
                 role="primary",

@@ -17,6 +17,9 @@ from core.services.telegram_delivery_queue_service import (
 from core.services.telegram_notification_outbox_queue_feedback import (
     TelegramNotificationOutboxQueueLifecycleFeedback,
 )
+from core.services.telegram_channel_membership_queue_feedback import (
+    TelegramChannelMembershipQueueLifecycleFeedback,
+)
 from core.services.telegram_notification_outbox_queue_service import (
     NOTIFICATION_OUTBOX_QUEUE_HANDOFF,
     NOTIFICATION_OUTBOX_QUEUE_REQUIRES_RECONCILIATION,
@@ -41,6 +44,9 @@ from core.services.telegram_notification_outbox_service import (
 from core.telegram_delivery_notification_action_freshness import (
     validate_notification_action_telegram_delivery_freshness,
 )
+from core.telegram_delivery_channel_membership_freshness import (
+    validate_channel_membership_telegram_delivery_freshness,
+)
 from core.telegram_delivery_offer_success_contract import (
     OFFER_SUCCESS_COPY_LEGACY,
 )
@@ -54,6 +60,7 @@ from core.telegram_delivery_repeat_offer_freshness import (
     validate_repeat_offer_response_telegram_delivery_freshness,
 )
 from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryDecision,
     TelegramDeliveryOutcome,
     TelegramDeliveryAction,
     TelegramDeliveryState,
@@ -66,6 +73,7 @@ from core.utils import utc_now
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_channel_membership_saga import TelegramChannelMembershipSaga
 from models.telegram_notification_outbox import (
     TelegramNotificationOutbox,
     TelegramNotificationOutboxStatus,
@@ -720,7 +728,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             self.assertEqual(outbox.queue_job_id, int(job.id))
             self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.PENDING)
 
-    async def test_relink_reclassifies_and_builds_new_job(self):
+    async def test_relink_suppresses_membership_notice_without_new_job(self):
         outbox_ids, user_ids = await self._seed_outbox(recipients=1)
         first = await self._handoff()
         job = await self._claim_job()
@@ -739,7 +747,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                     utc_now(),
                 )
             )
-            self.assertEqual(freshness.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+            self.assertEqual(freshness.outcome, TelegramFreshnessOutcome.SUPERSEDED)
             dispatched = await apply_telegram_delivery_freshness_result(
                 db,
                 current_server="foreign",
@@ -753,17 +761,15 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             self.assertFalse(dispatched)
             await db.commit()
         replacement = await self._handoff()
-        self.assertNotEqual(replacement.job_id, first.job_id)
+        self.assertIsNone(replacement)
         async with self.Session() as db:
             old = await db.get(TelegramDeliveryJobRecord, int(first.job_id))
-            new = await db.get(TelegramDeliveryJobRecord, int(replacement.job_id))
             outbox = await db.get(TelegramNotificationOutbox, outbox_ids[0])
-            user = await db.get(User, user_ids[0])
-            self.assertEqual(old.state, TelegramDeliveryState.PENDING_RECONCILE)
-            self.assertEqual(new.payload["chat_id"], int(user.telegram_id))
-            self.assertEqual(outbox.queue_job_id, int(new.id))
+            self.assertEqual(old.state, TelegramDeliveryState.SUPERSEDED)
+            self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SKIPPED)
+            self.assertIsNone(outbox.queue_job_id)
 
-    async def test_repeat_response_relink_reclassifies_to_distinct_job(self):
+    async def test_repeat_response_relink_suppresses_without_distinct_job(self):
         outbox_id, user_id = await self._seed_repeat_outbox()
         first = await self._handoff_repeat()
         job = await self._claim_job(worker_id="repeat-bridge")
@@ -790,7 +796,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 )
                 self.assertEqual(
                     freshness.outcome,
-                    TelegramFreshnessOutcome.RECLASSIFY,
+                    TelegramFreshnessOutcome.SUPERSEDED,
                 )
                 dispatched = await apply_telegram_delivery_freshness_result(
                     db,
@@ -806,16 +812,13 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 await db.commit()
 
         replacement = await self._handoff_repeat()
-        self.assertNotEqual(replacement.job_id, first.job_id)
+        self.assertIsNone(replacement)
         async with self.Session() as db:
             old = await db.get(TelegramDeliveryJobRecord, int(first.job_id))
-            new = await db.get(TelegramDeliveryJobRecord, int(replacement.job_id))
             outbox = await db.get(TelegramNotificationOutbox, outbox_id)
-            user = await db.get(User, user_id)
-            self.assertEqual(old.state, TelegramDeliveryState.PENDING_RECONCILE)
-            self.assertEqual(new.payload["chat_id"], int(user.telegram_id))
-            self.assertNotEqual(new.source_version, old.source_version)
-            self.assertEqual(outbox.queue_job_id, int(new.id))
+            self.assertEqual(old.state, TelegramDeliveryState.SUPERSEDED)
+            self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SKIPPED)
+            self.assertIsNone(outbox.queue_job_id)
 
     async def test_lifecycle_callbacks_are_required(self):
         await self._seed_outbox(recipients=1)
@@ -1261,6 +1264,161 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             reassigned_decision.reason,
             "notification_action_freshness_deleted_route_reassigned",
         )
+
+    async def test_deleted_account_materializes_ordered_ban_unban_saga(self):
+        channel_id = -1001234567890
+        async with self.Session() as db:
+            user = self._user(
+                account_name="deleted_membership_saga",
+                mobile="09128887742",
+                telegram_id=8_477_742,
+            )
+            db.add(user)
+            await db.flush()
+            user_id = int(user.id)
+            telegram_id = int(user.telegram_id)
+            user.is_deleted = True
+            user.deleted_at = utc_now().replace(tzinfo=None)
+            user.telegram_id = None
+            user.sync_version = 2
+            result = await enqueue_account_deletion_telegram_notification_once(
+                db,
+                recipient=TelegramNotificationRecipient(
+                    user_id=user_id,
+                    telegram_id=telegram_id,
+                ),
+                source_id=f"account-deleted:{user_id}:2",
+                text="حساب از پروژه حذف شد",
+                user=user,
+                user_sync_version=2,
+            )
+            outbox_id = int(result.outbox.id)
+            await db.commit()
+
+        async with self.Session() as db:
+            handoff = await handoff_next_due_telegram_notification_outbox(
+                db,
+                current_server="foreign",
+                expected_channel_id=channel_id,
+                now=utc_now(),
+            )
+            await db.commit()
+        self.assertEqual(handoff.disposition, NOTIFICATION_OUTBOX_QUEUE_HANDOFF)
+
+        async with self.Session() as db:
+            saga = (
+                await db.execute(
+                    select(TelegramChannelMembershipSaga).where(
+                        TelegramChannelMembershipSaga.source_outbox_id == outbox_id
+                    )
+                )
+            ).scalar_one()
+            ban = await db.get(TelegramDeliveryJobRecord, int(saga.ban_job_id))
+            unban = await db.get(TelegramDeliveryJobRecord, int(saga.unban_job_id))
+            ban_freshness = await validate_channel_membership_telegram_delivery_freshness(
+                db,
+                ban,
+                utc_now(),
+                expected_channel_id=channel_id,
+            )
+            unban_wait = await validate_channel_membership_telegram_delivery_freshness(
+                db,
+                unban,
+                utc_now(),
+                expected_channel_id=channel_id,
+            )
+            self.assertEqual(ban.method, "banChatMember")
+            self.assertEqual(ban.payload["user_id"], telegram_id)
+            self.assertEqual(unban.method, "unbanChatMember")
+            self.assertEqual(ban_freshness.outcome, TelegramFreshnessOutcome.SEND)
+            self.assertEqual(
+                unban_wait.outcome,
+                TelegramFreshnessOutcome.WAIT_DEPENDENCY,
+            )
+
+            feedback = TelegramChannelMembershipQueueLifecycleFeedback(
+                expected_channel_id=channel_id
+            )
+            ban.state = TelegramDeliveryState.SENT
+            await feedback.apply_delivery_result(
+                db,
+                ban,
+                TelegramDeliveryDecision(
+                    outcome=TelegramDeliveryOutcome.SENT,
+                    reason="sent",
+                ),
+                utc_now(),
+            )
+            # A later relink must not cancel the compensating unban after the
+            # provider has durably accepted the ban.
+            db.add(
+                self._user(
+                    account_name="membership_saga_relinked_after_ban",
+                    mobile="09128887743",
+                    telegram_id=telegram_id,
+                )
+            )
+            await db.commit()
+
+        async with self.Session() as db:
+            saga = await db.get(TelegramChannelMembershipSaga, int(saga.id))
+            unban = await db.get(TelegramDeliveryJobRecord, int(saga.unban_job_id))
+            unban_freshness = await validate_channel_membership_telegram_delivery_freshness(
+                db,
+                unban,
+                utc_now(),
+                expected_channel_id=channel_id,
+            )
+            self.assertEqual(unban_freshness.outcome, TelegramFreshnessOutcome.SEND)
+            self.assertEqual(
+                unban_freshness.reason,
+                "membership_freshness_unban_compensation_required",
+            )
+            unban.state = TelegramDeliveryState.SENT
+            feedback = TelegramChannelMembershipQueueLifecycleFeedback(
+                expected_channel_id=channel_id
+            )
+            await feedback.apply_delivery_result(
+                db,
+                unban,
+                TelegramDeliveryDecision(
+                    outcome=TelegramDeliveryOutcome.SENT,
+                    reason="sent",
+                ),
+                utc_now(),
+            )
+            await db.commit()
+
+        async with self.Session() as db:
+            saga = await db.get(TelegramChannelMembershipSaga, int(saga.id))
+            self.assertEqual(saga.state, "complete")
+            self.assertIsNotNone(saga.ban_succeeded_at)
+            self.assertIsNotNone(saga.completed_at)
+
+    async def test_inactive_account_notice_materializes_membership_saga(self):
+        outbox_id, _user_id = await self._seed_action_outbox(
+            action=TelegramDeliveryAction.ACCOUNT_STATUS,
+            account_status=UserAccountStatus.INACTIVE,
+            current_account_status=UserAccountStatus.INACTIVE,
+        )
+        await self._handoff()
+
+        async with self.Session() as db:
+            saga = (
+                await db.execute(
+                    select(TelegramChannelMembershipSaga).where(
+                        TelegramChannelMembershipSaga.source_outbox_id == outbox_id
+                    )
+                )
+            ).scalar_one()
+            ban = await db.get(TelegramDeliveryJobRecord, int(saga.ban_job_id))
+            unban = await db.get(TelegramDeliveryJobRecord, int(saga.unban_job_id))
+            self.assertEqual(saga.source_kind, "account_inactive")
+            self.assertEqual(ban.action_kind, TelegramDeliveryAction.CHANNEL_MEMBER_BAN)
+            self.assertEqual(
+                unban.action_kind,
+                TelegramDeliveryAction.CHANNEL_MEMBER_UNBAN,
+            )
 
     async def test_deleted_account_notice_skips_reassigned_predelete_route(self):
         async with self.Session() as db:

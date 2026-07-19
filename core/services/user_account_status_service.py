@@ -238,7 +238,11 @@ async def transition_user_account_status(
             messenger_blocked=False,
         )
 
-        if user.telegram_id is not None:
+        if (
+            user.telegram_id is not None
+            and configured_telegram_delivery_runtime().mode
+            != TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
             try:
                 await remove_user_from_telegram_channel(user.telegram_id)
             except Exception:

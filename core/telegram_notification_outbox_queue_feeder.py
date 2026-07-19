@@ -84,6 +84,7 @@ async def run_telegram_notification_outbox_queue_handoff_cycle(
             result = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server=current_server(),
+                expected_channel_id=getattr(settings, "channel_id", None),
             )
             if result is None:
                 await db.rollback()

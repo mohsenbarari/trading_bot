@@ -27,6 +27,9 @@ from core.services.telegram_trade_result_queue_feedback import (
 from core.services.telegram_scheduled_operation_queue_feedback import (
     TelegramScheduledOperationQueueLifecycleFeedback,
 )
+from core.services.telegram_channel_membership_queue_feedback import (
+    TelegramChannelMembershipQueueLifecycleFeedback,
+)
 from core.telegram_delivery_admin_broadcast_freshness import (
     ADMIN_BROADCAST_FRESHNESS_ACTIONS,
     AdminBroadcastTelegramDeliveryFreshnessValidator,
@@ -85,6 +88,10 @@ from core.telegram_delivery_trade_freshness import (
 from core.telegram_delivery_scheduled_operation_freshness import (
     SCHEDULED_OPERATION_FRESHNESS_ACTIONS,
     ScheduledOperationTelegramDeliveryFreshnessValidator,
+)
+from core.telegram_delivery_channel_membership_freshness import (
+    CHANNEL_MEMBERSHIP_FRESHNESS_ACTIONS,
+    ChannelMembershipTelegramDeliveryFreshnessValidator,
 )
 from core.telegram_delivery_credentials import (
     TelegramDeliveryCredentialRegistry,
@@ -212,6 +219,15 @@ def configured_telegram_delivery_freshness_registry(
             ),
         ),
     )
+    _merge_unique(
+        routes,
+        notification_action_freshness_routes(
+            CHANNEL_MEMBERSHIP_FRESHNESS_ACTIONS,
+            ChannelMembershipTelegramDeliveryFreshnessValidator(
+                expected_channel_id=expected_channel_id
+            ),
+        ),
+    )
     return TelegramDeliveryFreshnessRegistry(routes)
 
 
@@ -232,6 +248,9 @@ def configured_telegram_delivery_lifecycle_registry(
     scheduled_feedback = TelegramScheduledOperationQueueLifecycleFeedback(
         expected_channel_id=expected_channel_id
     )
+    membership_feedback = TelegramChannelMembershipQueueLifecycleFeedback(
+        expected_channel_id=expected_channel_id
+    )
 
     for actions, feedback in (
         (OFFER_FRESHNESS_ACTIONS, offer_feedback),
@@ -244,6 +263,7 @@ def configured_telegram_delivery_lifecycle_registry(
         (OFFER_SUCCESS_FRESHNESS_ACTIONS, notification_feedback),
         (CALLBACK_FRESHNESS_ACTIONS, callback_feedback),
         (SCHEDULED_OPERATION_FRESHNESS_ACTIONS, scheduled_feedback),
+        (CHANNEL_MEMBERSHIP_FRESHNESS_ACTIONS, membership_feedback),
     ):
         _merge_unique(routes, lifecycle_routes(actions, feedback))
     return TelegramDeliveryLifecycleRegistry(routes)

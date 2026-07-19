@@ -568,6 +568,21 @@ def telegram_notification_action_outbox_is_deleted_account_notice(
     )
 
 
+def telegram_notification_action_channel_removal_kind(
+    outbox: TelegramNotificationOutbox | Any,
+) -> str | None:
+    """Classify an account notice that durably requests channel removal."""
+    source = _validate_source_contract(outbox)
+    if source.account_notice_kind == ACCOUNT_NOTICE_KIND_DELETED:
+        return "account_deleted"
+    if (
+        source.account_notice_kind == ACCOUNT_NOTICE_KIND_STATUS
+        and source.expected_account_status == UserAccountStatus.INACTIVE.value
+    ):
+        return "account_inactive"
+    return None
+
+
 async def telegram_notification_action_deleted_route_is_reassigned(
     db: AsyncSession,
     outbox: TelegramNotificationOutbox | Any,

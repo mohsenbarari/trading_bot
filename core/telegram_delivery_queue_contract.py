@@ -80,6 +80,8 @@ class TelegramDeliveryAction(str, Enum):
     RECONCILIATION_EDIT = "reconciliation_edit"
     NEW_USER_MEMBERSHIP = "new_user_membership"
     ACCOUNT_STATUS = "account_status"
+    CHANNEL_MEMBER_BAN = "channel_member_ban"
+    CHANNEL_MEMBER_UNBAN = "channel_member_unban"
     TARGETED_ADMIN_MESSAGE = "targeted_admin_message"
     ADMIN_BROADCAST = "admin_broadcast"
     GENERAL_ANNOUNCEMENT = "general_announcement"
@@ -244,6 +246,8 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.CANCELLED_OFFER_EDIT: (TelegramDeliveryPriority.M4, 2),
     TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT: (TelegramDeliveryPriority.M4, 3),
     TelegramDeliveryAction.ACCOUNT_STATUS: (TelegramDeliveryPriority.M5, 0),
+    TelegramDeliveryAction.CHANNEL_MEMBER_BAN: (TelegramDeliveryPriority.M5, 0),
+    TelegramDeliveryAction.CHANNEL_MEMBER_UNBAN: (TelegramDeliveryPriority.M5, 1),
     TelegramDeliveryAction.TIMED_SECURITY: (TelegramDeliveryPriority.M5, 0),
     TelegramDeliveryAction.DELAYED_RESTRICTION: (TelegramDeliveryPriority.M5, 0),
     TelegramDeliveryAction.TARGETED_ADMIN_MESSAGE: (TelegramDeliveryPriority.M5, 1),
@@ -285,6 +289,8 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.ADMIN_SYSTEM, TelegramDeliveryAction.ADMIN_BROADCAST): 3,
     (TelegramFeederKind.ADMIN_SYSTEM, TelegramDeliveryAction.GENERAL_ANNOUNCEMENT): 4,
     (TelegramFeederKind.ADMIN_SYSTEM, TelegramDeliveryAction.COSMETIC_CLEANUP): 5,
+    (TelegramFeederKind.ADMIN_SYSTEM, TelegramDeliveryAction.CHANNEL_MEMBER_BAN): 6,
+    (TelegramFeederKind.ADMIN_SYSTEM, TelegramDeliveryAction.CHANNEL_MEMBER_UNBAN): 7,
     (TelegramFeederKind.MARKET_STATUS, TelegramDeliveryAction.MARKET_TRANSITION): 0,
     (TelegramFeederKind.MARKET_STATUS, TelegramDeliveryAction.MARKET_STATUS_CORRECTION): 1,
     (TelegramFeederKind.MARKET_STATUS, TelegramDeliveryAction.NONCRITICAL_MARKET): 2,

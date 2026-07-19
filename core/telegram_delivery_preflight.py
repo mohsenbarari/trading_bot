@@ -266,7 +266,11 @@ def _validate_permissions(
             f"telegram_preflight_manage_permission_missing:{role}"
         )
     if role == TELEGRAM_PRIMARY_BOT_IDENTITY:
-        required = {"can_post_messages", "can_edit_messages"}
+        required = {
+            "can_post_messages",
+            "can_edit_messages",
+            "can_restrict_members",
+        }
         if not required.issubset(permissions):
             raise TelegramDeliveryPreflightFailedError(
                 "telegram_preflight_primary_permissions_missing"
