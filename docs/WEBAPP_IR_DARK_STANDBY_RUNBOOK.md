@@ -58,6 +58,13 @@ production namespace is a separate post-Full-Matrix change with fresh
 snapshots, explicit approval, rollback evidence, and a stability window. Test
 results never authorize a production-domain change by themselves.
 
+This test-domain boundary does not move the project's authoritative Full
+Matrix away from `staging.gold-trade.ir`. Early CDN checks may use
+`app.gold-trading.ir`, but final evidence must come from the official staging
+deployment. If both hostnames are used during that campaign, they must be two
+ingresses to the same immutable release and data plane, not separate staging
+environments.
+
 ## Time Contract
 
 Every host, container, PostgreSQL instance, log, manifest, and object key uses

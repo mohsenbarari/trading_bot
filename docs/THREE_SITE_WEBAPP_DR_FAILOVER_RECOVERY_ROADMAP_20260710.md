@@ -293,6 +293,7 @@ The deployment namespaces are fixed and deliberately different:
 ```text
 production root:       gold-trade.ir
 current production:    coin.gold-trade.ir
+official staging:      staging.gold-trade.ir
 failover-test root:    gold-trading.ir
 current CDN test app:  app.gold-trading.ir
 ```
@@ -303,6 +304,14 @@ the isolated provider-validation zone. As of the read-only Arvan check on
 `gold-trade.ir` is not. Production onboarding and routing are a separate
 post-Full-Matrix change gate. Evidence from the test root cannot authorize a
 production-root mutation.
+
+`staging.gold-trade.ir` remains the canonical project staging environment.
+`app.gold-trading.ir` is only an isolated CDN/failover ingress used for early
+provider and routing tests. The final project Full Matrix must execute against
+the official staging deployment. When a CDN-specific scenario still requires
+the test ingress, both hostnames must reach the same immutable staging release,
+three-site runtime, databases, queues, and evidence set; a separate shadow
+staging environment cannot be used to assemble a passing result.
 
 Required properties:
 
@@ -1277,6 +1286,23 @@ Exit criteria:
 
 ### Stage 9 - Automated Failure Matrix
 
+Execution boundary:
+
+- unit, component, transport, and isolated Arvan primitive tests may run in the
+  lab and on `gold-trading.ir` before the official staging campaign;
+- the authoritative Full Matrix campaign runs on the official project staging
+  environment at `staging.gold-trade.ir` using one immutable integration SHA;
+- every Bot, WebApp-FI, WebApp-IR, Witness, database, queue, file plane, and
+  test runner in the campaign must declare that same release/config identity;
+- CDN-specific cases may use `app.gold-trading.ir` only as a second ingress to
+  that exact staging deployment while the production root is deliberately not
+  enrolled in Arvan;
+- domain-sensitive behavior such as Telegram links, CORS, cookies, WebSocket
+  reconnect, authentication, and public URL generation must still pass on the
+  canonical `staging.gold-trade.ir` hostname;
+- results from different releases, databases, or shadow environments must not
+  be combined into one passing Full Matrix report.
+
 Required scenarios:
 
 - normal three-site replication;
@@ -1355,7 +1381,10 @@ Exit criteria:
 
 Deliverables:
 
-- isolated three-site-like staging topology;
+- the official `staging.gold-trade.ir` project environment deployed as an
+  isolated three-site topology;
+- optional `app.gold-trading.ir` Arvan ingress attached to the same exact
+  staging release and data plane for CDN-specific scenarios only;
 - no production peer or data;
 - normal baseline and checksum evidence;
 - controlled international-link cut;
@@ -1371,6 +1400,11 @@ Deliverables:
 
 Exit criteria:
 
+- one campaign/evidence identity proves all final results came from the
+  official staging environment and one immutable integration SHA;
+- canonical-host domain-sensitive tests pass on `staging.gold-trade.ir`, while
+  any CDN-specific alias results are reported separately but against the same
+  runtime and data plane;
 - repeated successful drills with no unresolved conflict;
 - no duplicate trade, offer, notification, or publication side effect;
 - canonical DB and file parity pass after recovery;
