@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
     telegram_delivery_queue_worker_batch_limit: int = 25
+    telegram_delivery_queue_primary_concurrency: int = 4
+    telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
+    telegram_delivery_queue_channel_editor_concurrency: int = 1
     telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_lease_seconds: float = 30.0
     telegram_delivery_queue_worker_recover_limit: int = 100
@@ -230,11 +233,21 @@ class Settings(BaseSettings):
         for name in (
             "telegram_delivery_queue_worker_batch_limit",
             "telegram_delivery_queue_worker_recover_limit",
+            "telegram_delivery_queue_primary_concurrency",
+            "telegram_delivery_queue_primary_m0_reserved_concurrency",
+            "telegram_delivery_queue_channel_editor_concurrency",
             "telegram_offer_queue_feeder_batch_limit",
             "telegram_delivery_queue_limiter_key_ttl_seconds",
         ):
             if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
                 raise ValueError(f"{name}_must_be_positive")
+        if (
+            self.telegram_delivery_queue_primary_m0_reserved_concurrency
+            >= self.telegram_delivery_queue_primary_concurrency
+        ):
+            raise ValueError(
+                "telegram_delivery_queue_primary_m0_reservation_must_leave_general_capacity"
+            )
         return self
     
     class Config:

@@ -25,7 +25,6 @@ from core.telegram_delivery_queue_contract import (
     TelegramFreshnessOutcome,
     apply_freshness_decision,
 )
-from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_delivery_provider_outcome import (
     TELEGRAM_PROVIDER_OUTCOME_PENDING,
@@ -40,6 +39,7 @@ from .telegram_delivery_queue_service import (
     _enum_value,
     _record_to_contract,
     _require_foreign,
+    _transition_time,
 )
 
 
@@ -247,7 +247,7 @@ async def resolve_ambiguous_telegram_delivery_job(
 ) -> TelegramDeliveryDecision:
     """Break-glass resolution with positive evidence and append-only audit."""
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     if not str(evidence_reference).strip() or not str(operator_reference).strip():
         raise TelegramDeliveryQueueValidationError("reconciliation_evidence_and_actor_required")
     job = (
@@ -333,7 +333,7 @@ async def reconcile_telegram_delivery_jobs(
     now: datetime | None = None,
 ) -> TelegramDeliveryReconciliationReport:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     ambiguous_cutoff = current_time - timedelta(
         seconds=max(1.0, float(ambiguity_grace_seconds))
     )

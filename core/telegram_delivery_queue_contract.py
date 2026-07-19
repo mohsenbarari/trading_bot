@@ -636,12 +636,17 @@ def apply_freshness_decision(
             job.feeder_rank = feeder_internal_rank(job.feeder, decision.replacement_action)
 
 
-def _positive_number(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
+def _telegram_retry_after_integer(value: Any) -> int | None:
+    """Accept only the Bot API's documented positive ``Integer`` shape.
+
+    ``bool`` is deliberately rejected even though it is an ``int`` subclass in
+    Python.  Values outside Telegram's documented signed 32-bit Integer range
+    are malformed provider data and must take the bounded-backoff fallback
+    instead of being truncated or overflowing persistence.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return number if math.isfinite(number) and number > 0 else None
+    return value if 0 < value <= 2_147_483_647 else None
 
 
 def _status_code(result: TelegramGatewayResultLike) -> int | None:
@@ -660,13 +665,13 @@ def _status_code(result: TelegramGatewayResultLike) -> int | None:
     return None
 
 
-def _retry_after_seconds(result: TelegramGatewayResultLike) -> float | None:
+def _retry_after_seconds(result: TelegramGatewayResultLike) -> int | None:
     if not isinstance(result.response_json, Mapping):
         return None
     parameters = result.response_json.get("parameters")
     if not isinstance(parameters, Mapping):
         return None
-    return _positive_number(parameters.get("retry_after"))
+    return _telegram_retry_after_integer(parameters.get("retry_after"))
 
 
 def _has_migrate_to_chat_id(result: TelegramGatewayResultLike) -> bool:

@@ -581,6 +581,31 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.next_retry_at, NOW + timedelta(seconds=5.25))
         self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
 
+    async def test_malformed_retry_after_uses_fallback_without_truncation_or_overflow(self):
+        for index, malformed in enumerate((1.5, "2", True, 2_147_483_648)):
+            with self.subTest(retry_after=malformed):
+                queue = InMemoryTelegramDeliveryQueue()
+                job = await self.enqueue(queue, f"malformed-retry-after-{index}")
+                await self.claim(queue)
+                decision = await self.resolve(
+                    queue,
+                    job,
+                    gateway_result(
+                        status_code=429,
+                        response_json={
+                            "parameters": {"retry_after": malformed}
+                        },
+                    ),
+                    retry_base_seconds=1,
+                    retry_max_seconds=1,
+                    retry_after_safety_seconds=0.1,
+                )
+                self.assertEqual(
+                    decision.next_retry_at,
+                    NOW + timedelta(seconds=1.1),
+                )
+                self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
+
     async def test_transport_phase_and_jitter_are_safe_deterministic_and_bounded(self):
         prewrite_queue = InMemoryTelegramDeliveryQueue()
         prewrite = await self.enqueue(prewrite_queue, "prewrite")

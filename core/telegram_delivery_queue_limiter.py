@@ -312,7 +312,13 @@ class RedisTelegramDeliveryLimiter:
             "bot_next": f"{prefix}:bot:{bot_identity}:next",
             "destination_next": f"{prefix}:destination:{destination_digest}:next",
             "bot_block": f"{prefix}:bot:{bot_identity}:blocked",
-            "destination_block": f"{prefix}:destination:{destination_digest}:blocked",
+            # Hard permission/capability pauses are credential-specific.  The
+            # shared destination cadence key above remains cross-bot so adding
+            # the editor never multiplies the channel's accepted send rate.
+            "destination_block": (
+                f"{prefix}:bot:{bot_identity}:destination:"
+                f"{destination_digest}:blocked"
+            ),
             "gateway_block": f"{prefix}:gateway:blocked",
             "recent_429": f"{prefix}:bot:{bot_identity}:recent-429",
             "probe_required": f"{prefix}:bot:{bot_identity}:probe-required",
@@ -643,10 +649,12 @@ class RedisTelegramDeliveryLimiter:
                 "telegram_limiter_destination_missing"
             )
         digest = _destination_digest(destination)
-        keys = self._keys("primary", digest)
+        primary_keys = self._keys("primary", digest)
+        editor_keys = self._keys("channel_editor", digest)
         await self._resume_delete(
-            keys["destination_block"],
-            keys["destination_next"],
+            primary_keys["destination_block"],
+            editor_keys["destination_block"],
+            primary_keys["destination_next"],
         )
 
     async def resume_destination(self, destination_key: str) -> None:

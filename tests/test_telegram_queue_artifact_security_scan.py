@@ -9,7 +9,11 @@ import tempfile
 import unittest
 import zipfile
 
-from scripts.scan_telegram_queue_artifacts import scan_paths
+from scripts.scan_telegram_queue_artifacts import (
+    scan_paths,
+    scan_release_surfaces,
+    scan_tracked_source,
+)
 
 
 class TelegramQueueArtifactSecurityScanTests(unittest.TestCase):
@@ -107,6 +111,45 @@ class TelegramQueueArtifactSecurityScanTests(unittest.TestCase):
         report = scan_paths([Path("/definitely/not/present/topq-artifact")])
         self.assertEqual(report["status"], "blocked")
         self.assertEqual(report["findings"][0]["kind"], "input_missing")
+
+    def test_tracked_source_scan_uses_high_confidence_secret_shapes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.check_call(["git", "init", "-q"], cwd=repo)
+            safe = repo / "safe.py"
+            safe.write_text('bot_token = settings.bot_token\nuser_id = 4\n', encoding="utf-8")
+            subprocess.check_call(["git", "add", "safe.py"], cwd=repo)
+            subprocess.check_call(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "safe"],
+                cwd=repo,
+            )
+            clean = scan_tracked_source(repo)
+
+            unsafe = repo / "unsafe.env"
+            unsafe.write_text(
+                "BOT_TOKEN=1234567890:" + ("Z" * 35) + "\n",
+                encoding="utf-8",
+            )
+            subprocess.check_call(["git", "add", "unsafe.env"], cwd=repo)
+            subprocess.check_call(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "unsafe"],
+                cwd=repo,
+            )
+            blocked = scan_tracked_source(repo)
+
+        self.assertEqual(clean["status"], "clean")
+        self.assertRegex(clean["git_commit"], r"^[0-9a-f]{40}$")
+        self.assertRegex(clean["blob_manifest_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(blocked["status"], "blocked")
+        self.assertEqual(blocked["findings"][0]["kind"], "telegram_bot_token")
+
+    def test_release_scan_requires_at_least_one_surface(self):
+        report = scan_release_surfaces(
+            artifact_paths=(),
+            tracked_source_root=None,
+        )
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["findings"][0]["kind"], "scan_surface_missing")
 
 
 if __name__ == "__main__":

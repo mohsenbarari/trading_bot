@@ -12,12 +12,16 @@ import atexit
 import asyncio
 import gc
 from hashlib import sha256
+from importlib import metadata
 import io
 import json
 import os
+import platform
 from pathlib import Path
 import re
+import subprocess
 import sys
+import time
 import unittest
 from urllib.parse import urlparse, urlunparse
 import warnings
@@ -85,11 +89,61 @@ class _FdTrackingTextTestResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.fd_growth_events: list[dict[str, object]] = []
+        self.test_results: list[dict[str, object]] = []
         self._fd_before_test: dict[int, str] | None = None
+        self._test_started_at: float | None = None
+        self._recorded_test_ids: set[str] = set()
 
     def startTest(self, test) -> None:
         self._fd_before_test = _open_fd_snapshot()
+        self._test_started_at = time.perf_counter()
         super().startTest(test)
+
+    def _record_test(self, test, status: str) -> None:
+        test_id = test.id()
+        if test_id in self._recorded_test_ids:
+            return
+        self._recorded_test_ids.add(test_id)
+        duration_ms = (
+            None
+            if self._test_started_at is None
+            else round((time.perf_counter() - self._test_started_at) * 1000.0, 3)
+        )
+        self.test_results.append(
+            {"test_id": test_id, "status": status, "duration_ms": duration_ms}
+        )
+
+    def addSuccess(self, test) -> None:
+        self._record_test(test, "passed")
+        super().addSuccess(test)
+
+    def addFailure(self, test, err) -> None:
+        self._record_test(test, "failed")
+        super().addFailure(test, err)
+
+    def addError(self, test, err) -> None:
+        self._record_test(test, "error")
+        super().addError(test, err)
+
+    def addSkip(self, test, reason) -> None:
+        self._record_test(test, "skipped")
+        super().addSkip(test, reason)
+
+    def addExpectedFailure(self, test, err) -> None:
+        self._record_test(test, "expected_failure")
+        super().addExpectedFailure(test, err)
+
+    def addUnexpectedSuccess(self, test) -> None:
+        self._record_test(test, "unexpected_success")
+        super().addUnexpectedSuccess(test)
+
+    def addSubTest(self, test, subtest, err) -> None:
+        if err is not None:
+            self._record_test(
+                test,
+                "failed" if issubclass(err[0], test.failureException) else "error",
+            )
+        super().addSubTest(test, subtest, err)
 
     def stopTest(self, test) -> None:
         fd_after_test = _open_fd_snapshot()
@@ -107,7 +161,47 @@ class _FdTrackingTextTestResult(unittest.TextTestResult):
                     {"test": test.id(), "opened": opened}
                 )
         self._fd_before_test = None
+        self._test_started_at = None
         super().stopTest(test)
+
+
+def _flatten_test_ids(suite: unittest.TestSuite) -> list[str]:
+    ids: list[str] = []
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            ids.extend(_flatten_test_ids(item))
+        else:
+            ids.append(item.id())
+    return ids
+
+
+def _git_metadata(repo_root: Path) -> dict[str, object]:
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", *args],
+            cwd=repo_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+
+    try:
+        return {
+            "commit": git("rev-parse", "HEAD"),
+            "branch": git("branch", "--show-current"),
+            "dirty": bool(git("status", "--porcelain")),
+        }
+    except (OSError, subprocess.CalledProcessError):
+        return {"commit": None, "branch": None, "dirty": None}
+
+
+def _dependency_versions() -> dict[str, str | None]:
+    versions: dict[str, str | None] = {}
+    for package in ("SQLAlchemy", "asyncpg", "psycopg2-binary", "redis", "pydantic", "aiogram"):
+        try:
+            versions[package] = metadata.version(package)
+        except metadata.PackageNotFoundError:
+            versions[package] = None
+    return versions
 
 
 def _validated_database_urls(raw_url: str) -> tuple[str, str]:
@@ -307,6 +401,10 @@ def main(argv: list[str] | None = None) -> int:
         start_dir=str((repo_root / args.start_directory).resolve()),
         pattern=args.pattern,
     )
+    discovered_test_ids = _flatten_test_ids(suite)
+    test_inventory_sha256 = sha256(
+        "\n".join(discovered_test_ids).encode("utf-8")
+    ).hexdigest()
     # Imports and the first uvloop/event-loop initialization may create
     # process-lifetime selector descriptors. Warm them before the leak
     # baseline so only per-test growth is treated as a leak.
@@ -324,13 +422,18 @@ def main(argv: list[str] | None = None) -> int:
         log_target.parent.mkdir(parents=True, exist_ok=True)
         evidence_log = log_target.open("w", encoding="utf-8")
         test_stream = _TeeTextStream(sys.stderr, evidence_log)
+    captured_warnings: list[warnings.WarningMessage] = []
     try:
-        result = unittest.TextTestRunner(
-            stream=test_stream,
-            verbosity=args.verbosity,
-            buffer=True,
-            resultclass=_FdTrackingTextTestResult,
-        ).run(suite)
+        with warnings.catch_warnings(record=True) as warning_records:
+            warnings.simplefilter("always")
+            warnings.filterwarnings("error", category=ResourceWarning)
+            result = unittest.TextTestRunner(
+                stream=test_stream,
+                verbosity=args.verbosity,
+                buffer=True,
+                resultclass=_FdTrackingTextTestResult,
+            ).run(suite)
+            captured_warnings = list(warning_records)
     finally:
         sys.unraisablehook = previous_unraisable_hook
         if evidence_log is not None:
@@ -354,20 +457,35 @@ def main(argv: list[str] | None = None) -> int:
             if fd_before_snapshot.get(descriptor) != target
         ]
     )
+    result_inventory_complete = bool(
+        len(result.test_results) == result.testsRun == len(discovered_test_ids)
+    )
+    warning_categories: dict[str, int] = {}
+    for warning in captured_warnings:
+        category = warning.category.__name__
+        warning_categories[category] = warning_categories.get(category, 0) + 1
     hygiene_ok = (
         not unraisable_failures
         and not loop_failures
         and (fd_growth is None or fd_growth <= 0)
+        and result_inventory_complete
+        and not result.skipped
     )
     report: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "environment": "synthetic-test",
         "pattern": args.pattern,
         "tests_run": result.testsRun,
+        "discovered_test_count": len(discovered_test_ids),
+        "test_inventory_sha256": test_inventory_sha256,
+        "result_inventory_complete": result_inventory_complete,
+        "test_results": result.test_results,
         "failures": len(result.failures),
         "errors": len(result.errors),
         "skipped": len(result.skipped),
         "resource_warnings_are_errors": True,
+        "captured_warning_count": len(captured_warnings),
+        "captured_warning_categories": dict(sorted(warning_categories.items())),
         "slow_callback_threshold_seconds": _SLOW_CALLBACK_THRESHOLD_SECONDS,
         "unraisable_failures": unraisable_failures,
         "asyncio_loop_failures": loop_failures,
@@ -379,6 +497,37 @@ def main(argv: list[str] | None = None) -> int:
         "provider_credentials_forced_empty": True,
         "exclusive_scratch_lock": True,
         "scratch_lock_fingerprint": scratch_lock.fingerprint,
+        "git": _git_metadata(repo_root),
+        "runtime": {
+            "python": platform.python_version(),
+            "implementation": platform.python_implementation(),
+            "platform": platform.platform(),
+            "dependencies": _dependency_versions(),
+        },
+        "invocation": {
+            "environment": args.environment,
+            "pattern": args.pattern,
+            "start_directory": args.start_directory,
+            "verbosity": args.verbosity,
+            "database_url_redacted": True,
+            "redis_url_redacted": True,
+            "command_redacted": [
+                sys.executable,
+                "scripts/run_telegram_queue_local_evidence.py",
+                "--environment",
+                args.environment,
+                "--database-url",
+                "[redacted-local-scratch-url]",
+                "--redis-url",
+                "[redacted-local-scratch-url]",
+                "--pattern",
+                args.pattern,
+                "--start-directory",
+                args.start_directory,
+                "--verbosity",
+                str(args.verbosity),
+            ],
+        },
         "success": bool(result.wasSuccessful() and hygiene_ok),
     }
     _write_report(args.report, report)

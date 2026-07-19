@@ -277,6 +277,17 @@ class TelegramDeliveryQueueLimiterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(expected_key, redis.set_calls[0][0])
                 self.assertNotIn("raw-private-destination", repr(redis.set_calls))
 
+    def test_hard_destination_block_is_bot_scoped_but_cadence_is_shared(self):
+        limiter = _limiter(_FakeRedis())
+        digest = "synthetic-destination-digest"
+        primary = limiter._keys("primary", digest)
+        editor = limiter._keys("channel_editor", digest)
+        self.assertEqual(primary["destination_next"], editor["destination_next"])
+        self.assertNotEqual(
+            primary["destination_block"],
+            editor["destination_block"],
+        )
+
     async def test_resume_validates_scope_and_only_clears_local_block_after_redis_success(self):
         redis = _FakeRedis()
         limiter = _limiter(redis)

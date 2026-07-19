@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+from sqlalchemy.exc import OperationalError
+
 from core import telegram_delivery_queue_worker as worker
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
 from core.telegram_delivery_queue_limiter import (
@@ -120,6 +122,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         blocked_bots=(),
         cooldown_destinations=(),
         hard_destinations=(),
+        hard_bot_destinations=(),
         gateway_blocked=False,
     ):
         return worker.TelegramDeliveryLimiterRehydrationReport(
@@ -127,6 +130,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             blocked_bot_identities=tuple(blocked_bots),
             cooldown_destination_keys=tuple(cooldown_destinations),
             hard_blocked_destination_keys=tuple(hard_destinations),
+            hard_blocked_bot_destinations=tuple(hard_bot_destinations),
             gateway_blocked=gateway_blocked,
         )
 
@@ -174,6 +178,260 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(primary_mode, (True, True))
         self.assertEqual(editor_mode, (False, False))
 
+    async def test_editor_destination_pause_does_not_stop_primary_channel_lane(self):
+        channel_destination = f"channel:{int(worker.settings.channel_id)}"
+        editor_pause = self._rehydration(
+            hard_bot_destinations=(("channel_editor", channel_destination),),
+        )
+        self.assertEqual(
+            worker._telegram_delivery_lane_start_mode(
+                SimpleNamespace(bot_identity="primary"),
+                rehydration=editor_pause,
+                channel_destination_key=channel_destination,
+            ),
+            (True, False),
+        )
+        self.assertEqual(
+            worker._telegram_delivery_lane_start_mode(
+                SimpleNamespace(bot_identity="channel_editor"),
+                rehydration=editor_pause,
+                channel_destination_key=channel_destination,
+            ),
+            (False, False),
+        )
+
+    async def test_primary_destination_pause_preserves_primary_private_lane(self):
+        channel_destination = f"channel:{int(worker.settings.channel_id)}"
+        primary_pause = self._rehydration(
+            hard_bot_destinations=(("primary", channel_destination),),
+        )
+        self.assertEqual(
+            worker._telegram_delivery_lane_start_mode(
+                SimpleNamespace(bot_identity="primary"),
+                rehydration=primary_pause,
+                channel_destination_key=channel_destination,
+            ),
+            (True, True),
+        )
+
+    async def test_primary_lane_has_independent_reserved_m0_slot(self):
+        general_started = asyncio.Event()
+        m0_finished = asyncio.Event()
+        release_general = asyncio.Event()
+        never = asyncio.Event()
+
+        async def slot_loop(_lane, *, maximum_effective_priority, **_kwargs):
+            if maximum_effective_priority is None:
+                general_started.set()
+                await release_general.wait()
+                return
+            await general_started.wait()
+            m0_finished.set()
+            await never.wait()
+
+        lane = SimpleNamespace(bot_identity="primary")
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch.object(
+            worker.settings,
+            "telegram_delivery_queue_primary_concurrency",
+            2,
+        ), patch.object(
+            worker.settings,
+            "telegram_delivery_queue_primary_m0_reserved_concurrency",
+            1,
+        ), patch(
+            "core.telegram_delivery_queue_worker._telegram_delivery_queue_lane_slot_loop",
+            side_effect=slot_loop,
+        ):
+            task = asyncio.create_task(worker.telegram_delivery_queue_lane_loop(lane))
+            await asyncio.wait_for(m0_finished.wait(), timeout=1)
+            self.assertFalse(release_general.is_set())
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+    async def test_provider_fact_recording_retries_database_outage_beyond_three_attempts(self):
+        db = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        unavailable = OperationalError(
+            "INSERT provider outcome",
+            {},
+            ConnectionError("synthetic database outage"),
+        )
+        persisted = SimpleNamespace(outcome=SimpleNamespace(id=991))
+        record = AsyncMock(
+            side_effect=(unavailable, unavailable, unavailable, unavailable, persisted)
+        )
+        applied_decision = SimpleNamespace(outcome=worker.TelegramDeliveryOutcome.SENT)
+        apply = AsyncMock(return_value=applied_decision)
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.record_telegram_delivery_provider_outcome",
+            new=record,
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_provider_outcome",
+            new=apply,
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            decision, limiter_decision = (
+                await worker._persist_delivery_result_after_dispatch(
+                    bot_identity="primary",
+                    job_id=77,
+                    worker_id="provider-fact-worker",
+                    lease_token=9,
+                    gateway_result=worker.telegram_gateway.TelegramGatewayResult(
+                        ok=False,
+                        method="sendMessage",
+                        status_code=429,
+                        response_json={
+                            "ok": False,
+                            "error_code": 429,
+                            "parameters": {"retry_after": 2},
+                        },
+                    ),
+                    feedback=AsyncMock(),
+                )
+            )
+
+        self.assertIs(decision, applied_decision)
+        self.assertIs(limiter_decision, applied_decision)
+        self.assertEqual(record.await_count, 5)
+        apply.assert_awaited_once()
+
+    async def test_provider_fact_commit_failure_retries_same_fenced_fact(self):
+        db = AsyncMock()
+        unavailable = OperationalError(
+            "COMMIT provider outcome",
+            {},
+            ConnectionError("synthetic commit outage"),
+        )
+        db.commit = AsyncMock(side_effect=(unavailable, None, None))
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        persisted = SimpleNamespace(outcome=SimpleNamespace(id=993))
+        record = AsyncMock(return_value=persisted)
+        applied_decision = SimpleNamespace(outcome=worker.TelegramDeliveryOutcome.SENT)
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.record_telegram_delivery_provider_outcome",
+            new=record,
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_provider_outcome",
+            new=AsyncMock(return_value=applied_decision),
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            decision, _ = await worker._persist_delivery_result_after_dispatch(
+                bot_identity="primary",
+                job_id=79,
+                worker_id="provider-fact-commit-worker",
+                lease_token=11,
+                gateway_result=worker.telegram_gateway.TelegramGatewayResult(
+                    ok=True,
+                    method="sendMessage",
+                    status_code=200,
+                    response_json={"ok": True, "result": {"message_id": 43}},
+                ),
+                feedback=AsyncMock(),
+            )
+
+        self.assertIs(decision, applied_decision)
+        self.assertEqual(record.await_count, 2)
+
+    async def test_lane_claims_and_recovery_wait_behind_volatile_provider_fact(self):
+        worker._provider_outcome_persistence_barriers.add(("primary", 990, 12))
+        try:
+            with patch(
+                "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+                return_value=self._queue_runtime(),
+            ), patch(
+                "core.telegram_delivery_queue_worker.assert_background_job_authority"
+            ), patch(
+                "core.telegram_delivery_queue_worker.claim_next_telegram_delivery_job",
+                new=AsyncMock(),
+            ) as claim, patch(
+                "core.telegram_delivery_queue_worker.recover_expired_telegram_delivery_leases",
+                new=AsyncMock(),
+            ) as recover:
+                report = await worker.run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    freshness_validator=AsyncMock(),
+                    lifecycle_feedback=_NoopLifecycleFeedback(),
+                    gateway_call=AsyncMock(),
+                    dispatch_limiter=_AllowLimiter(),
+                    recover_leases=False,
+                )
+                recovered = await worker._recover_expired_leases()
+        finally:
+            worker._provider_outcome_persistence_barriers.discard(("primary", 990, 12))
+
+        self.assertEqual(report.processed_count, 0)
+        self.assertEqual(report.status_counts, {"provider_fact_persistence_wait": 1})
+        self.assertEqual(recovered, 0)
+        claim.assert_not_awaited()
+        recover.assert_not_awaited()
+
+    async def test_cancellation_after_provider_response_waits_for_durable_fact(self):
+        db = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        record = AsyncMock(
+            side_effect=(
+                asyncio.CancelledError(),
+                SimpleNamespace(outcome=SimpleNamespace(id=992)),
+            )
+        )
+        apply = AsyncMock()
+
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.record_telegram_delivery_provider_outcome",
+            new=record,
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_provider_outcome",
+            new=apply,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await worker._persist_delivery_result_after_dispatch(
+                    bot_identity="primary",
+                    job_id=78,
+                    worker_id="provider-fact-cancel-worker",
+                    lease_token=10,
+                    gateway_result=worker.telegram_gateway.TelegramGatewayResult(
+                        ok=True,
+                        method="sendMessage",
+                        status_code=200,
+                        response_json={
+                            "ok": True,
+                            "result": {"message_id": 42},
+                        },
+                    ),
+                    feedback=AsyncMock(),
+                )
+
+        self.assertEqual(record.await_count, 2)
+        self.assertGreaterEqual(db.commit.await_count, 1)
+        apply.assert_not_awaited()
+
     async def test_private_only_lane_exits_for_full_preflight_when_channel_gate_clears(self):
         channel_destination = f"channel:{int(worker.settings.channel_id)}"
         limiter = _AllowLimiter()
@@ -184,7 +442,17 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             gateway_call=AsyncMock(),
             dispatch_limiter=limiter,
         )
-        cycle = AsyncMock()
+        slot_calls = []
+        never = asyncio.Event()
+        real_sleep = asyncio.sleep
+
+        async def slot_loop(_lane, **kwargs):
+            slot_calls.append(kwargs)
+            await never.wait()
+
+        async def yield_once(_delay):
+            await real_sleep(0)
+
         with patch(
             "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
             new=AsyncMock(
@@ -196,21 +464,28 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
             ),
         ), patch(
-            "core.telegram_delivery_queue_worker.run_telegram_delivery_queue_cycle",
-            new=cycle,
+            "core.telegram_delivery_queue_worker._telegram_delivery_queue_lane_slot_loop",
+            side_effect=slot_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.asyncio.sleep",
-            new=AsyncMock(),
+            side_effect=yield_once,
         ):
             await worker.telegram_delivery_private_only_lane_loop(
                 lane,
                 channel_destination_key=channel_destination,
             )
 
-        cycle.assert_awaited_once()
+        self.assertEqual(len(slot_calls), 4)
+        self.assertTrue(
+            all(
+                call["allowed_destination_classes"]
+                == {worker.TelegramDestinationClass.PRIVATE}
+                for call in slot_calls
+            )
+        )
         self.assertEqual(
-            cycle.await_args.kwargs["allowed_destination_classes"],
-            {worker.TelegramDestinationClass.PRIVATE},
+            sum(call["maximum_effective_priority"] == 0 for call in slot_calls),
+            1,
         )
 
     async def test_cycle_without_authoritative_freshness_adapter_refuses_before_db_touch(self):
@@ -267,6 +542,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker._release_after_predispatch_error",
             new=release,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_database_now",
+            new=AsyncMock(return_value=worker.utc_now()),
         ):
             with self.assertRaises(asyncio.CancelledError):
                 await run_telegram_delivery_queue_cycle(
@@ -1272,16 +1550,14 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         sampled_now = worker.utc_now()
-        durable_gate = AsyncMock()
+        durable_deadline = sampled_now + worker.timedelta(seconds=2.6)
+        durable_gate = AsyncMock(return_value=durable_deadline)
         with patch(
             "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
             new=rehydrate,
         ), patch(
             "core.telegram_delivery_queue_worker.run_configured_telegram_delivery_preflight",
             new=preflight,
-        ), patch(
-            "core.telegram_delivery_queue_worker.utc_now",
-            return_value=sampled_now,
         ), patch(
             "core.telegram_delivery_queue_worker._retry_after_safety_seconds",
             return_value=0.1,
@@ -1302,7 +1578,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(limiter.bot_cooldowns, [
-            ("primary", sampled_now + worker.timedelta(seconds=2.6))
+            ("primary", durable_deadline)
         ])
         durable_gate.assert_awaited_once_with(
             bot_identity="primary",
@@ -1328,7 +1604,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 retry_after_seconds=2.5,
             )
         )
-        durable_gate = AsyncMock()
+        durable_gate = AsyncMock(
+            return_value=worker.utc_now() + worker.timedelta(seconds=2.6)
+        )
         with patch(
             "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
             new=rehydrate,

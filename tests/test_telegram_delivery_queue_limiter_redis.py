@@ -562,11 +562,14 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
             now=now,
         )
         self.assertFalse(
+            (await self.limiter.acquire(_job("primary", destination), now=now)).allowed
+        )
+        self.assertTrue(
             (await self.limiter.acquire(_job("channel_editor", destination), now=now)).allowed
         )
         await self.limiter.resume_destination(destination)
         self.assertTrue(
-            (await self.limiter.acquire(_job("channel_editor", destination), now=now)).allowed
+            (await self.limiter.acquire(_job("primary", destination), now=now)).allowed
         )
 
         await self.redis.flushdb()

@@ -159,6 +159,32 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
             runner._write_report(str(path), {"success": True, "tests_run": 3})
             self.assertIn('"success": true', path.read_text(encoding="utf-8"))
 
+    def test_result_records_exact_test_inventory_and_status(self):
+        stream = io.StringIO()
+        result = runner._FdTrackingTextTestResult(
+            stream,
+            descriptions=False,
+            verbosity=0,
+        )
+        case = unittest.FunctionTestCase(lambda: None)
+        result.startTest(case)
+        result.addSuccess(case)
+        result.stopTest(case)
+
+        self.assertEqual(len(result.test_results), 1)
+        self.assertEqual(result.test_results[0]["test_id"], case.id())
+        self.assertEqual(result.test_results[0]["status"], "passed")
+        self.assertGreaterEqual(result.test_results[0]["duration_ms"], 0)
+
+    def test_flattened_inventory_hash_input_is_stable(self):
+        first = unittest.FunctionTestCase(lambda: None, description="first")
+        second = unittest.FunctionTestCase(lambda: None, description="second")
+        suite = unittest.TestSuite((unittest.TestSuite((first,)), second))
+        self.assertEqual(
+            runner._flatten_test_ids(suite),
+            [first.id(), second.id()],
+        )
+
     def test_raw_log_stream_mirrors_output(self):
         console = io.StringIO()
         evidence = io.StringIO()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any
@@ -48,7 +48,6 @@ from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_VALUES,
 )
 from core.telegram_gateway import TelegramGatewayResult
-from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.telegram_delivery_provider_outcome import (
@@ -182,6 +181,41 @@ _DURABLE_UNRESOLVED_DESTINATION_STATES = (
     TelegramDeliveryState.AMBIGUOUS_UNRESOLVED,
     TelegramDeliveryState.PENDING_RECONCILE,
 )
+
+
+async def telegram_delivery_database_now(db: AsyncSession) -> datetime:
+    """Return PostgreSQL's wall clock as the queue's authoritative time.
+
+    Redis owns limiter time through ``Redis TIME``.  PostgreSQL owns durable
+    eligibility, deadline, lease and recovery time through ``clock_timestamp``.
+    Host clocks are intentionally excluded from those state transitions so two
+    workers with different wall clocks cannot shorten a lease or promote work
+    at different instants.
+    """
+    sampled = (await db.execute(select(func.clock_timestamp()))).scalar_one()
+    if not isinstance(sampled, datetime):
+        raise TelegramDeliveryQueueValidationError(
+            "telegram_delivery_database_clock_invalid"
+        )
+    if sampled.tzinfo is None or sampled.utcoffset() is None:
+        raise TelegramDeliveryQueueValidationError(
+            "telegram_delivery_database_clock_must_be_timezone_aware"
+        )
+    return sampled.astimezone(timezone.utc)
+
+
+async def _transition_time(
+    db: AsyncSession,
+    explicit_now: datetime | None,
+) -> datetime:
+    """Use explicit test time only when supplied; production uses PostgreSQL."""
+    if explicit_now is not None:
+        if explicit_now.tzinfo is None or explicit_now.utcoffset() is None:
+            raise TelegramDeliveryQueueValidationError(
+                "telegram_delivery_transition_time_must_be_timezone_aware"
+            )
+        return explicit_now.astimezone(timezone.utc)
+    return await telegram_delivery_database_now(db)
 
 
 def _dispatch_scope_advisory_key(scope: str) -> int:
@@ -384,8 +418,12 @@ async def _assert_durable_dispatch_gate(
                                         None
                                     ),
                                 ),
-                                TelegramDeliveryJobRecord.state
-                                == TelegramDeliveryState.BLOCKED_DESTINATION,
+                                and_(
+                                    TelegramDeliveryJobRecord.bot_identity
+                                    == str(record.bot_identity),
+                                    TelegramDeliveryJobRecord.state
+                                    == TelegramDeliveryState.BLOCKED_DESTINATION,
+                                ),
                             ),
                         ),
                         and_(
@@ -480,7 +518,7 @@ async def load_active_telegram_limiter_evidence(
 ) -> tuple[TelegramLimiterEvidence, ...]:
     """Return committed cooldown/pause evidence rebuilt before claims."""
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     records = list(
         (
             await db.execute(
@@ -585,11 +623,9 @@ def canonical_telegram_delivery_payload(
 
 
 def _positive_int(value: Any) -> int | None:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError, OverflowError):
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return parsed if 0 < parsed <= 9_223_372_036_854_775_807 else None
+    return value if 0 < value <= 2_147_483_647 else None
 
 
 def _raw_retry_after(result: TelegramGatewayResultLike) -> int | None:
@@ -718,7 +754,7 @@ async def record_telegram_delivery_provider_outcome(
     fact for the same dispatch fence is quarantined by refusing the write.
     """
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     record = (
         await db.execute(
             select(TelegramDeliveryJobRecord)
@@ -1015,6 +1051,7 @@ async def claim_next_telegram_delivery_job(
     request_timeout_seconds: float,
     lease_seconds: float,
     allowed_destination_classes: set[TelegramDestinationClass] | None = None,
+    maximum_effective_priority: int | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryJobRecord | None:
     _require_foreign(current_server)
@@ -1023,7 +1060,7 @@ async def claim_next_telegram_delivery_job(
         raise TelegramDeliveryQueueValidationError("telegram_bot_identity_not_allowlisted")
     if float(lease_seconds) < float(request_timeout_seconds) + MINIMUM_LEASE_MARGIN_SECONDS:
         raise TelegramDeliveryQueueValidationError("lease_must_cover_request_timeout_plus_margin")
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     normalized_destination_classes: tuple[TelegramDestinationClass, ...] | None = None
     if allowed_destination_classes is not None:
         normalized_destination_classes = tuple(
@@ -1114,7 +1151,12 @@ async def claim_next_telegram_delivery_job(
                             blocker.state.in_(_DURABLE_UNRESOLVED_DESTINATION_STATES),
                             blocker.dispatch_started_at.is_not(None),
                         ),
-                        blocker.state == TelegramDeliveryState.BLOCKED_DESTINATION,
+                        and_(
+                            blocker.bot_identity
+                            == TelegramDeliveryJobRecord.bot_identity,
+                            blocker.state
+                            == TelegramDeliveryState.BLOCKED_DESTINATION,
+                        ),
                     ),
                 ),
                 and_(
@@ -1194,6 +1236,22 @@ async def claim_next_telegram_delivery_job(
                 normalized_destination_classes
             )
         )
+    if maximum_effective_priority is not None:
+        try:
+            normalized_maximum_priority = int(maximum_effective_priority)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TelegramDeliveryQueueValidationError(
+                "maximum_effective_priority_invalid"
+            ) from exc
+        if (
+            isinstance(maximum_effective_priority, bool)
+            or normalized_maximum_priority != maximum_effective_priority
+            or not 0 <= normalized_maximum_priority <= 7
+        ):
+            raise TelegramDeliveryQueueValidationError(
+                "maximum_effective_priority_invalid"
+            )
+        claim_filters.append(effective_priority <= normalized_maximum_priority)
     stmt = (
         select(TelegramDeliveryJobRecord)
         .where(*claim_filters)
@@ -1211,13 +1269,17 @@ async def claim_next_telegram_delivery_job(
     record = (await db.execute(stmt)).scalar_one_or_none()
     if record is None:
         return None
+    # Lease duration begins at the database linearization boundary rather than
+    # at an earlier selection/fairness query.  ``clock_timestamp`` advances
+    # during a transaction, unlike ``now()``/``transaction_timestamp()``.
+    lease_started_at = await _transition_time(db, now)
     record.state = TelegramDeliveryState.LEASED
     record.worker_id = str(worker_id)
     record.lease_token = int(record.lease_token or 0) + 1
-    record.lease_until = current_time + timedelta(seconds=float(lease_seconds))
+    record.lease_until = lease_started_at + timedelta(seconds=float(lease_seconds))
     record.dispatch_started_at = None
     record.attempt_count = int(record.attempt_count or 0) + 1
-    record.updated_at = current_time
+    record.updated_at = lease_started_at
     await db.flush()
     return record
 
@@ -1234,7 +1296,7 @@ async def mark_telegram_delivery_dispatch_started(
     now: datetime | None = None,
 ) -> bool:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     record = (
         await db.execute(
             select(TelegramDeliveryJobRecord)
@@ -1260,7 +1322,7 @@ async def mark_telegram_delivery_dispatch_started(
     # long enough for an otherwise valid lease to expire. Sample the clock
     # again at the actual local linearization boundary; an expired fence must
     # never be followed by a Telegram side effect.
-    dispatch_linearized_at = max(current_time, utc_now())
+    dispatch_linearized_at = max(current_time, await _transition_time(db, now))
     if record.lease_until is None or record.lease_until <= dispatch_linearized_at:
         return False
     _require_lifecycle_callback(
@@ -1277,7 +1339,10 @@ async def mark_telegram_delivery_dispatch_started(
     )
     if dispatch_guard is not None:
         await dispatch_guard(db, record, dispatch_linearized_at)
-        dispatch_linearized_at = max(dispatch_linearized_at, utc_now())
+        dispatch_linearized_at = max(
+            dispatch_linearized_at,
+            await _transition_time(db, now),
+        )
         if record.lease_until is None or record.lease_until <= dispatch_linearized_at:
             return False
     record.dispatch_started_at = dispatch_linearized_at
@@ -1307,7 +1372,7 @@ async def apply_telegram_delivery_freshness_result(
     _require_foreign(current_server)
     if decision.outcome == TelegramFreshnessOutcome.SEND:
         return True
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     record = (
         await db.execute(
             select(TelegramDeliveryJobRecord)
@@ -1377,7 +1442,7 @@ async def release_unstarted_telegram_delivery_lease(
     now: datetime | None = None,
 ) -> bool:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     record = (
         await db.execute(
             select(TelegramDeliveryJobRecord)
@@ -1420,7 +1485,7 @@ async def defer_unstarted_telegram_delivery_lease(
     The same lease fence used by dispatch protects this transition.
     """
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     record = (
         await db.execute(
             select(TelegramDeliveryJobRecord)
@@ -1597,7 +1662,7 @@ async def resolve_telegram_delivery_result(
     now: datetime | None = None,
 ) -> TelegramDeliveryDecision:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     record = (
         await db.execute(
             select(TelegramDeliveryJobRecord)
@@ -1648,7 +1713,7 @@ async def resolve_telegram_delivery_result(
         callback_reason="callback_delivery_feedback_required",
     )
     await _acquire_dispatch_scope_locks(db, record=record)
-    result_linearized_at = utc_now()
+    result_linearized_at = await _transition_time(db, now)
 
     contract_job = _record_to_contract(record)
     decision = apply_gateway_result(
@@ -1714,7 +1779,7 @@ async def apply_telegram_delivery_provider_outcome(
 ) -> TelegramDeliveryDecision:
     """Apply one recorded provider fact and domain feedback atomically."""
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     outcome = (
         await db.execute(
             select(TelegramDeliveryProviderOutcomeRecord)
@@ -1782,7 +1847,7 @@ async def record_telegram_provider_outcome_apply_failure(
 ) -> bool:
     """Persist replay scheduling after an apply transaction rolled back."""
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     outcome = (
         await db.execute(
             select(TelegramDeliveryProviderOutcomeRecord)
@@ -1815,7 +1880,7 @@ async def load_telegram_provider_outcome_backlog(
 ) -> TelegramProviderOutcomeBacklogReport:
     """Return bounded replay work plus complete pending age/count evidence."""
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     pending_count, oldest_created_at = (
         await db.execute(
             select(
@@ -1864,7 +1929,7 @@ async def recover_expired_telegram_delivery_leases(
     now: datetime | None = None,
 ) -> TelegramDeliveryLeaseRecoveryReport:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     stmt = (
         select(TelegramDeliveryJobRecord)
         .where(

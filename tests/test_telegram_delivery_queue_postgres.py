@@ -10,9 +10,10 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from core import telegram_delivery_queue_worker as queue_worker
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryDedupeConflictError,
@@ -680,6 +681,116 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
         self.assertEqual(outcome.apply_state, TELEGRAM_PROVIDER_OUTCOME_APPLIED)
         self.assertIsNotNone(outcome.applied_at)
+
+    async def test_provider_outcome_initial_database_outage_retries_to_one_durable_fact(self):
+        cases = (
+            (
+                "provider-outcome-initial-db-outage-success",
+                TelegramGatewayResult(
+                    ok=True,
+                    method="sendMessage",
+                    status_code=200,
+                    response_json={
+                        "ok": True,
+                        "result": {"message_id": 71001},
+                    },
+                ),
+                TelegramDeliveryOutcome.SENT,
+                TelegramDeliveryState.SENT,
+            ),
+            (
+                "provider-outcome-initial-db-outage-429",
+                TelegramGatewayResult(
+                    ok=False,
+                    method="sendMessage",
+                    status_code=429,
+                    response_json={
+                        "ok": False,
+                        "error_code": 429,
+                        "description": "Too Many Requests",
+                        "parameters": {"retry_after": 3},
+                    },
+                ),
+                TelegramDeliveryOutcome.RETRY_PENDING,
+                TelegramDeliveryState.PENDING_RETRY,
+            ),
+        )
+
+        for index, (source_id, gateway_result, expected_outcome, expected_state) in enumerate(cases):
+            with self.subTest(source_id=source_id):
+                enqueued = await self._enqueue(
+                    source_id,
+                    destination=f"private:{9100 + index}",
+                    payload={"chat_id": 9100 + index, "text": source_id},
+                )
+                claimed = await self._claim(f"provider-outage-worker-{index}")
+                async with self.Session() as db:
+                    await mark_telegram_delivery_dispatch_started(
+                        db,
+                        current_server="foreign",
+                        job_id=enqueued.job.id,
+                        worker_id=f"provider-outage-worker-{index}",
+                        lease_token=claimed.lease_token,
+                    )
+                    await db.commit()
+
+                real_record = queue_worker.record_telegram_delivery_provider_outcome
+                attempts = 0
+
+                async def flaky_record(*args, **kwargs):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts <= 4:
+                        raise OperationalError(
+                            "INSERT telegram_delivery_provider_outcomes",
+                            {},
+                            OSError("synthetic_initial_database_outage"),
+                        )
+                    return await real_record(*args, **kwargs)
+
+                with (
+                    patch.object(queue_worker, "AsyncSessionLocal", self.Session),
+                    patch.object(queue_worker, "current_server", return_value="foreign"),
+                    patch.object(
+                        queue_worker,
+                        "record_telegram_delivery_provider_outcome",
+                        side_effect=flaky_record,
+                    ),
+                    patch.object(queue_worker.asyncio, "sleep", new=AsyncMock()),
+                ):
+                    decision, provider_decision = (
+                        await queue_worker._persist_delivery_result_after_dispatch(
+                            bot_identity="primary",
+                            job_id=enqueued.job.id,
+                            worker_id=f"provider-outage-worker-{index}",
+                            lease_token=claimed.lease_token,
+                            gateway_result=gateway_result,
+                            feedback=_NoopLifecycleFeedback().apply_delivery_result,
+                        )
+                    )
+
+                self.assertEqual(attempts, 5)
+                self.assertEqual(decision.outcome, expected_outcome)
+                self.assertEqual(provider_decision.outcome, expected_outcome)
+                async with self.Session() as db:
+                    job = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+                    outcomes = list(
+                        (
+                            await db.execute(
+                                select(TelegramDeliveryProviderOutcomeRecord).where(
+                                    TelegramDeliveryProviderOutcomeRecord.job_id
+                                    == enqueued.job.id
+                                )
+                            )
+                        ).scalars()
+                    )
+                self.assertEqual(job.state, expected_state)
+                self.assertEqual(len(outcomes), 1)
+                self.assertEqual(
+                    outcomes[0].apply_state,
+                    TELEGRAM_PROVIDER_OUTCOME_APPLIED,
+                )
+                self.assertEqual(outcomes[0].apply_attempt_count, 0)
 
     async def test_reconciler_revalidates_idempotent_edit_before_safe_retry(self):
         now = utc_now()
@@ -1604,6 +1715,91 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             ["callback", "trade-overdue", "offer-publish"],
         )
 
+    async def test_reserved_claim_only_takes_effective_m0_work(self):
+        now = utc_now()
+        await self._enqueue(
+            "lower-priority-general",
+            action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+            destination="private:general-priority",
+        )
+        async with self.Session() as db:
+            no_m0 = await claim_next_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                worker_id="reserved-m0-empty",
+                request_timeout_seconds=10,
+                lease_seconds=30,
+                maximum_effective_priority=0,
+                now=now,
+            )
+            await db.rollback()
+        self.assertIsNone(no_m0)
+
+        overdue = await self._enqueue(
+            "overdue-trade-for-reserved-slot",
+            feeder=TelegramFeederKind.TRADE,
+            action=TelegramDeliveryAction.TRADE_RESULT,
+            destination="private:trade-recipient",
+            deadline=now - timedelta(milliseconds=1),
+        )
+        async with self.Session() as db:
+            claimed = await claim_next_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                worker_id="reserved-m0-worker",
+                request_timeout_seconds=10,
+                lease_seconds=30,
+                maximum_effective_priority=0,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(claimed.id, overdue.job.id)
+
+    async def test_host_clock_skew_cannot_claim_or_recover_against_database_time(self):
+        async with self.Session() as db:
+            database_now = (
+                await db.execute(select(func.clock_timestamp()))
+            ).scalar_one()
+        future = await self._enqueue(
+            "database-clock-future-job",
+            eligible=database_now + timedelta(seconds=20),
+        )
+        with patch(
+            "core.services.telegram_delivery_queue_service.utc_now",
+            create=True,
+            return_value=database_now + timedelta(days=365),
+        ):
+            claimed = await self._claim("host-clock-far-future")
+        self.assertIsNone(claimed)
+
+        async with self.Session() as db:
+            record = await db.get(TelegramDeliveryJobRecord, future.job.id)
+            record.state = TelegramDeliveryState.LEASED
+            record.worker_id = "host-clock-skew-worker"
+            record.lease_token = 1
+            record.lease_until = database_now + timedelta(seconds=20)
+            record.dispatch_started_at = None
+            await db.commit()
+        with patch(
+            "core.services.telegram_delivery_queue_service.utc_now",
+            create=True,
+            return_value=database_now + timedelta(days=365),
+        ):
+            async with self.Session() as db:
+                report = await recover_expired_telegram_delivery_leases(
+                    db,
+                    current_server="foreign",
+                    max_rows=10,
+                )
+                await db.commit()
+        self.assertEqual(report.job_ids, ())
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, future.job.id)
+        self.assertEqual(persisted.state, TelegramDeliveryState.LEASED)
+        self.assertEqual(persisted.worker_id, "host-clock-skew-worker")
+
     async def test_skip_locked_allows_two_workers_to_claim_different_rows(self):
         await self._enqueue("skip-locked-1")
         await self._enqueue("skip-locked-2")
@@ -1799,8 +1995,10 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         claimed_at = utc_now()
         job = await self._claim("worker-expired-after-lock", now=claimed_at)
         with patch(
-            "core.services.telegram_delivery_queue_service.utc_now",
-            return_value=claimed_at + timedelta(seconds=31),
+            "core.services.telegram_delivery_queue_service.telegram_delivery_database_now",
+            new=AsyncMock(
+                side_effect=(claimed_at, claimed_at + timedelta(seconds=31))
+            ),
         ):
             async with self.Session() as db:
                 marked = await mark_telegram_delivery_dispatch_started(
@@ -1809,7 +2007,6 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     job_id=job.id,
                     worker_id=job.worker_id,
                     lease_token=job.lease_token,
-                    now=claimed_at,
                 )
                 await db.commit()
 
@@ -2079,32 +2276,36 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await db.commit()
 
-        async def persist(job, *, provider_time, retry_after):
+        async def persist(job, *, provider_time, linearized_at, retry_after):
             async with self.Session() as db:
-                decision = await resolve_telegram_delivery_result(
-                    db,
-                    current_server="foreign",
-                    job_id=job.id,
-                    worker_id=job.worker_id,
-                    lease_token=job.lease_token,
-                    result=TelegramGatewayResult(
-                        ok=False,
-                        method="sendMessage",
-                        status_code=429,
-                        response_json={
-                            "ok": False,
-                            "error_code": 429,
-                            "parameters": {"retry_after": retry_after},
-                        },
-                    ),
-                    retry_after_safety_seconds=0.1,
-                    retry_base_seconds=1,
-                    retry_max_seconds=300,
-                    # Keep the test insensitive to a loaded local PostgreSQL;
-                    # the assertion is about commit ordering, not a 2s wall-clock SLA.
-                    global_rate_limit_window_seconds=30.0,
-                    now=provider_time,
-                )
+                with patch(
+                    "core.services.telegram_delivery_queue_service."
+                    "telegram_delivery_database_now",
+                    new=AsyncMock(side_effect=(provider_time, linearized_at)),
+                ):
+                    decision = await resolve_telegram_delivery_result(
+                        db,
+                        current_server="foreign",
+                        job_id=job.id,
+                        worker_id=job.worker_id,
+                        lease_token=job.lease_token,
+                        result=TelegramGatewayResult(
+                            ok=False,
+                            method="sendMessage",
+                            status_code=429,
+                            response_json={
+                                "ok": False,
+                                "error_code": 429,
+                                "parameters": {"retry_after": retry_after},
+                            },
+                        ),
+                        retry_after_safety_seconds=0.1,
+                        retry_base_seconds=1,
+                        retry_max_seconds=300,
+                        # Keep the test insensitive to a loaded local PostgreSQL;
+                        # the assertion is about DB linearization ordering.
+                        global_rate_limit_window_seconds=30.0,
+                    )
                 await db.commit()
                 return decision
 
@@ -2113,11 +2314,13 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         later = await persist(
             second,
             provider_time=base + timedelta(seconds=1),
+            linearized_at=base + timedelta(seconds=2),
             retry_after=120,
         )
         older = await persist(
             first,
             provider_time=base,
+            linearized_at=base + timedelta(seconds=3),
             retry_after=5,
         )
         self.assertIsNone(later.bot_cooldown_until)
@@ -2607,32 +2810,28 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await db.commit()
             async with self.Session() as db:
-                with patch(
-                    "core.services.telegram_delivery_queue_service.utc_now",
-                    return_value=at,
-                ):
-                    decision = await resolve_telegram_delivery_result(
-                        db,
-                        current_server="foreign",
-                        job_id=job.id,
-                        worker_id=job.worker_id,
-                        lease_token=job.lease_token,
-                        result=TelegramGatewayResult(
-                            ok=False,
-                            method="sendMessage",
-                            status_code=429,
-                            response_json={
-                                "ok": False,
-                                "error_code": 429,
-                                "parameters": {"retry_after": 1},
-                            },
-                        ),
-                        retry_after_safety_seconds=0.0,
-                        retry_base_seconds=1,
-                        retry_max_seconds=300,
-                        global_rate_limit_window_seconds=2.0,
-                        now=at,
-                    )
+                decision = await resolve_telegram_delivery_result(
+                    db,
+                    current_server="foreign",
+                    job_id=job.id,
+                    worker_id=job.worker_id,
+                    lease_token=job.lease_token,
+                    result=TelegramGatewayResult(
+                        ok=False,
+                        method="sendMessage",
+                        status_code=429,
+                        response_json={
+                            "ok": False,
+                            "error_code": 429,
+                            "parameters": {"retry_after": 1},
+                        },
+                    ),
+                    retry_after_safety_seconds=0.0,
+                    retry_base_seconds=1,
+                    retry_max_seconds=300,
+                    global_rate_limit_window_seconds=2.0,
+                    now=at,
+                )
                 await db.commit()
                 return decision
 
@@ -2712,6 +2911,15 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 },
                 "candidate": {
                     "source_id": "hard-destination-candidate",
+                    "feeder": TelegramFeederKind.OFFER_CONTROL,
+                    "action": TelegramDeliveryAction.OFFER_PUBLISH,
+                    "destination": "channel:hard-destination",
+                    "destination_class": TelegramDestinationClass.CHANNEL,
+                    "payload": {"chat_id": -1001, "text": "candidate"},
+                    "bot_identity": "primary",
+                },
+                "control": {
+                    "source_id": "hard-destination-other-control",
                     "feeder": TelegramFeederKind.OFFER_EDIT,
                     "action": TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
                     "destination": "channel:hard-destination",
@@ -2723,11 +2931,6 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                         "text": "expired",
                     },
                     "bot_identity": "channel_editor",
-                },
-                "control": {
-                    "source_id": "hard-destination-other-control",
-                    "destination": "private:other-destination-control",
-                    "bot_identity": "primary",
                 },
             },
             {
@@ -4015,6 +4218,211 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             persisted_editor = await db.get(TelegramDeliveryJobRecord, editor.job.id)
         self.assertEqual(persisted_primary.state, TelegramDeliveryState.SENT)
         self.assertEqual(persisted_editor.state, TelegramDeliveryState.SENT)
+
+    async def test_editor_403_does_not_block_primary_publication_for_same_channel(self):
+        channel_destination = "channel:editor-permission-isolation"
+        editor = await self._enqueue(
+            "editor-forbidden",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.PARTIAL_OFFER_EDIT,
+            destination=channel_destination,
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            payload={"chat_id": -1001, "message_id": 10, "text": "expired"},
+            bot_identity="channel_editor",
+        )
+        primary = await self._enqueue(
+            "primary-publication-after-editor-403",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+            destination=channel_destination,
+            destination_class=TelegramDestinationClass.CHANNEL,
+            payload={"chat_id": -1001, "text": "new offer"},
+        )
+        another_editor = await self._enqueue(
+            "editor-still-gated",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+            destination=channel_destination,
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            payload={"chat_id": -1001, "message_id": 11, "text": "expired"},
+            bot_identity="channel_editor",
+        )
+        now = utc_now()
+        claimed_editor = await self._claim(
+            "editor-403-worker",
+            now=now,
+            bot_identity="channel_editor",
+        )
+        self.assertEqual(claimed_editor.id, editor.job.id)
+        async with self.Session() as db:
+            self.assertTrue(
+                await mark_telegram_delivery_dispatch_started(
+                    db,
+                    current_server="foreign",
+                    job_id=claimed_editor.id,
+                    worker_id=claimed_editor.worker_id,
+                    lease_token=claimed_editor.lease_token,
+                    now=now,
+                )
+            )
+            decision = await resolve_telegram_delivery_result(
+                db,
+                current_server="foreign",
+                job_id=claimed_editor.id,
+                worker_id=claimed_editor.worker_id,
+                lease_token=claimed_editor.lease_token,
+                result=TelegramGatewayResult(
+                    ok=False,
+                    method="editMessageText",
+                    status_code=403,
+                    response_json={
+                        "ok": False,
+                        "error_code": 403,
+                        "description": "Forbidden: bot lacks edit permission",
+                    },
+                ),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1,
+                retry_max_seconds=300,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.DESTINATION_PAUSED)
+
+        claimed_primary = await self._claim("primary-after-editor-403", now=now)
+        self.assertEqual(claimed_primary.id, primary.job.id)
+        claimed_editor_again = await self._claim(
+            "editor-after-editor-403",
+            now=now,
+            bot_identity="channel_editor",
+        )
+        self.assertIsNone(claimed_editor_again)
+        async with self.Session() as db:
+            persisted = await db.get(
+                TelegramDeliveryJobRecord,
+                another_editor.job.id,
+            )
+        self.assertEqual(persisted.state, TelegramDeliveryState.PENDING)
+
+    async def test_reserved_m0_slot_delivers_later_m0_while_general_call_is_slow(self):
+        slow = await self._enqueue(
+            "slow-lower-priority",
+            destination="private:slow-recipient",
+            payload={"chat_id": 1001, "text": "slow-lower-priority"},
+        )
+        slow_started = asyncio.Event()
+        release_slow = asyncio.Event()
+        m0_finished = asyncio.Event()
+
+        async def gateway(method, payload, **_kwargs):
+            if payload.get("text") == "slow-lower-priority":
+                slow_started.set()
+                await release_slow.wait()
+                return TelegramGatewayResult(
+                    ok=True,
+                    method=method,
+                    status_code=200,
+                    response_json={"ok": True, "result": {"message_id": 501}},
+                )
+            m0_finished.set()
+            return TelegramGatewayResult(
+                ok=True,
+                method=method,
+                status_code=200,
+                response_json={"ok": True, "result": True},
+            )
+
+        async def freshness_validator(_db, _job, _now):
+            return TelegramFreshnessDecision(TelegramFreshnessOutcome.SEND)
+
+        lane = SimpleNamespace(
+            bot_identity="primary",
+            freshness_validator=freshness_validator,
+            lifecycle_feedback=_NoopLifecycleFeedback(),
+            gateway_call=gateway,
+            dispatch_limiter=_AllowLimiter(),
+        )
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch.object(
+            queue_worker.settings,
+            "telegram_delivery_queue_primary_concurrency",
+            2,
+        ), patch.object(
+            queue_worker.settings,
+            "telegram_delivery_queue_primary_m0_reserved_concurrency",
+            1,
+        ), patch.object(
+            queue_worker.settings,
+            "telegram_delivery_queue_worker_interval_seconds",
+            0.1,
+        ):
+            general_task = asyncio.create_task(
+                run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    limit=1,
+                    freshness_validator=freshness_validator,
+                    lifecycle_feedback=lane.lifecycle_feedback,
+                    gateway_call=gateway,
+                    dispatch_limiter=lane.dispatch_limiter,
+                    worker_id="primary-general-hol-test",
+                    recover_leases=False,
+                )
+            )
+            try:
+                await asyncio.wait_for(slow_started.wait(), timeout=2)
+                m0 = await self._enqueue(
+                    "later-m0-callback",
+                    action=TelegramDeliveryAction.CALLBACK_DEADLINE,
+                    destination="private:callback-recipient",
+                    method="answerCallbackQuery",
+                    payload={"callback_query_id": "later-m0"},
+                    deadline=utc_now() + timedelta(seconds=2),
+                )
+                reserved_report = await asyncio.wait_for(
+                    run_telegram_delivery_queue_cycle(
+                        bot_identity="primary",
+                        limit=1,
+                        freshness_validator=freshness_validator,
+                        lifecycle_feedback=lane.lifecycle_feedback,
+                        gateway_call=gateway,
+                        dispatch_limiter=lane.dispatch_limiter,
+                        worker_id="primary-reserved-m0-hol-test",
+                        recover_leases=False,
+                        maximum_effective_priority=0,
+                    ),
+                    timeout=2,
+                )
+                self.assertEqual(reserved_report.processed_count, 1)
+                self.assertTrue(m0_finished.is_set())
+                self.assertFalse(release_slow.is_set())
+            finally:
+                release_slow.set()
+                await asyncio.wait_for(general_task, timeout=2)
+
+            async with self.Session() as db:
+                persisted_slow = await db.get(
+                    TelegramDeliveryJobRecord,
+                    slow.job.id,
+                )
+                persisted_m0 = await db.get(
+                    TelegramDeliveryJobRecord,
+                    m0.job.id,
+                )
+
+        self.assertEqual(persisted_slow.state, TelegramDeliveryState.SENT)
+        self.assertEqual(persisted_m0.state, TelegramDeliveryState.SENT)
 
     async def test_predispatch_validator_failure_releases_unstarted_lease(self):
         enqueued = await self._enqueue("worker-validator-failure")

@@ -61,3 +61,8 @@
 - channel cooldown در startup نباید private primary را متوقف کند؛ identity-only mode فقط private-capable است و مجوز publication/edit نیست.
 - resume برای bot/gateway همانند destination باید saga audit‌شده، full preflight، recheck Redis و crash recovery داشته باشد.
 - permission readback زنده فقط روی SHA نهایی و بلافاصله پیش از smoke Stage 4 معتبر است؛ artifact باید redacted و checksumدار باشد و تمام Story rights نیز false باشند.
+
+## الحاقیه scope خطای permission پس از review نهایی `2026-07-19`
+
+- `403` کانال یک hard capability failure برای credential پاسخ‌دهنده است و کلید durable/Redis آن با `(bot_identity,destination)` scope می‌شود. revoke یا نبود `can_edit_messages` editor انتشار سالم primary را مسدود نمی‌کند و editor job نیز هرگز به primary fallback نمی‌شود.
+- cadence مقصد و cooldown ناشی از `429` واقعی همان destination همچنان cross-bot و محافظه‌کارانه مشترک‌اند. bot-scoped کردن permission block به معنی دوبرابر فرض‌کردن ظرفیت channel یا عبور از `retry_after` نیست.

@@ -21,12 +21,12 @@ from core.telegram_delivery_preflight import (
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryState
 from core.telegram_delivery_queue_limiter import TelegramDeliveryDispatchLimiter
-from core.utils import utc_now
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 
 from .telegram_delivery_queue_service import (
     SUPPORTED_TELEGRAM_BOT_IDENTITIES,
+    _transition_time,
     acquire_telegram_delivery_scope_locks,
 )
 from .telegram_delivery_resume_service import _validate_full_preflight_report
@@ -221,7 +221,7 @@ async def record_telegram_preflight_rate_limit(
         raise TelegramRuntimeGateValidationError(
             "telegram_preflight_retry_after_invalid"
         )
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     await acquire_telegram_delivery_scope_locks(
         db,
         bot_identities=(bot_identity,),
@@ -268,7 +268,7 @@ async def mark_telegram_preflight_gate_active(
     now: datetime | None = None,
 ) -> bool:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     await acquire_telegram_delivery_scope_locks(
         db,
         bot_identities=(bot_identity,),
@@ -306,7 +306,7 @@ async def load_active_telegram_runtime_gates(
     now: datetime | None = None,
 ) -> tuple[TelegramRuntimeGateEvidence, ...]:
     _require_foreign(current_server)
-    current_time = now or utc_now()
+    current_time = await _transition_time(db, now)
     rows = (
         await db.execute(
             select(TelegramDeliveryRuntimeGate)
@@ -381,7 +381,7 @@ async def resume_telegram_runtime_gate(
     request_id: str,
     requested_by: str,
     preflight_runner: Callable[..., Any] = run_configured_telegram_delivery_preflight,
-    now_factory: Callable[[], datetime] = utc_now,
+    now_factory: Callable[[], datetime] | None = None,
 ) -> TelegramRuntimeGateResumeReport:
     _require_foreign(current_server)
     normalized_scope = str(scope or "").strip().lower()
@@ -390,9 +390,6 @@ async def resume_telegram_runtime_gate(
     actor = str(requested_by or "").strip()
     if not actor:
         raise TelegramRuntimeGateValidationError("telegram_runtime_gate_actor_required")
-    now = now_factory()
-    if now.tzinfo is None or now.utcoffset() is None:
-        raise TelegramRuntimeGateValidationError("telegram_runtime_gate_time_invalid")
     selected_identities = (
         (str(bot_identity),)
         if normalized_scope == "bot"
@@ -403,9 +400,22 @@ async def resume_telegram_runtime_gate(
             "telegram_runtime_gate_credential_identity_missing"
         )
 
+    async def transition_time(db: AsyncSession) -> datetime:
+        value = (
+            now_factory()
+            if now_factory is not None
+            else await _transition_time(db, None)
+        )
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise TelegramRuntimeGateValidationError(
+                "telegram_runtime_gate_time_invalid"
+            )
+        return value
+
     idempotent_replay = False
     database_already_applied = False
     async with session_factory() as db:
+        now = await transition_time(db)
         await acquire_telegram_delivery_scope_locks(
             db,
             bot_identities=selected_identities,
@@ -486,8 +496,8 @@ async def resume_telegram_runtime_gate(
             credential_registry=credential_registry,
         )
     except Exception as exc:
-        failed_at = now_factory()
         async with session_factory() as db:
+            failed_at = await transition_time(db)
             await acquire_telegram_delivery_scope_locks(
                 db,
                 bot_identities=selected_identities,
@@ -535,8 +545,8 @@ async def resume_telegram_runtime_gate(
                 await db.commit()
         raise
 
-    applied_at = now_factory()
     async with session_factory() as db:
+        applied_at = await transition_time(db)
         await acquire_telegram_delivery_scope_locks(
             db,
             bot_identities=selected_identities,
@@ -590,8 +600,8 @@ async def resume_telegram_runtime_gate(
         else:
             await dispatch_limiter.resume_gateway()
     except Exception as exc:
-        failed_at = now_factory()
         async with session_factory() as db:
+            failed_at = await transition_time(db)
             await acquire_telegram_delivery_scope_locks(
                 db,
                 bot_identities=selected_identities,
@@ -612,8 +622,8 @@ async def resume_telegram_runtime_gate(
             "telegram_runtime_gate_redis_not_cleared"
         ) from exc
 
-    completed_at = now_factory()
     async with session_factory() as db:
+        completed_at = await transition_time(db)
         await acquire_telegram_delivery_scope_locks(
             db,
             bot_identities=selected_identities,

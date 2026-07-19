@@ -62,3 +62,9 @@ limiter و scheduler فقط همراه execution-owner flag فعال می‌شو
 - startup از PostgreSQL cooldown و pauseهای bot/gateway را بازسازی می‌کند. claim و marker نهایی هر دو gate را می‌خوانند؛ خرابی یا پاک‌شدن Redis اجازهٔ ارسال زودرس نمی‌دهد.
 - preflight کامل موفق، cooldown منقضی را با evidence هویت/permission به `active` می‌برد. preflight هویتی private-only حق پاک‌کردن destination pause یا hard pause را ندارد.
 - pause ناشی از پاسخ provider و transition job در یک transaction ثبت می‌شوند؛ rollback هیچ gate یتیمی باقی نمی‌گذارد.
+
+## الحاقیه bounded concurrency پس از review نهایی `2026-07-19`
+
+- هر role یک pool محدود دارد، نه یک coroutine شبکه تک‌اسلاتی. default primary برابر چهار slot است: سه slot عمومی و یک slot رزروشده که SQL فقط effective priority `M0`—از جمله trade عبورکرده از پنج ثانیه—را claim می‌کند. editor default یک slot مستقل دارد.
+- slot عمومی همچنان M0 را claim می‌کند؛ reservation ظرفیت اضافه و work-conserving برای deadline است، نه یک صف موازی یا تغییر ترتیب M0..M7. Redis bot/destination gate authority admission و ordering منبع مشترک باقی می‌ماند.
+- یک provider call کند روی مقصد مستقل نمی‌تواند slot رزروشده M0 را نگه دارد. عملیات همان destination همچنان پشت gate/in-flight واقعی serialize می‌شوند و lease حداقل timeout شبکه به‌اضافه margin را پوشش می‌دهد.

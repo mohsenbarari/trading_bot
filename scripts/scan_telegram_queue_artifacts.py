@@ -6,10 +6,12 @@ import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import gzip
+import hashlib
 import io
 import json
 from pathlib import Path
 import re
+import subprocess
 import tarfile
 from typing import Iterable
 import zipfile
@@ -59,6 +61,10 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "email_address",
         re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
     ),
+)
+
+_SOURCE_SECRET_KINDS = frozenset(
+    {"telegram_bot_token", "private_key", "bearer_token", "jwt"}
 )
 
 _SENSITIVE_ASSIGNMENT = re.compile(
@@ -254,18 +260,164 @@ def scan_paths(paths: Iterable[Path]) -> dict[str, object]:
     }
 
 
+def scan_tracked_source(repo_root: Path) -> dict[str, object]:
+    """Scan the exact tracked Git tree for high-confidence credential shapes.
+
+    Source code necessarily contains field names such as ``bot_token`` and
+    ``user_id``; applying the evidence/PII assignment rules to source would be
+    noisy and misleading.  This surface therefore uses only secret-value
+    signatures while evidence and staging logs retain the stricter scanner.
+    """
+    root = Path(repo_root).resolve()
+    findings: list[Finding] = []
+    scanned_files = 0
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            text=True,
+        ).strip()
+        tree = subprocess.check_output(
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=root,
+            text=True,
+        ).strip()
+        raw = subprocess.check_output(
+            ["git", "ls-tree", "-r", "-z", "--full-tree", "HEAD"],
+            cwd=root,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {
+            "schema_version": 1,
+            "surface": "tracked_source",
+            "status": "blocked",
+            "scanned_files": 0,
+            "finding_count": 1,
+            "findings": [
+                asdict(Finding(kind="tracked_source_unavailable", path=str(root)))
+            ],
+        }
+    manifest_rows: list[str] = []
+    for encoded_row in raw.split(b"\0"):
+        if not encoded_row:
+            continue
+        try:
+            metadata, encoded_path = encoded_row.split(b"\t", 1)
+            mode, object_type, object_id = metadata.decode("ascii").split()
+        except (ValueError, UnicodeDecodeError):
+            findings.append(Finding(kind="tracked_tree_entry_invalid", path="."))
+            continue
+        relative = encoded_path.decode("utf-8", errors="surrogateescape")
+        if object_type != "blob":
+            continue
+        manifest_rows.append(f"{mode} {object_id}\t{relative}")
+        scanned_files += 1
+        try:
+            size = int(
+                subprocess.check_output(
+                    ["git", "cat-file", "-s", object_id],
+                    cwd=root,
+                    text=True,
+                ).strip()
+            )
+            if size > MAX_FILE_BYTES:
+                findings.append(
+                    Finding(kind="file_size_limit_exceeded", path=relative)
+                )
+                continue
+            blob = subprocess.check_output(
+                ["git", "cat-file", "blob", object_id],
+                cwd=root,
+            )
+            text = blob.decode("latin-1", errors="ignore")
+        except Exception:
+            findings.append(Finding(kind="file_unreadable", path=relative))
+            continue
+        for kind, pattern in _PATTERNS:
+            if kind in _SOURCE_SECRET_KINDS and pattern.search(text):
+                findings.append(Finding(kind=kind, path=relative))
+    return {
+        "schema_version": 1,
+        "surface": "tracked_source",
+        "git_commit": commit,
+        "git_tree": tree,
+        "blob_manifest_sha256": hashlib.sha256(
+            ("\n".join(manifest_rows) + "\n").encode("utf-8", errors="surrogateescape")
+        ).hexdigest(),
+        "status": "clean" if not findings else "blocked",
+        "scanned_files": scanned_files,
+        "finding_count": len(findings),
+        "findings": [asdict(finding) for finding in findings],
+    }
+
+
+def scan_release_surfaces(
+    *,
+    artifact_paths: Iterable[Path],
+    tracked_source_root: Path | None,
+) -> dict[str, object]:
+    surfaces: list[dict[str, object]] = []
+    artifact_roots = tuple(artifact_paths)
+    if artifact_roots:
+        artifact_report = scan_paths(artifact_roots)
+        artifact_report = {**artifact_report, "surface": "artifacts_and_logs"}
+        surfaces.append(artifact_report)
+    if tracked_source_root is not None:
+        surfaces.append(scan_tracked_source(tracked_source_root))
+    if not surfaces:
+        surfaces.append(
+            {
+                "schema_version": 1,
+                "surface": "inputs",
+                "status": "blocked",
+                "scanned_files": 0,
+                "finding_count": 1,
+                "findings": [
+                    asdict(Finding(kind="scan_surface_missing", path="."))
+                ],
+            }
+        )
+    findings = [
+        {**finding, "surface": surface["surface"]}
+        for surface in surfaces
+        for finding in surface["findings"]
+    ]
+    clean = all(surface["status"] == "clean" for surface in surfaces)
+    return {
+        "schema_version": 2,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "clean" if clean else "blocked",
+        "scanned_files": sum(int(surface["scanned_files"]) for surface in surfaces),
+        "finding_count": len(findings),
+        "findings": findings,
+        "surfaces": [
+            {
+                "surface": surface["surface"],
+                "status": surface["status"],
+                "scanned_files": surface["scanned_files"],
+                "finding_count": surface["finding_count"],
+            }
+            for surface in surfaces
+        ],
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Scan Telegram queue evidence files and archives for secrets and raw PII."
     )
-    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument("paths", nargs="*", type=Path)
+    parser.add_argument("--tracked-source-root", type=Path)
     parser.add_argument("--report", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    report = scan_paths(args.paths)
+    report = scan_release_surfaces(
+        artifact_paths=args.paths,
+        tracked_source_root=args.tracked_source_root,
+    )
     rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

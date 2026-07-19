@@ -19,6 +19,7 @@ import time
 from types import SimpleNamespace
 from typing import Any, Protocol
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
@@ -36,6 +37,7 @@ from core.services.telegram_delivery_queue_service import (
     TELEGRAM_DELIVERY_QUEUE_WORKER_ID,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
     TelegramDeliveryDispatchDeferredError,
+    TelegramDeliveryQueueValidationError,
     apply_telegram_delivery_freshness_result,
     claim_next_telegram_delivery_job,
     defer_unstarted_telegram_delivery_lease,
@@ -48,6 +50,7 @@ from core.services.telegram_delivery_queue_service import (
     recover_expired_telegram_delivery_leases,
     release_unstarted_telegram_delivery_lease,
     apply_telegram_delivery_provider_outcome,
+    telegram_delivery_database_now,
 )
 from core.services.telegram_delivery_reconciliation_service import (
     reconcile_telegram_delivery_jobs,
@@ -104,8 +107,16 @@ from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
-_RESULT_PERSISTENCE_MAX_ATTEMPTS = 3
+_RESULT_APPLICATION_MAX_ATTEMPTS = 3
+_PROVIDER_OUTCOME_PERSISTENCE_RETRY_BASE_SECONDS = 0.1
+_PROVIDER_OUTCOME_PERSISTENCE_RETRY_MAX_SECONDS = 5.0
 _RETENTION_INTERVAL_SECONDS = 3600.0
+# Provider responses that have been received but not yet committed are an
+# in-process fail-stop barrier.  Slots from the same role must not claim past a
+# known provider fact, and lease recovery must not race that fact into an
+# ambiguous state when PostgreSQL returns.  The set is mutated only by this
+# asyncio event loop; no thread synchronization is needed.
+_provider_outcome_persistence_barriers: set[tuple[str, int, int]] = set()
 
 TelegramQueueGatewayCall = Callable[..., Awaitable[telegram_gateway.TelegramGatewayResult]]
 TelegramQueueFreshnessValidator = Callable[
@@ -194,6 +205,7 @@ class TelegramDeliveryLimiterRehydrationReport:
     blocked_bot_identities: tuple[str, ...]
     cooldown_destination_keys: tuple[str, ...]
     hard_blocked_destination_keys: tuple[str, ...]
+    hard_blocked_bot_destinations: tuple[tuple[str, str], ...]
     gateway_blocked: bool
 
 
@@ -305,6 +317,53 @@ def _worker_id(bot_identity: str) -> str:
     )[:128]
 
 
+def _worker_slot_id(bot_identity: str, slot_kind: str, slot_index: int) -> str:
+    suffix = f":{str(slot_kind)}{int(slot_index)}"
+    base = _worker_id(bot_identity)
+    return f"{base[: 128 - len(suffix)]}{suffix}"
+
+
+def _lane_slot_plan(bot_identity: str) -> tuple[tuple[str, int | None], ...]:
+    """Return bounded lane slots and any reserved effective-priority ceiling."""
+    identity = _normalize_lane_identity(bot_identity)
+    if identity == TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY:
+        concurrency = max(
+            1,
+            int(
+                getattr(
+                    settings,
+                    "telegram_delivery_queue_channel_editor_concurrency",
+                    1,
+                )
+            ),
+        )
+        return tuple((f"general-{index}", None) for index in range(concurrency))
+
+    concurrency = max(
+        2,
+        int(getattr(settings, "telegram_delivery_queue_primary_concurrency", 4)),
+    )
+    reserved = max(
+        1,
+        int(
+            getattr(
+                settings,
+                "telegram_delivery_queue_primary_m0_reserved_concurrency",
+                1,
+            )
+        ),
+    )
+    if reserved >= concurrency:
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "telegram_primary_m0_reservation_invalid"
+        )
+    general = concurrency - reserved
+    return (
+        *tuple((f"general-{index}", None) for index in range(general)),
+        *tuple((f"m0-reserved-{index}", 0) for index in range(reserved)),
+    )
+
+
 def _worker_batch_limit(limit: int | None = None) -> int:
     configured = limit if limit is not None else getattr(
         settings, "telegram_delivery_queue_worker_batch_limit", 25
@@ -353,17 +412,21 @@ async def _persist_preflight_rate_limit_gate(
     *,
     bot_identity: str,
     retry_after_seconds: float,
-) -> None:
+) -> datetime:
     async with AsyncSessionLocal() as db:
-        await record_telegram_preflight_rate_limit(
+        gate = await record_telegram_preflight_rate_limit(
             db,
             current_server=current_server(),
             bot_identity=bot_identity,
             retry_after_seconds=retry_after_seconds,
             safety_seconds=_retry_after_safety_seconds(),
-            now=utc_now(),
         )
         await db.commit()
+        if gate.cooldown_until is None:
+            raise TelegramDeliveryQueueImplementationIncompleteError(
+                "telegram_preflight_cooldown_deadline_missing"
+            )
+        return gate.cooldown_until
 
 
 async def _persist_preflight_success_gate(
@@ -377,7 +440,6 @@ async def _persist_preflight_success_gate(
             current_server=current_server(),
             bot_identity=bot_identity,
             report=report,
-            now=utc_now(),
         )
         await db.commit()
 
@@ -386,8 +448,8 @@ async def rehydrate_telegram_delivery_limiter_state(
     dispatch_limiter: TelegramDeliveryDispatchLimiter,
 ) -> TelegramDeliveryLimiterRehydrationReport:
     """Rebuild Redis cooldown and hard-pause evidence before any claim."""
-    sampled_at = utc_now()
     async with AsyncSessionLocal() as db:
+        sampled_at = await telegram_delivery_database_now(db)
         evidence_rows = await load_active_telegram_limiter_evidence(
             db,
             current_server=current_server(),
@@ -410,6 +472,7 @@ async def rehydrate_telegram_delivery_limiter_state(
     blocked_bot_identities: set[str] = set()
     cooldown_destination_keys: set[str] = set()
     hard_blocked_destination_keys: set[str] = set(incomplete_resume_destinations)
+    hard_blocked_bot_destinations: set[tuple[str, str]] = set()
     gateway_blocked = False
     pause_decisions = {
         TelegramDeliveryState.BLOCKED_BOT: TelegramDeliveryOutcome.BOT_PAUSED,
@@ -427,7 +490,7 @@ async def rehydrate_telegram_delivery_limiter_state(
     }
     runtime_gateway_gate = any(gate.scope == "gateway" for gate in runtime_gates)
     for evidence in evidence_rows:
-        current_time = utc_now()
+        current_time = sampled_at
         observed_at = evidence.observed_at
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:
             raise TelegramDeliveryQueueImplementationIncompleteError(
@@ -487,7 +550,9 @@ async def rehydrate_telegram_delivery_limiter_state(
             if evidence.state == TelegramDeliveryState.BLOCKED_BOT:
                 blocked_bot_identities.add(evidence.bot_identity)
             elif evidence.state == TelegramDeliveryState.BLOCKED_DESTINATION:
-                hard_blocked_destination_keys.add(evidence.destination_key)
+                hard_blocked_bot_destinations.add(
+                    (evidence.bot_identity, evidence.destination_key)
+                )
             elif evidence.state == TelegramDeliveryState.BLOCKED_GATEWAY:
                 gateway_blocked = True
             await dispatch_limiter.observe(
@@ -502,7 +567,7 @@ async def rehydrate_telegram_delivery_limiter_state(
         if evidence_restored:
             restored += 1
     for gate in runtime_gates:
-        current_time = utc_now()
+        current_time = sampled_at
         if gate.scope == "bot" and gate.bot_identity:
             blocked_bot_identities.add(gate.bot_identity)
             if (
@@ -545,11 +610,16 @@ async def rehydrate_telegram_delivery_limiter_state(
         blocked_bot_identities=tuple(sorted(blocked_bot_identities)),
         cooldown_destination_keys=tuple(sorted(cooldown_destination_keys)),
         hard_blocked_destination_keys=tuple(sorted(hard_blocked_destination_keys)),
+        hard_blocked_bot_destinations=tuple(
+            sorted(hard_blocked_bot_destinations)
+        ),
         gateway_blocked=gateway_blocked,
     )
 
 
 async def _recover_expired_leases() -> int:
+    if _provider_outcome_persistence_barriers:
+        return 0
     async with AsyncSessionLocal() as db:
         report = await recover_expired_telegram_delivery_leases(
             db,
@@ -627,6 +697,7 @@ async def _release_unused_rate_limit_probe(
 
 async def _persist_delivery_result_after_dispatch(
     *,
+    bot_identity: str,
     job_id: int,
     worker_id: str,
     lease_token: int,
@@ -640,11 +711,25 @@ async def _persist_delivery_result_after_dispatch(
         ],
         Awaitable[None],
     ],
-    decision_time: datetime,
 ) -> tuple[TelegramDeliveryDecision, TelegramDeliveryDecision]:
-    """Record one provider fact, then atomically apply queue/domain feedback."""
+    """Record one provider fact, then atomically apply queue/domain feedback.
+
+    Once Telegram has answered, a transient PostgreSQL outage must not discard
+    that known fact while this process is alive.  Recording therefore retries
+    connection/storage failures without a small attempt cap.  Cancellation is
+    remembered but deferred until the idempotent provider-outcome row commits;
+    the replay worker can then finish domain feedback without another Telegram
+    call.  An abrupt process/host loss can still leave a genuinely ambiguous
+    dispatch because the Bot API provides no idempotency token.
+    """
+    lane_identity = _normalize_lane_identity(bot_identity)
+    barrier = (lane_identity, int(job_id), int(lease_token))
+    _provider_outcome_persistence_barriers.add(barrier)
     outcome_id: int | None = None
-    for attempt in range(1, _RESULT_PERSISTENCE_MAX_ATTEMPTS + 1):
+    attempt = 0
+    cancellation_requested = False
+    while outcome_id is None:
+        attempt += 1
         try:
             async with AsyncSessionLocal() as db:
                 persisted = await record_telegram_delivery_provider_outcome(
@@ -654,32 +739,61 @@ async def _persist_delivery_result_after_dispatch(
                     worker_id=worker_id,
                     lease_token=lease_token,
                     result=gateway_result,
-                    now=decision_time,
                 )
-                outcome_id = int(persisted.outcome.id)
+                persisted_outcome_id = int(persisted.outcome.id)
                 await db.commit()
-            break
+                # A returned ORM identity is not a durable fact until commit
+                # itself succeeds.  On an uncertain/failed commit the unique
+                # job+lease fence makes the next insert attempt idempotent.
+                outcome_id = persisted_outcome_id
         except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            if attempt >= _RESULT_PERSISTENCE_MAX_ATTEMPTS:
-                raise
+            # A cancellation delivered after the provider response is not
+            # allowed to erase the response from volatile memory.  Retrying is
+            # safe because job_id+lease_token uniquely fences the outcome row.
+            cancellation_requested = True
+            continue
+        except TelegramDeliveryQueueValidationError as exc:
+            # Fence conflicts and malformed facts are invariants, not storage
+            # outages.  Retrying them forever would conceal a programming or
+            # reconciliation defect.
+            # Keep the barrier installed and fail the lane supervisor.  A
+            # validation/fence conflict after Telegram answered is not safe to
+            # downgrade into an ordinary logged cycle error.
+            raise TelegramDeliveryQueueImplementationIncompleteError(
+                "telegram_provider_outcome_fact_rejected"
+            ) from exc
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+            retry_delay = min(
+                _PROVIDER_OUTCOME_PERSISTENCE_RETRY_MAX_SECONDS,
+                _PROVIDER_OUTCOME_PERSISTENCE_RETRY_BASE_SECONDS
+                * (2 ** min(attempt - 1, 10)),
+            )
             logger.warning(
-                "Retrying Telegram provider-outcome recording",
+                "Telegram provider outcome is retained in memory until PostgreSQL recovers",
                 extra={
                     "event": "telegram_delivery.provider_outcome_record_retry",
                     "job_id": job_id,
                     "attempt": attempt,
-                    "max_attempts": _RESULT_PERSISTENCE_MAX_ATTEMPTS,
+                    "retry_delay_seconds": retry_delay,
                     "error_class": type(exc).__name__,
                 },
             )
-            await asyncio.sleep(0.05 * attempt)
+            try:
+                await asyncio.sleep(retry_delay)
+            except asyncio.CancelledError:
+                cancellation_requested = True
 
     if outcome_id is None:
-        raise RuntimeError("telegram_delivery_provider_outcome_record_exhausted")
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "telegram_delivery_provider_outcome_record_exhausted"
+        )
+    _provider_outcome_persistence_barriers.discard(barrier)
+    if cancellation_requested:
+        # The provider fact is durable.  Preserve normal task cancellation and
+        # let the independent replay loop apply it after restart/resume.
+        raise asyncio.CancelledError
 
-    for attempt in range(1, _RESULT_PERSISTENCE_MAX_ATTEMPTS + 1):
+    for attempt in range(1, _RESULT_APPLICATION_MAX_ATTEMPTS + 1):
         try:
             async with AsyncSessionLocal() as db:
                 decision = await apply_telegram_delivery_provider_outcome(
@@ -725,7 +839,6 @@ async def _persist_delivery_result_after_dispatch(
                         ),
                     ),
                     feedback=feedback,
-                    now=decision_time,
                 )
                 await db.commit()
             return decision, decision
@@ -738,10 +851,9 @@ async def _persist_delivery_result_after_dispatch(
                     current_server=current_server(),
                     outcome_id=outcome_id,
                     error=exc,
-                    now=utc_now(),
                 )
                 await failure_db.commit()
-            if attempt >= _RESULT_PERSISTENCE_MAX_ATTEMPTS:
+            if attempt >= _RESULT_APPLICATION_MAX_ATTEMPTS:
                 raise
             logger.warning(
                 "Retrying Telegram provider-outcome application",
@@ -750,7 +862,7 @@ async def _persist_delivery_result_after_dispatch(
                     "job_id": job_id,
                     "outcome_id": outcome_id,
                     "attempt": attempt,
-                    "max_attempts": _RESULT_PERSISTENCE_MAX_ATTEMPTS,
+                    "max_attempts": _RESULT_APPLICATION_MAX_ATTEMPTS,
                     "error_class": type(exc).__name__,
                 },
             )
@@ -770,6 +882,7 @@ async def run_telegram_delivery_queue_cycle(
     worker_id: str | None = None,
     recover_leases: bool = True,
     allowed_destination_classes: set[TelegramDestinationClass] | None = None,
+    maximum_effective_priority: int | None = None,
 ) -> TelegramDeliveryQueueCycleReport:
     """Run a bounded testable cycle without holding a DB transaction over HTTP."""
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
@@ -818,6 +931,19 @@ async def run_telegram_delivery_queue_cycle(
     processed_count = 0
     recovered_count = await _recover_expired_leases() if recover_leases else 0
 
+    if any(
+        pending_bot_identity == lane_identity
+        for pending_bot_identity, _job_id, _lease_token
+        in _provider_outcome_persistence_barriers
+    ):
+        return TelegramDeliveryQueueCycleReport(
+            bot_identity=lane_identity,
+            processed_count=0,
+            recovered_count=recovered_count,
+            status_counts={"provider_fact_persistence_wait": 1},
+            stale_fence_count=0,
+        )
+
     for _ in range(_worker_batch_limit(limit)):
         async with AsyncSessionLocal() as db:
             job = await claim_next_telegram_delivery_job(
@@ -828,6 +954,7 @@ async def run_telegram_delivery_queue_cycle(
                 request_timeout_seconds=_request_timeout_seconds(),
                 lease_seconds=_lease_seconds(),
                 allowed_destination_classes=allowed_destination_classes,
+                maximum_effective_priority=maximum_effective_priority,
             )
             if job is None:
                 await db.rollback()
@@ -836,9 +963,9 @@ async def run_telegram_delivery_queue_cycle(
 
         job_id = int(job.id)
         lease_token = int(job.lease_token)
-        current_time = utc_now()
         try:
             async with AsyncSessionLocal() as db:
+                current_time = await telegram_delivery_database_now(db)
                 freshness = await validator(db, job, current_time)
                 may_dispatch = await apply_telegram_delivery_freshness_result(
                     db,
@@ -929,9 +1056,9 @@ async def run_telegram_delivery_queue_cycle(
         # Revalidate once more at the final local boundary before marking the
         # dispatch as started. This closes the claim/limiter race without
         # holding a database transaction over the network call.
-        final_freshness_time = utc_now()
         try:
             async with AsyncSessionLocal() as db:
+                final_freshness_time = await telegram_delivery_database_now(db)
                 freshness = await validator(db, job, final_freshness_time)
                 may_dispatch = await apply_telegram_delivery_freshness_result(
                     db,
@@ -1000,7 +1127,6 @@ async def run_telegram_delivery_queue_cycle(
                     lease_token=lease_token,
                     dispatch_guard=lifecycle_feedback.assert_dispatchable,
                     rate_limit_probe=admission.is_rate_limit_probe,
-                    now=utc_now(),
                 )
                 if dispatch_marked:
                     await db.commit()
@@ -1090,14 +1216,13 @@ async def run_telegram_delivery_queue_cycle(
                 transport_phase="write_unknown",
             )
 
-        decision_time = utc_now()
         decision, limiter_decision = await _persist_delivery_result_after_dispatch(
+            bot_identity=lane_identity,
             job_id=job_id,
             worker_id=active_worker_id,
             lease_token=lease_token,
             gateway_result=gateway_result,
             feedback=lifecycle_feedback.apply_delivery_result,
-            decision_time=decision_time,
         )
         if decision.outcome == TelegramDeliveryOutcome.STALE_LEASE:
             stale_fence_count += 1
@@ -1118,33 +1243,50 @@ async def run_telegram_delivery_queue_cycle(
     )
 
 
-async def telegram_delivery_queue_lane_loop(
+async def _telegram_delivery_queue_lane_slot_loop(
     lane: TelegramDeliveryQueueLaneSpec,
+    *,
+    slot_name: str,
+    slot_index: int,
+    maximum_effective_priority: int | None,
+    allowed_destination_classes: set[TelegramDestinationClass] | None = None,
 ) -> None:
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
     logger.info(
-        "Telegram delivery execution lane started",
+        "Telegram delivery execution slot started",
         extra={
-            "event": "telegram_delivery_queue_lane.started",
+            "event": "telegram_delivery_queue_lane.slot_started",
             "bot_role": lane.bot_identity,
+            "slot_name": slot_name,
+            "slot_index": slot_index,
+            "maximum_effective_priority": maximum_effective_priority,
             "interval_seconds": _worker_interval_seconds(),
-            "batch_limit": _worker_batch_limit(),
+            "batch_limit": 1,
         },
     )
     iteration = 0
     while True:
         iteration += 1
+        report: TelegramDeliveryQueueCycleReport | None = None
         start_time = time.perf_counter()
         with job_context(JOB_TELEGRAM_DELIVERY_QUEUE, iteration=iteration) as run_id:
             try:
                 report = await run_telegram_delivery_queue_cycle(
                     bot_identity=lane.bot_identity,
+                    limit=1,
                     freshness_validator=lane.freshness_validator,
                     lifecycle_feedback=lane.lifecycle_feedback,
                     gateway_call=lane.gateway_call,
                     dispatch_limiter=lane.dispatch_limiter,
+                    worker_id=_worker_slot_id(
+                        lane.bot_identity,
+                        "m0" if maximum_effective_priority == 0 else "g",
+                        slot_index,
+                    ),
                     recover_leases=False,
+                    allowed_destination_classes=allowed_destination_classes,
+                    maximum_effective_priority=maximum_effective_priority,
                 )
                 if report.processed_count:
                     logger.info(
@@ -1153,6 +1295,8 @@ async def telegram_delivery_queue_lane_loop(
                             "event": "job.cycle.completed",
                             "job_name": JOB_TELEGRAM_DELIVERY_QUEUE,
                             "bot_role": lane.bot_identity,
+                            "slot_name": slot_name,
+                            "slot_index": slot_index,
                             "run_id": run_id,
                             "iteration": iteration,
                             "processed_count": report.processed_count,
@@ -1178,11 +1322,62 @@ async def telegram_delivery_queue_lane_loop(
                     exc,
                     job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
                     bot_role=lane.bot_identity,
+                    slot_name=slot_name,
+                    slot_index=slot_index,
                     run_id=run_id,
                     iteration=iteration,
                     duration_ms=duration_ms_since(start_time),
                 )
-        await asyncio.sleep(_worker_interval_seconds())
+        # The configured interval is an idle-poll delay, not a per-message
+        # throughput cap.  Redis remains the sole cadence authority.  A short
+        # cancellable yield also prevents a hot empty/limited database loop and
+        # gives shutdown a clean boundary outside connection establishment.
+        if report is not None and report.processed_count:
+            await asyncio.sleep(min(0.01, _worker_interval_seconds()))
+        else:
+            await asyncio.sleep(_worker_interval_seconds())
+
+
+async def telegram_delivery_queue_lane_loop(
+    lane: TelegramDeliveryQueueLaneSpec,
+) -> None:
+    """Supervise bounded intra-role slots, including reserved M0 capacity."""
+    assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
+    _assert_queue_runtime_owner()
+    slot_plan = _lane_slot_plan(lane.bot_identity)
+    logger.info(
+        "Telegram delivery execution lane started",
+        extra={
+            "event": "telegram_delivery_queue_lane.started",
+            "bot_role": lane.bot_identity,
+            "slot_count": len(slot_plan),
+            "m0_reserved_slot_count": sum(
+                ceiling == 0 for _, ceiling in slot_plan
+            ),
+        },
+    )
+    tasks = [
+        asyncio.create_task(
+            _telegram_delivery_queue_lane_slot_loop(
+                lane,
+                slot_name=slot_name,
+                slot_index=index,
+                maximum_effective_priority=maximum_priority,
+                allowed_destination_classes=None,
+            ),
+            name=(
+                f"telegram-delivery-lane-slot:{lane.bot_identity}:"
+                f"{slot_name}"
+            ),
+        )
+        for index, (slot_name, maximum_priority) in enumerate(slot_plan)
+    ]
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def telegram_delivery_private_only_lane_loop(
@@ -1207,44 +1402,54 @@ async def telegram_delivery_private_only_lane_loop(
             "bot_role": lane.bot_identity,
         },
     )
-    while True:
-        rehydration = await rehydrate_telegram_delivery_limiter_state(
-            lane.dispatch_limiter
-        )
-        may_start, identity_only = _telegram_delivery_lane_start_mode(
-            lane,
-            rehydration=rehydration,
-            channel_destination_key=channel_destination_key,
-        )
-        if not may_start or not identity_only:
-            return
-        try:
-            await run_telegram_delivery_queue_cycle(
-                bot_identity=lane.bot_identity,
-                freshness_validator=lane.freshness_validator,
-                lifecycle_feedback=lane.lifecycle_feedback,
-                gateway_call=lane.gateway_call,
-                dispatch_limiter=lane.dispatch_limiter,
-                recover_leases=False,
+    initial_rehydration = await rehydrate_telegram_delivery_limiter_state(
+        lane.dispatch_limiter
+    )
+    may_start, identity_only = _telegram_delivery_lane_start_mode(
+        lane,
+        rehydration=initial_rehydration,
+        channel_destination_key=channel_destination_key,
+    )
+    if not may_start or not identity_only:
+        return
+
+    slot_plan = _lane_slot_plan(lane.bot_identity)
+    tasks = [
+        asyncio.create_task(
+            _telegram_delivery_queue_lane_slot_loop(
+                lane,
+                slot_name=f"private-{slot_name}",
+                slot_index=index,
+                maximum_effective_priority=maximum_priority,
                 allowed_destination_classes={TelegramDestinationClass.PRIVATE},
+            ),
+            name=f"telegram-delivery-private-slot:{slot_name}",
+        )
+        for index, (slot_name, maximum_priority) in enumerate(slot_plan)
+    ]
+    try:
+        while True:
+            failed = next((task for task in tasks if task.done()), None)
+            if failed is not None:
+                await failed
+                raise TelegramDeliveryQueueImplementationIncompleteError(
+                    "telegram_private_lane_slot_stopped_unexpectedly"
+                )
+            await asyncio.sleep(_worker_interval_seconds())
+            rehydration = await rehydrate_telegram_delivery_limiter_state(
+                lane.dispatch_limiter
             )
-        except asyncio.CancelledError:
-            raise
-        except (
-            TelegramDeliveryQueueImplementationIncompleteError,
-            TelegramDeliveryLimiterUnavailableError,
-        ):
-            raise
-        except Exception as exc:
-            _loop_errors.log(
-                logger,
-                "Error in Telegram private-only lane %s: %s",
-                lane.bot_identity,
-                exc,
-                job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
-                bot_role=lane.bot_identity,
+            may_start, identity_only = _telegram_delivery_lane_start_mode(
+                lane,
+                rehydration=rehydration,
+                channel_destination_key=channel_destination_key,
             )
-        await asyncio.sleep(_worker_interval_seconds())
+            if not may_start or not identity_only:
+                return
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def telegram_delivery_queue_recovery_loop() -> None:
@@ -1300,7 +1505,6 @@ async def run_telegram_provider_outcome_replay_cycle(
             db,
             current_server=current_server(),
             max_rows=batch_size,
-            now=utc_now(),
         )
         await db.rollback()
 
@@ -1364,7 +1568,6 @@ async def run_telegram_provider_outcome_replay_cycle(
                         ),
                     ),
                     feedback=routed_feedback,
-                    now=utc_now(),
                 )
                 await db.commit()
             if decision.outcome not in {
@@ -1381,7 +1584,6 @@ async def run_telegram_provider_outcome_replay_cycle(
                     current_server=current_server(),
                     outcome_id=outcome_id,
                     error=exc,
-                    now=utc_now(),
                 )
                 await failure_db.commit()
             logger.warning(
@@ -1436,7 +1638,6 @@ async def telegram_delivery_reconciliation_loop(
                     ),
                 ),
                 max_rows=_recover_limit(),
-                now=utc_now(),
             )
             await db.commit()
         if report.unresolved_count or report.configuration_blocked_count:
@@ -1464,10 +1665,15 @@ def _telegram_delivery_lane_start_mode(
         return False, False
     if lane.bot_identity in set(rehydration.blocked_bot_identities):
         return False, False
-    if channel_destination_key in {
+    channel_globally_gated = channel_destination_key in {
         *rehydration.cooldown_destination_keys,
         *rehydration.hard_blocked_destination_keys,
-    }:
+    }
+    channel_lane_gated = (
+        lane.bot_identity,
+        channel_destination_key,
+    ) in set(rehydration.hard_blocked_bot_destinations)
+    if channel_globally_gated or channel_lane_gated:
         if lane.bot_identity == TELEGRAM_PRIMARY_BOT_IDENTITY:
             return True, True
         return False, False
@@ -1593,14 +1799,14 @@ async def _telegram_delivery_deferred_lane_activation_loop(
                 exc.retry_after_seconds + _retry_after_safety_seconds(),
             )
             rate_limited_identity = str(exc.bot_identity or lane.bot_identity)
-            await _persist_preflight_rate_limit_gate(
+            durable_cooldown_until = await _persist_preflight_rate_limit_gate(
                 bot_identity=rate_limited_identity,
                 retry_after_seconds=exc.retry_after_seconds,
             )
             try:
                 await lane.dispatch_limiter.extend_bot_cooldown(
                     rate_limited_identity,
-                    until=utc_now() + timedelta(seconds=retry_delay),
+                    until=durable_cooldown_until,
                 )
             except asyncio.CancelledError:
                 raise

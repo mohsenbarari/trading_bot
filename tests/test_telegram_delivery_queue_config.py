@@ -31,6 +31,10 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             settings.telegram_delivery_queue_worker_lease_seconds,
             settings.telegram_delivery_queue_worker_request_timeout_seconds + 15,
         )
+        self.assertGreater(
+            settings.telegram_delivery_queue_primary_concurrency,
+            settings.telegram_delivery_queue_primary_m0_reserved_concurrency,
+        )
 
     def test_nonfinite_negative_and_inverted_retry_config_fail_startup(self):
         invalid = (
@@ -57,6 +61,12 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             {"telegram_delivery_queue_worker_batch_limit": 0},
             {"telegram_delivery_queue_limiter_key_ttl_seconds": -1},
             {"telegram_delivery_queue_destination_min_interval_seconds": 0},
+            {"telegram_delivery_queue_primary_concurrency": 0},
+            {"telegram_delivery_queue_primary_m0_reserved_concurrency": 0},
+            {
+                "telegram_delivery_queue_primary_concurrency": 2,
+                "telegram_delivery_queue_primary_m0_reserved_concurrency": 2,
+            },
         )
         for values in invalid:
             with self.subTest(values=values), self.assertRaises(ValidationError):
