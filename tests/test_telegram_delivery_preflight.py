@@ -416,11 +416,106 @@ class TelegramDeliveryPreflightTests(unittest.IsolatedAsyncioTestCase):
             await _run(primary=gateway)
 
         self.assertEqual(captured.exception.retry_after_seconds, 127.0)
+        self.assertEqual(captured.exception.retry_after_source, "provider_integer")
         self.assertEqual(
             str(captured.exception),
             "telegram_preflight_rate_limited:primary:getMe",
         )
         self.assertNotIn("sensitive provider text", str(captured.exception))
+
+    async def test_provider_429_malformed_shapes_use_bounded_durable_fallback(self):
+        malformed_values = (
+            True,
+            "1",
+            1.5,
+            0,
+            -1,
+            2_147_483_648,
+            10**100,
+            None,
+        )
+        for raw_value in malformed_values:
+            rate_limited = TelegramGatewayResult(
+                ok=False,
+                method="getMe",
+                status_code=429,
+                response_json={
+                    "ok": False,
+                    "error_code": 429,
+                    "parameters": {"retry_after": raw_value},
+                },
+            )
+            gateway = _ReadbackGateway(
+                role="primary",
+                bot_id=PRIMARY_BOT_ID,
+                override_results={"getMe": rate_limited},
+            )
+            with self.subTest(raw_type=type(raw_value).__name__, raw=raw_value):
+                with self.assertRaises(
+                    TelegramDeliveryPreflightRateLimitedError
+                ) as captured:
+                    await _run(
+                        primary=gateway,
+                        malformed_retry_after_fallback_seconds=3.0,
+                    )
+                self.assertEqual(captured.exception.retry_after_seconds, 3.0)
+                self.assertEqual(
+                    captured.exception.retry_after_source,
+                    "bounded_malformed_fallback",
+                )
+                self.assertIn("rate_limited_malformed", str(captured.exception))
+
+        missing_parameters = TelegramGatewayResult(
+            ok=False,
+            method="getMe",
+            status_code=429,
+            response_json={"ok": False, "error_code": 429},
+        )
+        gateway = _ReadbackGateway(
+            role="primary",
+            bot_id=PRIMARY_BOT_ID,
+            override_results={"getMe": missing_parameters},
+        )
+        with self.assertRaises(
+            TelegramDeliveryPreflightRateLimitedError
+        ) as captured:
+            await _run(
+                primary=gateway,
+                malformed_retry_after_fallback_seconds=3.0,
+            )
+        self.assertEqual(
+            captured.exception.retry_after_source,
+            "bounded_malformed_fallback",
+        )
+
+    async def test_malformed_preflight_fallback_is_capped_for_unsafe_caller_input(self):
+        rate_limited = TelegramGatewayResult(
+            ok=False,
+            method="getMe",
+            status_code=429,
+            response_json={
+                "ok": False,
+                "error_code": 429,
+                "parameters": {"retry_after": "malformed"},
+            },
+        )
+        gateway = _ReadbackGateway(
+            role="primary",
+            bot_id=PRIMARY_BOT_ID,
+            override_results={"getMe": rate_limited},
+        )
+        with self.assertRaises(
+            TelegramDeliveryPreflightRateLimitedError
+        ) as captured:
+            await _run(
+                primary=gateway,
+                malformed_retry_after_fallback_seconds=10**12,
+            )
+        self.assertEqual(captured.exception.retry_after_seconds, 300.0)
+        self.assertEqual(
+            captured.exception.retry_after_source,
+            "bounded_malformed_fallback",
+        )
 
     async def test_wrong_bot_channel_or_member_identity_is_rejected(self):
         cases = (

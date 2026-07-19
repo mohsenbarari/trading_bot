@@ -13,12 +13,14 @@ from core.services.telegram_delivery_queue_service import (
     TELEGRAM_PRIMARY_BOT_IDENTITY,
 )
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_delivery_queue_contract import telegram_retry_after_integer
 
 
 TelegramPreflightGatewayCall = Callable[
     ...,
     Awaitable[telegram_gateway.TelegramGatewayResult],
 ]
+_MALFORMED_RETRY_AFTER_FALLBACK_MAX_SECONDS = 300.0
 
 _ADMIN_PERMISSION_FIELDS = (
     "can_manage_chat",
@@ -75,11 +77,13 @@ class TelegramDeliveryPreflightRateLimitedError(
         reason: str,
         *,
         retry_after_seconds: float,
+        retry_after_source: str = "provider_integer",
         bot_identity: str | None = None,
         method: str | None = None,
     ) -> None:
         super().__init__(reason)
         self.retry_after_seconds = retry_after_seconds
+        self.retry_after_source = retry_after_source
         self.bot_identity = bot_identity
         self.method = method
 
@@ -147,6 +151,7 @@ def _result_payload(
     *,
     role: str,
     method: str,
+    malformed_retry_after_fallback_seconds: float,
 ) -> Mapping[str, Any]:
     try:
         result_method = gateway_result.method
@@ -163,21 +168,28 @@ def _result_payload(
         and not result_ok
         and isinstance(body, Mapping)
         and body.get("error_code") == 429
-        and isinstance(body.get("parameters"), Mapping)
     ):
-        raw_retry_after = body["parameters"].get("retry_after")
-        if not isinstance(raw_retry_after, bool):
-            try:
-                retry_after = float(raw_retry_after)
-            except (TypeError, ValueError, OverflowError):
-                retry_after = 0.0
-            if math.isfinite(retry_after) and retry_after > 0:
-                raise TelegramDeliveryPreflightRateLimitedError(
-                    f"telegram_preflight_rate_limited:{role}:{method}",
-                    retry_after_seconds=retry_after,
-                    bot_identity=role,
-                    method=method,
-                )
+        parameters = body.get("parameters")
+        retry_after = telegram_retry_after_integer(
+            parameters.get("retry_after")
+            if isinstance(parameters, Mapping)
+            else None
+        )
+        if retry_after is not None:
+            raise TelegramDeliveryPreflightRateLimitedError(
+                f"telegram_preflight_rate_limited:{role}:{method}",
+                retry_after_seconds=float(retry_after),
+                retry_after_source="provider_integer",
+                bot_identity=role,
+                method=method,
+            )
+        raise TelegramDeliveryPreflightRateLimitedError(
+            f"telegram_preflight_rate_limited_malformed:{role}:{method}",
+            retry_after_seconds=malformed_retry_after_fallback_seconds,
+            retry_after_source="bounded_malformed_fallback",
+            bot_identity=role,
+            method=method,
+        )
     if (
         result_method != method
         or status_code != 200
@@ -199,6 +211,7 @@ async def _readback(
     method: str,
     payload: Mapping[str, Any],
     timeout_seconds: float,
+    malformed_retry_after_fallback_seconds: float,
 ) -> Mapping[str, Any]:
     try:
         result = await call(
@@ -211,7 +224,12 @@ async def _readback(
         raise TelegramDeliveryPreflightFailedError(
             f"telegram_preflight_transport_failed:{role}:{method}:{type(exc).__name__}"
         ) from exc
-    return _result_payload(result, role=role, method=method)
+    return _result_payload(
+        result,
+        role=role,
+        method=method,
+        malformed_retry_after_fallback_seconds=malformed_retry_after_fallback_seconds,
+    )
 
 
 def _permission_readback(
@@ -301,6 +319,7 @@ async def run_telegram_delivery_preflight(
     editor_enabled: bool,
     expected_editor_bot_id: Any = None,
     timeout_seconds: float = 10.0,
+    malformed_retry_after_fallback_seconds: float = 1.0,
     gateway_calls: Mapping[str, TelegramPreflightGatewayCall] | None = None,
     bot_identities: tuple[str, ...] | None = None,
     identity_only_bot_identities: tuple[str, ...] = (),
@@ -359,6 +378,15 @@ async def run_telegram_delivery_preflight(
         raise TelegramDeliveryPreflightConfigurationError(
             "telegram_preflight_timeout_invalid"
         )
+    malformed_fallback = float(malformed_retry_after_fallback_seconds)
+    if not math.isfinite(malformed_fallback) or malformed_fallback <= 0:
+        raise TelegramDeliveryPreflightConfigurationError(
+            "telegram_preflight_malformed_retry_after_fallback_invalid"
+        )
+    malformed_fallback = min(
+        malformed_fallback,
+        _MALFORMED_RETRY_AFTER_FALLBACK_MAX_SECONDS,
+    )
 
     calls = dict(
         credential_registry.build_gateway_calls()
@@ -384,6 +412,7 @@ async def run_telegram_delivery_preflight(
             method="getMe",
             payload={},
             timeout_seconds=timeout,
+            malformed_retry_after_fallback_seconds=malformed_fallback,
         )
         actual_bot_id = _provider_int(bot.get("id"), role=role, field="bot_id")
         if bot.get("is_bot") is not True or actual_bot_id != expected_bot_id:
@@ -416,6 +445,7 @@ async def run_telegram_delivery_preflight(
             method="getChat",
             payload={"chat_id": configured_channel_id},
             timeout_seconds=timeout,
+            malformed_retry_after_fallback_seconds=malformed_fallback,
         )
         actual_chat_id = _provider_int(chat.get("id"), role=role, field="chat_id")
         if actual_chat_id != approved_channel_id or chat.get("type") != "channel":
@@ -429,6 +459,7 @@ async def run_telegram_delivery_preflight(
             method="getChatMember",
             payload={"chat_id": configured_channel_id, "user_id": actual_bot_id},
             timeout_seconds=timeout,
+            malformed_retry_after_fallback_seconds=malformed_fallback,
         )
         member_user = member.get("user")
         if not isinstance(member_user, Mapping):
@@ -502,6 +533,11 @@ async def run_configured_telegram_delivery_preflight(
             settings,
             "telegram_delivery_queue_preflight_timeout_seconds",
             10.0,
+        ),
+        malformed_retry_after_fallback_seconds=getattr(
+            settings,
+            "telegram_delivery_queue_retry_base_seconds",
+            1.0,
         ),
         bot_identities=bot_identities,
         identity_only_bot_identities=identity_only_bot_identities,

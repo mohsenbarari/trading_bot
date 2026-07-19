@@ -117,6 +117,47 @@ _RETENTION_INTERVAL_SECONDS = 3600.0
 # ambiguous state when PostgreSQL returns.  The set is mutated only by this
 # asyncio event loop; no thread synchronization is needed.
 _provider_outcome_persistence_barriers: set[tuple[str, int, int]] = set()
+_provider_dispatch_entries: set[tuple[str, int, int]] = set()
+
+
+def _role_provider_fact_blocked(bot_identity: str) -> bool:
+    lane_identity = _normalize_lane_identity(bot_identity)
+    return any(
+        pending_identity == lane_identity
+        for pending_identity, _job_id, _lease_token
+        in _provider_outcome_persistence_barriers
+    )
+
+
+def _try_enter_provider_dispatch(
+    bot_identity: str,
+    *,
+    job_id: int,
+    lease_token: int,
+) -> bool:
+    """Linearize a provider dispatch against same-role retained facts.
+
+    These sets are accessed only on the owning asyncio event loop and this
+    function has no await boundary.  A response can therefore close the role
+    gate before another slot registers its provider call.  Calls registered
+    before closure are already in flight and retain their own fenced fact.
+    """
+    entry = (_normalize_lane_identity(bot_identity), int(job_id), int(lease_token))
+    if _role_provider_fact_blocked(entry[0]):
+        return False
+    _provider_dispatch_entries.add(entry)
+    return True
+
+
+def _leave_provider_dispatch(
+    bot_identity: str,
+    *,
+    job_id: int,
+    lease_token: int,
+) -> None:
+    _provider_dispatch_entries.discard(
+        (_normalize_lane_identity(bot_identity), int(job_id), int(lease_token))
+    )
 
 TelegramQueueGatewayCall = Callable[..., Awaitable[telegram_gateway.TelegramGatewayResult]]
 TelegramQueueFreshnessValidator = Callable[
@@ -412,6 +453,7 @@ async def _persist_preflight_rate_limit_gate(
     *,
     bot_identity: str,
     retry_after_seconds: float,
+    retry_after_source: str,
 ) -> datetime:
     async with AsyncSessionLocal() as db:
         gate = await record_telegram_preflight_rate_limit(
@@ -420,6 +462,7 @@ async def _persist_preflight_rate_limit_gate(
             bot_identity=bot_identity,
             retry_after_seconds=retry_after_seconds,
             safety_seconds=_retry_after_safety_seconds(),
+            retry_after_source=retry_after_source,
         )
         await db.commit()
         if gate.cooldown_until is None:
@@ -931,11 +974,7 @@ async def run_telegram_delivery_queue_cycle(
     processed_count = 0
     recovered_count = await _recover_expired_leases() if recover_leases else 0
 
-    if any(
-        pending_bot_identity == lane_identity
-        for pending_bot_identity, _job_id, _lease_token
-        in _provider_outcome_persistence_barriers
-    ):
+    if _role_provider_fact_blocked(lane_identity):
         return TelegramDeliveryQueueCycleReport(
             bot_identity=lane_identity,
             processed_count=0,
@@ -963,6 +1002,19 @@ async def run_telegram_delivery_queue_cycle(
 
         job_id = int(job.id)
         lease_token = int(job.lease_token)
+        if _role_provider_fact_blocked(lane_identity):
+            await _defer_for_dispatch_limit(
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                retry_seconds=0.1,
+                reason="provider_fact_persistence_wait_after_claim",
+            )
+            status_counts["provider_fact_persistence_wait"] = (
+                status_counts.get("provider_fact_persistence_wait", 0) + 1
+            )
+            processed_count += 1
+            continue
         try:
             async with AsyncSessionLocal() as db:
                 current_time = await telegram_delivery_database_now(db)
@@ -1109,6 +1161,30 @@ async def run_telegram_delivery_queue_cycle(
             processed_count += 1
             continue
 
+        dispatch_entry_acquired = _try_enter_provider_dispatch(
+            lane_identity,
+            job_id=job_id,
+            lease_token=lease_token,
+        )
+        if not dispatch_entry_acquired:
+            await _defer_for_dispatch_limit(
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                retry_seconds=0.1,
+                reason="provider_fact_persistence_wait_before_dispatch",
+            )
+            await _release_unused_rate_limit_probe(
+                dispatch_limiter=dispatch_limiter,
+                job=job,
+                admission=admission,
+            )
+            status_counts["provider_fact_persistence_wait"] = (
+                status_counts.get("provider_fact_persistence_wait", 0) + 1
+            )
+            processed_count += 1
+            continue
+
         try:
             async with AsyncSessionLocal() as db:
                 # The dispatch marker is the local linearization point for the
@@ -1133,6 +1209,11 @@ async def run_telegram_delivery_queue_cycle(
                 else:
                     await db.rollback()
         except asyncio.CancelledError:
+            _leave_provider_dispatch(
+                lane_identity,
+                job_id=job_id,
+                lease_token=lease_token,
+            )
             await _release_after_predispatch_error(
                 job_id=job_id,
                 worker_id=active_worker_id,
@@ -1146,6 +1227,11 @@ async def run_telegram_delivery_queue_cycle(
             )
             raise
         except TelegramDeliveryDispatchDeferredError as exc:
+            _leave_provider_dispatch(
+                lane_identity,
+                job_id=job_id,
+                lease_token=lease_token,
+            )
             deferred = await _defer_for_dispatch_limit(
                 job_id=job_id,
                 worker_id=active_worker_id,
@@ -1175,6 +1261,11 @@ async def run_telegram_delivery_queue_cycle(
             processed_count += 1
             continue
         except Exception as exc:
+            _leave_provider_dispatch(
+                lane_identity,
+                job_id=job_id,
+                lease_token=lease_token,
+            )
             await _release_after_predispatch_error(
                 job_id=job_id,
                 worker_id=active_worker_id,
@@ -1188,6 +1279,11 @@ async def run_telegram_delivery_queue_cycle(
             )
             raise
         if not dispatch_marked:
+            _leave_provider_dispatch(
+                lane_identity,
+                job_id=job_id,
+                lease_token=lease_token,
+            )
             await _release_unused_rate_limit_probe(
                 dispatch_limiter=dispatch_limiter,
                 job=job,
@@ -1197,33 +1293,40 @@ async def run_telegram_delivery_queue_cycle(
             continue
 
         try:
-            gateway_result = await gateway_call(
-                str(job.method),
-                dict(job.payload or {}),
-                timeout=_request_timeout_seconds(),
-                idempotency_key=str(job.dedupe_key),
-            )
-        except asyncio.CancelledError:
-            # Dispatch was already marked. Lease recovery must classify this as
-            # ambiguous/reconcile; releasing it as retryable could duplicate.
-            raise
-        except Exception as exc:
-            gateway_result = telegram_gateway.TelegramGatewayResult(
-                ok=False,
-                method=str(job.method),
-                idempotency_key=str(job.dedupe_key),
-                error=type(exc).__name__,
-                transport_phase="write_unknown",
-            )
+            try:
+                gateway_result = await gateway_call(
+                    str(job.method),
+                    dict(job.payload or {}),
+                    timeout=_request_timeout_seconds(),
+                    idempotency_key=str(job.dedupe_key),
+                )
+            except asyncio.CancelledError:
+                # Dispatch was already marked. Lease recovery must classify this as
+                # ambiguous/reconcile; releasing it as retryable could duplicate.
+                raise
+            except Exception as exc:
+                gateway_result = telegram_gateway.TelegramGatewayResult(
+                    ok=False,
+                    method=str(job.method),
+                    idempotency_key=str(job.dedupe_key),
+                    error=type(exc).__name__,
+                    transport_phase="write_unknown",
+                )
 
-        decision, limiter_decision = await _persist_delivery_result_after_dispatch(
-            bot_identity=lane_identity,
-            job_id=job_id,
-            worker_id=active_worker_id,
-            lease_token=lease_token,
-            gateway_result=gateway_result,
-            feedback=lifecycle_feedback.apply_delivery_result,
-        )
+            decision, limiter_decision = await _persist_delivery_result_after_dispatch(
+                bot_identity=lane_identity,
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                gateway_result=gateway_result,
+                feedback=lifecycle_feedback.apply_delivery_result,
+            )
+        finally:
+            _leave_provider_dispatch(
+                lane_identity,
+                job_id=job_id,
+                lease_token=lease_token,
+            )
         if decision.outcome == TelegramDeliveryOutcome.STALE_LEASE:
             stale_fence_count += 1
         key = decision.outcome.value
@@ -1802,6 +1905,7 @@ async def _telegram_delivery_deferred_lane_activation_loop(
             durable_cooldown_until = await _persist_preflight_rate_limit_gate(
                 bot_identity=rate_limited_identity,
                 retry_after_seconds=exc.retry_after_seconds,
+                retry_after_source=exc.retry_after_source,
             )
             try:
                 await lane.dispatch_limiter.extend_bot_cooldown(

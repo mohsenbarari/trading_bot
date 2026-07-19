@@ -48,6 +48,16 @@ def make_state(**overrides):
 
 
 class TelegramOfferQueueServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.database_now = utc_now()
+        patcher = patch.object(
+            service,
+            "telegram_delivery_database_now",
+            new=AsyncMock(return_value=self.database_now),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_action_mapping_covers_publish_partial_and_terminal(self):
         self.assertEqual(
             service.offer_delivery_action(

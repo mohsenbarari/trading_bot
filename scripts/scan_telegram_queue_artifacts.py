@@ -236,25 +236,48 @@ def _files(paths: Iterable[Path]) -> Iterable[Path]:
 def scan_paths(paths: Iterable[Path]) -> dict[str, object]:
     roots = tuple(Path(path) for path in paths)
     findings: list[Finding] = []
-    scanned_files = 0
+    scanned_files: list[str] = []
+    manifest_rows: list[str] = []
     missing = [str(path) for path in roots if not path.exists()]
     for missing_path in missing:
         findings.append(Finding(kind="input_missing", path=missing_path))
     for path in _files(path for path in roots if path.exists()):
-        scanned_files += 1
+        containing_roots = [
+            root
+            for root in roots
+            if root.is_dir() and (path == root or root in path.parents)
+        ]
+        if containing_roots:
+            label = path.relative_to(max(containing_roots, key=lambda item: len(item.parts))).as_posix()
+        else:
+            label = path.name
+        if label in scanned_files:
+            findings.append(Finding(kind="scan_path_label_collision", path=label))
+            continue
+        scanned_files.append(label)
         try:
             size = path.stat().st_size
             if size > MAX_FILE_BYTES:
                 findings += _limit_finding("file_size_limit_exceeded", path=str(path))
+                manifest_rows.append(f"{label}\toversized:{size}")
                 continue
-            findings += _scan_blob(path.read_bytes(), path=str(path), member=None)
+            blob = path.read_bytes()
+            manifest_rows.append(f"{label}\t{hashlib.sha256(blob).hexdigest()}\t{len(blob)}")
+            findings += _scan_blob(blob, path=str(path), member=None)
         except Exception:
             findings += _limit_finding("file_unreadable", path=str(path))
+            manifest_rows.append(f"{label}\tunreadable")
+    scanned_files.sort()
+    manifest_rows.sort()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "clean" if not findings else "blocked",
+        "scanned_file_count": len(scanned_files),
         "scanned_files": scanned_files,
+        "scanned_file_manifest_sha256": hashlib.sha256(
+            ("\n".join(manifest_rows) + "\n").encode("utf-8")
+        ).hexdigest(),
         "finding_count": len(findings),
         "findings": [asdict(finding) for finding in findings],
     }
@@ -270,7 +293,7 @@ def scan_tracked_source(repo_root: Path) -> dict[str, object]:
     """
     root = Path(repo_root).resolve()
     findings: list[Finding] = []
-    scanned_files = 0
+    scanned_files: list[str] = []
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -288,10 +311,12 @@ def scan_tracked_source(repo_root: Path) -> dict[str, object]:
         )
     except (OSError, subprocess.CalledProcessError):
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "surface": "tracked_source",
             "status": "blocked",
-            "scanned_files": 0,
+            "scanned_file_count": 0,
+            "scanned_files": [],
+            "blob_manifest_sha256": hashlib.sha256(b"").hexdigest(),
             "finding_count": 1,
             "findings": [
                 asdict(Finding(kind="tracked_source_unavailable", path=str(root)))
@@ -311,7 +336,7 @@ def scan_tracked_source(repo_root: Path) -> dict[str, object]:
         if object_type != "blob":
             continue
         manifest_rows.append(f"{mode} {object_id}\t{relative}")
-        scanned_files += 1
+        scanned_files.append(relative)
         try:
             size = int(
                 subprocess.check_output(
@@ -337,7 +362,7 @@ def scan_tracked_source(repo_root: Path) -> dict[str, object]:
             if kind in _SOURCE_SECRET_KINDS and pattern.search(text):
                 findings.append(Finding(kind=kind, path=relative))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "surface": "tracked_source",
         "git_commit": commit,
         "git_tree": tree,
@@ -345,7 +370,8 @@ def scan_tracked_source(repo_root: Path) -> dict[str, object]:
             ("\n".join(manifest_rows) + "\n").encode("utf-8", errors="surrogateescape")
         ).hexdigest(),
         "status": "clean" if not findings else "blocked",
-        "scanned_files": scanned_files,
+        "scanned_file_count": len(scanned_files),
+        "scanned_files": sorted(scanned_files),
         "finding_count": len(findings),
         "findings": [asdict(finding) for finding in findings],
     }
@@ -367,10 +393,12 @@ def scan_release_surfaces(
     if not surfaces:
         surfaces.append(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "surface": "inputs",
                 "status": "blocked",
-                "scanned_files": 0,
+                "scanned_file_count": 0,
+                "scanned_files": [],
+                "scanned_file_manifest_sha256": hashlib.sha256(b"").hexdigest(),
                 "finding_count": 1,
                 "findings": [
                     asdict(Finding(kind="scan_surface_missing", path="."))
@@ -383,18 +411,59 @@ def scan_release_surfaces(
         for finding in surface["findings"]
     ]
     clean = all(surface["status"] == "clean" for surface in surfaces)
+    artifact_files = sorted(
+        {
+            str(name)
+            for surface in surfaces
+            if surface["surface"] == "artifacts_and_logs"
+            for name in surface.get("scanned_files", [])
+        }
+    )
+    surface_manifest_rows = [
+        "\t".join(
+            (
+                str(surface["surface"]),
+                str(surface.get("scanned_file_manifest_sha256") or surface.get("blob_manifest_sha256") or ""),
+                str(surface.get("scanned_file_count", surface.get("scanned_files", 0))),
+            )
+        )
+        for surface in surfaces
+    ]
+    artifact_manifest_sha256 = next(
+        (
+            str(surface.get("scanned_file_manifest_sha256") or "")
+            for surface in surfaces
+            if surface["surface"] == "artifacts_and_logs"
+        ),
+        hashlib.sha256(b"").hexdigest(),
+    )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "clean" if clean else "blocked",
-        "scanned_files": sum(int(surface["scanned_files"]) for surface in surfaces),
+        "scanned_file_count": len(artifact_files),
+        "total_scanned_file_count": sum(
+            int(surface.get("scanned_file_count", surface.get("scanned_files", 0)))
+            for surface in surfaces
+        ),
+        "scanned_files": artifact_files,
+        "scanned_file_manifest_sha256": artifact_manifest_sha256,
+        "release_surface_manifest_sha256": hashlib.sha256(
+            ("\n".join(sorted(surface_manifest_rows)) + "\n").encode("utf-8")
+        ).hexdigest(),
         "finding_count": len(findings),
         "findings": findings,
         "surfaces": [
             {
                 "surface": surface["surface"],
                 "status": surface["status"],
-                "scanned_files": surface["scanned_files"],
+                "scanned_file_count": surface.get(
+                    "scanned_file_count", surface.get("scanned_files", 0)
+                ),
+                "scanned_file_manifest_sha256": surface.get(
+                    "scanned_file_manifest_sha256",
+                    surface.get("blob_manifest_sha256"),
+                ),
                 "finding_count": surface["finding_count"],
             }
             for surface in surfaces

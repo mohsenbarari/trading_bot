@@ -36,6 +36,10 @@ class TelegramQueueArtifactSecurityScanTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "clean")
         self.assertEqual(report["finding_count"], 0)
+        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["scanned_file_count"], 1)
+        self.assertEqual(report["scanned_files"], ["queue-report.json"])
+        self.assertRegex(report["scanned_file_manifest_sha256"], r"^[0-9a-f]{64}$")
 
     def test_raw_sensitive_fields_and_common_secret_shapes_are_blocked_without_echo(self):
         synthetic_token = "1234567890:" + ("A" * 35)

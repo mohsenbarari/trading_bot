@@ -22,13 +22,13 @@ from core.services.telegram_offer_queue_service import (
     load_offer_edit_fresh_success_counts,
     load_offer_publication_queue_candidates,
 )
+from core.services.telegram_delivery_queue_service import telegram_delivery_database_now
 from core.telegram_delivery_queue_contract import EDIT_CATCH_UP_FRESH_COUNT
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
 from core.trading_settings import get_trading_settings_async
-from core.utils import utc_now
 
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ async def _handoff_candidates(
     *,
     expected_channel_id: int,
     offer_expiry_minutes: int,
+    now,
 ) -> tuple[int, int, int, int]:
     handed_off = 0
     deduplicated = 0
@@ -88,6 +89,7 @@ async def _handoff_candidates(
                     state=candidate.state,
                     expected_channel_id=expected_channel_id,
                     offer_expiry_minutes=offer_expiry_minutes,
+                    now=now,
                 )
             if result.queue_result is None:
                 skipped += 1
@@ -131,6 +133,7 @@ async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederRe
     edit_counts = (0, 0, 0, 0)
     async with AsyncSessionLocal() as db:
         if not publication_gated:
+            publication_now = await telegram_delivery_database_now(db)
             publication_candidates = await load_offer_publication_queue_candidates(
                 db,
                 limit=_batch_limit(),
@@ -140,6 +143,7 @@ async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederRe
                 publication_candidates,
                 expected_channel_id=channel_id,
                 offer_expiry_minutes=expiry_minutes,
+                now=publication_now,
             )
 
         edit_success_counts = await load_offer_edit_fresh_success_counts(db)
@@ -148,17 +152,19 @@ async def run_telegram_offer_queue_handoff_cycle() -> TelegramOfferQueueFeederRe
             for rank, count in edit_success_counts.items()
             if count >= EDIT_CATCH_UP_FRESH_COUNT
         )
+        edit_now = await telegram_delivery_database_now(db)
         edit_candidates = await load_offer_edit_queue_candidates(
             db,
             limit=_batch_limit(),
             catch_up_due_ranks=catch_up_due_ranks,
-            now=utc_now(),
+            now=edit_now,
         )
         edit_counts = await _handoff_candidates(
             db,
             edit_candidates,
             expected_channel_id=channel_id,
             offer_expiry_minutes=expiry_minutes,
+            now=edit_now,
         )
 
     return TelegramOfferQueueFeederReport(

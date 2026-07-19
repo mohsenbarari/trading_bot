@@ -96,6 +96,8 @@ from core.telegram_delivery_callback_freshness import (
     validate_telegram_callback_delivery_freshness,
 )
 from core.services.telegram_offer_queue_service import (
+    enqueue_current_offer_delivery,
+    load_offer_edit_queue_candidates,
     load_offer_edit_fresh_success_counts,
     record_offer_edit_delivery_success,
 )
@@ -1006,6 +1008,146 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.Session() as db:
             counts = await load_offer_edit_fresh_success_counts(db)
         self.assertEqual(counts[0], 0)
+
+    async def test_offer_feeder_candidate_selection_uses_postgres_time_under_host_skew(self):
+        public_id = "ofr_feeder_db_clock_pg"
+        commodity_name = "feeder-db-clock-commodity"
+        channel_id = -100123456701
+        async with self.Session() as db:
+            await db.execute(
+                text("DELETE FROM offer_publication_states WHERE offer_public_id = :id"),
+                {"id": public_id},
+            )
+            await db.execute(
+                text("DELETE FROM offers WHERE offer_public_id = :id"),
+                {"id": public_id},
+            )
+            await db.execute(
+                text("DELETE FROM commodities WHERE name = :name"),
+                {"name": commodity_name},
+            )
+            commodity = Commodity(name=commodity_name)
+            db.add(commodity)
+            await db.flush()
+            offer = Offer(
+                offer_public_id=public_id,
+                home_server="foreign",
+                offer_type=OfferType.SELL,
+                settlement_type=SettlementType.CASH,
+                commodity_id=commodity.id,
+                commodity=commodity,
+                quantity=10,
+                remaining_quantity=5,
+                price=72_500_000,
+                is_wholesale=True,
+                status=OfferStatus.ACTIVE,
+            )
+            db.add(offer)
+            await db.flush()
+            state = build_offer_publication_state(
+                offer,
+                OfferPublicationSurface.TELEGRAM_CHANNEL,
+                status=OfferPublicationStatus.SENT,
+            )
+            state.offer_version_id = max(0, int(offer.version_id) - 1)
+            state.surface_resource_id = "901"
+            state.telegram_chat_id = channel_id
+            state.telegram_message_id = 901
+            db.add(state)
+            await db.commit()
+
+        for host_skew in (-timedelta(hours=24), timedelta(hours=24)):
+            with patch(
+                "core.utils.utc_now",
+                return_value=utc_now() + host_skew,
+            ):
+                async with self.Session() as db:
+                    candidates = await load_offer_edit_queue_candidates(
+                        db,
+                        limit=25,
+                    )
+                    candidate_public_ids = {
+                        candidate.offer.offer_public_id for candidate in candidates
+                    }
+                    await db.rollback()
+            self.assertIn(
+                public_id,
+                candidate_public_ids,
+            )
+
+    async def test_offer_publication_deadline_edges_ignore_host_clock_skew(self):
+        commodity_name = "publication-db-deadline-commodity"
+        async with self.Session() as db:
+            await db.execute(
+                text(
+                    "DELETE FROM offer_publication_states "
+                    "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')"
+                )
+            )
+            await db.execute(
+                text(
+                    "DELETE FROM offers "
+                    "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')"
+                )
+            )
+            await db.execute(
+                text("DELETE FROM commodities WHERE name = :name"),
+                {"name": commodity_name},
+            )
+            commodity = Commodity(name=commodity_name)
+            db.add(commodity)
+            await db.flush()
+            database_now = (
+                await db.execute(text("SELECT clock_timestamp()"))
+            ).scalar_one()
+            results = []
+            for index, deadline_offset in enumerate((1, -1), start=1):
+                offer = Offer(
+                    offer_public_id=f"ofr_db_deadline_edge_{index}",
+                    home_server="foreign",
+                    offer_type=OfferType.SELL,
+                    settlement_type=SettlementType.CASH,
+                    commodity_id=commodity.id,
+                    commodity=commodity,
+                    quantity=10,
+                    remaining_quantity=10,
+                    price=72_500_000,
+                    is_wholesale=True,
+                    status=OfferStatus.ACTIVE,
+                )
+                db.add(offer)
+                await db.flush()
+                state = build_offer_publication_state(
+                    offer,
+                    OfferPublicationSurface.TELEGRAM_CHANNEL,
+                    status=OfferPublicationStatus.PENDING,
+                )
+                db.add(state)
+                await db.flush()
+                with patch(
+                    "core.utils.utc_now",
+                    return_value=database_now + timedelta(hours=24),
+                ):
+                    results.append(
+                        await enqueue_current_offer_delivery(
+                            db,
+                            current_server="foreign",
+                            offer=offer,
+                            state=state,
+                            expected_channel_id=-100123456701,
+                            offer_expiry_minutes=2,
+                            publication_freshness_deadline_at=(
+                                database_now + timedelta(seconds=deadline_offset)
+                            ),
+                        )
+                    )
+            await db.commit()
+        self.assertIsNotNone(results[0].queue_result)
+        self.assertIsNone(results[1].queue_result)
+        self.assertEqual(
+            results[1].skipped_reason,
+            "offer_publication_deadline_passed",
+        )
 
     async def test_offer_edit_claim_is_globally_newest_first_across_feeder_cycles(self):
         now = utc_now()
@@ -3174,6 +3316,39 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active_gate.state, TELEGRAM_RUNTIME_GATE_ACTIVE)
         self.assertIsNone(active_gate.cooldown_until)
 
+    async def test_malformed_preflight_429_persists_bounded_database_cooldown(self):
+        now = utc_now()
+        async with self.Session() as db:
+            gate = await record_telegram_preflight_rate_limit(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                retry_after_seconds=3,
+                safety_seconds=0.1,
+                retry_after_source="bounded_malformed_fallback",
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(
+            gate.reason_code,
+            "telegram_preflight_rate_limited_malformed_fallback",
+        )
+        self.assertEqual(gate.retry_after_seconds, 3)
+        self.assertEqual(gate.cooldown_until, now + timedelta(seconds=3.1))
+        await self._enqueue("preflight-malformed-rate-limit-candidate")
+        self.assertIsNone(
+            await self._claim(
+                "preflight-malformed-rate-limit-worker",
+                now=now + timedelta(seconds=1),
+            )
+        )
+        async with self.Session() as db:
+            persisted_gate = await db.get(TelegramDeliveryRuntimeGate, "bot:primary")
+        self.assertEqual(
+            persisted_gate.cooldown_until,
+            now + timedelta(seconds=3.1),
+        )
+
     async def test_bot_pause_gate_resume_is_crash_safe_idempotent_and_audited(self):
         blocked_job, decision = await self._persist_hard_pause(
             "runtime-bot-pause",
@@ -3964,6 +4139,106 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             limiter.observations[0][1].reason,
             "rate_limit_probe_cancelled_before_dispatch",
         )
+
+    async def test_two_slots_do_not_start_new_provider_call_after_retained_fact(self):
+        blocked_candidate = await self._enqueue("cross-slot-blocked-candidate")
+        provider_candidate = await self._enqueue("cross-slot-provider-candidate")
+        blocked_claimed = asyncio.Event()
+        provider_fact_retained = asyncio.Event()
+        allow_provider_fact_commit = asyncio.Event()
+
+        class _WaitForRetainedFactLimiter(_AllowLimiter):
+            async def acquire(self, _job, *, now):
+                blocked_claimed.set()
+                await asyncio.wait_for(provider_fact_retained.wait(), timeout=2)
+                return TelegramDeliveryDispatchAdmission(allowed=True)
+
+        async def freshness_validator(_db, _job, _now):
+            return TelegramFreshnessDecision(TelegramFreshnessOutcome.SEND)
+
+        async def delayed_provider_record(db, **kwargs):
+            if int(kwargs["job_id"]) == int(provider_candidate.job.id):
+                # The worker installs its role gate immediately before calling
+                # this persistence function.
+                provider_fact_retained.set()
+                await asyncio.wait_for(allow_provider_fact_commit.wait(), timeout=2)
+            return await record_telegram_delivery_provider_outcome(db, **kwargs)
+
+        blocked_gateway = AsyncMock()
+        provider_gateway = AsyncMock(
+            return_value=TelegramGatewayResult(
+                ok=True,
+                method="sendMessage",
+                status_code=200,
+                response_json={"ok": True, "result": {"message_id": 771}},
+            )
+        )
+        with patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            self.Session,
+        ), patch(
+            "core.telegram_delivery_queue_worker.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.record_telegram_delivery_provider_outcome",
+            side_effect=delayed_provider_record,
+        ):
+            blocked_task = asyncio.create_task(
+                run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    limit=1,
+                    freshness_validator=freshness_validator,
+                    lifecycle_feedback=_NoopLifecycleFeedback(),
+                    gateway_call=blocked_gateway,
+                    dispatch_limiter=_WaitForRetainedFactLimiter(),
+                    worker_id="cross-slot-blocked-worker",
+                    recover_leases=False,
+                )
+            )
+            await asyncio.wait_for(blocked_claimed.wait(), timeout=2)
+            provider_task = asyncio.create_task(
+                run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    limit=1,
+                    freshness_validator=freshness_validator,
+                    lifecycle_feedback=_NoopLifecycleFeedback(),
+                    gateway_call=provider_gateway,
+                    dispatch_limiter=_AllowLimiter(),
+                    worker_id="cross-slot-provider-worker",
+                    recover_leases=False,
+                )
+            )
+            try:
+                blocked_report = await asyncio.wait_for(blocked_task, timeout=2)
+                self.assertEqual(
+                    blocked_report.status_counts,
+                    {"provider_fact_persistence_wait": 1},
+                )
+                blocked_gateway.assert_not_awaited()
+            finally:
+                allow_provider_fact_commit.set()
+            provider_report = await asyncio.wait_for(provider_task, timeout=2)
+
+        self.assertEqual(provider_report.status_counts, {"sent": 1})
+        provider_gateway.assert_awaited_once()
+        async with self.Session() as db:
+            blocked = await db.get(
+                TelegramDeliveryJobRecord, blocked_candidate.job.id
+            )
+            provider = await db.get(
+                TelegramDeliveryJobRecord, provider_candidate.job.id
+            )
+        self.assertEqual(blocked.state, TelegramDeliveryState.PENDING_RETRY)
+        self.assertEqual(
+            blocked.outcome_reason,
+            "provider_fact_persistence_wait_before_dispatch",
+        )
+        self.assertIsNone(blocked.last_error_class)
+        self.assertIsNone(blocked.dispatch_started_at)
+        self.assertEqual(provider.state, TelegramDeliveryState.SENT)
 
     async def test_complete_freshness_router_runs_at_both_worker_boundaries(self):
         enqueued = await self._enqueue("worker-complete-router")

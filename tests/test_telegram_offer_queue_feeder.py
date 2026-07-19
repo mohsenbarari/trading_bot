@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from core import telegram_offer_queue_feeder as feeder
 from core.services.telegram_offer_queue_service import TelegramOfferQueueError
 from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
+from core.utils import utc_now
 
 
 class FakeSession:
@@ -46,6 +47,16 @@ def candidate(public_id):
 
 
 class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.database_now = utc_now()
+        patcher = patch.object(
+            feeder,
+            "telegram_delivery_database_now",
+            new=AsyncMock(return_value=self.database_now),
+        )
+        self.database_clock = patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_cycle_hands_off_publication_and_edit_candidates(self):
         session = FakeSession()
         runtime = SimpleNamespace(
@@ -111,6 +122,13 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.deduplicated, 1)
         self.assertFalse(report.publication_gated)
         self.assertEqual(enqueue.await_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["now"] == self.database_now
+                for call in enqueue.await_args_list
+            )
+        )
+        self.assertEqual(self.database_clock.await_count, 2)
         self.assertEqual(session.commit.await_count, 2)
         self.assertEqual(session.savepoint_entries, 2)
         session.rollback.assert_not_awaited()
@@ -180,6 +198,10 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.edit_handoffs, 1)
         load_publication.assert_not_awaited()
         load_edits.assert_awaited_once()
+        self.assertEqual(
+            load_edits.await_args.kwargs["now"], self.database_now
+        )
+        self.database_clock.assert_awaited_once()
 
     async def test_invalid_candidate_rolls_back_and_next_candidate_continues(self):
         session = FakeSession()
@@ -204,6 +226,7 @@ class TelegramOfferQueueFeederTests(unittest.IsolatedAsyncioTestCase):
                 candidates,
                 expected_channel_id=-100,
                 offer_expiry_minutes=2,
+                now=self.database_now,
             )
 
         self.assertEqual(counts, (1, 0, 0, 1))

@@ -636,7 +636,7 @@ def apply_freshness_decision(
             job.feeder_rank = feeder_internal_rank(job.feeder, decision.replacement_action)
 
 
-def _telegram_retry_after_integer(value: Any) -> int | None:
+def telegram_retry_after_integer(value: Any) -> int | None:
     """Accept only the Bot API's documented positive ``Integer`` shape.
 
     ``bool`` is deliberately rejected even though it is an ``int`` subclass in
@@ -671,7 +671,7 @@ def _retry_after_seconds(result: TelegramGatewayResultLike) -> int | None:
     parameters = result.response_json.get("parameters")
     if not isinstance(parameters, Mapping):
         return None
-    return _telegram_retry_after_integer(parameters.get("retry_after"))
+    return telegram_retry_after_integer(parameters.get("retry_after"))
 
 
 def _has_migrate_to_chat_id(result: TelegramGatewayResultLike) -> bool:

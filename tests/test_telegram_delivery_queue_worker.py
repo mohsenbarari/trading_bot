@@ -92,6 +92,10 @@ class _NoopLifecycleFeedback:
 
 class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        worker._provider_outcome_persistence_barriers.clear()
+        worker._provider_dispatch_entries.clear()
+        self.addCleanup(worker._provider_outcome_persistence_barriers.clear)
+        self.addCleanup(worker._provider_dispatch_entries.clear)
         self._channel_id_patcher = patch.object(
             worker.settings,
             "channel_id",
@@ -386,6 +390,84 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recovered, 0)
         claim.assert_not_awaited()
         recover.assert_not_awaited()
+
+    async def test_cross_slot_provider_fact_closes_gate_after_claim_before_dispatch(self):
+        job = SimpleNamespace(
+            id=991,
+            lease_token=13,
+            method="sendMessage",
+            payload={"chat_id": 1, "text": "redacted"},
+            dedupe_key="cross-slot-provider-fact",
+            bot_identity="primary",
+            destination_key="private:cross-slot",
+        )
+        db = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        freshness_apply_count = 0
+
+        async def apply_freshness(*_args, **_kwargs):
+            nonlocal freshness_apply_count
+            freshness_apply_count += 1
+            if freshness_apply_count == 2:
+                # Model slot A receiving a definitive response while slot B has
+                # already claimed and is at its final pre-dispatch boundary.
+                worker._provider_outcome_persistence_barriers.add(
+                    ("primary", 990, 12)
+                )
+            return True
+
+        defer = AsyncMock(return_value=True)
+        gateway = AsyncMock()
+        mark = AsyncMock()
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.claim_next_telegram_delivery_job",
+            new=AsyncMock(return_value=job),
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_freshness_result",
+            side_effect=apply_freshness,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_database_now",
+            new=AsyncMock(return_value=worker.utc_now()),
+        ), patch(
+            "core.telegram_delivery_queue_worker._defer_for_dispatch_limit",
+            new=defer,
+        ), patch(
+            "core.telegram_delivery_queue_worker.mark_telegram_delivery_dispatch_started",
+            new=mark,
+        ):
+            report = await worker.run_telegram_delivery_queue_cycle(
+                bot_identity="primary",
+                freshness_validator=AsyncMock(return_value=object()),
+                lifecycle_feedback=_NoopLifecycleFeedback(),
+                gateway_call=gateway,
+                dispatch_limiter=_AllowLimiter(),
+                recover_leases=False,
+                limit=1,
+            )
+
+        self.assertEqual(
+            report.status_counts, {"provider_fact_persistence_wait": 1}
+        )
+        defer.assert_awaited_once_with(
+            job_id=991,
+            worker_id=ANY,
+            lease_token=13,
+            retry_seconds=0.1,
+            reason="provider_fact_persistence_wait_before_dispatch",
+        )
+        mark.assert_not_awaited()
+        gateway.assert_not_awaited()
+        self.assertFalse(worker._provider_dispatch_entries)
 
     async def test_cancellation_after_provider_response_waits_for_durable_fact(self):
         db = AsyncMock()
@@ -1662,6 +1744,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         durable_gate.assert_awaited_once_with(
             bot_identity="primary",
             retry_after_seconds=2.5,
+            retry_after_source="provider_integer",
         )
         sleep.assert_awaited_once_with(2.6)
 

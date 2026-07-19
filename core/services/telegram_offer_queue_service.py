@@ -25,6 +25,7 @@ from core.services.telegram_delivery_queue_service import (
     TELEGRAM_PRIMARY_BOT_IDENTITY,
     TelegramDeliveryEnqueueResult,
     enqueue_telegram_delivery_job,
+    telegram_delivery_database_now,
 )
 from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
@@ -45,7 +46,6 @@ from core.telegram_delivery_queue_contract import (
     TelegramDestinationClass,
     TelegramFeederKind,
 )
-from core.utils import utc_now
 from models.offer import Offer, OfferStatus
 from models.offer_publication_state import (
     OfferPublicationState,
@@ -372,7 +372,9 @@ async def enqueue_current_offer_delivery(
 ) -> TelegramOfferQueueHandoffResult:
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         raise TelegramOfferQueueError("telegram_offer_queue_handoff_is_foreign_only")
-    current_time = now or utc_now()
+    current_time = _normalized_time(
+        now if now is not None else await telegram_delivery_database_now(db)
+    )
     channel_id = _nonzero_int(
         expected_channel_id,
         reason="telegram_offer_queue_channel_invalid",
@@ -538,7 +540,9 @@ async def load_offer_edit_queue_candidates(
     catch_up_due_ranks: frozenset[int] = frozenset(),
     now: datetime | None = None,
 ) -> list[TelegramOfferQueueCandidate]:
-    current_time = _normalized_time(now or utc_now())
+    current_time = _normalized_time(
+        now if now is not None else await telegram_delivery_database_now(db)
+    )
     state = aliased(OfferPublicationState)
     queued_job = aliased(TelegramDeliveryJobRecord)
     edit_rank = case(

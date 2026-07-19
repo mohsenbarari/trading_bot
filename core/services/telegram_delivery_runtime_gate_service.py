@@ -207,16 +207,19 @@ async def record_telegram_preflight_rate_limit(
     bot_identity: str,
     retry_after_seconds: float,
     safety_seconds: float,
+    retry_after_source: str = "provider_integer",
     now: datetime | None = None,
 ) -> TelegramDeliveryRuntimeGate:
     _require_foreign(current_server)
     retry_after = float(retry_after_seconds)
     safety = float(safety_seconds)
+    source = str(retry_after_source or "")
     if (
         not math.isfinite(retry_after)
         or retry_after <= 0
         or not math.isfinite(safety)
         or safety < 0
+        or source not in {"provider_integer", "bounded_malformed_fallback"}
     ):
         raise TelegramRuntimeGateValidationError(
             "telegram_preflight_retry_after_invalid"
@@ -237,7 +240,11 @@ async def record_telegram_preflight_rate_limit(
         gate.cooldown_until = cooldown_until
     if gate.state in {TELEGRAM_RUNTIME_GATE_ACTIVE, TELEGRAM_RUNTIME_GATE_COOLDOWN}:
         gate.state = TELEGRAM_RUNTIME_GATE_COOLDOWN
-    gate.reason_code = "telegram_preflight_rate_limited"
+    gate.reason_code = (
+        "telegram_preflight_rate_limited"
+        if source == "provider_integer"
+        else "telegram_preflight_rate_limited_malformed_fallback"
+    )
     gate.provider_status_code = 429
     gate.retry_after_seconds = max(1, int(math.ceil(retry_after)))
     gate.evidence_hash = _safe_hash(
@@ -246,6 +253,7 @@ async def record_telegram_preflight_rate_limit(
                 "gate_key": gate.gate_key,
                 "status": 429,
                 "retry_after": gate.retry_after_seconds,
+                "retry_after_source": source,
                 "cooldown_until": gate.cooldown_until.isoformat(),
             },
             sort_keys=True,
@@ -514,6 +522,7 @@ async def resume_telegram_runtime_gate(
                 gate.last_error_detail = detail
                 if isinstance(exc, TelegramDeliveryPreflightRateLimitedError):
                     retry_after = float(exc.retry_after_seconds)
+                    retry_source = str(exc.retry_after_source)
                     safety = float(
                         getattr(
                             settings,
@@ -524,7 +533,11 @@ async def resume_telegram_runtime_gate(
                     gate.cooldown_until = failed_at + timedelta(
                         seconds=retry_after + safety
                     )
-                    gate.reason_code = "telegram_preflight_rate_limited"
+                    gate.reason_code = (
+                        "telegram_preflight_rate_limited"
+                        if retry_source == "provider_integer"
+                        else "telegram_preflight_rate_limited_malformed_fallback"
+                    )
                     gate.provider_status_code = 429
                     gate.retry_after_seconds = max(1, int(math.ceil(retry_after)))
                     gate.evidence_hash = _safe_hash(
@@ -534,6 +547,7 @@ async def resume_telegram_runtime_gate(
                                 "request_id": normalized_request,
                                 "status": 429,
                                 "retry_after": gate.retry_after_seconds,
+                                "retry_after_source": retry_source,
                                 "cooldown_until": gate.cooldown_until.isoformat(),
                             },
                             sort_keys=True,

@@ -28,6 +28,13 @@ class TelegramQueueRoadmapConsistencyTests(unittest.TestCase):
                 1,
                 finding,
             )
+        for index in range(1, 9):
+            finding = f"TQ-R{index:03d}"
+            self.assertEqual(
+                len(re.findall(rf"^\| `{finding}` \|", text, flags=re.MULTILINE)),
+                1,
+                finding,
+            )
 
 
 if __name__ == "__main__":

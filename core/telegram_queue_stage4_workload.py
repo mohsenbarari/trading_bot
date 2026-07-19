@@ -24,6 +24,7 @@ STAGE4_MANUAL_EXPIRY_COUNT = 180
 STAGE4_TRADE_TARGET_COUNT = 540
 STAGE4_CONCURRENT_TRADE_OFFER_COUNT = 162
 STAGE4_ADMIN_JOB_COUNT = 125
+STAGE4_MARKET_NOTICE_COUNT = 2
 
 LOT_SHAPE_QUOTAS = {"none": 900, "two": 450, "three": 450}
 INVALID_FAMILY_QUOTAS = {
@@ -235,6 +236,10 @@ def build_stage4_workload(
     ]
     rng.shuffle(nonconcurrent_ids)
     concurrent_expiry_races = set(rng.sample(concurrent_ids, 18))
+    race_expected_winner = {
+        offer_id: ("trade" if index % 2 == 0 else "expiry")
+        for index, offer_id in enumerate(sorted(concurrent_expiry_races))
+    }
     manual_expiry_ids = set(nonconcurrent_ids[:162]) | concurrent_expiry_races
 
     valid_events: list[dict[str, Any]] = []
@@ -268,6 +273,7 @@ def build_stage4_workload(
             "trade_mode": trade_mode,
             "manual_expiry_requested": offer_id in manual_expiry_ids,
             "expiry_trade_race": offer_id in concurrent_expiry_races,
+            "race_expected_winner": race_expected_winner.get(offer_id),
             "synthetic_notes": bool(offer_index % 3 == 0),
             "response_catalog_id": "offer.valid.preview",
         }
@@ -289,24 +295,36 @@ def build_stage4_workload(
         if row["event_type"] == "offer_submit_valid"
     }
     lifecycle_events: list[dict[str, Any]] = []
+    trade_release_at_by_offer: dict[str, int] = {}
     for offer_id, mode in trade_modes.items():
         submit = by_offer[offer_id]
         requester_count = concurrent_request_count.get(offer_id, 1)
         base_at = int(submit["at_ms"]) + rng.randint(5_000, 90_000)
+        trade_release_at_by_offer[offer_id] = base_at
+        race_winner = race_expected_winner.get(offer_id)
+        trade_at = base_at + (25 if race_winner == "expiry" else 0)
         for request_index in range(requester_count):
             lifecycle_events.append(
                 {
                     "event_id": f"trade-{offer_id}-{request_index + 1}",
                     "event_type": "trade_request",
-                    "at_ms": base_at,
+                    "at_ms": trade_at,
                     "business_event_id": offer_id,
                     "actor_key": owner_cycle[
                         (offer_ids.index(offer_id) + request_index + 1)
                         % len(owner_cycle)
                     ],
                     "concurrency_barrier": (
-                        f"trade-barrier-{offer_id}" if mode == "concurrent" else None
+                        (
+                            f"expiry-trade-barrier-{offer_id}"
+                            if offer_id in concurrent_expiry_races
+                            else f"trade-barrier-{offer_id}"
+                        )
+                        if mode == "concurrent"
+                        else None
                     ),
+                    "race_expected_winner": race_winner,
+                    "expiry_trade_race": offer_id in concurrent_expiry_races,
                     "partial": mode == "partial_then_complete",
                     "response_catalog_id": "trade.request.result",
                 }
@@ -326,16 +344,29 @@ def build_stage4_workload(
                     "response_catalog_id": "trade.partial.completion",
                 }
             )
-    for offer_id in manual_expiry_ids:
+    for offer_id in sorted(manual_expiry_ids):
         submit = by_offer[offer_id]
+        race_winner = race_expected_winner.get(offer_id)
+        expiry_at = (
+            trade_release_at_by_offer[offer_id]
+            + (25 if race_winner == "trade" else 0)
+            if race_winner is not None
+            else int(submit["at_ms"]) + rng.randint(10_000, 110_000)
+        )
         lifecycle_events.append(
             {
                 "event_id": f"manual-expiry-{offer_id}",
                 "event_type": "manual_expiry_request",
-                "at_ms": int(submit["at_ms"]) + rng.randint(10_000, 110_000),
+                "at_ms": expiry_at,
                 "business_event_id": offer_id,
                 "actor_key": submit["owner_key"],
                 "expiry_trade_race": offer_id in concurrent_expiry_races,
+                "concurrency_barrier": (
+                    f"expiry-trade-barrier-{offer_id}"
+                    if race_winner is not None
+                    else None
+                ),
+                "race_expected_winner": race_winner,
                 "response_catalog_id": "offer.manual_expiry.result",
             }
         )
@@ -369,10 +400,34 @@ def build_stage4_workload(
         for burst in range(5)
         for recipient in range(25)
     ]
+    market_notice_events = [
+        {
+            "event_id": "market-transition-opened",
+            "event_type": "market_status_change",
+            "at_ms": peak_windows[1][0] * 1000 + 50,
+            "business_event_id": "market-transition-opened",
+            "transition": "opened",
+            "response_catalog_id": "market.channel.opened",
+        },
+        {
+            "event_id": "market-transition-closed",
+            "event_type": "market_status_change",
+            "at_ms": peak_windows[-2][0] * 1000 + 50,
+            "business_event_id": "market-transition-closed",
+            "transition": "closed",
+            "response_catalog_id": "market.channel.closed",
+        },
+    ]
 
     events = tuple(
         sorted(
-            (*valid_events, *invalid_events, *lifecycle_events, *admin_events),
+            (
+                *valid_events,
+                *invalid_events,
+                *lifecycle_events,
+                *admin_events,
+                *market_notice_events,
+            ),
             key=lambda row: (int(row["at_ms"]), str(row["event_id"])),
         )
     )
@@ -408,6 +463,12 @@ def validate_stage4_workload(
     invalid = [row for row in events if row.get("event_type") == "offer_submit_invalid"]
     manual = [row for row in events if row.get("event_type") == "manual_expiry_request"]
     admin = [row for row in events if row.get("event_type") == "admin_broadcast_delivery"]
+    market_notices = [
+        row for row in events if row.get("event_type") == "market_status_change"
+    ]
+    trade_requests = [
+        row for row in events if row.get("event_type") == "trade_request"
+    ]
     if events != tuple(
         sorted(
             events,
@@ -445,8 +506,6 @@ def validate_stage4_workload(
         raise Stage4WorkloadValidationError("stage4_manual_expiry_quota_mismatch")
     if sum(bool(row.get("expiry_trade_race")) for row in manual) != 18:
         raise Stage4WorkloadValidationError("stage4_expiry_race_quota_mismatch")
-    if len(admin) != STAGE4_ADMIN_JOB_COUNT:
-        raise Stage4WorkloadValidationError("stage4_admin_job_quota_mismatch")
     valid_by_offer = {str(row["business_event_id"]): row for row in valid}
     if len(valid_by_offer) != len(valid):
         raise Stage4WorkloadValidationError("stage4_valid_business_identity_duplicate")
@@ -461,13 +520,49 @@ def validate_stage4_workload(
             raise Stage4WorkloadValidationError(
                 "stage4_lifecycle_event_precedes_submission"
             )
-    trade_requests = [row for row in events if row.get("event_type") == "trade_request"]
     for row in trade_requests:
         source = valid_by_offer.get(str(row["business_event_id"]))
         if source is None or int(row["at_ms"]) <= int(source["at_ms"]):
             raise Stage4WorkloadValidationError(
                 "stage4_trade_event_precedes_submission"
             )
+    race_manual = {
+        str(row["business_event_id"]): row
+        for row in manual
+        if row.get("expiry_trade_race") is True
+    }
+    for offer_id, expiry in race_manual.items():
+        race_trades = [
+            row
+            for row in trade_requests
+            if str(row["business_event_id"]) == offer_id
+        ]
+        if len(race_trades) < 2:
+            raise Stage4WorkloadValidationError(
+                "stage4_expiry_race_competing_trade_count_invalid"
+            )
+        barrier = f"expiry-trade-barrier-{offer_id}"
+        race_rows = [expiry, *race_trades]
+        if any(row.get("concurrency_barrier") != barrier for row in race_rows):
+            raise Stage4WorkloadValidationError(
+                "stage4_expiry_race_barrier_mismatch"
+            )
+        planned_times = [int(row["at_ms"]) for row in race_rows]
+        if max(planned_times) - min(planned_times) > 50:
+            raise Stage4WorkloadValidationError(
+                "stage4_expiry_race_planned_skew_exceeded"
+            )
+        expected_winners = {row.get("race_expected_winner") for row in race_rows}
+        if expected_winners not in ({"trade"}, {"expiry"}):
+            raise Stage4WorkloadValidationError(
+                "stage4_expiry_race_expected_winner_invalid"
+            )
+    if len(admin) != STAGE4_ADMIN_JOB_COUNT:
+        raise Stage4WorkloadValidationError("stage4_admin_job_quota_mismatch")
+    if len(market_notices) != STAGE4_MARKET_NOTICE_COUNT or {
+        row.get("transition") for row in market_notices
+    } != {"opened", "closed"}:
+        raise Stage4WorkloadValidationError("stage4_market_notice_quota_mismatch")
     if len({str(row["business_event_id"]) for row in trade_requests}) != (
         STAGE4_TRADE_TARGET_COUNT
     ):
@@ -528,6 +623,7 @@ def validate_stage4_workload(
         "manual_expiry_requests": len(manual),
         "expiry_trade_races": sum(bool(row.get("expiry_trade_race")) for row in manual),
         "admin_jobs": len(admin),
+        "market_notices": len(market_notices),
         "active_owners": len(owners),
         "commodity_count": len(commodity_set),
         "event_count": len(events),
