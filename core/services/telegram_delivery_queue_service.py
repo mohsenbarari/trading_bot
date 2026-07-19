@@ -587,7 +587,7 @@ def _positive_int(value: Any) -> int | None:
         parsed = int(value)
     except (TypeError, ValueError, OverflowError):
         return None
-    return parsed if parsed > 0 else None
+    return parsed if 0 < parsed <= 9_223_372_036_854_775_807 else None
 
 
 def _raw_retry_after(result: TelegramGatewayResultLike) -> int | None:
@@ -649,9 +649,22 @@ def _sanitized_provider_response(result: TelegramGatewayResultLike) -> dict[str,
 def _provider_outcome_facts(
     result: TelegramGatewayResultLike,
 ) -> tuple[dict[str, Any], str]:
+    transport_phase = str(
+        getattr(result, "transport_phase", "") or ""
+    ).strip().lower() or None
+    if transport_phase not in {
+        None,
+        "pre_write",
+        "write_unknown",
+        "response_received",
+    }:
+        raise TelegramDeliveryQueueValidationError(
+            "provider_outcome_transport_phase_invalid"
+        )
     facts = {
         "gateway_ok": bool(result.ok),
         "method": str(result.method or ""),
+        "transport_phase": transport_phase,
         "provider_status_code": (
             int(result.status_code) if result.status_code is not None else None
         ),
@@ -683,6 +696,7 @@ def _provider_outcome_to_gateway_result(
             str(response.get("description") or "") if isinstance(response, Mapping) else ""
         ),
         error=outcome.provider_error_class,
+        transport_phase=outcome.transport_phase,
     )
 
 
@@ -743,6 +757,7 @@ async def record_telegram_delivery_provider_outcome(
         worker_id=str(worker_id),
         bot_identity=str(record.bot_identity),
         method=str(record.method),
+        transport_phase=facts["transport_phase"],
         gateway_ok=facts["gateway_ok"],
         provider_status_code=facts["provider_status_code"],
         provider_response=facts["provider_response"],
@@ -782,6 +797,7 @@ def _record_to_contract(record: TelegramDeliveryJobRecord) -> TelegramDeliveryJo
         campaign_id=record.campaign_id,
         state=TelegramDeliveryState(_enum_value(record.state)),
         attempt_count=int(record.attempt_count or 0),
+        provider_attempt_count=int(record.provider_attempt_count or 0),
         next_retry_at=record.next_retry_at,
         lease_until=record.lease_until,
         lease_token=int(record.lease_token or 0),
@@ -947,6 +963,7 @@ async def enqueue_telegram_delivery_job(
         "run_id": normalized_run_id,
         "state": TelegramDeliveryState.PENDING,
         "attempt_count": 0,
+        "provider_attempt_count": 0,
         "lease_token": 0,
     }
     insert_stmt = (
@@ -1262,6 +1279,7 @@ async def mark_telegram_delivery_dispatch_started(
         if record.lease_until is None or record.lease_until <= dispatch_linearized_at:
             return False
     record.dispatch_started_at = dispatch_linearized_at
+    record.provider_attempt_count = int(record.provider_attempt_count or 0) + 1
     record.rate_limit_probe = bool(rate_limit_probe)
     record.updated_at = dispatch_linearized_at
     await db.flush()
@@ -1570,6 +1588,7 @@ async def resolve_telegram_delivery_result(
     retry_after_safety_seconds: float,
     retry_base_seconds: float,
     retry_max_seconds: float,
+    retry_jitter_ratio: float = 0.0,
     global_rate_limit_window_seconds: float = 2.0,
     feedback: TelegramDeliveryResultFeedback | None = None,
     recorded_outcome: TelegramDeliveryProviderOutcomeRecord | None = None,
@@ -1637,6 +1656,7 @@ async def resolve_telegram_delivery_result(
         retry_after_safety_seconds=retry_after_safety_seconds,
         retry_base_seconds=retry_base_seconds,
         retry_max_seconds=retry_max_seconds,
+        retry_jitter_ratio=retry_jitter_ratio,
     )
     record.state = contract_job.state
     record.next_retry_at = contract_job.next_retry_at
@@ -1687,6 +1707,7 @@ async def apply_telegram_delivery_provider_outcome(
     retry_max_seconds: float,
     global_rate_limit_window_seconds: float,
     feedback: TelegramDeliveryResultFeedback,
+    retry_jitter_ratio: float = 0.0,
     now: datetime | None = None,
 ) -> TelegramDeliveryDecision:
     """Apply one recorded provider fact and domain feedback atomically."""
@@ -1726,6 +1747,7 @@ async def apply_telegram_delivery_provider_outcome(
         retry_after_safety_seconds=retry_after_safety_seconds,
         retry_base_seconds=retry_base_seconds,
         retry_max_seconds=retry_max_seconds,
+        retry_jitter_ratio=retry_jitter_ratio,
         global_rate_limit_window_seconds=global_rate_limit_window_seconds,
         feedback=feedback,
         recorded_outcome=outcome,

@@ -117,6 +117,30 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
             TelegramDeliveryProviderOutcomeRecord.__table__.columns,
         )
 
+        transport_migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/a163f4a5b7c8_add_telegram_transport_attempt_facts.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "a052f3a4b6c7"',
+            transport_migration,
+        )
+        self.assertIn("provider_attempt_count", transport_migration)
+        self.assertIn("transport_phase", transport_migration)
+
+        self.assertIn(
+            "ck_telegram_delivery_jobs_provider_attempt_count",
+            constraint_names,
+        )
+        provider_constraints = {
+            constraint.name
+            for constraint in TelegramDeliveryProviderOutcomeRecord.__table__.constraints
+        }
+        self.assertIn(
+            "ck_telegram_delivery_provider_outcomes_transport_phase",
+            provider_constraints,
+        )
+
     def test_runtime_gate_has_strict_scope_and_identity_constraints(self):
         table = TelegramDeliveryRuntimeGate.__table__
         names = {constraint.name for constraint in table.constraints}

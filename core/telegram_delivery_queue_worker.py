@@ -707,6 +707,13 @@ async def _persist_delivery_result_after_dispatch(
                             )
                         ),
                     ),
+                    retry_jitter_ratio=float(
+                        getattr(
+                            settings,
+                            "telegram_delivery_queue_retry_jitter_ratio",
+                            0.2,
+                        )
+                    ),
                     global_rate_limit_window_seconds=max(
                         0.001,
                         float(
@@ -1080,6 +1087,7 @@ async def run_telegram_delivery_queue_cycle(
                 method=str(job.method),
                 idempotency_key=str(job.dedupe_key),
                 error=type(exc).__name__,
+                transport_phase="write_unknown",
             )
 
         decision_time = utc_now()
@@ -1337,6 +1345,13 @@ async def run_telegram_provider_outcome_replay_cycle(
                                 300.0,
                             )
                         ),
+                    ),
+                    retry_jitter_ratio=float(
+                        getattr(
+                            settings,
+                            "telegram_delivery_queue_retry_jitter_ratio",
+                            0.2,
+                        )
                     ),
                     global_rate_limit_window_seconds=max(
                         0.001,

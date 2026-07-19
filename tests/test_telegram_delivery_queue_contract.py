@@ -48,6 +48,7 @@ class FakeGatewayResult:
     response_json: dict[str, Any] | None
     response_text: str
     error: str | None
+    transport_phase: str | None = None
 
     @property
     def message_id(self) -> int | None:
@@ -68,6 +69,7 @@ def gateway_result(
     response_json: dict | None = None,
     response_text: str = "",
     error: str | None = None,
+    transport_phase: str | None = None,
 ) -> FakeGatewayResult:
     return FakeGatewayResult(
         ok=ok,
@@ -76,6 +78,7 @@ def gateway_result(
         response_json=response_json,
         response_text=response_text,
         error=error,
+        transport_phase=transport_phase,
     )
 
 
@@ -565,6 +568,7 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         queue = InMemoryTelegramDeliveryQueue()
         job = await self.enqueue(queue, "fallback")
         job.attempt_count = 10_000
+        job.provider_attempt_count = 10_000
         await self.claim(queue)
         decision = await self.resolve(
             queue,
@@ -576,6 +580,101 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(decision.next_retry_at, NOW + timedelta(seconds=5.25))
         self.assertEqual(job.state, TelegramDeliveryState.PENDING_RETRY)
+
+    async def test_transport_phase_and_jitter_are_safe_deterministic_and_bounded(self):
+        prewrite_queue = InMemoryTelegramDeliveryQueue()
+        prewrite = await self.enqueue(prewrite_queue, "prewrite")
+        await self.claim(prewrite_queue)
+        prewrite_decision = await self.resolve(
+            prewrite_queue,
+            prewrite,
+            gateway_result(
+                error="UnknownConnectWrapper",
+                transport_phase="pre_write",
+            ),
+            retry_base_seconds=10,
+            retry_max_seconds=20,
+            retry_jitter_ratio=0.2,
+        )
+        self.assertEqual(
+            prewrite_decision.outcome,
+            TelegramDeliveryOutcome.RETRY_PENDING,
+        )
+        delay = (prewrite_decision.next_retry_at - NOW).total_seconds()
+        self.assertGreaterEqual(delay, 8)
+        self.assertLessEqual(delay, 12)
+
+        repeat_queue = InMemoryTelegramDeliveryQueue()
+        repeat = await self.enqueue(repeat_queue, "prewrite")
+        await self.claim(repeat_queue)
+        repeated = await self.resolve(
+            repeat_queue,
+            repeat,
+            gateway_result(
+                error="UnknownConnectWrapper",
+                transport_phase="pre_write",
+            ),
+            retry_base_seconds=10,
+            retry_max_seconds=20,
+            retry_jitter_ratio=0.2,
+        )
+        self.assertEqual(repeated.next_retry_at, prewrite_decision.next_retry_at)
+
+        unknown_write_queue = InMemoryTelegramDeliveryQueue()
+        unknown_write = await self.enqueue(unknown_write_queue, "unknown-write")
+        await self.claim(unknown_write_queue)
+        ambiguous = await self.resolve(
+            unknown_write_queue,
+            unknown_write,
+            gateway_result(
+                error="CustomProxyDisconnect",
+                transport_phase="write_unknown",
+            ),
+        )
+        self.assertEqual(ambiguous.outcome, TelegramDeliveryOutcome.AMBIGUOUS)
+
+    async def test_nonfinite_retry_inputs_never_overflow_or_loop(self):
+        for retry_after in (float("nan"), float("inf"), "1e999999"):
+            queue = InMemoryTelegramDeliveryQueue()
+            job = await self.enqueue(queue, f"nonfinite-{retry_after}")
+            await self.claim(queue)
+            decision = await self.resolve(
+                queue,
+                job,
+                gateway_result(
+                    status_code=429,
+                    response_json={"parameters": {"retry_after": retry_after}},
+                ),
+                retry_base_seconds=1,
+                retry_max_seconds=5,
+            )
+            self.assertEqual(decision.outcome, TelegramDeliveryOutcome.RETRY_PENDING)
+            self.assertLessEqual(
+                (decision.next_retry_at - NOW).total_seconds(),
+                5.1,
+            )
+
+        queue = InMemoryTelegramDeliveryQueue()
+        job = await self.enqueue(
+            queue,
+            "invalid-config",
+            feeder=TelegramFeederKind.OFFER_EDIT,
+            action=TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
+            destination="channel:invalid-config",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="editMessageText",
+            bot_identity="channel_editor",
+        )
+        await self.claim(queue, bot_identity="channel_editor")
+        decision = await self.resolve(
+            queue,
+            job,
+            gateway_result(method="editMessageText", status_code=503),
+            retry_base_seconds=10,
+            retry_max_seconds=1,
+        )
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.QUARANTINED)
+        self.assertEqual(decision.reason, "telegram_retry_config_invalid")
 
     async def test_success_is_terminal_and_replayed_resolution_is_noop(self):
         queue = InMemoryTelegramDeliveryQueue()

@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum, IntEnum
+import hashlib
+import math
 from typing import Any, Protocol
 
 
@@ -21,6 +23,7 @@ class TelegramGatewayResultLike(Protocol):
     response_text: str
     response_json: dict[str, Any] | None
     error: str | None
+    transport_phase: str | None
 
     @property
     def message_id(self) -> int | None:
@@ -375,6 +378,7 @@ class TelegramDeliveryJob:
     campaign_id: str | None = None
     state: TelegramDeliveryState = TelegramDeliveryState.PENDING
     attempt_count: int = 0
+    provider_attempt_count: int = 0
     next_retry_at: datetime | None = None
     lease_until: datetime | None = None
     lease_token: int = 0
@@ -626,7 +630,7 @@ def _positive_number(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return number if number > 0 else None
+    return number if math.isfinite(number) and number > 0 else None
 
 
 def _status_code(result: TelegramGatewayResultLike) -> int | None:
@@ -672,13 +676,48 @@ def _error_text(result: TelegramGatewayResultLike) -> str:
 
 
 def _bounded_backoff_seconds(
-    attempt_count: int, *, base_seconds: float, max_seconds: float
+    attempt_count: int,
+    *,
+    base_seconds: float,
+    max_seconds: float,
+    jitter_ratio: float = 0.0,
+    jitter_identity: str = "",
 ) -> float:
+    base = float(base_seconds)
+    maximum = float(max_seconds)
+    jitter = float(jitter_ratio)
+    if (
+        not math.isfinite(base)
+        or not math.isfinite(maximum)
+        or not math.isfinite(jitter)
+        or base <= 0
+        or maximum <= 0
+        or base > maximum
+        or jitter < 0
+        or jitter > 1
+    ):
+        raise ValueError("telegram_retry_config_invalid")
     exponent = min(max(0, int(attempt_count) - 1), 16)
-    return min(
-        max(float(base_seconds), float(max_seconds)),
-        float(base_seconds) * (2**exponent),
-    )
+    delay = min(maximum, base * (2**exponent))
+    if jitter:
+        digest = hashlib.sha256(
+            f"{jitter_identity}:{int(attempt_count)}".encode("utf-8")
+        ).digest()
+        fraction = int.from_bytes(digest[:8], "big") / float((1 << 64) - 1)
+        factor = 1.0 + ((fraction * 2.0) - 1.0) * jitter
+        delay = min(maximum, max(0.001, delay * factor))
+    return delay
+
+
+def _safe_retry_at(now: datetime, seconds: float) -> datetime:
+    if math.isinf(seconds) and seconds > 0:
+        return datetime.max.replace(tzinfo=now.tzinfo or timezone.utc)
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("telegram_retry_delay_invalid")
+    try:
+        return now + timedelta(seconds=seconds)
+    except OverflowError:
+        return datetime.max.replace(tzinfo=now.tzinfo or timezone.utc)
 
 
 def _clear_lease(job: TelegramDeliveryJob) -> None:
@@ -694,6 +733,7 @@ def apply_gateway_result(
     retry_after_safety_seconds: float,
     retry_base_seconds: float = 1.0,
     retry_max_seconds: float = DEFAULT_MAX_RETRY_SECONDS,
+    retry_jitter_ratio: float = 0.0,
     destination_pause_seconds: float = DEFAULT_DESTINATION_PAUSE_SECONDS,
 ) -> TelegramDeliveryDecision:
     if job.is_terminal:
@@ -730,6 +770,7 @@ def apply_gateway_result(
     status_code = _status_code(result)
     error_text = _error_text(result)
     normalized_error = str(result.error or "").strip().lower()
+    transport_phase = str(getattr(result, "transport_phase", "") or "").strip().lower()
     job.last_error_class = str(
         result.error
         or (f"HTTP{status_code}" if status_code is not None else "TelegramUnknownError")
@@ -769,14 +810,28 @@ def apply_gateway_result(
     if status_code == 429:
         retry_after = _retry_after_seconds(result)
         if retry_after is None:
-            retry_after = _bounded_backoff_seconds(
-                job.attempt_count,
-                base_seconds=retry_base_seconds,
-                max_seconds=retry_max_seconds,
+            try:
+                retry_after = _bounded_backoff_seconds(
+                    job.provider_attempt_count,
+                    base_seconds=retry_base_seconds,
+                    max_seconds=retry_max_seconds,
+                    jitter_ratio=retry_jitter_ratio,
+                    jitter_identity=job.dedupe_key,
+                )
+            except ValueError:
+                job.state = TelegramDeliveryState.QUARANTINED
+                return TelegramDeliveryDecision(
+                    TelegramDeliveryOutcome.QUARANTINED,
+                    reason="telegram_retry_config_invalid",
+                )
+        safety = float(retry_after_safety_seconds)
+        if not math.isfinite(safety) or safety < 0:
+            job.state = TelegramDeliveryState.QUARANTINED
+            return TelegramDeliveryDecision(
+                TelegramDeliveryOutcome.QUARANTINED,
+                reason="telegram_retry_config_invalid",
             )
-        retry_at = now + timedelta(
-            seconds=retry_after + max(0.0, float(retry_after_safety_seconds))
-        )
+        retry_at = _safe_retry_at(now, retry_after + safety)
         job.state = TelegramDeliveryState.PENDING_RETRY
         job.next_retry_at = retry_at
         return TelegramDeliveryDecision(
@@ -850,7 +905,8 @@ def apply_gateway_result(
         )
 
     if job.method == "sendMessage" and (
-        normalized_error in _AMBIGUOUS_SEND_ERRORS
+        transport_phase == "write_unknown"
+        or normalized_error in _AMBIGUOUS_SEND_ERRORS
         or (status_code is not None and 500 <= status_code <= 599)
         or (status_code is not None and 200 <= status_code <= 299)
     ):
@@ -862,12 +918,21 @@ def apply_gateway_result(
         )
 
     if status_code is not None and 200 <= status_code <= 299:
-        delay = _bounded_backoff_seconds(
-            job.attempt_count,
-            base_seconds=retry_base_seconds,
-            max_seconds=retry_max_seconds,
-        )
-        retry_at = now + timedelta(seconds=delay)
+        try:
+            delay = _bounded_backoff_seconds(
+                job.provider_attempt_count,
+                base_seconds=retry_base_seconds,
+                max_seconds=retry_max_seconds,
+                jitter_ratio=retry_jitter_ratio,
+                jitter_identity=job.dedupe_key,
+            )
+        except ValueError:
+            job.state = TelegramDeliveryState.QUARANTINED
+            return TelegramDeliveryDecision(
+                TelegramDeliveryOutcome.QUARANTINED,
+                reason="telegram_retry_config_invalid",
+            )
+        retry_at = _safe_retry_at(now, delay)
         job.state = TelegramDeliveryState.PENDING_RETRY
         job.next_retry_at = retry_at
         return TelegramDeliveryDecision(
@@ -878,15 +943,25 @@ def apply_gateway_result(
 
     if (
         (status_code is not None and 500 <= status_code <= 599)
+        or transport_phase in {"pre_write", "write_unknown"}
         or normalized_error in _SAFE_RETRY_TRANSPORT_ERRORS
         or normalized_error in _AMBIGUOUS_SEND_ERRORS
     ):
-        delay = _bounded_backoff_seconds(
-            job.attempt_count,
-            base_seconds=retry_base_seconds,
-            max_seconds=retry_max_seconds,
-        )
-        retry_at = now + timedelta(seconds=delay)
+        try:
+            delay = _bounded_backoff_seconds(
+                job.provider_attempt_count,
+                base_seconds=retry_base_seconds,
+                max_seconds=retry_max_seconds,
+                jitter_ratio=retry_jitter_ratio,
+                jitter_identity=job.dedupe_key,
+            )
+        except ValueError:
+            job.state = TelegramDeliveryState.QUARANTINED
+            return TelegramDeliveryDecision(
+                TelegramDeliveryOutcome.QUARANTINED,
+                reason="telegram_retry_config_invalid",
+            )
+        retry_at = _safe_retry_at(now, delay)
         job.state = TelegramDeliveryState.PENDING_RETRY
         job.next_retry_at = retry_at
         return TelegramDeliveryDecision(
@@ -1116,6 +1191,7 @@ class InMemoryTelegramDeliveryQueue:
         retry_after_safety_seconds: float,
         retry_base_seconds: float = 1.0,
         retry_max_seconds: float = DEFAULT_MAX_RETRY_SECONDS,
+        retry_jitter_ratio: float = 0.0,
         destination_pause_seconds: float = DEFAULT_DESTINATION_PAUSE_SECONDS,
         rate_limit_probe_delay_seconds: float = DEFAULT_RATE_LIMIT_PROBE_DELAY_SECONDS,
         global_rate_limit_window_seconds: float = DEFAULT_GLOBAL_RATE_LIMIT_WINDOW_SECONDS,
@@ -1130,6 +1206,7 @@ class InMemoryTelegramDeliveryQueue:
                     retry_after_safety_seconds=retry_after_safety_seconds,
                     retry_base_seconds=retry_base_seconds,
                     retry_max_seconds=retry_max_seconds,
+                    retry_jitter_ratio=retry_jitter_ratio,
                     destination_pause_seconds=destination_pause_seconds,
                 )
             if (
@@ -1141,6 +1218,7 @@ class InMemoryTelegramDeliveryQueue:
                     TelegramDeliveryOutcome.STALE_LEASE,
                     reason="stale_or_missing_lease",
                 )
+            job.provider_attempt_count += 1
             decision = apply_gateway_result(
                 job,
                 result,
@@ -1148,6 +1226,7 @@ class InMemoryTelegramDeliveryQueue:
                 retry_after_safety_seconds=retry_after_safety_seconds,
                 retry_base_seconds=retry_base_seconds,
                 retry_max_seconds=retry_max_seconds,
+                retry_jitter_ratio=retry_jitter_ratio,
                 destination_pause_seconds=destination_pause_seconds,
             )
             if decision.destination_cooldown_until is not None:

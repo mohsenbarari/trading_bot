@@ -50,6 +50,11 @@ class TelegramDeliveryProviderOutcomeRecord(Base):
             "apply_state IN ('pending', 'applied', 'quarantined')",
             name="ck_telegram_delivery_provider_outcomes_apply_state",
         ),
+        CheckConstraint(
+            "transport_phase IS NULL OR transport_phase IN "
+            "('pre_write', 'write_unknown', 'response_received')",
+            name="ck_telegram_delivery_provider_outcomes_transport_phase",
+        ),
         Index(
             "ix_telegram_delivery_provider_outcomes_pending",
             "next_apply_at",
@@ -74,6 +79,7 @@ class TelegramDeliveryProviderOutcomeRecord(Base):
     worker_id = Column(String(128), nullable=False)
     bot_identity = Column(String(128), nullable=False)
     method = Column(String(64), nullable=False)
+    transport_phase = Column(String(24), nullable=True)
     gateway_ok = Column(Boolean, nullable=False)
     provider_status_code = Column(Integer, nullable=True)
     provider_response = Column(JSON, nullable=True)

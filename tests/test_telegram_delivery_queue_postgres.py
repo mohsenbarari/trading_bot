@@ -62,6 +62,7 @@ from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueSurfaceError,
     apply_telegram_delivery_freshness_result as _apply_telegram_delivery_freshness_result,
     claim_next_telegram_delivery_job,
+    defer_unstarted_telegram_delivery_lease,
     enqueue_telegram_delivery_job,
     mark_telegram_delivery_dispatch_started as _mark_telegram_delivery_dispatch_started,
     apply_telegram_delivery_provider_outcome,
@@ -271,7 +272,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "a052f3a4b6c7"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "a163f4a5b7c8"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -517,6 +518,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 "description": "Too Many Requests",
                 "parameters": {"retry_after": 3},
             },
+            transport_phase="response_received",
         )
         async with self.Session() as db:
             first = await record_telegram_delivery_provider_outcome(
@@ -531,6 +533,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             first_id = int(first.outcome.id)
             await db.commit()
         self.assertTrue(first.created)
+        self.assertEqual(first.outcome.transport_phase, "response_received")
 
         async with self.Session() as db:
             replay = await record_telegram_delivery_provider_outcome(
@@ -1748,6 +1751,48 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             await db.rollback()
         self.assertTrue(first)
         self.assertFalse(second)
+
+    async def test_admission_attempts_are_distinct_from_provider_attempts(self):
+        await self._enqueue("provider-attempt-accounting")
+        now = utc_now()
+        first = await self._claim("admission-worker-1", now=now)
+        self.assertEqual(first.attempt_count, 1)
+        self.assertEqual(first.provider_attempt_count, 0)
+        async with self.Session() as db:
+            deferred = await defer_unstarted_telegram_delivery_lease(
+                db,
+                current_server="foreign",
+                job_id=first.id,
+                worker_id=first.worker_id,
+                lease_token=first.lease_token,
+                retry_seconds=0.001,
+                reason="synthetic_limiter_wait",
+                now=now,
+            )
+            await db.commit()
+        self.assertTrue(deferred)
+
+        second = await self._claim(
+            "admission-worker-2",
+            now=now + timedelta(seconds=1),
+        )
+        self.assertEqual(second.attempt_count, 2)
+        self.assertEqual(second.provider_attempt_count, 0)
+        async with self.Session() as db:
+            marked = await mark_telegram_delivery_dispatch_started(
+                db,
+                current_server="foreign",
+                job_id=second.id,
+                worker_id=second.worker_id,
+                lease_token=second.lease_token,
+                now=now + timedelta(seconds=1),
+            )
+            await db.commit()
+        self.assertTrue(marked)
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, second.id)
+            self.assertEqual(persisted.attempt_count, 2)
+            self.assertEqual(persisted.provider_attempt_count, 1)
 
     async def test_dispatch_marker_rechecks_lease_after_scope_lock_wait(self):
         await self._enqueue("dispatch-marker-expired-after-lock")

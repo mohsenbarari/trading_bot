@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import hashlib
 import logging
 import os
 from typing import Any, Optional
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_BASE_URL = "https://api.telegram.org"
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 _MISSING = object()
+_CORRELATION_HASH_DOMAIN = b"telegram-delivery-correlation-v1\x00"
 
 
 class TelegramGatewaySurfaceError(RuntimeError):
@@ -36,6 +38,7 @@ class TelegramGatewayResult:
     response_json: Optional[dict[str, Any]] = None
     idempotency_key: Optional[str] = None
     error: Optional[str] = None
+    transport_phase: Optional[str] = None
 
     @property
     def message_id(self) -> Optional[int]:
@@ -59,6 +62,16 @@ def assert_telegram_execution_surface(*, operation: str = "telegram") -> None:
 
 def _resolve_bot_token(bot_token: Optional[str] = None) -> Optional[str]:
     return bot_token or settings.bot_token or os.getenv("BOT_TOKEN")
+
+
+def _delivery_correlation_hash(value: Optional[str]) -> Optional[str]:
+    """Return a stable, one-way log correlation without exposing queue identity."""
+    if value is None:
+        return None
+    digest = hashlib.sha256()
+    digest.update(_CORRELATION_HASH_DOMAIN)
+    digest.update(str(value).encode("utf-8", errors="replace"))
+    return digest.hexdigest()
 
 
 def _response_json(response: Any) -> Optional[dict[str, Any]]:
@@ -89,6 +102,37 @@ def _missing_token_result(method: str, idempotency_key: Optional[str]) -> Telegr
         method=method,
         idempotency_key=idempotency_key,
         error="missing_bot_token",
+        transport_phase="pre_write",
+    )
+
+
+def _transport_failure_phase(exc: BaseException, *, response: Any = None) -> str:
+    if response is not None or getattr(exc, "response", None) is not None:
+        return "response_received"
+    if isinstance(
+        exc,
+        (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout),
+    ):
+        return "pre_write"
+    return "write_unknown"
+
+
+def _result_from_response(
+    *,
+    method: str,
+    response: Any,
+    idempotency_key: Optional[str],
+    error: str | None = None,
+) -> TelegramGatewayResult:
+    return TelegramGatewayResult(
+        ok=_status_ok(response),
+        method=method,
+        status_code=getattr(response, "status_code", None),
+        response_text=_response_text(response),
+        response_json=_response_json(response),
+        idempotency_key=idempotency_key,
+        error=error,
+        transport_phase="response_received",
     )
 
 
@@ -116,28 +160,38 @@ async def post_telegram_method(
                 timeout=timeout,
             )
     except Exception as exc:
+        received_response = (
+            response if response is not None else getattr(exc, "response", None)
+        )
         logger.debug(
             "Telegram gateway async request failed",
             extra={
                 "event": "telegram.gateway_async_failed",
                 "method": method,
-                "idempotency_key": idempotency_key,
+                "delivery_correlation_hash": _delivery_correlation_hash(
+                    idempotency_key
+                ),
                 "error_class": type(exc).__name__,
             },
         )
+        if received_response is not None:
+            return _result_from_response(
+                method=method,
+                response=received_response,
+                idempotency_key=idempotency_key,
+                error=type(exc).__name__,
+            )
         return TelegramGatewayResult(
             ok=False,
             method=method,
             idempotency_key=idempotency_key,
             error=type(exc).__name__,
+            transport_phase=_transport_failure_phase(exc),
         )
 
-    return TelegramGatewayResult(
-        ok=_status_ok(response),
+    return _result_from_response(
         method=method,
-        status_code=getattr(response, "status_code", None),
-        response_text=_response_text(response),
-        response_json=_response_json(response),
+        response=response,
         idempotency_key=idempotency_key,
     )
 
@@ -157,6 +211,7 @@ def post_telegram_method_sync(
     if not token:
         return _missing_token_result(method, idempotency_key)
 
+    response = None
     try:
         response = httpx.post(
             f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
@@ -164,28 +219,38 @@ def post_telegram_method_sync(
             timeout=timeout,
         )
     except Exception as exc:
+        received_response = (
+            response if response is not None else getattr(exc, "response", None)
+        )
         logger.debug(
             "Telegram gateway sync request failed",
             extra={
                 "event": "telegram.gateway_sync_failed",
                 "method": method,
-                "idempotency_key": idempotency_key,
+                "delivery_correlation_hash": _delivery_correlation_hash(
+                    idempotency_key
+                ),
                 "error_class": type(exc).__name__,
             },
         )
+        if received_response is not None:
+            return _result_from_response(
+                method=method,
+                response=received_response,
+                idempotency_key=idempotency_key,
+                error=type(exc).__name__,
+            )
         return TelegramGatewayResult(
             ok=False,
             method=method,
             idempotency_key=idempotency_key,
             error=type(exc).__name__,
+            transport_phase=_transport_failure_phase(exc),
         )
 
-    return TelegramGatewayResult(
-        ok=_status_ok(response),
+    return _result_from_response(
         method=method,
-        status_code=getattr(response, "status_code", None),
-        response_text=_response_text(response),
-        response_json=_response_json(response),
+        response=response,
         idempotency_key=idempotency_key,
     )
 

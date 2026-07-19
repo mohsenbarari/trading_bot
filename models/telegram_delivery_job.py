@@ -59,6 +59,10 @@ class TelegramDeliveryJobRecord(Base):
         CheckConstraint("priority BETWEEN 0 AND 7", name="ck_telegram_delivery_jobs_priority"),
         CheckConstraint("priority_rank >= 0", name="ck_telegram_delivery_jobs_priority_rank"),
         CheckConstraint("attempt_count >= 0", name="ck_telegram_delivery_jobs_attempt_count"),
+        CheckConstraint(
+            "provider_attempt_count >= 0",
+            name="ck_telegram_delivery_jobs_provider_attempt_count",
+        ),
         CheckConstraint("lease_token >= 0", name="ck_telegram_delivery_jobs_lease_token"),
         CheckConstraint(
             "bot_identity IN ('primary', 'channel_editor')",
@@ -235,6 +239,12 @@ class TelegramDeliveryJobRecord(Base):
         server_default=text("'pending'"),
     )
     attempt_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    provider_attempt_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
     next_retry_at = Column(DateTime(timezone=True), nullable=True)
     worker_id = Column(String(128), nullable=True)
     lease_token = Column(BigInteger, nullable=False, default=0, server_default=text("0"))
