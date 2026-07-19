@@ -288,11 +288,21 @@ This roadmap does not redefine those classes.
 
 The public domain is a logical active-WebApp address behind Arvan.
 
-Example only:
+The deployment namespaces are fixed and deliberately different:
 
 ```text
-app.example.com
+production root:       gold-trade.ir
+current production:    coin.gold-trade.ir
+failover-test root:    gold-trading.ir
+current CDN test app:  app.gold-trading.ir
 ```
+
+`gold-trading.ir` is not an alternate spelling or alias for production. It is
+the isolated provider-validation zone. As of the read-only Arvan check on
+2026-07-19, only this test root is enrolled in the current CDN account;
+`gold-trade.ir` is not. Production onboarding and routing are a separate
+post-Full-Matrix change gate. Evidence from the test root cannot authorize a
+production-root mutation.
 
 Required properties:
 
@@ -1738,6 +1748,15 @@ The following changes were made only on the test domain `gold-trading.ir`:
 - HSTS remains disabled until the complete hostname and rollback matrix passes;
 - no Load Balancer or Arvan health check exists;
 - no public request was routed to WebApp-IR during this validation.
+
+The production root is `gold-trade.ir`; it is outside this validation scope.
+A read-only API check on 2026-07-19 returned only `gold-trading.ir` as an active
+CDN domain. It also confirmed both `app` and `switch-test` remained proxied over
+HTTPS to WebApp-FI `65.109.220.59`. No mutation was performed. The current
+origin-switch implementation now rejects every applied change whose root is
+not exactly `gold-trading.ir`, before contacting the API. Unlocking
+`gold-trade.ir` requires a later reviewed code/config change after Full Matrix,
+explicit operator authorization, and a tested rollback/stability procedure.
 
 The pre-change and post-change API snapshots are retained under the ignored
 local path `tmp/arvan-cdn-snapshots/20260714T191952Z/`. The API token remains in
@@ -3391,3 +3410,18 @@ The operational contract and fail-closed manifest verifier are in
 `deploy/production/webapp-ir-dark-standby.env.example`. A later refresh must
 restore into an empty generation or use the approved incremental DR protocol;
 this one-time snapshot must never be replayed over locally written state.
+
+### 48.4 Domain and CDN boundary
+
+- production root: `gold-trade.ir`;
+- isolated CDN/failover-test root: `gold-trading.ir`;
+- current Arvan account view: only `gold-trading.ir` is enrolled and active;
+- current test records `app` and `switch-test`: proxied HTTPS origins still at
+  WebApp-FI `65.109.220.59`;
+- production root enrollment, DNS/CDN mutation, or traffic switching: not
+  authorized and not performed.
+
+The dark-standby manifest records both roots and fails validation if their
+roles overlap, the test public host leaves the test namespace, or the Arvan
+configured root points at production. The low-level origin-switch primitive is
+also apply-locked to `gold-trading.ir` until the later post-Full-Matrix gate.

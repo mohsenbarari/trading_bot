@@ -7,6 +7,7 @@ from scripts.arvan_origin_switch import (
     ArvanOriginSwitchError,
     append_audit_event,
     confirmation_phrase,
+    enforce_apply_domain_scope,
     inspect_or_switch,
     load_token,
 )
@@ -47,6 +48,27 @@ class FakeApi:
 
 
 class ArvanOriginSwitchTests(unittest.TestCase):
+    def test_apply_is_restricted_to_isolated_test_domain(self) -> None:
+        with self.assertRaisesRegex(ArvanOriginSwitchError, "restricted to the failover-test"):
+            enforce_apply_domain_scope("gold-trade.ir", apply=True)
+        enforce_apply_domain_scope("gold-trade.ir", apply=False)
+        enforce_apply_domain_scope("gold-trading.ir", apply=True)
+
+    def test_production_apply_is_rejected_before_api_access(self) -> None:
+        fake = FakeApi()
+        with self.assertRaisesRegex(ArvanOriginSwitchError, "post-matrix authorization"):
+            inspect_or_switch(
+                domain="gold-trade.ir",
+                record_name="app",
+                target_ip="10.0.0.2",
+                token="secret",
+                expected_current_ip="10.0.0.1",
+                apply=True,
+                confirmation=confirmation_phrase("gold-trade.ir", "app", "10.0.0.2"),
+                request_fn=fake,
+            )
+        self.assertEqual(fake.calls, [])
+
     def test_dry_run_never_writes(self) -> None:
         fake = FakeApi()
         result = inspect_or_switch(

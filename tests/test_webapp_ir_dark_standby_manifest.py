@@ -78,6 +78,21 @@ class DarkStandbyManifestTests(unittest.TestCase):
         failures, _ = MODULE.validate(values, check_files=False)
         self.assertTrue(any("different physical hosts" in item for item in failures))
 
+    def test_production_and_test_domain_boundaries_cannot_be_mixed(self) -> None:
+        values = valid_values()
+        values["FAILOVER_TEST_ROOT_DOMAIN"] = "gold-trade.ir"
+        values["FAILOVER_TEST_PUBLIC_HOST"] = "app.gold-trade.ir"
+        values["ARVAN_CDN_CONFIGURED_ROOT_DOMAIN"] = "gold-trade.ir"
+        failures, _ = MODULE.validate(values, check_files=False)
+        self.assertTrue(any("must be different" in item for item in failures))
+        self.assertTrue(any("must not include the production" in item for item in failures))
+
+    def test_test_public_host_must_belong_to_test_root(self) -> None:
+        values = valid_values()
+        values["FAILOVER_TEST_PUBLIC_HOST"] = "app.example.invalid"
+        failures, _ = MODULE.validate(values, check_files=False)
+        self.assertTrue(any("must be below" in item for item in failures))
+
 
 if __name__ == "__main__":
     unittest.main()

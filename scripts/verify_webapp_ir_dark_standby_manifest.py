@@ -20,6 +20,11 @@ REQUIRED_VALUES = {
     "DARK_STANDBY_MODE": "1",
     "SERVER_TIMEZONE": "UTC",
     "USER_DISPLAY_TIMEZONE": "Asia/Tehran",
+    "PRODUCTION_ROOT_DOMAIN": "gold-trade.ir",
+    "FAILOVER_TEST_ROOT_DOMAIN": "gold-trading.ir",
+    "FAILOVER_TEST_PUBLIC_HOST": "app.gold-trading.ir",
+    "ARVAN_CDN_CONFIGURED_ROOT_DOMAIN": "gold-trading.ir",
+    "ARVAN_CDN_MUTATION_SCOPE": "test-only",
     "OBJECT_STORAGE_PROVIDER": "arvan",
     "OBJECT_STORAGE_BUCKET": "production-sync-coin",
     "PAYLOAD_ENCRYPTION": "age-x25519",
@@ -96,6 +101,22 @@ def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], l
         failures.append("SOURCE_RELEASE_SHA must be an exact 40-character lowercase Git SHA")
     if values.get("WEBAPP_FI_HOST") == values.get("WA_IR_HOST"):
         failures.append("WEBAPP_FI_HOST and WA_IR_HOST must be different physical hosts")
+    production_root = values.get("PRODUCTION_ROOT_DOMAIN", "").lower().rstrip(".")
+    test_root = values.get("FAILOVER_TEST_ROOT_DOMAIN", "").lower().rstrip(".")
+    test_public_host = values.get("FAILOVER_TEST_PUBLIC_HOST", "").lower().rstrip(".")
+    configured_cdn_root = values.get("ARVAN_CDN_CONFIGURED_ROOT_DOMAIN", "").lower().rstrip(".")
+    if production_root and production_root == test_root:
+        failures.append("production and failover-test root domains must be different")
+    if test_root and configured_cdn_root and configured_cdn_root != test_root:
+        failures.append("Arvan CDN configured root must equal the failover-test root")
+    if test_root and test_public_host and not test_public_host.endswith(f".{test_root}"):
+        failures.append("FAILOVER_TEST_PUBLIC_HOST must be below FAILOVER_TEST_ROOT_DOMAIN")
+    if production_root and (
+        configured_cdn_root == production_root
+        or test_public_host == production_root
+        or test_public_host.endswith(f".{production_root}")
+    ):
+        failures.append("dark-standby CDN scope must not include the production root domain")
     endpoint = values.get("OBJECT_STORAGE_ENDPOINT", "")
     if endpoint and not endpoint.startswith("https://"):
         failures.append("OBJECT_STORAGE_ENDPOINT must use HTTPS")
@@ -178,6 +199,8 @@ def main() -> int:
         "release_sha": values.get("SOURCE_RELEASE_SHA"),
         "source_host": values.get("WEBAPP_FI_HOST"),
         "target_host": values.get("WA_IR_HOST"),
+        "production_root_domain": values.get("PRODUCTION_ROOT_DOMAIN"),
+        "failover_test_root_domain": values.get("FAILOVER_TEST_ROOT_DOMAIN"),
         "bucket": values.get("OBJECT_STORAGE_BUCKET"),
         "failures": failures,
         "warnings": warnings,

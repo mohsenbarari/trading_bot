@@ -2,6 +2,12 @@
 
 This document defines the first production release flow driven from the foreign server.
 
+> Domain boundary: `gold-trade.ir` is the production root namespace;
+> `gold-trading.ir` is the isolated Arvan CDN/failover-test namespace. Do not
+> substitute the test domain into a production runtime manifest, and do not
+> treat a successful test-domain switch as approval to enroll or route the
+> production namespace.
+
 ## Scope
 
 This is intentionally the **online-first** version for Iran:

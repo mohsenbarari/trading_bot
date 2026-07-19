@@ -23,6 +23,8 @@ from typing import Any, Callable
 
 
 DEFAULT_API_BASE = "https://napi.arvancloud.ir/cdn/4.0"
+PRODUCTION_ROOT_DOMAIN = "gold-trade.ir"
+FAILOVER_TEST_ROOT_DOMAIN = "gold-trading.ir"
 
 
 class ArvanOriginSwitchError(RuntimeError):
@@ -155,6 +157,18 @@ def confirmation_phrase(domain: str, record_name: str, target_ip: str) -> str:
     return f"switch:{domain}:{record_name}:{target_ip}"
 
 
+def enforce_apply_domain_scope(domain: str, *, apply: bool) -> None:
+    """Keep this pre-production primitive confined to the isolated test zone."""
+    if not apply:
+        return
+    if domain != FAILOVER_TEST_ROOT_DOMAIN:
+        raise ArvanOriginSwitchError(
+            "Applied Arvan changes are currently restricted to the failover-test "
+            f"domain {FAILOVER_TEST_ROOT_DOMAIN!r}; production domain "
+            f"{PRODUCTION_ROOT_DOMAIN!r} requires a separate post-matrix authorization"
+        )
+
+
 def append_audit_event(path: Path, event: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -187,6 +201,7 @@ def inspect_or_switch(
     api_base: str = DEFAULT_API_BASE,
     request_fn: RequestFn = api_request,
 ) -> dict[str, Any]:
+    enforce_apply_domain_scope(domain, apply=apply)
     encoded_domain = urllib.parse.quote(domain, safe="")
     records_url = f"{api_base.rstrip('/')}/domains/{encoded_domain}/dns-records"
     current = find_exact_a_record(request_fn("GET", records_url, token, None), record_name)

@@ -38,6 +38,26 @@ advertised Public Access Block and default bucket SSE controls cause its data
 plane to reject `PutObject`. Those controls are absent, so client-side
 encryption is a mandatory gate rather than optional defense.
 
+## Domain Safety Boundary
+
+The two DNS namespaces are intentionally separate:
+
+| Purpose | Root domain | Current WebApp host |
+| --- | --- | --- |
+| Production application | `gold-trade.ir` | `coin.gold-trade.ir` in the current production manifest |
+| CDN/failover validation | `gold-trading.ir` | `app.gold-trading.ir` |
+
+A read-only Arvan API check on 2026-07-19 showed only `gold-trading.ir` enrolled
+and active in the current CDN account. Both `app.gold-trading.ir` and the
+isolated `switch-test.gold-trading.ir` record remained proxied to WebApp-FI
+`65.109.220.59`. No CDN or DNS mutation was made.
+
+All origin-switch drills are test-only. The origin-switch tool rejects applied
+changes for `gold-trade.ir` before any API request. Enrolling or routing the
+production namespace is a separate post-Full-Matrix change with fresh
+snapshots, explicit approval, rollback evidence, and a stability window. Test
+results never authorize a production-domain change by themselves.
+
 ## Time Contract
 
 Every host, container, PostgreSQL instance, log, manifest, and object key uses
