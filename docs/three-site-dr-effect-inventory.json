@@ -1,0 +1,344 @@
+{
+  "effects": [
+    {
+      "ambiguity_policy": "read-after-write typed reconciliation; generic shell execution forbidden",
+      "authority": "control_plane",
+      "causation": "fresh signed failover plan and exact operation hash",
+      "claim": "independent Witness one-time reservation",
+      "destination_identity": "allowlisted zone/record/origin transition",
+      "durability": "Witness-reserved_failover_operation_ledger",
+      "idempotency": "global Witness reservation plus typed operation id",
+      "name": "arvan_route_switch",
+      "notes": "The source CLI remains validation-only until a reviewed typed deployment backend is injected.",
+      "outcomes": [
+        "confirmed",
+        "lost_response",
+        "failed",
+        "fenced"
+      ],
+      "provider": "arvan_cdn",
+      "readiness": "route state must match target and public verification before completion",
+      "source_files": [
+        "core/dr_command_orchestration_adapter.py",
+        "core/dr_failover_orchestrator.py",
+        "scripts/arvan_origin_switch.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "adding an email provider requires a new durable inventory entry and tests",
+      "authority": "none",
+      "causation": "none",
+      "claim": "none",
+      "destination_identity": "none",
+      "durability": "not_configured",
+      "idempotency": "none",
+      "name": "email",
+      "notes": "No runtime email provider exists at this revision.",
+      "outcomes": [
+        "not_present"
+      ],
+      "provider": "email",
+      "readiness": "not applicable",
+      "source_files": []
+    },
+    {
+      "ambiguity_policy": "HEAD/read-back verification resolves response loss; untracked local residue is quarantined",
+      "authority": "webapp",
+      "causation": "committed chat/file record and blob manifest",
+      "claim": "leased blob delivery row",
+      "destination_identity": "bucket, opaque object key, ciphertext hash, and provider version id",
+      "durability": "content_addressed_ciphertext_manifest_and_per_destination_delivery",
+      "idempotency": "plaintext content hash plus encryption context and destination",
+      "name": "encrypted_blob_object_storage",
+      "notes": "User bytes are client-side encrypted before leaving a site; S3 metadata contains no plaintext identity.",
+      "outcomes": [
+        "uploaded",
+        "downloaded",
+        "verified",
+        "quarantined",
+        "blocked"
+      ],
+      "provider": "s3_object_storage",
+      "readiness": "ciphertext/version parity and no unresolved orphan quarantine item",
+      "source_files": [
+        "core/dr_audit_anchor.py",
+        "core/dr_blob_worker.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "never used as proof of commit or cross-site convergence",
+      "authority": "webapp",
+      "causation": "already committed database/event state",
+      "claim": "none; post-commit best-effort signal only",
+      "destination_identity": "user/channel connection",
+      "durability": "non_durable_derived_signal",
+      "idempotency": "not required; clients reload canonical state after reconnect",
+      "name": "realtime_redis_and_websocket",
+      "notes": "Redis/SSE/WebSocket traffic is a disposable wake-up hint over canonical database state.",
+      "outcomes": [
+        "published",
+        "dropped",
+        "client_reloaded"
+      ],
+      "provider": "redis_websocket",
+      "readiness": "excluded from durable parity; connection health only",
+      "source_files": [
+        "api/routers/offers.py",
+        "api/routers/realtime.py",
+        "api/routers/sync.py",
+        "api/routers/trades.py",
+        "core/events.py",
+        "core/utils.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "ambiguous provider response is manual-review and not retried",
+      "authority": "webapp",
+      "causation": "immutable recovery-request DR event",
+      "claim": "Writer-epoch-bound leased effect worker",
+      "destination_identity": "normalized mobile hash",
+      "durability": "same_transaction_generic_effect_outbox",
+      "idempotency": "recovery request id and action",
+      "name": "sms_account_recovery",
+      "notes": "Informational recovery SMS is enqueued transactionally with the recovery state change.",
+      "outcomes": [
+        "succeeded",
+        "not_sent",
+        "ambiguous",
+        "cancelled_stale_epoch"
+      ],
+      "provider": "smsir",
+      "readiness": "no ambiguous recovery SMS effect",
+      "source_files": [
+        "api/routers/sessions.py",
+        "core/sms.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "provider-start ambiguity is persisted and never blindly retried",
+      "authority": "webapp",
+      "causation": "OTP challenge or invitation delivery row",
+      "claim": "domain ledger claim bridged through Writer-epoch capability immediately before send",
+      "destination_identity": "normalized mobile hash plus domain record",
+      "durability": "durable_domain_claim",
+      "idempotency": "OTP claim id or invitation_sms_deliveries uniqueness",
+      "name": "sms_otp_and_invitation",
+      "notes": "Existing specialized OTP/invitation ledgers remain authoritative; strict mode adds final Writer-term validation.",
+      "outcomes": [
+        "accepted",
+        "failed",
+        "ambiguous",
+        "disabled"
+      ],
+      "provider": "smsir",
+      "readiness": "no expired/inflight ambiguous domain claim",
+      "source_files": [
+        "api/routers/accountants.py",
+        "api/routers/auth.py",
+        "api/routers/customers.py",
+        "api/routers/invitations.py",
+        "core/services/otp_sms_delivery_service.py",
+        "core/sms.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "expired sending lease requires reconciliation/manual decision",
+      "authority": "foreign",
+      "causation": "telegram_admin_broadcasts row",
+      "claim": "leased foreign-only receipt claim",
+      "destination_identity": "recipient user id plus Telegram id snapshot",
+      "durability": "durable_per_recipient_receipt",
+      "idempotency": "telegram_admin_broadcast_receipts.dedupe_key unique constraint",
+      "name": "telegram_admin_broadcast",
+      "notes": "Broadcast-level status is derived from per-recipient receipts.",
+      "outcomes": [
+        "sent",
+        "retryable_failed",
+        "skipped",
+        "terminal_failed"
+      ],
+      "provider": "telegram",
+      "readiness": "broadcast complete only when every receipt is terminal",
+      "source_files": [
+        "core/services/telegram_admin_broadcast_delivery_service.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "never infer business commit from UI response; user can refresh/reissue",
+      "authority": "foreign",
+      "causation": "one Telegram update/callback handled by Bot-FI",
+      "claim": "single Bot update handler; no asynchronous business delivery promise",
+      "destination_identity": "originating chat and message",
+      "durability": "non_durable_derived_ui",
+      "idempotency": "Telegram update processing and persisted business command identity where mutation occurs",
+      "name": "telegram_interactive_ui",
+      "notes": "Menus, callback acknowledgements, exports, and message cleanup are rebuildable UI—not durable business notifications.",
+      "outcomes": [
+        "rendered",
+        "best_effort_failed"
+      ],
+      "provider": "telegram",
+      "readiness": "excluded from business convergence; monitored as Bot API error rate",
+      "source_files": [
+        "bot/handlers/admin.py",
+        "bot/handlers/admin_commodities.py",
+        "bot/handlers/admin_users.py",
+        "bot/handlers/trade_create.py",
+        "bot/handlers/trade_execute.py",
+        "bot/handlers/trade_history.py",
+        "bot/message_manager.py",
+        "bot/utils/trade_suggestion_messages.py",
+        "core/utils.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "unknown response is retained for bounded reconciliation",
+      "authority": "foreign",
+      "causation": "market transition and transition timestamp",
+      "claim": "foreign transition worker claim",
+      "destination_identity": "configured market channel",
+      "durability": "durable_transition_receipt",
+      "idempotency": "market_channel_notice_receipts.dedupe_key unique constraint",
+      "name": "telegram_market_transition_notice",
+      "notes": "Market-open and market-close notices are foreign-local effects.",
+      "outcomes": [
+        "sent",
+        "retry_pending",
+        "terminal_failed"
+      ],
+      "provider": "telegram",
+      "readiness": "no overdue non-terminal market notice receipt",
+      "source_files": [
+        "core/services/market_transition_service.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "unknown send result remains failed/lagged for reconciliation; integration must preserve candidate queue semantics",
+      "authority": "foreign",
+      "causation": "offer public id, home authority, and offer version",
+      "claim": "foreign publication worker serializes the persisted publication state",
+      "destination_identity": "channel id and persisted Telegram message id",
+      "durability": "durable_offer_publication_state",
+      "idempotency": "offer_publication_states.dedupe_key and gateway idempotency keys",
+      "name": "telegram_offer_publication_and_edit",
+      "notes": "The sibling candidate/telegram-offer-publition-queue owns the final queue implementation; integration must not regress this contract.",
+      "outcomes": [
+        "pending",
+        "sent",
+        "visible",
+        "failed",
+        "disabled",
+        "lagged"
+      ],
+      "provider": "telegram",
+      "readiness": "pending/failed/lagged publication reconciliation counts",
+      "source_files": [
+        "api/routers/offers.py",
+        "core/offer_expiry.py",
+        "core/services/telegram_offer_channel_service.py",
+        "core/services/telegram_offer_publication_service.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "expired sending claim is terminal/manual-review; never blind retry",
+      "authority": "foreign",
+      "causation": "source_type plus immutable source identity",
+      "claim": "leased foreign-only worker claim",
+      "destination_identity": "recipient user id plus Telegram id snapshot",
+      "durability": "durable_foreign_local_outbox",
+      "idempotency": "telegram_notification_outbox.dedupe_key unique constraint",
+      "name": "telegram_private_notification_outbox",
+      "notes": "Project membership and other asynchronous private notifications use one row per recipient.",
+      "outcomes": [
+        "sent",
+        "retry_pending",
+        "skipped",
+        "terminal_failed"
+      ],
+      "provider": "telegram",
+      "readiness": "non-terminal and exhausted receipt counts",
+      "source_files": [
+        "api/routers/sync.py",
+        "api/routers/users.py",
+        "core/notifications.py",
+        "core/services/telegram_notification_outbox_service.py",
+        "core/services/user_account_status_service.py",
+        "core/services/user_deletion_service.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "ambiguous provider start is preserved and not blindly retried",
+      "authority": "foreign",
+      "causation": "OTP challenge or registration command id",
+      "claim": "foreign OTP/registration claim",
+      "destination_identity": "Telegram chat id",
+      "durability": "durable_otp_claim_or_idempotent_registration_command",
+      "idempotency": "OTP claim id or registration command receipt",
+      "name": "telegram_registration_otp_and_handoff",
+      "notes": "Join-request replies are derived handoff messages; registration state remains authoritative in the durable command/OTP ledger.",
+      "outcomes": [
+        "sent",
+        "failed",
+        "ambiguous",
+        "already_processed"
+      ],
+      "provider": "telegram",
+      "readiness": "unresolved OTP and registration command claims",
+      "source_files": [
+        "api/routers/auth.py",
+        "bot/handlers/start.py",
+        "core/services/telegram_otp_delivery_service.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "expired processing lease is reconciled and never blindly resent",
+      "authority": "foreign",
+      "causation": "trade_completed event type and trade number",
+      "claim": "leased foreign-only receipt claim",
+      "destination_identity": "recipient user id plus Telegram id at send",
+      "durability": "durable_per_trade_per_recipient_receipt",
+      "idempotency": "trade_delivery_receipts.dedupe_key unique constraint",
+      "name": "telegram_trade_delivery",
+      "notes": "One receipt exists per event, trade, recipient, and channel.",
+      "outcomes": [
+        "sent",
+        "retry_pending",
+        "skipped",
+        "not_required",
+        "permanent_failed"
+      ],
+      "provider": "telegram",
+      "readiness": "all required trade delivery receipts terminal",
+      "source_files": [
+        "api/routers/trades.py",
+        "core/services/trade_telegram_delivery_service.py"
+      ]
+    },
+    {
+      "ambiguity_policy": "ambiguous effect is never automatically retried; 404/410 only terminalizes that endpoint",
+      "authority": "webapp",
+      "causation": "immutable DR event in the authoritative business transaction",
+      "claim": "Writer-epoch-bound leased effect worker",
+      "destination_identity": "hash of exact push subscription endpoint",
+      "durability": "same_transaction_fanout_then_per_endpoint_outbox",
+      "idempotency": "event, effect type, and endpoint hash unique effect key",
+      "name": "webpush_market_and_notification",
+      "notes": "Provider fanout is represented by one durable effect per subscription endpoint.",
+      "outcomes": [
+        "succeeded",
+        "not_sent",
+        "ambiguous",
+        "cancelled_stale_epoch"
+      ],
+      "provider": "webpush",
+      "readiness": "no ambiguous effect and no due non-terminal endpoint effect",
+      "source_files": [
+        "api/routers/notifications.py",
+        "core/web_push.py"
+      ]
+    }
+  ],
+  "inventory_sha256": "12e29552e777c93fc543bcaf761cf24f86699d9cfef1862ac61bd59be16402a0",
+  "schema": "three-site-dr-effect-inventory-v1",
+  "surface_count": 14
+}

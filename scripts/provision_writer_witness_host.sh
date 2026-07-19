@@ -387,6 +387,7 @@ for required in \
     "$SOURCE_DIR/release-manifest.json" \
     "$SOURCE_DIR/writer_witness_app.py" \
     "$ASSET_DIR/001_initial.sql" \
+    "$ASSET_DIR/002_failover_operation_ledger.sql" \
     "$ASSET_DIR/requirements.txt" \
     "$ASSET_DIR/requirements.lock" \
     "$ASSET_DIR/python-runtime.json" \
@@ -1361,6 +1362,14 @@ then
         -d writer_witness \
         -f "$ASSET_DIR/001_initial.sql"
 fi
+if [[ "$(runuser -u postgres -- psql -XAtqc 'SELECT version_num FROM writer_witness_schema_version' writer_witness)" == "001" ]]; then
+    PGPASSWORD="$WITNESS_DB_MIGRATOR_PASSWORD" psql \
+        -Xv ON_ERROR_STOP=1 \
+        -h 127.0.0.1 \
+        -U writer_witness_migrator \
+        -d writer_witness \
+        -f "$ASSET_DIR/002_failover_operation_ledger.sql"
+fi
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 writer_witness <<'SQL'
 REVOKE ALL ON DATABASE writer_witness FROM PUBLIC;
 GRANT CONNECT ON DATABASE writer_witness TO writer_witness_migrator, writer_witness_runtime;
@@ -1369,6 +1378,7 @@ GRANT USAGE ON SCHEMA public TO writer_witness_runtime;
 GRANT SELECT ON writer_witness_schema_version TO writer_witness_runtime;
 GRANT SELECT, UPDATE ON webapp_writer_witness_state TO writer_witness_runtime;
 GRANT SELECT, INSERT ON webapp_writer_witness_receipts TO writer_witness_runtime;
+GRANT SELECT, INSERT, UPDATE ON dr_failover_operation_ledger TO writer_witness_runtime;
 SQL
 
 private_key_file=/etc/trading-bot-witness/writer-witness-ed25519

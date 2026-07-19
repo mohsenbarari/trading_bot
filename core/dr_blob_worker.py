@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 import secrets
-import stat
+import tempfile
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -23,10 +23,23 @@ from core.dark_standby import assert_not_dark_standby
 from core.db import DrProjectionSessionLocal, verify_three_site_database_role_bindings
 from core.dr_blob_plane import (
     DrBlobPlaneError,
-    blob_object_key,
     garbage_collect_expired_local_blobs,
     mark_unreferenced_blobs_tombstoned,
-    persist_content_addressed_bytes,
+    persist_content_addressed_file,
+    reconcile_orphaned_local_blobs,
+)
+from core.dr_blob_crypto import (
+    ENCRYPTION_ALGORITHM,
+    FORMAT_OVERHEAD,
+    CiphertextIdentity,
+    DrBlobCryptoError,
+    DrBlobKeyring,
+    ciphertext_identity_from_provider,
+    decrypt_blob_stream,
+    encrypted_object_key,
+    encrypt_local_blob,
+    load_blob_keyring,
+    metadata_for_ciphertext,
 )
 from core.dr_delivery_worker import _key_for_destination, parse_peer_urls
 from core.dr_event_protocol import canonical_json_bytes
@@ -55,6 +68,13 @@ class S3Config:
     bucket: str
     access_key: str
     secret_key: str
+
+
+@dataclass(frozen=True)
+class ObjectStorageBlobResult:
+    identity: CiphertextIdentity
+    version_id: str | None
+    etag: str | None
 
 
 def load_s3_config() -> S3Config:
@@ -105,77 +125,129 @@ def validate_s3_controls(config: S3Config) -> None:
 async def maintain_blob_retention() -> str:
     with projection_fence_scope(source="dr_blob_retention"):
         async with DrProjectionSessionLocal() as session:
+            reconciled = await reconcile_orphaned_local_blobs(session)
             tombstoned = await mark_unreferenced_blobs_tombstoned(session)
             deleted = await garbage_collect_expired_local_blobs(session)
             await session.commit()
-    return "changed" if tombstoned or deleted else "idle"
+    return "changed" if reconciled or tombstoned or deleted else "idle"
 
 
-def _head_or_upload(config: S3Config, manifest: dict[str, Any]) -> tuple[str | None, str | None]:
-    client = _client(config)
-    key = manifest["object_key"]
+def _not_found(exc: ClientError) -> bool:
+    return str((exc.response.get("Error") or {}).get("Code") or "") in {
+        "404", "NoSuchKey", "NotFound",
+    }
+
+
+def _verify_object_body(
+    result: dict[str, Any],
+    *,
+    identity: CiphertextIdentity,
+    manifest: dict[str, Any],
+    keyring: DrBlobKeyring,
+) -> None:
+    with tempfile.TemporaryFile(mode="w+b") as plaintext:
+        decrypt_blob_stream(
+            result["Body"],
+            ciphertext_size=identity.ciphertext_size,
+            expected_ciphertext_hash=identity.ciphertext_hash,
+            content_hash=manifest["content_hash"],
+            size_bytes=int(manifest["size_bytes"]),
+            mime_type=manifest["mime_type"],
+            object_key=identity.object_key,
+            key_id=identity.key_id,
+            keyring=keyring,
+            plaintext_sink=plaintext,
+        )
+
+
+def _existing_object(
+    client,
+    config: S3Config,
+    *,
+    manifest: dict[str, Any],
+    keyring: DrBlobKeyring,
+) -> ObjectStorageBlobResult | None:
+    key = str(manifest["object_key"])
     try:
         head = client.head_object(Bucket=config.bucket, Key=key)
-        metadata = head.get("Metadata") or {}
-        if int(head.get("ContentLength") or -1) != int(manifest["size_bytes"]):
-            raise DrBlobWorkerError("existing Object Storage blob has a conflicting size")
-        if metadata.get("sha256") != manifest["content_hash"]:
-            raise DrBlobWorkerError("existing Object Storage blob has a conflicting content hash")
-        version_id = head.get("VersionId")
-        if settings.dr_blob_require_versioning and not version_id:
-            raise DrBlobWorkerError("existing Object Storage blob lacks a version identity")
-        return version_id, str(head.get("ETag") or "").strip('"') or None
     except ClientError as exc:
-        code = str((exc.response.get("Error") or {}).get("Code") or "")
-        if code not in {"404", "NoSuchKey", "NotFound"}:
-            raise
-    fd = os.open(manifest["local_path"], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    metadata_before = os.fstat(fd)
-    if not stat.S_ISREG(metadata_before.st_mode) or metadata_before.st_nlink != 1:
-        os.close(fd)
-        raise DrBlobWorkerError("local blob is not a stable single-link regular file")
-    digest = __import__("hashlib").sha256()
-    while True:
-        chunk = os.read(fd, 1024 * 1024)
-        if not chunk:
-            break
-        digest.update(chunk)
-    if digest.hexdigest() != manifest["content_hash"] or metadata_before.st_size != int(manifest["size_bytes"]):
-        os.close(fd)
-        raise DrBlobWorkerError("local blob failed pre-upload hash/size validation")
-    os.lseek(fd, 0, os.SEEK_SET)
-    with os.fdopen(fd, "rb") as source:
+        if _not_found(exc):
+            return None
+        raise
+    identity = ciphertext_identity_from_provider(
+        object_key=key,
+        content_length=head.get("ContentLength"),
+        metadata=head.get("Metadata"),
+    )
+    if (
+        identity.key_id != manifest["encryption_key_id"]
+        or identity.ciphertext_size != int(manifest["size_bytes"]) + FORMAT_OVERHEAD
+        or (
+            manifest.get("object_ciphertext_hash")
+            and identity.ciphertext_hash != manifest["object_ciphertext_hash"]
+        )
+    ):
+        raise DrBlobWorkerError("existing encrypted object conflicts with the immutable manifest")
+    result = client.get_object(Bucket=config.bucket, Key=key)
+    _verify_object_body(result, identity=identity, manifest=manifest, keyring=keyring)
+    version_id = result.get("VersionId") or head.get("VersionId")
+    if settings.dr_blob_require_versioning and not version_id:
+        raise DrBlobWorkerError("existing encrypted object lacks a version identity")
+    return ObjectStorageBlobResult(
+        identity=identity,
+        version_id=version_id,
+        etag=str(head.get("ETag") or "").strip('"') or None,
+    )
+
+
+def _head_or_upload(
+    config: S3Config,
+    manifest: dict[str, Any],
+    keyring: DrBlobKeyring,
+) -> ObjectStorageBlobResult:
+    client = _client(config)
+    existing = _existing_object(client, config, manifest=manifest, keyring=keyring)
+    if existing is not None:
+        return existing
+    encrypted, identity, _ = encrypt_local_blob(
+        local_path=manifest["local_path"],
+        content_hash=manifest["content_hash"],
+        size_bytes=int(manifest["size_bytes"]),
+        mime_type=manifest["mime_type"],
+        object_key=manifest["object_key"],
+        key_id=manifest["encryption_key_id"],
+        keyring=keyring,
+    )
+    try:
         result = client.put_object(
             Bucket=config.bucket,
-            Key=key,
-            Body=source,
-            ContentLength=int(manifest["size_bytes"]),
-            ContentType=manifest["mime_type"],
-            Metadata={"sha256": manifest["content_hash"]},
-            ServerSideEncryption="AES256",
+            Key=identity.object_key,
+            Body=encrypted,
+            ContentLength=identity.ciphertext_size,
+            ContentType="application/octet-stream",
+            Metadata=metadata_for_ciphertext(identity),
         )
-        metadata_after = os.fstat(source.fileno())
-        if (
-            metadata_after.st_ino != metadata_before.st_ino
-            or metadata_after.st_dev != metadata_before.st_dev
-            or metadata_after.st_size != metadata_before.st_size
-            or metadata_after.st_mtime_ns != metadata_before.st_mtime_ns
-        ):
-            raise DrBlobWorkerError("local blob changed during Object Storage upload")
-    # A read-after-write HEAD binds provider metadata before DB acknowledgement.
-    head = client.head_object(Bucket=config.bucket, Key=key)
-    if (
-        int(head.get("ContentLength") or -1) != int(manifest["size_bytes"])
-        or (head.get("Metadata") or {}).get("sha256") != manifest["content_hash"]
-    ):
-        raise DrBlobWorkerError("uploaded Object Storage blob failed read-back validation")
+    finally:
+        encrypted.close()
+    head = client.head_object(Bucket=config.bucket, Key=identity.object_key)
+    observed = ciphertext_identity_from_provider(
+        object_key=identity.object_key,
+        content_length=head.get("ContentLength"),
+        metadata=head.get("Metadata"),
+    )
+    if observed != identity:
+        raise DrBlobWorkerError("uploaded encrypted object failed read-back identity validation")
     version_id = head.get("VersionId") or result.get("VersionId")
     if settings.dr_blob_require_versioning and not version_id:
-        raise DrBlobWorkerError("uploaded Object Storage blob lacks a version identity")
-    return version_id, str(head.get("ETag") or "").strip('"') or None
+        raise DrBlobWorkerError("uploaded encrypted object lacks a version identity")
+    return ObjectStorageBlobResult(
+        identity=identity,
+        version_id=version_id,
+        etag=str(head.get("ETag") or "").strip('"') or None,
+    )
 
 
-async def upload_one_blob(config: S3Config) -> str:
+async def upload_one_blob(config: S3Config, keyring: DrBlobKeyring) -> str:
     identity = resolve_runtime_identity(settings)
     now = datetime.now(timezone.utc)
     with projection_fence_scope(source="dr_blob_upload_claim"):
@@ -198,6 +270,24 @@ async def upload_one_blob(config: S3Config) -> str:
                 row.last_error_code = "manifest_missing"
                 await session.commit()
                 return "quarantined"
+            if manifest.object_key is None:
+                manifest.encryption_key_id = keyring.active_key_id
+                manifest.encryption_algorithm = ENCRYPTION_ALGORITHM
+                manifest.object_key = encrypted_object_key(
+                    manifest.content_hash,
+                    prefix=settings.dr_blob_object_prefix,
+                    keyring=keyring,
+                    key_id=keyring.active_key_id,
+                )
+            elif (
+                manifest.encryption_algorithm != ENCRYPTION_ALGORITHM
+                or not manifest.encryption_key_id
+            ):
+                row.status = "quarantined"
+                row.last_error_code = "cipher_identity_missing"
+                await session.commit()
+                return "quarantined"
+            keyring.key(str(manifest.encryption_key_id))
             row.attempt_count = int(row.attempt_count or 0) + 1
             row.last_attempt_at = now
             row.status = "failed"
@@ -210,10 +300,13 @@ async def upload_one_blob(config: S3Config) -> str:
                 "mime_type": manifest.mime_type,
                 "local_path": manifest.local_path,
                 "object_key": manifest.object_key,
+                "encryption_key_id": manifest.encryption_key_id,
+                "encryption_algorithm": manifest.encryption_algorithm,
+                "object_ciphertext_hash": manifest.object_ciphertext_hash,
             }
             await session.commit()
     try:
-        version_id, etag = await asyncio.to_thread(_head_or_upload, config, snapshot)
+        stored = await asyncio.to_thread(_head_or_upload, config, snapshot, keyring)
     except Exception as exc:
         with projection_fence_scope(source="dr_blob_upload_failed"):
             async with DrProjectionSessionLocal() as session:
@@ -233,8 +326,12 @@ async def upload_one_blob(config: S3Config) -> str:
             if row is None or manifest is None:
                 raise DrBlobWorkerError("blob delivery state disappeared after upload")
             manifest.state = "uploaded"
-            manifest.object_version_id = version_id
-            manifest.object_etag = etag
+            manifest.object_version_id = stored.version_id
+            manifest.object_etag = stored.etag
+            manifest.object_ciphertext_hash = stored.identity.ciphertext_hash
+            manifest.object_ciphertext_size = stored.identity.ciphertext_size
+            manifest.encryption_key_id = stored.identity.key_id
+            manifest.encryption_algorithm = stored.identity.algorithm
             manifest.uploaded_at = datetime.now(timezone.utc)
             row.status = "available"
             row.next_attempt_at = None
@@ -243,25 +340,67 @@ async def upload_one_blob(config: S3Config) -> str:
     return "uploaded"
 
 
-def _download_and_verify(config: S3Config, *, content_hash: str, expected_size: int) -> tuple[str, str | None]:
+def _download_and_verify(
+    config: S3Config,
+    keyring: DrBlobKeyring,
+    *,
+    content_hash: str,
+    expected_size: int,
+    mime_type: str,
+) -> tuple[str, ObjectStorageBlobResult]:
     client = _client(config)
-    result = client.get_object(Bucket=config.bucket, Key=blob_object_key(content_hash))
-    metadata = result.get("Metadata") or {}
-    if metadata.get("sha256") != content_hash:
-        raise DrBlobWorkerError("Object Storage blob metadata hash mismatch")
-    body = result["Body"].read(MAX_BLOB_BYTES + 1)
-    if len(body) > MAX_BLOB_BYTES or len(body) != expected_size:
-        raise DrBlobWorkerError("Object Storage blob size mismatch")
-    observed_hash, local_path = persist_content_addressed_bytes(body)
-    if observed_hash != content_hash:
-        raise DrBlobWorkerError("Object Storage blob content hash mismatch")
-    version_id = result.get("VersionId")
-    if settings.dr_blob_require_versioning and not version_id:
-        raise DrBlobWorkerError("downloaded Object Storage blob lacks a version identity")
-    return local_path, version_id
+    if expected_size > MAX_BLOB_BYTES:
+        raise DrBlobWorkerError("encrypted Object Storage blob exceeds the local size limit")
+    for key_id in keyring.discovery_order():
+        object_key = encrypted_object_key(
+            content_hash,
+            prefix=settings.dr_blob_object_prefix,
+            keyring=keyring,
+            key_id=key_id,
+        )
+        try:
+            result = client.get_object(Bucket=config.bucket, Key=object_key)
+        except ClientError as exc:
+            if _not_found(exc):
+                continue
+            raise
+        identity = ciphertext_identity_from_provider(
+            object_key=object_key,
+            content_length=result.get("ContentLength"),
+            metadata=result.get("Metadata"),
+        )
+        if identity.key_id != key_id or identity.ciphertext_size != expected_size + FORMAT_OVERHEAD:
+            raise DrBlobWorkerError("encrypted Object Storage identity is inconsistent")
+        with tempfile.TemporaryFile(mode="w+b") as plaintext:
+            decrypt_blob_stream(
+                result["Body"],
+                ciphertext_size=identity.ciphertext_size,
+                expected_ciphertext_hash=identity.ciphertext_hash,
+                content_hash=content_hash,
+                size_bytes=expected_size,
+                mime_type=mime_type,
+                object_key=object_key,
+                key_id=key_id,
+                keyring=keyring,
+                plaintext_sink=plaintext,
+            )
+            local_path = persist_content_addressed_file(
+                plaintext,
+                expected_hash=content_hash,
+                expected_size=expected_size,
+            )
+        version_id = result.get("VersionId")
+        if settings.dr_blob_require_versioning and not version_id:
+            raise DrBlobWorkerError("downloaded encrypted object lacks a version identity")
+        return local_path, ObjectStorageBlobResult(
+            identity=identity,
+            version_id=version_id,
+            etag=str(result.get("ETag") or "").strip('"') or None,
+        )
+    raise DrBlobWorkerError("encrypted Object Storage blob is unavailable for every retained key")
 
 
-async def download_one_blob(config: S3Config) -> str:
+async def download_one_blob(config: S3Config, keyring: DrBlobKeyring) -> str:
     identity = resolve_runtime_identity(settings)
     async with DrProjectionSessionLocal() as session:
         candidate = (
@@ -305,11 +444,13 @@ async def download_one_blob(config: S3Config) -> str:
         str(candidate[3]),
     )
     try:
-        local_path, version_id = await asyncio.to_thread(
+        local_path, stored = await asyncio.to_thread(
             _download_and_verify,
             config,
+            keyring,
             content_hash=content_hash,
             expected_size=expected_size,
+            mime_type=mime_type,
         )
     except Exception:
         return "retry"
@@ -325,8 +466,13 @@ async def download_one_blob(config: S3Config) -> str:
                         size_bytes=expected_size,
                         mime_type=mime_type,
                         local_path=local_path,
-                        object_key=blob_object_key(content_hash),
-                        object_version_id=version_id,
+                        object_key=stored.identity.object_key,
+                        object_version_id=stored.version_id,
+                        object_etag=stored.etag,
+                        object_ciphertext_hash=stored.identity.ciphertext_hash,
+                        object_ciphertext_size=stored.identity.ciphertext_size,
+                        encryption_key_id=stored.identity.key_id,
+                        encryption_algorithm=stored.identity.algorithm,
                         state="uploaded",
                         uploaded_at=datetime.now(timezone.utc),
                     )
@@ -334,22 +480,34 @@ async def download_one_blob(config: S3Config) -> str:
             elif (
                 int(manifest.size_bytes) != expected_size
                 or manifest.local_path != local_path
-                or manifest.object_key != blob_object_key(content_hash)
+                or manifest.object_key != stored.identity.object_key
+                or manifest.object_ciphertext_hash != stored.identity.ciphertext_hash
+                or int(manifest.object_ciphertext_size or 0) != stored.identity.ciphertext_size
+                or manifest.encryption_key_id != stored.identity.key_id
+                or manifest.encryption_algorithm != stored.identity.algorithm
             ):
                 raise DrBlobWorkerError("downloaded blob conflicts with the local immutable manifest")
             if existing is None:
                 unsigned_receipt = {
                     "content_hash": content_hash,
                     "size_bytes": expected_size,
-                    "object_version_id": version_id,
+                    "object_version_id": stored.version_id,
+                    "object_ciphertext_hash": stored.identity.ciphertext_hash,
+                    "object_ciphertext_size": stored.identity.ciphertext_size,
+                    "encryption_key_id": stored.identity.key_id,
+                    "encryption_algorithm": stored.identity.algorithm,
                 }
                 session.add(
                     DrBlobReceipt(
                         content_hash=content_hash,
                         destination_site=identity.physical_site,
                         origin_physical_site=origin_site,
-                        object_version_id=version_id,
+                        object_version_id=stored.version_id,
                         size_bytes=expected_size,
+                        object_ciphertext_hash=stored.identity.ciphertext_hash,
+                        object_ciphertext_size=stored.identity.ciphertext_size,
+                        encryption_key_id=stored.identity.key_id,
+                        encryption_algorithm=stored.identity.algorithm,
                         local_path=local_path,
                         receipt_hash=hashlib.sha256(
                             canonical_json_bytes(unsigned_receipt)
@@ -424,6 +582,10 @@ async def report_one_blob_receipt(
             "content_hash": receipt.content_hash,
             "size_bytes": int(receipt.size_bytes),
             "object_version_id": receipt.object_version_id,
+            "object_ciphertext_hash": receipt.object_ciphertext_hash,
+            "object_ciphertext_size": int(receipt.object_ciphertext_size),
+            "encryption_key_id": receipt.encryption_key_id,
+            "encryption_algorithm": receipt.encryption_algorithm,
             "receipt_hash": receipt.receipt_hash,
             "origin_site": receipt.origin_physical_site,
         }
@@ -500,6 +662,7 @@ async def dr_blob_loop() -> None:
     assert_not_dark_standby("dr_blob_worker")
     await verify_three_site_database_role_bindings()
     config = load_s3_config()
+    keyring = load_blob_keyring(settings.dr_blob_encryption_keyring_file)
     await asyncio.to_thread(validate_s3_controls, config)
     identity = resolve_runtime_identity(settings)
     peer_urls = parse_peer_urls(settings.dr_sync_peer_urls_json, local_site=identity.physical_site)
@@ -511,8 +674,8 @@ async def dr_blob_loop() -> None:
         follow_redirects=False,
     ) as client:
         while True:
-            uploaded = await upload_one_blob(config)
-            downloaded = await download_one_blob(config)
+            uploaded = await upload_one_blob(config, keyring)
+            downloaded = await download_one_blob(config, keyring)
             reported = await report_one_blob_receipt(
                 local_site=identity.physical_site,
                 client=client,

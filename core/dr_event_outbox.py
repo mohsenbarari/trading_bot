@@ -17,15 +17,20 @@ import enum
 import hashlib
 import json
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import event, inspect as sa_inspect
-from sqlalchemy.orm import Session
+from sqlalchemy import event, inspect as sa_inspect, text
+from sqlalchemy.orm import Session, object_session
+from sqlalchemy.sql.elements import TextClause
 
 from core.config import settings
-from core.dr_event_protocol import append_local_dr_event, canonical_json_bytes
+from core.dr_event_protocol import (
+    append_local_dr_event,
+    canonical_json_bytes,
+    finalize_local_dr_transaction,
+)
 from core.dr_data_policy import canonical_dr_row_payload
-from core.sync_outbox_guard import statement_write_target_table
+from core.sync_outbox_guard import raw_sql_is_provably_read_only, statement_write_target_table
 from core.sync_registry import SyncPolicy, get_sync_registry_entry, sync_registry_entries
 from models.database import Base
 
@@ -35,18 +40,22 @@ class DrEventOutboxError(RuntimeError):
 
 
 _REGISTERED = False
+_DR_TRANSACTION_KEY = "_dr_event_transaction"
+_DR_SAVEPOINT_MARKS_KEY = "_dr_event_savepoint_marks"
 _INTERNAL_TABLES = frozenset(
     {
         "change_log",
         "dr_conflict_quarantine",
         "dr_database_runtime",
         "dr_effect_outbox",
+        "dr_effect_fanouts",
         "dr_blob_manifests",
         "dr_file_intents",
         "dr_blob_deliveries",
         "dr_blob_receipts",
         "dr_recovery_manifests",
         "dr_durability_state",
+        "dr_destination_cursors",
         "dr_event_deliveries",
         "dr_event_receipts",
         "dr_events",
@@ -65,6 +74,19 @@ _INTERNAL_TABLES = frozenset(
         "webapp_writer_witness_state",
     }
 )
+
+
+def current_dr_transaction_event_ids(session: Any) -> tuple[str, ...]:
+    """Return event IDs produced by the caller's current root transaction.
+
+    Same-transaction effect and file intents use this read-only view so they
+    can never fall back to a previously committed aggregate event.
+    """
+
+    sync_session = getattr(session, "sync_session", session)
+    info = getattr(sync_session, "info", {})
+    transaction = info.get(_DR_TRANSACTION_KEY) or {}
+    return tuple(str(event_id) for event_id in transaction.get("event_ids") or ())
 
 
 def _enabled() -> bool:
@@ -158,14 +180,59 @@ def _record(mapper: Any, connection: Any, target: Any, operation: str) -> None:
     if operation == "UPDATE" and not _has_column_changes(target):
         return
     payload = _row_payload(target)
-    append_local_dr_event(
+    session = object_session(target)
+    if session is None:
+        raise DrEventOutboxError("DR mapper mutation is not attached to a Session")
+    transaction = session.info.setdefault(
+        _DR_TRANSACTION_KEY,
+        {"transaction_id": str(uuid4()), "event_ids": []},
+    )
+    position = len(transaction["event_ids"]) + 1
+    event_id = append_local_dr_event(
         connection,
         table_name=table_name,
         record_id=_record_identity(target),
         operation=operation,
         data=payload,
         change_log_id=None,
+        transaction_id=str(transaction["transaction_id"]),
+        transaction_position=position,
     )
+    if event_id is not None:
+        transaction["event_ids"].append(event_id)
+    if (
+        event_id is not None
+        and operation == "INSERT"
+        and table_name in {"offers", "notifications"}
+    ):
+        from core.runtime_identity import resolve_runtime_identity
+
+        identity = resolve_runtime_identity(settings)
+        from core.writer_fencing import current_writer_fence_context
+
+        fence = current_writer_fence_context()
+        if identity.is_webapp_authority and fence is not None:
+            connection.execute(
+                text(
+                    "INSERT INTO dr_effect_fanouts ("
+                    "event_id, aggregate_type, aggregate_db_id, origin_physical_site, "
+                    "writer_epoch, fanout_type, status) VALUES ("
+                    ":event_id, :aggregate_type, :aggregate_db_id, :origin_site, "
+                    ":writer_epoch, :fanout_type, 'pending')"
+                ),
+                {
+                    "event_id": event_id,
+                    "aggregate_type": table_name,
+                    "aggregate_db_id": _record_identity(target),
+                    "origin_site": identity.physical_site,
+                    "writer_epoch": int(fence.writer_epoch),
+                    "fanout_type": (
+                        "market_offer_webpush"
+                        if table_name == "offers"
+                        else "notification_webpush"
+                    ),
+                },
+            )
 
 
 def _after_insert(mapper: Any, connection: Any, target: Any) -> None:
@@ -184,7 +251,8 @@ def _guard_bulk_or_raw_write(orm_execute_state: Any) -> None:
     if not _enabled():
         return
     execution_options = getattr(orm_execute_state, "execution_options", {}) or {}
-    table_name = statement_write_target_table(getattr(orm_execute_state, "statement", None))
+    statement = getattr(orm_execute_state, "statement", None)
+    table_name = statement_write_target_table(statement)
     if execution_options.get("is_sync"):
         from core.writer_fencing import current_projection_fence_context
 
@@ -198,11 +266,67 @@ def _guard_bulk_or_raw_write(orm_execute_state: Any) -> None:
         if table_name not in _INTERNAL_TABLES:
             raise DrEventOutboxError("dr_internal_write is restricted to DR bookkeeping tables")
         return
+    if isinstance(statement, TextClause) and table_name is None:
+        if raw_sql_is_provably_read_only(str(statement)):
+            return
+        raise DrEventOutboxError(
+            "unclassified raw SQL could bypass immutable three-site DR recording"
+        )
     if table_name is None or _table_policy(table_name) == SyncPolicy.INTERNAL_BOOKKEEPING:
         return
     raise DrEventOutboxError(
         f"bulk/raw mutation of {table_name} would bypass immutable three-site DR recording"
     )
+
+
+def _finalize_transaction_before_commit(session: Session) -> None:
+    if not _enabled() or session.in_nested_transaction():
+        return
+    # before_commit runs before SQLAlchemy's implicit final flush.  Force it so
+    # every mapper mutation is known before the transaction envelope is sealed.
+    session.flush()
+    transaction = session.info.get(_DR_TRANSACTION_KEY)
+    if not transaction or transaction.get("finalized"):
+        return
+    event_ids = list(transaction.get("event_ids") or [])
+    if not event_ids:
+        return
+    transaction["transaction_hash"] = finalize_local_dr_transaction(
+        session.connection(), event_ids
+    )
+    transaction["finalized"] = True
+
+
+def _clear_transaction_state(session: Session) -> None:
+    if session.in_nested_transaction():
+        return
+    session.info.pop(_DR_TRANSACTION_KEY, None)
+    session.info.pop(_DR_SAVEPOINT_MARKS_KEY, None)
+
+
+def _mark_savepoint(session: Session, transaction: Any) -> None:
+    if not getattr(transaction, "nested", False):
+        return
+    pending = session.info.get(_DR_TRANSACTION_KEY) or {}
+    session.info.setdefault(_DR_SAVEPOINT_MARKS_KEY, {})[id(transaction)] = len(
+        pending.get("event_ids") or []
+    )
+
+
+def _truncate_rolled_back_savepoint(session: Session, transaction: Any) -> None:
+    marks = session.info.get(_DR_SAVEPOINT_MARKS_KEY) or {}
+    mark = marks.pop(id(transaction), None)
+    pending = session.info.get(_DR_TRANSACTION_KEY)
+    if mark is None or not pending:
+        return
+    del pending["event_ids"][int(mark):]
+    pending.pop("finalized", None)
+    pending.pop("transaction_hash", None)
+
+
+def _forget_savepoint_mark(session: Session, transaction: Any) -> None:
+    marks = session.info.get(_DR_SAVEPOINT_MARKS_KEY) or {}
+    marks.pop(id(transaction), None)
 
 
 def register_dr_event_outbox_listener() -> None:
@@ -214,6 +338,12 @@ def register_dr_event_outbox_listener() -> None:
     event.listen(Base, "after_update", _after_update, propagate=True)
     event.listen(Base, "after_delete", _after_delete, propagate=True)
     event.listen(Session, "do_orm_execute", _guard_bulk_or_raw_write)
+    event.listen(Session, "before_commit", _finalize_transaction_before_commit)
+    event.listen(Session, "after_commit", _clear_transaction_state)
+    event.listen(Session, "after_rollback", _clear_transaction_state)
+    event.listen(Session, "after_transaction_create", _mark_savepoint)
+    event.listen(Session, "after_soft_rollback", _truncate_rolled_back_savepoint)
+    event.listen(Session, "after_transaction_end", _forget_savepoint_mark)
     _REGISTERED = True
 
 

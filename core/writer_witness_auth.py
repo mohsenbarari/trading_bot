@@ -14,6 +14,7 @@ from core.runtime_sites import WEBAPP_SITES
 WITNESS_AUTH_VERSION = 1
 WITNESS_TRANSITION_PATH = "/v1/writer-witness/transitions"
 WITNESS_STATUS_PATH = "/v1/writer-witness/status"
+WITNESS_OPERATION_PATH = "/v1/writer-witness/failover-operations"
 HEADER_KEY_ID = "X-Writer-Witness-Key-Id"
 HEADER_SITE = "X-Writer-Witness-Site"
 HEADER_TIMESTAMP = "X-Writer-Witness-Timestamp"

@@ -12,6 +12,7 @@ from typing import Any
 from core.db import DrControlSessionLocal, verify_three_site_database_role_bindings
 from core.dark_standby import assert_not_dark_standby
 from core.dr_durability_gate import build_connectivity_state_update
+from core.dr_connectivity_classifier import load_connectivity_policy
 from core.secure_file_io import read_secure_text
 from models.dr_event import DrDurabilityState
 
@@ -44,6 +45,7 @@ async def update_state(*, rounds: list[dict[str, Any]], operator: str, ttl_secon
     assert_not_dark_standby("connectivity_controller")
     update = build_connectivity_state_update(
         rounds,
+        policy=load_connectivity_policy(),
         operator=operator,
         ttl_seconds=ttl_seconds,
     )
@@ -69,6 +71,8 @@ async def update_state(*, rounds: list[dict[str, Any]], operator: str, ttl_secon
         "confidence": update.classification.confidence,
         "consecutive_rounds": update.classification.consecutive_rounds,
         "evidence_hash": update.classification.evidence_hash,
+        "campaign_id": update.classification.campaign_id,
+        "policy_hash": update.classification.policy_hash,
         "evidence_expires_at": update.evidence_expires_at.isoformat(),
         "critical_isolated_writes": "frozen",
     }

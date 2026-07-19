@@ -11,10 +11,10 @@
     "site": 6
   },
   "remote_process_call_count": 49,
-  "remote_process_surface_sha256": "942a0d6ce4d35b88297669cafbd52e89235eccd02e84396f7851e4b0e95a8005",
+  "remote_process_surface_sha256": "bc99efec3aed79153b9a42ca847ddfe088c165e67025ba90430092e84bf0f82d",
   "schema_version": "writer_witness_command_surfaces_v1",
   "source_sha256": {
-    "scripts/plan_writer_witness_real_host_matrix.py": "025357de76e224ffd46720c4ee439b29bf34ea12ee3165a09d0b01848e1587d3",
+    "scripts/plan_writer_witness_real_host_matrix.py": "80b15905af483d9d54a87070ac5dbfbf92ea96bde2582d34c44f245356270179",
     "scripts/run_writer_witness_real_host_matrix.py": "eca68a09a5253cc0f4b316573d6bf5c922201d0c9f245c4bf19849dd43a6be39"
   }
 }

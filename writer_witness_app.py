@@ -6,11 +6,13 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import base64
+import hashlib
 import json
 import logging
 from pathlib import Path
 import re
 from typing import Any, Awaitable, Callable
+from uuid import UUID, uuid4
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -28,6 +30,7 @@ from sqlalchemy.ext.asyncio import (
 from core.runtime_sites import AUTHORITY_WEBAPP, SITE_WEBAPP_IR
 from core.writer_witness_auth import (
     WITNESS_STATUS_PATH,
+    WITNESS_OPERATION_PATH,
     WITNESS_TRANSITION_PATH,
     WitnessAuthenticationError,
     WitnessClientCredential,
@@ -47,8 +50,17 @@ from core.writer_witness_control import (
 
 TRANSITION_PATH = WITNESS_TRANSITION_PATH
 STATUS_PATH = WITNESS_STATUS_PATH
-WITNESS_SCHEMA_VERSION = "001"
+WITNESS_SCHEMA_VERSION = "002"
 logger = logging.getLogger("writer_witness")
+
+
+def _canonical_json_bytes(payload: Any) -> bytes:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 async def database_clock(session: AsyncSession) -> datetime:
@@ -87,6 +99,17 @@ class WitnessCommand:
     request_id: str
     reason: str
     lease_duration_seconds: int
+
+
+@dataclass(frozen=True)
+class FailoverOperationCommand:
+    action: str
+    operation_id: str
+    operation_nonce: str
+    plan_hash: str
+    expires_at: datetime
+    outcome: str | None
+    evidence_hash: str | None
 
 
 class WitnessServiceConfigurationError(RuntimeError):
@@ -197,6 +220,84 @@ def _parse_command(raw_body: bytes, *, default_duration: int) -> WitnessCommand:
         reason=reason.strip(),
         lease_duration_seconds=duration,
     )
+
+
+def _parse_failover_operation(raw_body: bytes) -> FailoverOperationCommand:
+    try:
+        payload = json.loads(raw_body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WriterWitnessError("failover operation body must be valid JSON") from exc
+    common = {
+        "contract_version", "action", "operation_id", "operation_nonce",
+        "plan_hash", "expires_at",
+    }
+    action = payload.get("action") if isinstance(payload, dict) else None
+    required = common if action == "reserve" else common | {"outcome", "evidence_hash"}
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != required
+        or payload.get("contract_version") != 1
+        or action not in {"reserve", "finalize"}
+    ):
+        raise WriterWitnessError("failover operation fields do not match the contract")
+    try:
+        operation_id = str(UUID(str(payload["operation_id"])))
+        operation_nonce = str(UUID(str(payload["operation_nonce"])))
+        expires_at = datetime.fromisoformat(str(payload["expires_at"]).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise WriterWitnessError("failover operation identity/time is invalid") from exc
+    if expires_at.tzinfo is None:
+        raise WriterWitnessError("failover operation expiry lacks timezone")
+    plan_hash = str(payload["plan_hash"])
+    outcome = payload.get("outcome")
+    evidence_hash = payload.get("evidence_hash")
+    if (
+        operation_id == operation_nonce
+        or not re.fullmatch(r"[0-9a-f]{64}", plan_hash)
+        or (action == "finalize" and outcome not in {"completed", "rolled_back"})
+        or (
+            action == "finalize"
+            and not re.fullmatch(r"[0-9a-f]{64}", str(evidence_hash))
+        )
+    ):
+        raise WriterWitnessError("failover operation values are invalid")
+    return FailoverOperationCommand(
+        action=action,
+        operation_id=operation_id,
+        operation_nonce=operation_nonce,
+        plan_hash=plan_hash,
+        expires_at=expires_at.astimezone(timezone.utc),
+        outcome=str(outcome) if outcome is not None else None,
+        evidence_hash=str(evidence_hash) if evidence_hash is not None else None,
+    )
+
+
+def _signed_operation_receipt(
+    runtime: WriterWitnessServiceRuntime,
+    *,
+    command: FailoverOperationCommand,
+    status: str,
+    receipt_id: str,
+    receipt_hash: str,
+) -> dict[str, Any]:
+    unsigned = {
+        "contract_version": 1,
+        "status": status,
+        "operation_id": command.operation_id,
+        "operation_nonce": command.operation_nonce,
+        "plan_hash": command.plan_hash,
+        "ledger_receipt_hash": receipt_hash,
+        "ledger_receipt_id": receipt_id,
+    }
+    private = Ed25519PrivateKey.from_private_bytes(
+        base64.b64decode(runtime.private_key_base64, validate=True)
+    )
+    return {
+        **unsigned,
+        "witness_signature": base64.b64encode(
+            private.sign(_canonical_json_bytes(unsigned))
+        ).decode("ascii"),
+    }
 
 
 def _read_private_key(path_value: str | None, public_key_base64: str | None) -> str:
@@ -500,6 +601,155 @@ def create_writer_witness_app(
                 "witness_time": witness_now.isoformat(),
                 "state": _state_payload(snapshot),
             },
+            200,
+        )
+
+    @app.post(WITNESS_OPERATION_PATH)
+    async def failover_operation_ledger(request: Request):
+        """Reserve/finalize one saga exactly once in the independent Witness DB."""
+
+        service_runtime = active_runtime(request)
+        raw_body = await request.body()
+        try:
+            async with service_runtime.session_factory() as session:
+                caller, witness_now = await authenticate(
+                    request, service_runtime, session, raw_body
+                )
+                command = _parse_failover_operation(raw_body)
+                expected_request_id = (
+                    command.operation_nonce
+                    if command.action == "reserve"
+                    else command.operation_id
+                )
+                if caller.request_id != expected_request_id:
+                    raise WitnessAuthenticationError(
+                        "signed request id does not match the failover operation"
+                    )
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT operation_id, operation_nonce, plan_hash, status, "
+                            "reservation_receipt_id, reservation_receipt_hash, "
+                            "final_evidence_hash FROM dr_failover_operation_ledger "
+                            "WHERE operation_id = :operation_id "
+                            "OR operation_nonce = :operation_nonce FOR UPDATE"
+                        ),
+                        {
+                            "operation_id": command.operation_id,
+                            "operation_nonce": command.operation_nonce,
+                        },
+                    )
+                ).mappings().one_or_none()
+                if command.action == "reserve":
+                    if row is None:
+                        if witness_now >= command.expires_at:
+                            raise WriterWitnessError("expired failover plan cannot be reserved")
+                        receipt_id = str(uuid4())
+                        receipt_payload = {
+                            "operation_id": command.operation_id,
+                            "operation_nonce": command.operation_nonce,
+                            "plan_hash": command.plan_hash,
+                            "expires_at": command.expires_at.isoformat(),
+                            "receipt_id": receipt_id,
+                        }
+                        receipt_hash = hashlib.sha256(
+                            _canonical_json_bytes(receipt_payload)
+                        ).hexdigest()
+                        await session.execute(
+                            text(
+                                "INSERT INTO dr_failover_operation_ledger "
+                                "(operation_id, operation_nonce, plan_hash, status, expires_at, "
+                                "reservation_receipt_id, reservation_receipt_hash) VALUES "
+                                "(:operation_id, :operation_nonce, :plan_hash, 'reserved', "
+                                ":expires_at, :receipt_id, :receipt_hash)"
+                            ),
+                            {
+                                "operation_id": command.operation_id,
+                                "operation_nonce": command.operation_nonce,
+                                "plan_hash": command.plan_hash,
+                                "expires_at": command.expires_at,
+                                "receipt_id": receipt_id,
+                                "receipt_hash": receipt_hash,
+                            },
+                        )
+                        status = "reserved"
+                    else:
+                        if (
+                            row["operation_id"] != command.operation_id
+                            or
+                            row["operation_nonce"] != command.operation_nonce
+                            or row["plan_hash"] != command.plan_hash
+                        ):
+                            raise WriterWitnessError(
+                                "failover operation id was consumed by another plan"
+                            )
+                        receipt_id = str(row["reservation_receipt_id"])
+                        receipt_hash = str(row["reservation_receipt_hash"])
+                        status = "existing"
+                else:
+                    if row is None or (
+                        row["operation_id"] != command.operation_id
+                        or row["operation_nonce"] != command.operation_nonce
+                        or row["plan_hash"] != command.plan_hash
+                    ):
+                        raise WriterWitnessError(
+                            "failover operation was not independently reserved"
+                        )
+                    if row["status"] == "reserved":
+                        await session.execute(
+                            text(
+                                "UPDATE dr_failover_operation_ledger SET status = :status, "
+                                "final_evidence_hash = :evidence_hash, "
+                                "finalized_at = clock_timestamp(), updated_at = clock_timestamp() "
+                                "WHERE operation_id = :operation_id"
+                            ),
+                            {
+                                "status": command.outcome,
+                                "evidence_hash": command.evidence_hash,
+                                "operation_id": command.operation_id,
+                            },
+                        )
+                    elif (
+                        row["status"] != command.outcome
+                        or row["final_evidence_hash"] != command.evidence_hash
+                    ):
+                        raise WriterWitnessError(
+                            "failover operation already has another final outcome"
+                        )
+                    receipt_id = str(row["reservation_receipt_id"])
+                    receipt_hash = hashlib.sha256(
+                        _canonical_json_bytes(
+                            {
+                                "reservation_receipt_hash": row["reservation_receipt_hash"],
+                                "outcome": command.outcome,
+                                "evidence_hash": command.evidence_hash,
+                            }
+                        )
+                    ).hexdigest()
+                    status = str(command.outcome)
+                await session.commit()
+        except WitnessAuthenticationError as exc:
+            return _json_response({"accepted": False, "code": exc.code}, 401)
+        except WriterWitnessError as exc:
+            return _json_response(
+                {"accepted": False, "code": exc.code, "detail": str(exc)}, 409
+            )
+        except Exception:
+            logger.exception(
+                "Witness failover operation ledger failed closed",
+                extra={"event": "writer_witness.failover_operation.error"},
+            )
+            return _json_response(
+                {"accepted": False, "code": "witness_operation_ledger_error"}, 503
+            )
+        return _json_response(
+            _signed_operation_receipt(
+                service_runtime,
+                command=command,
+                status=status,
+                receipt_id=receipt_id,
+                receipt_hash=receipt_hash,
+            ),
             200,
         )
 

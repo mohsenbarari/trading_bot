@@ -171,8 +171,154 @@ async def _apply_webapp_replica_row(session, event: DrEvent) -> str:  # noqa: AN
     return "ok"
 
 
+class _ProjectionDeferred(RuntimeError):
+    pass
+
+
+class _ProjectionRejected(RuntimeError):
+    def __init__(self, reason: str, evidence: dict | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.evidence = evidence or {}
+
+
+async def _load_complete_transaction_group(session, checkpoint, destination_site: str):  # noqa: ANN001
+    from core.dr_delivery_worker import event_envelope
+    from core.dr_event_protocol import destination_transaction_hash
+
+    next_sequence = int(checkpoint.contiguous_applied_sequence) + 1
+    first_receipt = await session.scalar(
+        select(DrEventReceipt).where(
+            DrEventReceipt.destination_site == destination_site,
+            DrEventReceipt.origin_physical_site == checkpoint.origin_physical_site,
+            DrEventReceipt.producer_epoch == checkpoint.producer_epoch,
+            DrEventReceipt.producer_sequence == next_sequence,
+            DrEventReceipt.status == "received",
+        ).with_for_update()
+    )
+    if first_receipt is None:
+        raise _ProjectionDeferred()
+    first_event = await session.get(DrEvent, first_receipt.event_id)
+    if first_event is None or first_event.envelope_hash != first_receipt.envelope_hash:
+        raise _ProjectionRejected("stored_event_receipt_hash_mismatch")
+    if int(first_event.protocol_version) == 1:
+        return [(first_receipt, first_event)]
+    try:
+        first_stream = dict(first_event.destination_streams[destination_site])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _ProjectionRejected("destination_transaction_metadata_missing") from exc
+    if int(first_stream.get("transaction_position") or 0) != 1:
+        raise _ProjectionRejected("transaction_group_does_not_start_at_position_one")
+    expected_size = int(first_stream.get("transaction_size") or 0)
+    transaction_id = str(first_stream.get("transaction_id") or "")
+    rows = (
+        await session.execute(
+            select(DrEventReceipt, DrEvent)
+            .join(DrEvent, DrEvent.event_id == DrEventReceipt.event_id)
+            .where(
+                DrEventReceipt.destination_site == destination_site,
+                DrEventReceipt.origin_physical_site == checkpoint.origin_physical_site,
+                DrEventReceipt.producer_epoch == checkpoint.producer_epoch,
+                DrEvent.transaction_id == transaction_id,
+                DrEventReceipt.status == "received",
+            )
+            .with_for_update(of=DrEventReceipt)
+        )
+    ).all()
+    if len(rows) < expected_size:
+        raise _ProjectionDeferred()
+    if len(rows) != expected_size:
+        raise _ProjectionRejected("transaction_group_cardinality_mismatch")
+    try:
+        rows = sorted(
+            rows,
+            key=lambda row: int(row[1].destination_streams[destination_site]["transaction_position"]),
+        )
+        streams = [event.destination_streams[destination_site] for _receipt, event in rows]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _ProjectionRejected("destination_transaction_metadata_missing") from exc
+    positions = [int(stream["transaction_position"]) for stream in streams]
+    sequences = [int(receipt.producer_sequence) for receipt, _event in rows]
+    signed_sequences = [int(stream["sequence"]) for stream in streams]
+    if positions != list(range(1, expected_size + 1)) or sequences != list(
+        range(next_sequence, next_sequence + expected_size)
+    ) or signed_sequences != sequences:
+        raise _ProjectionRejected("transaction_group_order_mismatch")
+    envelopes = [event_envelope(event) for _receipt, event in rows]
+    group_hash = destination_transaction_hash(
+        envelopes, destination_site=destination_site
+    )
+    if any(stream["transaction_hash"] != group_hash for stream in streams):
+        raise _ProjectionRejected("transaction_group_hash_mismatch")
+    return rows
+
+
+async def _apply_projection_event(session, event: DrEvent, destination_site: str) -> str:
+    projection_version, version_decision = await _locked_projection_version(
+        session, event, destination_site
+    )
+    if version_decision == "conflict":
+        raise _ProjectionRejected(
+            "same_authority_epoch_multiple_sites",
+            {
+                "aggregate_type": event.aggregate_type,
+                "aggregate_id": event.aggregate_id,
+                "stored_origin_site": projection_version.origin_physical_site,
+            },
+        )
+    mode = projection_mode(
+        table_name=event.aggregate_type,
+        origin_site=event.origin_physical_site,
+        destination_site=destination_site,
+    )
+    if version_decision == "stale" or mode == "noop":
+        result = "ignored"
+    elif mode == "generic":
+        result = await _apply_webapp_replica_row(session, event)
+    else:
+        from api.routers.sync import _apply_item, _parse_item
+
+        try:
+            record_id = int(event.aggregate_db_id) if event.aggregate_db_id is not None else event.aggregate_id
+        except (TypeError, ValueError):
+            record_id = event.aggregate_id
+        parsed = _parse_item(
+            {
+                "table": event.aggregate_type,
+                "operation": event.operation,
+                "id": record_id,
+                "data": event.canonical_payload,
+            }
+        )
+        if parsed is None:
+            result = "failed"
+        else:
+            table, operation, model, data, parsed_record_id = parsed
+            result = await _apply_item(
+                session,
+                table,
+                operation,
+                parsed_record_id,
+                data,
+                model,
+                [],
+                [],
+                source_server=("foreign" if event.origin_authority == "foreign" else "iran"),
+            )
+    if result == "deferred":
+        raise _ProjectionDeferred()
+    if result not in {"ok", "ignored"}:
+        raise _ProjectionRejected(
+            "business_projection_rejected",
+            {"aggregate_type": event.aggregate_type, "operation": event.operation},
+        )
+    if version_decision == "apply":
+        _store_projection_version(session, projection_version, event, destination_site)
+    return result
+
+
 async def apply_next_dr_projection() -> str:
-    """Apply one next-contiguous event; return applied/idle/deferred/quarantined."""
+    """Apply one complete source transaction in exactly one destination commit."""
 
     identity = resolve_runtime_identity(settings)
     if not identity.is_webapp_site and not identity.is_bot_site:
@@ -196,153 +342,83 @@ async def apply_next_dr_projection() -> str:
             )
             if checkpoint is None:
                 return "idle"
-            next_sequence = int(checkpoint.contiguous_applied_sequence) + 1
-            receipt = await session.scalar(
-                select(DrEventReceipt).where(
-                    DrEventReceipt.destination_site == identity.physical_site,
-                    DrEventReceipt.origin_physical_site == checkpoint.origin_physical_site,
-                    DrEventReceipt.producer_epoch == checkpoint.producer_epoch,
-                    DrEventReceipt.producer_sequence == next_sequence,
-                    DrEventReceipt.status == "received",
-                ).with_for_update()
-            )
-            if receipt is None:
-                # Rotate a temporarily blocked stream behind other origins so
-                # a cross-stream FK dependency cannot starve the whole site.
+            try:
+                group = await _load_complete_transaction_group(
+                    session, checkpoint, identity.physical_site
+                )
+            except _ProjectionDeferred:
                 checkpoint.updated_at = datetime.now(timezone.utc)
                 await session.commit()
                 return "deferred"
-            event = await session.get(DrEvent, receipt.event_id)
-            if event is None or event.envelope_hash != receipt.envelope_hash:
-                session.add(
-                    DrConflictQuarantine(
-                        quarantine_id=str(uuid4()),
-                        destination_site=identity.physical_site,
-                        origin_physical_site=checkpoint.origin_physical_site,
-                        producer_epoch=checkpoint.producer_epoch,
-                        producer_sequence=next_sequence,
-                        event_id=receipt.event_id,
-                        reason="stored_event_receipt_hash_mismatch",
-                        expected_hash=receipt.envelope_hash,
-                        received_hash=event.envelope_hash if event is not None else "0" * 64,
-                        evidence={},
-                    )
+            except _ProjectionRejected as exc:
+                # At least the first receipt exists. Quarantine it and block
+                # the stream until an operator resolves the corrupt group.
+                next_sequence = int(checkpoint.contiguous_applied_sequence) + 1
+                receipt = await session.scalar(
+                    select(DrEventReceipt).where(
+                        DrEventReceipt.destination_site == identity.physical_site,
+                        DrEventReceipt.origin_physical_site == checkpoint.origin_physical_site,
+                        DrEventReceipt.producer_epoch == checkpoint.producer_epoch,
+                        DrEventReceipt.producer_sequence == next_sequence,
+                    ).with_for_update()
                 )
-                receipt.status = "quarantined"
-                await session.commit()
-                return "quarantined"
-
-            projection_version, version_decision = await _locked_projection_version(
-                session, event, identity.physical_site
-            )
-            if version_decision == "conflict":
-                session.add(
-                    DrConflictQuarantine(
-                        quarantine_id=str(uuid4()),
-                        destination_site=identity.physical_site,
-                        origin_physical_site=checkpoint.origin_physical_site,
-                        producer_epoch=checkpoint.producer_epoch,
-                        producer_sequence=next_sequence,
-                        event_id=event.event_id,
-                        reason="same_authority_epoch_multiple_sites",
-                        expected_hash=projection_version.envelope_hash,
-                        received_hash=event.envelope_hash,
-                        evidence={
-                            "aggregate_type": event.aggregate_type,
-                            "aggregate_id": event.aggregate_id,
-                            "stored_origin_site": projection_version.origin_physical_site,
-                        },
-                    )
-                )
-                receipt.status = "quarantined"
-                await session.commit()
-                return "quarantined"
-
-            mode = projection_mode(
-                table_name=event.aggregate_type,
-                origin_site=event.origin_physical_site,
-                destination_site=identity.physical_site,
-            )
-            if version_decision == "stale":
-                result = "ignored"
-            elif mode == "noop":
-                result = "ignored"
-            elif mode == "generic":
-                result = await _apply_webapp_replica_row(session, event)
-            else:
-                from api.routers.sync import _apply_item, _parse_item
-
-                try:
-                    record_id = int(event.aggregate_db_id) if event.aggregate_db_id is not None else event.aggregate_id
-                except (TypeError, ValueError):
-                    record_id = event.aggregate_id
-                wire_item = {
-                    "table": event.aggregate_type,
-                    "operation": event.operation,
-                    "id": record_id,
-                    "data": event.canonical_payload,
-                }
-                parsed = _parse_item(wire_item)
-                if parsed is None:
-                    result = "failed"
-                else:
-                    table, operation, model, data, parsed_record_id = parsed
-                    result = await _apply_item(
-                        session,
-                        table,
-                        operation,
-                        parsed_record_id,
-                        data,
-                        model,
-                        [],
-                        [],
-                        source_server=("foreign" if event.origin_authority == "foreign" else "iran"),
-                    )
-            if result == "deferred":
-                checkpoint_key = (
-                    checkpoint.destination_site,
-                    checkpoint.origin_physical_site,
-                    checkpoint.producer_epoch,
-                )
-                await session.rollback()
-                async with DrProjectionSessionLocal() as defer_session:
-                    await defer_session.execute(
-                        update(DrStreamCheckpoint)
-                        .where(
-                            DrStreamCheckpoint.destination_site == checkpoint_key[0],
-                            DrStreamCheckpoint.origin_physical_site == checkpoint_key[1],
-                            DrStreamCheckpoint.producer_epoch == checkpoint_key[2],
+                if receipt is not None:
+                    receipt.status = "quarantined"
+                    session.add(
+                        DrConflictQuarantine(
+                            quarantine_id=str(uuid4()),
+                            destination_site=identity.physical_site,
+                            origin_physical_site=checkpoint.origin_physical_site,
+                            producer_epoch=checkpoint.producer_epoch,
+                            producer_sequence=next_sequence,
+                            event_id=receipt.event_id,
+                            reason=exc.reason,
+                            expected_hash=receipt.envelope_hash,
+                            received_hash=receipt.envelope_hash,
+                            evidence=exc.evidence,
                         )
-                        .values(updated_at=datetime.now(timezone.utc))
-                        .execution_options(is_sync=True)
                     )
-                    await defer_session.commit()
-                return "deferred"
-            if result not in {"ok", "ignored"}:
-                session.add(
-                    DrConflictQuarantine(
-                        quarantine_id=str(uuid4()),
-                        destination_site=identity.physical_site,
-                        origin_physical_site=checkpoint.origin_physical_site,
-                        producer_epoch=checkpoint.producer_epoch,
-                        producer_sequence=next_sequence,
-                        event_id=event.event_id,
-                        reason="business_projection_rejected",
-                        expected_hash=event.envelope_hash,
-                        received_hash=event.envelope_hash,
-                        evidence={"aggregate_type": event.aggregate_type, "operation": event.operation},
-                    )
-                )
-                receipt.status = "quarantined"
                 await session.commit()
                 return "quarantined"
-            receipt.status = "applied"
-            receipt.applied_at = datetime.now(timezone.utc)
-            checkpoint.contiguous_applied_sequence = next_sequence
-            if version_decision == "apply":
-                _store_projection_version(
-                    session, projection_version, event, identity.physical_site
-                )
+
+            rejected: _ProjectionRejected | None = None
+            deferred = False
+            try:
+                async with session.begin_nested():
+                    for _receipt, event in group:
+                        await _apply_projection_event(session, event, identity.physical_site)
+            except _ProjectionDeferred:
+                deferred = True
+            except _ProjectionRejected as exc:
+                rejected = exc
+            if deferred:
+                checkpoint.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+                return "deferred"
+            if rejected is not None:
+                for receipt, event in group:
+                    receipt.status = "quarantined"
+                    session.add(
+                        DrConflictQuarantine(
+                            quarantine_id=str(uuid4()),
+                            destination_site=identity.physical_site,
+                            origin_physical_site=event.origin_physical_site,
+                            producer_epoch=event.producer_epoch,
+                            producer_sequence=event.producer_sequence,
+                            event_id=event.event_id,
+                            reason=rejected.reason,
+                            expected_hash=event.envelope_hash,
+                            received_hash=event.envelope_hash,
+                            evidence={"transaction_id": event.transaction_id, **rejected.evidence},
+                        )
+                    )
+                await session.commit()
+                return "quarantined"
+            applied_at = datetime.now(timezone.utc)
+            for receipt, _event in group:
+                receipt.status = "applied"
+                receipt.applied_at = applied_at
+            checkpoint.contiguous_applied_sequence = int(group[-1][0].producer_sequence)
             await session.commit()
             return "applied"
 

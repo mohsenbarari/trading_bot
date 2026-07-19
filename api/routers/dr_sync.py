@@ -77,7 +77,11 @@ async def receive_blob_receipt(request: Request, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=413, detail="DR blob receipt is too large")
     try:
         payload = json.loads(body)
-        required = {"content_hash", "size_bytes", "object_version_id", "receipt_hash"}
+        required = {
+            "content_hash", "size_bytes", "object_version_id",
+            "object_ciphertext_hash", "object_ciphertext_size",
+            "encryption_key_id", "encryption_algorithm", "receipt_hash",
+        }
         if not isinstance(payload, dict) or set(payload) != required:
             raise DrEventReceiveError("DR blob receipt fields are invalid")
         unsigned = {key: payload[key] for key in required - {"receipt_hash"}}
@@ -89,6 +93,17 @@ async def receive_blob_receipt(request: Request, db: AsyncSession = Depends(get_
             raise DrEventReceiveError("DR blob receipt content hash is malformed")
         if type(payload["size_bytes"]) is not int or payload["size_bytes"] < 0:
             raise DrEventReceiveError("DR blob receipt size is invalid")
+        if (
+            not isinstance(payload["object_ciphertext_hash"], str)
+            or len(payload["object_ciphertext_hash"]) != 64
+            or any(ch not in "0123456789abcdef" for ch in payload["object_ciphertext_hash"])
+            or type(payload["object_ciphertext_size"]) is not int
+            or payload["object_ciphertext_size"] < payload["size_bytes"]
+            or payload["encryption_algorithm"] != "AES-256-GCM-v1"
+            or not isinstance(payload["encryption_key_id"], str)
+            or not payload["encryption_key_id"]
+        ):
+            raise DrEventReceiveError("DR blob receipt cipher identity is invalid")
         if settings.dr_blob_require_versioning and not str(payload["object_version_id"] or ""):
             raise DrEventReceiveError("DR blob receipt lacks required object version identity")
         auth = _authenticate(request, body, destination_site=identity.physical_site)
@@ -110,6 +125,13 @@ async def receive_blob_receipt(request: Request, db: AsyncSession = Depends(get_
             raise DrEventReceiveError("DR blob receipt arrived before durable object availability")
         if int(manifest.size_bytes) != payload["size_bytes"]:
             raise DrEventReceiveError("DR blob receipt size conflicts with local manifest")
+        if (
+            manifest.object_ciphertext_hash != payload["object_ciphertext_hash"]
+            or int(manifest.object_ciphertext_size or 0) != payload["object_ciphertext_size"]
+            or manifest.encryption_key_id != payload["encryption_key_id"]
+            or manifest.encryption_algorithm != payload["encryption_algorithm"]
+        ):
+            raise DrEventReceiveError("DR blob receipt cipher identity conflicts with local manifest")
         if (
             settings.dr_blob_require_versioning
             and (

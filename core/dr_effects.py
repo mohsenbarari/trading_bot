@@ -29,7 +29,7 @@ from core.writer_fencing import (
     writer_fence_scope,
 )
 from core.writer_lease_clock import boottime_seconds
-from models.dr_event import DrEffectOutbox, DrEvent
+from models.dr_event import DrEffectFanout, DrEffectOutbox, DrEvent
 from models.webapp_writer_state import WebappWriterState
 
 
@@ -220,48 +220,6 @@ async def enqueue_epoch_bound_effect(
     return row
 
 
-async def enqueue_effect_for_aggregate(
-    *,
-    aggregate_type: str,
-    aggregate_db_id: str | int,
-    effect_type: str,
-    provider: str,
-    destination_key: str,
-    idempotency_key: str,
-    payload: dict[str, Any],
-) -> str:
-    """Find the committed causation event and append a durable effect intent."""
-
-    fence = current_writer_fence_context()
-    if fence is None:
-        raise DrEffectError("post-commit effect enqueue lost its writer capability")
-    async with AsyncSessionLocal() as session:
-        event = await session.scalar(
-            select(DrEvent)
-            .where(
-                DrEvent.aggregate_type == aggregate_type,
-                DrEvent.aggregate_db_id == str(aggregate_db_id),
-                DrEvent.origin_physical_site == fence.physical_site,
-                DrEvent.writer_epoch == fence.writer_epoch,
-            )
-            .order_by(DrEvent.producer_sequence.desc())
-            .limit(1)
-        )
-        if event is None:
-            raise DrEffectError("no immutable causation event exists for external effect")
-        row = await enqueue_epoch_bound_effect(
-            session,
-            event_id=event.event_id,
-            effect_type=effect_type,
-            provider=provider,
-            destination_key=destination_key,
-            idempotency_key=idempotency_key,
-            payload=payload,
-        )
-        await session.commit()
-        return row.effect_id
-
-
 async def claim_next_effect() -> str | None:
     identity = resolve_runtime_identity(settings)
     now = datetime.now(timezone.utc)
@@ -338,6 +296,162 @@ async def claim_next_effect() -> str | None:
             effect.claim_expires_at = now + timedelta(seconds=max(5, int(settings.dr_effect_claim_seconds)))
             await session.commit()
             return effect.effect_id
+
+
+async def expand_next_effect_fanout() -> str:
+    """Atomically expand one source-transaction fanout into idempotent effects."""
+
+    identity = resolve_runtime_identity(settings)
+    require_witness = bool(settings.writer_witness_required)
+    async with AsyncSessionLocal() as session:
+        state = await session.scalar(
+            select(WebappWriterState)
+            .where(WebappWriterState.authority == "webapp")
+            .with_for_update(read=True)
+        )
+        if state is None:
+            raise DrEffectError("writer state is missing while expanding effect fanout")
+        snapshot = writer_state_snapshot(state)
+        active, _reasons = snapshot_is_local_active(
+            identity, snapshot, require_witness_lease=require_witness
+        )
+        if not active:
+            return "idle"
+        with writer_fence_scope(
+            identity,
+            snapshot,
+            source="dr_effect_fanout",
+            require_witness_lease=require_witness,
+        ):
+            fanout = await session.scalar(
+                select(DrEffectFanout)
+                .where(
+                    DrEffectFanout.origin_physical_site == identity.physical_site,
+                    DrEffectFanout.writer_epoch == snapshot.writer_epoch,
+                    DrEffectFanout.status == "pending",
+                )
+                .order_by(DrEffectFanout.created_at, DrEffectFanout.event_id)
+                .with_for_update(skip_locked=True)
+                .limit(1)
+            )
+            if fanout is None:
+                return "idle"
+            event = await session.get(DrEvent, fanout.event_id)
+            if event is None:
+                raise DrEffectError("effect fanout references a missing immutable event")
+            recipient_count = 0
+            if not bool(settings.web_push_enabled):
+                fanout.status = "skipped"
+            elif fanout.fanout_type == "notification_webpush":
+                from core.web_push import build_notification_push_payload
+                from models.notification import Notification
+                from models.push_subscription import PushSubscription
+
+                notification = await session.get(Notification, int(fanout.aggregate_db_id))
+                if notification is None:
+                    fanout.status = "skipped"
+                else:
+                    user_id = int(notification.user_id)
+                    subscriptions = list(
+                        (
+                            await session.execute(
+                                select(PushSubscription)
+                                .where(
+                                    PushSubscription.user_id == user_id,
+                                    PushSubscription.enabled == True,
+                                )
+                                .order_by(PushSubscription.id)
+                            )
+                        ).scalars().all()
+                    )
+                    push_payload = build_notification_push_payload(
+                        notification, notification.extra_payload
+                    )
+                    for subscription in subscriptions:
+                        await enqueue_epoch_bound_effect(
+                            session,
+                            event_id=event.event_id,
+                            effect_type="webpush_subscription",
+                            provider="webpush",
+                            destination_key=f"endpoint:{subscription.endpoint_hash}",
+                            idempotency_key=(
+                                f"webpush:notification:{notification.id}:"
+                                f"subscription:{subscription.endpoint_hash}"
+                            ),
+                            payload={
+                                "user_id": user_id,
+                                "subscription_id": int(subscription.id),
+                                "endpoint_hash": str(subscription.endpoint_hash),
+                                "push_payload": push_payload,
+                            },
+                        )
+                    recipient_count = len(subscriptions)
+                    fanout.status = "expanded" if subscriptions else "skipped"
+            elif fanout.fanout_type == "market_offer_webpush":
+                from core.web_push import (
+                    build_market_offer_push_payload,
+                    is_first_active_market_offer,
+                    load_market_offer_push_target_user_ids,
+                )
+                from models.offer import Offer, OfferStatus
+                from models.push_subscription import PushSubscription
+                from sqlalchemy.orm import selectinload
+
+                offer = await session.scalar(
+                    select(Offer)
+                    .options(selectinload(Offer.commodity))
+                    .where(Offer.id == int(fanout.aggregate_db_id))
+                )
+                if (
+                    offer is None
+                    or offer.status != OfferStatus.ACTIVE
+                    or not await is_first_active_market_offer(session, offer.id)
+                ):
+                    fanout.status = "skipped"
+                else:
+                    recipients = await load_market_offer_push_target_user_ids(
+                        session,
+                        {getattr(offer, "user_id", None), getattr(offer, "actor_user_id", None)},
+                    )
+                    payload = build_market_offer_push_payload(offer)
+                    subscriptions = list(
+                        (
+                            await session.execute(
+                                select(PushSubscription)
+                                .where(
+                                    PushSubscription.user_id.in_(recipients),
+                                    PushSubscription.enabled == True,
+                                )
+                                .order_by(PushSubscription.id)
+                            )
+                        ).scalars().all()
+                    ) if recipients else []
+                    for subscription in subscriptions:
+                        await enqueue_epoch_bound_effect(
+                            session,
+                            event_id=event.event_id,
+                            effect_type="webpush_subscription",
+                            provider="webpush",
+                            destination_key=f"endpoint:{subscription.endpoint_hash}",
+                            idempotency_key=(
+                                f"webpush:market-offer:{offer.id}:"
+                                f"subscription:{subscription.endpoint_hash}"
+                            ),
+                            payload={
+                                "user_id": int(subscription.user_id),
+                                "subscription_id": int(subscription.id),
+                                "endpoint_hash": str(subscription.endpoint_hash),
+                                "push_payload": payload,
+                            },
+                        )
+                    recipient_count = len(subscriptions)
+                    fanout.status = "expanded" if subscriptions else "skipped"
+            else:
+                raise DrEffectError("effect fanout type is unsupported")
+            fanout.recipient_count = recipient_count
+            fanout.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+            return fanout.status
 
 
 async def execute_claimed_effect(effect_id: str, handlers: dict[tuple[str, str], EffectHandler]) -> str:
@@ -443,8 +557,13 @@ async def dr_effect_loop(handlers: dict[tuple[str, str], EffectHandler]) -> None
         raise DrEffectError("DR effect worker is disabled")
     await verify_three_site_database_role_bindings()
     while True:
+        fanout_result = await expand_next_effect_fanout()
         effect_id = await claim_next_effect()
         if effect_id is None:
-            await asyncio.sleep(max(0.05, float(settings.dr_effect_poll_seconds)))
+            await asyncio.sleep(
+                0.05
+                if fanout_result == "expanded"
+                else max(0.05, float(settings.dr_effect_poll_seconds))
+            )
             continue
         await execute_claimed_effect(effect_id, handlers)

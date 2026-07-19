@@ -66,6 +66,23 @@ SELECT json_build_object(
 )::text
 FROM webapp_writer_witness_receipts
 ORDER BY request_id;
+
+SELECT json_build_object(
+    'record', 'failover_operation',
+    'operation_id', operation_id,
+    'operation_nonce', operation_nonce,
+    'plan_hash', plan_hash,
+    'status', status,
+    'expires_at', to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'reservation_receipt_id', reservation_receipt_id,
+    'reservation_receipt_hash', reservation_receipt_hash,
+    'final_evidence_hash', final_evidence_hash,
+    'finalized_at', CASE WHEN finalized_at IS NULL THEN NULL ELSE to_char(finalized_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END,
+    'created_at', to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'updated_at', to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+)::text
+FROM dr_failover_operation_ledger
+ORDER BY operation_id;
 SQL
 }
 
@@ -82,8 +99,10 @@ if [[ "$output_mode" == "json" ]]; then
         "SELECT authority || ':' || writer_epoch || ':' || lease_status FROM webapp_writer_witness_state")"
     receipts="$(runuser -u postgres -- psql -XAt -d "$database_name" -c \
         'SELECT count(*) FROM webapp_writer_witness_receipts')"
-    printf '{"database":"%s","manifest_sha256":"%s","receipt_count":%s,"state":"%s"}\n' \
-        "$database_name" "$manifest_sha256" "$receipts" "$state"
+    operations="$(runuser -u postgres -- psql -XAt -d "$database_name" -c \
+        'SELECT count(*) FROM dr_failover_operation_ledger')"
+    printf '{"database":"%s","manifest_sha256":"%s","operation_count":%s,"receipt_count":%s,"state":"%s"}\n' \
+        "$database_name" "$manifest_sha256" "$operations" "$receipts" "$state"
 else
     printf '%s\n' "$manifest_sha256"
 fi

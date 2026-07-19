@@ -52,6 +52,9 @@ async def bootstrap(value: str) -> None:
             (ROOT / "deploy/writer-witness/001_initial.sql").read_text(encoding="utf-8")
         )
         await connection.execute(
+            (ROOT / "deploy/writer-witness/002_failover_operation_ledger.sql").read_text(encoding="utf-8")
+        )
+        await connection.execute(
             """
             INSERT INTO webapp_writer_state (
                 authority, active_site, writer_epoch, control_state,

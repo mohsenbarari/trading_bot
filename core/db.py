@@ -138,26 +138,52 @@ async def verify_three_site_database_role_bindings() -> None:
     from core.runtime_identity import resolve_runtime_identity
 
     identity = resolve_runtime_identity(settings)
-    if not identity.is_webapp_site:
-        return
-    urls = {
-        settings.database_url,
-        str(settings.dr_projection_database_url or ""),
-        str(settings.dr_control_database_url or ""),
+    service = str(getattr(settings, "trading_bot_service", "app") or "app")
+    projection_services = {
+        "dr_receiver", "dr_projection_worker", "dr_delivery_worker", "dr_blob_worker"
     }
-    if "" in urls or len(urls) != 3:
-        raise RuntimeError("strict three-site WebApp requires three distinct database role URLs")
+    required_roles = (
+        ("application", "projection")
+        if service == "dr_effect_worker"
+        else (("projection",) if service in projection_services else ("application",))
+    )
 
     async def session_user(factory) -> str:  # noqa: ANN001
         async with factory() as session:
             return str(await session.scalar(text("SELECT session_user")))
 
-    application_role = await session_user(AsyncSessionLocal)
-    projection_role = await session_user(DrProjectionSessionLocal)
-    control_role = await session_user(DrControlSessionLocal)
-    if len({application_role, projection_role, control_role}) != 3:
-        raise RuntimeError("strict three-site database sessions do not use three distinct roles")
-    async with DrControlSessionLocal() as session:
+    factories = {
+        "application": AsyncSessionLocal,
+        "projection": DrProjectionSessionLocal,
+        "control": DrControlSessionLocal,
+    }
+    observed = {role: await session_user(factories[role]) for role in required_roles}
+    if identity.is_bot_site:
+        for role, database_role in observed.items():
+            if not database_role.endswith(f"_{'app' if role == 'application' else role}"):
+                raise RuntimeError(f"Bot {role} process is not bound to its least-privilege role")
+        read_factory = factories[required_roles[0]]
+        async with read_factory() as session:
+            row = (
+                await session.execute(
+                    text(
+                        "SELECT enforcement_enabled, physical_site, application_role, "
+                        "projection_role FROM dr_database_runtime WHERE singleton_id = 1"
+                    )
+                )
+            ).mappings().one_or_none()
+        if row is None or not row["enforcement_enabled"] or row["physical_site"] != identity.physical_site:
+            raise RuntimeError("Bot database event fencing is not enabled for bot_fi")
+        for role, database_role in observed.items():
+            if row[f"{role}_role"] != database_role:
+                raise RuntimeError("Bot database role binding does not match runtime identity")
+        return
+    if not identity.is_webapp_site:
+        return
+    # Every service validates only the credential it actually receives.  This
+    # avoids distributing application/projection/control passwords together.
+    read_factory = factories[required_roles[0]]
+    async with read_factory() as session:
         row = (
             await session.execute(
                 text(
@@ -168,11 +194,7 @@ async def verify_three_site_database_role_bindings() -> None:
         ).mappings().one_or_none()
     if row is None or not row["enforcement_enabled"]:
         raise RuntimeError("three-site database enforcement is not enabled")
-    expected = {
-        "physical_site": identity.physical_site,
-        "application_role": application_role,
-        "projection_role": projection_role,
-        "control_role": control_role,
-    }
+    expected = {"physical_site": identity.physical_site}
+    expected.update({f"{role}_role": value for role, value in observed.items()})
     if any(row[key] != value for key, value in expected.items()):
         raise RuntimeError("three-site database role binding does not match runtime identity")

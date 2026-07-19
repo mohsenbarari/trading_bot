@@ -30,6 +30,18 @@ class DrProducerCursor(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class DrDestinationCursor(Base):
+    """Contiguous stream position visible to one authorized destination."""
+
+    __tablename__ = "dr_destination_cursors"
+    origin_authority = Column(String(16), primary_key=True)
+    origin_physical_site = Column(String(16), primary_key=True)
+    producer_epoch = Column(BigInteger, primary_key=True)
+    destination_site = Column(String(16), primary_key=True)
+    last_sequence = Column(BigInteger, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DrEvent(Base):
     __tablename__ = "dr_events"
     __table_args__ = (
@@ -44,6 +56,13 @@ class DrEvent(Base):
         CheckConstraint("operation IN ('INSERT', 'UPDATE', 'DELETE')", name="ck_dr_events_operation"),
         Index("ix_dr_events_aggregate", "aggregate_type", "aggregate_id", "aggregate_version"),
         Index("ix_dr_events_stream", "origin_physical_site", "producer_epoch", "producer_sequence"),
+        UniqueConstraint(
+            "origin_physical_site",
+            "producer_epoch",
+            "transaction_id",
+            "transaction_position",
+            name="ux_dr_events_transaction_position",
+        ),
     )
 
     event_id = Column(String(36), primary_key=True)
@@ -65,6 +84,18 @@ class DrEvent(Base):
     idempotency_key = Column(String(255), nullable=True)
     writer_epoch = Column(BigInteger, nullable=True)
     tombstone = Column(Boolean, nullable=False, default=False)
+    transaction_id = Column(String(36), nullable=True)
+    transaction_position = Column(Integer, nullable=True)
+    transaction_size = Column(Integer, nullable=True)
+    transaction_hash = Column(String(64), nullable=True)
+    # Per-destination sequence and atomic visibility group.  A global source
+    # transaction may contain WebApp-private rows that Bot-FI must never see;
+    # destination streams prevent unauthorized rows from becoming false gaps.
+    destination_streams = Column(JSON, nullable=True)
+    # Local PostgreSQL transaction identity is never transported.  A deferred
+    # database trigger uses it to prove every authoritative row mutation has a
+    # same-transaction event before commit.
+    source_xid = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -97,6 +128,10 @@ class DrEventReceipt(Base):
         CheckConstraint(
             "status IN ('received', 'applied', 'duplicate', 'blocked_gap', 'quarantined')",
             name="ck_dr_event_receipts_status",
+        ),
+        UniqueConstraint(
+            "destination_site", "origin_physical_site", "producer_epoch", "producer_sequence",
+            name="ux_dr_event_receipts_destination_stream",
         ),
     )
 
@@ -215,6 +250,36 @@ class DrEffectOutbox(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class DrEffectFanout(Base):
+    """Transactionally durable request to derive recipient-specific effects."""
+
+    __tablename__ = "dr_effect_fanouts"
+    __table_args__ = (
+        CheckConstraint(
+            "fanout_type IN ('market_offer_webpush', 'notification_webpush')",
+            name="ck_dr_effect_fanouts_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'expanded', 'skipped')",
+            name="ck_dr_effect_fanouts_status",
+        ),
+        Index("ix_dr_effect_fanouts_ready", "status", "created_at"),
+    )
+
+    event_id = Column(
+        String(36), ForeignKey("dr_events.event_id", ondelete="RESTRICT"), primary_key=True
+    )
+    aggregate_type = Column(String(64), nullable=False)
+    aggregate_db_id = Column(String(64), nullable=False)
+    origin_physical_site = Column(String(16), nullable=False)
+    writer_epoch = Column(BigInteger, nullable=False)
+    fanout_type = Column(String(32), nullable=False)
+    status = Column(String(16), nullable=False, default="pending")
+    recipient_count = Column(Integer, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DrBlobManifest(Base):
     __tablename__ = "dr_blob_manifests"
     __table_args__ = (
@@ -226,9 +291,15 @@ class DrBlobManifest(Base):
     size_bytes = Column(BigInteger, nullable=False)
     mime_type = Column(String(100), nullable=False)
     local_path = Column(String(512), nullable=False)
-    object_key = Column(String(512), nullable=False, unique=True)
+    # Object coordinates are assigned by the encryption-only blob worker.  The
+    # application process never receives the client-side encryption keyring.
+    object_key = Column(String(512), nullable=True, unique=True)
     object_version_id = Column(String(255), nullable=True)
     object_etag = Column(String(255), nullable=True)
+    object_ciphertext_hash = Column(String(64), nullable=True)
+    object_ciphertext_size = Column(BigInteger, nullable=True)
+    encryption_key_id = Column(String(64), nullable=True)
+    encryption_algorithm = Column(String(32), nullable=True)
     state = Column(String(16), nullable=False, default="local")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     uploaded_at = Column(DateTime(timezone=True), nullable=True)
@@ -281,6 +352,10 @@ class DrBlobReceipt(Base):
     origin_physical_site = Column(String(16), primary_key=True)
     object_version_id = Column(String(255), nullable=True)
     size_bytes = Column(BigInteger, nullable=False)
+    object_ciphertext_hash = Column(String(64), nullable=False)
+    object_ciphertext_size = Column(BigInteger, nullable=False)
+    encryption_key_id = Column(String(64), nullable=False)
+    encryption_algorithm = Column(String(32), nullable=False)
     local_path = Column(String(512), nullable=False)
     receipt_hash = Column(String(64), nullable=False)
     source_acknowledgement_hash = Column(String(64), nullable=True)

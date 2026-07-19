@@ -10,6 +10,8 @@ from core.dr_event_protocol import (
     relay_destinations,
     sha256_json,
     transport_peers,
+    transaction_hash_from_envelopes,
+    destination_transaction_hash,
     validate_transport_path,
     validate_envelope,
 )
@@ -155,3 +157,91 @@ class DrEventProtocolTests(unittest.TestCase):
         invalid["origin_authority"] = "foreign"
         with self.assertRaisesRegex(DrEventProtocolError, "physical producer"):
             validate_envelope(invalid)
+
+    def test_protocol_v2_binds_every_member_to_one_transaction_hash(self):
+        first = envelope(sequence=10, event_id="12345678-1234-4234-8234-123456789ab1")
+        second = envelope(sequence=11, event_id="12345678-1234-4234-8234-123456789ab2")
+        for position, item in enumerate((first, second), 1):
+            item.update(
+                protocol_version=2,
+                transaction_id="12345678-1234-4234-8234-123456789abc",
+                transaction_position=position,
+                transaction_size=2,
+                transaction_hash="0" * 64,
+                destination_streams={
+                    "webapp_fi": {
+                        "sequence": position,
+                        "transaction_id": "12345678-1234-4234-8234-123456789abc",
+                        "transaction_position": position,
+                        "transaction_size": 2,
+                        "transaction_hash": "0" * 64,
+                    }
+                },
+            )
+        group_hash = transaction_hash_from_envelopes([first, second])
+        destination_hash = destination_transaction_hash(
+            [first, second], destination_site="webapp_fi"
+        )
+        first["transaction_hash"] = group_hash
+        second["transaction_hash"] = group_hash
+        first["destination_streams"]["webapp_fi"]["transaction_hash"] = destination_hash
+        second["destination_streams"]["webapp_fi"]["transaction_hash"] = destination_hash
+
+        validate_envelope(first)
+        validate_envelope(second)
+        tampered = copy.deepcopy(second)
+        tampered["transaction_position"] = 1
+        self.assertNotEqual(
+            transaction_hash_from_envelopes([first, tampered]),
+            group_hash,
+        )
+
+    def test_destination_streams_remove_private_event_gaps_without_leaking_payload(self):
+        product = envelope(sequence=20, event_id="12345678-1234-4234-8234-123456789ab3")
+        private = envelope(sequence=21, event_id="12345678-1234-4234-8234-123456789ab4")
+        product["aggregate_type"] = "offers"
+        private["aggregate_type"] = "messages"
+        transaction_id = "12345678-1234-4234-8234-123456789abd"
+        for position, item in enumerate((product, private), 1):
+            item.update(
+                protocol_version=2,
+                transaction_id=transaction_id,
+                transaction_position=position,
+                transaction_size=2,
+                transaction_hash="0" * 64,
+            )
+        product["destination_streams"] = {
+            "webapp_fi": {
+                "sequence": 10, "transaction_id": transaction_id,
+                "transaction_position": 1, "transaction_size": 2,
+                "transaction_hash": "0" * 64,
+            },
+            "bot_fi": {
+                "sequence": 7, "transaction_id": transaction_id,
+                "transaction_position": 1, "transaction_size": 1,
+                "transaction_hash": "0" * 64,
+            },
+        }
+        private["destination_streams"] = {
+            "webapp_fi": {
+                "sequence": 11, "transaction_id": transaction_id,
+                "transaction_position": 2, "transaction_size": 2,
+                "transaction_hash": "0" * 64,
+            },
+        }
+        global_hash = transaction_hash_from_envelopes([product, private])
+        for item in (product, private):
+            item["transaction_hash"] = global_hash
+        webapp_hash = destination_transaction_hash(
+            [product, private], destination_site="webapp_fi"
+        )
+        bot_hash = destination_transaction_hash([product], destination_site="bot_fi")
+        for item in (product, private):
+            item["destination_streams"]["webapp_fi"]["transaction_hash"] = webapp_hash
+        product["destination_streams"]["bot_fi"]["transaction_hash"] = bot_hash
+
+        product_validated = validate_envelope(product)
+        private_validated = validate_envelope(private)
+        self.assertEqual(product_validated.destination_stream("bot_fi")["sequence"], 7)
+        with self.assertRaisesRegex(DrEventProtocolError, "not authorized"):
+            private_validated.destination_stream("bot_fi")

@@ -13,7 +13,7 @@ async def main() -> None:
     assert_not_dark_standby("dr_effect_worker")
     await dr_effect_loop(
         {
-            ("webpush", "webpush_user"): execute_web_push_effect,
+            ("webpush", "webpush_subscription"): execute_web_push_effect,
             ("smsir", "recovery_sms"): execute_sms_bulk_effect,
         }
     )

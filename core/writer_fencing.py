@@ -17,7 +17,7 @@ from core.config import settings
 from core.webapp_writer_control import WriterStateSnapshot, snapshot_is_local_active
 from core.writer_lease_clock import lease_clock_reasons
 from core.sync_field_policy import SyncFieldAction, sync_field_policy_entries
-from core.sync_outbox_guard import statement_write_target_table
+from core.sync_outbox_guard import raw_sql_is_provably_read_only, statement_write_target_table
 from core.sync_registry import SyncPolicy, sync_registry_entries
 
 
@@ -60,6 +60,7 @@ LOCAL_PROJECTION_TABLES = frozenset(
         "user_counter_event_receipts", "dr_events", "dr_event_receipts",
         "dr_event_deliveries", "dr_stream_checkpoints", "dr_conflict_quarantine",
         "dr_replay_nonces", "dr_effect_outbox",
+        "dr_effect_fanouts",
         "dr_producer_cursors", "dr_projection_versions",
         "dr_blob_manifests", "dr_file_intents", "dr_blob_deliveries",
         "dr_blob_receipts", "dr_recovery_manifests",
@@ -72,6 +73,10 @@ CONTROL_TABLES = frozenset(
 
 def _is_control_session(session: Session) -> bool:
     return bool(getattr(session, "info", {}).get("three_site_db_role") == "control")
+
+
+def _is_projection_session(session: Session) -> bool:
+    return bool(getattr(session, "info", {}).get("three_site_db_role") == "projection")
 
 
 def current_writer_fence_context() -> WriterFenceContext | None:
@@ -175,6 +180,13 @@ def _strict_webapp_fencing_enabled() -> bool:
     return identity.is_webapp_authority and identity.is_webapp_site
 
 
+def _strict_three_site_enabled() -> bool:
+    return bool(
+        getattr(settings, "three_site_dr_enabled", False)
+        and getattr(settings, "dr_event_protocol_strict", False)
+    )
+
+
 def _changed_fields(session: Session, obj: object, *, is_new: bool) -> frozenset[str]:
     state = sa_inspect(obj)
     fields: set[str] = set()
@@ -213,16 +225,26 @@ def _guard_before_flush(session: Session, flush_context, instances) -> None:  # 
         return
     writer = current_writer_fence_context()
     projection = current_projection_fence_context()
+    projection_role_session = _is_projection_session(session)
     control = _is_control_session(session)
-    if writer is None and projection is None and not control:
+    if writer is None and projection is None and not projection_role_session and not control:
         raise WriterFenceError("WebApp ORM mutation lacks an explicit writer/projection capability")
     for obj, operation, is_new in candidates:
         table_name = sa_inspect(obj).mapper.local_table.name
         if control and table_name not in CONTROL_TABLES:
             raise WriterFenceError(f"control database role forbids table {table_name}")
-        if projection is not None:
+        if projection is not None or projection_role_session:
             fields = frozenset() if operation == "delete" else _changed_fields(session, obj, is_new=is_new)
-            _validate_projection_target(table_name, fields)
+            if projection is not None:
+                _validate_projection_target(table_name, fields)
+            else:
+                allowed_tables, allowed_fields = _projection_allowlist()
+                if table_name not in allowed_tables or set(fields) - set(
+                    allowed_fields.get(table_name, frozenset())
+                ):
+                    raise WriterFenceError(
+                        f"projection database role forbids table/fields on {table_name}"
+                    )
     if writer is not None:
         from core.dr_durability_gate import enforce_session_durability
 
@@ -239,19 +261,22 @@ def _guard_orm_execute(orm_execute_state) -> None:  # noqa: ANN001
     statement = getattr(orm_execute_state, "statement", None)
     table_name = statement_write_target_table(statement)
     if table_name is None and isinstance(statement, TextClause):
-        normalized = " ".join(str(statement).lower().split())
-        if "setval(" in normalized or normalized.startswith("select set_config("):
-            table_name = "__sequence__"
+        if raw_sql_is_provably_read_only(str(statement)):
+            return
+        raise WriterFenceError(
+            "Unclassified raw SQL is forbidden by strict WebApp writer fencing"
+        )
     if table_name is None:
         return
     writer = current_writer_fence_context()
     projection = current_projection_fence_context()
+    projection_role_session = _is_projection_session(orm_execute_state.session)
     control = _is_control_session(orm_execute_state.session)
-    if writer is None and projection is None and not control:
+    if writer is None and projection is None and not projection_role_session and not control:
         raise WriterFenceError("WebApp bulk/raw mutation lacks an explicit writer/projection capability")
     if control and table_name not in CONTROL_TABLES:
         raise WriterFenceError(f"control database role forbids table {table_name}")
-    if projection is not None and table_name != "__sequence__":
+    if (projection is not None or projection_role_session) and table_name != "__sequence__":
         if isinstance(statement, TextClause):
             raise WriterFenceError("projection capability forbids raw SQL mutations")
         raw_values = getattr(statement, "_values", None)
@@ -262,13 +287,26 @@ def _guard_orm_execute(orm_execute_state) -> None:  # noqa: ANN001
                 name = getattr(key, "name", None) or getattr(key, "key", None) or str(key)
                 normalized.add(str(name))
             fields = frozenset(normalized)
-        _validate_projection_target(table_name, fields)
+        if projection is not None:
+            _validate_projection_target(table_name, fields)
+        else:
+            allowed_tables, allowed_fields = _projection_allowlist()
+            if table_name not in allowed_tables or (
+                fields is not None
+                and set(fields) - set(allowed_fields.get(table_name, frozenset()))
+            ):
+                raise WriterFenceError(
+                    f"projection database role forbids table/fields on {table_name}"
+                )
     orm_execute_state.session.info[_WRITE_SEEN_KEY] = True
 
 
 def _set_database_capability_after_begin(session: Session, transaction, connection) -> None:  # noqa: ANN001
-    if not _strict_webapp_fencing_enabled():
+    if not _strict_three_site_enabled():
         return
+    from core.runtime_identity import resolve_runtime_identity
+
+    identity = resolve_runtime_identity(settings)
     writer = current_writer_fence_context()
     projection = current_projection_fence_context()
     if writer is not None:
@@ -279,7 +317,7 @@ def _set_database_capability_after_begin(session: Session, transaction, connecti
             "trading_bot.transition_id": writer.transition_id,
             "trading_bot.witness_lease_id": writer.witness_lease_id or "",
         }
-    elif projection is not None:
+    elif projection is not None or _is_projection_session(session):
         settings_map = {
             "trading_bot.mutation_capability": "projection",
             "trading_bot.physical_site": str(getattr(settings, "physical_site", "") or ""),
@@ -288,6 +326,11 @@ def _set_database_capability_after_begin(session: Session, transaction, connecti
         settings_map = {
             "trading_bot.mutation_capability": "control",
             "trading_bot.physical_site": str(getattr(settings, "physical_site", "") or ""),
+        }
+    elif identity.is_bot_site:
+        settings_map = {
+            "trading_bot.mutation_capability": "foreign_writer",
+            "trading_bot.physical_site": identity.physical_site,
         }
     else:
         return

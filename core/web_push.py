@@ -73,6 +73,21 @@ def is_web_push_configured() -> bool:
     )
 
 
+def is_web_push_client_configured() -> bool:
+    """Return whether an API process can safely advertise subscription support.
+
+    In strict three-site mode the private VAPID key belongs only to the effect
+    worker.  API processes need only the public key and must not infer disabled
+    browser support from the deliberate absence of provider credentials.
+    """
+
+    return bool(
+        is_web_push_execution_allowed()
+        and settings.web_push_enabled
+        and settings.web_push_vapid_public_key
+    )
+
+
 def web_push_config_status() -> dict[str, Any]:
     missing: list[str] = []
     if not is_web_push_execution_allowed():
@@ -81,12 +96,16 @@ def web_push_config_status() -> dict[str, Any]:
         missing.append("WEB_PUSH_ENABLED")
     if not settings.web_push_vapid_public_key:
         missing.append("WEB_PUSH_VAPID_PUBLIC_KEY")
-    if not settings.web_push_vapid_private_key:
-        missing.append("WEB_PUSH_VAPID_PRIVATE_KEY")
-    if not settings.web_push_vapid_subject:
-        missing.append("WEB_PUSH_VAPID_SUBJECT")
-    if not is_web_push_dependency_available():
-        missing.append("pywebpush")
+    strict_three_site = bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    )
+    if not strict_three_site:
+        if not settings.web_push_vapid_private_key:
+            missing.append("WEB_PUSH_VAPID_PRIVATE_KEY")
+        if not settings.web_push_vapid_subject:
+            missing.append("WEB_PUSH_VAPID_SUBJECT")
+        if not is_web_push_dependency_available():
+            missing.append("pywebpush")
 
     return {
         "enabled": len(missing) == 0,
@@ -482,6 +501,12 @@ async def send_market_offer_web_push(offer_id: int) -> None:
 
 
 def schedule_market_offer_web_push(offer_id: int) -> None:
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        # The mapper outbox inserted a dr_effect_fanouts row in the same
+        # transaction as the Offer.  Never create a detached post-commit task.
+        return
     if not is_web_push_configured():
         return
 
@@ -489,13 +514,7 @@ def schedule_market_offer_web_push(offer_id: int) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-
-    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
-        getattr(settings, "dr_event_protocol_strict", False)
-    ):
-        task = loop.create_task(_enqueue_market_offer_web_push_effects(offer_id))
-    else:
-        task = loop.create_task(send_market_offer_web_push(offer_id))
+    task = loop.create_task(send_market_offer_web_push(offer_id))
 
     def _log_task_error(done_task: asyncio.Task) -> None:
         try:
@@ -533,6 +552,11 @@ def schedule_notification_web_push(
     notification_id: int,
     extra_payload: dict[str, Any] | None = None,
 ) -> None:
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        # The Notification transaction already contains a durable fanout row.
+        return
     if not is_web_push_configured():
         return
 
@@ -540,15 +564,7 @@ def schedule_notification_web_push(
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-
-    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
-        getattr(settings, "dr_event_protocol_strict", False)
-    ):
-        task = loop.create_task(
-            _enqueue_notification_web_push_effect(notification_id, extra_payload)
-        )
-    else:
-        task = loop.create_task(send_notification_web_push(notification_id, extra_payload))
+    task = loop.create_task(send_notification_web_push(notification_id, extra_payload))
 
     def _log_task_error(done_task: asyncio.Task) -> None:
         try:
@@ -564,68 +580,132 @@ def schedule_notification_web_push(
     task.add_done_callback(_log_task_error)
 
 
-async def _enqueue_notification_web_push_effect(
-    notification_id: int,
-    extra_payload: dict[str, Any] | None,
-) -> None:
-    from core.db import AsyncSessionLocal
-    from core.dr_effects import enqueue_effect_for_aggregate
+async def execute_web_push_effect(db: AsyncSession, payload: dict[str, Any]):
+    """Execute exactly one durable endpoint intent.
 
-    async with AsyncSessionLocal() as db:
-        notification = await db.get(Notification, notification_id)
-        if notification is None:
-            return
-        payload = build_notification_push_payload(notification, extra_payload)
-        user_id = int(notification.user_id)
-    await enqueue_effect_for_aggregate(
-        aggregate_type="notifications",
-        aggregate_db_id=notification_id,
-        effect_type="webpush_user",
-        provider="webpush",
-        destination_key=f"user:{user_id}",
-        idempotency_key=f"webpush:notification:{notification_id}:user:{user_id}",
-        payload={"user_id": user_id, "push_payload": payload},
+    A user may own several browser subscriptions.  Keeping each provider call
+    in a separate effect prevents one successful browser delivery followed by
+    an ambiguous second call from making the whole user fanout unsafe to retry.
+    """
+
+    from core.dr_effects import (
+        ProviderEffectResult,
+        assert_epoch_bound_effect_execution,
     )
 
-
-async def _enqueue_market_offer_web_push_effects(offer_id: int) -> None:
-    from core.db import AsyncSessionLocal
-    from core.dr_effects import enqueue_effect_for_aggregate
-    from models.offer import Offer, OfferStatus
-    from sqlalchemy.orm import selectinload
-
-    async with AsyncSessionLocal() as db:
-        offer = await db.scalar(
-            select(Offer).options(selectinload(Offer.commodity)).where(Offer.id == offer_id)
-        )
-        if offer is None or offer.status != OfferStatus.ACTIVE:
-            return
-        if not await is_first_active_market_offer(db, offer.id):
-            return
-        target_user_ids = await load_market_offer_push_target_user_ids(
-            db,
-            {getattr(offer, "user_id", None), getattr(offer, "actor_user_id", None)},
-        )
-        payload = build_market_offer_push_payload(offer)
-    for user_id in target_user_ids:
-        await enqueue_effect_for_aggregate(
-            aggregate_type="offers",
-            aggregate_db_id=offer_id,
-            effect_type="webpush_user",
-            provider="webpush",
-            destination_key=f"user:{user_id}",
-            idempotency_key=f"webpush:market-offer:{offer_id}:user:{user_id}",
-            payload={"user_id": int(user_id), "push_payload": payload},
-        )
-
-
-async def execute_web_push_effect(db: AsyncSession, payload: dict[str, Any]):
-    from core.dr_effects import ProviderEffectResult
-
     user_id = payload.get("user_id")
+    subscription_id = payload.get("subscription_id")
+    endpoint_hash = payload.get("endpoint_hash")
     push_payload = payload.get("push_payload")
-    if type(user_id) is not int or not isinstance(push_payload, dict):
+    if (
+        type(user_id) is not int
+        or type(subscription_id) is not int
+        or not isinstance(endpoint_hash, str)
+        or len(endpoint_hash) != 64
+        or not isinstance(push_payload, dict)
+    ):
         return ProviderEffectResult(outcome="not_sent", error_code="invalid_webpush_payload")
-    result = await send_web_push_to_user(db, user_id, push_payload)
-    receipt = json.dumps(result, sort_keys=True, separators=(",", ":"))
-    return ProviderEffectResult(outcome="succeeded", receipt=receipt)
+    if not is_web_push_configured():
+        return ProviderEffectResult(outcome="not_sent", error_code="webpush_not_configured")
+    assert_epoch_bound_effect_execution(
+        provider="webpush", effect_type="webpush_subscription"
+    )
+    subscription = await db.scalar(
+        select(PushSubscription).where(
+            PushSubscription.id == subscription_id,
+            PushSubscription.user_id == user_id,
+            PushSubscription.endpoint_hash == endpoint_hash,
+            PushSubscription.enabled == True,
+        )
+    )
+    if subscription is None:
+        receipt = json.dumps(
+            {
+                "endpoint_hash": endpoint_hash,
+                "status": "subscription_absent_or_disabled",
+                "subscription_id": subscription_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return ProviderEffectResult(outcome="succeeded", receipt=receipt)
+
+    try:
+        from core.production_test_isolation import should_suppress_web_push_for_user
+
+        if await should_suppress_web_push_for_user(db, user_id):
+            return ProviderEffectResult(
+                outcome="succeeded",
+                receipt=json.dumps(
+                    {
+                        "endpoint_hash": endpoint_hash,
+                        "status": "production_test_suppressed",
+                        "subscription_id": subscription_id,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+    except Exception:
+        logger.exception(
+            "Failed to evaluate production test isolation for durable Web Push; continuing",
+            extra={
+                "event": "production_test_isolation.web_push_effect_suppression_failed",
+                "subscription_id": subscription_id,
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    try:
+        await asyncio.to_thread(
+            webpush,
+            subscription_info=_subscription_info(subscription),
+            data=json.dumps(push_payload, ensure_ascii=False),
+            vapid_private_key=settings.web_push_vapid_private_key,
+            vapid_claims={"sub": settings.web_push_vapid_subject},
+            ttl=max(0, int(settings.web_push_ttl_seconds)),
+            timeout=max(1.0, float(settings.web_push_timeout_seconds)),
+        )
+    except Exception as exc:
+        status_code = _response_status_code(exc)
+        subscription.last_failure_at = now
+        subscription.failure_count = int(subscription.failure_count or 0) + 1
+        subscription.last_error = _response_error_text(exc)
+        if status_code in TERMINAL_PUSH_STATUS_CODES:
+            subscription.enabled = False
+            await db.flush()
+            return ProviderEffectResult(
+                outcome="succeeded",
+                receipt=json.dumps(
+                    {
+                        "endpoint_hash": endpoint_hash,
+                        "provider_status": status_code,
+                        "status": "terminal_subscription_disabled",
+                        "subscription_id": subscription_id,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        await db.flush()
+        return ProviderEffectResult(
+            outcome="ambiguous",
+            error_code=f"webpush_provider_{status_code or 'exception'}",
+        )
+
+    subscription.last_success_at = now
+    subscription.failure_count = 0
+    subscription.last_error = None
+    await db.flush()
+    return ProviderEffectResult(
+        outcome="succeeded",
+        receipt=json.dumps(
+            {
+                "endpoint_hash": endpoint_hash,
+                "status": "provider_accepted",
+                "subscription_id": subscription_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )

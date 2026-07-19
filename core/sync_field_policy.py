@@ -10,6 +10,11 @@ from typing import Any
 
 
 SYNC_FIELD_POLICY_VERSION = 2
+# Canonical transport payloads may contain a small closed set of derived
+# identities that are not physical columns on the source table.
+SYNC_DERIVED_FIELDS = frozenset(
+    {("offer_requests", "customer_relation_invitation_token")}
+)
 
 
 class SyncFieldClassification(str, Enum):
@@ -477,27 +482,23 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
     ("push_subscriptions", "endpoint"): _entry(
         "push_subscriptions",
         "endpoint",
-        SyncFieldClassification.HASH_ONLY,
-        action=SyncFieldAction.HASH,
+        SyncFieldClassification.SYNC,
         sensitive=True,
-        output_field="endpoint_hash",
-        reason="browser push endpoints are Iran-local runtime secrets",
+        reason="private WebApp DR destination required after Writer promotion; never sent to Bot-FI",
     ),
     ("push_subscriptions", "p256dh"): _entry(
         "push_subscriptions",
         "p256dh",
-        SyncFieldClassification.NO_SYNC,
-        action=SyncFieldAction.DROP,
+        SyncFieldClassification.SYNC,
         sensitive=True,
-        reason="browser push key material is Iran-local runtime state",
+        reason="private WebApp DR key material required after Writer promotion; never sent to Bot-FI",
     ),
     ("push_subscriptions", "auth"): _entry(
         "push_subscriptions",
         "auth",
-        SyncFieldClassification.NO_SYNC,
-        action=SyncFieldAction.DROP,
+        SyncFieldClassification.SYNC,
         sensitive=True,
-        reason="browser push auth secret is Iran-local runtime state",
+        reason="private WebApp DR auth material required after Writer promotion; never sent to Bot-FI",
     ),
     ("push_subscriptions", "user_agent"): _entry(
         "push_subscriptions",

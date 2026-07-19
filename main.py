@@ -747,7 +747,11 @@ api_router.include_router(users_public.router, prefix="/users-public", tags=["Pu
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(blocks.router, prefix="/blocks", tags=["Blocks"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
-api_router.include_router(dr_sync.router, prefix="/dr-sync", tags=["DR Sync"])
+if not (settings.three_site_dr_enabled and settings.dr_event_protocol_strict):
+    # Strict three-site ingress lives in the projection-only dr_receiver_app.
+    # Keeping it out of the product API prevents an API compromise from
+    # acquiring projection credentials.
+    api_router.include_router(dr_sync.router, prefix="/dr-sync", tags=["DR Sync"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
 
 app.include_router(api_router)

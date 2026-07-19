@@ -45,9 +45,12 @@ state="$(runuser -u postgres -- psql -XAtqc \
     "$drill_database")"
 receipt_count="$(runuser -u postgres -- psql -XAtqc \
     'SELECT count(*) FROM webapp_writer_witness_receipts' "$drill_database")"
+operation_count="$(runuser -u postgres -- psql -XAtqc \
+    'SELECT count(*) FROM dr_failover_operation_ledger' "$drill_database")"
 
-[[ "$version" == "001" ]]
+[[ "$version" == "002" ]]
 [[ "$state" == webapp:* ]]
 [[ "$receipt_count" =~ ^[0-9]+$ ]]
-printf '{"status":"passed","schema_version":"%s","state":"%s","receipt_count":%s}\n' \
-    "$version" "$state" "$receipt_count"
+[[ "$operation_count" =~ ^[0-9]+$ ]]
+printf '{"status":"passed","schema_version":"%s","state":"%s","operation_count":%s,"receipt_count":%s}\n' \
+    "$version" "$state" "$operation_count" "$receipt_count"

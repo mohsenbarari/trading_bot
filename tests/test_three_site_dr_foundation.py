@@ -6,6 +6,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from io import BytesIO
+import base64
+from uuid import uuid4
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from sqlalchemy import update
 
@@ -19,7 +24,12 @@ from core.dr_delivery_worker import (
     parse_peer_urls,
 )
 from core.dr_durability_gate import build_connectivity_state_update, decide_durability
-from core.dr_connectivity_classifier import ConnectivityEvidenceError, classify_connectivity
+from core.dr_connectivity_classifier import (
+    ConnectivityEvidenceError,
+    ConnectivityEvidencePolicy,
+    VantageIdentity,
+    classify_connectivity,
+)
 from core.dr_effects import DrEffectError, assert_epoch_bound_effect_execution
 from core.dr_event_outbox import DrEventOutboxError, _guard_bulk_or_raw_write, _record_identity, _row_payload
 from core.dr_event_protocol import canonical_json_bytes
@@ -32,42 +42,122 @@ from scripts.verify_three_site_staging_inventory import InventoryError, verify_i
 
 
 class ThreeSiteDrFoundationTests(unittest.TestCase):
-    def test_connectivity_classifier_requires_fresh_multi_vantage_hysteresis(self):
-        now = datetime.now(timezone.utc)
+    def _signed_connectivity_evidence(self, *, now: datetime, mode: str):
+        controller = Ed25519PrivateKey.generate()
+        private_keys = {
+            name: Ed25519PrivateKey.generate()
+            for name in ("iran-a", "iran-b", "global-a")
+        }
+        targets = {
+            "webapp_fi": {"ip": "192.0.2.10", "tls_server_name": "fi.internal.test"},
+            "webapp_ir": {"ip": "192.0.2.20", "tls_server_name": "ir.internal.test"},
+            "witness": {"ip": "192.0.2.30", "tls_server_name": "witness.internal.test"},
+        }
+        vantages = {
+            name: VantageIdentity(
+                vantage_id=name,
+                physical_probe_id=f"physical-{name}",
+                region="iran" if name.startswith("iran") else "global",
+                key_id=f"key-{name}",
+                public_key=private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw),
+            )
+            for name, private in private_keys.items()
+        }
+        campaign_id = str(uuid4())
+        policy = ConnectivityEvidencePolicy(
+            campaign_id=campaign_id,
+            controller_id="independent-collector",
+            controller_key_id="collector-key",
+            controller_public_key=controller.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw),
+            targets=targets,
+            vantages=vantages,
+            policy_hash="d" * 64,
+        )
         rounds = []
-        for seconds in (30, 20, 10):
+        for index, seconds in enumerate((30, 20, 10), 1):
+            observed_at = (now - timedelta(seconds=seconds)).isoformat()
             probes = []
             for vantage in ("iran-a", "iran-b"):
-                probes.extend(
-                    [
-                        {"vantage_id": vantage, "vantage_region": "iran", "target": "webapp_fi", "reachable": False},
-                        {"vantage_id": vantage, "vantage_region": "iran", "target": "webapp_ir", "reachable": True},
-                        {"vantage_id": vantage, "vantage_region": "iran", "target": "witness", "reachable": True},
-                    ]
-                )
+                for target in ("webapp_fi", "webapp_ir", "witness"):
+                    reachable = True if mode == "online" else target != "webapp_fi"
+                    unsigned = {
+                        "vantage_id": vantage,
+                        "physical_probe_id": f"physical-{vantage}",
+                        "vantage_region": "iran",
+                        "target": target,
+                        "target_ip": targets[target]["ip"],
+                        "tls_server_name": targets[target]["tls_server_name"],
+                        "reachable": reachable,
+                        "observed_at": observed_at,
+                        "nonce": str(uuid4()),
+                        "key_id": f"key-{vantage}",
+                    }
+                    probes.append(
+                        {
+                            **unsigned,
+                            "signature": base64.b64encode(
+                                private_keys[vantage].sign(canonical_json_bytes(unsigned))
+                            ).decode(),
+                        }
+                    )
+            global_unsigned = {
+                "vantage_id": "global-a",
+                "physical_probe_id": "physical-global-a",
+                "vantage_region": "global",
+                "target": "webapp_fi",
+                "target_ip": targets["webapp_fi"]["ip"],
+                "tls_server_name": targets["webapp_fi"]["tls_server_name"],
+                "reachable": True,
+                "observed_at": observed_at,
+                "nonce": str(uuid4()),
+                "key_id": "key-global-a",
+            }
             probes.append(
-                {"vantage_id": "global-a", "vantage_region": "global", "target": "webapp_fi", "reachable": True}
+                {
+                    **global_unsigned,
+                    "signature": base64.b64encode(
+                        private_keys["global-a"].sign(canonical_json_bytes(global_unsigned))
+                    ).decode(),
+                }
             )
-            rounds.append({"observed_at": (now - timedelta(seconds=seconds)).isoformat(), "probes": probes})
-        classification = classify_connectivity(rounds, now=now)
+            unsigned_round = {
+                "campaign_id": campaign_id,
+                "round_id": str(uuid4()),
+                "observed_at": observed_at,
+                "probes": probes,
+            }
+            round_hash = __import__("hashlib").sha256(canonical_json_bytes(unsigned_round)).hexdigest()
+            receipt = {
+                "controller_id": "independent-collector",
+                "key_id": "collector-key",
+                "round_hash": round_hash,
+            }
+            rounds.append(
+                {
+                    **unsigned_round,
+                    "collector_receipt": {
+                        **receipt,
+                        "signature": base64.b64encode(
+                            controller.sign(canonical_json_bytes(receipt))
+                        ).decode(),
+                    },
+                }
+            )
+        return policy, rounds
+
+    def test_connectivity_classifier_requires_fresh_multi_vantage_hysteresis(self):
+        now = datetime.now(timezone.utc)
+        policy, rounds = self._signed_connectivity_evidence(now=now, mode="isolated")
+        classification = classify_connectivity(rounds, policy=policy, now=now)
         self.assertEqual((classification.mode, classification.confidence), ("isolated", "high"))
         rounds[-1]["observed_at"] = (now - timedelta(hours=1)).isoformat()
         with self.assertRaises(ConnectivityEvidenceError):
-            classify_connectivity(rounds, now=now)
+            classify_connectivity(rounds, policy=policy, now=now)
 
-        online_rounds = [
-            {
-                "observed_at": (now - timedelta(seconds=seconds)).isoformat(),
-                "probes": [
-                    {"vantage_id": vantage, "vantage_region": "iran", "target": target, "reachable": True}
-                    for vantage in ("iran-a", "iran-b")
-                    for target in ("webapp_fi", "webapp_ir", "witness")
-                ],
-            }
-            for seconds in (15, 10, 5)
-        ]
+        online_policy, online_rounds = self._signed_connectivity_evidence(now=now, mode="online")
         update = build_connectivity_state_update(
             online_rounds,
+            policy=online_policy,
             operator="staging-connectivity-controller",
             now=now,
             ttl_seconds=30,
@@ -174,6 +264,10 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         )
         self.assertEqual(
             projection_mode(table_name="push_subscriptions", origin_site="webapp_ir", destination_site="webapp_fi"),
+            "generic",
+        )
+        self.assertEqual(
+            projection_mode(table_name="push_subscriptions", origin_site="webapp_ir", destination_site="bot_fi"),
             "noop",
         )
 

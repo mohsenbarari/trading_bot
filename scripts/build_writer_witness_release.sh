@@ -108,6 +108,7 @@ for source in \
     offer_identity.py \
     registration_identity.py \
     runtime_sites.py \
+    writer_lease_clock.py \
     writer_witness_auth.py \
     writer_witness_contract.py \
     writer_witness_control.py
@@ -122,6 +123,7 @@ find "$ROOT_DIR/models" -maxdepth 1 -type f -name '*.py' -print0 \
 
 for source in \
     001_initial.sql \
+    002_failover_operation_ledger.sql \
     requirements.txt \
     requirements.lock \
     python-runtime.json \

@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
@@ -18,11 +18,11 @@ from core.runtime_sites import PHYSICAL_SITES, SITE_BOT_FI, SITE_WEBAPP_FI, SITE
 from core.sync_metadata import build_sync_metadata
 
 
-DR_EVENT_PROTOCOL_VERSION = 1
+DR_EVENT_PROTOCOL_VERSION = 2
 DR_EVENT_SCHEMA_VERSION = 1
 EVENT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-ENVELOPE_FIELDS = frozenset(
+V1_ENVELOPE_FIELDS = frozenset(
     {
         "protocol_version",
         "event_id",
@@ -45,6 +45,13 @@ ENVELOPE_FIELDS = frozenset(
         "created_at",
     }
 )
+TRANSACTION_FIELDS = frozenset(
+    {
+        "transaction_id", "transaction_position", "transaction_size", "transaction_hash",
+        "destination_streams",
+    }
+)
+ENVELOPE_FIELDS = V1_ENVELOPE_FIELDS | TRANSACTION_FIELDS
 
 
 class DrEventProtocolError(RuntimeError):
@@ -71,6 +78,20 @@ class ValidatedDrEnvelope:
     @property
     def producer_sequence(self) -> int:
         return int(self.payload["producer_sequence"])
+
+    def destination_stream(self, destination_site: str) -> dict[str, Any]:
+        if int(self.payload["protocol_version"]) == 1:
+            return {
+                "sequence": self.producer_sequence,
+                "transaction_id": self.event_id,
+                "transaction_position": 1,
+                "transaction_size": 1,
+                "transaction_hash": self.envelope_hash,
+            }
+        stream = self.payload["destination_streams"].get(destination_site)
+        if not isinstance(stream, dict):
+            raise DrEventProtocolError("DR event is not authorized for this destination")
+        return dict(stream)
 
 
 @dataclass(frozen=True)
@@ -103,9 +124,13 @@ def envelope_hash(payload: dict[str, Any]) -> str:
 
 
 def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
-    if not isinstance(payload, dict) or set(payload) != ENVELOPE_FIELDS:
-        raise DrEventProtocolError("DR envelope fields do not match protocol v1")
-    if type(payload.get("protocol_version")) is not int or payload["protocol_version"] != 1:
+    if not isinstance(payload, dict):
+        raise DrEventProtocolError("DR envelope must be an object")
+    protocol_version = payload.get("protocol_version")
+    expected_fields = V1_ENVELOPE_FIELDS if protocol_version == 1 else ENVELOPE_FIELDS
+    if set(payload) != expected_fields:
+        raise DrEventProtocolError("DR envelope fields do not match its protocol version")
+    if type(protocol_version) is not int or protocol_version not in {1, 2}:
         raise DrEventProtocolError("unsupported DR event protocol version")
     if type(payload.get("schema_version")) is not int or payload["schema_version"] != 1:
         raise DrEventProtocolError("unsupported DR payload schema version")
@@ -140,6 +165,47 @@ def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
             raise DrEventProtocolError("WebApp producer_epoch must equal writer_epoch")
     elif writer_epoch is not None:
         raise DrEventProtocolError("foreign-authority DR event must not carry writer_epoch")
+    if protocol_version == 2:
+        try:
+            transaction_id = str(UUID(str(payload.get("transaction_id"))))
+        except ValueError as exc:
+            raise DrEventProtocolError("DR transaction_id must be a UUID") from exc
+        if transaction_id != payload.get("transaction_id"):
+            raise DrEventProtocolError("DR transaction_id is not canonical")
+        position = payload.get("transaction_position")
+        size = payload.get("transaction_size")
+        if type(position) is not int or type(size) is not int or position < 1 or size < 1 or position > size:
+            raise DrEventProtocolError("DR transaction position/size is invalid")
+        if not HASH_RE.fullmatch(str(payload.get("transaction_hash") or "")):
+            raise DrEventProtocolError("DR transaction hash is invalid")
+        streams = payload.get("destination_streams")
+        if not isinstance(streams, dict) or not streams:
+            raise DrEventProtocolError("DR destination streams are missing")
+        expected_stream_fields = {
+            "sequence", "transaction_id", "transaction_position",
+            "transaction_size", "transaction_hash",
+        }
+        for destination, stream in streams.items():
+            if (
+                destination not in PHYSICAL_SITES
+                or destination == payload.get("origin_physical_site")
+                or not isinstance(stream, dict)
+                or set(stream) != expected_stream_fields
+            ):
+                raise DrEventProtocolError("DR destination stream identity is invalid")
+            if (
+                type(stream.get("sequence")) is not int
+                or stream["sequence"] < 1
+                or stream.get("transaction_id") != transaction_id
+                or type(stream.get("transaction_position")) is not int
+                or type(stream.get("transaction_size")) is not int
+                or stream["transaction_position"] < 1
+                or stream["transaction_size"] < 1
+                or stream["transaction_position"] > stream["transaction_size"]
+                or not HASH_RE.fullmatch(str(stream.get("transaction_hash") or ""))
+                or stream["transaction_hash"] == "0" * 64
+            ):
+                raise DrEventProtocolError("DR destination stream transaction is invalid")
     created_at = payload.get("created_at")
     try:
         parsed = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
@@ -150,14 +216,57 @@ def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
     return ValidatedDrEnvelope(payload=json.loads(canonical_json_bytes(payload)), envelope_hash=envelope_hash(payload))
 
 
+def transaction_hash_from_envelopes(envelopes: list[dict[str, Any]]) -> str:
+    """Hash the ordered immutable members without circular envelope hashes."""
+
+    ordered = sorted(envelopes, key=lambda item: int(item["transaction_position"]))
+    members = [
+        {
+            "event_id": item["event_id"],
+            "producer_sequence": item["producer_sequence"],
+            "transaction_position": item["transaction_position"],
+            "aggregate_type": item["aggregate_type"],
+            "aggregate_id": item["aggregate_id"],
+            "aggregate_db_id": item["aggregate_db_id"],
+            "aggregate_version": item["aggregate_version"],
+            "operation": item["operation"],
+            "canonical_payload_hash": item["canonical_payload_hash"],
+            "schema_version": item["schema_version"],
+            "writer_epoch": item["writer_epoch"],
+            "tombstone": item["tombstone"],
+        }
+        for item in ordered
+    ]
+    return sha256_json(members)
+
+
+def destination_transaction_hash(
+    envelopes: list[dict[str, Any]], *, destination_site: str
+) -> str:
+    """Hash only members authorized for one destination in local stream order."""
+
+    visible: list[dict[str, Any]] = []
+    for envelope in envelopes:
+        stream = (envelope.get("destination_streams") or {}).get(destination_site)
+        if not isinstance(stream, dict):
+            continue
+        member = dict(envelope)
+        member["transaction_position"] = int(stream["transaction_position"])
+        visible.append(member)
+    if not visible:
+        raise DrEventProtocolError("destination transaction has no visible members")
+    return transaction_hash_from_envelopes(visible)
+
+
 def decide_receipt(
     *,
     contiguous_sequence: int,
     incoming: ValidatedDrEnvelope,
     existing_event_hash: str | None = None,
     existing_sequence_hash: str | None = None,
+    incoming_sequence: int | None = None,
 ) -> ReceiptDecision:
-    sequence = incoming.producer_sequence
+    sequence = incoming.producer_sequence if incoming_sequence is None else int(incoming_sequence)
     if existing_event_hash is not None:
         if existing_event_hash == incoming.envelope_hash:
             return ReceiptDecision("duplicate")
@@ -203,6 +312,25 @@ def initial_delivery_destinations(
                 return (SITE_WEBAPP_FI,)
             return ()
     return transport_peers(origin_site)
+
+
+def ultimate_delivery_destinations(
+    origin_site: str, *, aggregate_type: str
+) -> tuple[str, ...]:
+    """All sites entitled to the event, independent of the sparse relay path."""
+
+    from core.dr_data_policy import WEBAPP_DR_REPLICA_TABLES
+
+    if aggregate_type in WEBAPP_DR_REPLICA_TABLES:
+        if origin_site == SITE_WEBAPP_FI:
+            return (SITE_WEBAPP_IR,)
+        if origin_site == SITE_WEBAPP_IR:
+            return (SITE_WEBAPP_FI,)
+        return ()
+    ordered_sites = (SITE_BOT_FI, SITE_WEBAPP_FI, SITE_WEBAPP_IR)
+    if origin_site not in ordered_sites:
+        raise DrEventProtocolError("origin site is outside the fixed topology")
+    return tuple(site for site in ordered_sites if site != origin_site)
 
 
 def relay_destinations(
@@ -258,6 +386,34 @@ def _next_producer_sequence(connection, *, authority: str, site: str, epoch: int
     return int(row)
 
 
+def _next_destination_sequence(
+    connection, *, authority: str, site: str, epoch: int, destination_site: str
+) -> int:
+    row = connection.execute(
+        text(
+            """
+            INSERT INTO dr_destination_cursors (
+                origin_authority, origin_physical_site, producer_epoch,
+                destination_site, last_sequence
+            ) VALUES (:authority, :site, :epoch, :destination_site, 1)
+            ON CONFLICT (
+                origin_authority, origin_physical_site, producer_epoch, destination_site
+            ) DO UPDATE SET
+                last_sequence = dr_destination_cursors.last_sequence + 1,
+                updated_at = clock_timestamp()
+            RETURNING last_sequence
+            """
+        ),
+        {
+            "authority": authority,
+            "site": site,
+            "epoch": epoch,
+            "destination_site": destination_site,
+        },
+    ).scalar_one()
+    return int(row)
+
+
 def append_local_dr_event(
     connection,
     *,
@@ -266,6 +422,8 @@ def append_local_dr_event(
     operation: str,
     data: dict[str, Any],
     change_log_id: int | None,
+    transaction_id: str,
+    transaction_position: int,
 ) -> str | None:
     """Append business mutation plus immutable DR event in one transaction."""
 
@@ -304,6 +462,26 @@ def append_local_dr_event(
     now = datetime.now(timezone.utc).isoformat()
     event_id = str(uuid4())
     payload = json.loads(canonical_json_bytes(data))
+    destination_streams = {
+        destination: {
+            "sequence": _next_destination_sequence(
+                connection,
+                authority=identity.logical_authority,
+                site=identity.physical_site,
+                epoch=producer_epoch,
+                destination_site=destination,
+            ),
+            "transaction_id": transaction_id,
+            "transaction_position": 0,
+            "transaction_size": 0,
+            "transaction_hash": "0" * 64,
+        }
+        for destination in ultimate_delivery_destinations(
+            identity.physical_site, aggregate_type=table_name
+        )
+    }
+    if not destination_streams:
+        raise DrEventProtocolError("DR business event has no authorized destination")
     envelope = {
         "protocol_version": DR_EVENT_PROTOCOL_VERSION,
         "event_id": event_id,
@@ -324,8 +502,13 @@ def append_local_dr_event(
         "writer_epoch": writer_epoch,
         "tombstone": str(operation).upper() == "DELETE",
         "created_at": now,
+        "transaction_id": transaction_id,
+        "transaction_position": int(transaction_position),
+        # Finalized after the Session flush has exposed every mapper event.
+        "transaction_size": 0,
+        "transaction_hash": "0" * 64,
+        "destination_streams": destination_streams,
     }
-    validated = validate_envelope(envelope)
     connection.execute(
         text(
             """
@@ -334,20 +517,25 @@ def append_local_dr_event(
                 producer_epoch, producer_sequence, aggregate_type, aggregate_id,
                 aggregate_db_id, aggregate_version, operation, canonical_payload,
                 canonical_payload_hash, envelope_hash, schema_version, causation_id,
-                idempotency_key, writer_epoch, tombstone, created_at
+                idempotency_key, writer_epoch, tombstone, created_at,
+                transaction_id, transaction_position, transaction_size, transaction_hash,
+                destination_streams, source_xid
             ) VALUES (
                 :event_id, :protocol_version, :origin_authority, :origin_physical_site,
                 :producer_epoch, :producer_sequence, :aggregate_type, :aggregate_id,
                 :aggregate_db_id, :aggregate_version, :operation, CAST(:canonical_payload AS JSONB),
                 :canonical_payload_hash, :envelope_hash, :schema_version, :causation_id,
-                :idempotency_key, :writer_epoch, :tombstone, CAST(:created_at AS TIMESTAMPTZ)
+                :idempotency_key, :writer_epoch, :tombstone, CAST(:created_at AS TIMESTAMPTZ),
+                :transaction_id, :transaction_position, 0, :transaction_hash,
+                CAST(:destination_streams AS JSONB), txid_current()
             )
             """
         ),
         {
             **{key: value for key, value in envelope.items() if key != "canonical_payload"},
             "canonical_payload": canonical_json_bytes(payload).decode("utf-8"),
-            "envelope_hash": validated.envelope_hash,
+            "destination_streams": canonical_json_bytes(destination_streams).decode("utf-8"),
+            "envelope_hash": "0" * 64,
         },
     )
     for destination in initial_delivery_destinations(
@@ -363,3 +551,90 @@ def append_local_dr_event(
             {"event_id": event_id, "destination": destination},
         )
     return event_id
+
+
+def finalize_local_dr_transaction(connection, event_ids: list[str]) -> str:
+    if not event_ids:
+        raise DrEventProtocolError("cannot finalize an empty DR transaction")
+    rows = connection.execute(
+        text(
+            "SELECT * FROM dr_events WHERE event_id = ANY(:event_ids) "
+            "ORDER BY transaction_position FOR UPDATE"
+        ),
+        {"event_ids": event_ids},
+    ).mappings().all()
+    if len(rows) != len(event_ids):
+        raise DrEventProtocolError("DR transaction finalization lost an event")
+    transaction_ids = {row["transaction_id"] for row in rows}
+    positions = [int(row["transaction_position"] or 0) for row in rows]
+    if len(transaction_ids) != 1 or positions != list(range(1, len(rows) + 1)):
+        raise DrEventProtocolError("DR transaction members are not contiguous")
+    provisional: list[dict[str, Any]] = []
+    size = len(rows)
+    for row in rows:
+        created_at = row["created_at"]
+        if isinstance(created_at, datetime):
+            created_at = created_at.astimezone(timezone.utc).isoformat()
+        provisional.append(
+            {
+                key: row[key]
+                for key in V1_ENVELOPE_FIELDS
+                if key != "created_at"
+            }
+            | {
+                "created_at": created_at,
+                "transaction_id": row["transaction_id"],
+                "transaction_position": int(row["transaction_position"]),
+                "transaction_size": size,
+                "transaction_hash": "0" * 64,
+                "destination_streams": dict(row["destination_streams"] or {}),
+            }
+        )
+    group_hash = transaction_hash_from_envelopes(provisional)
+    destinations = sorted(
+        {
+            destination
+            for envelope in provisional
+            for destination in envelope["destination_streams"]
+        }
+    )
+    for destination in destinations:
+        members = [
+            envelope
+            for envelope in provisional
+            if destination in envelope["destination_streams"]
+        ]
+        for position, envelope in enumerate(members, 1):
+            stream = dict(envelope["destination_streams"][destination])
+            stream.update(
+                transaction_position=position,
+                transaction_size=len(members),
+            )
+            envelope["destination_streams"][destination] = stream
+        destination_hash = destination_transaction_hash(
+            members, destination_site=destination
+        )
+        for envelope in members:
+            envelope["destination_streams"][destination]["transaction_hash"] = (
+                destination_hash
+            )
+    for envelope in provisional:
+        envelope["transaction_hash"] = group_hash
+        validated = validate_envelope(envelope)
+        connection.execute(
+            text(
+                "UPDATE dr_events SET transaction_size=:size, transaction_hash=:transaction_hash, "
+                "destination_streams=CAST(:destination_streams AS JSONB), "
+                "envelope_hash=:envelope_hash WHERE event_id=:event_id"
+            ),
+            {
+                "size": size,
+                "transaction_hash": group_hash,
+                "destination_streams": canonical_json_bytes(
+                    envelope["destination_streams"]
+                ).decode("utf-8"),
+                "envelope_hash": validated.envelope_hash,
+                "event_id": envelope["event_id"],
+            },
+        )
+    return group_hash

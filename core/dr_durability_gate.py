@@ -9,7 +9,11 @@ from typing import Any, Iterable
 from sqlalchemy import text
 
 from core.config import settings
-from core.dr_connectivity_classifier import ConnectivityClassification, classify_connectivity
+from core.dr_connectivity_classifier import (
+    ConnectivityClassification,
+    ConnectivityEvidencePolicy,
+    classify_connectivity,
+)
 
 
 class DrDurabilityGateError(RuntimeError):
@@ -59,6 +63,7 @@ class DurabilityStateUpdate:
 def build_connectivity_state_update(
     rounds: list[dict[str, Any]],
     *,
+    policy: ConnectivityEvidencePolicy,
     operator: str,
     now: datetime | None = None,
     ttl_seconds: int = 60,
@@ -70,7 +75,12 @@ def build_connectivity_state_update(
     ttl = int(ttl_seconds)
     if ttl < 10 or ttl > 300:
         raise DrDurabilityGateError("durability-state evidence TTL must be 10..300 seconds")
-    classification = classify_connectivity(rounds, now=current, max_age_seconds=300)
+    classification = classify_connectivity(
+        rounds,
+        policy=policy,
+        now=current,
+        max_age_seconds=300,
+    )
     return DurabilityStateUpdate(
         classification=classification,
         evidence_expires_at=current + timedelta(seconds=ttl),

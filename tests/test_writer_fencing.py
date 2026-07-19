@@ -137,6 +137,23 @@ class WriterFenceTests(unittest.TestCase):
             with self.assertRaisesRegex(WriterFenceError, "bulk/raw"):
                 session.execute(text("UPDATE users SET full_name = 'unsafe' WHERE id = 1"))
 
+    def test_scoped_writable_cte_and_function_are_still_rejected(self):
+        engine = create_engine("sqlite:///:memory:")
+        unsafe = (
+            "WITH changed AS (UPDATE users SET full_name = 'unsafe' RETURNING id) SELECT id FROM changed",
+            "CALL mutate_user(1)",
+            "SELECT mutate_user(1)",
+            "SELECT id FROM users; DELETE FROM users",
+        )
+        with Session(engine) as session, self._strict_settings(), writer_fence_scope(
+            identity(), snapshot(), source="test"
+        ):
+            for sql in unsafe:
+                with self.subTest(sql=sql), self.assertRaisesRegex(
+                    WriterFenceError, "Unclassified raw SQL"
+                ):
+                    session.execute(text(sql))
+
     def test_projection_capability_has_closed_field_allowlist(self):
         engine = create_engine("sqlite:///:memory:")
         with Session(engine) as session, self._strict_settings(), projection_fence_scope(source="test"):

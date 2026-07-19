@@ -6,7 +6,10 @@
 # network while the site is dark.
 services:
   db:
-    image: postgres:15-alpine
+    image: trading_bot_postgres_boottime:15-${RELEASE_SHA:?exact release SHA required}
+    build:
+      context: ../..
+      dockerfile: deploy/postgres-boottime/Dockerfile
     container_name: trading_bot_db
     restart: unless-stopped
     network_mode: none

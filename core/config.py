@@ -44,8 +44,13 @@ class Settings(BaseSettings):
     dr_blob_object_region: str | None = None
     dr_blob_object_bucket: str | None = None
     dr_blob_s3_credentials_file: str | None = None
+    dr_blob_encryption_keyring_file: str | None = None
     dr_blob_require_versioning: bool = True
     dr_blob_gc_retention_days: int = 30
+    dr_blob_orphan_grace_seconds: int = 3600
+    dr_blob_orphan_quarantine_days: int = 30
+    dr_blob_orphan_scan_max_entries: int = 10000
+    dr_blob_local_quota_bytes: int = 20 * 1024 * 1024 * 1024
     dr_audit_anchor_object_prefix: str = "three-site-dr/audit-anchors"
     # Safe default until the owner approves RPO and a synchronous same-region
     # journal has independently passed restoration drills.

@@ -209,6 +209,8 @@ stop_isolated_postgres() {
 start_isolated_postgres
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -f /srv/trading-bot-witness/current/deploy/writer-witness/001_initial.sql >/dev/null
+runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
+    -f /srv/trading-bot-witness/current/deploy/writer-witness/002_failover_operation_ledger.sql >/dev/null
 state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
     --phase running --postgres-pid "$postgres_pid"
 

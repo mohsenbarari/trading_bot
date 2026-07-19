@@ -21,12 +21,19 @@ WEBAPP_DR_REPLICA_TABLES = frozenset(
         "invitation_identity_reservations",
         "invitation_sms_deliveries",
         "messages",
+        "push_subscriptions",
         "session_login_requests",
         "single_session_recovery_admin_targets",
         "single_session_recovery_requests",
         "user_sessions",
     }
 )
+WEBAPP_DR_DROPPED_FIELDS: dict[str, frozenset[str]] = {
+    # Provider diagnostics and browser fingerprint metadata are not required
+    # to resume delivery after promotion. Endpoint/key material is required and
+    # remains confined to the private FI<->IR WebApp stream.
+    "push_subscriptions": frozenset({"last_error", "platform", "user_agent"}),
+}
 
 
 def canonical_dr_row_payload(table_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -35,11 +42,11 @@ def canonical_dr_row_payload(table_name: str, payload: dict[str, Any]) -> dict[s
     # The legacy field policy describes what may cross the Bot/WebApp trust
     # boundary.  The private WebApp replica set never reaches Bot-FI and must
     # retain required Messenger/session columns so IR is a complete standby.
-    sanitized = (
-        dict(payload)
-        if table_name in WEBAPP_DR_REPLICA_TABLES
-        else sanitize_sync_payload(table_name, payload)
-    )
+    if table_name in WEBAPP_DR_REPLICA_TABLES:
+        excluded = WEBAPP_DR_DROPPED_FIELDS.get(table_name, frozenset())
+        sanitized = {key: value for key, value in payload.items() if key not in excluded}
+    else:
+        sanitized = sanitize_sync_payload(table_name, payload)
     if not isinstance(sanitized, dict):
         raise ValueError("DR row payload must be an object")
     if table_name == "chat_files" and sanitized.get("content_hash"):

@@ -129,6 +129,14 @@ def event_envelope(event: DrEvent) -> dict[str, Any]:
         "tombstone": event.tombstone,
         "created_at": created_at.astimezone(timezone.utc).isoformat(),
     }
+    if int(event.protocol_version) >= 2:
+        payload.update(
+            transaction_id=event.transaction_id,
+            transaction_position=event.transaction_position,
+            transaction_size=event.transaction_size,
+            transaction_hash=event.transaction_hash,
+            destination_streams=event.destination_streams,
+        )
     validated = validate_envelope(payload)
     if validated.envelope_hash != event.envelope_hash:
         raise DrDeliveryError(f"stored DR event hash mismatch for {event.event_id}")

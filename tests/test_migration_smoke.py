@@ -38,7 +38,61 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         self.assertTrue(result.stdout.strip(), msg='Expected at least one Alembic head revision')
-        self.assertIn('d3e8f9a0b1c2', result.stdout)
+        self.assertIn('e9e4f5a6b7c8', result.stdout)
+
+    def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
+        migration = (
+            REPO_ROOT
+            / 'migrations/versions/e4f9a0b1c2d3_use_database_boottime_writer_fence.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('CREATE EXTENSION IF NOT EXISTS trading_bot_boottime', migration)
+        self.assertIn('trading_bot_boottime_seconds()', migration)
+        self.assertIn('trading_bot_boot_id()', migration)
+        upgrade_body = migration.split('def upgrade()', 1)[1].split('def downgrade()', 1)[0]
+        self.assertNotIn('clock_timestamp()', upgrade_body)
+
+    def test_three_site_trigger_functions_never_inherit_public_execute(self):
+        expected = {
+            'e4f9a0b1c2d3_use_database_boottime_writer_fence.py': (
+                'trading_bot_enforce_writer_term()',
+            ),
+            'e5a0b1c2d3e4_add_durable_effect_fanouts.py': (
+                'trading_bot_dr_effect_fanout_intent_immutable()',
+            ),
+            'e6b1c2d3e4f5_add_dr_transaction_envelopes.py': (
+                'trading_bot_dr_event_immutable()',
+                'trading_bot_dr_event_finalized()',
+            ),
+            'e8d3e4f5a6b7_enforce_database_event_coverage.py': (
+                'trading_bot_require_same_transaction_dr_event()',
+                'trading_bot_dr_event_immutable()',
+            ),
+            'e9e4f5a6b7c8_enable_bot_database_event_fence.py': (
+                'trading_bot_enforce_writer_term()',
+                'trading_bot_require_same_transaction_dr_event()',
+            ),
+        }
+        for filename, functions in expected.items():
+            source = (REPO_ROOT / 'migrations/versions' / filename).read_text(encoding='utf-8')
+            for function in functions:
+                self.assertIn(
+                    f'REVOKE ALL ON FUNCTION {function} FROM PUBLIC',
+                    source,
+                    msg=f'{filename}:{function}',
+                )
+
+    def test_runtime_role_scripts_revoke_global_function_defaults(self):
+        for filename in (
+            'activate_three_site_database_fencing.py',
+            'provision_bot_database_roles.py',
+        ):
+            source = (REPO_ROOT / 'scripts' / filename).read_text(encoding='utf-8')
+            self.assertIn('REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC', source)
+            self.assertNotIn(
+                'IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC',
+                source,
+            )
 
     def test_webapp_writer_migration_bootstraps_current_fi_writer(self):
         migration = (

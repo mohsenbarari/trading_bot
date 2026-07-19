@@ -237,6 +237,8 @@ async def _bootstrap(urls: dict[str, URL]) -> None:
     )
     witness_schema = (ROOT / "deploy/writer-witness/001_initial.sql").read_text(
         encoding="utf-8"
+    ) + (ROOT / "deploy/writer-witness/002_failover_operation_ledger.sql").read_text(
+        encoding="utf-8"
     )
     await asyncio.gather(
         _raw_execute(urls["webapp_fi"], local_schema),
@@ -620,9 +622,19 @@ async def _core_phase(urls: dict[str, URL]) -> dict[str, Any]:
             now=clock.value,
             require_witness_lease=True,
             witness_safety_margin_seconds=SAFETY_MARGIN_SECONDS,
+            current_boottime=(
+                float(fi_after_partition.witness_observed_boottime)
+                + (
+                    clock.value
+                    - fi_after_partition.witness_observed_wall_at
+                ).total_seconds()
+            ),
         )
         require(not fi_eligible, "FI remained eligible inside the safety margin")
-        require("writer_witness_lease_expired" in fi_reasons, "FI failed closed for wrong reason")
+        require(
+            "writer_witness_monotonic_deadline_expired" in fi_reasons,
+            "FI failed closed for wrong monotonic-clock reason",
+        )
         results["asymmetric_partition"] = "fi_failed_closed_without_local_extension"
 
         # The prior rejected packet is replayed after expiry and must stay
@@ -751,9 +763,16 @@ async def _pause_phase(urls: dict[str, URL]) -> dict[str, Any]:
             now=fail_closed_at,
             require_witness_lease=True,
             witness_safety_margin_seconds=SAFETY_MARGIN_SECONDS,
+            current_boottime=(
+                float(after.witness_observed_boottime)
+                + (fail_closed_at - after.witness_observed_wall_at).total_seconds()
+            ),
         )
         require(not eligible, "IR did not fail closed while witness DB was unavailable")
-        require("writer_witness_lease_expired" in reasons, "pause failed closed for wrong reason")
+        require(
+            "writer_witness_monotonic_deadline_expired" in reasons,
+            "pause failed closed for wrong monotonic-clock reason",
+        )
         require(
             await _bot_marker(bot_sessions) == "untouched-by-witness",
             "witness DB pause mutated Bot-FI",

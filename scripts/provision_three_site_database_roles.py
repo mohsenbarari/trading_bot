@@ -47,12 +47,34 @@ def main() -> int:
                 statement = connection.scalar(
                     text(
                         "SELECT format(" +
-                        ("'ALTER ROLE %I PASSWORD %L'" if exists else "'CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS'") +
+                        ("'ALTER ROLE %I LOGIN PASSWORD %L NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS'" if exists else "'CREATE ROLE %I LOGIN PASSWORD %L NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS'") +
                         ", :role, :password)"
                     ),
                     {"role": role, "password": password},
                 )
                 connection.exec_driver_sql(str(statement))
+                # PostgreSQL NOINHERIT prevents automatic privilege inheritance,
+                # but membership still authorizes SET ROLE.  Runtime identities
+                # therefore have no role memberships in either direction.
+                memberships = connection.execute(
+                    text(
+                        "SELECT parent.rolname AS parent_role, member.rolname AS member_role "
+                        "FROM pg_auth_members membership "
+                        "JOIN pg_roles parent ON parent.oid = membership.roleid "
+                        "JOIN pg_roles member ON member.oid = membership.member "
+                        "WHERE parent.rolname = :role OR member.rolname = :role"
+                    ),
+                    {"role": role},
+                ).mappings().all()
+                for membership in memberships:
+                    revoke = connection.scalar(
+                        text("SELECT format('REVOKE %I FROM %I', :parent, :member)"),
+                        {
+                            "parent": membership["parent_role"],
+                            "member": membership["member_role"],
+                        },
+                    )
+                    connection.exec_driver_sql(str(revoke))
     except Exception as exc:
         print(json.dumps({"status": "error", "error_class": type(exc).__name__}, sort_keys=True))
         return 1

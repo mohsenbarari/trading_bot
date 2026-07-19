@@ -52,6 +52,11 @@ def _entry(
 
 
 _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
+    "dr_destination_cursors": _entry(
+        "dr_destination_cursors", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_outbox",), "local origin producer",
+        "monotonic per-origin/per-destination stream sequence", "DR ordering only",
+    ),
     "dr_durability_state": _entry(
         "dr_durability_state", SyncPolicy.INTERNAL_BOOKKEEPING,
         ("dr_orchestrator", "durability_health_controller"), "local DR control plane",
@@ -91,6 +96,12 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "dr_effect_outbox", SyncPolicy.INTERNAL_BOOKKEEPING,
         ("dr_effect_worker",), "local DR effect plane",
         "never product-sync execution leases", "epoch-bound external effects",
+    ),
+    "dr_effect_fanouts": _entry(
+        "dr_effect_fanouts", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_outbox", "dr_effect_worker"), "local DR effect plane",
+        "immutable event-bound fanout intent with local expansion status",
+        "transactional recipient fanout only",
     ),
     "dr_event_deliveries": _entry(
         "dr_event_deliveries", SyncPolicy.INTERNAL_BOOKKEEPING,
@@ -305,9 +316,10 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "push_subscriptions",
         SyncPolicy.NO_SYNC,
         ("webapp_browser_runtime",),
-        "iran local browser runtime",
-        "no cross-server merge",
-        "iran Web Push runtime only",
+        "WebApp authority private replica",
+        "WebApp-FI/WebApp-IR only; endpoint hash is the stable destination identity",
+        "Web Push destination and key material; never project to Bot-FI",
+        notes="Private WebApp DR state required for notification continuity after Writer promotion.",
     ),
     "session_login_requests": _entry(
         "session_login_requests",

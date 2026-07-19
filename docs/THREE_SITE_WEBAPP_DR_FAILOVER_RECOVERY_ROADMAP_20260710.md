@@ -3601,3 +3601,119 @@ heads are pushed, current `origin/main` is fetched, Alembic sibling heads and
 semantic overlap are resolved on the isolated integration branch, and the
 combined project is ready for the authoritative Full Matrix. Neither feature
 branch is merged into the other or into `main` in this section.
+
+## 50. Exact-SHA Pro Review Closure - 2026-07-19
+
+This section records remediation of the independent ChatGPT Pro review of
+exact SHA `0bfb8f89221a6deda8f8d07eed8427188ab3ed70`. It supersedes none of
+the live gates above and does not authorize an integration branch, deployment,
+Writer transition, CDN/DNS mutation, Full Matrix, or merge to `main`.
+
+### 50.1 Source findings closed or forced fail-closed
+
+1. Unknown raw SQL, including writable CTE, multi-statement, `CALL`, and
+   `EXECUTE` shapes, is rejected at the ORM boundary. Deferred PostgreSQL
+   coverage triggers also reject application-role row changes that do not have
+   a same-transaction immutable event, including raw-driver access.
+2. WebApp and Bot runtime roles are `LOGIN NOINHERIT`, have every direct role
+   membership revoked, are checked for transitive `SET ROLE` paths and inbound
+   grants, own no public objects/functions, receive no implicit function
+   execution, and inherit no permissive owner default privileges.
+3. PostgreSQL Writer fencing uses a native `CLOCK_BOOTTIME` plus boot-ID
+   extension. A wall-clock rollback cannot extend an old term, and reboot or
+   missing monotonic evidence fails closed until a fresh Witness lease is
+   installed.
+4. The staging Compose file has no global `env_file`. Effective secret
+   references are checked against a service allowlist. Owner credentials stay
+   in migration/role/fencing jobs, Bot token stays in the Bot process, provider
+   keys stay in their workers, and directed DR/Witness secrets stay in their
+   exact callers. The former shared `dr_control` network is replaced by closed
+   Bot-FI/WebApp-FI, WebApp-FI/WebApp-IR, and WebApp/Witness networks plus
+   separate per-site egress networks.
+5. Bot-FI has distinct application/projection roles, receiver, delivery, and
+   projection services. Projection is restricted to the shared product table
+   and field policy; WebApp-private session, Messenger, push, and file state is
+   excluded.
+6. Every immutable event carries a source transaction identity and per-
+   destination transaction position/count/hash. A destination waits for the
+   complete visible group and applies it in one database commit. Destination-
+   specific sequences prevent private WebApp rows from creating permanent Bot
+   gaps inside mixed transactions.
+7. Offer and notification Web Push fanout is inserted in the business/event
+   transaction, then expanded idempotently to one effect per subscription
+   endpoint. Account-recovery SMS intent is also inserted before the recovery
+   state commits and never falls back to a previously committed aggregate
+   event. The generic post-commit effect-enqueue API was removed.
+8. The blob worker encrypts bytes client-side with streaming authenticated
+   encryption, opaque keyed object names, separate plaintext/ciphertext hashes,
+   encryption key/version metadata, exact decrypt-and-verify, and no dependency
+   on provider SSE. Operation-owned pending directories and fsynced intent
+   records cover the file-before-database crash window; an age/ownership/hash-
+   aware reconciler quarantines unknown residue.
+9. The failover saga accepts only a closed typed operation contract. Arbitrary
+   shell, `curl`, `ssh`, Docker, and Python command execution was removed. Plans
+   contain a bounded TTL, independent nonce, exact release/route/epoch/current-
+   state bindings and two policy-bound Ed25519 approvals. Witness stores the
+   globally unique reservation/final receipt. Rollback validation uses the
+   completed-step set: after target term acquisition, source restoration
+   requires the next Witness epoch; otherwise the only safe fallback is fully
+   fenced.
+10. Connectivity decisions accept only allowlisted Ed25519-signed probes from
+    distinct physical Iran/global vantages, exact target IP/TLS identities,
+    unique round/probe nonces, ordered fresh rounds, and a separately signed
+    collector receipt. Unsigned labels and replayed/stale campaigns fail.
+11. Machine-generated artifacts classify every mapped table and field by
+    authority, replication class, destinations, projection action, sensitivity,
+    tombstone/retention rule and write surface, and inventory every Telegram,
+    Web Push, SMS, Object Storage, realtime, email, and route-switch effect by
+    causation, destination, idempotency, ambiguity, claim and readiness rule.
+12. The Writer-Witness release now includes the monotonic clock helper; its
+    source manifest hashes were regenerated. The real failure drill schema and
+    its pause/resume assertions now use the same boot/boottime contract as the
+    product database.
+
+### 50.2 Verification evidence at this boundary
+
+- a fresh PostgreSQL 15 database migrated from empty to single head
+  `e9e4f5a6b7c8`; downgrade from `e9` to `e5` and re-upgrade to `e9` passed;
+- WebApp database activation produced `253` role/grant/fence statements; `9`
+  real PostgreSQL WebApp tests passed, including writable CTE/raw-driver,
+  role-graph/`SET ROLE`, and database-monotonic expiry cases;
+- `5` real PostgreSQL Bot role/fencing tests and the destination-specific
+  atomic transaction-projection test passed;
+- the Writer-Witness source half passed `463` tests with zero skips; the real
+  four-database Docker failure drill passed `5` guarded PostgreSQL tests and
+  concurrent acquire, exact replay, asymmetric partition, epoch-2-only Writer,
+  database isolation, Witness-container pause, monotonic safety expiry,
+  durable resume, and final cleanup phases;
+- focused protocol, role, effect, blob, operation-ledger, staging-boundary,
+  recovery-SMS and source-inventory suites passed; deterministic data/effect
+  artifacts regenerate byte-for-byte;
+- Python compilation, `git diff --check`, migration single-head/smoke checks,
+  Writer-Witness command-surface verification, staging secret/network verifier,
+  and `docker compose config --quiet` passed.
+
+### 50.3 Gates intentionally still external
+
+The following cannot be manufactured by source code and remain blocking before
+official staging or production activation: owner-approved RPO/RTO and a real
+same-region durability mechanism for isolated critical writes; independent
+custody and installation of approver/vantage/blob/Witness keys; a reviewed
+deployment-specific implementation of the typed failover backend (the current
+CLI is validation-only and refuses live execution); real `/proc` and mount
+secret inspection; real host clock/reboot/pause/disk faults; live Arvan Object
+Storage/versioning/timeout/corruption evidence; independent audit anchoring;
+four-host destructive isolation; measured capacity/DPI/backlog thresholds; and
+the authoritative integration Full Matrix.
+
+The raw broad unittest discovery command is not the acceptance gate because it
+mixes optional Hypothesis/frontend prerequisites and host-fault tests that
+deliberately reject inherited dummy database URLs. Acceptance uses the closed,
+no-skip source gate, real PostgreSQL gates, deterministic generators, and the
+real Docker failure drill listed above.
+
+Work remains stopped before creating an integration branch. The sibling
+`candidate/telegram-offer-publition-queue` branch must first become complete,
+clean, immutable, and pushed; only then may both exact feature heads be
+integrated deliberately with the then-current `main`, including the Alembic and
+semantic-overlap plan, before the official Full Matrix.

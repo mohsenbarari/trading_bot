@@ -12,6 +12,7 @@ from core.writer_fencing import (
     register_writer_fence_listener,
     writer_fence_scope,
 )
+from core.writer_lease_clock import boottime_seconds, current_boot_id
 
 
 def test_database_url() -> str:
@@ -37,6 +38,7 @@ class WriterFencingPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(test_database_url(), pool_pre_ping=True)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         register_writer_fence_listener()
+        observed_boottime = boottime_seconds()
         async with self.sessions() as session:
             await session.execute(
                 text(
@@ -47,14 +49,25 @@ class WriterFencingPostgresTests(unittest.IsolatedAsyncioTestCase):
                         control_state = 'active',
                         transition_id = 'integration-active-term',
                         witness_lease_id = 'integration-lease',
+                        witness_lease_issued_at = clock_timestamp(),
                         witness_lease_expires_at = clock_timestamp() + interval '180 seconds',
                         witness_proof_hash = repeat('a', 64),
                         witness_transition_id = 'integration-witness-term',
+                        witness_local_boot_id = :boot_id,
+                        witness_local_boottime_deadline = :boottime_deadline,
+                        witness_observed_wall_at = clock_timestamp(),
+                        witness_observed_boottime = :observed_boottime,
+                        witness_clock_offset_ms = 0,
                         updated_by = 'integration-test',
                         reason = 'integration setup'
                     WHERE authority = 'webapp'
                     """
-                )
+                ),
+                {
+                    "boot_id": current_boot_id(),
+                    "boottime_deadline": observed_boottime + 180.0,
+                    "observed_boottime": observed_boottime,
+                },
             )
             await session.commit()
 
@@ -88,7 +101,7 @@ class WriterFencingPostgresTests(unittest.IsolatedAsyncioTestCase):
                     await stale_session.commit()
                 await stale_session.rollback()
 
-    async def test_commit_rejects_witness_lease_inside_safety_margin(self):
+    async def test_commit_rejects_expired_monotonic_witness_deadline(self):
         identity = RuntimeIdentity("webapp", "webapp_fi", "iran", False)
         async with self.sessions() as session:
             snapshot = await load_writer_snapshot(session)
@@ -98,10 +111,11 @@ class WriterFencingPostgresTests(unittest.IsolatedAsyncioTestCase):
                 text(
                     """
                     UPDATE webapp_writer_state
-                    SET witness_lease_expires_at = clock_timestamp() + interval '5 seconds'
+                    SET witness_local_boottime_deadline = :expired_deadline
                     WHERE authority = 'webapp'
                     """
-                )
+                ),
+                {"expired_deadline": boottime_seconds() - 1.0},
             )
             await control_session.commit()
 

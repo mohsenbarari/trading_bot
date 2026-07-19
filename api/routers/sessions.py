@@ -15,7 +15,8 @@ from core.audit_logger import audit_log
 from core.config import settings
 from core.enums import MessageType
 from core.security import create_access_token, create_refresh_token
-from core.dr_effects import enqueue_effect_for_aggregate
+from core.dr_effects import DrEffectError, enqueue_epoch_bound_effect
+from core.dr_event_outbox import current_dr_transaction_event_ids
 from core.sms import send_sms
 from core.utils import publish_user_event
 from api.deps import get_current_user
@@ -29,8 +30,10 @@ from models.session import (
     SingleSessionRecoveryAdminTarget,
     SingleSessionRecoveryRequest,
 )
+from models.dr_event import DrEvent
 from core.services.chat_service import persist_sent_direct_message, publish_direct_message_event
 from core.services.chat_upload_session_service import persist_chat_media_file_bytes
+from core.writer_fencing import current_writer_fence_context
 from core.services.session_service import (
     get_active_sessions,
     get_session_by_refresh_token,
@@ -83,27 +86,65 @@ ACCOUNTANT_SESSION_MANAGEMENT_DETAIL = "حسابداران به مدیریت ن�
 
 
 async def _enqueue_recovery_sms(
+    db: AsyncSession,
     recovery_request: SingleSessionRecoveryRequest,
     *,
     mobile: str,
     message: str,
     action: str,
-) -> None:
+) -> bool:
+    """Persist a recovery-SMS intent in the recovery-state transaction.
+
+    ``False`` means strict three-site mode is disabled and the caller must keep
+    the legacy post-commit provider call. In strict mode, failure to bind the
+    intent to the immutable causation event aborts the business transaction.
+    """
+
     if not (
         bool(getattr(settings, "three_site_dr_enabled", False))
         and bool(getattr(settings, "dr_event_protocol_strict", False))
     ):
-        send_sms(mobile, message)
-        return
-    await enqueue_effect_for_aggregate(
-        aggregate_type="single_session_recovery_requests",
-        aggregate_db_id=recovery_request.id,
+        return False
+    fence = current_writer_fence_context()
+    if fence is None:
+        raise DrEffectError("recovery SMS intent lacks the current writer capability")
+    # Mapper listeners append the immutable causation event during flush. The
+    # event and effect intent then commit (or roll back) as one unit.
+    await db.flush()
+    transaction_event_ids = current_dr_transaction_event_ids(db)
+    if not transaction_event_ids:
+        raise DrEffectError("recovery SMS transaction has no immutable causation events")
+    event = await db.scalar(
+        select(DrEvent)
+        .where(
+            DrEvent.event_id.in_(transaction_event_ids),
+            DrEvent.aggregate_type == "single_session_recovery_requests",
+            DrEvent.aggregate_db_id == str(recovery_request.id),
+            DrEvent.origin_physical_site == fence.physical_site,
+            DrEvent.writer_epoch == fence.writer_epoch,
+        )
+        .order_by(DrEvent.producer_sequence.desc())
+        .limit(1)
+    )
+    if event is None:
+        raise DrEffectError("recovery SMS has no immutable causation event in its transaction")
+    await enqueue_epoch_bound_effect(
+        db,
+        event_id=event.event_id,
         effect_type="recovery_sms",
         provider="smsir",
         destination_key=mobile,
         idempotency_key=f"recovery-sms:{recovery_request.id}:{action}",
         payload={"mobile": mobile, "message": message},
     )
+    return True
+
+
+def _send_legacy_recovery_sms(*, durably_queued: bool, mobile: str, message: str) -> None:
+    """Keep the pre-DR provider behavior after the business commit."""
+
+    if not durably_queued:
+        send_sms(mobile, message)
 
 
 def _audit_actor_role(user: object) -> str | None:
@@ -362,20 +403,29 @@ async def _expire_recovery_if_needed(
         login_req.status = LoginRequestStatus.EXPIRED
 
     await _clear_recovery_admin_action_messages(db, recovery_request.id)
-    await db.commit()
-
     requester = requester_user or getattr(recovery_request, "user", None)
     if requester is None:
         stmt_user = select(User).where(User.id == recovery_request.user_id)
         requester = (await db.execute(stmt_user)).scalar_one_or_none()
     requester_mobile_number = getattr(requester, "mobile_number", None)
+    sms_message = build_recovery_expired_sms_text()
+    sms_durably_queued = False
+    if requester and requester_mobile_number:
+        sms_durably_queued = await _enqueue_recovery_sms(
+            db,
+            recovery_request,
+            mobile=requester_mobile_number,
+            message=sms_message,
+            action="expired",
+        )
+    await db.commit()
+
     if requester and requester_mobile_number:
         try:
-            await _enqueue_recovery_sms(
-                recovery_request,
+            _send_legacy_recovery_sms(
+                durably_queued=sms_durably_queued,
                 mobile=requester_mobile_number,
-                message=build_recovery_expired_sms_text(),
-                action="expired",
+                message=sms_message,
             )
         except Exception as exc:
             logger.warning("Failed to send recovery-expired SMS for user %s: %s", requester.id, exc)
@@ -830,16 +880,25 @@ async def request_single_session_recovery_identity(
 
     request_identity_verification(recovery_request)
     await _clear_recovery_admin_action_messages(db, recovery_request.id)
+    requester_mobile_number = getattr(requester_user, "mobile_number", None)
+    sms_message = build_identity_requested_sms_text()
+    sms_durably_queued = False
+    if requester_mobile_number:
+        sms_durably_queued = await _enqueue_recovery_sms(
+            db,
+            recovery_request,
+            mobile=requester_mobile_number,
+            message=sms_message,
+            action="identity_requested",
+        )
     await db.commit()
 
-    requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            await _enqueue_recovery_sms(
-                recovery_request,
+            _send_legacy_recovery_sms(
+                durably_queued=sms_durably_queued,
                 mobile=requester_mobile_number,
-                message=build_identity_requested_sms_text(),
-                action="identity_requested",
+                message=sms_message,
             )
         except Exception as exc:
             logger.warning("Failed to send recovery identity-request SMS user=%s: %s", requester_user.id, exc)
@@ -892,23 +951,33 @@ async def approve_single_session_recovery(
         platform=Platform.WEB,
         home_server=login_req.requester_home_server,
     )
+    requester_mobile_number = getattr(requester_user, "mobile_number", None)
+    sms_message = build_recovery_approved_sms_text(
+        after_identity_review=approved_after_identity_review
+    )
+    sms_action = (
+        "approved_after_identity_review"
+        if approved_after_identity_review
+        else "approved"
+    )
+    sms_durably_queued = False
+    if requester_mobile_number:
+        sms_durably_queued = await _enqueue_recovery_sms(
+            db,
+            recovery_request,
+            mobile=requester_mobile_number,
+            message=sms_message,
+            action=sms_action,
+        )
     await db.commit()
     await _store_temporary_refresh_token(_get_recovery_token_cache_key(recovery_request.id), refresh_token)
 
-    requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            await _enqueue_recovery_sms(
-                recovery_request,
+            _send_legacy_recovery_sms(
+                durably_queued=sms_durably_queued,
                 mobile=requester_mobile_number,
-                message=build_recovery_approved_sms_text(
-                    after_identity_review=approved_after_identity_review
-                ),
-                action=(
-                    "approved_after_identity_review"
-                    if approved_after_identity_review
-                    else "approved"
-                ),
+                message=sms_message,
             )
         except Exception as exc:
             logger.warning("Failed to send recovery-approved SMS user=%s: %s", requester_user.id, exc)
@@ -950,22 +1019,32 @@ async def reject_single_session_recovery(
     if login_req is not None and login_req.status == LoginRequestStatus.PENDING:
         login_req.status = LoginRequestStatus.REJECTED
     await _clear_recovery_admin_action_messages(db, recovery_request.id)
+    requester_mobile_number = getattr(requester_user, "mobile_number", None)
+    sms_message = build_recovery_rejected_sms_text(
+        after_identity_review=rejected_after_identity_review
+    )
+    sms_action = (
+        "rejected_after_identity_review"
+        if rejected_after_identity_review
+        else "rejected"
+    )
+    sms_durably_queued = False
+    if requester_mobile_number:
+        sms_durably_queued = await _enqueue_recovery_sms(
+            db,
+            recovery_request,
+            mobile=requester_mobile_number,
+            message=sms_message,
+            action=sms_action,
+        )
     await db.commit()
 
-    requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            await _enqueue_recovery_sms(
-                recovery_request,
+            _send_legacy_recovery_sms(
+                durably_queued=sms_durably_queued,
                 mobile=requester_mobile_number,
-                message=build_recovery_rejected_sms_text(
-                    after_identity_review=rejected_after_identity_review
-                ),
-                action=(
-                    "rejected_after_identity_review"
-                    if rejected_after_identity_review
-                    else "rejected"
-                ),
+                message=sms_message,
             )
         except Exception as exc:
             logger.warning("Failed to send recovery-rejected SMS user=%s: %s", requester_user.id, exc)
@@ -1026,6 +1105,17 @@ async def submit_single_session_recovery_identity(
         )
         submit_identity_material(recovery_request)
         await _clear_recovery_admin_action_messages(db, recovery_request.id)
+        requester_mobile_number = getattr(requester_user, "mobile_number", None)
+        sms_message = build_identity_submitted_sms_text()
+        sms_durably_queued = False
+        if requester_mobile_number:
+            sms_durably_queued = await _enqueue_recovery_sms(
+                db,
+                recovery_request,
+                mobile=requester_mobile_number,
+                message=sms_message,
+                action="identity_submitted",
+            )
         await db.commit()
         await _deliver_identity_submission_messages(
             db,
@@ -1038,14 +1128,12 @@ async def submit_single_session_recovery_identity(
     finally:
         await file.close()
 
-    requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            await _enqueue_recovery_sms(
-                recovery_request,
+            _send_legacy_recovery_sms(
+                durably_queued=sms_durably_queued,
                 mobile=requester_mobile_number,
-                message=build_identity_submitted_sms_text(),
-                action="identity_submitted",
+                message=sms_message,
             )
         except Exception as exc:
             logger.warning("Failed to send recovery identity-submitted SMS user=%s: %s", requester_user.id, exc)

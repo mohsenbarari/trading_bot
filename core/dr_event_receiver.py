@@ -61,6 +61,11 @@ def _event_model(envelope: ValidatedDrEnvelope) -> DrEvent:
         idempotency_key=item["idempotency_key"],
         writer_epoch=item["writer_epoch"],
         tombstone=item["tombstone"],
+        transaction_id=item.get("transaction_id"),
+        transaction_position=item.get("transaction_position"),
+        transaction_size=item.get("transaction_size"),
+        transaction_hash=item.get("transaction_hash"),
+        destination_streams=item.get("destination_streams"),
         created_at=_utc_timestamp(item["created_at"]),
     )
 
@@ -110,14 +115,18 @@ async def _checkpoint(
 async def _existing_hashes(
     session: AsyncSession,
     envelope: ValidatedDrEnvelope,
+    *,
+    local_site: str,
+    destination_sequence: int,
 ) -> tuple[str | None, str | None]:
     event = await session.get(DrEvent, envelope.event_id)
     event_hash = event.envelope_hash if event is not None else None
     sequence_hash = await session.scalar(
-        select(DrEvent.envelope_hash).where(
-            DrEvent.origin_physical_site == envelope.origin_physical_site,
-            DrEvent.producer_epoch == envelope.producer_epoch,
-            DrEvent.producer_sequence == envelope.producer_sequence,
+        select(DrEventReceipt.envelope_hash).where(
+            DrEventReceipt.destination_site == local_site,
+            DrEventReceipt.origin_physical_site == envelope.origin_physical_site,
+            DrEventReceipt.producer_epoch == envelope.producer_epoch,
+            DrEventReceipt.producer_sequence == destination_sequence,
         )
     )
     return event_hash, sequence_hash
@@ -199,11 +208,22 @@ async def receive_envelope(
             "status": "quarantined",
             "reason": policy_reason,
         }
+    try:
+        destination_stream = envelope.destination_stream(local_site)
+        destination_sequence = int(destination_stream["sequence"])
+    except Exception as exc:
+        raise DrEventReceiveError("DR event lacks an authorized destination stream") from exc
     checkpoint = await _checkpoint(session, local_site=local_site, envelope=envelope)
-    event_hash, sequence_hash = await _existing_hashes(session, envelope)
+    event_hash, sequence_hash = await _existing_hashes(
+        session,
+        envelope,
+        local_site=local_site,
+        destination_sequence=destination_sequence,
+    )
     decision: ReceiptDecision = decide_receipt(
         contiguous_sequence=int(checkpoint.contiguous_received_sequence),
         incoming=envelope,
+        incoming_sequence=destination_sequence,
         existing_event_hash=event_hash,
         existing_sequence_hash=sequence_hash,
     )
@@ -216,7 +236,7 @@ async def receive_envelope(
                 destination_site=local_site,
                 origin_physical_site=envelope.origin_physical_site,
                 producer_epoch=envelope.producer_epoch,
-                producer_sequence=envelope.producer_sequence,
+                producer_sequence=destination_sequence,
                 event_id=envelope.event_id,
                 reason=decision.reason,
                 expected_hash=event_hash or sequence_hash,
@@ -234,7 +254,7 @@ async def receive_envelope(
             destination_site=local_site,
             origin_physical_site=envelope.origin_physical_site,
             producer_epoch=envelope.producer_epoch,
-            producer_sequence=envelope.producer_sequence,
+            producer_sequence=destination_sequence,
             envelope_hash=envelope.envelope_hash,
             received_from_site=received_from_site,
             relay_site=(
@@ -250,6 +270,10 @@ async def receive_envelope(
         local_site,
         aggregate_type=str(envelope.payload["aggregate_type"]),
     ):
+        if int(envelope.payload["protocol_version"]) >= 2 and destination not in envelope.payload[
+            "destination_streams"
+        ]:
+            raise DrEventReceiveError("relay destination is absent from the signed destination stream")
         session.add(
             DrEventDelivery(
                 event_id=envelope.event_id,

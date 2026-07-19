@@ -966,7 +966,7 @@ maybe_fail candidate_restored
 
 candidate_version="$(runuser -u postgres -- psql -XAt "$candidate_database" -c \
     'SELECT version_num FROM writer_witness_schema_version')"
-if [[ "$candidate_version" != "001" \
+if [[ "$candidate_version" != "002" \
     || "$(state_value "$candidate_database")" != "$expected_state" \
     || "$(receipt_count "$candidate_database")" != "$expected_receipts" \
     || "$(manifest_hash "$candidate_database")" != "$expected_manifest" ]]; then
@@ -982,6 +982,7 @@ GRANT USAGE ON SCHEMA public TO writer_witness_runtime;
 GRANT SELECT ON writer_witness_schema_version TO writer_witness_runtime;
 GRANT SELECT, UPDATE ON webapp_writer_witness_state TO writer_witness_runtime;
 GRANT SELECT, INSERT ON webapp_writer_witness_receipts TO writer_witness_runtime;
+GRANT SELECT, INSERT, UPDATE ON dr_failover_operation_ledger TO writer_witness_runtime;
 SQL
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 postgres -v candidate="$candidate_database" <<'SQL'
 REVOKE ALL ON DATABASE :"candidate" FROM PUBLIC;
