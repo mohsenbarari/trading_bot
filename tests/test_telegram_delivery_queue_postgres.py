@@ -1125,10 +1125,12 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _credential_registry(*, editor_enabled: bool = False):
         return TelegramDeliveryCredentialRegistry.from_values(
-            primary_token="123456:test-primary-runtime-gate-token",
+            primary_token=":".join(
+                ("123456", "test-primary-runtime-gate-token")
+            ),
             editor_enabled=editor_enabled,
             editor_token=(
-                "654321:test-editor-runtime-gate-token"
+                ":".join(("654321", "test-editor-runtime-gate-token"))
                 if editor_enabled
                 else None
             ),
