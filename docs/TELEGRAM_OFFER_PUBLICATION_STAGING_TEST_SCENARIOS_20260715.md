@@ -549,8 +549,12 @@ goodput = terminally_delivered_jobs / total_wall_clock_including_cooldown_and_dr
 - reconciliation report
 - acceptance report با وضعیت pass/fail هر معیار
 - خلاصه مقایسه با دورهای همان seed
+- health/alert JSON دوره‌ای و shadow-order snapshot فقط‌خواندنی مطابق `docs/TELEGRAM_DELIVERY_QUEUE_OBSERVABILITY_RUNBOOK_20260719.md`
+- security scan JSON برای تک‌تک artifactها و archive نهایی؛ status غیر `clean` مانع اشتراک‌گذاری و پذیرش run است
 
 artifact خام دارای داده حساس commit نمی‌شود. فقط گزارش پاک‌سازی‌شده و قرارداد سناریو می‌تواند وارد Git شود.
+
+runner و تمام artifactها باید environment را صریحاً `synthetic-test` یا `staging` ثبت کنند. استفاده از label `production` برای fault/synthetic test، حتی اگر endpoint ساختگی باشد، ممنوع و fail-closed است. observer فقط transaction دیتابیس `READ ONLY` دارد و شمار provider network call آن باید دقیقاً صفر باشد.
 
 ## 16. پیش‌نیازهای Stage 4
 
@@ -570,3 +574,4 @@ artifact خام دارای داده حساس commit نمی‌شود. فقط گز
 - guard خودکار که default و production را همچنان `4` تأیید کند
 - تأیید runtime expiry دو دقیقه و سایر limitهای کاربران
 - تست محلی کامل پیش از اولین پیام زنده staging
+- عبور observer فقط‌خواندنی، alert/STOP thresholdها، shadow بدون mutation/provider call و artifact security scan؛ خروجی `stop` یا scan غیرپاک مانع ورود به load نهایی است
