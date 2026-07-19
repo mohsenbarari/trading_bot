@@ -1234,6 +1234,53 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
 
         create_task.assert_not_called()
 
+    async def test_supervisor_releases_owner_and_started_tasks_when_task_creation_fails(self):
+        validator = AsyncMock()
+        original_create_task = asyncio.create_task
+        created_tasks = []
+        create_attempts = 0
+
+        def fail_second_task_creation(coroutine, *, name=None):
+            nonlocal create_attempts
+            create_attempts += 1
+            if create_attempts == 2:
+                raise RuntimeError("synthetic_task_creation_failure")
+            task = original_create_task(coroutine, name=name)
+            created_tasks.append(task)
+            return task
+
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.asyncio.create_task",
+            side_effect=fail_second_task_creation,
+        ), patch(
+            "core.telegram_delivery_queue_worker.rehydrate_telegram_delivery_limiter_state",
+            new=AsyncMock(return_value=self._rehydration()),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "synthetic_task_creation_failure",
+            ):
+                await telegram_delivery_queue_loop(
+                    freshness_validators={"primary": validator},
+                    lifecycle_feedbacks={
+                        "primary": _NoopLifecycleFeedback()
+                    },
+                    credential_registry=self._credentials(),
+                    dispatch_limiter=_AllowLimiter(),
+                    bot_identities=("primary",),
+                )
+
+        self.assertEqual(create_attempts, 2)
+        self.assertTrue(created_tasks[0].done())
+        self.assertTrue(created_tasks[0].cancelled())
+        self.assertTrue(self.process_owner_lease.closed)
+        self.assertIsNone(worker._active_process_owner_lease)
+
     async def test_supervisor_starts_editor_when_primary_bot_is_durably_paused(self):
         started = asyncio.Event()
         started_lanes = []

@@ -2047,47 +2047,49 @@ async def telegram_delivery_queue_loop(
             "telegram_delivery_queue_process_owner_already_active_in_process"
         )
     _active_process_owner_lease = process_owner_lease
-    logger.info(
-        "Shared Telegram delivery queue supervisor started",
-        extra={
-            "event": "telegram_delivery_queue_worker.started",
-            "bot_roles": tuple(lane.bot_identity for lane in lanes),
-            "lane_count": len(lanes),
-            "restored_limiter_evidence_count": limiter_rehydration.restored_count,
-        },
-    )
-    tasks = [
-        asyncio.create_task(
-            _telegram_delivery_deferred_lane_activation_loop(
-                lane,
-                credential_registry=credential_registry,
-                channel_destination_key=channel_destination_key,
-                initial_rehydration=limiter_rehydration,
-            ),
-            name=f"telegram-delivery-supervised-lane:{lane.bot_identity}",
+    tasks: list[asyncio.Task[None]] = []
+
+    def start_task(coroutine, *, name: str) -> None:
+        try:
+            task = asyncio.create_task(coroutine, name=name)
+        except BaseException:
+            coroutine.close()
+            raise
+        tasks.append(task)
+
+    try:
+        logger.info(
+            "Shared Telegram delivery queue supervisor started",
+            extra={
+                "event": "telegram_delivery_queue_worker.started",
+                "bot_roles": tuple(lane.bot_identity for lane in lanes),
+                "lane_count": len(lanes),
+                "restored_limiter_evidence_count": limiter_rehydration.restored_count,
+            },
         )
-        for lane in lanes
-    ]
-    tasks.append(
-        asyncio.create_task(
+        for lane in lanes:
+            start_task(
+                _telegram_delivery_deferred_lane_activation_loop(
+                    lane,
+                    credential_registry=credential_registry,
+                    channel_destination_key=channel_destination_key,
+                    initial_rehydration=limiter_rehydration,
+                ),
+                name=f"telegram-delivery-supervised-lane:{lane.bot_identity}",
+            )
+        start_task(
             telegram_delivery_queue_owner_monitor_loop(process_owner_lease),
             name="telegram-delivery-process-owner-monitor",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_delivery_queue_recovery_loop(),
             name="telegram-delivery-lease-recovery",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_delivery_reconciliation_loop(lanes=lanes),
             name="telegram-delivery-reconciliation",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_provider_outcome_replay_loop(
                 lifecycle_feedbacks={
                     lane.bot_identity: lane.lifecycle_feedback for lane in lanes
@@ -2095,50 +2097,34 @@ async def telegram_delivery_queue_loop(
             ),
             name="telegram-delivery-provider-outcome-replay",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_delivery_retention_loop(),
             name="telegram-delivery-retention",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_offer_queue_handoff_loop(),
             name="telegram-offer-queue-feeder",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_trade_result_queue_handoff_loop(),
             name="telegram-trade-result-queue-feeder",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_admin_broadcast_queue_handoff_loop(),
             name="telegram-admin-broadcast-queue-feeder",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_notification_outbox_queue_handoff_loop(),
             name="telegram-notification-outbox-queue-feeder",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_market_notice_queue_handoff_loop(),
             name="telegram-market-notice-queue-feeder",
         )
-    )
-    tasks.append(
-        asyncio.create_task(
+        start_task(
             telegram_scheduled_operation_queue_handoff_loop(),
             name="telegram-scheduled-operation-queue-feeder",
         )
-    )
-    try:
         await asyncio.gather(*tasks)
     finally:
         for task in tasks:
