@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 import unittest
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from core import telegram_delivery_queue_worker as queue_worker
 from core.enums import SettlementType, UserAccountStatus
 from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueValidationError,
@@ -123,6 +125,12 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
         _run_alembic(sync_url, "upgrade", "head")
 
     async def asyncSetUp(self):
+        self.previous_process_owner_lease = (
+            queue_worker._active_process_owner_lease
+        )
+        queue_worker._active_process_owner_lease = SimpleNamespace(
+            assert_held=AsyncMock(return_value=None)
+        )
         _, async_url = DATABASE_URLS
         self.engine = create_async_engine(async_url, pool_pre_ping=True)
         self.Session = async_sessionmaker(
@@ -149,6 +157,9 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
             await db.commit()
 
     async def asyncTearDown(self):
+        queue_worker._active_process_owner_lease = (
+            self.previous_process_owner_lease
+        )
         await self.engine.dispose()
 
     @staticmethod
