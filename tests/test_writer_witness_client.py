@@ -58,9 +58,15 @@ def local_snapshot(*, expires_at: datetime) -> WriterStateSnapshot:
         readiness_approved_at=None,
         readiness_expires_at=None,
         witness_lease_id="lease-4",
+        witness_lease_issued_at=NOW,
         witness_lease_expires_at=expires_at,
         witness_proof_hash="a" * 64,
         witness_transition_id="witness-old",
+        witness_local_boot_id="12345678-1234-4234-8234-123456789abc",
+        witness_local_boottime_deadline=125.0,
+        witness_observed_wall_at=NOW,
+        witness_observed_boottime=100.0,
+        witness_clock_offset_ms=0,
     )
 
 
@@ -223,7 +229,7 @@ class WriterWitnessRenewalTests(unittest.IsolatedAsyncioTestCase):
         sessions = FakeSessionFactory()
         local_transition = AsyncMock()
         with (
-            patch("core.writer_witness_client.AsyncSessionLocal", new=sessions),
+            patch("core.writer_witness_client.DrControlSessionLocal", new=sessions),
             patch(
                 "core.writer_witness_client.load_writer_snapshot",
                 new=AsyncMock(return_value=snapshot),
@@ -248,9 +254,11 @@ class WriterWitnessRenewalTests(unittest.IsolatedAsyncioTestCase):
             snapshot,
             now=NOW + timedelta(seconds=26),
             require_witness_lease=True,
+            current_boot_id="12345678-1234-4234-8234-123456789abc",
+            current_boottime=126.0,
         )
         self.assertFalse(eligible)
-        self.assertIn("writer_witness_lease_expired", reasons)
+        self.assertIn("writer_witness_monotonic_deadline_expired", reasons)
 
 
 if __name__ == "__main__":

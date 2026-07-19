@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from core.runtime_sites import WEBAPP_SITES
+from core.writer_lease_clock import LeaseClockEvidence, build_lease_clock_evidence
 
 
 WITNESS_PROOF_VERSION = 1
@@ -47,6 +48,7 @@ class ValidatedWitnessLeaseProof:
     witness_transition_id: str
     proof_hash: str
     canonical_payload: dict[str, Any]
+    clock_evidence: LeaseClockEvidence | None = None
 
 
 def witness_timing_configuration_is_safe(
@@ -175,6 +177,9 @@ def validate_witness_lease_proof(
     safety_margin_seconds: int = 15,
     max_clock_skew_seconds: int = 5,
     max_lifetime_seconds: int = 180,
+    boot_id: str | None = None,
+    observed_boottime: float | None = None,
+    boot_id_file: str = "/proc/sys/kernel/random/boot_id",
 ) -> ValidatedWitnessLeaseProof:
     if expected_site not in WEBAPP_SITES:
         raise WitnessProofError(f"unsupported expected_site={expected_site!r}")
@@ -246,6 +251,15 @@ def validate_witness_lease_proof(
         sort_keys=True,
         separators=(",", ":"),
     )
+    clock_evidence = build_lease_clock_evidence(
+        issued_at=issued_at,
+        expires_at=expires_at,
+        observed_wall_at=current,
+        safety_margin_seconds=safety_margin_seconds,
+        boot_id=boot_id,
+        observed_boottime=observed_boottime,
+        boot_id_file=boot_id_file,
+    )
     return ValidatedWitnessLeaseProof(
         holder_site=expected_site,
         writer_epoch=writer_epoch,
@@ -255,4 +269,5 @@ def validate_witness_lease_proof(
         witness_transition_id=transition_id,
         proof_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         canonical_payload=canonical_payload,
+        clock_evidence=clock_evidence,
     )

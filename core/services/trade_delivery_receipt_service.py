@@ -810,18 +810,33 @@ async def cleanup_terminal_trade_delivery_receipts(
     if dry_run:
         return audit_report
 
-    result = await db.execute(
-        build_terminal_receipt_retention_cleanup_statement(
-            cutoff=audit_report.cutoff,
-            limit=limit,
-        )
+    rows = list(
+        (
+            await db.execute(
+                select(TradeDeliveryReceipt)
+                .where(
+                    TradeDeliveryReceipt.status.in_(
+                        list(TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES)
+                    ),
+                    TradeDeliveryReceipt.terminal_at.is_not(None),
+                    TradeDeliveryReceipt.terminal_at < audit_report.cutoff,
+                )
+                .order_by(
+                    TradeDeliveryReceipt.terminal_at.asc(),
+                    TradeDeliveryReceipt.id.asc(),
+                )
+                .limit(max(1, int(limit or 1)))
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars().all()
     )
-    deleted_rows = _result_scalars_all(result)
+    for row in rows:
+        await db.delete(row)
     return ReceiptRetentionReport(
         dry_run=False,
         retention_days=audit_report.retention_days,
         cutoff=audit_report.cutoff,
-        terminal_deleted_count=len(deleted_rows),
+        terminal_deleted_count=len(rows),
         terminal_candidate_count=audit_report.terminal_candidate_count,
         non_terminal_old_count=audit_report.non_terminal_old_count,
         oldest_non_terminal_at=audit_report.oldest_non_terminal_at,

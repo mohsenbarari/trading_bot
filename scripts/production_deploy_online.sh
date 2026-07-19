@@ -1624,6 +1624,8 @@ ensure_runtime_env_file() {
             --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
             --iran-server-url "$IRAN_SERVER_URL" \
             --iran-server-domain "$IRAN_SERVER_DOMAIN" \
+            --foreign-physical-site bot_fi \
+            --iran-physical-site webapp_fi \
             --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
             --iran-api-workers "${IRAN_API_WORKERS:-4}"
         chmod 600 "$local_env_path" || true
@@ -1772,6 +1774,8 @@ ensure_runtime_env_file() {
         --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
         --iran-server-url "$IRAN_SERVER_URL" \
         --iran-server-domain "$IRAN_SERVER_DOMAIN" \
+        --foreign-physical-site bot_fi \
+        --iran-physical-site webapp_fi \
         --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
         --iran-api-workers "${IRAN_API_WORKERS:-4}"
 

@@ -6,18 +6,42 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
-import stat
 import subprocess
 from pathlib import Path
+
+from core.secure_file_io import SecureFileError, read_secure_bytes, read_secure_text, sha256_secure_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 TRUE_VALUES = {"1", "true", "yes", "on"}
+EXPECTED_TOPOLOGY = {
+    "BOT_FI_HOST": "65.109.216.187",
+    "WEBAPP_FI_HOST": "65.109.220.59",
+    "WA_IR_HOST": "185.206.95.250",
+    "WRITER_WITNESS_HOST": "185.206.95.94",
+    "TRANSITIONAL_WRITER_WITNESS_HOST": "185.231.182.6",
+}
+GIT_EXECUTABLE = "/usr/bin/git"
+GIT_ENVIRONMENT = {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/nonexistent",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+}
 
 REQUIRED_VALUES = {
     "DARK_STANDBY_MODE": "1",
+    "TOPOLOGY_SCHEMA_VERSION": "three-site-dr-v1",
     "SERVER_TIMEZONE": "UTC",
     "USER_DISPLAY_TIMEZONE": "Asia/Tehran",
     "PRODUCTION_ROOT_DOMAIN": "gold-trade.ir",
@@ -26,7 +50,15 @@ REQUIRED_VALUES = {
     "ARVAN_CDN_CONFIGURED_ROOT_DOMAIN": "gold-trading.ir",
     "ARVAN_CDN_MUTATION_SCOPE": "test-only",
     "OBJECT_STORAGE_PROVIDER": "arvan",
+    "OBJECT_STORAGE_ENDPOINT": "https://s3.ir-thr-at1.arvanstorage.ir",
+    "OBJECT_STORAGE_REGION": "ir-thr-at1",
     "OBJECT_STORAGE_BUCKET": "production-sync-coin",
+    "OBJECT_STORAGE_PREFIX": "dark-standby",
+    "OBJECT_ACL": "private",
+    "OBJECT_VERSIONING_REQUIRED": "true",
+    "SOURCE_EXPECTED_BRANCH": "main",
+    "SOURCE_WORKTREE_CLEAN": "true",
+    "TARGET_DB_EXPECTED_STATE": "empty-or-operation-owned",
     "PAYLOAD_ENCRYPTION": "age-x25519",
     "BACKGROUND_JOBS_ENABLED": "false",
     "START_APP_SERVICE": "false",
@@ -41,7 +73,7 @@ REQUIRED_VALUES = {
 }
 
 REQUIRED_KEYS = (
-    "SOURCE_PROJECT_DIR", "SOURCE_RUNTIME_ENV", "WEBAPP_FI_HOST",
+    "SOURCE_PROJECT_DIR", "SOURCE_RUNTIME_ENV", "BOT_FI_HOST", "WEBAPP_FI_HOST",
     "WEBAPP_FI_SSH_USER", "WEBAPP_FI_SSH_PORT", "WEBAPP_FI_SSH_KEY",
     "WEBAPP_FI_PROJECT_DIR", "WA_IR_HOST", "WA_IR_SSH_USER",
     "WA_IR_SSH_PORT", "WA_IR_SSH_KEY", "WA_IR_PROJECT_DIR",
@@ -49,7 +81,9 @@ REQUIRED_KEYS = (
     "OBJECT_STORAGE_REGION", "OBJECT_STORAGE_PREFIX",
     "OBJECT_STORAGE_CREDENTIAL_FILE", "OBJECT_URL_TTL_SECONDS",
     "AGE_IDENTITY_FILE", "AGE_RECIPIENT_FILE", "LOCAL_ARTIFACT_DIR",
-    "REMOTE_BACKUP_DIR",
+    "REMOTE_BACKUP_DIR", "WRITER_WITNESS_HOST", "TRANSITIONAL_WRITER_WITNESS_HOST",
+    "SOURCE_TREE_SHA", "RELEASE_ARTIFACT_PATH", "RELEASE_ARTIFACT_SHA256",
+    "RESTORE_OPERATION_ID", "TARGET_DB_VOLUME_NAME",
 )
 
 SECRET_PATH_KEYS = (
@@ -57,9 +91,9 @@ SECRET_PATH_KEYS = (
 )
 
 
-def parse_env(path: Path) -> dict[str, str]:
+def parse_env_text(text: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -73,6 +107,10 @@ def parse_env(path: Path) -> dict[str, str]:
     return values
 
 
+def parse_env(path: Path) -> dict[str, str]:
+    return parse_env_text(read_secure_text(path, label="dark-standby manifest"))
+
+
 def is_true(value: str | None) -> bool:
     return str(value or "").strip().lower() in TRUE_VALUES
 
@@ -83,6 +121,26 @@ def inside_repo(path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def run_git(source_path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run a bounded, non-interactive Git inspection with no ambient config."""
+
+    return subprocess.run(
+        [
+            GIT_EXECUTABLE,
+            "-c", "core.fsmonitor=false",
+            "-c", "core.hooksPath=/dev/null",
+            "-C", str(source_path),
+            *arguments,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        timeout=10,
+        env=GIT_ENVIRONMENT,
+    )
 
 
 def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], list[str]]:
@@ -99,6 +157,18 @@ def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], l
     release_sha = values.get("SOURCE_RELEASE_SHA", "")
     if not SHA_RE.fullmatch(release_sha):
         failures.append("SOURCE_RELEASE_SHA must be an exact 40-character lowercase Git SHA")
+    if not SHA_RE.fullmatch(values.get("SOURCE_TREE_SHA", "")):
+        failures.append("SOURCE_TREE_SHA must be an exact 40-character lowercase Git tree SHA")
+    if not SHA256_RE.fullmatch(values.get("RELEASE_ARTIFACT_SHA256", "")):
+        failures.append("RELEASE_ARTIFACT_SHA256 must be exactly 64 lowercase hex characters")
+    if not UUID_RE.fullmatch(values.get("RESTORE_OPERATION_ID", "")):
+        failures.append("RESTORE_OPERATION_ID must be a canonical UUID")
+    for key, expected in EXPECTED_TOPOLOGY.items():
+        if values.get(key) != expected:
+            failures.append(f"{key} must match the approved topology address {expected}")
+    topology_hosts = [values.get(key) for key in EXPECTED_TOPOLOGY]
+    if None not in topology_hosts and len(set(topology_hosts)) != len(topology_hosts):
+        failures.append("every physical topology role must use a unique host")
     if values.get("WEBAPP_FI_HOST") == values.get("WA_IR_HOST"):
         failures.append("WEBAPP_FI_HOST and WA_IR_HOST must be different physical hosts")
     production_root = values.get("PRODUCTION_ROOT_DOMAIN", "").lower().rstrip(".")
@@ -118,8 +188,6 @@ def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], l
     ):
         failures.append("dark-standby CDN scope must not include the production root domain")
     endpoint = values.get("OBJECT_STORAGE_ENDPOINT", "")
-    if endpoint and not endpoint.startswith("https://"):
-        failures.append("OBJECT_STORAGE_ENDPOINT must use HTTPS")
     try:
         ttl = int(values.get("OBJECT_URL_TTL_SECONDS", "0"))
     except ValueError:
@@ -142,20 +210,21 @@ def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], l
         path = Path(raw)
         if not path.is_absolute():
             failures.append(f"{key} must be an absolute path")
-        if inside_repo(path) and "/tmp/" not in str(path):
+        if inside_repo(path):
             failures.append(f"{key} must not be stored in the tracked repository")
         if check_files:
-            if not path.is_file():
-                failures.append(f"{key} does not exist: {path}")
-            else:
-                mode = stat.S_IMODE(path.stat().st_mode)
-                if mode & 0o077:
-                    failures.append(f"{key} must not be group/world accessible (mode={mode:o})")
+            try:
+                read_secure_bytes(path, label=key)
+            except SecureFileError as exc:
+                failures.append(str(exc))
 
     for key in ("WEBAPP_FI_SSH_KEY", "WA_IR_SSH_KEY", "AGE_RECIPIENT_FILE"):
         raw = values.get(key)
-        if check_files and raw and not Path(raw).is_file():
-            failures.append(f"{key} does not exist: {raw}")
+        if check_files and raw:
+            try:
+                read_secure_bytes(Path(raw), label=key)
+            except SecureFileError as exc:
+                failures.append(str(exc))
 
     source = values.get("SOURCE_PROJECT_DIR")
     if check_files and source:
@@ -163,15 +232,49 @@ def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], l
         if not (source_path / ".git").exists():
             failures.append("SOURCE_PROJECT_DIR is not a Git worktree")
         else:
-            result = subprocess.run(
-                ["git", "-C", str(source_path), "rev-parse", "HEAD"],
-                text=True, capture_output=True, check=False,
-            )
+            result = run_git(source_path, "rev-parse", "HEAD")
             head = result.stdout.strip() if result.returncode == 0 else ""
             if head != release_sha:
                 failures.append(
                     f"SOURCE_PROJECT_DIR HEAD {head!r} does not match SOURCE_RELEASE_SHA"
                 )
+            branch_result = run_git(source_path, "symbolic-ref", "--short", "HEAD")
+            branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+            if branch != values.get("SOURCE_EXPECTED_BRANCH"):
+                failures.append(
+                    f"SOURCE_PROJECT_DIR branch {branch!r} does not match SOURCE_EXPECTED_BRANCH"
+                )
+            status_result = run_git(
+                source_path, "status", "--porcelain=v1", "--untracked-files=all"
+            )
+            if status_result.returncode != 0 or status_result.stdout:
+                failures.append("SOURCE_PROJECT_DIR worktree must be completely clean")
+            tree_result = run_git(source_path, "rev-parse", "HEAD^{tree}")
+            tree_sha = tree_result.stdout.strip() if tree_result.returncode == 0 else ""
+            if tree_sha != values.get("SOURCE_TREE_SHA"):
+                failures.append(
+                    f"SOURCE_PROJECT_DIR tree {tree_sha!r} does not match SOURCE_TREE_SHA"
+                )
+            second_head = run_git(source_path, "rev-parse", "HEAD").stdout.strip()
+            if second_head != head:
+                failures.append("SOURCE_PROJECT_DIR identity changed during validation")
+
+    artifact_raw = values.get("RELEASE_ARTIFACT_PATH")
+    if artifact_raw:
+        artifact = Path(artifact_raw)
+        if not artifact.is_absolute():
+            failures.append("RELEASE_ARTIFACT_PATH must be absolute")
+        if check_files:
+            try:
+                actual_artifact_hash, _ = sha256_secure_file(
+                    artifact,
+                    label="release artifact",
+                    max_size=4 * 1024 * 1024 * 1024,
+                )
+                if actual_artifact_hash != values.get("RELEASE_ARTIFACT_SHA256"):
+                    failures.append("release artifact hash does not match manifest")
+            except SecureFileError as exc:
+                failures.append(str(exc))
 
     if values.get("WRITER_WITNESS_REQUIRED", "").lower() == "false":
         warnings.append("writer witness is disabled; this host must remain dark and non-writer")
@@ -185,17 +288,16 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     path = Path(args.manifest)
-    if not path.is_file():
-        raise SystemExit(f"manifest does not exist: {path}")
     values: dict[str, str] = {}
     try:
-        values = parse_env(path)
+        manifest_bytes = read_secure_bytes(path, label="dark-standby manifest")
+        values = parse_env_text(manifest_bytes.decode("utf-8"))
         failures, warnings = validate(values, check_files=args.check_files)
     except Exception as exc:
         failures, warnings = [str(exc)], []
     payload = {
         "status": "passed" if not failures else "failed",
-        "manifest_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "manifest_sha256": hashlib.sha256(manifest_bytes if 'manifest_bytes' in locals() else b"").hexdigest(),
         "release_sha": values.get("SOURCE_RELEASE_SHA"),
         "source_host": values.get("WEBAPP_FI_HOST"),
         "target_host": values.get("WA_IR_HOST"),

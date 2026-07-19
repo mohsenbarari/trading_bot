@@ -62,7 +62,14 @@ import logging
 from datetime import date as date_cls, datetime, time as time_cls, timezone
 from dataclasses import dataclass
 
-router = APIRouter()
+def _reject_legacy_sync_when_three_site_strict() -> None:
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        raise HTTPException(status_code=410, detail="Legacy sync is disabled by strict DR protocol")
+
+
+router = APIRouter(dependencies=[Depends(_reject_legacy_sync_when_three_site_strict)])
 logger = logging.getLogger(__name__)
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 PRODUCTION_FULL_MATRIX_SYNC_MARKERS = ("PFM_", "PRODTEST_", "FMX_")

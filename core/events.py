@@ -149,7 +149,7 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
         "ts": now,
         "hash": data_hash
     })
-    _extract_change_log_id(result)
+    change_log_id = _extract_change_log_id(result)
     mark_sync_outbox_recorded(connection, table_name, operation, record_id, data)
 
 

@@ -1,6 +1,8 @@
 import logging
 import ipaddress
+from datetime import datetime, timedelta, timezone
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -15,11 +17,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
-    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages
+    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages, dr_sync
 )
 from api.routers import accountants
 from api.routers import customers
 from core.config import settings
+from core.dark_standby import assert_not_dark_standby
 from core.deployment_surface import allowed_cors_origins
 from core.redis import init_redis, close_redis, get_redis_client
 from core.db import AsyncSessionLocal, get_db, init_db
@@ -63,10 +66,11 @@ from core.webapp_writer_control import (
     WriterStateSnapshot,
     load_writer_snapshot,
     snapshot_is_local_active,
+    validate_readiness_evidence,
 )
 from core.writer_fencing import (
     WriterFenceError,
-    register_writer_fence_listener,
+    projection_fence_scope,
     writer_fence_scope,
 )
 from core.writer_witness_contract import witness_public_key_is_valid
@@ -80,8 +84,8 @@ from core.writer_witness_client import (
 # -------------------------------------------------------
 configure_logging("api")
 logger = logging.getLogger(__name__)
+assert_not_dark_standby("api")
 RUNTIME_IDENTITY = resolve_runtime_identity(settings)
-register_writer_fence_listener()
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 FOREIGN_INTERNAL_EXACT_PATHS = {"/metrics"}
@@ -120,7 +124,8 @@ PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES = (
     "/api/auth/internal/telegram-otp",
 )
 WRITER_FENCE_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-WRITER_FENCE_PROJECTION_PREFIXES = ("/api/sync",)
+WRITER_FENCE_PROJECTION_PREFIXES = ("/api/sync", "/api/dr-sync")
+GIT_RELEASE_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -545,6 +550,9 @@ async def lifespan(app: FastAPI):
     if settings.invitation_contract_v2_enabled:
         public_webapp_url_for_links()
     await init_db()
+    from core.db import verify_three_site_database_role_bindings
+
+    await verify_three_site_database_role_bindings()
     redis_client = await init_redis()
     setup_event_listeners()
     writer_snapshot = await _load_runtime_writer_snapshot()
@@ -648,6 +656,20 @@ async def enforce_production_test_isolation(request: Request, call_next):
 
 @app.middleware("http")
 async def enforce_webapp_writer_fence(request: Request, call_next):
+    if (
+        settings.three_site_dr_enabled
+        and RUNTIME_IDENTITY.is_webapp_authority
+        and any(_path_matches_prefix(request.url.path, prefix) for prefix in WRITER_FENCE_PROJECTION_PREFIXES)
+    ):
+        try:
+            with projection_fence_scope(source="legacy_sync_receive"):
+                return await call_next(request)
+        except WriterFenceError:
+            logger.exception(
+                "Blocked sync projection outside its closed table/field capability",
+                extra={"event": "writer.projection.rejected", "path": request.url.path},
+            )
+            return _writer_fenced_response(("projection_capability_rejected",))
     if not _request_requires_webapp_writer(request):
         return await call_next(request)
     try:
@@ -725,6 +747,7 @@ api_router.include_router(users_public.router, prefix="/users-public", tags=["Pu
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(blocks.router, prefix="/blocks", tags=["Blocks"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
+api_router.include_router(dr_sync.router, prefix="/dr-sync", tags=["DR Sync"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
 
 app.include_router(api_router)
@@ -758,6 +781,99 @@ async def _local_dependency_health(db: AsyncSession) -> tuple[bool, bool, tuple[
     except Exception:
         reasons.append("redis_unavailable")
     return database_ok, redis_ok, tuple(dict.fromkeys(reasons))
+
+
+async def _three_site_origin_readiness_reasons(
+    db: AsyncSession,
+    *,
+    writer_epoch: int | None,
+    require_global_convergence: bool,
+    manifest_kind: str = "origin",
+) -> tuple[str, ...]:
+    if not settings.three_site_dr_enabled:
+        return ()
+    reasons: list[str] = []
+    if not settings.dr_event_protocol_enabled or not settings.dr_event_protocol_strict:
+        reasons.append("dr_event_protocol_not_strict")
+    if settings.dark_standby_mode:
+        reasons.append("dark_standby_mode_active")
+    try:
+        unresolved_conflicts = int(
+            await db.scalar(text("SELECT count(*) FROM dr_conflict_quarantine WHERE resolved_at IS NULL"))
+            or 0
+        )
+        if unresolved_conflicts:
+            reasons.append("dr_conflicts_unresolved")
+        unapplied = int(
+            await db.scalar(
+                text(
+                    "SELECT count(*) FROM dr_stream_checkpoints "
+                    "WHERE destination_site = :site "
+                    "AND contiguous_applied_sequence <> contiguous_received_sequence"
+                ),
+                {"site": RUNTIME_IDENTITY.physical_site},
+            )
+            or 0
+        )
+        if unapplied:
+            reasons.append("dr_projection_checkpoint_incomplete")
+        blocked_receipts = int(
+            await db.scalar(
+                text(
+                    "SELECT count(*) FROM dr_event_receipts WHERE destination_site = :site "
+                    "AND status IN ('blocked_gap', 'quarantined')"
+                ),
+                {"site": RUNTIME_IDENTITY.physical_site},
+            )
+            or 0
+        )
+        if blocked_receipts:
+            reasons.append("dr_receipt_gap_or_quarantine")
+        ambiguous_effects = int(
+            await db.scalar(
+                text(
+                    "SELECT count(*) FROM dr_effect_outbox WHERE executor_site = :site "
+                    "AND status = 'ambiguous'"
+                ),
+                {"site": RUNTIME_IDENTITY.physical_site},
+            )
+            or 0
+        )
+        if ambiguous_effects:
+            reasons.append("dr_effects_ambiguous")
+        if require_global_convergence:
+            undelivered = int(
+                await db.scalar(
+                    text(
+                        "SELECT count(*) FROM dr_event_deliveries "
+                        "WHERE status <> 'acknowledged'"
+                    )
+                )
+                or 0
+            )
+            if undelivered:
+                reasons.append("dr_destination_delivery_incomplete")
+        from core.dr_blob_plane import DrBlobPlaneError, assert_blob_promotion_ready
+
+        try:
+            await assert_blob_promotion_ready(db)
+        except DrBlobPlaneError:
+            reasons.append("dr_blob_parity_incomplete")
+        if settings.origin_readiness_require_recovery_manifest:
+            from core.dr_blob_plane import current_verified_recovery_manifest_exists
+
+            manifest_current = await current_verified_recovery_manifest_exists(
+                db,
+                physical_site=RUNTIME_IDENTITY.physical_site,
+                writer_epoch=int(writer_epoch or 0),
+                release_sha=str(settings.release_sha or ""),
+                manifest_kind=manifest_kind,
+            )
+            if not manifest_current:
+                reasons.append("dr_recovery_manifest_missing_or_stale")
+    except Exception:
+        reasons.append("dr_readiness_evidence_unavailable")
+    return tuple(dict.fromkeys(reasons))
 
 
 def _origin_readiness_request_allowed(request: Request) -> bool:
@@ -834,8 +950,8 @@ async def get_health_origin_ready(
         reasons.append("writer_state_unavailable")
 
     release_sha = str(getattr(settings, "release_sha", None) or "").strip()
-    if not release_sha:
-        reasons.append("release_sha_missing")
+    if not GIT_RELEASE_SHA_RE.fullmatch(release_sha.lower()):
+        reasons.append("release_sha_invalid")
 
     expected_revision = str(
         getattr(settings, "origin_expected_migration_revision", None) or ""
@@ -858,6 +974,14 @@ async def get_health_origin_ready(
     if not (Path("mini_app_dist") / "index.html").is_file():
         reasons.append("frontend_assets_missing")
 
+    require_global_convergence = request.query_params.get("require_global_convergence") == "true"
+    reasons.extend(
+        await _three_site_origin_readiness_reasons(
+            db,
+            writer_epoch=writer_snapshot.writer_epoch if writer_snapshot is not None else None,
+            require_global_convergence=require_global_convergence,
+        )
+    )
     reasons = list(dict.fromkeys(reasons))
     payload = {
         "origin_ready": not reasons,
@@ -886,11 +1010,189 @@ async def get_health_origin_ready(
         "migration_revision": current_revision,
         "database_ok": database_ok,
         "redis_ok": redis_ok,
+        "global_convergence_required": require_global_convergence,
         "reasons": reasons,
     }
     if reasons:
         return JSONResponse(payload, status_code=503, headers={"Cache-Control": "no-store"})
     return JSONResponse(payload, status_code=200, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/health/promotion-ready")
+async def get_health_promotion_ready(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Prove a fenced standby is ready for exactly the next Writer epoch."""
+
+    if not _origin_readiness_request_allowed(request):
+        raise HTTPException(status_code=404, detail="Not found")
+    reasons: list[str] = []
+    action = str(request.query_params.get("action") or "")
+    if action not in {"promote_ir", "failback_fi"}:
+        reasons.append("promotion_action_invalid")
+    expected_target = "webapp_ir" if action == "promote_ir" else "webapp_fi"
+    if action in {"promote_ir", "failback_fi"} and RUNTIME_IDENTITY.physical_site != expected_target:
+        reasons.append("promotion_action_target_mismatch")
+    try:
+        expected_epoch = int(request.query_params.get("expected_writer_epoch", ""))
+        if expected_epoch < 2:
+            raise ValueError
+    except (TypeError, ValueError):
+        expected_epoch = 0
+        reasons.append("expected_writer_epoch_invalid")
+
+    if not settings.three_site_dr_enabled:
+        reasons.append("three_site_dr_disabled")
+    if not settings.writer_witness_required:
+        reasons.append("writer_witness_not_enforced")
+    elif not witness_public_key_is_valid(settings.writer_witness_public_key):
+        reasons.append("writer_witness_public_key_invalid")
+    if settings.writer_witness_required:
+        reasons.extend(writer_witness_client_configuration_reasons(RUNTIME_IDENTITY))
+
+    database_ok, redis_ok, dependency_reasons = await _local_dependency_health(db)
+    reasons.extend(dependency_reasons)
+    try:
+        writer_snapshot = await load_writer_snapshot(db)
+        if writer_snapshot.control_state != "fenced" or writer_snapshot.active_site is not None:
+            reasons.append("promotion_target_not_locally_fenced")
+        if expected_epoch and expected_epoch != writer_snapshot.writer_epoch + 1:
+            reasons.append("promotion_epoch_not_exact_next")
+    except WriterControlError:
+        writer_snapshot = None
+        reasons.append("writer_state_unavailable")
+
+    release_sha = str(getattr(settings, "release_sha", None) or "").strip().lower()
+    if not GIT_RELEASE_SHA_RE.fullmatch(release_sha):
+        reasons.append("release_sha_invalid")
+    expected_revision = str(
+        getattr(settings, "origin_expected_migration_revision", None) or ""
+    ).strip()
+    current_revision = None
+    if not expected_revision:
+        reasons.append("expected_migration_revision_missing")
+    elif database_ok:
+        try:
+            current_revision = (
+                await db.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one_or_none()
+            if current_revision != expected_revision:
+                reasons.append("migration_revision_mismatch")
+        except Exception:
+            reasons.append("migration_revision_unavailable")
+    if not settings.background_jobs_enabled:
+        reasons.append("background_jobs_disabled")
+    if not (Path("mini_app_dist") / "index.html").is_file():
+        reasons.append("frontend_assets_missing")
+    reasons.extend(
+        await _three_site_origin_readiness_reasons(
+            db,
+            writer_epoch=expected_epoch,
+            require_global_convergence=action == "failback_fi",
+            manifest_kind="promotion",
+        )
+    )
+    if action == "failback_fi":
+        expected_database_hash = str(
+            request.query_params.get("expected_database_fingerprint_hash") or ""
+        )
+        expected_blob_hash = str(request.query_params.get("expected_blob_set_hash") or "")
+        try:
+            expected_database_rows = int(
+                request.query_params.get("expected_database_row_count", "")
+            )
+            expected_blob_count = int(request.query_params.get("expected_blob_count", ""))
+            if expected_database_rows < 0 or expected_blob_count < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            expected_database_rows = -1
+            expected_blob_count = -1
+            reasons.append("failback_origin_counts_invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_database_hash) or not re.fullmatch(
+            r"[0-9a-f]{64}", expected_blob_hash
+        ):
+            reasons.append("failback_origin_hashes_invalid")
+        if (
+            expected_epoch
+            and expected_database_rows >= 0
+            and expected_blob_count >= 0
+            and re.fullmatch(r"[0-9a-f]{64}", expected_database_hash)
+            and re.fullmatch(r"[0-9a-f]{64}", expected_blob_hash)
+        ):
+            try:
+                barrier = (
+                    await db.execute(
+                        text(
+                            "SELECT database_fingerprint_hash, database_row_count, "
+                            "blob_set_hash, blob_count FROM dr_recovery_manifests "
+                            "WHERE manifest_kind = 'promotion' AND physical_site = :site "
+                            "AND writer_epoch = :epoch AND release_sha = :release_sha "
+                            "AND status = 'verified' ORDER BY verified_at DESC LIMIT 1"
+                        ),
+                        {
+                            "site": RUNTIME_IDENTITY.physical_site,
+                            "epoch": expected_epoch,
+                            "release_sha": release_sha,
+                        },
+                    )
+                ).mappings().one_or_none()
+                if barrier is None or (
+                    barrier["database_fingerprint_hash"] != expected_database_hash
+                    or int(barrier["database_row_count"]) != expected_database_rows
+                    or barrier["blob_set_hash"] != expected_blob_hash
+                    or int(barrier["blob_count"]) != expected_blob_count
+                ):
+                    reasons.append("failback_origin_target_parity_mismatch")
+            except Exception:
+                reasons.append("failback_origin_target_parity_unavailable")
+    reasons = list(dict.fromkeys(reasons))
+    evidence = None
+    evidence_hash = None
+    if not reasons:
+        now = datetime.now(timezone.utc)
+        lifetime = max(1, int(settings.origin_readiness_max_evidence_age_seconds))
+        evidence = {
+            "evidence_id": str(uuid.uuid4()),
+            "target_site": RUNTIME_IDENTITY.physical_site,
+            "writer_epoch": expected_epoch,
+            "action": action,
+            "generated_at": now.isoformat(),
+            "expires_at": (now + timedelta(seconds=lifetime)).isoformat(),
+            "schema_compatible": True,
+            "release_compatible": True,
+            "database_ready": True,
+            "storage_ready": True,
+            "sync_checkpoint_ready": True,
+            "no_critical_conflicts": True,
+            "background_jobs_ready": True,
+            "fencing_acknowledged": True,
+        }
+        evidence_hash = validate_readiness_evidence(
+            evidence,
+            target_site=RUNTIME_IDENTITY.physical_site,
+            writer_epoch=expected_epoch,
+            now=now,
+        ).content_hash
+    payload = {
+        "promotion_ready": not reasons,
+        "physical_site": RUNTIME_IDENTITY.physical_site,
+        "writer_epoch": writer_snapshot.writer_epoch if writer_snapshot is not None else None,
+        "expected_writer_epoch": expected_epoch or None,
+        "action": action or None,
+        "release_sha": release_sha or None,
+        "migration_revision": current_revision,
+        "database_ok": database_ok,
+        "redis_ok": redis_ok,
+        "readiness_evidence": evidence,
+        "readiness_hash": evidence_hash,
+        "reasons": reasons,
+    }
+    return JSONResponse(
+        payload,
+        status_code=200 if not reasons else 503,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/metrics")

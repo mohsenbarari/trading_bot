@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import DrControlSessionLocal
 from core.runtime_identity import resolve_runtime_identity
 from core.webapp_writer_control import (
     ACTION_ACTIVATE,
@@ -96,7 +96,7 @@ async def run(args: argparse.Namespace) -> dict:
     identity = resolve_runtime_identity(settings)
     if not identity.is_webapp_site:
         raise WriterControlError("this command is valid only on webapp_fi or webapp_ir")
-    async with AsyncSessionLocal() as session:
+    async with DrControlSessionLocal() as session:
         before = await load_writer_snapshot(session)
     if args.action == "status":
         return {
@@ -186,7 +186,7 @@ async def run(args: argparse.Namespace) -> dict:
             f"confirmation mismatch; use --confirm {required_confirmation!r} after dry-run review"
         )
 
-    async with AsyncSessionLocal() as session:
+    async with DrControlSessionLocal() as session:
         try:
             after = await transition_writer_state(
                 session,
@@ -203,7 +203,7 @@ async def run(args: argparse.Namespace) -> dict:
         except Exception:
             await session.rollback()
             raise
-    async with AsyncSessionLocal() as session:
+    async with DrControlSessionLocal() as session:
         verified = await load_writer_snapshot(session)
     if args.action == ACTION_LEASE_REFRESH:
         if (

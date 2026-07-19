@@ -15,6 +15,7 @@ from core.audit_logger import audit_log
 from core.config import settings
 from core.enums import MessageType
 from core.security import create_access_token, create_refresh_token
+from core.dr_effects import enqueue_effect_for_aggregate
 from core.sms import send_sms
 from core.utils import publish_user_event
 from api.deps import get_current_user
@@ -79,6 +80,30 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 ACCOUNTANT_SESSION_MANAGEMENT_DETAIL = "حسابداران به مدیریت نشست و خروج از حساب کاربری دسترسی ندارند."
+
+
+async def _enqueue_recovery_sms(
+    recovery_request: SingleSessionRecoveryRequest,
+    *,
+    mobile: str,
+    message: str,
+    action: str,
+) -> None:
+    if not (
+        bool(getattr(settings, "three_site_dr_enabled", False))
+        and bool(getattr(settings, "dr_event_protocol_strict", False))
+    ):
+        send_sms(mobile, message)
+        return
+    await enqueue_effect_for_aggregate(
+        aggregate_type="single_session_recovery_requests",
+        aggregate_db_id=recovery_request.id,
+        effect_type="recovery_sms",
+        provider="smsir",
+        destination_key=mobile,
+        idempotency_key=f"recovery-sms:{recovery_request.id}:{action}",
+        payload={"mobile": mobile, "message": message},
+    )
 
 
 def _audit_actor_role(user: object) -> str | None:
@@ -346,7 +371,12 @@ async def _expire_recovery_if_needed(
     requester_mobile_number = getattr(requester, "mobile_number", None)
     if requester and requester_mobile_number:
         try:
-            send_sms(requester_mobile_number, build_recovery_expired_sms_text())
+            await _enqueue_recovery_sms(
+                recovery_request,
+                mobile=requester_mobile_number,
+                message=build_recovery_expired_sms_text(),
+                action="expired",
+            )
         except Exception as exc:
             logger.warning("Failed to send recovery-expired SMS for user %s: %s", requester.id, exc)
 
@@ -805,7 +835,12 @@ async def request_single_session_recovery_identity(
     requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            send_sms(requester_mobile_number, build_identity_requested_sms_text())
+            await _enqueue_recovery_sms(
+                recovery_request,
+                mobile=requester_mobile_number,
+                message=build_identity_requested_sms_text(),
+                action="identity_requested",
+            )
         except Exception as exc:
             logger.warning("Failed to send recovery identity-request SMS user=%s: %s", requester_user.id, exc)
 
@@ -863,9 +898,17 @@ async def approve_single_session_recovery(
     requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            send_sms(
-                requester_mobile_number,
-                build_recovery_approved_sms_text(after_identity_review=approved_after_identity_review),
+            await _enqueue_recovery_sms(
+                recovery_request,
+                mobile=requester_mobile_number,
+                message=build_recovery_approved_sms_text(
+                    after_identity_review=approved_after_identity_review
+                ),
+                action=(
+                    "approved_after_identity_review"
+                    if approved_after_identity_review
+                    else "approved"
+                ),
             )
         except Exception as exc:
             logger.warning("Failed to send recovery-approved SMS user=%s: %s", requester_user.id, exc)
@@ -912,9 +955,17 @@ async def reject_single_session_recovery(
     requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            send_sms(
-                requester_mobile_number,
-                build_recovery_rejected_sms_text(after_identity_review=rejected_after_identity_review),
+            await _enqueue_recovery_sms(
+                recovery_request,
+                mobile=requester_mobile_number,
+                message=build_recovery_rejected_sms_text(
+                    after_identity_review=rejected_after_identity_review
+                ),
+                action=(
+                    "rejected_after_identity_review"
+                    if rejected_after_identity_review
+                    else "rejected"
+                ),
             )
         except Exception as exc:
             logger.warning("Failed to send recovery-rejected SMS user=%s: %s", requester_user.id, exc)
@@ -990,7 +1041,12 @@ async def submit_single_session_recovery_identity(
     requester_mobile_number = getattr(requester_user, "mobile_number", None)
     if requester_mobile_number:
         try:
-            send_sms(requester_mobile_number, build_identity_submitted_sms_text())
+            await _enqueue_recovery_sms(
+                recovery_request,
+                mobile=requester_mobile_number,
+                message=build_identity_submitted_sms_text(),
+                action="identity_submitted",
+            )
         except Exception as exc:
             logger.warning("Failed to send recovery identity-submitted SMS user=%s: %s", requester_user.id, exc)
 

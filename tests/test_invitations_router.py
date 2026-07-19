@@ -283,7 +283,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             is_used=False,
             expires_at=datetime.utcnow() + timedelta(hours=1),
         )
-        db = FakeDB([FakeExecuteResult(None)])
+        db = FakeDB([FakeExecuteResult([])])
 
         with patch(
             "api.routers.invitations.lock_invitation_for_transition",

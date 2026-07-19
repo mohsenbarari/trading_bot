@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.registration_contracts import InvitationSMSStatus
+from core.dr_effects import execute_claimed_inline_effect
 from core.server_routing import SERVER_IRAN, current_server
 from core.sms import SMSDeliveryOutcome
 from core.utils import utc_now
@@ -130,7 +131,12 @@ async def deliver_invitation_sms_once(
     await db.commit()
 
     try:
-        sender_outcome = await asyncio.to_thread(sender)
+        sender_outcome = await execute_claimed_inline_effect(
+            effect_type="invitation_sms",
+            provider="smsir",
+            idempotency_key=f"invitation-sms:{int(invitation_id)}:{claim_generation}",
+            handler=lambda: asyncio.to_thread(sender),
+        )
     except Exception:
         sender_outcome = SMSDeliveryOutcome.AMBIGUOUS
 

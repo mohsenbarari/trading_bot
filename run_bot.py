@@ -4,6 +4,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from core.config import settings
+from core.dark_standby import assert_not_dark_standby
 from core.server_routing import SERVER_FOREIGN, normalize_server
 from bot.handlers import (
     start, 
@@ -46,6 +47,7 @@ def _configured_service_name() -> str:
 
 
 def assert_bot_runtime_surface() -> None:
+    assert_not_dark_standby("bot")
     configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
     configured_service = _configured_service_name()
     reasons: list[str] = []

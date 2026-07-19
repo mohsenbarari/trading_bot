@@ -1,6 +1,6 @@
 """Local durable observation and audit of WebApp writer ownership."""
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Index, String, Text
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Float, Index, String, Text
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -37,9 +37,15 @@ class WebappWriterState(Base):
     readiness_approved_at = Column(DateTime(timezone=True), nullable=True)
     readiness_expires_at = Column(DateTime(timezone=True), nullable=True)
     witness_lease_id = Column(String(64), nullable=True)
+    witness_lease_issued_at = Column(DateTime(timezone=True), nullable=True)
     witness_lease_expires_at = Column(DateTime(timezone=True), nullable=True)
     witness_proof_hash = Column(String(64), nullable=True)
     witness_transition_id = Column(String(64), nullable=True)
+    witness_local_boot_id = Column(String(36), nullable=True)
+    witness_local_boottime_deadline = Column(Float, nullable=True)
+    witness_observed_wall_at = Column(DateTime(timezone=True), nullable=True)
+    witness_observed_boottime = Column(Float, nullable=True)
+    witness_clock_offset_ms = Column(BigInteger, nullable=True)
     updated_by = Column(String(128), nullable=False)
     reason = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

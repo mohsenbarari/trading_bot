@@ -111,6 +111,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values = self.sample_values()
         foreign = build_runtime_env(
             role="foreign",
+            physical_site="bot_fi",
             frontend_url="https://coin.362514.ir",
             public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
@@ -124,6 +125,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
         iran = build_runtime_env(
             role="iran",
+            physical_site="webapp_fi",
             frontend_url="https://coin.gold-trade.ir",
             public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
@@ -199,6 +201,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         rendered = build_runtime_env(
             role="foreign",
+            physical_site="bot_fi",
             frontend_url="https://foreign.example.com",
             public_webapp_url="https://webapp.example.ir",
             foreign_server_url="https://sync.example.com",
@@ -240,6 +243,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "2",
                 "--iran-api-workers",
                 "4",
+                "--foreign-physical-site",
+                "bot_fi",
+                "--iran-physical-site",
+                "webapp_fi",
             ]
             with patch.dict(os.environ, values, clear=False):
                 with patch("sys.argv", argv):

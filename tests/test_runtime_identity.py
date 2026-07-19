@@ -64,6 +64,41 @@ class RuntimeIdentityTests(unittest.TestCase):
         with self.assertRaises(RuntimeIdentityError):
             resolve_runtime_identity(SimpleNamespace(server_mode="webapp-ish"))
 
+    def test_three_site_runtime_forbids_compatibility_inference(self):
+        with self.assertRaisesRegex(RuntimeIdentityError, "explicit"):
+            resolve_runtime_identity(
+                SimpleNamespace(
+                    server_mode="iran",
+                    three_site_dr_enabled=True,
+                    topology_schema_version="three-site-dr-v1",
+                )
+            )
+
+    def test_three_site_runtime_requires_versioned_topology(self):
+        with self.assertRaisesRegex(RuntimeIdentityError, "TOPOLOGY_SCHEMA_VERSION"):
+            resolve_runtime_identity(
+                SimpleNamespace(
+                    server_mode="iran",
+                    logical_authority="webapp",
+                    physical_site="webapp_ir",
+                    three_site_dr_enabled=True,
+                    topology_schema_version="wrong",
+                )
+            )
+
+    def test_three_site_runtime_accepts_explicit_unique_site(self):
+        identity = resolve_runtime_identity(
+            SimpleNamespace(
+                server_mode="iran",
+                logical_authority="webapp",
+                physical_site="webapp_ir",
+                three_site_dr_enabled=True,
+                topology_schema_version="three-site-dr-v1",
+            )
+        )
+        self.assertEqual(identity.physical_site, "webapp_ir")
+        self.assertFalse(identity.compatibility_inferred)
+
 
 if __name__ == "__main__":
     unittest.main()

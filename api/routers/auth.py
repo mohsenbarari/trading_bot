@@ -11,6 +11,7 @@ import secrets
 import hashlib
 import hmac
 import time
+import asyncio
 from jose import JWTError, jwt
 from core.db import get_db
 from models.user import User, UserRole
@@ -96,6 +97,7 @@ from core.services.otp_delivery_state_service import (
     validate_otp_delivery_runtime_settings,
 )
 from core.services.otp_sms_delivery_service import execute_claimed_otp_sms_delivery
+from core.dr_effects import execute_claimed_inline_effect
 from core.services.telegram_otp_delivery_service import deliver_telegram_otp_once
 from core.telegram_otp_transport import forward_telegram_otp_delivery
 from core.registration_feature_policy import direct_registration_runtime_ready
@@ -872,7 +874,13 @@ async def register_otp_request(
         return {"detail": "کد تایید در لاگ staging ثبت شد", "expires_in": OTP_TTL_SECONDS}
     
     # Send SMS (Always SMS because user is not registered on Telegram yet)
-    if send_otp_sms(mobile, otp_code):
+    registration_sms_outcome = await _deliver_legacy_otp_sms_once(
+        redis,
+        mobile=mobile,
+        otp_code=otp_code,
+        purpose="registration",
+    )
+    if registration_sms_outcome == SMSDeliveryOutcome.ACCEPTED:
         return {"detail": "کد تایید ارسال شد", "expires_in": OTP_TTL_SECONDS}
     else:
         await redis.delete(otp_key)
@@ -1184,6 +1192,48 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
 
 def _generate_otp_code() -> str:
     return f"{secrets.randbelow(90000) + 10000:05d}"
+
+
+async def _deliver_legacy_otp_sms_once(
+    redis,
+    *,
+    mobile: str,
+    otp_code: str,
+    purpose: str,
+) -> SMSDeliveryOutcome:
+    """Add a crash-aware Redis claim to compatibility OTP delivery."""
+
+    identity = hmac.new(
+        settings.jwt_secret_key.encode("utf-8"),
+        f"legacy-otp-sms\0{purpose}\0{mobile}\0{otp_code}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    claim_key = f"otp_delivery:legacy_sms_claim:{identity}"
+    ttl = max(60, int(OTP_TTL_SECONDS) + 60)
+    claimed = await redis.set(claim_key, "started", ex=ttl, nx=True)
+    if not claimed:
+        existing = await redis.get(claim_key)
+        if isinstance(existing, bytes):
+            existing = existing.decode("utf-8", errors="replace")
+        if existing == SMSDeliveryOutcome.ACCEPTED.value:
+            return SMSDeliveryOutcome.ACCEPTED
+        if existing == SMSDeliveryOutcome.FAILED.value:
+            return SMSDeliveryOutcome.FAILED
+        return SMSDeliveryOutcome.AMBIGUOUS
+    try:
+        sent = await execute_claimed_inline_effect(
+            effect_type="legacy_otp_sms",
+            provider="smsir",
+            idempotency_key=f"legacy-otp-sms:{identity}",
+            handler=lambda: asyncio.to_thread(send_otp_sms, mobile, otp_code),
+        )
+        outcome = SMSDeliveryOutcome.ACCEPTED if sent else SMSDeliveryOutcome.FAILED
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        outcome = SMSDeliveryOutcome.AMBIGUOUS
+    await redis.set(claim_key, outcome.value, ex=ttl)
+    return outcome
 
 
 async def _deliver_stage6_sms(redis, *, state) -> SMSDeliveryOutcome:
@@ -1588,7 +1638,13 @@ async def request_otp(
         logger.info("Attempting legacy OTP SMS delivery", extra={"event": "otp.legacy_sms_attempt"})
         # اگر اینترنت وصله ولی تلگرام ارسال نشد (یا کاربر تلگرام نداره) -> SMS
         # اگر اینترنت قطعه -> SMS
-        if send_otp_sms(mobile, otp_code):
+        legacy_sms_outcome = await _deliver_legacy_otp_sms_once(
+            redis,
+            mobile=mobile,
+            otp_code=otp_code,
+            purpose="login",
+        )
+        if legacy_sms_outcome == SMSDeliveryOutcome.ACCEPTED:
             sent_via_sms = True
             logger.info("Legacy OTP sent via SMS", extra={"event": "otp.legacy_sms_sent"})
         else:
@@ -1673,7 +1729,13 @@ async def resend_otp_sms(
             raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
 
     # Legacy compatibility when Stage 6 state is disabled or absent.
-    if send_otp_sms(mobile, otp_code):
+    resend_sms_outcome = await _deliver_legacy_otp_sms_once(
+        redis,
+        mobile=mobile,
+        otp_code=otp_code,
+        purpose="resend",
+    )
+    if resend_sms_outcome == SMSDeliveryOutcome.ACCEPTED:
         await redis.setex(sms_limit_key, 60, "1") # 1 min limit for SMS resend
         return {
             "detail": "کد از طریق پیامک ارسال شد",

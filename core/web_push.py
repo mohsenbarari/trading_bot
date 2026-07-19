@@ -41,6 +41,14 @@ def is_web_push_dependency_available() -> bool:
 
 
 def is_web_push_execution_allowed() -> bool:
+    if bool(getattr(settings, "three_site_dr_enabled", False)):
+        try:
+            from core.runtime_identity import resolve_runtime_identity
+
+            identity = resolve_runtime_identity(settings)
+            return identity.is_webapp_authority and identity.is_webapp_site
+        except Exception:
+            return False
     return current_server() == WEB_PUSH_EXECUTION_SERVER
 
 
@@ -230,6 +238,13 @@ async def send_web_push_to_user(
 ) -> dict[str, int]:
     if not is_web_push_configured():
         return disabled_web_push_result()
+    from core.dr_effects import (
+        DrEffectError,
+        assert_epoch_bound_effect_execution,
+        current_effect_capability,
+    )
+
+    assert_epoch_bound_effect_execution(provider="webpush", effect_type="webpush_user")
 
     try:
         from core.production_test_isolation import should_suppress_web_push_for_user
@@ -264,6 +279,7 @@ async def send_web_push_to_user(
     sent = 0
     failed = 0
     disabled = 0
+    ambiguous_error: Exception | None = None
     data = json.dumps(payload, ensure_ascii=False)
     vapid_claims = {"sub": settings.web_push_vapid_subject}
 
@@ -287,6 +303,8 @@ async def send_web_push_to_user(
             if status_code in TERMINAL_PUSH_STATUS_CODES:
                 subscription.enabled = False
                 disabled += 1
+            elif current_effect_capability() is not None:
+                ambiguous_error = exc
             logger.warning(
                 "Web Push delivery failed",
                 extra={
@@ -296,6 +314,8 @@ async def send_web_push_to_user(
                     "status_code": status_code,
                 },
             )
+            if ambiguous_error is not None:
+                break
             continue
 
         sent += 1
@@ -303,7 +323,12 @@ async def send_web_push_to_user(
         subscription.failure_count = 0
         subscription.last_error = None
 
-    await db.commit()
+    if current_effect_capability() is not None:
+        await db.flush()
+    else:
+        await db.commit()
+    if ambiguous_error is not None:
+        raise DrEffectError("Web Push provider state is ambiguous") from ambiguous_error
     return {"total": len(subscriptions), "sent": sent, "failed": failed, "disabled": disabled}
 
 
@@ -465,7 +490,12 @@ def schedule_market_offer_web_push(offer_id: int) -> None:
     except RuntimeError:
         return
 
-    task = loop.create_task(send_market_offer_web_push(offer_id))
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        task = loop.create_task(_enqueue_market_offer_web_push_effects(offer_id))
+    else:
+        task = loop.create_task(send_market_offer_web_push(offer_id))
 
     def _log_task_error(done_task: asyncio.Task) -> None:
         try:
@@ -511,7 +541,14 @@ def schedule_notification_web_push(
     except RuntimeError:
         return
 
-    task = loop.create_task(send_notification_web_push(notification_id, extra_payload))
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        task = loop.create_task(
+            _enqueue_notification_web_push_effect(notification_id, extra_payload)
+        )
+    else:
+        task = loop.create_task(send_notification_web_push(notification_id, extra_payload))
 
     def _log_task_error(done_task: asyncio.Task) -> None:
         try:
@@ -525,3 +562,70 @@ def schedule_notification_web_push(
             )
 
     task.add_done_callback(_log_task_error)
+
+
+async def _enqueue_notification_web_push_effect(
+    notification_id: int,
+    extra_payload: dict[str, Any] | None,
+) -> None:
+    from core.db import AsyncSessionLocal
+    from core.dr_effects import enqueue_effect_for_aggregate
+
+    async with AsyncSessionLocal() as db:
+        notification = await db.get(Notification, notification_id)
+        if notification is None:
+            return
+        payload = build_notification_push_payload(notification, extra_payload)
+        user_id = int(notification.user_id)
+    await enqueue_effect_for_aggregate(
+        aggregate_type="notifications",
+        aggregate_db_id=notification_id,
+        effect_type="webpush_user",
+        provider="webpush",
+        destination_key=f"user:{user_id}",
+        idempotency_key=f"webpush:notification:{notification_id}:user:{user_id}",
+        payload={"user_id": user_id, "push_payload": payload},
+    )
+
+
+async def _enqueue_market_offer_web_push_effects(offer_id: int) -> None:
+    from core.db import AsyncSessionLocal
+    from core.dr_effects import enqueue_effect_for_aggregate
+    from models.offer import Offer, OfferStatus
+    from sqlalchemy.orm import selectinload
+
+    async with AsyncSessionLocal() as db:
+        offer = await db.scalar(
+            select(Offer).options(selectinload(Offer.commodity)).where(Offer.id == offer_id)
+        )
+        if offer is None or offer.status != OfferStatus.ACTIVE:
+            return
+        if not await is_first_active_market_offer(db, offer.id):
+            return
+        target_user_ids = await load_market_offer_push_target_user_ids(
+            db,
+            {getattr(offer, "user_id", None), getattr(offer, "actor_user_id", None)},
+        )
+        payload = build_market_offer_push_payload(offer)
+    for user_id in target_user_ids:
+        await enqueue_effect_for_aggregate(
+            aggregate_type="offers",
+            aggregate_db_id=offer_id,
+            effect_type="webpush_user",
+            provider="webpush",
+            destination_key=f"user:{user_id}",
+            idempotency_key=f"webpush:market-offer:{offer_id}:user:{user_id}",
+            payload={"user_id": int(user_id), "push_payload": payload},
+        )
+
+
+async def execute_web_push_effect(db: AsyncSession, payload: dict[str, Any]):
+    from core.dr_effects import ProviderEffectResult
+
+    user_id = payload.get("user_id")
+    push_payload = payload.get("push_payload")
+    if type(user_id) is not int or not isinstance(push_payload, dict):
+        return ProviderEffectResult(outcome="not_sent", error_code="invalid_webpush_payload")
+    result = await send_web_push_to_user(db, user_id, push_payload)
+    receipt = json.dumps(result, sort_keys=True, separators=(",", ":"))
+    return ProviderEffectResult(outcome="succeeded", receipt=receipt)

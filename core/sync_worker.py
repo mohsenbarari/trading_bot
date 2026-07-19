@@ -467,6 +467,13 @@ async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str,
     return response
 
 async def main():
+    from core.dark_standby import assert_not_dark_standby
+
+    assert_not_dark_standby("sync_worker")
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        raise RuntimeError("legacy sync worker is forbidden by strict three-site DR protocol")
     assert_background_job_authority(JOB_SYNC_WORKER)
     logger.info("🚀 Starting Sync Worker...")
     

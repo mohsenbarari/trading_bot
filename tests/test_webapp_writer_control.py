@@ -19,6 +19,7 @@ from core.webapp_writer_control import (
     validate_readiness_evidence,
 )
 from core.writer_witness_contract import ValidatedWitnessLeaseProof
+from core.writer_lease_clock import LeaseClockEvidence
 
 
 NOW = datetime(2026, 7, 14, 21, 0, tzinfo=timezone.utc)
@@ -60,9 +61,15 @@ def writer_state(*, active_site="webapp_fi", epoch=1, control_state=CONTROL_ACTI
         updated_by="migration",
         reason="bootstrap",
         witness_lease_id=None,
+        witness_lease_issued_at=None,
         witness_lease_expires_at=None,
         witness_proof_hash=None,
         witness_transition_id=None,
+        witness_local_boot_id=None,
+        witness_local_boottime_deadline=None,
+        witness_observed_wall_at=None,
+        witness_observed_boottime=None,
+        witness_clock_offset_ms=None,
     )
 
 
@@ -263,6 +270,13 @@ class WriterTransitionTests(unittest.IsolatedAsyncioTestCase):
             witness_transition_id="witness-renewed",
             proof_hash="b" * 64,
             canonical_payload={},
+            clock_evidence=LeaseClockEvidence(
+                boot_id="12345678-1234-4234-8234-123456789abc",
+                observed_wall_at=NOW,
+                observed_boottime=100.0,
+                boottime_deadline=265.0,
+                witness_issue_offset_ms=0,
+            ),
         )
 
         with patch(
@@ -299,9 +313,15 @@ class WriterTransitionTests(unittest.IsolatedAsyncioTestCase):
             readiness_approved_at=None,
             readiness_expires_at=None,
             witness_lease_id="lease-3",
+            witness_lease_issued_at=NOW,
             witness_lease_expires_at=NOW + timedelta(seconds=16),
             witness_proof_hash="a" * 64,
             witness_transition_id="witness-3",
+            witness_local_boot_id="12345678-1234-4234-8234-123456789abc",
+            witness_local_boottime_deadline=116.0,
+            witness_observed_wall_at=NOW,
+            witness_observed_boottime=100.0,
+            witness_clock_offset_ms=0,
         )
 
         active, _ = snapshot_is_local_active(
@@ -310,18 +330,63 @@ class WriterTransitionTests(unittest.IsolatedAsyncioTestCase):
             now=NOW,
             require_witness_lease=True,
             witness_safety_margin_seconds=15,
+            current_boot_id="12345678-1234-4234-8234-123456789abc",
+            current_boottime=100.0,
         )
         expired, reasons = snapshot_is_local_active(
             webapp_identity(),
             base,
-            now=NOW + timedelta(seconds=1),
+            now=NOW - timedelta(hours=1),
             require_witness_lease=True,
             witness_safety_margin_seconds=15,
+            current_boot_id="12345678-1234-4234-8234-123456789abc",
+            current_boottime=116.0,
         )
 
         self.assertTrue(active)
         self.assertFalse(expired)
-        self.assertIn("writer_witness_lease_expired", reasons)
+        self.assertIn("writer_witness_monotonic_deadline_expired", reasons)
+
+    def test_clock_rollback_and_host_reboot_fail_closed(self):
+        base = WriterStateSnapshot(
+            active_site="webapp_fi",
+            writer_epoch=3,
+            control_state=CONTROL_ACTIVE,
+            transition_id="transition-current",
+            readiness_evidence_hash=None,
+            readiness_evidence_id=None,
+            readiness_approved_by=None,
+            readiness_approved_at=None,
+            readiness_expires_at=None,
+            witness_lease_id="lease-3",
+            witness_lease_issued_at=NOW,
+            witness_lease_expires_at=NOW + timedelta(seconds=180),
+            witness_proof_hash="a" * 64,
+            witness_transition_id="witness-3",
+            witness_local_boot_id="12345678-1234-4234-8234-123456789abc",
+            witness_local_boottime_deadline=200.0,
+            witness_observed_wall_at=NOW,
+            witness_observed_boottime=100.0,
+            witness_clock_offset_ms=0,
+        )
+        active, reasons = snapshot_is_local_active(
+            webapp_identity(), base,
+            now=NOW - timedelta(days=1),
+            require_witness_lease=True,
+            current_boot_id="12345678-1234-4234-8234-123456789abc",
+            current_boottime=201.0,
+        )
+        self.assertFalse(active)
+        self.assertIn("writer_witness_monotonic_deadline_expired", reasons)
+        active, reasons = snapshot_is_local_active(
+            webapp_identity(), base,
+            now=NOW,
+            require_witness_lease=True,
+            current_boot_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            current_boottime=101.0,
+        )
+        self.assertFalse(active)
+        self.assertIn("writer_witness_host_rebooted", reasons)
 
 
 if __name__ == "__main__":

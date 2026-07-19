@@ -12,9 +12,17 @@ import main
 from core.runtime_identity import RuntimeIdentity
 from core.webapp_writer_control import WriterStateSnapshot
 from core.writer_fencing import WriterFenceError, current_writer_fence_context
+from core.writer_lease_clock import boottime_seconds, current_boot_id
 
 
-def request(method: str, path: str, *, client: str = "127.0.0.1", headers=None) -> Request:
+def request(
+    method: str,
+    path: str,
+    *,
+    client: str = "127.0.0.1",
+    headers=None,
+    query_string: str = "",
+) -> Request:
     encoded_headers = [
         (name.lower().encode("latin-1"), value.encode("latin-1"))
         for name, value in (headers or {}).items()
@@ -27,7 +35,7 @@ def request(method: str, path: str, *, client: str = "127.0.0.1", headers=None) 
             "scheme": "https",
             "path": path,
             "raw_path": path.encode("ascii"),
-            "query_string": b"",
+            "query_string": query_string.encode("ascii"),
             "headers": encoded_headers,
             "client": (client, 12345),
             "server": ("origin.example", 443),
@@ -55,6 +63,12 @@ def writer_snapshot(site: str = "webapp_fi", *, evidence: bool = False):
         witness_lease_expires_at=now + timedelta(minutes=2) if evidence else None,
         witness_proof_hash="b" * 64 if evidence else None,
         witness_transition_id="witness-transition-current" if evidence else None,
+        witness_lease_issued_at=now if evidence else None,
+        witness_local_boot_id=current_boot_id() if evidence else None,
+        witness_local_boottime_deadline=boottime_seconds() + 100 if evidence else None,
+        witness_observed_wall_at=now if evidence else None,
+        witness_observed_boottime=boottime_seconds() if evidence else None,
+        witness_clock_offset_ms=0 if evidence else None,
     )
 
 
@@ -71,7 +85,126 @@ class FakeHealthDb:
         return ScalarResult("d2e7f8a9b0c1")
 
 
+class MappingResult:
+    def __init__(self, value):
+        self.value = value
+
+    def mappings(self):
+        return self
+
+    def one_or_none(self):
+        return self.value
+
+
+class FakeFailbackHealthDb:
+    def __init__(self, barrier):
+        self.barrier = barrier
+        self.calls = 0
+
+    async def execute(self, _statement, _params=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ScalarResult("d2e7f8a9b0c1")
+        return MappingResult(self.barrier)
+
+
 class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
+    async def test_promotion_readiness_requires_fenced_target_and_exact_next_epoch(self):
+        fenced = writer_snapshot()
+        fenced = WriterStateSnapshot(
+            **{
+                **fenced.__dict__,
+                "active_site": None,
+                "control_state": "fenced",
+            }
+        )
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity("webapp_ir")), patch(
+            "main._local_dependency_health",
+            new=AsyncMock(return_value=(True, True, ())),
+        ), patch(
+            "main._three_site_origin_readiness_reasons",
+            new=AsyncMock(return_value=()),
+        ), patch(
+            "main.load_writer_snapshot", new=AsyncMock(return_value=fenced)
+        ), patch.object(
+            main.settings, "three_site_dr_enabled", True
+        ), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch(
+            "main.witness_public_key_is_valid", return_value=True
+        ), patch(
+            "main.writer_witness_client_configuration_reasons", return_value=()
+        ), patch.object(
+            main.settings, "release_sha", "a" * 40
+        ), patch.object(
+            main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
+        ), patch.object(
+            main.settings, "background_jobs_enabled", True
+        ), patch(
+            "main.Path.is_file", return_value=True
+        ):
+            response = await main.get_health_promotion_ready(
+                request(
+                    "GET",
+                    "/health/promotion-ready",
+                    query_string="action=promote_ir&expected_writer_epoch=5",
+                ),
+                FakeHealthDb(),
+            )
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(payload["promotion_ready"])
+        self.assertEqual(payload["readiness_evidence"]["writer_epoch"], 5)
+        self.assertEqual(payload["readiness_evidence"]["action"], "promote_ir")
+        self.assertEqual(len(payload["readiness_hash"]), 64)
+
+    async def test_failback_readiness_binds_origin_and_target_parity(self):
+        fenced = WriterStateSnapshot(
+            **{
+                **writer_snapshot().__dict__,
+                "active_site": None,
+                "control_state": "fenced",
+            }
+        )
+        database_hash = "d" * 64
+        blob_hash = "e" * 64
+        barrier = {
+            "database_fingerprint_hash": database_hash,
+            "database_row_count": 123,
+            "blob_set_hash": blob_hash,
+            "blob_count": 7,
+        }
+        query = (
+            "action=failback_fi&expected_writer_epoch=5&"
+            f"expected_database_fingerprint_hash={database_hash}&"
+            "expected_database_row_count=123&"
+            f"expected_blob_set_hash={blob_hash}&expected_blob_count=7"
+        )
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity("webapp_fi")), patch(
+            "main._local_dependency_health", new=AsyncMock(return_value=(True, True, ()))
+        ), patch(
+            "main._three_site_origin_readiness_reasons", new=AsyncMock(return_value=())
+        ) as dr_reasons, patch(
+            "main.load_writer_snapshot", new=AsyncMock(return_value=fenced)
+        ), patch.object(main.settings, "three_site_dr_enabled", True), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch("main.witness_public_key_is_valid", return_value=True), patch(
+            "main.writer_witness_client_configuration_reasons", return_value=()
+        ), patch.object(main.settings, "release_sha", "a" * 40), patch.object(
+            main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
+        ), patch.object(main.settings, "background_jobs_enabled", True), patch(
+            "main.Path.is_file", return_value=True
+        ):
+            response = await main.get_health_promotion_ready(
+                request("GET", "/health/promotion-ready", query_string=query),
+                FakeFailbackHealthDb(barrier),
+            )
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["action"], "failback_fi")
+        self.assertTrue(payload["promotion_ready"])
+        self.assertTrue(dr_reasons.await_args.kwargs["require_global_convergence"])
+
     async def test_get_public_config_returns_non_sensitive_settings(self):
         with patch.object(main.settings, "bot_username", "bot_user"), patch.object(main.settings, "frontend_url", "https://front.example"):
             result = await main.get_public_config()
@@ -186,7 +319,7 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             "main.load_writer_snapshot",
             new=AsyncMock(return_value=ready_snapshot),
         ), patch.object(
-            main.settings, "release_sha", "release-current"
+            main.settings, "release_sha", "a" * 40
         ), patch.object(
             main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
         ), patch.object(

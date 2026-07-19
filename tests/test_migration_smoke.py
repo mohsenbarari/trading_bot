@@ -38,7 +38,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         self.assertTrue(result.stdout.strip(), msg='Expected at least one Alembic head revision')
-        self.assertIn('d2e7f8a9b0c1', result.stdout)
+        self.assertIn('d3e8f9a0b1c2', result.stdout)
 
     def test_webapp_writer_migration_bootstraps_current_fi_writer(self):
         migration = (

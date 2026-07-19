@@ -10,6 +10,7 @@ from scripts.arvan_origin_switch import (
     enforce_apply_domain_scope,
     inspect_or_switch,
     load_token,
+    parse_args,
 )
 
 
@@ -169,10 +170,52 @@ class ArvanOriginSwitchTests(unittest.TestCase):
             token_path = Path(tmpdir) / "token"
             token_path.write_text("secret\n", encoding="utf-8")
             token_path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
-            with self.assertRaisesRegex(ArvanOriginSwitchError, "permissions are too broad"):
+            with self.assertRaisesRegex(ArvanOriginSwitchError, "group/world accessible"):
                 load_token(token_path)
             token_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
             self.assertEqual(load_token(token_path), "secret")
+
+    def test_token_symlink_and_hardlink_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            token_path = root / "token"
+            token_path.write_text("secret\n", encoding="utf-8")
+            token_path.chmod(0o600)
+            symlink = root / "token-link"
+            symlink.symlink_to(token_path)
+            with self.assertRaises(ArvanOriginSwitchError):
+                load_token(symlink)
+            hardlink = root / "token-hardlink"
+            hardlink.hardlink_to(token_path)
+            with self.assertRaisesRegex(ArvanOriginSwitchError, "hard link"):
+                load_token(token_path)
+
+    def test_cli_has_no_custom_api_base_escape_hatch(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(
+                [
+                    "--domain", "gold-trading.ir",
+                    "--record", "switch-test",
+                    "--target-ip", "10.0.0.2",
+                    "--api-base", "https://attacker.invalid",
+                ]
+            )
+
+    def test_function_rejects_custom_api_base_before_api_access(self) -> None:
+        fake = FakeApi()
+        with self.assertRaisesRegex(ArvanOriginSwitchError, "custom Arvan API"):
+            inspect_or_switch(
+                domain="gold-trading.ir",
+                record_name="switch-test",
+                target_ip="10.0.0.2",
+                token="secret",
+                expected_current_ip=None,
+                apply=False,
+                confirmation=None,
+                api_base="https://attacker.invalid",
+                request_fn=fake,
+            )
+        self.assertEqual(fake.calls, [])
 
     def test_audit_log_is_owner_only_and_contains_no_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -185,6 +228,15 @@ class ArvanOriginSwitchTests(unittest.TestCase):
             contents = audit_path.read_text(encoding="utf-8")
             self.assertIn("arvan.origin_switch.applied", contents)
             self.assertNotIn("secret", contents)
+            first = __import__("json").loads(contents)
+            self.assertEqual(first["previous_hash"], "0" * 64)
+            self.assertEqual(len(first["event_hash"]), 64)
+            append_audit_event(
+                audit_path,
+                {"event": "arvan.origin_switch.verified", "target_ip": "10.0.0.2"},
+            )
+            second = __import__("json").loads(audit_path.read_text(encoding="utf-8").splitlines()[1])
+            self.assertEqual(second["previous_hash"], first["event_hash"])
 
 
 if __name__ == "__main__":

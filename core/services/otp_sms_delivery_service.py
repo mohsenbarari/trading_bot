@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 
 from core.registration_contracts import OTPDeliveryStatus
+from core.dr_effects import execute_claimed_inline_effect
 from core.services.otp_delivery_state_service import (
     OTPDeliveryClaim,
     mark_sms_provider_attempt_started,
@@ -48,7 +49,12 @@ async def execute_claimed_otp_sms_delivery(
         )
 
     try:
-        outcome = await send_otp_sms_result_async(claim.mobile_number, claim.otp_code)
+        outcome = await execute_claimed_inline_effect(
+            effect_type="otp_sms",
+            provider="smsir",
+            idempotency_key=f"otp-sms:{claim.request_id}",
+            handler=lambda: send_otp_sms_result_async(claim.mobile_number, claim.otp_code),
+        )
     except asyncio.CancelledError:
         raise
     except Exception:

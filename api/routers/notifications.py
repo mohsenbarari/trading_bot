@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 import asyncio
 import json
 from core.db import get_db
+from core.config import settings
 from models.notification import Notification
 from models.push_subscription import PushSubscription
 from models.user_notification_preference import UserNotificationPreference
@@ -203,6 +204,16 @@ async def send_test_push_notification(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        # This diagnostic endpoint has no committed business event to use as
+        # immutable causation.  Direct provider I/O would therefore bypass the
+        # Writer-epoch effect ledger in strict DR mode.
+        raise HTTPException(
+            status_code=409,
+            detail="Test Web Push is unavailable while strict three-site DR is enabled",
+        )
     config_status = web_push_config_status()
     if not config_status["enabled"]:
         raise HTTPException(status_code=503, detail="Web Push is not configured")

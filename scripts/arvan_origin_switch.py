@@ -21,6 +21,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from core.secure_file_io import SecureFileError, append_hash_chained_jsonl, read_secure_text
+
 
 DEFAULT_API_BASE = "https://napi.arvancloud.ir/cdn/4.0"
 PRODUCTION_ROOT_DOMAIN = "gold-trade.ir"
@@ -29,6 +31,23 @@ FAILOVER_TEST_ROOT_DOMAIN = "gold-trading.ir"
 
 class ArvanOriginSwitchError(RuntimeError):
     """Raised when an origin switch cannot be proven safe or successful."""
+
+
+def validate_api_url(url: str) -> None:
+    reviewed = urllib.parse.urlsplit(DEFAULT_API_BASE)
+    candidate = urllib.parse.urlsplit(url)
+    if candidate.scheme != "https" or candidate.hostname != reviewed.hostname:
+        raise ArvanOriginSwitchError("Arvan API URL must use the reviewed HTTPS origin")
+    reviewed_prefix = reviewed.path.rstrip("/") + "/"
+    if not candidate.path.startswith(reviewed_prefix):
+        raise ArvanOriginSwitchError("Arvan API URL is outside the reviewed CDN API path")
+    if candidate.username or candidate.password or candidate.port not in (None, 443):
+        raise ArvanOriginSwitchError("Arvan API URL contains a forbidden authority component")
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise ArvanOriginSwitchError("Arvan API redirects are forbidden")
 
 
 def _json_bytes(payload: dict[str, Any] | None) -> bytes | None:
@@ -45,6 +64,7 @@ def api_request(
     *,
     timeout: float = 20.0,
 ) -> dict[str, Any]:
+    validate_api_url(url)
     headers = {
         "Accept": "application/json",
         "Authorization": f"Apikey {token}",
@@ -55,7 +75,8 @@ def api_request(
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+        with opener.open(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:2000]
@@ -73,14 +94,9 @@ def api_request(
 
 def load_token(path: Path) -> str:
     try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-    except FileNotFoundError as exc:
-        raise ArvanOriginSwitchError(f"Token file does not exist: {path}") from exc
-    if mode & 0o077:
-        raise ArvanOriginSwitchError(
-            f"Token file permissions are too broad ({mode:o}); expected owner-only access such as 600"
-        )
-    token = path.read_text(encoding="utf-8").strip()
+        token = read_secure_text(path, label="Arvan API token", max_size=16 * 1024).strip()
+    except SecureFileError as exc:
+        raise ArvanOriginSwitchError(str(exc)) from exc
     if not token:
         raise ArvanOriginSwitchError("Token file is empty")
     return token
@@ -170,20 +186,15 @@ def enforce_apply_domain_scope(domain: str, *, apply: bool) -> None:
 
 
 def append_audit_event(path: Path, event: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "host": socket.gethostname(),
         **event,
     }
-    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:
-        os.write(
-            descriptor,
-            (json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"),
-        )
-    finally:
-        os.close(descriptor)
+        append_hash_chained_jsonl(path, payload)
+    except SecureFileError as exc:
+        raise ArvanOriginSwitchError(str(exc)) from exc
 
 
 RequestFn = Callable[[str, str, str, dict[str, Any] | None], dict[str, Any]]
@@ -202,6 +213,8 @@ def inspect_or_switch(
     request_fn: RequestFn = api_request,
 ) -> dict[str, Any]:
     enforce_apply_domain_scope(domain, apply=apply)
+    if api_base.rstrip("/") != DEFAULT_API_BASE:
+        raise ArvanOriginSwitchError("custom Arvan API bases are forbidden")
     encoded_domain = urllib.parse.quote(domain, safe="")
     records_url = f"{api_base.rstrip('/')}/domains/{encoded_domain}/dns-records"
     current = find_exact_a_record(request_fn("GET", records_url, token, None), record_name)
@@ -259,7 +272,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.getenv("ARVAN_API_TOKEN_FILE"),
         help="Owner-readable file containing the Arvan API token.",
     )
-    parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     parser.add_argument("--operator", help="Named operator responsible for an applied change.")
@@ -288,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_current_ip=args.expected_current_ip,
             apply=args.apply,
             confirmation=args.confirm,
-            api_base=args.api_base,
+            api_base=DEFAULT_API_BASE,
         )
     except ArvanOriginSwitchError as exc:
         if args.apply and args.audit_log:

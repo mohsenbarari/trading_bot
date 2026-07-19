@@ -128,11 +128,6 @@ async def get_current_user(
             detail="REQUIRES_PASSWORD_CHANGE"
         )
         
-    # Update last_seen
-    if not user.last_seen_at or (utc_now_naive() - user.last_seen_at).total_seconds() > 60:
-        user.last_seen_at = utc_now_naive()
-        await db.commit()
-
     set_request_context(
         actor_id=user.id,
         actor_role=getattr(user.role, "value", str(user.role)),

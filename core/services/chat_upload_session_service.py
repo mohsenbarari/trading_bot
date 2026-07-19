@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from core.enums import ChatType, MessageType
+from core.dr_blob_plane import bind_chat_file_blob
 from core.services.accountant_relation_service import EffectiveOwnerActor, resolve_effective_owner_actor
 from core.services.chat_room_service import get_active_group_member_or_403, get_room_or_404
 from core.services.chat_service import (
@@ -433,7 +434,10 @@ async def _cleanup_uncommitted_chat_file(
     chat_file = await db.get(ChatFile, session.final_chat_file_id)
     if chat_file is None:
         return
-    await _remove_file_if_exists(chat_file.s3_key)
+    # Content-addressed blobs are immutable and may be shared by other rows or
+    # needed by a recovery point. They are reclaimed only by the delayed DR GC.
+    if not getattr(chat_file, "content_hash", None):
+        await _remove_file_if_exists(chat_file.s3_key)
     await db.delete(chat_file)
     session.final_chat_file_id = None
 
@@ -575,23 +579,17 @@ async def persist_chat_media_file_bytes(
         ext = file_name.split(".")[-1] if file_name and "." in file_name else mime.split("/")[-1]
 
     file_uuid = str(uuid.uuid4())
-    upload_dir = os.path.join("uploads", "chat_files", str(uploader_id))
-    await _ensure_directory(upload_dir)
-    file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
-
-    async with aiofiles.open(file_path, "wb") as file_handle:
-        await file_handle.write(contents)
-
     chat_file = ChatFile(
         id=file_uuid,
         uploader_id=uploader_id,
-        s3_key=file_path,
+        s3_key="pending-content-address",
         file_name=file_name,
         mime_type=mime,
         size=size,
         thumbnail=thumbnail,
     )
     db.add(chat_file)
+    await bind_chat_file_blob(db, chat_file=chat_file, contents=contents)
     await _flush_if_supported(db)
     return UploadFilePersistenceResult(
         chat_file=chat_file,

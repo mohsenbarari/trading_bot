@@ -14,7 +14,7 @@ import httpx
 import sqlalchemy as sa
 from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
@@ -1257,15 +1257,19 @@ async def sync_direct_read_state(
     other_user_id: int,
 ) -> Conversation | None:
     """Sync direct-chat read state across legacy Conversation rows and generic ChatMember cursors."""
-    await db.execute(
-        update(Message)
-        .where(
-            Message.sender_id == other_user_id,
-            Message.receiver_id == reader.id,
-            Message.is_read.is_(False),
-        )
-        .values(is_read=True)
+    unread_messages = list(
+        (
+            await db.execute(
+                select(Message).where(
+                    Message.sender_id == other_user_id,
+                    Message.receiver_id == reader.id,
+                    Message.is_read.is_(False),
+                )
+            )
+        ).scalars().all()
     )
+    for message in unread_messages:
+        message.is_read = True
 
     conversation = await get_existing_direct_conversation(db, reader.id, other_user_id)
     ordered_user1_id, _ = get_direct_conversation_key(reader.id, other_user_id)
@@ -1347,22 +1351,18 @@ async def generate_direct_location_snapshot(
                 return None
 
         file_id = str(uuid.uuid4())
-        upload_dir = os.path.join(os.getcwd(), "uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, f"{file_id}.png")
-
-        async with aiofiles.open(file_path, "wb") as file_handle:
-            await file_handle.write(response.content)
-
         chat_file = ChatFile(
             id=file_id,
             uploader_id=uploader_id,
-            s3_key=file_path,
+            s3_key="pending-content-address",
             file_name=f"location_preview_{file_id[:8]}.png",
             mime_type="image/png",
             size=len(response.content),
         )
         db.add(chat_file)
+        from core.dr_blob_plane import bind_chat_file_blob
+
+        await bind_chat_file_blob(db, chat_file=chat_file, contents=response.content)
         await db.flush()
         return file_id
     except Exception as exc:

@@ -1,6 +1,10 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 from core.runtime_identity import RuntimeIdentity
 from core.webapp_writer_control import WriterStateSnapshot
@@ -8,8 +12,13 @@ from core.writer_fencing import (
     WriterFenceError,
     _enforce_writer_fence_before_commit,
     current_writer_fence_context,
+    projection_fence_scope,
+    register_writer_fence_listener,
+    settings as writer_fence_settings,
     writer_fence_scope,
 )
+from core.writer_lease_clock import boottime_seconds, current_boot_id
+from models.user import User
 
 
 def identity(site="webapp_fi"):
@@ -32,6 +41,12 @@ def snapshot(site="webapp_fi", epoch=2, transition_id="transition-current", *, w
         witness_lease_expires_at=now + timedelta(seconds=180) if witness else None,
         witness_proof_hash="a" * 64 if witness else None,
         witness_transition_id="witness-current" if witness else None,
+        witness_lease_issued_at=now if witness else None,
+        witness_local_boot_id=current_boot_id() if witness else None,
+        witness_local_boottime_deadline=boottime_seconds() + 160 if witness else None,
+        witness_observed_wall_at=now if witness else None,
+        witness_observed_boottime=boottime_seconds() if witness else None,
+        witness_clock_offset_ms=0 if witness else None,
     )
 
 
@@ -58,6 +73,18 @@ class FakeSession:
 
 
 class WriterFenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        register_writer_fence_listener()
+
+    def _strict_settings(self):
+        return patch.multiple(
+            writer_fence_settings,
+            three_site_dr_enabled=True,
+            logical_authority="webapp",
+            physical_site="webapp_fi",
+            server_mode="iran",
+        )
     def test_scope_sets_and_restores_commit_context(self):
         self.assertIsNone(current_writer_fence_context())
 
@@ -97,10 +124,36 @@ class WriterFenceTests(unittest.TestCase):
                     with self.assertRaises(WriterFenceError):
                         _enforce_writer_fence_before_commit(FakeSession(changed))
 
-    def test_unscoped_projection_transaction_is_not_intercepted(self):
-        session = SimpleNamespace(connection=lambda: self.fail("must not query writer state"))
+    def test_unscoped_authoritative_orm_commit_is_rejected(self):
+        engine = create_engine("sqlite:///:memory:")
+        with Session(engine) as session, self._strict_settings():
+            session.add(User(id=1001, full_name="unsafe"))
+            with self.assertRaisesRegex(WriterFenceError, "lacks an explicit"):
+                session.commit()
 
-        _enforce_writer_fence_before_commit(session)
+    def test_unscoped_bulk_or_raw_write_is_rejected(self):
+        engine = create_engine("sqlite:///:memory:")
+        with Session(engine) as session, self._strict_settings():
+            with self.assertRaisesRegex(WriterFenceError, "bulk/raw"):
+                session.execute(text("UPDATE users SET full_name = 'unsafe' WHERE id = 1"))
+
+    def test_projection_capability_has_closed_field_allowlist(self):
+        engine = create_engine("sqlite:///:memory:")
+        with Session(engine) as session, self._strict_settings(), projection_fence_scope(source="test"):
+            session.add(User(id=1002, full_name="safe", admin_password_hash="forbidden"))
+            with self.assertRaisesRegex(WriterFenceError, "admin_password_hash"):
+                session.commit()
+
+    def test_read_only_unscoped_commit_does_not_query_writer_state(self):
+        session = SimpleNamespace(
+            info={},
+            new=(),
+            dirty=(),
+            deleted=(),
+            connection=lambda: self.fail("must not query writer state"),
+        )
+        with self._strict_settings():
+            _enforce_writer_fence_before_commit(session)
 
     def test_commit_boundary_fails_closed_when_required_witness_is_near_expiry(self):
         now = datetime.now(timezone.utc)
@@ -111,7 +164,8 @@ class WriterFenceTests(unittest.TestCase):
             "transition_id": "transition-current",
             "witness_lease_id": "lease-current",
             "witness_lease_expires_at": now + timedelta(seconds=180),
-            "database_now": now,
+            "witness_local_boot_id": current_boot_id(),
+            "witness_local_boottime_deadline": boottime_seconds() + 160,
         }
         with writer_fence_scope(
             identity(),
@@ -125,7 +179,7 @@ class WriterFenceTests(unittest.TestCase):
                     FakeSession(
                         {
                             **valid_row,
-                            "witness_lease_expires_at": now + timedelta(seconds=10),
+                            "witness_local_boottime_deadline": boottime_seconds() - 1,
                         }
                     )
                 )

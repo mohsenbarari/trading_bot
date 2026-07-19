@@ -10,6 +10,7 @@ from core.db import AsyncSessionLocal
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from models.user import User, set_legacy_has_bot_access_compatibility
 from core.enums import UserRole
+from core.dark_standby import assert_not_dark_standby
 
 # سعی می‌کنیم توابع نرمال‌سازی را ایمپورت کنیم، اگر نبودند ساده عمل می‌کنیم
 try:
@@ -111,6 +112,7 @@ def main():
     """
     تابع اصلی مدیریت دستورات
     """
+    assert_not_dark_standby("migration")
     # بررسی آرگومان‌های خط فرمان
     if len(sys.argv) > 1:
         command_name = sys.argv[1]

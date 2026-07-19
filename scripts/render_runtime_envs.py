@@ -235,6 +235,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audit-trail-path", default="/app/audit_trail/audit.jsonl")
     parser.add_argument("--foreign-api-workers", default=os.environ.get("FOREIGN_API_WORKERS", "2"))
     parser.add_argument("--iran-api-workers", default=os.environ.get("IRAN_API_WORKERS", "4"))
+    parser.add_argument("--foreign-physical-site", required=True, choices=("bot_fi",))
+    parser.add_argument(
+        "--iran-physical-site",
+        required=True,
+        choices=("webapp_fi", "webapp_ir"),
+    )
     return parser.parse_args()
 
 def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]:
@@ -280,6 +286,7 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
 def build_runtime_env(
     *,
     role: str,
+    physical_site: str,
     frontend_url: str,
     public_webapp_url: str,
     foreign_server_url: str,
@@ -291,10 +298,13 @@ def build_runtime_env(
     api_workers: str,
     values: dict[str, str],
 ) -> OrderedDict[str, str]:
+    expected_sites = {"foreign": {"bot_fi"}, "iran": {"webapp_fi", "webapp_ir"}}
+    if role not in expected_sites or physical_site not in expected_sites[role]:
+        raise ValueError(f"invalid explicit runtime identity role={role!r} site={physical_site!r}")
     rendered = OrderedDict()
     rendered["SERVER_MODE"] = role
     rendered["LOGICAL_AUTHORITY"] = "foreign" if role == "foreign" else "webapp"
-    rendered["PHYSICAL_SITE"] = "bot_fi" if role == "foreign" else "webapp_fi"
+    rendered["PHYSICAL_SITE"] = physical_site
     rendered["API_WORKERS"] = str(api_workers)
     for key in COMMON_RUNTIME_KEYS[:6]:
         rendered[key] = values[key]
@@ -364,6 +374,7 @@ def main() -> int:
         args.local_output,
         build_runtime_env(
             role="foreign",
+            physical_site=args.foreign_physical_site,
             frontend_url=args.foreign_frontend_url,
             public_webapp_url=args.iran_frontend_url,
             foreign_server_url=args.foreign_server_url,
@@ -380,6 +391,7 @@ def main() -> int:
         args.iran_output,
         build_runtime_env(
             role="iran",
+            physical_site=args.iran_physical_site,
             frontend_url=args.iran_frontend_url,
             public_webapp_url=args.iran_frontend_url,
             foreign_server_url=args.foreign_server_url,

@@ -3459,3 +3459,145 @@ The dark-standby manifest records both roots and fails validation if their
 roles overlap, the test public host leaves the test namespace, or the Arvan
 configured root points at production. The low-level origin-switch primitive is
 also apply-locked to `gold-trading.ir` until the later post-Full-Matrix gate.
+
+## 49. Independent Three-Site Architecture Review Remediation - 2026-07-19
+
+This section records the source remediation of the independent ChatGPT Pro
+review at exact SHA `412cab88`. It does not convert supplied infrastructure
+claims into observed evidence and it does not authorize a `main` merge,
+integration branch, Full Matrix, database-role activation, production
+migration, Writer lease, deployment, Arvan mutation, or traffic change.
+
+### 49.1 Closed source invariants
+
+The feature branch now implements these fail-closed contracts:
+
+1. every WebApp-authority ORM mutation is fenced at transaction flush/commit;
+   the request method is no longer the boundary, and known bulk-DML business
+   paths use row-bound ORM mutations so event creation cannot be bypassed;
+2. Writer lease validity is additionally bound to Linux `CLOCK_BOOTTIME`, boot
+   ID, a bounded Witness-to-host clock observation, exact transition and epoch;
+3. immutable UUID events carry producer site/epoch/sequence and canonical/
+   envelope hashes, with destination deliveries/receipts, contiguous
+   checkpoints, projection versions, gap blocking, conflict quarantine, and
+   identity-preserving relay metadata;
+4. dark environment rendering uses an explicit secret allowlist and secure
+   atomic output, and rejects unsafe ownership, symlinks, hardlinks, and mode;
+5. the Arvan client permits only the exact HTTPS API origin, refuses redirects,
+   uses secure token/audit I/O, and binds both Ed25519 approvals to the canonical
+   hash of the exact command manifest;
+6. provider effects have immutable event/epoch/destination/idempotency/payload
+   intent, a destination execution site, durable result state, and an epoch
+   recheck before execution; strict-DR direct Telegram/test-push bypasses fail;
+7. dark mode is enforced by runtime entrypoints and database-only Compose, not
+   solely by operator convention;
+8. the failover/failback saga binds exact source fencing, connection drain,
+   target readiness, Witness transition, Arvan route evidence, rollback state,
+   and immutable audit evidence under one operation ID;
+9. topology manifests bind production/test roots, exact host roles and
+   allowlists, physical identity, release/source identity, and secure reads;
+10. executable four-role staging artifacts isolate Bot-FI, WebApp-FI,
+    WebApp-IR, and Witness mutable PostgreSQL/Redis/uploads/audit resources and
+    reject production-boundary overlap;
+11. the blob plane uses content hashes, immutable/versioned object identity,
+    intent/event linkage, destination receipts, resumable delivery, and local
+    deletion only after durable remote acknowledgement;
+12. logical authority and physical site are explicit; legacy Iran-mode
+    inference is rejected during strict three-site operation;
+13. DR transport uses pairwise keys, endpoint/key identity, timestamp, nonce
+    replay protection, body hash and strict protocol metadata; legacy sync is
+    rejected after strict activation;
+14. distinct application Writer, projection and control database roles are
+    enforced by PostgreSQL triggers, projection table/field allowlists,
+    immutable events, and immutable effect intent;
+15. failback readiness requires global convergence plus query-bound WebApp-IR
+    database/blob fingerprints and an exactly matching verified WebApp-FI
+    promotion manifest before FI can reacquire authority.
+
+### 49.2 Review finding disposition
+
+| Finding | Source disposition | Remaining non-source gate |
+|---|---|---|
+| `DR-F001` | closed by fail-closed transaction and PostgreSQL fencing | guarded staging activation and Full Matrix proof |
+| `DR-F002` | closed by boot/boottime-bound lease validation | host clock/boot failure drills |
+| `DR-F003` | event, receipt, checkpoint, projection, relay, and quarantine plane implemented | authoritative three-site load/fault evidence |
+| `DR-F004` | durability freeze and data-class state are executable | owner-approved RPO/RTO and independent same-region durability must be provisioned and measured |
+| `DR-F005` | closed by allowlisted, securely written dark environment | fresh secret rotation and host inspection before install |
+| `DR-F006` | exact Arvan origin, no redirects, signed command binding and secure audit I/O | provider-scoped token rotation and provider evidence |
+| `DR-F007` | epoch-bound immutable effect outbox and strict bypass rejection implemented | provider ambiguity and crash drills |
+| `DR-F008` | hard dark-runtime prohibitions implemented | independent host verification |
+| `DR-F009` | failover/failback saga and exact evidence contracts implemented | controlled staging campaign and rollback drills |
+| `DR-F010` | topology allowlists and stable secure reads implemented | actual-host manifest population and verification |
+| `DR-F011` | isolated four-role staging Compose/inventory implemented | dedicated staging resources and deployment |
+| `DR-F012` | source inventory rejects production overlap | destructive-test isolation must be proven on real hosts before Full Matrix |
+| `DR-F013` | content-addressed blob and recovery/parity manifests implemented | Object Storage availability, retention, restore, and corruption drills |
+| `DR-F014` | explicit physical-site identity implemented | deployment inventory migration |
+| `DR-F015` | strict pairwise authenticated DR protocol implemented | key custody/rotation and partition/replay drills |
+| `DR-F016` | preflight detects dirty worktrees, lineage, and semantic integration tasks | deferred until the candidate branch is complete; no merge/integration branch is authorized here |
+| `DR-F017` | fail-closed Witness/connectivity/durability states are represented | Witness HA/rebuild, hub loss, provider/time/control-plane, DPI, bandwidth, capacity, and alert thresholds remain operational gates |
+| `DR-F018` | local audit hash chain, recovery fingerprints, and external anchor command implemented | independent anchor custody and independently observed live evidence |
+
+`DR-F004`, `DR-F012`, `DR-F016`, and `DR-F017` cannot honestly be closed by
+repository code alone. They remain explicit preproduction blockers and must
+not be silently downgraded to warnings.
+
+### 49.3 Mandatory transition order
+
+Promotion from FI to IR is permitted only in this order:
+
+1. classify sustained connectivity evidence under a unique operation ID;
+2. freeze/fence WebApp-FI and prove the exact source and term are fenced;
+3. prove old-origin mutable connections are drained;
+4. validate IR database, blob, event/checkpoint, conflict, durability, runtime,
+   and public-origin readiness for `promote_ir`;
+5. obtain the next Witness epoch for IR and recheck readiness under that epoch;
+6. switch only the approved Arvan test route using a dual-signed,
+   command-manifest-bound plan;
+7. verify the exact public domain/record/IR target and append audit evidence;
+   otherwise execute the saga rollback.
+
+Failback from IR to FI is permitted only in this order:
+
+1. keep IR active/public while all original Bot/FI/IR streams and blobs converge;
+2. require zero gaps, unresolved quarantines, ambiguous effects, or unsafe
+   durability states;
+3. bind FI readiness to query-derived IR database/blob fingerprints and a
+   matching verified FI promotion manifest for `failback_fi`;
+4. enter the sensitive-write barrier, deliver the final delta, and repeat parity;
+5. fence IR and prove its mutable connections are drained;
+6. obtain the next Witness epoch for FI and recheck FI readiness;
+7. switch the approved route to FI, externally verify and append/anchor evidence;
+   rollback to IR on any incomplete step.
+
+Reachability, checksum without stream continuity, equal integer IDs, elapsed
+time, or CDN health alone can never authorize either transition.
+
+### 49.4 Verification and stop boundary
+
+Source verification includes focused architecture and affected-business unit
+tests, migration smoke tests, static Compose validation, and guarded real
+PostgreSQL migrate/role/grant/fence/downgrade/re-upgrade proof. Exact current
+evidence at the source-remediation boundary is:
+
+- `549` affected-business, security, protocol, and architecture unit tests
+  passed in the final clean run;
+- a fresh PostgreSQL 16 database migrated from empty to `d3e8f9a0b1c2`, all
+  `238` role/grant/fencing activation statements applied, and all `5` real
+  application/projection/control-role tests passed;
+- the same scratch database successfully downgraded to `d2e7f8a9b0c1` and
+  upgraded back to `d3e8f9a0b1c2`;
+- Python compilation, `git diff --check`, Alembic single-head inspection, and
+  static three-site Compose rendering passed;
+- the example staging inventory intentionally remains blocked by placeholders;
+  real host inventory, secrets, and destructive-isolation proof are later live
+  gates and were not fabricated as source evidence.
+
+The exact pushed commit identity must be recorded in the final branch handoff.
+
+Work stops immediately before creating the `main`-based integration branch.
+That branch may be created only after
+`candidate/telegram-offer-publition-queue` is complete and clean, both feature
+heads are pushed, current `origin/main` is fetched, Alembic sibling heads and
+semantic overlap are resolved on the isolated integration branch, and the
+combined project is ready for the authoritative Full Matrix. Neither feature
+branch is merged into the other or into `main` in this section.

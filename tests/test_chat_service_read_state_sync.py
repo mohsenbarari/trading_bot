@@ -7,8 +7,11 @@ from core.services.chat_service import sync_direct_read_state
 
 
 class FakeDB:
-    def __init__(self, *, other_user=None):
-        self.execute = AsyncMock()
+    def __init__(self, *, other_user=None, unread_messages=()):
+        result = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: list(unread_messages))
+        )
+        self.execute = AsyncMock(return_value=result)
         self.other_user = other_user
         self.get_calls = []
 
@@ -53,6 +56,20 @@ class ChatServiceReadStateSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conversation.unread_count_user1, 0)
         self.assertEqual(conversation.unread_count_user2, 9)
         self.assertEqual(db.get_calls, [("User", 20)])
+
+    async def test_sync_direct_read_state_records_each_message_as_an_orm_change(self):
+        reader = SimpleNamespace(id=10)
+        messages = [SimpleNamespace(is_read=False), SimpleNamespace(is_read=False)]
+        db = FakeDB(other_user=SimpleNamespace(id=20), unread_messages=messages)
+        with patch(
+            "core.services.chat_service.get_existing_direct_conversation",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.chat_service._find_existing_direct_chat_id",
+            new=AsyncMock(return_value=None),
+        ):
+            await sync_direct_read_state(db, reader=reader, other_user_id=20)
+        self.assertTrue(all(message.is_read for message in messages))
 
     async def test_sync_direct_read_state_updates_reader_cursor_and_repairs_missing_member(self):
         reader = SimpleNamespace(id=20)

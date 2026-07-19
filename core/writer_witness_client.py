@@ -15,7 +15,7 @@ from uuid import uuid4
 import httpx
 
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import DrControlSessionLocal
 from core.runtime_identity import RuntimeIdentity, resolve_runtime_identity
 from core.webapp_writer_control import (
     ACTION_LEASE_REFRESH,
@@ -270,7 +270,7 @@ async def renew_local_writer_lease_once(
     max_clock_skew_seconds: int | None = None,
 ) -> ValidatedWitnessLeaseProof:
     runtime_identity = identity or resolve_runtime_identity(settings)
-    active_session_factory = session_factory or AsyncSessionLocal
+    active_session_factory = session_factory or DrControlSessionLocal
     active_lease_duration = int(
         lease_duration_seconds
         if lease_duration_seconds is not None

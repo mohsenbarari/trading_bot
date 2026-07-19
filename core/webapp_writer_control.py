@@ -18,6 +18,7 @@ from core.writer_witness_contract import (
     ValidatedWitnessLeaseProof,
     witness_timing_configuration_is_safe,
 )
+from core.writer_lease_clock import lease_clock_reasons
 from models.webapp_writer_state import WebappWriterState, WebappWriterTransition
 
 
@@ -61,6 +62,12 @@ class WriterStateSnapshot:
     witness_lease_expires_at: datetime | None = None
     witness_proof_hash: str | None = None
     witness_transition_id: str | None = None
+    witness_lease_issued_at: datetime | None = None
+    witness_local_boot_id: str | None = None
+    witness_local_boottime_deadline: float | None = None
+    witness_observed_wall_at: datetime | None = None
+    witness_observed_boottime: float | None = None
+    witness_clock_offset_ms: int | None = None
 
     def local_runtime_role(self, physical_site: str) -> str:
         if self.control_state == CONTROL_ACTIVE:
@@ -102,6 +109,12 @@ def writer_state_snapshot(state: WebappWriterState) -> WriterStateSnapshot:
         witness_lease_expires_at=getattr(state, "witness_lease_expires_at", None),
         witness_proof_hash=getattr(state, "witness_proof_hash", None),
         witness_transition_id=getattr(state, "witness_transition_id", None),
+        witness_lease_issued_at=getattr(state, "witness_lease_issued_at", None),
+        witness_local_boot_id=getattr(state, "witness_local_boot_id", None),
+        witness_local_boottime_deadline=getattr(state, "witness_local_boottime_deadline", None),
+        witness_observed_wall_at=getattr(state, "witness_observed_wall_at", None),
+        witness_observed_boottime=getattr(state, "witness_observed_boottime", None),
+        witness_clock_offset_ms=getattr(state, "witness_clock_offset_ms", None),
     )
 
 
@@ -204,6 +217,8 @@ def snapshot_is_local_active(
     require_readiness_evidence: bool = False,
     require_witness_lease: bool = False,
     witness_safety_margin_seconds: int | None = None,
+    current_boot_id: str | None = None,
+    current_boottime: float | None = None,
 ) -> tuple[bool, tuple[str, ...]]:
     reasons: list[str] = []
     if not identity.is_webapp_site or not identity.is_webapp_authority:
@@ -235,20 +250,17 @@ def snapshot_is_local_active(
             or not snapshot.witness_transition_id
         ):
             reasons.append("writer_witness_proof_missing")
-        if snapshot.witness_lease_expires_at is None:
+        if snapshot.witness_lease_expires_at is None or snapshot.witness_lease_issued_at is None:
             reasons.append("writer_witness_expiry_missing")
-        else:
-            margin = max(
-                0,
-                int(
-                    witness_safety_margin_seconds
-                    if witness_safety_margin_seconds is not None
-                    else settings.writer_witness_safety_margin_seconds
-                ),
+        reasons.extend(
+            lease_clock_reasons(
+                stored_boot_id=snapshot.witness_local_boot_id,
+                stored_boottime_deadline=snapshot.witness_local_boottime_deadline,
+                current_boot=current_boot_id,
+                current_boottime=current_boottime,
+                boot_id_file=settings.writer_witness_boot_id_file,
             )
-            deadline = _utc(now or datetime.now(timezone.utc)) + timedelta(seconds=margin)
-            if _utc(snapshot.witness_lease_expires_at) <= deadline:
-                reasons.append("writer_witness_lease_expired")
+        )
     return not reasons, tuple(reasons)
 
 
@@ -265,16 +277,30 @@ def _clear_witness_lease(state: WebappWriterState) -> None:
     state.witness_lease_expires_at = None
     state.witness_proof_hash = None
     state.witness_transition_id = None
+    state.witness_lease_issued_at = None
+    state.witness_local_boot_id = None
+    state.witness_local_boottime_deadline = None
+    state.witness_observed_wall_at = None
+    state.witness_observed_boottime = None
+    state.witness_clock_offset_ms = None
 
 
 def _store_witness_lease(
     state: WebappWriterState,
     proof: ValidatedWitnessLeaseProof,
 ) -> None:
+    if proof.clock_evidence is None:
+        raise WriterControlError("validated witness proof lacks host monotonic timing evidence")
     state.witness_lease_id = proof.lease_id
+    state.witness_lease_issued_at = proof.issued_at
     state.witness_lease_expires_at = proof.expires_at
     state.witness_proof_hash = proof.proof_hash
     state.witness_transition_id = proof.witness_transition_id
+    state.witness_local_boot_id = proof.clock_evidence.boot_id
+    state.witness_local_boottime_deadline = proof.clock_evidence.boottime_deadline
+    state.witness_observed_wall_at = proof.clock_evidence.observed_wall_at
+    state.witness_observed_boottime = proof.clock_evidence.observed_boottime
+    state.witness_clock_offset_ms = proof.clock_evidence.witness_issue_offset_ms
 
 
 async def transition_writer_state(

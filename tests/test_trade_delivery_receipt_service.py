@@ -69,6 +69,7 @@ class FakeDB:
         self.flush_count = 0
         self.commit_count = 0
         self.begin_nested_count = 0
+        self.deleted = []
 
     async def execute(self, stmt):
         self.execute_calls.append(stmt)
@@ -94,6 +95,9 @@ class FakeDB:
 
     async def commit(self):
         self.commit_count += 1
+
+    async def delete(self, obj):
+        self.deleted.append(obj)
 
     def begin_nested(self):
         self.begin_nested_count += 1

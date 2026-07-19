@@ -17,6 +17,7 @@ from core.runtime_sites import (
     WEBAPP_SITES,
 )
 LEGACY_SERVER_ALIASES = frozenset({"germany", "de", "foreign", "german", "iran", "ir"})
+THREE_SITE_TOPOLOGY_SCHEMA_VERSION = "three-site-dr-v1"
 
 
 class RuntimeIdentityError(RuntimeError):
@@ -55,6 +56,19 @@ def resolve_runtime_identity(settings_obj=settings) -> RuntimeIdentity:
     server_mode = normalize_server(raw_server_mode)
     configured_authority = _clean(getattr(settings_obj, "logical_authority", None))
     configured_site = _clean(getattr(settings_obj, "physical_site", None))
+    three_site_enabled = bool(getattr(settings_obj, "three_site_dr_enabled", False))
+    topology_schema_version = _clean(getattr(settings_obj, "topology_schema_version", None))
+
+    if three_site_enabled:
+        if topology_schema_version != THREE_SITE_TOPOLOGY_SCHEMA_VERSION:
+            raise RuntimeIdentityError(
+                "three-site runtime requires TOPOLOGY_SCHEMA_VERSION="
+                f"{THREE_SITE_TOPOLOGY_SCHEMA_VERSION}"
+            )
+        if configured_authority is None or configured_site is None:
+            raise RuntimeIdentityError(
+                "three-site runtime requires explicit LOGICAL_AUTHORITY and PHYSICAL_SITE"
+            )
 
     inferred_authority = AUTHORITY_FOREIGN if server_mode == SERVER_FOREIGN else AUTHORITY_WEBAPP
     inferred_site = SITE_BOT_FI if server_mode == SERVER_FOREIGN else SITE_WEBAPP_FI

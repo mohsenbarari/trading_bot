@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import sqlalchemy as sa
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.enums import ChatMembershipStatus, ChatMemberRole, ChatType
@@ -215,18 +215,21 @@ async def backfill_direct_chats(
             stats.messages_linked += await _count_unlinked_messages(db, conversation.user1_id, conversation.user2_id)
             continue
 
-        update_stmt = (
-            update(Message)
-            .where(
-                Message.chat_id.is_(None),
-                or_(
-                    sa.and_(Message.sender_id == conversation.user1_id, Message.receiver_id == conversation.user2_id),
-                    sa.and_(Message.sender_id == conversation.user2_id, Message.receiver_id == conversation.user1_id),
-                ),
-            )
-            .values(chat_id=chat_id)
+        unlinked_messages = list(
+            (
+                await db.execute(
+                    select(Message).where(
+                        Message.chat_id.is_(None),
+                        or_(
+                            sa.and_(Message.sender_id == conversation.user1_id, Message.receiver_id == conversation.user2_id),
+                            sa.and_(Message.sender_id == conversation.user2_id, Message.receiver_id == conversation.user1_id),
+                        ),
+                    )
+                )
+            ).scalars().all()
         )
-        result = await db.execute(update_stmt)
-        stats.messages_linked += int(result.rowcount or 0)
+        for message in unlinked_messages:
+            message.chat_id = chat_id
+        stats.messages_linked += len(unlinked_messages)
 
     return stats

@@ -1,0 +1,504 @@
+name: trading-bot-three-site-staging
+
+# Functional four-role staging topology. Every mutable store is independent.
+# Host-destructive scenarios additionally require four dedicated hosts and a
+# passing scripts/verify_three_site_staging_inventory.py report.
+
+x-app: &app
+  image: trading_bot_three_site_staging:${STAGING_RELEASE_SHA:?exact release SHA required}
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+    args:
+      FRONTEND_DIST_DIR: ${STAGING_FRONTEND_DOCKER_DIST_DIR:-mini_app_dist_staging}
+  restart: unless-stopped
+  env_file: ${THREE_SITE_STAGING_ENV_FILE:-../../.env.three-site.staging}
+  volumes:
+    - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+  logging: &logging
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+x-three-site: &three_site
+  TZ: UTC
+  ENVIRONMENT: staging
+  TOPOLOGY_SCHEMA_VERSION: three-site-dr-v1
+  THREE_SITE_DR_ENABLED: "true"
+  DR_EVENT_PROTOCOL_ENABLED: "true"
+  DR_EVENT_PROTOCOL_STRICT: "true"
+  DR_SYNC_VERIFY_TLS: "true"
+  DR_SYNC_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+  RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
+
+x-postgres: &postgres
+  image: postgres:15-alpine
+  restart: unless-stopped
+  command: [postgres, -c, timezone=UTC, -c, log_timezone=UTC]
+  logging: *logging
+  healthcheck:
+    test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+
+x-redis: &redis
+  image: redis:7-alpine
+  restart: unless-stopped
+  command: [redis-server, --appendonly, "yes", --appendfsync, everysec, --maxmemory-policy, noeviction]
+  logging: *logging
+
+x-webapp-fi-owner-env: &webapp_fi_owner_env
+  <<: *three_site
+  SERVER_MODE: iran
+  LOGICAL_AUTHORITY: webapp
+  PHYSICAL_SITE: webapp_fi
+  DATABASE_URL: postgresql+asyncpg://${WEBAPP_FI_POSTGRES_USER}:${WEBAPP_FI_POSTGRES_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://${WEBAPP_FI_POSTGRES_USER}:${WEBAPP_FI_POSTGRES_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: ${WEBAPP_FI_POSTGRES_USER}
+  POSTGRES_PASSWORD: ${WEBAPP_FI_POSTGRES_PASSWORD}
+  POSTGRES_DB: ${WEBAPP_FI_POSTGRES_DB}
+  REDIS_URL: redis://webapp_fi_redis:6379/0
+  REDIS_HOST: webapp_fi_redis
+  DR_SYNC_PEER_URLS_JSON: ${WEBAPP_FI_DR_PEERS_JSON:?required}
+  DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
+
+x-webapp-fi-env: &webapp_fi_env
+  <<: *webapp_fi_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_fi_app:${WEBAPP_FI_APP_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_fi_app:${WEBAPP_FI_APP_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_fi_projection:${WEBAPP_FI_PROJECTION_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  DR_CONTROL_DATABASE_URL: postgresql+asyncpg://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: webapp_fi_app
+  POSTGRES_PASSWORD: ${WEBAPP_FI_APP_DB_PASSWORD}
+  WRITER_WITNESS_REQUIRED: "true"
+  WRITER_WITNESS_INTERNAL_URL: ${STAGING_WITNESS_URL:?required}
+  WRITER_WITNESS_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+  WRITER_WITNESS_CLIENT_KEY_ID: ${WEBAPP_FI_WITNESS_KEY_ID:?required}
+  WRITER_WITNESS_CLIENT_SECRET: ${WEBAPP_FI_WITNESS_SECRET:?required}
+  DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
+
+x-webapp-ir-owner-env: &webapp_ir_owner_env
+  <<: *three_site
+  SERVER_MODE: iran
+  LOGICAL_AUTHORITY: webapp
+  PHYSICAL_SITE: webapp_ir
+  DATABASE_URL: postgresql+asyncpg://${WEBAPP_IR_POSTGRES_USER}:${WEBAPP_IR_POSTGRES_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://${WEBAPP_IR_POSTGRES_USER}:${WEBAPP_IR_POSTGRES_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: ${WEBAPP_IR_POSTGRES_USER}
+  POSTGRES_PASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD}
+  POSTGRES_DB: ${WEBAPP_IR_POSTGRES_DB}
+  REDIS_URL: redis://webapp_ir_redis:6379/0
+  REDIS_HOST: webapp_ir_redis
+  DR_SYNC_PEER_URLS_JSON: ${WEBAPP_IR_DR_PEERS_JSON:?required}
+  DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_IR_DR_PAIRWISE_KEYS_JSON:?required}
+
+x-webapp-ir-env: &webapp_ir_env
+  <<: *webapp_ir_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_ir_app:${WEBAPP_IR_APP_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_ir_app:${WEBAPP_IR_APP_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_ir_projection:${WEBAPP_IR_PROJECTION_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  DR_CONTROL_DATABASE_URL: postgresql+asyncpg://webapp_ir_control:${WEBAPP_IR_CONTROL_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: webapp_ir_app
+  POSTGRES_PASSWORD: ${WEBAPP_IR_APP_DB_PASSWORD}
+  WRITER_WITNESS_REQUIRED: "true"
+  WRITER_WITNESS_INTERNAL_URL: ${STAGING_WITNESS_URL:?required}
+  WRITER_WITNESS_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+  WRITER_WITNESS_CLIENT_KEY_ID: ${WEBAPP_IR_WITNESS_KEY_ID:?required}
+  WRITER_WITNESS_CLIENT_SECRET: ${WEBAPP_IR_WITNESS_SECRET:?required}
+  DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
+
+services:
+  bot_fi_db:
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${BOT_FI_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${BOT_FI_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${BOT_FI_POSTGRES_DB:?required}
+    volumes: [bot_fi_postgres:/var/lib/postgresql/data]
+    networks: [bot_fi]
+
+  bot_fi_redis:
+    <<: *redis
+    volumes: [bot_fi_redis:/data]
+    networks: [bot_fi]
+
+  bot_fi_migration:
+    <<: *app
+    restart: "no"
+    command: [python, manage.py]
+    environment: &bot_env
+      <<: *three_site
+      SERVER_MODE: foreign
+      LOGICAL_AUTHORITY: foreign
+      PHYSICAL_SITE: bot_fi
+      DATABASE_URL: postgresql+asyncpg://${BOT_FI_POSTGRES_USER}:${BOT_FI_POSTGRES_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${BOT_FI_POSTGRES_USER}:${BOT_FI_POSTGRES_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: ${BOT_FI_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${BOT_FI_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${BOT_FI_POSTGRES_DB}
+      REDIS_URL: redis://bot_fi_redis:6379/0
+      REDIS_HOST: bot_fi_redis
+      DR_SYNC_PEER_URLS_JSON: ${BOT_FI_DR_PEERS_JSON:?required}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${BOT_FI_DR_PAIRWISE_KEYS_JSON:?required}
+    depends_on: {bot_fi_db: {condition: service_healthy}}
+    networks: [bot_fi, dr_control]
+
+  bot_fi_api:
+    <<: *app
+    command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment: {<<: *bot_env, TRADING_BOT_SERVICE: api}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - bot_fi_uploads:/app/uploads
+      - bot_fi_audit:/app/audit_trail
+    ports: ["127.0.0.1:8211:8000"]
+    depends_on:
+      bot_fi_migration: {condition: service_completed_successfully}
+      bot_fi_redis: {condition: service_started}
+    networks: [bot_fi, dr_control]
+
+  bot_fi_bot:
+    <<: *app
+    command: [python, run_bot.py]
+    environment: {<<: *bot_env, TRADING_BOT_SERVICE: bot}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - bot_fi_audit:/app/audit_trail
+    depends_on: {bot_fi_api: {condition: service_started}}
+    networks: [bot_fi, dr_control]
+
+  bot_fi_dr_delivery:
+    <<: *app
+    command: [python, -m, core.dr_delivery_worker]
+    environment: {<<: *bot_env, TRADING_BOT_SERVICE: dr_delivery_worker}
+    depends_on: {bot_fi_api: {condition: service_started}}
+    networks: [bot_fi, dr_control]
+
+  webapp_fi_db:
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${WEBAPP_FI_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${WEBAPP_FI_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${WEBAPP_FI_POSTGRES_DB:?required}
+    volumes: [webapp_fi_postgres:/var/lib/postgresql/data]
+    networks: [webapp_fi]
+
+  webapp_fi_redis:
+    <<: *redis
+    volumes: [webapp_fi_redis:/data]
+    networks: [webapp_fi]
+
+  webapp_fi_migration:
+    <<: *app
+    restart: "no"
+    command: [python, manage.py]
+    environment: *webapp_fi_owner_env
+    depends_on:
+      webapp_fi_db_roles: {condition: service_completed_successfully}
+    networks: [webapp_fi, dr_control]
+
+  webapp_fi_db_roles:
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_three_site_database_roles.py, --role-prefix, webapp_fi]
+    environment:
+      <<: *webapp_fi_owner_env
+      THREE_SITE_APP_DB_PASSWORD: ${WEBAPP_FI_APP_DB_PASSWORD:?required}
+      THREE_SITE_PROJECTION_DB_PASSWORD: ${WEBAPP_FI_PROJECTION_DB_PASSWORD:?required}
+      THREE_SITE_CONTROL_DB_PASSWORD: ${WEBAPP_FI_CONTROL_DB_PASSWORD:?required}
+    depends_on: {webapp_fi_db: {condition: service_healthy}}
+    networks: [webapp_fi]
+
+  webapp_fi_db_fencing:
+    <<: *app
+    restart: "no"
+    command:
+      - python
+      - scripts/activate_three_site_database_fencing.py
+      - --site
+      - webapp_fi
+      - --application-role
+      - webapp_fi_app
+      - --projection-role
+      - webapp_fi_projection
+      - --control-role
+      - webapp_fi_control
+      - --operator
+      - staging-compose
+      - --apply
+      - --confirm
+      - ENABLE-THREE-SITE-DATABASE-FENCING
+    environment: *webapp_fi_owner_env
+    depends_on: {webapp_fi_migration: {condition: service_completed_successfully}}
+    networks: [webapp_fi]
+
+  webapp_fi_api:
+    <<: *app
+    command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment: {<<: *webapp_fi_env, TRADING_BOT_SERVICE: api}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_fi_uploads:/app/uploads
+      - webapp_fi_audit:/app/audit_trail
+    ports: ["127.0.0.1:8212:8000"]
+    depends_on:
+      webapp_fi_db_fencing: {condition: service_completed_successfully}
+      webapp_fi_redis: {condition: service_started}
+    networks: [webapp_fi, dr_control]
+
+  webapp_fi_dr_delivery:
+    <<: *app
+    command: [python, -m, core.dr_delivery_worker]
+    environment: {<<: *webapp_fi_env, TRADING_BOT_SERVICE: dr_delivery_worker}
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    networks: [webapp_fi, dr_control]
+
+  webapp_fi_dr_projection:
+    <<: *app
+    command: [python, -m, core.dr_projection_worker]
+    environment: {<<: *webapp_fi_env, TRADING_BOT_SERVICE: dr_projection_worker}
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    networks: [webapp_fi, dr_control]
+
+  webapp_fi_effects:
+    <<: *app
+    command: [python, scripts/run_dr_effect_worker.py]
+    environment: {<<: *webapp_fi_env, TRADING_BOT_SERVICE: dr_effect_worker, DR_EFFECT_WORKER_ENABLED: "true"}
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    networks: [webapp_fi, dr_control]
+
+  webapp_fi_blobs:
+    <<: *app
+    command: [python, -m, core.dr_blob_worker]
+    environment: {<<: *webapp_fi_env, TRADING_BOT_SERVICE: dr_blob_worker}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_fi_uploads:/app/uploads
+      - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    networks: [webapp_fi, dr_control]
+
+  webapp_ir_db:
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${WEBAPP_IR_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${WEBAPP_IR_POSTGRES_DB:?required}
+    volumes: [webapp_ir_postgres:/var/lib/postgresql/data]
+    networks: [webapp_ir]
+
+  webapp_ir_redis:
+    <<: *redis
+    volumes: [webapp_ir_redis:/data]
+    networks: [webapp_ir]
+
+  webapp_ir_migration:
+    <<: *app
+    restart: "no"
+    command: [python, manage.py]
+    environment: *webapp_ir_owner_env
+    depends_on:
+      webapp_ir_db_roles: {condition: service_completed_successfully}
+    networks: [webapp_ir, dr_control]
+
+  webapp_ir_db_roles:
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_three_site_database_roles.py, --role-prefix, webapp_ir]
+    environment:
+      <<: *webapp_ir_owner_env
+      THREE_SITE_APP_DB_PASSWORD: ${WEBAPP_IR_APP_DB_PASSWORD:?required}
+      THREE_SITE_PROJECTION_DB_PASSWORD: ${WEBAPP_IR_PROJECTION_DB_PASSWORD:?required}
+      THREE_SITE_CONTROL_DB_PASSWORD: ${WEBAPP_IR_CONTROL_DB_PASSWORD:?required}
+    depends_on: {webapp_ir_db: {condition: service_healthy}}
+    networks: [webapp_ir]
+
+  webapp_ir_db_fencing:
+    <<: *app
+    restart: "no"
+    command:
+      - python
+      - scripts/activate_three_site_database_fencing.py
+      - --site
+      - webapp_ir
+      - --application-role
+      - webapp_ir_app
+      - --projection-role
+      - webapp_ir_projection
+      - --control-role
+      - webapp_ir_control
+      - --operator
+      - staging-compose
+      - --apply
+      - --confirm
+      - ENABLE-THREE-SITE-DATABASE-FENCING
+    environment: *webapp_ir_owner_env
+    depends_on: {webapp_ir_migration: {condition: service_completed_successfully}}
+    networks: [webapp_ir]
+
+  webapp_ir_api:
+    <<: *app
+    command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment: {<<: *webapp_ir_env, TRADING_BOT_SERVICE: api}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads
+      - webapp_ir_audit:/app/audit_trail
+    ports: ["127.0.0.1:8213:8000"]
+    depends_on:
+      webapp_ir_db_fencing: {condition: service_completed_successfully}
+      webapp_ir_redis: {condition: service_started}
+    networks: [webapp_ir, dr_control]
+
+  webapp_ir_dr_delivery:
+    <<: *app
+    command: [python, -m, core.dr_delivery_worker]
+    environment: {<<: *webapp_ir_env, TRADING_BOT_SERVICE: dr_delivery_worker}
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    networks: [webapp_ir, dr_control]
+
+  webapp_ir_dr_projection:
+    <<: *app
+    command: [python, -m, core.dr_projection_worker]
+    environment: {<<: *webapp_ir_env, TRADING_BOT_SERVICE: dr_projection_worker}
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    networks: [webapp_ir, dr_control]
+
+  webapp_ir_effects:
+    <<: *app
+    command: [python, scripts/run_dr_effect_worker.py]
+    environment: {<<: *webapp_ir_env, TRADING_BOT_SERVICE: dr_effect_worker, DR_EFFECT_WORKER_ENABLED: "true"}
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    networks: [webapp_ir, dr_control]
+
+  webapp_ir_blobs:
+    <<: *app
+    command: [python, -m, core.dr_blob_worker]
+    environment: {<<: *webapp_ir_env, TRADING_BOT_SERVICE: dr_blob_worker}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads
+      - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    networks: [webapp_ir, dr_control]
+
+  witness_db:
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${WITNESS_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${WITNESS_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${WITNESS_POSTGRES_DB:?required}
+    volumes: [witness_postgres:/var/lib/postgresql/data]
+    networks: [witness]
+
+  witness_api:
+    <<: *app
+    command: [uvicorn, writer_witness_app:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      TZ: UTC
+      ENVIRONMENT: staging
+      WRITER_WITNESS_DATABASE_URL: postgresql+asyncpg://${WITNESS_POSTGRES_USER}:${WITNESS_POSTGRES_PASSWORD}@witness_db/${WITNESS_POSTGRES_DB}
+      WRITER_WITNESS_RELEASE_SHA: ${STAGING_RELEASE_SHA}
+      WRITER_WITNESS_SERVICE_ENABLED: "true"
+      WRITER_WITNESS_PRIVATE_KEY_FILE: /run/witness-signing/private.key
+      WRITER_WITNESS_SERVICE_WEBAPP_FI_KEY_ID: ${WEBAPP_FI_WITNESS_KEY_ID:?required}
+      WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET: ${WEBAPP_FI_WITNESS_SECRET:?required}
+      WRITER_WITNESS_SERVICE_WEBAPP_IR_KEY_ID: ${WEBAPP_IR_WITNESS_KEY_ID:?required}
+      WRITER_WITNESS_SERVICE_WEBAPP_IR_SECRET: ${WEBAPP_IR_WITNESS_SECRET:?required}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_WITNESS_SIGNING_KEY:?required}:/run/witness-signing/private.key:ro
+      - witness_audit:/app/audit_trail
+    ports: ["127.0.0.1:8214:8000"]
+    depends_on: {witness_migration: {condition: service_completed_successfully}}
+    networks: [witness, dr_control]
+
+  witness_migration:
+    image: postgres:15-alpine
+    restart: "no"
+    environment:
+      PGPASSWORD: ${WITNESS_POSTGRES_PASSWORD:?required}
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        if [ "$$(psql -h witness_db -U "$${WITNESS_POSTGRES_USER}" -d "$${WITNESS_POSTGRES_DB}" -tAc
+        "SELECT to_regclass('public.writer_witness_schema_version') IS NOT NULL")" != "t" ]; then
+        psql -v ON_ERROR_STOP=1 -h witness_db -U "$${WITNESS_POSTGRES_USER}" -d "$${WITNESS_POSTGRES_DB}"
+        -f /schema/001_initial.sql; fi
+    env_file: ${THREE_SITE_STAGING_ENV_FILE:-../../.env.three-site.staging}
+    volumes:
+      - ../writer-witness/001_initial.sql:/schema/001_initial.sql:ro
+    depends_on: {witness_db: {condition: service_healthy}}
+    networks: [witness]
+
+  bot_fi_dr_tls:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/bot-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_BOT_FI_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_BOT_FI_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {bot_fi_api: {condition: service_started}}
+    networks: [bot_fi, dr_control]
+    logging: *logging
+
+  webapp_fi_dr_tls:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/webapp-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_WEBAPP_FI_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_WEBAPP_FI_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    networks: [webapp_fi, dr_control]
+    logging: *logging
+
+  webapp_ir_dr_tls:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/webapp-ir-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_WEBAPP_IR_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_WEBAPP_IR_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    networks: [webapp_ir, dr_control]
+    logging: *logging
+
+  witness_dr_tls:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/witness-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_WITNESS_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_WITNESS_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {witness_api: {condition: service_started}}
+    networks: [witness, dr_control]
+    logging: *logging
+
+networks:
+  bot_fi: {internal: true}
+  webapp_fi: {internal: true}
+  webapp_ir: {internal: true}
+  witness: {internal: true}
+  dr_control: {}
+
+volumes:
+  bot_fi_postgres: {}
+  bot_fi_redis: {}
+  bot_fi_uploads: {}
+  bot_fi_audit: {}
+  webapp_fi_postgres: {}
+  webapp_fi_redis: {}
+  webapp_fi_uploads: {}
+  webapp_fi_audit: {}
+  webapp_ir_postgres: {}
+  webapp_ir_redis: {}
+  webapp_ir_uploads: {}
+  webapp_ir_audit: {}
+  witness_postgres: {}
+  witness_audit: {}
