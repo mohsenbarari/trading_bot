@@ -435,12 +435,17 @@ def main(argv: list[str] | None = None) -> int:
             ).run(suite)
             captured_warnings = list(warning_records)
     finally:
-        sys.unraisablehook = previous_unraisable_hook
         if evidence_log is not None:
             evidence_log.close()
 
-    gc.collect()
-    fd_after_snapshot = _open_fd_snapshot()
+    try:
+        # Keep the evidence hook installed through deterministic finalization.
+        # Otherwise a late __del__ ResourceWarning can be printed after the
+        # JSON verdict and escape the report entirely.
+        gc.collect()
+        fd_after_snapshot = _open_fd_snapshot()
+    finally:
+        sys.unraisablehook = previous_unraisable_hook
     fd_before = None if fd_before_snapshot is None else len(fd_before_snapshot)
     fd_after = None if fd_after_snapshot is None else len(fd_after_snapshot)
     fd_growth = (

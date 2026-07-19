@@ -1191,6 +1191,8 @@ Telegram، `retry_after` را برای درخواست ناموفق ناشی از
 
 هر هشت اصلاح source-local این remediation پیاده شده و با unit، mutation، PostgreSQL و Redis scratch متمرکز بازبینی شده‌اند. ترتیب باقی‌مانده: commit جانشین، بازاجرای suiteهای گسترده و اسکن source/evidence بر روی exact clean SHA، push، تولید bundle مقید به همان SHA و سپس re-review مستقل ChatGPT Pro. هیچ ادعایی درباره شواهد زنده در این برش وجود ندارد. تست نهایی `1800+400` تا GO بازبین و مجوز جداگانه staging اجرا نمی‌شود.
 
+خودممیزی evidence نیز یک gap دیرهنگام را بست: hook مربوط به `unraisable` تا پس از GC نهایی فعال می‌ماند تا `ResourceWarning` نتواند پس از verdict JSON پنهان شود. تست exception در request-logging نیز dispatch خود middleware را مستقیم می‌سنجد تا leak شناخته‌شدهٔ exception path در `BaseHTTPMiddleware` به‌اشتباه از runner پنهان یا به کد صف نسبت داده نشود.
+
 ## 14. معیار پذیرش نهایی
 
 - پیش از شروع Stage 3، تصمیم‌های بخش 13.12 به ADRهای بخش 13.6 استخراج، قرارداد pure با `M0` تا `M7` بازنویسی و تمام تست‌های Stage 2 دوباره پاس شده باشند. گیت اولیه در `2026-07-16` با شش ADR، `44` تست قرارداد و `171` تست هدفمند پاس شد؛ ADR هفتم بعد از تصمیم editor افزوده و با چالش `C68` اصلاح شد و پیش از فعال‌سازی runtime باید تست‌های `C62..C68/N19` نیز پاس شوند.

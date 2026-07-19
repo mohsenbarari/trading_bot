@@ -35,6 +35,7 @@ The remediation self-review found and closed several proof-quality gaps beyond t
 - callback effects were not receiver-required in the new oracle; trade and manual-expiry callbacks now require independent receiver evidence;
 - fault durable state was only required to be non-empty; it is now checked against a code-owned per-case allowlist;
 - provider-fact barrier deferral was initially represented as a pre-dispatch worker error; it is now a short controlled retry with no `last_error`.
+- the exact-SHA evidence runner restored `sys.unraisablehook` before its final garbage collection, allowing a late finalizer warning to appear after the JSON verdict; the hook now covers finalization, and request-logging's exception assertion exercises the middleware dispatch directly instead of conflating it with Starlette's known `BaseHTTPMiddleware` exception-stream lifecycle.
 
 ## Evidence contract
 
