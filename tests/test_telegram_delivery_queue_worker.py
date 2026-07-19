@@ -803,6 +803,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         market_feeder_started = asyncio.Event()
         scheduled_feeder_started = asyncio.Event()
         offer_feeder_started = asyncio.Event()
+        reconciliation_started = asyncio.Event()
+        provider_outcome_replay_started = asyncio.Event()
+        retention_started = asyncio.Event()
         all_started = asyncio.Event()
 
         async def lane_loop(lane):
@@ -901,6 +904,26 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 all_started.set()
             await asyncio.Event().wait()
 
+        async def reconciliation_loop(*, lanes):
+            self.assertEqual(
+                {lane.bot_identity for lane in lanes},
+                {"primary", "channel_editor"},
+            )
+            reconciliation_started.set()
+            await asyncio.Event().wait()
+
+        async def provider_outcome_replay_loop(*, lifecycle_feedbacks):
+            self.assertEqual(
+                set(lifecycle_feedbacks),
+                {"primary", "channel_editor"},
+            )
+            provider_outcome_replay_started.set()
+            await asyncio.Event().wait()
+
+        async def retention_loop():
+            retention_started.set()
+            await asyncio.Event().wait()
+
         validator = AsyncMock()
         credentials = self._credentials(editor=True)
         limiter = _AllowLimiter()
@@ -918,6 +941,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
             side_effect=recovery_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_reconciliation_loop",
+            side_effect=reconciliation_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_provider_outcome_replay_loop",
+            side_effect=provider_outcome_replay_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_retention_loop",
+            side_effect=retention_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
             side_effect=trade_feeder_loop,
@@ -959,6 +991,14 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await asyncio.wait_for(all_started.wait(), timeout=1)
+            await asyncio.wait_for(
+                asyncio.gather(
+                    reconciliation_started.wait(),
+                    provider_outcome_replay_started.wait(),
+                    retention_started.wait(),
+                ),
+                timeout=1,
+            )
             self.assertEqual(started_lanes, {"primary", "channel_editor"})
             self.assertTrue(recovery_started.is_set())
             self.assertTrue(trade_feeder_started.is_set())
@@ -967,6 +1007,9 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(market_feeder_started.is_set())
             self.assertTrue(scheduled_feeder_started.is_set())
             self.assertTrue(offer_feeder_started.is_set())
+            self.assertTrue(reconciliation_started.is_set())
+            self.assertTrue(provider_outcome_replay_started.is_set())
+            self.assertTrue(retention_started.is_set())
             self.assertEqual(preflight.await_count, 2)
             self.assertEqual(
                 {call.kwargs["bot_identities"] for call in preflight.await_args_list},
@@ -1031,7 +1074,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             started.set()
             await asyncio.Event().wait()
 
-        async def idle_loop():
+        async def idle_loop(*_args, **_kwargs):
             await asyncio.Event().wait()
 
         validator = AsyncMock()
@@ -1049,6 +1092,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=lane_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_reconciliation_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_provider_outcome_replay_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_retention_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
@@ -1119,7 +1171,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         async def private_lane_loop(lane, **_kwargs):
             await lane_loop(lane)
 
-        async def idle_loop():
+        async def idle_loop(*_args, **_kwargs):
             await asyncio.Event().wait()
 
         validator = AsyncMock()
@@ -1140,6 +1192,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=private_lane_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_reconciliation_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_provider_outcome_replay_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_retention_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
@@ -1216,7 +1277,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                     all_deferred.set()
                 await asyncio.Event().wait()
 
-            async def idle_loop():
+            async def idle_loop(*_args, **_kwargs):
                 await asyncio.Event().wait()
 
             with self.subTest(rehydration=rehydration), patch(
@@ -1229,6 +1290,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=deferred_loop,
             ), patch(
                 "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
+                side_effect=idle_loop,
+            ), patch(
+                "core.telegram_delivery_queue_worker.telegram_delivery_reconciliation_loop",
+                side_effect=idle_loop,
+            ), patch(
+                "core.telegram_delivery_queue_worker.telegram_provider_outcome_replay_loop",
+                side_effect=idle_loop,
+            ), patch(
+                "core.telegram_delivery_queue_worker.telegram_delivery_retention_loop",
                 side_effect=idle_loop,
             ), patch(
                 "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
@@ -1291,7 +1361,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             deferred_started.set()
             await asyncio.Event().wait()
 
-        async def idle_loop():
+        async def idle_loop(*_args, **_kwargs):
             await asyncio.Event().wait()
 
         with patch(
@@ -1304,6 +1374,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=deferred_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_reconciliation_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_provider_outcome_replay_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_retention_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
@@ -1654,7 +1733,7 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 )
             return self._preflight_report(role)
 
-        async def idle_loop():
+        async def idle_loop(*_args, **_kwargs):
             await asyncio.Event().wait()
 
         validator = AsyncMock()
@@ -1669,6 +1748,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             side_effect=lane_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_delivery_queue_recovery_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_reconciliation_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_provider_outcome_replay_loop",
+            side_effect=idle_loop,
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_retention_loop",
             side_effect=idle_loop,
         ), patch(
             "core.telegram_delivery_queue_worker.telegram_trade_result_queue_handoff_loop",
