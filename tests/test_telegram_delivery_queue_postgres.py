@@ -1,5 +1,6 @@
 import asyncio
 from datetime import timedelta
+import json
 import os
 import re
 import subprocess
@@ -14,6 +15,9 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from core import telegram_delivery_queue_worker as queue_worker
+from core.telegram_delivery_queue_owner import (
+    acquire_telegram_delivery_queue_owner,
+)
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryDedupeConflictError,
@@ -310,6 +314,12 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         _run_alembic(sync_url, "upgrade", "head")
 
     async def asyncSetUp(self):
+        self.previous_process_owner_lease = (
+            queue_worker._active_process_owner_lease
+        )
+        queue_worker._active_process_owner_lease = SimpleNamespace(
+            assert_held=AsyncMock(return_value=None)
+        )
         _, async_url = DATABASE_URLS
         self.engine = create_async_engine(async_url, pool_pre_ping=True)
         self.Session = async_sessionmaker(
@@ -336,7 +346,73 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
 
+    async def test_two_processes_cannot_own_queue_executor_simultaneously(self):
+        sync_url, _ = DATABASE_URLS
+        environment = os.environ.copy()
+        environment["TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL"] = (
+            make_url(sync_url)
+            .set(drivername="postgresql")
+            .render_as_string(hide_password=False)
+        )
+        command = [
+            sys.executable,
+            "-m",
+            "scripts.probe_telegram_queue_owner_lock",
+        ]
+        first = subprocess.Popen(
+            [*command, "--hold"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=environment,
+        )
+        try:
+            first_line = first.stdout.readline()
+            if not first_line:
+                self.fail(
+                    "owner probe exited before readiness: "
+                    + (first.stderr.read() if first.stderr is not None else "")
+                )
+            self.assertTrue(json.loads(first_line)["acquired"])
+            second = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(second.returncode, 3, second.stderr)
+            self.assertFalse(json.loads(second.stdout)["acquired"])
+        finally:
+            if first.stdin is not None and first.poll() is None:
+                first.stdin.write("release\n")
+                first.stdin.flush()
+            first.wait(timeout=10)
+            for stream in (first.stdin, first.stdout, first.stderr):
+                if stream is not None:
+                    stream.close()
+        third = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual(third.returncode, 0, third.stderr)
+        self.assertTrue(json.loads(third.stdout)["acquired"])
+
+    async def test_process_owner_lease_verifies_real_session_lock(self):
+        lease = await acquire_telegram_delivery_queue_owner(self.engine)
+        try:
+            await lease.assert_held()
+        finally:
+            await lease.close()
+
     async def asyncTearDown(self):
+        queue_worker._active_process_owner_lease = (
+            self.previous_process_owner_lease
+        )
         await self.engine.dispose()
 
     @staticmethod

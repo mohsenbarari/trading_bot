@@ -15,15 +15,20 @@ from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping, Sequence
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from core.telegram_queue_stage4_workload import (
     STAGE4_DURATION_SECONDS,
+    STAGE4_EVIDENCE_TIMELINE_SECONDS,
     Stage4Workload,
     build_stage4_workload,
+    stage4_authoritative_result_constraints,
     validate_stage4_workload,
 )
 
 
-STAGE4_HARNESS_SCHEMA_VERSION = 2
+STAGE4_HARNESS_SCHEMA_VERSION = 3
 STAGE4_REQUIRED_FINGERPRINTS = frozenset(
     {
         "database",
@@ -51,14 +56,37 @@ STAGE4_LIVE_EVIDENCE_FILES = (
     "telegram_results.jsonl",
     "receiver_receipts.jsonl",
     "queue_metrics.jsonl",
+    "fault_executions.jsonl",
     "fault_results.jsonl",
     "cleanup_ledger.jsonl",
     "reconciliation.json",
     "acceptance.json",
     "security_scan.json",
 )
+STAGE4_ROLE_EVIDENCE_FILES = {
+    "sender": (
+        "preflight.json",
+        "telegram_results.jsonl",
+        "queue_metrics.jsonl",
+        "fault_executions.jsonl",
+    ),
+    "observer": (
+        "business_outcomes.jsonl",
+        "receiver_receipts.jsonl",
+        "fault_results.jsonl",
+        "cleanup_ledger.jsonl",
+        "reconciliation.json",
+        "acceptance.json",
+    ),
+}
+STAGE4_ATTESTATION_FILES = (
+    "execution_authorization.json",
+    "sender_attestation.json",
+    "observer_attestation.json",
+)
 _FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
 _RUN_ID = re.compile(r"^stage4-[a-z0-9][a-z0-9-]{5,80}$")
+_PLAN_NONCE = re.compile(r"^[0-9a-f]{64}$")
 _FORBIDDEN_CONFIG_KEYS = re.compile(
     r"(?:^|_)(?:token|secret|password|chat_id|channel_id|bot_id|telegram_id|"
     r"database_url|redis_url|user_id)(?:$|_)",
@@ -99,6 +127,394 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def stage4_observation_sha256(kind: str, row: Mapping[str, Any]) -> str:
+    """Bind an observation fingerprint to the complete canonical raw record."""
+    payload = {
+        key: value
+        for key, value in row.items()
+        if key not in {
+            "observation_sha256",
+            "provider_observation_sha256",
+            "receiver_observation_sha256",
+            "durable_observation_sha256",
+            "cleanup_observation_sha256",
+            "adapter_observation_sha256",
+        }
+    }
+    return "sha256:" + sha256_text(
+        f"telegram-stage4-{kind}-observation-v1:" + canonical_json(payload)
+    )
+
+
+def stage4_authoritative_state_sha256(state: Mapping[str, Any]) -> str:
+    """Return the code-owned digest of a complete synthetic offer snapshot."""
+    return "sha256:" + sha256_text(
+        "telegram-stage4-authoritative-offer-state-v1:" + canonical_json(state)
+    )
+
+
+def stage4_expected_authoritative_states(
+    trace: Iterable[Mapping[str, Any]],
+    outcomes_by_event: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any] | None]:
+    """Reconstruct raw offer snapshots from the trace and observed winners.
+
+    Losing concurrent requests observe the winner's terminal snapshot without
+    incrementing its version.  Returning raw snapshots prevents an arbitrary,
+    hash-shaped string from masquerading as authoritative state evidence.
+    """
+    rows = tuple(trace)
+    valid_by_offer = {
+        str(row["business_event_id"]): row
+        for row in rows
+        if row.get("event_type") == "offer_submit_valid"
+    }
+    expected: dict[str, dict[str, Any] | None] = {
+        str(row["event_id"]): None for row in rows
+    }
+    lifecycle_by_offer: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        if row.get("event_type") in {
+            "trade_request",
+            "manual_expiry_request",
+            "automatic_expiry",
+        }:
+            lifecycle_by_offer.setdefault(
+                str(row["business_event_id"]), []
+            ).append(row)
+
+    def snapshot(
+        *,
+        offer_id: str,
+        status: str,
+        remaining_lots: int,
+        state_version: int,
+        terminal_event_id: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "business_event_id": offer_id,
+            "status": status,
+            "remaining_lots": remaining_lots,
+            "state_version": state_version,
+            "terminal_event_id": terminal_event_id,
+        }
+
+    for offer_id, submit in valid_by_offer.items():
+        lot_count = int(submit["lot_count"])
+        submit_id = str(submit["event_id"])
+        confirm_id = f"confirm-{offer_id}"
+        if confirm_id not in outcomes_by_event:
+            raise Stage4HarnessValidationError(
+                "stage4_authoritative_state_confirmation_missing"
+            )
+        expected[submit_id] = snapshot(
+            offer_id=offer_id,
+            status="pending_confirmation",
+            remaining_lots=lot_count,
+            state_version=1,
+            terminal_event_id=None,
+        )
+        expected[confirm_id] = snapshot(
+            offer_id=offer_id,
+            status="active",
+            remaining_lots=lot_count,
+            state_version=2,
+            terminal_event_id=None,
+        )
+        lifecycle = lifecycle_by_offer.get(offer_id, [])
+        partials = [
+            row
+            for row in lifecycle
+            if outcomes_by_event[str(row["event_id"])].get(
+                "authoritative_result"
+            )
+            == "partial_trade_committed"
+        ]
+        terminals = [
+            row
+            for row in lifecycle
+            if outcomes_by_event[str(row["event_id"])].get(
+                "authoritative_result"
+            )
+            in {"trade_committed", "expiry_committed"}
+        ]
+        if len(partials) > 1 or len(terminals) != 1:
+            raise Stage4HarnessValidationError(
+                "stage4_authoritative_state_transition_cardinality_invalid"
+            )
+        partial_state: dict[str, Any] | None = None
+        if partials:
+            partial_event_id = str(partials[0]["event_id"])
+            partial_state = snapshot(
+                offer_id=offer_id,
+                status="active",
+                remaining_lots=max(1, lot_count - 1),
+                state_version=3,
+                terminal_event_id=None,
+            )
+            expected[partial_event_id] = partial_state
+        terminal = terminals[0]
+        terminal_event_id = str(terminal["event_id"])
+        terminal_result = str(
+            outcomes_by_event[terminal_event_id]["authoritative_result"]
+        )
+        terminal_state = snapshot(
+            offer_id=offer_id,
+            status=(
+                "traded" if terminal_result == "trade_committed" else "expired"
+            ),
+            remaining_lots=(
+                0
+                if terminal_result == "trade_committed"
+                else (
+                    int(partial_state["remaining_lots"])
+                    if partial_state is not None
+                    else lot_count
+                )
+            ),
+            state_version=4 if partial_state is not None else 3,
+            terminal_event_id=terminal_event_id,
+        )
+        expected[terminal_event_id] = terminal_state
+        winner_committed_ms = outcomes_by_event[terminal_event_id].get(
+            "committed_elapsed_ms"
+        )
+        for row in lifecycle:
+            event_id = str(row["event_id"])
+            result = outcomes_by_event[event_id].get("authoritative_result")
+            if result == "rejected_conflict":
+                loser_committed_ms = outcomes_by_event[event_id].get(
+                    "committed_elapsed_ms"
+                )
+                if (
+                    isinstance(winner_committed_ms, bool)
+                    or not isinstance(winner_committed_ms, (int, float))
+                    or isinstance(loser_committed_ms, bool)
+                    or not isinstance(loser_committed_ms, (int, float))
+                    or float(loser_committed_ms) < float(winner_committed_ms)
+                ):
+                    raise Stage4HarnessValidationError(
+                        "stage4_authoritative_conflict_precedes_winner"
+                    )
+                expected[event_id] = terminal_state
+        if any(expected[str(row["event_id"])] is None for row in lifecycle):
+            raise Stage4HarnessValidationError(
+                "stage4_authoritative_state_transition_unresolved"
+            )
+    return expected
+
+
+def _active_delivery_obligations(
+    obligations: Iterable[Mapping[str, Any]],
+    outcomes_by_event: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    active: list[dict[str, Any]] = []
+    for raw in obligations:
+        row = dict(raw)
+        policy = str(row.get("activation_policy") or "")
+        if policy == "always":
+            if row.get("activation_results") != []:
+                raise Stage4HarnessValidationError(
+                    "stage4_delivery_activation_contract_invalid"
+                )
+            active.append(row)
+            continue
+        if policy != "authoritative_result":
+            raise Stage4HarnessValidationError(
+                "stage4_delivery_activation_contract_invalid"
+            )
+        event_id = str(row.get("activation_event_id") or "")
+        allowed = row.get("activation_results")
+        outcome = outcomes_by_event.get(event_id)
+        if not isinstance(allowed, list) or not allowed or outcome is None:
+            raise Stage4HarnessValidationError(
+                "stage4_delivery_activation_contract_invalid"
+            )
+        if outcome.get("authoritative_result") in set(allowed):
+            active.append(row)
+    return tuple(active)
+
+
+def _expected_receiver_rendered_offer_state(
+    obligation: Mapping[str, Any],
+    outcomes_by_event: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if (
+        obligation.get("destination_class") != "channel"
+        or not str(obligation.get("method") or "").startswith("editMessage")
+    ):
+        return None
+    state_event_id = str(obligation.get("required_state_event_id") or "")
+    outcome = outcomes_by_event.get(state_event_id)
+    state = outcome.get("authoritative_state") if outcome is not None else None
+    if not isinstance(state, Mapping):
+        raise Stage4HarnessValidationError(
+            "stage4_receiver_rendered_state_source_invalid"
+        )
+    return {
+        "status": state["status"],
+        "remaining_lots": state["remaining_lots"],
+        "action_buttons_present": state["status"] == "active",
+    }
+
+
+def verify_stage4_role_attestation(
+    root: Path,
+    *,
+    role: str,
+    manifest: Mapping[str, Any],
+    public_key: bytes,
+) -> None:
+    if role not in STAGE4_ROLE_EVIDENCE_FILES or len(public_key) != 32:
+        raise Stage4HarnessValidationError("stage4_evidence_trust_key_invalid")
+    envelope = _load_json(root / f"{role}_attestation.json")
+    if not isinstance(envelope, Mapping) or set(envelope) != {"payload", "signature"}:
+        raise Stage4HarnessValidationError("stage4_evidence_attestation_invalid")
+    payload = envelope.get("payload")
+    if not isinstance(payload, Mapping) or set(payload) != {
+        "schema_version",
+        "role",
+        "run_id",
+        "plan_nonce",
+        "trace_sha256",
+        "trust_policy_sha256",
+        "network_policy_sha256",
+        "driver_executable_sha256",
+        "started_at",
+        "completed_at",
+        "files",
+    }:
+        raise Stage4HarnessValidationError("stage4_evidence_attestation_invalid")
+    expected_files = set(STAGE4_ROLE_EVIDENCE_FILES[role])
+    files = payload.get("files")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("role") != role
+        or payload.get("run_id") != manifest["run_id"]
+        or payload.get("plan_nonce") != manifest["plan_nonce"]
+        or payload.get("trace_sha256") != manifest["trace_sha256"]
+        or payload.get("trust_policy_sha256") != manifest["trust_policy_sha256"]
+        or payload.get("network_policy_sha256")
+        != manifest["network_policy_fingerprints"][role]
+        or _FINGERPRINT.fullmatch(
+            "sha256:" + str(payload.get("driver_executable_sha256") or "")
+        )
+        is None
+        or payload.get("driver_executable_sha256")
+        != _load_json(root / "execution_authorization.json")[
+            "driver_executables_sha256"
+        ][role]
+        or not isinstance(files, Mapping)
+        or set(files) != expected_files
+        or any(
+            str(files[name]) != sha256_file(root / name)
+            for name in expected_files
+        )
+    ):
+        raise Stage4HarnessValidationError("stage4_evidence_attestation_mismatch")
+    try:
+        started = datetime.fromisoformat(str(payload["started_at"]).replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(str(payload["completed_at"]).replace("Z", "+00:00"))
+        if (
+            started.tzinfo is None
+            or completed.tzinfo is None
+            or completed < started
+        ):
+            raise ValueError("invalid attestation chronology")
+        signature = base64.b64decode(str(envelope["signature"]), validate=True)
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature, canonical_json(payload).encode("utf-8")
+        )
+    except (ValueError, TypeError, KeyError, InvalidSignature) as exc:
+        raise Stage4HarnessValidationError(
+            "stage4_evidence_attestation_signature_invalid"
+        ) from exc
+
+
+def _verify_stage4_execution_authorization_evidence(
+    root: Path,
+    *,
+    manifest: Mapping[str, Any],
+    public_key: bytes,
+) -> None:
+    authorization = _load_json(root / "execution_authorization.json")
+    expected_keys = {
+        "schema_version",
+        "allow_live_staging",
+        "authorization_id",
+        "run_id",
+        "plan_nonce",
+        "git_commit",
+        "trace_sha256",
+        "config_sha256",
+        "trust_policy_sha256",
+        "driver_commands_sha256",
+        "driver_executables_sha256",
+        "not_before",
+        "expires_at",
+        "signature",
+    }
+    if (
+        not isinstance(authorization, Mapping)
+        or set(authorization) != expected_keys
+        or len(public_key) != 32
+        or authorization.get("schema_version") != 2
+        or authorization.get("allow_live_staging") is not True
+        or authorization.get("run_id") != manifest["run_id"]
+        or authorization.get("plan_nonce") != manifest["plan_nonce"]
+        or authorization.get("git_commit") != manifest["git_commit"]
+        or authorization.get("trace_sha256") != manifest["trace_sha256"]
+        or authorization.get("config_sha256") != manifest["config_sha256"]
+        or authorization.get("trust_policy_sha256")
+        != manifest["trust_policy_sha256"]
+        or not str(authorization.get("authorization_id") or "").startswith(
+            "stage4-auth-"
+        )
+        or _FINGERPRINT.fullmatch(
+            "sha256:" + str(authorization.get("driver_commands_sha256") or "")
+        )
+        is None
+        or not isinstance(authorization.get("driver_executables_sha256"), Mapping)
+        or set(authorization["driver_executables_sha256"])
+        != {"sender", "observer"}
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", str(value or "")) is None
+            for value in authorization["driver_executables_sha256"].values()
+        )
+    ):
+        raise Stage4HarnessValidationError(
+            "stage4_execution_authorization_evidence_invalid"
+        )
+    try:
+        not_before = datetime.fromisoformat(
+            str(authorization["not_before"]).replace("Z", "+00:00")
+        )
+        expires_at = datetime.fromisoformat(
+            str(authorization["expires_at"]).replace("Z", "+00:00")
+        )
+        if (
+            not_before.tzinfo is None
+            or expires_at.tzinfo is None
+            or expires_at <= not_before
+            or (expires_at - not_before).total_seconds() > 3600
+        ):
+            raise ValueError("invalid authorization chronology")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise Stage4HarnessValidationError(
+            "stage4_execution_authorization_evidence_invalid"
+        ) from exc
+    payload = {key: value for key, value in authorization.items() if key != "signature"}
+    try:
+        signature = base64.b64decode(str(authorization["signature"]), validate=True)
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature, canonical_json(payload).encode("utf-8")
+        )
+    except (ValueError, TypeError, KeyError, InvalidSignature) as exc:
+        raise Stage4HarnessValidationError(
+            "stage4_execution_authorization_evidence_signature_invalid"
+        ) from exc
 
 
 def stage4_config_binding_sha256(config: Mapping[str, Any]) -> str:
@@ -177,17 +593,12 @@ def validate_stage4_run_config(
         raise Stage4HarnessValidationError(
             "stage4_network_policy_fingerprints_invalid"
         )
-    public_key_text = str(config.get("authorization_public_key") or "")
-    try:
-        public_key = base64.b64decode(public_key_text, validate=True)
-    except (ValueError, TypeError) as exc:
-        raise Stage4HarnessValidationError(
-            "stage4_authorization_public_key_invalid"
-        ) from exc
-    if len(public_key) != 32:
-        raise Stage4HarnessValidationError(
-            "stage4_authorization_public_key_invalid"
-        )
+    trust_policy_sha256 = str(config.get("trust_policy_sha256") or "")
+    if _FINGERPRINT.fullmatch(trust_policy_sha256) is None:
+        raise Stage4HarnessValidationError("stage4_trust_policy_fingerprint_invalid")
+    plan_nonce = str(config.get("plan_nonce") or "")
+    if _PLAN_NONCE.fullmatch(plan_nonce) is None:
+        raise Stage4HarnessValidationError("stage4_plan_nonce_invalid")
     limits = config.get("runtime_limits")
     if not isinstance(limits, Mapping) or {
         "staging_max_active_offers": int(limits.get("staging_max_active_offers", -1)),
@@ -217,7 +628,8 @@ def validate_stage4_run_config(
             key: str(network_policies[key])
             for key in sorted(STAGE4_NETWORK_POLICY_ROLES)
         },
-        "authorization_public_key": public_key_text,
+        "trust_policy_sha256": trust_policy_sha256,
+        "plan_nonce": plan_nonce,
         "provider_network_enabled": bool(live_execution),
     }
 
@@ -270,6 +682,17 @@ def stage4_fault_catalog() -> tuple[dict[str, Any], ...]:
         "http_429_integer_overflow": "integer:2147483648",
         "http_429_huge_integer": "integer:more-than-64-bit",
     }
+    retry_values: dict[str, Any] = {
+        "http_429_integer_one": 1,
+        "http_429_integer_max": 2_147_483_647,
+        "http_429_boolean_retry_after": True,
+        "http_429_string_retry_after": "1",
+        "http_429_fractional_retry_after": 0.5,
+        "http_429_zero_retry_after": 0,
+        "http_429_negative_retry_after": -1,
+        "http_429_integer_overflow": 2_147_483_648,
+        "http_429_huge_integer": 9_223_372_036_854_775_808,
+    }
     durable_states = {
         "ok_send_with_message_id": ("sent",),
         "ok_edit": ("sent", "sent_noop"),
@@ -312,14 +735,35 @@ def stage4_fault_catalog() -> tuple[dict[str, Any], ...]:
         "migrate_to_chat_id": ("blocked_destination",),
         "provider_fact_database_outage": ("sent", "sent_noop"),
     }
-    return tuple(
-        {
+    result: list[dict[str, Any]] = []
+    for case_id, expected in rows:
+        if case_id.startswith("http_429_"):
+            response_parameters = (
+                {}
+                if case_id == "http_429_missing_retry_after"
+                else {"retry_after": retry_values[case_id]}
+            )
+            injected_input = {
+                "http_status": 429,
+                "provider_body": {
+                    "ok": False,
+                    "error_code": 429,
+                    "response_parameters": response_parameters,
+                },
+            }
+        else:
+            injected_input = {
+                "controlled_fault_class": case_id,
+                "provider_body_kind": retry_shapes.get(case_id, case_id),
+            }
+        result.append({
             "case_id": case_id,
             "expected_disposition": expected,
             "required": True,
             "fault_injection_only": case_id not in {"ok_send_with_message_id", "ok_edit"},
-            "input_shape_sha256": sha256_text(
-                f"telegram-stage4-fault-shape-v1:{retry_shapes.get(case_id, case_id)}"
+            "injected_input": injected_input,
+            "input_shape_sha256": "sha256:" + sha256_text(
+                "telegram-stage4-fault-shape-v2:" + canonical_json(injected_input)
             ),
             "retry_after_source": (
                 "provider_integer"
@@ -331,9 +775,8 @@ def stage4_fault_catalog() -> tuple[dict[str, Any], ...]:
                 )
             ),
             "allowed_durable_states": list(durable_states[case_id]),
-        }
-        for case_id, expected in rows
-    )
+        })
+    return tuple(result)
 
 
 def stage4_stop_thresholds() -> dict[str, Any]:
@@ -362,8 +805,10 @@ def stage4_stop_thresholds() -> dict[str, Any]:
 def _expected_business_rows(
     events: Iterable[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], ...]:
+    event_rows = tuple(events)
+    constraints = stage4_authoritative_result_constraints(event_rows)
     rows: list[dict[str, Any]] = []
-    for event in events:
+    for event in event_rows:
         event_type = str(event["event_type"])
         if event_type == "offer_submit_valid":
             disposition = "accepted_with_durable_publication_and_private_confirmation"
@@ -390,6 +835,7 @@ def _expected_business_rows(
                 # or publication intent.
                 "response_receipt_required": True,
                 "response_catalog_id": event.get("response_catalog_id"),
+                **constraints[str(event["event_id"])],
             }
         )
     return tuple(rows)
@@ -403,15 +849,6 @@ def _delivery_obligation_rows(
     """Build the code-owned delivery oracle for the exact business trace."""
     event_rows = tuple(events)
     by_id = {str(row["event_id"]): row for row in event_rows}
-    valid_by_offer = {
-        str(row["business_event_id"]): row
-        for row in event_rows
-        if row["event_type"] == "offer_submit_valid"
-    }
-    trades_by_offer: dict[str, list[Mapping[str, Any]]] = {}
-    for row in event_rows:
-        if row["event_type"] == "trade_request":
-            trades_by_offer.setdefault(str(row["business_event_id"]), []).append(row)
     editor_role = (
         "channel_editor"
         if bot_mode == "primary-and-channel-editor"
@@ -429,11 +866,16 @@ def _delivery_obligation_rows(
         destination_class: str,
         response_catalog_id: str,
         allowed_outcomes: Sequence[str] = ("sent",),
-        receiver_policy: str = "required_on_provider_effect",
+        receiver_policy: str = "required_for_sent_or_noop",
         ordinal: int = 1,
         causal_dependency_ids: Sequence[str] = (),
+        activation_results: Sequence[str] = (),
+        required_state_event_id: str | None = None,
     ) -> None:
         source = by_id[source_event_id]
+        activation_policy = (
+            "authoritative_result" if activation_results else "always"
+        )
         obligations.append(
             {
                 "obligation_id": obligation_id,
@@ -449,8 +891,12 @@ def _delivery_obligation_rows(
                 "allowed_outcomes": list(allowed_outcomes),
                 "receiver_policy": receiver_policy,
                 "ordinal": ordinal,
-                "source_version": f"trace-event:{source_event_id}",
+                "source_version": f"domain-event:{source_event_id}",
                 "causal_dependency_ids": list(causal_dependency_ids),
+                "activation_policy": activation_policy,
+                "activation_event_id": source_event_id,
+                "activation_results": list(activation_results),
+                "required_state_event_id": required_state_event_id,
             }
         )
 
@@ -466,6 +912,7 @@ def _delivery_obligation_rows(
                 bot_role="primary",
                 destination_class="private",
                 response_catalog_id=str(event["response_catalog_id"]),
+                required_state_event_id=event_id,
             )
         elif event_type == "offer_confirm":
             add(
@@ -479,7 +926,9 @@ def _delivery_obligation_rows(
                 allowed_outcomes=("sent", "sent_noop"),
                 causal_dependency_ids=(
                     f"event:submit-{event['business_event_id']}",
+                    f"delivery:preview:submit-{event['business_event_id']}",
                 ),
+                required_state_event_id=event_id,
             )
             add(
                 obligation_id=f"publication:{event_id}",
@@ -492,26 +941,7 @@ def _delivery_obligation_rows(
                 causal_dependency_ids=(
                     f"event:{event_id}",
                 ),
-            )
-            valid = valid_by_offer[str(event["business_event_id"])]
-            if valid.get("manual_expiry_requested"):
-                terminal_kind = "offer_channel_manual_expiry_or_terminal_edit"
-            elif valid.get("trade_mode"):
-                terminal_kind = "offer_channel_trade_terminal_edit"
-            else:
-                terminal_kind = "offer_channel_automatic_expiry_edit"
-            add(
-                obligation_id=f"terminal-edit:{event_id}",
-                source_event_id=event_id,
-                kind=terminal_kind,
-                method="editMessageText",
-                bot_role=editor_role,
-                destination_class="channel",
-                response_catalog_id="offer.channel.terminal",
-                allowed_outcomes=("sent", "sent_noop"),
-                causal_dependency_ids=(
-                    f"delivery:publication:{event_id}",
-                ),
+                required_state_event_id=event_id,
             )
         elif event_type == "offer_submit_invalid":
             add(
@@ -533,6 +963,57 @@ def _delivery_obligation_rows(
                 destination_class="private",
                 response_catalog_id=str(event["response_catalog_id"]),
             )
+            for ordinal in (1, 2):
+                add(
+                    obligation_id=f"trade-party:{event_id}:{ordinal}",
+                    source_event_id=event_id,
+                    kind="trade_party_private_notification",
+                    method="sendMessage",
+                    bot_role="primary",
+                    destination_class="private",
+                    response_catalog_id="trade.party.notification",
+                    ordinal=ordinal,
+                    activation_results=(
+                        "partial_trade_committed",
+                        "trade_committed",
+                    ),
+                    causal_dependency_ids=(f"event:{event_id}",),
+                    required_state_event_id=event_id,
+                )
+            if event.get("partial") is True:
+                add(
+                    obligation_id=f"partial-edit:{event_id}",
+                    source_event_id=event_id,
+                    kind="offer_channel_partial_edit",
+                    method="editMessageText",
+                    bot_role=editor_role,
+                    destination_class="channel",
+                    response_catalog_id="offer.channel.partial",
+                    allowed_outcomes=("sent", "sent_noop", "superseded"),
+                    activation_results=("partial_trade_committed",),
+                    causal_dependency_ids=(
+                        f"delivery:publication:confirm-{event['business_event_id']}",
+                        f"event:{event_id}",
+                    ),
+                    required_state_event_id=event_id,
+                )
+            else:
+                add(
+                    obligation_id=f"terminal-edit:{event_id}",
+                    source_event_id=event_id,
+                    kind="offer_channel_trade_terminal_edit",
+                    method="editMessageText",
+                    bot_role=editor_role,
+                    destination_class="channel",
+                    response_catalog_id="offer.channel.terminal",
+                    allowed_outcomes=("sent", "sent_noop"),
+                    activation_results=("trade_committed",),
+                    causal_dependency_ids=(
+                        f"delivery:publication:confirm-{event['business_event_id']}",
+                        f"event:{event_id}",
+                    ),
+                    required_state_event_id=event_id,
+                )
         elif event_type == "manual_expiry_request":
             add(
                 obligation_id=f"expiry-callback:{event_id}",
@@ -542,6 +1023,39 @@ def _delivery_obligation_rows(
                 bot_role="primary",
                 destination_class="private",
                 response_catalog_id=str(event["response_catalog_id"]),
+            )
+            add(
+                obligation_id=f"terminal-edit:{event_id}",
+                source_event_id=event_id,
+                kind="offer_channel_manual_expiry_edit",
+                method="editMessageText",
+                bot_role=editor_role,
+                destination_class="channel",
+                response_catalog_id="offer.channel.terminal",
+                allowed_outcomes=("sent", "sent_noop"),
+                activation_results=("expiry_committed",),
+                causal_dependency_ids=(
+                    f"delivery:publication:confirm-{event['business_event_id']}",
+                    f"event:{event_id}",
+                ),
+                required_state_event_id=event_id,
+            )
+        elif event_type == "automatic_expiry":
+            add(
+                obligation_id=f"terminal-edit:{event_id}",
+                source_event_id=event_id,
+                kind="offer_channel_automatic_expiry_edit",
+                method="editMessageText",
+                bot_role=editor_role,
+                destination_class="channel",
+                response_catalog_id="offer.channel.terminal",
+                allowed_outcomes=("sent", "sent_noop"),
+                activation_results=("expiry_committed",),
+                causal_dependency_ids=(
+                    f"delivery:publication:confirm-{event['business_event_id']}",
+                    f"event:{event_id}",
+                ),
+                required_state_event_id=event_id,
             )
         elif event_type == "admin_broadcast_delivery":
             add(
@@ -553,7 +1067,7 @@ def _delivery_obligation_rows(
                 destination_class="private",
                 response_catalog_id=str(event["response_catalog_id"]),
             )
-        elif event_type == "market_status_change":
+        elif event_type == "market_status_notice":
             add(
                 obligation_id=f"market-notice:{event_id}",
                 source_event_id=event_id,
@@ -565,52 +1079,6 @@ def _delivery_obligation_rows(
                 causal_dependency_ids=(f"event:{event_id}",),
             )
 
-    for offer_id, valid in valid_by_offer.items():
-        trade_mode = valid.get("trade_mode")
-        trade_rows = sorted(
-            trades_by_offer.get(offer_id, ()),
-            key=lambda row: (int(row["at_ms"]), str(row["event_id"])),
-        )
-        successful_trade_rows: list[Mapping[str, Any]] = []
-        if trade_mode == "normal" and trade_rows:
-            successful_trade_rows = trade_rows[:1]
-        elif trade_mode == "concurrent" and trade_rows:
-            if valid.get("race_expected_winner") != "expiry":
-                successful_trade_rows = trade_rows[:1]
-        elif trade_mode == "partial_then_complete":
-            successful_trade_rows = trade_rows
-            if trade_rows:
-                add(
-                    obligation_id=f"partial-edit:{offer_id}",
-                    source_event_id=str(trade_rows[0]["event_id"]),
-                    kind="offer_channel_partial_edit",
-                    method="editMessageText",
-                    bot_role=editor_role,
-                    destination_class="channel",
-                    response_catalog_id="offer.channel.partial",
-                    allowed_outcomes=("sent", "sent_noop", "superseded"),
-                    causal_dependency_ids=(
-                        f"delivery:publication:confirm-{offer_id}",
-                        f"event:{trade_rows[0]['event_id']}",
-                    ),
-                )
-        for trade_row in successful_trade_rows:
-            for ordinal in (1, 2):
-                add(
-                    obligation_id=(
-                        f"trade-party:{trade_row['event_id']}:{ordinal}"
-                    ),
-                    source_event_id=str(trade_row["event_id"]),
-                    kind="trade_party_private_notification",
-                    method="sendMessage",
-                    bot_role="primary",
-                    destination_class="private",
-                    response_catalog_id="trade.party.notification",
-                    ordinal=ordinal,
-                    causal_dependency_ids=(
-                        f"event:{trade_row['event_id']}",
-                    ),
-                )
     return tuple(
         sorted(obligations, key=lambda row: str(row["obligation_id"]))
     )
@@ -705,6 +1173,7 @@ def write_stage4_plan(
         manifest = {
             "schema_version": STAGE4_HARNESS_SCHEMA_VERSION,
             "run_id": safe["run_id"],
+            "plan_nonce": safe["plan_nonce"],
             "environment": safe["environment"],
             "bot_mode": safe["bot_mode"],
             "seed": int(seed),
@@ -717,6 +1186,7 @@ def write_stage4_plan(
             "staging_fingerprints": safe["staging_fingerprints"],
             "runtime_limits": safe["runtime_limits"],
             "network_policy_fingerprints": safe["network_policy_fingerprints"],
+            "trust_policy_sha256": safe["trust_policy_sha256"],
             "files": files,
         }
         _write_json(root / "manifest.json", manifest)
@@ -764,6 +1234,8 @@ def verify_stage4_plan(output_dir: Path) -> dict[str, Any]:
     manifest = _load_json(root / "manifest.json")
     if int(manifest.get("schema_version", 0)) != STAGE4_HARNESS_SCHEMA_VERSION:
         raise Stage4HarnessValidationError("stage4_manifest_schema_invalid")
+    if _PLAN_NONCE.fullmatch(str(manifest.get("plan_nonce") or "")) is None:
+        raise Stage4HarnessValidationError("stage4_manifest_plan_nonce_invalid")
     if manifest.get("provider_network_enabled") is not False:
         raise Stage4HarnessValidationError("stage4_plan_provider_network_must_be_disabled")
     declared = manifest.get("files")
@@ -813,10 +1285,34 @@ def verify_stage4_plan(output_dir: Path) -> dict[str, Any]:
     return manifest
 
 
-def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
+def _verify_stage4_live_evidence_unchecked(
+    output_dir: Path,
+    *,
+    evidence_public_keys: Mapping[str, bytes],
+) -> dict[str, Any]:
     """Fail closed unless sender, receiver, cleanup and reconciliation agree."""
     root = Path(output_dir)
     manifest = verify_stage4_plan(root)
+    if set(evidence_public_keys) != {"authorization", "sender", "observer"}:
+        raise Stage4HarnessValidationError("stage4_evidence_trust_keys_required")
+    for filename in STAGE4_ATTESTATION_FILES:
+        path = root / filename
+        if not path.is_file() or path.is_symlink():
+            raise Stage4HarnessValidationError(
+                f"stage4_live_evidence_missing:{filename}"
+            )
+    _verify_stage4_execution_authorization_evidence(
+        root,
+        manifest=manifest,
+        public_key=evidence_public_keys["authorization"],
+    )
+    for role in ("sender", "observer"):
+        verify_stage4_role_attestation(
+            root,
+            role=role,
+            manifest=manifest,
+            public_key=evidence_public_keys[role],
+        )
     for filename in STAGE4_LIVE_EVIDENCE_FILES:
         path = root / filename
         if not path.is_file() or path.is_symlink():
@@ -860,8 +1356,14 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         or set(outcomes_by_event) != set(expected_by_event)
     ):
         raise Stage4HarnessValidationError("stage4_business_outcome_ledger_mismatch")
+    valid_offer_ids = {
+        str(row["business_event_id"])
+        for row in trace
+        if row["event_type"] == "offer_submit_valid"
+    }
     for event_id, expected_row in expected_by_event.items():
         observed = outcomes_by_event[event_id]
+        allowed_results = set(expected_row["allowed_authoritative_results"])
         required = {
             "business_event_id": expected_row["business_event_id"],
             "event_type": expected_row["event_type"],
@@ -878,30 +1380,79 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
                 "stage4_business_outcome_value_mismatch"
             )
         observed_at_ms = observed.get("observed_at_ms")
+        state_required = str(expected_row["business_event_id"]) in valid_offer_ids
+        expected_fields = {
+            "event_id",
+            "business_event_id",
+            "event_type",
+            "observed_disposition",
+            "offer_delta",
+            "publication_intent_delta",
+            "response_catalog_id",
+            "status",
+            "observer_source",
+            "committed_elapsed_ms",
+            "observed_at_ms",
+            "authoritative_result",
+            "state_version",
+            "authoritative_state",
+            "state_sha256",
+            "observation_sha256",
+        }
+        if expected_row["authoritative_group_id"] is not None:
+            expected_fields.add("sender_release_elapsed_ms")
+        committed_at_ms = observed.get("committed_elapsed_ms")
         if (
+            set(observed) != expected_fields
+            or
             observed.get("observer_source") != "independent_database_observer"
             or isinstance(observed_at_ms, bool)
             or not isinstance(observed_at_ms, (int, float))
-            or float(observed_at_ms) < float(trace_by_event[event_id]["at_ms"])
-            or _FINGERPRINT.fullmatch(
-                str(observed.get("observation_sha256") or "")
+            or isinstance(committed_at_ms, bool)
+            or not isinstance(committed_at_ms, (int, float))
+            or float(committed_at_ms) < float(trace_by_event[event_id]["at_ms"])
+            or float(observed_at_ms) < float(committed_at_ms)
+            or observed.get("authoritative_result") not in allowed_results
+            or (
+                state_required
+                and (
+                    not str(observed.get("state_version") or "").startswith(
+                        "state:"
+                    )
+                    or not isinstance(observed.get("authoritative_state"), Mapping)
+                    or _FINGERPRINT.fullmatch(
+                        str(observed.get("state_sha256") or "")
+                    )
+                    is None
+                )
             )
-            is None
+            or (
+                not state_required
+                and (
+                    observed.get("state_version") is not None
+                    or observed.get("authoritative_state") is not None
+                    or observed.get("state_sha256") is not None
+                )
+            )
+            or observed.get("observation_sha256")
+            != stage4_observation_sha256("business", observed)
         ):
             raise Stage4HarnessValidationError(
                 "stage4_business_observer_evidence_invalid"
             )
 
-    race_groups: dict[str, list[dict[str, Any]]] = {}
-    for event_id, event in trace_by_event.items():
-        if event.get("expiry_trade_race") is True and event.get("event_type") in {
-            "trade_request",
-            "manual_expiry_request",
-        }:
-            race_groups.setdefault(str(event["business_event_id"]), []).append(event)
-    if len(race_groups) != 18:
-        raise Stage4HarnessValidationError("stage4_live_race_group_count_invalid")
-    for offer_id, group in race_groups.items():
+    competition_groups: dict[str, list[dict[str, Any]]] = {}
+    for event_id, expected_row in expected_by_event.items():
+        group_id = expected_row.get("authoritative_group_id")
+        if group_id is not None:
+            competition_groups.setdefault(str(group_id), []).append(
+                trace_by_event[event_id]
+            )
+    if len(competition_groups) != 162:
+        raise Stage4HarnessValidationError(
+            "stage4_live_competition_group_count_invalid"
+        )
+    for group_id, group in competition_groups.items():
         observed_group = [outcomes_by_event[str(event["event_id"])] for event in group]
         releases = [row.get("sender_release_elapsed_ms") for row in observed_group]
         if (
@@ -916,7 +1467,11 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             raise Stage4HarnessValidationError(
                 "stage4_live_race_release_skew_exceeded"
             )
-        expected_winner = str(group[0].get("race_expected_winner") or "")
+        group_rule = str(
+            expected_by_event[str(group[0]["event_id"])][
+                "authoritative_group_rule"
+            ]
+        )
         committed_trades = sum(
             row.get("authoritative_result") == "trade_committed"
             for event, row in zip(group, observed_group, strict=True)
@@ -927,28 +1482,64 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             for event, row in zip(group, observed_group, strict=True)
             if event["event_type"] == "manual_expiry_request"
         )
-        allowed_results = {
-            "trade_request": {"trade_committed", "rejected_conflict"},
-            "manual_expiry_request": {"expiry_committed", "rejected_conflict"},
-        }
-        if any(
-            row.get("authoritative_result")
-            not in allowed_results[str(event["event_type"])]
-            for event, row in zip(group, observed_group, strict=True)
-        ) or (
-            expected_winner == "trade"
+        if (
+            group_rule in {"trade", "exactly_one_trade"}
             and (committed_trades, committed_expiries) != (1, 0)
         ) or (
-            expected_winner == "expiry"
+            group_rule == "expiry"
             and (committed_trades, committed_expiries) != (0, 1)
-        ):
+        ) or group_rule not in {"trade", "expiry", "exactly_one_trade"}:
             raise Stage4HarnessValidationError(
-                f"stage4_live_race_authoritative_outcome_invalid:{offer_id}"
+                f"stage4_live_competition_authoritative_outcome_invalid:{group_id}"
             )
 
+    expected_states = stage4_expected_authoritative_states(
+        trace, outcomes_by_event
+    )
+    for event_id, state in expected_states.items():
+        observed = outcomes_by_event[event_id]
+        if state is None:
+            if (
+                observed.get("state_version") is not None
+                or observed.get("authoritative_state") is not None
+                or observed.get("state_sha256") is not None
+            ):
+                raise Stage4HarnessValidationError(
+                    "stage4_non_offer_authoritative_state_present"
+                )
+            continue
+        if (
+            observed.get("authoritative_state") != state
+            or observed.get("state_version") != f"state:{state['state_version']}"
+            or observed.get("state_sha256")
+            != stage4_authoritative_state_sha256(state)
+        ):
+            raise Stage4HarnessValidationError(
+                "stage4_authoritative_state_snapshot_mismatch"
+            )
+
+    terminal_by_offer: dict[str, list[str]] = {}
+    for event_id, observed in outcomes_by_event.items():
+        if observed.get("authoritative_result") in {
+            "trade_committed",
+            "expiry_committed",
+        }:
+            terminal_by_offer.setdefault(
+                str(observed["business_event_id"]), []
+            ).append(event_id)
+    if set(terminal_by_offer) != valid_offer_ids or any(
+        len(event_ids) != 1 for event_ids in terminal_by_offer.values()
+    ):
+        raise Stage4HarnessValidationError(
+            "stage4_live_terminal_state_cardinality_invalid"
+        )
+
     obligations = _load_jsonl(root / "delivery_obligations.jsonl")
+    active_obligations = _active_delivery_obligations(
+        obligations, outcomes_by_event
+    )
     obligations_by_id = {
-        str(row["obligation_id"]): row for row in obligations
+        str(row["obligation_id"]): row for row in active_obligations
     }
     for obligation in obligations:
         dependencies = obligation.get("causal_dependency_ids")
@@ -970,6 +1561,9 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             )
     telegram_results = _load_jsonl(root / "telegram_results.jsonl")
     result_ids = [str(row.get("delivery_id") or "") for row in telegram_results]
+    results_by_delivery = {
+        str(row.get("delivery_id") or ""): row for row in telegram_results
+    }
     results_by_obligation = {
         str(row.get("obligation_id") or ""): row for row in telegram_results
     }
@@ -977,6 +1571,7 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         not telegram_results
         or not all(result_ids)
         or len(set(result_ids)) != len(result_ids)
+        or len(results_by_delivery) != len(telegram_results)
         or len(results_by_obligation) != len(telegram_results)
         or set(results_by_obligation) != set(obligations_by_id)
     ):
@@ -1003,6 +1598,10 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             "provider_observation_sha256",
             "source_version",
             "causal_dependency_ids",
+            "source_state_sha256",
+            "payload_sha256",
+            "provider_message_fingerprint",
+            "target_message_fingerprint",
         }
         outcome = str(row.get("outcome") or "")
         expected_fields = {
@@ -1017,6 +1616,12 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         }
         enqueued_at = row.get("enqueued_elapsed_ms")
         completed_at = row.get("provider_completed_elapsed_ms")
+        required_state_event_id = obligation.get("required_state_event_id")
+        required_state_sha256 = (
+            outcomes_by_event[str(required_state_event_id)]["state_sha256"]
+            if required_state_event_id is not None
+            else None
+        )
         causal_order_invalid = any(
             (
                 dependency.startswith("event:")
@@ -1041,6 +1646,67 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             completed_at, bool
         ) else True
         provider_effect = 1 if outcome == "sent" else 0
+        method = str(obligation["method"])
+        provider_message_fingerprint = row.get("provider_message_fingerprint")
+        target_message_fingerprint = row.get("target_message_fingerprint")
+        payload_sha256 = row.get("payload_sha256")
+        message_identity_invalid = (
+            (
+                method == "sendMessage"
+                and (
+                    outcome == "sent"
+                    and (
+                        _FINGERPRINT.fullmatch(
+                            str(provider_message_fingerprint or "")
+                        )
+                        is None
+                    )
+                    or target_message_fingerprint is not None
+                )
+            )
+            or (
+                method.startswith("editMessage")
+                and (
+                    _FINGERPRINT.fullmatch(
+                        str(target_message_fingerprint or "")
+                    )
+                    is None
+                    or (
+                        outcome == "sent"
+                        and provider_message_fingerprint
+                        != target_message_fingerprint
+                    )
+                    or (
+                        outcome != "sent"
+                        and provider_message_fingerprint is not None
+                    )
+                )
+            )
+            or (
+                method == "answerCallbackQuery"
+                and (
+                    provider_message_fingerprint is not None
+                    or target_message_fingerprint is not None
+                )
+            )
+        )
+        target_delivery_dependency = next(
+            (
+                dependency.removeprefix("delivery:")
+                for dependency in obligation["causal_dependency_ids"]
+                if dependency.startswith("delivery:")
+            ),
+            None,
+        )
+        if method.startswith("editMessage") and target_delivery_dependency is not None:
+            dependency_message_fingerprint = results_by_obligation[
+                target_delivery_dependency
+            ].get("provider_message_fingerprint")
+            message_identity_invalid = (
+                message_identity_invalid
+                or target_message_fingerprint
+                != dependency_message_fingerprint
+            )
         if (
             set(row) != expected_result_fields
             or any(row.get(key) != value for key, value in expected_fields.items())
@@ -1050,14 +1716,24 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             or isinstance(completed_at, bool)
             or not isinstance(completed_at, (int, float))
             or float(enqueued_at) < float(obligation["source_at_ms"])
+            or (
+                required_state_event_id is not None
+                and float(enqueued_at)
+                < float(
+                    outcomes_by_event[str(required_state_event_id)][
+                        "committed_elapsed_ms"
+                    ]
+                )
+            )
             or float(completed_at) < float(enqueued_at)
             or causal_order_invalid
             or isinstance(row.get("provider_side_effect_count"), bool)
             or int(row.get("provider_side_effect_count", -1)) != provider_effect
-            or _FINGERPRINT.fullmatch(
-                str(row.get("provider_observation_sha256") or "")
-            )
-            is None
+            or row.get("source_state_sha256") != required_state_sha256
+            or _FINGERPRINT.fullmatch(str(payload_sha256 or "")) is None
+            or message_identity_invalid
+            or row.get("provider_observation_sha256")
+            != stage4_observation_sha256("provider", row)
         ):
             raise Stage4HarnessValidationError(
                 "stage4_telegram_obligation_result_invalid"
@@ -1070,9 +1746,12 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         delivery_id = str(row["delivery_id"])
         provider_effect_by_delivery[delivery_id] = provider_effect
         receiver_policy = str(obligation["receiver_policy"])
-        if receiver_policy == "required_on_provider_effect" and provider_effect == 1:
+        if receiver_policy == "required_for_sent_or_noop" and outcome in {
+            "sent",
+            "sent_noop",
+        }:
             receiver_required_ids.add(delivery_id)
-        elif receiver_policy not in {"required_on_provider_effect", "none"}:
+        elif receiver_policy not in {"required_for_sent_or_noop", "none"}:
             raise Stage4HarnessValidationError(
                 "stage4_delivery_receiver_policy_invalid"
             )
@@ -1083,25 +1762,71 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         len(set(receipt_ids)) != len(receipt_ids)
         or set(receipt_ids) != receiver_required_ids
         or any(
-            row.get("status") != "observed"
-            or _FINGERPRINT.fullmatch(
-                str(row.get("receiver_observation_sha256") or "")
-            )
-            is None
+            set(row)
+            != {
+                "delivery_id",
+                "status",
+                "observed_elapsed_ms",
+                "message_fingerprint",
+                "state_sha256",
+                "payload_sha256",
+                "rendered_offer_state",
+                "receiver_observation_sha256",
+            }
+            or row.get("status") != "observed"
             or isinstance(row.get("observed_elapsed_ms"), bool)
             or not isinstance(row.get("observed_elapsed_ms"), (int, float))
             or float(row["observed_elapsed_ms"])
-            < float(
-                next(
-                    result["provider_completed_elapsed_ms"]
-                    for result in telegram_results
-                    if result["delivery_id"] == row["delivery_id"]
-                )
+            < float(results_by_delivery[str(row["delivery_id"])]["provider_completed_elapsed_ms"])
+            or row.get("message_fingerprint")
+            != (
+                results_by_delivery[str(row["delivery_id"])][
+                    "target_message_fingerprint"
+                ]
+                if str(
+                    results_by_delivery[str(row["delivery_id"])]["method"]
+                ).startswith("editMessage")
+                else results_by_delivery[str(row["delivery_id"])][
+                    "provider_message_fingerprint"
+                ]
             )
+            or row.get("state_sha256")
+            != results_by_delivery[str(row["delivery_id"])]["source_state_sha256"]
+            or row.get("payload_sha256")
+            != results_by_delivery[str(row["delivery_id"])]["payload_sha256"]
+            or row.get("rendered_offer_state")
+            != _expected_receiver_rendered_offer_state(
+                obligations_by_id[
+                    results_by_delivery[str(row["delivery_id"])]["obligation_id"]
+                ],
+                outcomes_by_event,
+            )
+            or row.get("receiver_observation_sha256")
+            != stage4_observation_sha256("receiver", row)
             for row in receipts
         )
     ):
         raise Stage4HarnessValidationError("stage4_receiver_receipt_mismatch")
+
+    # A partial edit is useful only while its partial state is authoritative.
+    # If completion wins before the edit reaches Telegram, it must be recorded
+    # as superseded rather than displaying stale remaining lots.
+    terminal_commit_by_offer = {
+        str(row["business_event_id"]): float(row["committed_elapsed_ms"])
+        for row in outcomes
+        if row["authoritative_result"] in {"trade_committed", "expiry_committed"}
+    }
+    if any(
+        obligation["obligation_kind"] == "offer_channel_partial_edit"
+        and result["outcome"] in {"sent", "sent_noop"}
+        and float(result["provider_completed_elapsed_ms"])
+        >= terminal_commit_by_offer[str(obligation["business_event_id"])]
+        for obligation_id, obligation in obligations_by_id.items()
+        for result in (results_by_obligation[obligation_id],)
+    ):
+        raise Stage4HarnessValidationError(
+            "stage4_partial_edit_after_terminal_state"
+        )
 
     metrics = _load_jsonl(root / "queue_metrics.jsonl")
     elapsed_seconds = [row.get("elapsed_second") for row in metrics]
@@ -1111,7 +1836,7 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
             for value in elapsed_seconds
         )
         or len(set(elapsed_seconds)) != len(elapsed_seconds)
-        or not set(range(STAGE4_DURATION_SECONDS + 1)).issubset(
+        or not set(range(STAGE4_EVIDENCE_TIMELINE_SECONDS + 1)).issubset(
             set(elapsed_seconds)
         )
         or any(
@@ -1137,29 +1862,86 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
     ):
         raise Stage4HarnessValidationError("stage4_queue_not_drained")
 
+    catalog = {row["case_id"]: row for row in stage4_fault_catalog()}
+    fault_executions = _load_jsonl(root / "fault_executions.jsonl")
+    execution_by_id = {
+        str(row.get("case_id") or ""): row for row in fault_executions
+    }
+    if (
+        len(execution_by_id) != len(fault_executions)
+        or set(execution_by_id) != set(catalog)
+    ):
+        raise Stage4HarnessValidationError("stage4_fault_result_catalog_mismatch")
+    for case_id, execution in execution_by_id.items():
+        expected_fault = catalog[case_id]
+        if (
+            set(execution)
+            != {
+                "case_id",
+                "observed_disposition",
+                "injected_input",
+                "input_shape_sha256",
+                "retry_after_source",
+                "duplicate_provider_side_effect_count",
+                "provider_call_count",
+                "adapter_observation_sha256",
+            }
+            or execution.get("observed_disposition")
+            != expected_fault["expected_disposition"]
+            or execution.get("injected_input") != expected_fault["injected_input"]
+            or execution.get("input_shape_sha256")
+            != expected_fault["input_shape_sha256"]
+            or execution.get("input_shape_sha256")
+            != "sha256:" + sha256_text(
+                "telegram-stage4-fault-shape-v2:"
+                + canonical_json(execution["injected_input"])
+            )
+            or execution.get("retry_after_source")
+            != expected_fault["retry_after_source"]
+            or isinstance(
+                execution.get("duplicate_provider_side_effect_count"), bool
+            )
+            or int(execution.get("duplicate_provider_side_effect_count", -1)) != 0
+            or isinstance(execution.get("provider_call_count"), bool)
+            or int(execution.get("provider_call_count", -1)) != 1
+            or execution.get("adapter_observation_sha256")
+            != stage4_observation_sha256("adapter", execution)
+        ):
+            raise Stage4HarnessValidationError("stage4_fault_execution_mismatch")
+
     fault_results = _load_jsonl(root / "fault_results.jsonl")
     fault_by_id = {str(row.get("case_id") or ""): row for row in fault_results}
-    catalog = {row["case_id"]: row for row in stage4_fault_catalog()}
     if len(fault_by_id) != len(fault_results) or set(fault_by_id) != set(catalog):
         raise Stage4HarnessValidationError("stage4_fault_result_catalog_mismatch")
     for case_id, fault in fault_by_id.items():
         expected_fault = catalog[case_id]
+        expected_fields = {
+            "case_id",
+            "observer_source",
+            "durable_state",
+            "durable_record",
+            "durable_observation_sha256",
+        }
+        if case_id.startswith("http_429_"):
+            expected_fields.update(
+                {"retry_after_applied_seconds", "cooldown_deadline_source"}
+            )
+        durable_record = fault.get("durable_record")
         if (
-            fault.get("observed_disposition")
-            != expected_fault["expected_disposition"]
-            or fault.get("input_shape_sha256")
-            != expected_fault["input_shape_sha256"]
-            or fault.get("retry_after_source")
-            != expected_fault["retry_after_source"]
-            or int(fault.get("duplicate_provider_side_effect_count", -1)) != 0
-            or isinstance(fault.get("provider_call_count"), bool)
-            or int(fault.get("provider_call_count", -1)) != 1
+            set(fault) != expected_fields
+            or fault.get("observer_source") != "independent_database_observer"
             or fault.get("durable_state")
             not in expected_fault["allowed_durable_states"]
-            or _FINGERPRINT.fullmatch(
-                str(fault.get("durable_observation_sha256") or "")
+            or not isinstance(durable_record, Mapping)
+            or durable_record.get("state") != fault.get("durable_state")
+            or isinstance(
+                durable_record.get("duplicate_provider_side_effect_count"), bool
             )
-            is None
+            or durable_record.get("duplicate_provider_side_effect_count") != 0
+            or durable_record.get("retry_after_source")
+            != expected_fault["retry_after_source"]
+            or fault.get("durable_observation_sha256")
+            != stage4_observation_sha256("durable", fault)
         ):
             raise Stage4HarnessValidationError("stage4_fault_result_mismatch")
         if case_id.startswith("http_429_"):
@@ -1179,6 +1961,9 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
                 )
                 or fault.get("cooldown_deadline_source")
                 != expected_fault["retry_after_source"]
+                or durable_record.get("retry_after_applied_seconds") != applied
+                or durable_record.get("cooldown_deadline_source")
+                != expected_fault["retry_after_source"]
             ):
                 raise Stage4HarnessValidationError(
                     "stage4_fault_retry_after_evidence_invalid"
@@ -1196,10 +1981,8 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         or int(row["observer_before_count"]) < 1
         or isinstance(row.get("observer_after_count"), bool)
         or int(row.get("observer_after_count", -1)) != 0
-        or _FINGERPRINT.fullmatch(
-            str(row.get("cleanup_observation_sha256") or "")
-        )
-        is None
+        or row.get("cleanup_observation_sha256")
+        != stage4_observation_sha256("cleanup", row)
         for row in cleanup
     ):
         raise Stage4HarnessValidationError("stage4_cleanup_ledger_incomplete")
@@ -1243,7 +2026,7 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         "invalid_offer_publication_intents": 0,
         "cross_lane_route_mutations": 0,
         "backlog_caused_disablements": backlog_disablements,
-        "delivery_obligation_count": len(obligations),
+        "delivery_obligation_count": len(active_obligations),
         "provider_side_effect_count": sum(provider_effect_by_delivery.values()),
     }
     if reconciliation != expected_reconciliation:
@@ -1270,7 +2053,8 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         "backlog_caused_disablements": backlog_disablements,
     }
     criteria = {
-        "delivery_obligation_coverage": len(telegram_results) == len(obligations),
+        "delivery_obligation_coverage": len(telegram_results)
+        == len(active_obligations),
         "eligible_publication_before_deadline": recomputed_metrics[
             "eligible_publication_before_deadline_ratio"
         ]
@@ -1306,55 +2090,48 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
         raise Stage4HarnessValidationError("stage4_live_acceptance_not_clean")
 
     security_scan = _load_json(root / "security_scan.json")
-    required_scanned_files = {
+    exact_inventory = {
         "manifest.json",
         *STAGE4_PLAN_FILES,
-        *(name for name in STAGE4_LIVE_EVIDENCE_FILES if name != "security_scan.json"),
+        *STAGE4_LIVE_EVIDENCE_FILES,
+        *STAGE4_ATTESTATION_FILES,
     }
-    scanned_files = security_scan.get("scanned_files")
+    actual_entries = {entry.name for entry in root.iterdir()}
+    if actual_entries != exact_inventory or any(
+        not (root / name).is_file() or (root / name).is_symlink()
+        for name in exact_inventory
+    ):
+        raise Stage4HarnessValidationError("stage4_evidence_inventory_invalid")
+    # The verifier, not either driver, executes the scanner over every
+    # evidence input.  security_scan.json is the deterministic report of that
+    # operation and is the sole self-excluded artifact.
+    from scripts.scan_telegram_queue_artifacts import scan_paths
+
+    scan_targets = [
+        root / name for name in sorted(exact_inventory - {"security_scan.json"})
+    ]
+    recomputed_scan = scan_paths(scan_targets)
+    compared_keys = {
+        "schema_version",
+        "status",
+        "scanned_file_count",
+        "scanned_files",
+        "scanned_file_manifest_sha256",
+        "finding_count",
+        "findings",
+    }
     if (
-        int(security_scan.get("schema_version", 0)) not in {2, 3}
-        or not isinstance(scanned_files, list)
-        or isinstance(security_scan.get("scanned_file_count"), bool)
-        or int(security_scan.get("scanned_file_count", -1))
-        != len(scanned_files or [])
-        or _FINGERPRINT.fullmatch(
-            "sha256:"
-            + str(security_scan.get("scanned_file_manifest_sha256") or "")
+        recomputed_scan.get("status") != "clean"
+        or int(recomputed_scan.get("finding_count", -1)) != 0
+        or any(
+            security_scan.get(key) != recomputed_scan.get(key)
+            for key in compared_keys
         )
-        is None
-        or
-        security_scan.get("status") != "clean"
-        or int(security_scan.get("finding_count", -1)) != 0
-        or not required_scanned_files.issubset(
-            {str(name) for name in scanned_files or []}
-        )
+        or security_scan.get("self_excluded_file") != "security_scan.json"
+        or security_scan.get("self_excluded_reason")
+        != "verifier_generated_recursive_manifest"
     ):
         raise Stage4HarnessValidationError("stage4_security_scan_incomplete")
-    normalized_scanned_files = [str(name) for name in scanned_files]
-    if len(set(normalized_scanned_files)) != len(normalized_scanned_files):
-        raise Stage4HarnessValidationError("stage4_security_scan_file_invalid")
-    scan_manifest_rows: list[str] = []
-    for filename in normalized_scanned_files:
-        relative = Path(filename)
-        artifact = root / relative
-        if (
-            relative.is_absolute()
-            or relative.name != filename
-            or filename == "security_scan.json"
-            or not artifact.is_file()
-            or artifact.is_symlink()
-        ):
-            raise Stage4HarnessValidationError("stage4_security_scan_file_invalid")
-        blob = artifact.read_bytes()
-        scan_manifest_rows.append(
-            f"{filename}\t{hashlib.sha256(blob).hexdigest()}\t{len(blob)}"
-        )
-    recomputed_scan_manifest = hashlib.sha256(
-        ("\n".join(sorted(scan_manifest_rows)) + "\n").encode("utf-8")
-    ).hexdigest()
-    if security_scan.get("scanned_file_manifest_sha256") != recomputed_scan_manifest:
-        raise Stage4HarnessValidationError("stage4_security_scan_manifest_mismatch")
     return {
         "run_id": manifest["run_id"],
         "status": "verified",
@@ -1365,10 +2142,21 @@ def _verify_stage4_live_evidence_unchecked(output_dir: Path) -> dict[str, Any]:
     }
 
 
-def verify_stage4_live_evidence(output_dir: Path) -> dict[str, Any]:
+def verify_stage4_live_evidence(
+    output_dir: Path,
+    *,
+    evidence_public_keys: Mapping[str, bytes] | None = None,
+) -> dict[str, Any]:
     """Validate untrusted driver artifacts without leaking parser failures."""
     try:
-        return _verify_stage4_live_evidence_unchecked(output_dir)
+        if evidence_public_keys is None:
+            raise Stage4HarnessValidationError(
+                "stage4_evidence_trust_keys_required"
+            )
+        return _verify_stage4_live_evidence_unchecked(
+            output_dir,
+            evidence_public_keys=evidence_public_keys,
+        )
     except Stage4HarnessValidationError:
         raise
     except (KeyError, TypeError, ValueError, OverflowError) as exc:

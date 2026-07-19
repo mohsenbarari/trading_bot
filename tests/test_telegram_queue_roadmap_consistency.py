@@ -11,6 +11,9 @@ class TelegramQueueRoadmapConsistencyTests(unittest.TestCase):
         text = ROADMAP.read_text(encoding="utf-8")
         self.assertEqual(text.count("### نمای authoritative Stageها"), 1)
         self.assertEqual(text.count("وضعیت authoritative پس از remediation review"), 1)
+        self.assertEqual(
+            text.count("checkpoint جاری successor بازبینی `ef15604d`"), 1
+        )
         rows = re.findall(r"^\| `([0-6])` \| `([^`]+)` \|", text, flags=re.MULTILINE)
         self.assertEqual([stage for stage, _status in rows[:7]], list("0123456"))
         self.assertEqual(len(rows), 7)
@@ -30,6 +33,13 @@ class TelegramQueueRoadmapConsistencyTests(unittest.TestCase):
             )
         for index in range(1, 9):
             finding = f"TQ-R{index:03d}"
+            self.assertEqual(
+                len(re.findall(rf"^\| `{finding}` \|", text, flags=re.MULTILINE)),
+                1,
+                finding,
+            )
+        for index in range(1, 6):
+            finding = f"EF-RV-{index:03d}"
             self.assertEqual(
                 len(re.findall(rf"^\| `{finding}` \|", text, flags=re.MULTILINE)),
                 1,

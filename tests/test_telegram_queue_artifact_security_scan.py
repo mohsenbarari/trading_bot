@@ -116,6 +116,23 @@ class TelegramQueueArtifactSecurityScanTests(unittest.TestCase):
         self.assertEqual(report["status"], "blocked")
         self.assertEqual(report["findings"][0]["kind"], "input_missing")
 
+    def test_symlink_root_and_nested_symlink_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "safe.json"
+            target.write_text('{"status":"ok"}\n', encoding="utf-8")
+            link = root / "linked.json"
+            link.symlink_to(target)
+            root_report = scan_paths([link])
+            nested_report = scan_paths([root])
+
+        self.assertEqual(root_report["status"], "blocked")
+        self.assertEqual(nested_report["status"], "blocked")
+        self.assertIn(
+            "symlink_not_scanned",
+            {row["kind"] for row in nested_report["findings"]},
+        )
+
     def test_tracked_source_scan_uses_high_confidence_secret_shapes(self):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)

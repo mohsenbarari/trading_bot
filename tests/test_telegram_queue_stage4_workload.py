@@ -83,7 +83,7 @@ class TelegramQueueStage4WorkloadTests(unittest.TestCase):
         self.assertEqual(len(hashes), 3)
 
     def test_lifecycle_events_never_precede_submission_across_many_seeds(self):
-        for seed in range(1, 26):
+        for seed in range(1, 101):
             workload = build_stage4_workload(seed=seed, fixture=FIXTURE)
             submissions = {
                 event["business_event_id"]: int(event["at_ms"])
@@ -94,6 +94,7 @@ class TelegramQueueStage4WorkloadTests(unittest.TestCase):
                 "offer_confirm",
                 "trade_request",
                 "manual_expiry_request",
+                "automatic_expiry",
             }
             self.assertTrue(
                 all(
@@ -101,6 +102,31 @@ class TelegramQueueStage4WorkloadTests(unittest.TestCase):
                     > submissions[event["business_event_id"]]
                     for event in workload.events
                     if event["event_type"] in dependent
+                ),
+                seed,
+            )
+            valid = {
+                event["business_event_id"]: event
+                for event in workload.events
+                if event["event_type"] == "offer_submit_valid"
+            }
+            trades = {
+                event["business_event_id"]
+                for event in workload.events
+                if event["event_type"] == "trade_request"
+            }
+            ordinary_expiries = {
+                event["business_event_id"]
+                for event in workload.events
+                if event["event_type"] == "manual_expiry_request"
+                and not event.get("expiry_trade_race")
+            }
+            self.assertFalse(trades & ordinary_expiries, seed)
+            self.assertTrue(
+                all(
+                    int(row["lot_count"]) >= 2
+                    for row in valid.values()
+                    if row.get("trade_mode") == "partial_then_complete"
                 ),
                 seed,
             )

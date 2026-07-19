@@ -95,8 +95,12 @@ def _is_safe_redaction(value: str) -> bool:
 def _text_findings(text: str, *, path: str, member: str | None) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[str] = set()
+    # Hex fingerprints are deliberate one-way redactions.  Running phone-like
+    # patterns across their random digits creates false PII findings and does
+    # not inspect any recoverable source value.
+    pii_surface = re.sub(r"sha256:[0-9a-fA-F]{64}", "sha256:[redacted]", text)
     for kind, pattern in _PATTERNS:
-        if pattern.search(text) and kind not in seen:
+        if pattern.search(pii_surface) and kind not in seen:
             findings.append(Finding(kind=kind, path=path, member=member))
             seen.add(kind)
     for match in _SENSITIVE_ASSIGNMENT.finditer(text):
@@ -241,6 +245,15 @@ def scan_paths(paths: Iterable[Path]) -> dict[str, object]:
     missing = [str(path) for path in roots if not path.exists()]
     for missing_path in missing:
         findings.append(Finding(kind="input_missing", path=missing_path))
+    for root in roots:
+        if root.is_symlink():
+            findings.append(Finding(kind="symlink_not_scanned", path=str(root)))
+        elif root.is_dir():
+            findings.extend(
+                Finding(kind="symlink_not_scanned", path=str(candidate))
+                for candidate in root.rglob("*")
+                if candidate.is_symlink()
+            )
     for path in _files(path for path in roots if path.exists()):
         containing_roots = [
             root

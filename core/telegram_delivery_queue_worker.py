@@ -76,6 +76,11 @@ from core.telegram_delivery_queue_limiter import (
     TelegramDeliveryDispatchLimiter,
     TelegramDeliveryLimiterUnavailableError,
 )
+from core.telegram_delivery_queue_owner import (
+    TelegramDeliveryQueueOwnerLease,
+    acquire_telegram_delivery_queue_owner,
+    telegram_delivery_queue_owner_monitor_loop,
+)
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
 from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightRateLimitedError,
@@ -118,6 +123,7 @@ _RETENTION_INTERVAL_SECONDS = 3600.0
 # asyncio event loop; no thread synchronization is needed.
 _provider_outcome_persistence_barriers: set[tuple[str, int, int]] = set()
 _provider_dispatch_entries: set[tuple[str, int, int]] = set()
+_active_process_owner_lease: TelegramDeliveryQueueOwnerLease | None = None
 
 
 def _role_provider_fact_blocked(bot_identity: str) -> bool:
@@ -1161,6 +1167,42 @@ async def run_telegram_delivery_queue_cycle(
             processed_count += 1
             continue
 
+        # A PostgreSQL session advisory lock is the deployment-wide owner.
+        # Rechecking the unchanged backend immediately before provider entry
+        # prevents an old process from dispatching after its lock connection
+        # was lost and another process acquired ownership.
+        process_owner_lease = _active_process_owner_lease
+        if process_owner_lease is None:
+            await _release_after_predispatch_error(
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                reason="process_owner_lease_missing_before_dispatch",
+            )
+            await _release_unused_rate_limit_probe(
+                dispatch_limiter=dispatch_limiter,
+                job=job,
+                admission=admission,
+            )
+            raise TelegramDeliveryQueueImplementationIncompleteError(
+                "telegram_delivery_queue_process_owner_required"
+            )
+        try:
+            await process_owner_lease.assert_held()
+        except BaseException:
+            await _release_after_predispatch_error(
+                job_id=job_id,
+                worker_id=active_worker_id,
+                lease_token=lease_token,
+                reason="process_owner_lease_lost_before_dispatch",
+            )
+            await _release_unused_rate_limit_probe(
+                dispatch_limiter=dispatch_limiter,
+                job=job,
+                admission=admission,
+            )
+            raise
+
         dispatch_entry_acquired = _try_enter_provider_dispatch(
             lane_identity,
             job_id=job_id,
@@ -1966,6 +2008,7 @@ async def telegram_delivery_queue_loop(
     bot_identities: Sequence[str] | None = None,
 ) -> None:
     """Supervise independent bot lanes under the single queue-v1 owner."""
+    global _active_process_owner_lease
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
     _assert_queue_runtime_owner()
     if credential_registry is None:
@@ -1994,6 +2037,16 @@ async def telegram_delivery_queue_loop(
             "telegram_preflight_channel_destination_invalid"
         )
     channel_destination_key = f"channel:{normalized_channel_id}"
+    process_owner_lease = await acquire_telegram_delivery_queue_owner()
+    if (
+        _active_process_owner_lease is not None
+        and _active_process_owner_lease is not process_owner_lease
+    ):
+        await process_owner_lease.close()
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "telegram_delivery_queue_process_owner_already_active_in_process"
+        )
+    _active_process_owner_lease = process_owner_lease
     logger.info(
         "Shared Telegram delivery queue supervisor started",
         extra={
@@ -2015,6 +2068,12 @@ async def telegram_delivery_queue_loop(
         )
         for lane in lanes
     ]
+    tasks.append(
+        asyncio.create_task(
+            telegram_delivery_queue_owner_monitor_loop(process_owner_lease),
+            name="telegram-delivery-process-owner-monitor",
+        )
+    )
     tasks.append(
         asyncio.create_task(
             telegram_delivery_queue_recovery_loop(),
@@ -2085,3 +2144,5 @@ async def telegram_delivery_queue_loop(
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        _active_process_owner_lease = None
+        await process_owner_lease.close()

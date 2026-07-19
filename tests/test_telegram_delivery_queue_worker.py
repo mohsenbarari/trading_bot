@@ -90,12 +90,34 @@ class _NoopLifecycleFeedback:
         return None
 
 
+class _NoopProcessOwnerLease:
+    def __init__(self):
+        self.closed = False
+
+    async def assert_held(self):
+        return None
+
+    async def close(self):
+        self.closed = True
+
+
 class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         worker._provider_outcome_persistence_barriers.clear()
         worker._provider_dispatch_entries.clear()
         self.addCleanup(worker._provider_outcome_persistence_barriers.clear)
         self.addCleanup(worker._provider_dispatch_entries.clear)
+        worker._active_process_owner_lease = None
+        self.addCleanup(setattr, worker, "_active_process_owner_lease", None)
+        self.process_owner_lease = _NoopProcessOwnerLease()
+        worker._active_process_owner_lease = self.process_owner_lease
+        self._process_owner_patcher = patch.object(
+            worker,
+            "acquire_telegram_delivery_queue_owner",
+            new=AsyncMock(return_value=self.process_owner_lease),
+        )
+        self.acquire_process_owner = self._process_owner_patcher.start()
+        self.addCleanup(self._process_owner_patcher.stop)
         self._channel_id_patcher = patch.object(
             worker.settings,
             "channel_id",
@@ -468,6 +490,71 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
         mark.assert_not_awaited()
         gateway.assert_not_awaited()
         self.assertFalse(worker._provider_dispatch_entries)
+
+    async def test_lost_process_owner_releases_job_before_provider_entry(self):
+        job = SimpleNamespace(
+            id=992,
+            lease_token=14,
+            method="sendMessage",
+            payload={"chat_id": 1, "text": "redacted"},
+            dedupe_key="lost-process-owner",
+            bot_identity="primary",
+            destination_key="private:lost-owner",
+        )
+        db = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=db)
+        context.__aexit__ = AsyncMock(return_value=False)
+        lost_lease = SimpleNamespace(
+            assert_held=AsyncMock(side_effect=RuntimeError("synthetic_owner_lost"))
+        )
+        release = AsyncMock(return_value=True)
+        gateway = AsyncMock()
+        mark = AsyncMock()
+        worker._active_process_owner_lease = lost_lease
+        with patch(
+            "core.telegram_delivery_queue_worker.assert_background_job_authority"
+        ), patch(
+            "core.telegram_delivery_queue_worker.configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), patch(
+            "core.telegram_delivery_queue_worker.AsyncSessionLocal",
+            return_value=context,
+        ), patch(
+            "core.telegram_delivery_queue_worker.claim_next_telegram_delivery_job",
+            new=AsyncMock(return_value=job),
+        ), patch(
+            "core.telegram_delivery_queue_worker.apply_telegram_delivery_freshness_result",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.telegram_delivery_queue_worker.telegram_delivery_database_now",
+            new=AsyncMock(return_value=worker.utc_now()),
+        ), patch(
+            "core.telegram_delivery_queue_worker._release_after_predispatch_error",
+            new=release,
+        ), patch(
+            "core.telegram_delivery_queue_worker.mark_telegram_delivery_dispatch_started",
+            new=mark,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic_owner_lost"):
+                await worker.run_telegram_delivery_queue_cycle(
+                    bot_identity="primary",
+                    freshness_validator=AsyncMock(return_value=object()),
+                    lifecycle_feedback=_NoopLifecycleFeedback(),
+                    gateway_call=gateway,
+                    dispatch_limiter=_AllowLimiter(),
+                    recover_leases=False,
+                    limit=1,
+                )
+
+        release.assert_awaited_once_with(
+            job_id=992,
+            worker_id=ANY,
+            lease_token=14,
+            reason="process_owner_lease_lost_before_dispatch",
+        )
+        mark.assert_not_awaited()
+        gateway.assert_not_awaited()
 
     async def test_cancellation_after_provider_response_waits_for_durable_fact(self):
         db = AsyncMock()

@@ -1,101 +1,134 @@
 # Telegram Queue Stage 4 Harness Runbook
 
-## Scope and authorization
+## Safety boundary
 
-This runbook prepares the final `1,800 valid + 400 invalid` staging workload. It does not authorize staging execution, merge, production access, or deployment. `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY` remains `False` until the separate activation decision.
+This runbook prepares and verifies the final `1,800 valid + 400 invalid` staging workload. It does not authorize execution, merge, production access, or deployment. `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY` remains `False`; a separate owner approval is required before `execute`.
 
-The harness has four commands:
+The four commands are:
 
-1. `plan`: provider-free deterministic trace and ledger generation.
-2. `verify-plan`: checksum and completeness verification without processes or network.
-3. `execute`: staging only, requiring a clean pinned Git SHA, the literal `--authorize-live-staging` flag, a one-use Ed25519-signed authorization document bound to the run/trace/config/driver commands and driver binary digests, an independently provisioned `--trusted-authorization-public-key` trust-anchor file outside the run directory, a maximum one-hour validity window, and distinct staging/production fingerprints.
-4. `verify-live`: fail-closed reconciliation of sender, receiver, cleanup, business and queue evidence.
+1. `plan`: generate a deterministic, provider-free plan.
+2. `verify-plan`: regenerate the code-owned oracle and verify every plan byte.
+3. `execute`: run only on staging after fixed-policy authorization.
+4. `verify-live`: verify an already completed evidence directory without contacting Telegram.
 
-## Production-deny configuration
+The CLI intentionally has no option for a trust-policy path or a caller-selected authorization key. Live commands always use `/etc/trading-bot/stage4/stage4-trust-policy.json`.
 
-The redacted config must contain:
+## Deployment-owned trust policy
 
-- `schema_version=2`;
-- `environment=synthetic-test` for provider-free planning or `staging` for live execution;
-- `run_id` beginning with `stage4-`;
+Provision the trust policy outside Git and outside every run directory. It must be a root-owned regular file whose parent is root-owned and not writable by group or other. Its exact schema is:
+
+```json
+{
+  "schema_version": 1,
+  "authorization_public_key": "BASE64_ED25519_PUBLIC_KEY",
+  "sender_evidence_public_key": "BASE64_ED25519_PUBLIC_KEY",
+  "observer_evidence_public_key": "BASE64_ED25519_PUBLIC_KEY",
+  "sender_uid": 61001,
+  "sender_gid": 61001,
+  "observer_uid": 61002,
+  "observer_gid": 61002,
+  "sender_signing_key_path": "/etc/trading-bot/stage4/keys/sender.key",
+  "observer_signing_key_path": "/etc/trading-bot/stage4/keys/observer.key",
+  "authorization_registry_path": "/var/lib/trading-bot/stage4/used-authorizations.sqlite3",
+  "evidence_workspace_root": "/var/lib/trading-bot/stage4/evidence-workspaces",
+  "driver_root": "/opt/trading-bot/stage4-drivers",
+  "host_identity_sha256": "sha256:REDACTED_64_LOWERCASE_HEX"
+}
+```
+
+The three Ed25519 key pairs must be distinct. Sender and observer UIDs and GIDs must also be distinct and non-root. Each evidence private key is exactly 32 raw Ed25519 bytes, owned by its role and mode `0600`; its parent remains root-owned and non-writable. The runner derives its public key before any process or network action and rejects a mismatch. `host_identity_sha256` is the domain-separated fingerprint of the fixed host `/etc/machine-id`, preventing a copied trust policy and authorization registry from silently becoming valid on another host.
+
+The registry parent, evidence workspace and driver root are root-owned, absolute, non-symlink directories and are not writable by group or other. Authorization consumption is an atomic primary-key insert in the fixed registry. Copying a plan/output directory cannot replay an authorization.
+
+Each driver command contains exactly one absolute executable path. The executable is a regular non-symlink file under `driver_root`, root-owned, executable and has no owner/group/other write bit. Interpreter-plus-mutable-script commands and caller-provided arguments are rejected. The authorization binds both command and executable digests; the runner re-hashes binaries immediately before launch and the sender again before its first provider-capable process starts.
+
+## Redacted run configuration
+
+The schema version is `3`. Required controls are:
+
+- environment `synthetic-test` for planning or `staging` for live execution;
+- a unique `stage4-*` run ID and a fresh random 64-hex `plan_nonce`;
 - `bot_mode=primary-only|primary-and-channel-editor`;
-- SHA-256 fingerprints for database, Redis, primary bot, editor bot, channel, observer database and receiver session in both staging and production maps;
-- inequality for every staging/production fingerprint pair;
-- staging/default/production active-offer limits exactly `10/4/4` and expiry exactly `120` seconds;
-- `provider_network_enabled=false` for planning and `true` only in the separately authorized execution config;
-- absolute, non-symlinked, non-group/world-writable sender and observer executables for execution.
-- a base64 Ed25519 public authorization key, whose bytes must equal the independently provisioned external trust anchor, and distinct sender/observer network-policy fingerprints.
+- SHA-256 fingerprints for staging and production database, Redis, both bots, channel, observer database and receiver session, with no staging/production collision;
+- distinct sender/observer network-policy fingerprints;
+- the exact trust-policy fingerprint;
+- active-offer limits `10/4/4` for staging/default/production and expiry `120` seconds;
+- provider network `false` while planning and `true` only for an authorized execution;
+- one immutable driver executable per role.
 
-Raw token, secret, password, database/Redis URL, bot/channel/chat/user ID fields are rejected before process creation. Fingerprints are `sha256:<64 lowercase hex>` and cannot be reversed to credentials. Every staging child input is independently rebound before launch using `sha256("telegram-stage4-bound-value-v1:" + exact_environment_value)`; a mislabeled production-like endpoint or credential therefore cannot pass merely because the config contains an unrelated staging fingerprint.
+Raw credential, identity, URL, token, password, chat/channel/user/message ID and secret fields are rejected. Live child inputs are rebound to the signed staging fingerprints before launch. The sender receives only the staging database, Redis, bot and channel credential namespace. The observer receives only the independent read-only database, receiver session and channel; it receives no bot credential. Neither child inherits generic credentials, `PYTHONPATH`, cloud variables or the parent `PATH`.
 
-## Read-only production shape sampler
+## Workload and reference state machine
 
-`scripts/sample_telegram_stage4_offer_shapes.py` is the only production-data helper in this workflow. It requires:
+Input traffic lasts exactly 600 seconds, followed by a bounded 120-second expiry/drain interval. Every seed contains exactly:
 
-- `--environment production` and `--ack-production-read-only` together;
-- the expected credential-free database fingerprint;
-- a connection URL supplied only through the named environment variable;
-- a new output path.
+- 1,800 valid offers and 400 invalid attempts from 80 synthetic users;
+- lot shapes `900 none + 450 two + 450 three`;
+- 540 traded offers: 270 normal, 162 concurrent and 108 partial-then-complete;
+- partial trades only on two- or three-lot offers;
+- 180 manual expiries, of which only 18 explicitly share a trade/expiry barrier;
+- explicit automatic-expiry events for every otherwise non-terminal offer;
+- 125 admin deliveries and two notification-only market status notices;
+- all sanitized active commodity keys and all buy/sell × cash/tomorrow combinations;
+- natural peaks of 8–12 valid submissions per second while the ten-minute mean remains 3/s.
 
-It begins `REPEATABLE READ READ ONLY`, sets a 15-second statement timeout, verifies `transaction_read_only=on`, reads deterministic recent offer shapes, rolls back, and exports only commodity, buy/sell, settlement, quantity, price and 2/3-lot numeric templates. It never selects or exports offer/user/Telegram/message/public/idempotency IDs, human names or notes. This sampler is not run by the staging harness and staging never connects to production.
+Ordinary manual expiry targets and trade targets are disjoint. The only overlap is the 18 declared races. Every 2–5-way trade group and every expiry/trade group has exactly one independently observed authoritative winner. The observer returns the complete raw state snapshot—status, remaining lots, monotonic state version and terminal event—and the verifier recomputes its digest. Terminal, partial and party-message obligations activate from committed outcomes, never from input labels or confirmation time. A partial edit reaching Telegram after completion is rejected unless it was recorded as superseded.
 
-## Deterministic workload contract
+Market open/close entries in this workload are channel notices, not authoritative market mutations. Actual market-state transition behavior belongs to its separate live preflight scenario.
 
-For every seed the generator enforces:
+## Process and filesystem isolation
 
-- exactly 600 seconds of input, 1,800 accepted-valid and 400 invalid attempts;
-- 80 synthetic owners (minimum gate 70) and conservative maximum ten active offers per owner in any two-minute window;
-- valid lot shapes `900 none + 450 two-lot + 450 three-lot`;
-- 540 traded offers, including 162 concurrent offers with exact 2/3/4/5 requester quotas;
-- 180 manual expiry requests, 18 synchronized trade/expiry races, 125 admin deliveries and both market open/close channel notices during peaks;
-- all active commodities and every buy/sell × cash/tomorrow combination;
-- repeated 3–8-second peaks with 8–12 valid submissions per second;
-- unique event IDs and an immutable canonical trace SHA-256.
+The root runner creates separate `0700` temporary output directories owned by the sender and observer UIDs. Each child receives only its own output path and common read-only root-owned plan files. Neither role can traverse or write the other role's directory. Processes launch with an empty supplemental-group list.
 
-Every race has one expiry and at least two competing trade requests on one shared barrier. Planned release skew is at most 50 ms (the generated plan uses 25 ms), the live sender must prove observed skew at most 100 ms, and the independent business ledger must prove exactly one authoritative winner. Nine groups are trade-winner and nine are expiry-winner for every seed.
+The observer starts first and writes mode-`0600`, observer-owned `observer.ready.json`. The ready envelope is Ed25519-signed and binds run ID, nonce, trace, trust policy, observer network policy, immutable executable digest, actual observer PID and a fresh timestamp after process start. Unsigned, stale, wrong-owner, permissive, symlinked or pre-created readiness never starts the sender.
 
-The technical fault catalog is separate from natural market traffic. It includes success-envelope defects, 400/401/403/404/409, 5xx, pre-write transport failure, unknown-write failure, response-received/close, migration and provider-fact database outage. The 429 matrix separately covers Integer `1`, signed-32 maximum, missing, bool, string, fraction, zero, negative, max+1 and huge integer, each with a sanitized shape hash and durable deadline-source contract. Fault injection is prohibited during capacity calibration.
+After both processes exit, the runner requires the exact role inventory, verifies each role's signed attestation against its externally provisioned key, copies only allowlisted files into the root-owned final directory and makes them read-only. Extra files, directories and symlinks fail closed.
 
-## Generated plan artifacts
+Role ownership is:
 
-`plan` creates:
+- sender: `preflight.json`, `telegram_results.jsonl`, `queue_metrics.jsonl`, `fault_executions.jsonl`;
+- observer: `business_outcomes.jsonl`, `receiver_receipts.jsonl`, `fault_results.jsonl`, `cleanup_ledger.jsonl`, `reconciliation.json`, `acceptance.json`;
+- runner: signed execution authorization, both role attestations and `security_scan.json`.
 
-- `manifest.json`;
-- `event_trace.jsonl`;
-- `expected_business_ledger.jsonl`;
-- `delivery_obligations.jsonl`;
-- `fault_catalog.json`;
-- `cleanup_plan.jsonl`;
-- `quota_report.json`;
-- `stop_thresholds.json`.
+## Evidence contract
 
-The manifest binds Git SHA, seed, run ID, environment, mode, fixture/config/trace hashes and every file hash/size. An interrupted plan retains `.incomplete` and is rejected.
+Provider results contain unique delivery/obligation IDs, source event/version, causal dependencies, method, role, destination, enqueue/completion times, canonical provider observation digest, canonical authoritative-state digest, actual payload digest and privacy-preserving fingerprints of actual provider/target message IDs. Raw Telegram message IDs are prohibited in artifacts.
 
-## Live driver protocol
+The independent receiver must read back every `sent` and `sent_noop` result for which receiver evidence is required. Its signed receipt must match message fingerprint, payload digest and state digest. For channel edits it also records the visible offer status, remaining lots and whether action buttons remain. Thus a no-op or a correctly shaped hash cannot prove the wrong final text/buttons.
 
-The observer is started first with `STAGE4_RUN_DIR`, `STAGE4_MANIFEST` and `STAGE4_EVENT_TRACE`. It must create `observer.ready.json` containing the exact run ID and trace hash before the sender may start. The sender and observer are separate executables; both content digests and commands are signature-bound. Shell execution is not used.
+The 32-case fault matrix is split at the provenance boundary:
 
-The runner constructs both child environments from scratch. It never forwards generic `DATABASE_URL`, `REDIS_URL`, `BOT_TOKEN` or the rest of the parent environment. Sender receives only the fixed `STAGE4_STAGING_*` database/Redis/bot/channel namespace; observer receives only its distinct read-only database, receiver session and the same fingerprint-bound staging channel ID, and never receives bot credentials. The signed authorization has an exact field set; additional policy-like fields are rejected even when signed. The verification key is loaded from an absolute, non-symlink, non-group/world-writable file outside the mutable run directory; the key copied into config is signature-bound but is never accepted as its own trust root. A per-profile network-policy fingerprint is passed and must match the infrastructure-applied staging egress policy. Source validation does not pretend to install host firewall policy; absent external policy attestation is a live preflight failure.
+- sender-signed `fault_executions.jsonl` contains the exact code-owned sanitized injected request/provider shape, adapter classification, call count and duplicate-effect count;
+- observer-signed `fault_results.jsonl` contains the independently read raw durable record, applied retry deadline source and resulting state.
 
-The drivers must produce:
+The 429 cases separately cover integer `1`, signed-32 maximum, missing, bool, string, fraction, zero, negative, max+1 and huge integer. Malformed values remain retryable and use bounded fallback; a valid integer is preserved.
 
-- `preflight.json` binding the exact run/trace/mode, redacted routing-policy hash, runtime limits, production-collision count, role capability readback and a zero provider-call observer;
-- `business_outcomes.jsonl` with exactly one row per expected input event;
-- `telegram_results.jsonl` with exactly one row per code-owned delivery obligation, including unique delivery/obligation identity, source event/catalog, method, bot role, destination class, terminal outcome, enqueue/provider timestamps, provider observation hash and derived provider-side-effect count;
-- `receiver_receipts.jsonl` from the independent receiver side, in exact one-to-one agreement with every result marked receiver-required;
-- `queue_metrics.jsonl` with at least one sample for every elapsed second `0..600` plus the complete drain/cooldown interval and a zero-backlog final sample;
-- `fault_results.jsonl` with exactly one observed row for every mandatory fault-catalog case, matching shape hash, disposition, durable state, provider-call count, retry source/deadline and zero duplicate provider side effects; a driver-authored `status=pass` has no authority;
-- `cleanup_ledger.jsonl` covering every cleanup-plan identity as `completed` or `not_applicable`;
-- `reconciliation.json` with `status=clean` and explicit zero counts for unresolved jobs, duplicate side effects, missing business/receiver rows, invalid-offer publication intents, route mutation and backlog-caused disablement;
-- `acceptance.json` with exact `1800/400` input counts, no stop events, all criteria true and independently rechecked SLO metrics before `decision=pass` is accepted;
-- `security_scan.json` proving a clean scan over the manifest, every plan artifact and every other live artifact.
+Metrics cover every second `0..720` and end with zero ready, leased and unresolved backlog. Reconciliation and acceptance are recomputed from raw ledgers; driver-authored `pass` values have no authority. Cleanup covers every run-scoped synthetic identity and occurs only after measurement.
 
-No API `ok=true` is accepted as receiver evidence by itself. Test-DC user-client evidence covers response text, markup, callback and private delivery; normal Telegram staging covers capacity. Driver provisioning and credentials are Stage 4 infrastructure and are not embedded in Git.
+The runner itself scans the exact final flat inventory. `security_scan.json` is the sole explicitly self-excluded file because it is generated from the other bytes. The verifier reruns the scanner and compares its full result. Any extra/missing file, directory, symlink, secret/PII finding, hand-authored clean report or manifest mismatch fails closed.
 
-The verifier does not trust a self-declared `pass`: it regenerates the delivery-obligation ledger from the immutable trace, requires exact one-to-one provider results, derives receiver requirements and side-effect counts, validates race release/outcome evidence, and recomputes publication/callback latency percentiles, deadline ratio, reconciliation totals and acceptance decision from raw timestamps and ledgers. It also verifies editor route restrictions, the 601-second metric floor, final drain state, every explicit fault shape, observer-backed cleanup and the real scanner schema. The scanner manifest is independently recomputed from every declared artifact byte; a well-shaped fabricated hash is rejected. Missing, duplicate, malformed, copied or merely empty evidence fails closed. The former fabricated pattern of one primary/private `sendMessage` per business event is an explicit negative test.
+## Authorization and execution order
 
-## Stop order
+The authorization is Ed25519-signed by the fixed deployment authority, valid for at most one hour, and binds authorization ID, run ID, nonce, exact Git SHA, trace/config/trust-policy hashes, command hash and both executable hashes. The runner must have EUID 0 so it can enforce distinct UIDs. The repository must be clean and exactly at the planned SHA. Plan files must remain root-owned and non-writable by group/other and are reverified after driver exit.
 
-Any fingerprint collision, unexpected destination/role, secret/identity artifact, duplicate provider side effect, delivery obligation for an invalid offer, or persistent unbounded 429 stops the run. A failed capacity interval is cooled down and recorded; it is not retried at 100 ms and does not weaken expiry/SLO semantics. If no safe interval meets the fixed demand, the result is `NO-GO`.
+Execution order is:
 
-Artifacts are exported, scanned and checksum-bound before cleanup. Cleanup occurs outside the measurement window through approved run-scoped paths; provider deletes use M7. Production remains untouched throughout.
+1. verify fixed trust policy, host identity and key pairs;
+2. verify clean exact Git SHA, plan bytes and production-deny fingerprints;
+3. verify short-lived signed authorization and atomically consume it;
+4. create isolated role directories and allowlisted environments;
+5. start observer and verify its signed ready receipt;
+6. re-hash the sender executable and start sender;
+7. wait for clean exits, reverify plan, role inventories and signatures;
+8. promote read-only evidence, run the exact scanner and full verifier;
+9. export/checksum AI-readable evidence before run-scoped cleanup.
+
+Any failure consumes the authorization and requires a newly signed authorization for a retry. It never causes an automatic provider retry or a downgrade of safety controls.
+
+## Stop and remaining live gates
+
+Stop immediately on fingerprint collision, unexpected route/role, secret/identity artifact, duplicate provider effect, invalid-offer publication intent, missing receiver evidence, inconsistent authoritative state, stale terminal/partial edit, unbounded 429, observer/provider provenance failure or nonzero final backlog.
+
+Fault injection is forbidden during capacity calibration. A failed interval is cooled down and recorded; it is not retried every 100 ms and does not weaken expiry or latency semantics. If repeated receiver-backed calibration cannot meet fixed demand safely, the decision is `NO-GO`.
+
+Still-live gates are infrastructure egress attestation, real bot/channel permission readback, real publication/edit/private/callback smoke, repeated channel calibration, the final authorized workload, post-run cleanup evidence and rollback rehearsal. Production remains untouched and is a separately authorized stage.

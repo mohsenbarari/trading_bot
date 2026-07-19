@@ -16,6 +16,10 @@ from typing import Any, Iterable, Mapping, Sequence
 
 
 STAGE4_DURATION_SECONDS = 600
+STAGE4_OFFER_EXPIRY_SECONDS = 120
+STAGE4_EVIDENCE_TIMELINE_SECONDS = (
+    STAGE4_DURATION_SECONDS + STAGE4_OFFER_EXPIRY_SECONDS
+)
 STAGE4_VALID_OFFER_COUNT = 1800
 STAGE4_INVALID_OFFER_COUNT = 400
 STAGE4_OWNER_COUNT = 80
@@ -41,6 +45,97 @@ TRADE_MODE_QUOTAS = {"normal": 270, "concurrent": 162, "partial_then_complete": 
 
 class Stage4WorkloadValidationError(ValueError):
     """Raised before execution when a workload or fixture violates the contract."""
+
+
+def stage4_authoritative_result_constraints(
+    events: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Return a reference state-machine contract for every trace event.
+
+    Concurrent callers may win in any order, so the contract describes
+    allowed per-event results plus group invariants instead of fabricating a
+    winner from input ordering.  All other transitions have one reachable
+    authoritative result.
+    """
+    rows = tuple(events)
+    valid_by_offer = {
+        str(row["business_event_id"]): row
+        for row in rows
+        if row.get("event_type") == "offer_submit_valid"
+    }
+    constraints: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        event_id = str(row["event_id"])
+        event_type = str(row["event_type"])
+        offer = valid_by_offer.get(str(row["business_event_id"]))
+        allowed: tuple[str, ...]
+        group_id: str | None = None
+        group_rule: str | None = None
+        terminal_results: tuple[str, ...] = ()
+        if event_type == "offer_submit_valid":
+            allowed = ("offer_accepted",)
+        elif event_type == "offer_submit_invalid":
+            allowed = ("offer_rejected",)
+        elif event_type == "offer_confirm":
+            allowed = ("confirmation_committed",)
+        elif event_type == "admin_broadcast_delivery":
+            allowed = ("delivery_requested",)
+        elif event_type == "market_status_notice":
+            allowed = ("notice_requested",)
+        elif event_type == "automatic_expiry":
+            allowed = ("expiry_committed",)
+            terminal_results = ("expiry_committed",)
+        elif event_type == "manual_expiry_request":
+            if row.get("expiry_trade_race") is True:
+                group_id = f"expiry-trade:{row['business_event_id']}"
+                group_rule = str(row.get("race_expected_winner") or "")
+                allowed = (
+                    ("expiry_committed",)
+                    if group_rule == "expiry"
+                    else ("rejected_conflict",)
+                )
+            else:
+                allowed = ("expiry_committed",)
+            terminal_results = ("expiry_committed",)
+        elif event_type == "trade_request" and offer is not None:
+            mode = str(offer.get("trade_mode") or "")
+            if mode == "partial_then_complete":
+                allowed = (
+                    ("partial_trade_committed",)
+                    if row.get("partial") is True
+                    else ("trade_committed",)
+                )
+            elif mode == "normal":
+                allowed = ("trade_committed",)
+            elif mode == "concurrent":
+                group_id = (
+                    f"expiry-trade:{row['business_event_id']}"
+                    if row.get("expiry_trade_race") is True
+                    else f"concurrent-trade:{row['business_event_id']}"
+                )
+                expected = str(row.get("race_expected_winner") or "")
+                group_rule = expected or "exactly_one_trade"
+                allowed = (
+                    ("rejected_conflict",)
+                    if expected == "expiry"
+                    else ("trade_committed", "rejected_conflict")
+                )
+            else:
+                raise Stage4WorkloadValidationError(
+                    "stage4_trade_mode_reference_invalid"
+                )
+            terminal_results = ("trade_committed",)
+        else:
+            raise Stage4WorkloadValidationError(
+                f"stage4_reference_event_type_invalid:{event_type}"
+            )
+        constraints[event_id] = {
+            "allowed_authoritative_results": list(allowed),
+            "authoritative_group_id": group_id,
+            "authoritative_group_rule": group_rule,
+            "terminal_authoritative_results": list(terminal_results),
+        }
+    return constraints
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +301,7 @@ def build_stage4_workload(
     lot_shapes = _expanded_quota(LOT_SHAPE_QUOTAS)
     rng.shuffle(lot_shapes)
     offer_ids = [f"valid-{index + 1:04d}" for index in range(STAGE4_VALID_OFFER_COUNT)]
+    lot_shape_by_offer = dict(zip(offer_ids, lot_shapes, strict=True))
     submission_at_by_offer = dict(zip(offer_ids, submission_slots, strict=True))
     lifecycle_eligible_ids = [
         offer_id
@@ -214,14 +310,47 @@ def build_stage4_workload(
     ]
     if len(lifecycle_eligible_ids) < STAGE4_TRADE_TARGET_COUNT:
         raise Stage4WorkloadValidationError("stage4_lifecycle_target_pool_too_small")
-    shuffled_for_trade = lifecycle_eligible_ids.copy()
-    rng.shuffle(shuffled_for_trade)
-    trade_modes: dict[str, str] = {}
-    offset = 0
-    for mode, count in TRADE_MODE_QUOTAS.items():
-        for offer_id in shuffled_for_trade[offset : offset + count]:
-            trade_modes[offer_id] = mode
-        offset += count
+    # Partial-then-complete is meaningful only for multi-lot offers.  Select
+    # that quota first, then draw disjoint normal/concurrent targets.
+    partial_candidates = [
+        offer_id
+        for offer_id in lifecycle_eligible_ids
+        if lot_shape_by_offer[offer_id] in {"two", "three"}
+    ]
+    rng.shuffle(partial_candidates)
+    partial_ids = partial_candidates[
+        : TRADE_MODE_QUOTAS["partial_then_complete"]
+    ]
+    if len(partial_ids) != TRADE_MODE_QUOTAS["partial_then_complete"]:
+        raise Stage4WorkloadValidationError(
+            "stage4_partial_trade_multilot_pool_too_small"
+        )
+    partial_id_set = set(partial_ids)
+    remaining_trade_candidates = [
+        offer_id
+        for offer_id in lifecycle_eligible_ids
+        if offer_id not in partial_id_set
+    ]
+    rng.shuffle(remaining_trade_candidates)
+    normal_count = TRADE_MODE_QUOTAS["normal"]
+    concurrent_count = TRADE_MODE_QUOTAS["concurrent"]
+    trade_modes: dict[str, str] = {
+        offer_id: "partial_then_complete" for offer_id in partial_ids
+    }
+    trade_modes.update(
+        {
+            offer_id: "normal"
+            for offer_id in remaining_trade_candidates[:normal_count]
+        }
+    )
+    trade_modes.update(
+        {
+            offer_id: "concurrent"
+            for offer_id in remaining_trade_candidates[
+                normal_count : normal_count + concurrent_count
+            ]
+        }
+    )
     concurrent_ids = [
         offer_id for offer_id, mode in trade_modes.items() if mode == "concurrent"
     ]
@@ -229,18 +358,25 @@ def build_stage4_workload(
     rng.shuffle(concurrent_counts)
     concurrent_request_count = dict(zip(concurrent_ids, concurrent_counts, strict=True))
 
-    nonconcurrent_ids = [
+    # Ordinary manual expiry must never be assigned to a trade target.  The
+    # only intentional expiry/trade overlap is the explicitly barriered race
+    # population below.
+    nontrade_ids = [
         offer_id
         for offer_id in lifecycle_eligible_ids
-        if offer_id not in concurrent_ids
+        if offer_id not in trade_modes
     ]
-    rng.shuffle(nonconcurrent_ids)
+    rng.shuffle(nontrade_ids)
+    if len(nontrade_ids) < 162:
+        raise Stage4WorkloadValidationError(
+            "stage4_manual_expiry_nontrade_pool_too_small"
+        )
     concurrent_expiry_races = set(rng.sample(concurrent_ids, 18))
     race_expected_winner = {
         offer_id: ("trade" if index % 2 == 0 else "expiry")
         for index, offer_id in enumerate(sorted(concurrent_expiry_races))
     }
-    manual_expiry_ids = set(nonconcurrent_ids[:162]) | concurrent_expiry_races
+    manual_expiry_ids = set(nontrade_ids[:162]) | concurrent_expiry_races
 
     valid_events: list[dict[str, Any]] = []
     owner_cycle = [f"stage4-user-{index + 1:02d}" for index in range(STAGE4_OWNER_COUNT)]
@@ -371,6 +507,29 @@ def build_stage4_workload(
             }
         )
 
+    # Every accepted offer has an explicit reachable terminal transition.
+    # Offers completed by trade or manual expiry do not later receive an
+    # automatic-expiry event.  Late submissions expire during the bounded
+    # post-load drain window rather than being silently treated as terminal at
+    # confirmation time.
+    automatic_expiry_ids = [
+        offer_id
+        for offer_id in offer_ids
+        if offer_id not in trade_modes and offer_id not in manual_expiry_ids
+    ]
+    lifecycle_events.extend(
+        {
+            "event_id": f"automatic-expiry-{offer_id}",
+            "event_type": "automatic_expiry",
+            "at_ms": int(by_offer[offer_id]["at_ms"])
+            + STAGE4_OFFER_EXPIRY_SECONDS * 1000,
+            "business_event_id": offer_id,
+            "actor_key": "stage4-system-expiry",
+            "response_catalog_id": "offer.automatic_expiry.result",
+        }
+        for offer_id in automatic_expiry_ids
+    )
+
     invalid_families = _expanded_quota(INVALID_FAMILY_QUOTAS)
     rng.shuffle(invalid_families)
     invalid_events = [
@@ -403,7 +562,7 @@ def build_stage4_workload(
     market_notice_events = [
         {
             "event_id": "market-transition-opened",
-            "event_type": "market_status_change",
+            "event_type": "market_status_notice",
             "at_ms": peak_windows[1][0] * 1000 + 50,
             "business_event_id": "market-transition-opened",
             "transition": "opened",
@@ -411,7 +570,7 @@ def build_stage4_workload(
         },
         {
             "event_id": "market-transition-closed",
-            "event_type": "market_status_change",
+            "event_type": "market_status_notice",
             "at_ms": peak_windows[-2][0] * 1000 + 50,
             "business_event_id": "market-transition-closed",
             "transition": "closed",
@@ -464,7 +623,10 @@ def validate_stage4_workload(
     manual = [row for row in events if row.get("event_type") == "manual_expiry_request"]
     admin = [row for row in events if row.get("event_type") == "admin_broadcast_delivery"]
     market_notices = [
-        row for row in events if row.get("event_type") == "market_status_change"
+        row for row in events if row.get("event_type") == "market_status_notice"
+    ]
+    automatic_expiries = [
+        row for row in events if row.get("event_type") == "automatic_expiry"
     ]
     trade_requests = [
         row for row in events if row.get("event_type") == "trade_request"
@@ -488,6 +650,14 @@ def validate_stage4_workload(
         TRADE_MODE_QUOTAS
     ):
         raise Stage4WorkloadValidationError("stage4_trade_mode_quota_mismatch")
+    if any(
+        row.get("trade_mode") == "partial_then_complete"
+        and int(row.get("lot_count", 0)) < 2
+        for row in valid
+    ):
+        raise Stage4WorkloadValidationError(
+            "stage4_partial_trade_requires_multiple_lots"
+        )
     concurrent_requests = Counter(
         sum(
             1
@@ -526,11 +696,20 @@ def validate_stage4_workload(
             raise Stage4WorkloadValidationError(
                 "stage4_trade_event_precedes_submission"
             )
+    trade_offer_ids = {
+        str(row["business_event_id"]) for row in trade_requests
+    }
+    manual_offer_ids = {str(row["business_event_id"]) for row in manual}
     race_manual = {
         str(row["business_event_id"]): row
         for row in manual
         if row.get("expiry_trade_race") is True
     }
+    undeclared_overlap = (trade_offer_ids & manual_offer_ids) - set(race_manual)
+    if undeclared_overlap:
+        raise Stage4WorkloadValidationError(
+            "stage4_undeclared_trade_expiry_overlap"
+        )
     for offer_id, expiry in race_manual.items():
         race_trades = [
             row
@@ -563,6 +742,18 @@ def validate_stage4_workload(
         row.get("transition") for row in market_notices
     } != {"opened", "closed"}:
         raise Stage4WorkloadValidationError("stage4_market_notice_quota_mismatch")
+    expected_automatic_expiry_ids = set(valid_by_offer) - trade_offer_ids - manual_offer_ids
+    if {
+        str(row["business_event_id"]) for row in automatic_expiries
+    } != expected_automatic_expiry_ids or any(
+        int(row["at_ms"])
+        != int(valid_by_offer[str(row["business_event_id"])]["at_ms"])
+        + STAGE4_OFFER_EXPIRY_SECONDS * 1000
+        for row in automatic_expiries
+    ):
+        raise Stage4WorkloadValidationError(
+            "stage4_automatic_expiry_coverage_mismatch"
+        )
     if len({str(row["business_event_id"]) for row in trade_requests}) != (
         STAGE4_TRADE_TARGET_COUNT
     ):
@@ -591,8 +782,46 @@ def validate_stage4_workload(
         for settlement in ("cash", "tomorrow")
     ):
         raise Stage4WorkloadValidationError("stage4_combination_coverage_mismatch")
-    if any(not 0 <= int(row["at_ms"]) < STAGE4_DURATION_SECONDS * 1000 for row in events):
+    if any(
+        not 0 <= int(row["at_ms"]) < STAGE4_EVIDENCE_TIMELINE_SECONDS * 1000
+        for row in events
+    ):
         raise Stage4WorkloadValidationError("stage4_event_outside_timeline")
+    reference_constraints = stage4_authoritative_result_constraints(events)
+    if set(reference_constraints) != set(event_ids):
+        raise Stage4WorkloadValidationError(
+            "stage4_reference_state_machine_coverage_mismatch"
+        )
+    lifecycle_by_offer: dict[str, list[Mapping[str, Any]]] = {}
+    for row in (*trade_requests, *manual, *automatic_expiries):
+        lifecycle_by_offer.setdefault(str(row["business_event_id"]), []).append(row)
+    for offer_id, source in valid_by_offer.items():
+        lifecycle = lifecycle_by_offer.get(offer_id, [])
+        mode = source.get("trade_mode")
+        if not lifecycle:
+            raise Stage4WorkloadValidationError(
+                "stage4_offer_without_terminal_transition"
+            )
+        confirmation = next(
+            row for row in confirmations if str(row["business_event_id"]) == offer_id
+        )
+        if any(int(row["at_ms"]) <= int(confirmation["at_ms"]) for row in lifecycle):
+            raise Stage4WorkloadValidationError(
+                "stage4_terminal_transition_precedes_confirmation"
+            )
+        if mode == "partial_then_complete":
+            ordered_trades = sorted(
+                (row for row in lifecycle if row["event_type"] == "trade_request"),
+                key=lambda row: (int(row["at_ms"]), str(row["event_id"])),
+            )
+            if (
+                len(ordered_trades) != 2
+                or ordered_trades[0].get("partial") is not True
+                or ordered_trades[1].get("partial") is not False
+            ):
+                raise Stage4WorkloadValidationError(
+                    "stage4_partial_completion_sequence_invalid"
+                )
     # This is a conservative upper bound: assume every accepted offer remains
     # active for the full two-minute staging lifetime.  Business trades and
     # manual expiry can only reduce the real active count.
@@ -624,6 +853,7 @@ def validate_stage4_workload(
         "expiry_trade_races": sum(bool(row.get("expiry_trade_race")) for row in manual),
         "admin_jobs": len(admin),
         "market_notices": len(market_notices),
+        "automatic_expiries": len(automatic_expiries),
         "active_owners": len(owners),
         "commodity_count": len(commodity_set),
         "event_count": len(events),
