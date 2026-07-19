@@ -30,6 +30,8 @@ from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.telegram_interaction_message import (
     answer_callback_message_via_runtime,
     answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+    send_private_document_via_runtime,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from bot.utils.public_profile import (
@@ -40,7 +42,7 @@ from bot.utils.public_profile import (
 )
 
 from bot.callbacks import (
-    TradeHistoryCallback, HistoryPageCallback, 
+    TradeHistoryCallback, HistoryPageCallback,
     ExportHistoryCallback, ProfileCallback, ProfileTradePdfCallback
 )
 
@@ -124,29 +126,29 @@ async def _ensure_history_profile_access(
 async def get_trade_history(current_user_id: int, target_user_id: int, months: int = 3):
     """دریافت تاریخچه معاملات بین دو کاربر"""
     from_date = datetime.now(timezone.utc) - timedelta(days=months * 30)
-    
+
     async with AsyncSessionLocal() as session:
         # اگر target_user_id == current_user_id باشد، یعنی تاریخچه کل کاربر را می‌خواهد
         is_self_history = (target_user_id == current_user_id or target_user_id == 0)
-        
+
         target_user = None
         if not is_self_history:
             target_stmt = select(User).where(User.id == target_user_id)
             target_user = (await session.execute(target_stmt)).scalar_one_or_none()
             if not target_user:
                 return None, []
-        
+
         # دریافت معاملات
         stmt = (
             select(Trade)
             .options(
-                joinedload(Trade.commodity), 
+                joinedload(Trade.commodity),
                 joinedload(Trade.offer_user),
                 joinedload(Trade.responder_user)
             )
             .order_by(Trade.created_at.desc()) # از جدید به قدیم
         )
-        
+
         if is_self_history:
             stmt = stmt.where(
                 and_(
@@ -164,7 +166,7 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
                     )
                 )
             )
-            
+
         result = await session.execute(stmt)
         trades = result.scalars().all()
         await attach_customer_management_names(
@@ -178,21 +180,21 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
                 ],
             ],
         )
-        
+
         return target_user, trades
 
 
 def format_trade_history(trades, target_user, current_user_id: int) -> str:
     """فرمت‌بندی تاریخچه معاملات"""
     is_self = target_user is None
-    
+
     title = "📊 تاریخچه معاملات کل شما" if is_self else f"📊 تاریخچه معاملات با {user_display_name(target_user)}"
-    
+
     if not trades:
         return f"{title}\n\n⚠️ معامله‌ای یافت نشد."
-    
+
     text = f"{title}\n\n"
-    
+
     for trade in trades[:20]:  # حداکثر 20 معامله
         # تشخیص نوع معامله از دید کاربر فعلی
         if trade.responder_user_id == current_user_id:
@@ -203,12 +205,12 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
             # کاربر فعلی لفظ‌دهنده بود - عکس trade_type
             is_buy = trade.trade_type != TradeType.BUY
             counterparty = resolve_counterparty_account_name_for_perspective(trade, current_user_id)
-        
+
         trade_emoji = "🟢" if is_buy else "🔴"
         trade_label = "خرید" if is_buy else "فروش"
-        
+
         date_str = to_jalali_str(trade.created_at, "%Y/%m/%d %H:%M") if trade.created_at else "نامشخص"
-        
+
         text += (
             f"{trade_emoji} {trade_label} {trade.commodity.name} "
             f"{trade.quantity} عدد {trade_settlement_label(getattr(trade, 'settlement_type', None))} "
@@ -218,10 +220,10 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
         if is_self:
             text += f"   👤 طرف معامله: {counterparty}\n"
         text += "\n"
-    
+
     if len(trades) > 20:
         text += f"... و {len(trades) - 20} معامله دیگر"
-    
+
     return text
 
 
@@ -229,12 +231,12 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
 async def show_my_trade_history(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:
         return
-    
+
     target_user, trades = await get_trade_history(user.id, user.id, months=3)
     await state.update_data(history_months=3)
-    
+
     text = format_trade_history(trades, None, user.id)
-    
+
     # برای تاریخچه شخصی، دکمه بازگشت باید به پنل اصلی برگردد
     # اما get_trade_history_keyboard نیاز به target_user_id دارد. 0 را به عنوان نشانه خود استفاده می‌کنیم.
     await answer_incoming_message_via_runtime(
@@ -251,19 +253,19 @@ async def show_my_trade_history(message: types.Message, state: FSMContext, user:
 async def change_history_months(callback: types.CallbackQuery, callback_data: HistoryPageCallback, state: FSMContext, user: Optional[User]):
     if not user:
         return
-    
+
     months = callback_data.months
     target_user_id = callback_data.target_user_id
     await state.update_data(history_months=months)
-    
+
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
-    
+
     # اگر target_user_id آیدی خود کاربر باشد، یعنی تاریخچه کل است
     is_self = (target_user_id == user.id)
     text = format_trade_history(trades, target_user if not is_self else None, user.id)
-    
+
     try:
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             text,
             reply_markup=get_trade_history_keyboard(target_user_id)
         )
@@ -296,7 +298,7 @@ async def show_trade_history(callback: types.CallbackQuery, callback_data: Trade
     await state.update_data(history_months=3, history_target_id=target_user_id)
     is_self = target_user_id in {user.id, 0}
     text = format_trade_history(trades, None if is_self else target_user, user.id)
-    await callback.message.edit_text(text, reply_markup=get_trade_history_keyboard(target_user_id))
+    await edit_callback_message_via_runtime(callback, user, text, reply_markup=get_trade_history_keyboard(target_user_id))
     await answer_callback_query_via_runtime(callback)
 
 
@@ -325,7 +327,7 @@ async def filter_trade_history(callback: types.CallbackQuery, callback_data: His
     is_self = target_user_id in {user.id, 0}
     text = format_trade_history(trades, None if is_self else target_user, user.id)
     try:
-        await callback.message.edit_text(text, reply_markup=get_trade_history_keyboard(target_user_id))
+        await edit_callback_message_via_runtime(callback, user, text, reply_markup=get_trade_history_keyboard(target_user_id))
     except TelegramBadRequest:
         pass
     await answer_callback_query_via_runtime(callback)
@@ -371,20 +373,20 @@ async def generate_pdf(trades, target_user, current_user, months: Optional[int] 
 async def export_excel(callback: types.CallbackQuery, callback_data: ExportHistoryCallback, state: FSMContext, user: Optional[User], bot: Bot):
     if not user:
         return
-    
+
     await answer_callback_query_via_runtime(
         callback,
         "⏳ در حال ایجاد فایل Excel...",
     )
-    
+
     data = await state.get_data()
     months = data.get("history_months", 3)
     target_user_id = callback_data.target_user_id
     if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
         return
-    
+
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
-    
+
     if not trades:
         await answer_callback_message_via_runtime(
             callback,
@@ -394,22 +396,27 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
             action=TelegramDeliveryAction.TRADE_NONCRITICAL,
         )
         return
-    
+
     try:
         filename = await generate_excel(trades, target_user, user)
-        
+
         display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
-        
+
         # ارسال فایل
-        doc_msg = await bot.send_document(
-            chat_id=callback.message.chat.id,
-            document=FSInputFile(filename, filename=_history_download_filename(display_name, "xlsx")),
+        export_filename = _history_download_filename(display_name, "xlsx")
+        await send_private_document_via_runtime(
+            callback,
+            user,
+            FSInputFile(filename, filename=export_filename),
+            filename=export_filename,
+            bot=bot,
+            source_key="history-excel-document",
             caption=f"📊 تاریخچه معاملات {display_name}\n📅 {months} ماه اخیر"
         )
-        
+
         # حذف فایل موقت
         os.remove(filename)
-        
+
     except Exception as e:
         await answer_callback_message_via_runtime(
             callback,
@@ -425,20 +432,20 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
 async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistoryCallback, state: FSMContext, user: Optional[User], bot: Bot):
     if not user:
         return
-    
+
     await answer_callback_query_via_runtime(
         callback,
         "⏳ در حال ایجاد فایل PDF...",
     )
-    
+
     data = await state.get_data()
     months = data.get("history_months", 3)
     target_user_id = callback_data.target_user_id
     if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
         return
-    
+
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
-    
+
     if not trades:
         await answer_callback_message_via_runtime(
             callback,
@@ -448,22 +455,27 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
             action=TelegramDeliveryAction.TRADE_NONCRITICAL,
         )
         return
-    
+
     try:
         filename = await generate_pdf(trades, target_user, user, months=months)
-        
+
         display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
-        
+
         # ارسال فایل
-        doc_msg = await bot.send_document(
-            chat_id=callback.message.chat.id,
-            document=FSInputFile(filename, filename=_history_download_filename(display_name, "pdf")),
+        export_filename = _history_download_filename(display_name, "pdf")
+        await send_private_document_via_runtime(
+            callback,
+            user,
+            FSInputFile(filename, filename=export_filename),
+            filename=export_filename,
+            bot=bot,
+            source_key="history-pdf-document",
             caption=f"📊 تاریخچه معاملات {display_name}\n📅 {months} ماه اخیر"
         )
-        
+
         # حذف فایل موقت
         os.remove(filename)
-        
+
     except Exception as e:
         await answer_callback_message_via_runtime(
             callback,
@@ -508,9 +520,14 @@ async def export_profile_trade_pdf(
     try:
         filename = await generate_pdf(trades, target_user, user, months=3)
         display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
-        await bot.send_document(
-            chat_id=callback.message.chat.id,
-            document=FSInputFile(filename, filename=_history_download_filename(display_name, "pdf")),
+        export_filename = _history_download_filename(display_name, "pdf")
+        await send_private_document_via_runtime(
+            callback,
+            user,
+            FSInputFile(filename, filename=export_filename),
+            filename=export_filename,
+            bot=bot,
+            source_key="history-profile-pdf-document",
             caption=f"📊 تاریخچه معاملات {display_name}\n📅 ۳ ماه اخیر",
         )
         os.remove(filename)
@@ -529,9 +546,9 @@ async def export_profile_trade_pdf(
 async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileCallback, state: FSMContext, user: Optional[User]):
     if not user:
         return
-    
+
     target_user_id = callback_data.target_user_id
-    
+
     # اگر آیدی خودش بود، به منوی پنل برگردد
     if target_user_id == user.id:
         from bot.handlers.panel import show_my_profile_and_change_keyboard
@@ -551,7 +568,7 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
             f"`{profile_link}`"
         )
         from bot.keyboards import get_user_panel_keyboard
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             profile_text,
             parse_mode="Markdown",
             reply_markup=get_user_panel_keyboard(user.role)
@@ -563,7 +580,7 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
         profile = await load_bot_public_profile(session, viewer=user, target_user_id=target_user_id)
 
     if profile:
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             build_bot_public_profile_text(profile),
             reply_markup=build_bot_public_profile_keyboard(profile),
         )
@@ -574,7 +591,7 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
             show_alert=True,
         )
         return
-    
+
     await answer_callback_query_via_runtime(callback)
 
 
@@ -583,14 +600,14 @@ async def show_mutual_trade_history(callback: types.CallbackQuery, callback_data
     """نمایش تاریخچه معاملات بین دو کاربر از طریق کالبک"""
     if not user:
         return
-    
+
     target_user_id = callback_data.target_user_id
     await state.update_data(history_months=3)
     if not await _ensure_history_profile_access(user=user, target_user_id=target_user_id, callback=callback):
         return
-    
+
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
-    
+
     if not target_user and target_user_id != user.id:
         await answer_callback_query_via_runtime(
             callback,
@@ -598,11 +615,11 @@ async def show_mutual_trade_history(callback: types.CallbackQuery, callback_data
             show_alert=True,
         )
         return
-        
+
     is_self = (target_user_id == user.id)
     text = format_trade_history(trades, target_user if not is_self else None, user.id)
-    
-    await callback.message.edit_text(
+
+    await edit_callback_message_via_runtime(callback, user,
         text,
         reply_markup=get_trade_history_keyboard(target_user_id)
     )

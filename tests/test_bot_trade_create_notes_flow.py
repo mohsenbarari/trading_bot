@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from bot.handlers.trade_create import handle_notes_input, handle_skip_notes
 
@@ -14,7 +14,12 @@ class BotTradeCreateNotesFlowTests(unittest.IsolatedAsyncioTestCase):
             await handle_skip_notes(callback, state, user=SimpleNamespace(id=1))
 
         state.update_data.assert_awaited_once_with(notes=None)
-        preview_mock.assert_awaited_once_with(callback.message, state, edit=True)
+        preview_mock.assert_awaited_once_with(
+            callback.message,
+            state,
+            edit=True,
+            user=ANY,
+        )
         callback.answer.assert_awaited_once_with()
 
     async def test_handle_notes_input_handles_too_long_and_success(self):

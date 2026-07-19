@@ -19,6 +19,7 @@ from core.services.telegram_scheduled_operation_service import (
     cancel_telegram_scheduled_operation,
     enqueue_cosmetic_markup_cleanup_once,
     enqueue_noncritical_market_notice_once,
+    enqueue_pre_auth_interaction_once,
     enqueue_temporary_message_cleanup_once,
     handoff_next_due_telegram_scheduled_operation,
 )
@@ -26,6 +27,7 @@ from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryOutcome,
     TelegramDeliveryState,
+    TelegramDestinationClass,
     TelegramFreshnessOutcome,
 )
 from core.telegram_delivery_scheduled_operation_freshness import (
@@ -218,6 +220,96 @@ class TelegramScheduledOperationBridgePostgresTests(
             )
             self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
             await db.rollback()
+
+    async def test_pre_auth_send_and_edit_use_short_lived_private_routes(self):
+        due = utc_now() - timedelta(seconds=1)
+        async with self.Session() as db:
+            await enqueue_pre_auth_interaction_once(
+                db,
+                current_server="foreign",
+                chat_id=8_600_001,
+                source_id="preauth-send-1",
+                text="ثبت‌نام را ادامه دهید",
+                reply_markup={"keyboard": [[{"text": "ادامه"}]]},
+                due_at=due,
+                ttl_seconds=30,
+            )
+            await enqueue_pre_auth_interaction_once(
+                db,
+                current_server="foreign",
+                chat_id=8_600_001,
+                source_id="preauth-edit-1",
+                text="اطلاعات اصلاح شد",
+                method="editMessageText",
+                message_id=77,
+                due_at=due,
+                ttl_seconds=30,
+            )
+            await db.commit()
+
+        first = await self._handoff()
+        second = await self._handoff()
+        self.assertEqual(first.disposition, SCHEDULED_OPERATION_HANDOFF)
+        self.assertEqual(second.disposition, SCHEDULED_OPERATION_HANDOFF)
+        async with self.Session() as db:
+            jobs = list(
+                (
+                    await db.execute(
+                        select(TelegramDeliveryJobRecord).order_by(
+                            TelegramDeliveryJobRecord.id
+                        )
+                    )
+                ).scalars()
+            )
+            for job in jobs:
+                decision = await validate_scheduled_operation_telegram_delivery_freshness(
+                    db,
+                    job,
+                    utc_now(),
+                    expected_channel_id=CHANNEL_ID,
+                )
+                self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
+        by_action = {job.action_kind: job for job in jobs}
+        self.assertEqual(
+            by_action[TelegramDeliveryAction.PREAUTH_INTERACTION].payload["chat_id"],
+            8_600_001,
+        )
+        self.assertEqual(
+            by_action[TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT].payload[
+                "message_id"
+            ],
+            77,
+        )
+
+    async def test_pre_auth_group_rejection_uses_bounded_shared_chat_route(self):
+        due = utc_now() - timedelta(seconds=1)
+        async with self.Session() as db:
+            await enqueue_pre_auth_interaction_once(
+                db,
+                current_server="foreign",
+                chat_id=-1008_600_001,
+                source_id="preauth-group-rejection-1",
+                text="ثبت‌نام فقط در گفت‌وگوی خصوصی",
+                destination_class=TelegramDestinationClass.CHANNEL,
+                due_at=due,
+                ttl_seconds=30,
+            )
+            await db.commit()
+
+        handed = await self._handoff()
+        self.assertEqual(handed.disposition, SCHEDULED_OPERATION_HANDOFF)
+        async with self.Session() as db:
+            job = await db.get(TelegramDeliveryJobRecord, handed.job_id)
+            decision = await validate_scheduled_operation_telegram_delivery_freshness(
+                db,
+                job,
+                utc_now(),
+                expected_channel_id=CHANNEL_ID,
+            )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
+        self.assertEqual(job.destination_class, TelegramDestinationClass.CHANNEL)
+        self.assertEqual(job.destination_key, "channel:-1008600001")
+        self.assertEqual(job.payload["chat_id"], -1008_600_001)
 
     async def test_recipient_route_change_stops_cleanup_before_gateway(self):
         user_id = await self._seed_user()

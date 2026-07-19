@@ -20,6 +20,7 @@ _SUPPRESS = {
     TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
     TelegramDeliveryAction.OFFER_REPEAT_RESPONSE,
     TelegramDeliveryAction.GENERAL_IMMEDIATE,
+    TelegramDeliveryAction.PREAUTH_INTERACTION,
     TelegramDeliveryAction.TRADE_RESULT,
     TelegramDeliveryAction.TRADE_RESPONSE,
     TelegramDeliveryAction.TRADE_ALTERNATIVE,
@@ -51,6 +52,7 @@ _ROUTE_INDEPENDENT = {
 _PROVIDER_BOUND = {
     TelegramDeliveryAction.CALLBACK_DEADLINE,
     TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
+    TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
 }
 _SCOPED_REVALIDATE = {
     TelegramDeliveryAction.TEMPORARY_CLEANUP,

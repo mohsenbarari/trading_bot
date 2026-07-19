@@ -481,7 +481,16 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(shared_destination.allowed)
         self.assertEqual(shared_destination.wait_reason, "destination_gate")
-        self.assertGreaterEqual(shared_destination.retry_after_seconds, 127.09)
+        self.assertGreater(shared_destination.retry_after_seconds, 126.5)
+        self.assertIsNotNone(shared_destination.not_before)
+        self.assertGreaterEqual(
+            shared_destination.not_before,
+            now + timedelta(seconds=127.098),
+        )
+        self.assertLessEqual(
+            shared_destination.not_before,
+            now + timedelta(seconds=127.102),
+        )
         self.assertTrue(unrelated_destination.allowed)
 
     async def test_bot_replay_extension_is_idempotent_monotonic_and_bot_scoped(self):
@@ -504,7 +513,16 @@ class TelegramDeliveryQueueRedisLimiterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(primary.allowed)
         self.assertEqual(primary.wait_reason, "bot_lane")
-        self.assertGreaterEqual(primary.retry_after_seconds, 127.09)
+        self.assertGreater(primary.retry_after_seconds, 126.5)
+        self.assertIsNotNone(primary.not_before)
+        self.assertGreaterEqual(
+            primary.not_before,
+            maximum - timedelta(milliseconds=2),
+        )
+        self.assertLessEqual(
+            primary.not_before,
+            maximum + timedelta(milliseconds=2),
+        )
         self.assertTrue(editor.allowed)
 
     async def test_bot_destination_and_gateway_pauses_require_scoped_resume(self):

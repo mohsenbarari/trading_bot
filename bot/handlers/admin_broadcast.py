@@ -10,6 +10,7 @@ from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.telegram_interaction_message import (
     answer_incoming_message_via_runtime,
     edit_callback_message_via_runtime,
+    edit_callback_reply_markup_via_runtime,
 )
 from core.db import AsyncSessionLocal
 from core.enums import UserRole
@@ -241,7 +242,11 @@ async def toggle_group_recipient(callback: types.CallbackQuery, state: FSMContex
         audience_type=TelegramAdminBroadcastAudienceType.GROUP.value,
         target_groups=sorted(selected_groups),
     )
-    await callback.message.edit_reply_markup(reply_markup=_groups_keyboard(selected_groups))
+    await edit_callback_reply_markup_via_runtime(
+        callback,
+        user,
+        reply_markup=_groups_keyboard(selected_groups),
+    )
     await answer_callback_query_via_runtime(callback)
 
 

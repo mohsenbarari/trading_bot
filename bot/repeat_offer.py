@@ -270,6 +270,11 @@ async def refresh_repeat_offer_menu_for_expired_offer(
             ),
             candidate,
         )
+        if (
+            configured_telegram_delivery_runtime().mode
+            == TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
+            raise RuntimeError("repeat_offer_refresh_direct_owner_invalid")
         await bot.send_message(
             chat_id=int(telegram_id),
             text=TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,

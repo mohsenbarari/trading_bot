@@ -1,4 +1,6 @@
 import unittest
+import base64
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -71,6 +73,64 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
             client.post.await_args.kwargs["json"],
             {"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
         )
+
+    async def test_document_gateway_decodes_verified_content_into_multipart(self):
+        document = b"safe-binary-report"
+        client = FakeAsyncClientContext(response=FakeResponse())
+        payload = {
+            "chat_id": 9,
+            "caption": "گزارش",
+            "reply_markup": {"inline_keyboard": []},
+            "document_base64": base64.b64encode(document).decode("ascii"),
+            "document_filename": "report.xlsx",
+            "document_sha256": hashlib.sha256(document).hexdigest(),
+        }
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await telegram_gateway.post_telegram_method(
+                "sendDocument",
+                payload,
+                bot_token="token",
+            )
+
+        self.assertTrue(result.ok)
+        request = client.post.await_args
+        self.assertNotIn("json", request.kwargs)
+        self.assertNotIn(payload["document_base64"], request.kwargs["data"].values())
+        self.assertEqual(request.kwargs["data"]["chat_id"], "9")
+        self.assertEqual(
+            request.kwargs["data"]["reply_markup"],
+            '{"inline_keyboard":[]}',
+        )
+        self.assertEqual(
+            request.kwargs["files"]["document"],
+            ("report.xlsx", document, "application/octet-stream"),
+        )
+
+    async def test_document_gateway_rejects_hash_mismatch_before_http_write(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await telegram_gateway.post_telegram_method(
+                "sendDocument",
+                {
+                    "chat_id": 9,
+                    "caption": "گزارش",
+                    "document_base64": base64.b64encode(b"report").decode("ascii"),
+                    "document_filename": "report.xlsx",
+                    "document_sha256": "0" * 64,
+                },
+                bot_token="token",
+            )
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error, "ValueError")
+        self.assertEqual(result.transport_phase, "pre_write")
+        client.post.assert_not_awaited()
 
     async def test_missing_token_returns_failed_result_without_http_call(self):
         with patch("core.telegram_gateway.current_server", return_value="foreign"), patch.object(
@@ -180,6 +240,34 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
             "https://api.telegram.org/bottoken/sendMessage",
             json={"chat_id": 9, "text": "hello", "parse_mode": "HTML"},
             timeout=10,
+        )
+
+    def test_sync_document_gateway_uses_verified_multipart(self):
+        document = b"sync-report"
+        response = SimpleNamespace(status_code=200, text="", json=lambda: {"ok": True})
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.post",
+            return_value=response,
+        ) as http_post:
+            result = telegram_gateway.post_telegram_method_sync(
+                "sendDocument",
+                {
+                    "chat_id": 9,
+                    "caption": "report",
+                    "document_base64": base64.b64encode(document).decode("ascii"),
+                    "document_filename": "report.pdf",
+                    "document_sha256": hashlib.sha256(document).hexdigest(),
+                },
+                bot_token="token",
+            )
+
+        self.assertTrue(result.ok)
+        request = http_post.call_args
+        self.assertNotIn("json", request.kwargs)
+        self.assertEqual(request.kwargs["data"]["chat_id"], "9")
+        self.assertEqual(
+            request.kwargs["files"]["document"],
+            ("report.pdf", document, "application/octet-stream"),
         )
 
 

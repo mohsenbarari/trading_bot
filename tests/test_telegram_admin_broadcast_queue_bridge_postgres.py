@@ -469,7 +469,7 @@ class TelegramAdminBroadcastQueueBridgePostgresTests(
             # ownership prevents it from running in queue mode; it can never
             # reclaim the queue-bound first recipient.
 
-    async def test_relink_reclassifies_and_rebuilds_a_new_job(self):
+    async def test_relink_suppresses_old_broadcast_without_a_new_job(self):
         _, receipt_ids, user_ids = await self._seed_broadcast(recipients=1)
         first = await self._handoff()
         job = await self._claim_job()
@@ -487,7 +487,11 @@ class TelegramAdminBroadcastQueueBridgePostgresTests(
                 current,
                 utc_now(),
             )
-            self.assertEqual(freshness.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+            self.assertEqual(freshness.outcome, TelegramFreshnessOutcome.SUPERSEDED)
+            self.assertEqual(
+                freshness.reason,
+                "admin_broadcast_freshness_recipient_relinked",
+            )
             dispatched = await apply_telegram_delivery_freshness_result(
                 db,
                 current_server="foreign",
@@ -501,17 +505,16 @@ class TelegramAdminBroadcastQueueBridgePostgresTests(
             self.assertFalse(dispatched)
             await db.commit()
 
-        replacement = await self._handoff()
-        self.assertEqual(replacement.disposition, ADMIN_BROADCAST_QUEUE_HANDOFF)
-        self.assertNotEqual(replacement.job_id, first.job_id)
+        self.assertIsNone(await self._handoff())
         async with self.Session() as db:
             old_job = await db.get(TelegramDeliveryJobRecord, int(first.job_id))
-            new_job = await db.get(TelegramDeliveryJobRecord, int(replacement.job_id))
             receipt = await db.get(TelegramAdminBroadcastReceipt, receipt_ids[0])
-            user = await db.get(User, user_ids[0])
-            self.assertEqual(old_job.state, TelegramDeliveryState.PENDING_RECONCILE)
-            self.assertEqual(new_job.payload["chat_id"], int(user.telegram_id))
-            self.assertEqual(receipt.queue_job_id, int(new_job.id))
+            self.assertEqual(old_job.state, TelegramDeliveryState.SUPERSEDED)
+            self.assertEqual(
+                receipt.status,
+                TelegramAdminBroadcastReceiptStatus.SKIPPED,
+            )
+            self.assertIsNone(receipt.queue_job_id)
 
     async def test_lifecycle_callbacks_are_mandatory_for_broadcast_jobs(self):
         await self._seed_broadcast(recipients=1)

@@ -22,12 +22,14 @@ from core.telegram_gateway import TelegramGatewayResult
 
 
 class TelegramScheduledOperationContractTests(unittest.TestCase):
-    def test_exact_three_source_actions_have_bounded_routes(self):
+    def test_exact_five_source_actions_have_bounded_routes(self):
         self.assertEqual(
             SCHEDULED_OPERATION_FRESHNESS_ACTIONS,
             frozenset(
                 {
                     TelegramDeliveryAction.NONCRITICAL_MARKET,
+                    TelegramDeliveryAction.PREAUTH_INTERACTION,
+                    TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
                     TelegramDeliveryAction.TEMPORARY_CLEANUP,
                     TelegramDeliveryAction.COSMETIC_CLEANUP,
                 }
@@ -50,6 +52,18 @@ class TelegramScheduledOperationContractTests(unittest.TestCase):
                 TelegramDeliveryAction.COSMETIC_CLEANUP
             ].method,
             "editMessageReplyMarkup",
+        )
+        self.assertEqual(
+            SCHEDULED_OPERATION_POLICIES[
+                TelegramDeliveryAction.PREAUTH_INTERACTION
+            ].method,
+            "sendMessage",
+        )
+        self.assertEqual(
+            SCHEDULED_OPERATION_POLICIES[
+                TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT
+            ].method,
+            "editMessageText",
         )
         self.assertIn("deleteMessage", SUPPORTED_TELEGRAM_QUEUE_METHODS)
 

@@ -113,9 +113,18 @@ class TelegramInteractionResultContractTests(unittest.TestCase):
 
     def test_unsupported_method_and_invalid_logical_key_fail_closed(self):
         with self.assertRaisesRegex(ValueError, "method_unsupported"):
-            make_capture_contract(method="sendDocument")
+            make_capture_contract(method="sendPhoto")
         with self.assertRaisesRegex(ValueError, "logical_message_key_invalid"):
             make_capture_contract(logical_message_key="")
+
+    def test_document_send_captures_the_real_provider_message_id(self):
+        contract = make_capture_contract(method="sendDocument")
+
+        self.assertEqual(contract.method, "sendDocument")
+        self.assertEqual(
+            contract.result_requirement,
+            TelegramInteractionResultRequirement.CAPTURE_MESSAGE_ID,
+        )
 
     def test_known_message_target_is_ready_without_a_delivery_dependency(self):
         reference = build_known_message_target(chat_id=-10011, message_id=44)

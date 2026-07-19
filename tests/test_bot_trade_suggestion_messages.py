@@ -318,7 +318,7 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
         ) as clear_markup, patch(
             'bot.utils.trade_suggestion_messages.remove_trade_suggestion_record', AsyncMock()
         ) as remove_record:
-            suggestion_messages.schedule_trade_suggestion_cleanup(MagicMock(), 1, 10, 20)
+            await suggestion_messages.schedule_trade_suggestion_cleanup(MagicMock(), 1, 10, 20)
             await created.pop(0)
 
         clear_markup.assert_awaited_once()
@@ -328,7 +328,7 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
         with patch('bot.utils.trade_suggestion_messages.asyncio.create_task', side_effect=capture_task), patch(
             'bot.utils.trade_suggestion_messages.asyncio.sleep', AsyncMock()
         ), patch('bot.utils.trade_suggestion_messages.sync_trade_suggestions_for_offer', AsyncMock()) as sync_offer:
-            suggestion_messages.schedule_trade_suggestion_pending_reset(MagicMock(), 4)
+            await suggestion_messages.schedule_trade_suggestion_pending_reset(MagicMock(), 4)
             await created.pop(0)
         sync_offer.assert_awaited_once()
 
@@ -383,16 +383,16 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
             'sleep',
             new=AsyncMock(),
         ) as sleep:
-            suggestion_messages.schedule_trade_suggestion_cleanup(
+            await suggestion_messages.schedule_trade_suggestion_cleanup(
                 bot,
                 7,
                 10,
                 20,
             )
-            await created.pop(0)
 
         enqueue.assert_awaited_once()
         sleep.assert_not_awaited()
+        self.assertEqual(created, [])
 
     async def test_listen_trade_suggestion_events_processes_valid_messages_and_cleans_up(self):
         pubsub = _FakePubSub(

@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import base64
+import binascii
 import hashlib
+import json
 import logging
 import os
 from typing import Any, Optional
@@ -23,6 +26,7 @@ TELEGRAM_API_BASE_URL = "https://api.telegram.org"
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 _MISSING = object()
 _CORRELATION_HASH_DOMAIN = b"telegram-delivery-correlation-v1\x00"
+_MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
 
 
 class TelegramGatewaySurfaceError(RuntimeError):
@@ -111,7 +115,7 @@ def _transport_failure_phase(exc: BaseException, *, response: Any = None) -> str
         return "response_received"
     if isinstance(
         exc,
-        (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout),
+        (ValueError, httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout),
     ):
         return "pre_write"
     return "write_unknown"
@@ -136,6 +140,44 @@ def _result_from_response(
     )
 
 
+def _document_multipart_payload(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, str], dict[str, tuple[str, bytes, str]]]:
+    encoded = str(payload.get("document_base64") or "").strip()
+    filename = str(payload.get("document_filename") or "").strip()
+    expected_hash = str(payload.get("document_sha256") or "").strip().lower()
+    try:
+        document = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("telegram_document_encoding_invalid") from exc
+    if (
+        not document
+        or len(document) > _MAX_DOCUMENT_BYTES
+        or not filename
+        or len(filename) > 120
+        or "/" in filename
+        or "\\" in filename
+        or hashlib.sha256(document).hexdigest() != expected_hash
+    ):
+        raise ValueError("telegram_document_contract_invalid")
+    data: dict[str, str] = {}
+    for key, value in payload.items():
+        if key in {
+            "document_base64",
+            "document_filename",
+            "document_sha256",
+        } or value is None:
+            continue
+        data[key] = (
+            json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            if isinstance(value, (dict, list))
+            else str(value)
+        )
+    return data, {
+        "document": (filename, document, "application/octet-stream")
+    }
+
+
 async def post_telegram_method(
     method: str,
     payload: Mapping[str, Any],
@@ -154,11 +196,20 @@ async def post_telegram_method(
     response = None
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                json=dict(payload),
-                timeout=timeout,
-            )
+            if method == "sendDocument":
+                data, files = _document_multipart_payload(payload)
+                response = await client.post(
+                    f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
+                    data=data,
+                    files=files,
+                    timeout=timeout,
+                )
+            else:
+                response = await client.post(
+                    f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
+                    json=dict(payload),
+                    timeout=timeout,
+                )
     except Exception as exc:
         received_response = (
             response if response is not None else getattr(exc, "response", None)
@@ -213,11 +264,20 @@ def post_telegram_method_sync(
 
     response = None
     try:
-        response = httpx.post(
-            f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-            json=dict(payload),
-            timeout=timeout,
-        )
+        if method == "sendDocument":
+            data, files = _document_multipart_payload(payload)
+            response = httpx.post(
+                f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
+                data=data,
+                files=files,
+                timeout=timeout,
+            )
+        else:
+            response = httpx.post(
+                f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
+                json=dict(payload),
+                timeout=timeout,
+            )
     except Exception as exc:
         received_response = (
             response if response is not None else getattr(exc, "response", None)

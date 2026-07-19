@@ -61,6 +61,41 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
         )
         self.quota_patcher.start()
         self.addCleanup(self.quota_patcher.stop)
+        self.validation_settings_patcher = patch(
+            "core.services.trade_service.get_trading_settings",
+            return_value=SimpleNamespace(
+                offer_min_quantity=1,
+                offer_max_quantity=100_000,
+                lot_min_size=1,
+                lot_max_count=3,
+            ),
+        )
+        self.validation_settings_patcher.start()
+        self.addCleanup(self.validation_settings_patcher.stop)
+        self.active_offer_cache_patcher = patch(
+            "core.cache.incr_active_offer_count",
+            new=AsyncMock(),
+        )
+        self.active_offer_cache_patcher.start()
+        self.addCleanup(self.active_offer_cache_patcher.stop)
+        self.web_push_patcher = patch(
+            "core.web_push.schedule_market_offer_web_push",
+        )
+        self.web_push_patcher.start()
+        self.addCleanup(self.web_push_patcher.stop)
+        self.redis_connection_guard = patch(
+            "core.redis.pool.get_connection",
+            new=AsyncMock(side_effect=AssertionError("unexpected real Redis access")),
+        )
+        self.redis_connection_guard.start()
+        self.addCleanup(self.redis_connection_guard.stop)
+        self.database_connection_guard = patch(
+            "core.db.AsyncSessionLocal",
+            side_effect=AssertionError("unexpected real PostgreSQL access"),
+        )
+        self.database_connection_guard.start()
+        self.addCleanup(self.database_connection_guard.stop)
+
 
     async def test_fake_session_helpers_cover_existing_ids_and_empty_update_get(self):
         session = FakeSession()

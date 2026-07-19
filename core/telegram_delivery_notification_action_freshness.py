@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import base64
+import binascii
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,6 +20,7 @@ from core.services.telegram_delivery_queue_service import (
     canonical_telegram_delivery_payload,
 )
 from core.services.telegram_notification_outbox_service import (
+    TELEGRAM_DOCUMENT_EXPORT_MAX_BYTES,
     telegram_notification_dedupe_key,
     validate_telegram_notification_text,
 )
@@ -39,11 +42,14 @@ from core.telegram_delivery_notification_action_contract import (
 )
 from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionAnchorEffect,
+    TelegramInteractionDependencyDecision,
+    TelegramInteractionDependencyOutcome,
     TelegramInteractionResultContract,
     TelegramInteractionTargetKind,
     TelegramInteractionTargetReference,
     parse_interaction_result_contract,
     parse_interaction_target_reference,
+    resolve_interaction_target,
     serialize_interaction_result_contract,
     serialize_interaction_target_reference,
 )
@@ -99,6 +105,9 @@ class TelegramNotificationActionSource:
     not_before: datetime | None
     interaction_result: TelegramInteractionResultContract | None
     interaction_target: TelegramInteractionTargetReference | None
+    document_base64: str | None
+    document_filename: str | None
+    document_sha256: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +228,9 @@ def _validate_source_contract(
     not_before: datetime | None = None
     interaction_result: TelegramInteractionResultContract | None = None
     interaction_target: TelegramInteractionTargetReference | None = None
+    document_base64: str | None = None
+    document_filename: str | None = None
+    document_sha256: str | None = None
     expected_user_sync_version = _strict_positive_int(
         extra_payload.get("user_sync_version")
     )
@@ -301,6 +313,13 @@ def _validate_source_contract(
             allowed_keys.add("interaction_result")
         if "interaction_target" in extra_payload:
             allowed_keys.add("interaction_target")
+        document_keys = {
+            "document_base64",
+            "document_filename",
+            "document_sha256",
+        }
+        if document_keys & set(extra_payload):
+            allowed_keys.update(document_keys)
         if set(extra_payload) != allowed_keys:
             raise ValueError("notification_action_extra_payload_invalid")
         raw_reply_markup = extra_payload.get("reply_markup")
@@ -317,7 +336,12 @@ def _validate_source_contract(
                 raw_interaction_result
             )
             if (
-                interaction_result.method not in {"sendMessage", "editMessageText"}
+                interaction_result.method not in {
+                    "sendMessage",
+                    "sendDocument",
+                    "editMessageText",
+                    "editMessageReplyMarkup",
+                }
                 or interaction_result.destination_class
                 != TelegramDestinationClass.PRIVATE
                 or not interaction_result.authenticated
@@ -329,7 +353,7 @@ def _validate_source_contract(
                 raise ValueError(
                     "notification_action_interaction_persistent_menu_mismatch"
                 )
-            if interaction_result.method == "sendMessage":
+            if interaction_result.method in {"sendMessage", "sendDocument"}:
                 if raw_interaction_target is not None:
                     raise ValueError(
                         "notification_action_send_target_forbidden"
@@ -342,10 +366,6 @@ def _validate_source_contract(
                 interaction_target = parse_interaction_target_reference(
                     raw_interaction_target
                 )
-                if interaction_target.kind != TelegramInteractionTargetKind.KNOWN_MESSAGE:
-                    raise ValueError(
-                        "notification_action_edit_target_kind_unsupported"
-                    )
                 enqueue_chat_id = _strict_positive_int(
                     getattr(outbox, "telegram_id_at_enqueue", None)
                 )
@@ -360,13 +380,55 @@ def _validate_source_contract(
         elif raw_interaction_target is not None:
             raise ValueError("notification_action_target_without_interaction")
 
+        if interaction_result is not None and interaction_result.method == "sendDocument":
+            document_base64 = str(extra_payload.get("document_base64") or "").strip()
+            document_filename = str(extra_payload.get("document_filename") or "").strip()
+            document_sha256 = str(extra_payload.get("document_sha256") or "").strip().lower()
+            try:
+                document_bytes = base64.b64decode(document_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("notification_action_document_encoding_invalid") from exc
+            if (
+                not document_bytes
+                or len(document_bytes) > TELEGRAM_DOCUMENT_EXPORT_MAX_BYTES
+                or not document_filename
+                or len(document_filename) > 120
+                or "/" in document_filename
+                or "\\" in document_filename
+                or hashlib.sha256(document_bytes).hexdigest() != document_sha256
+            ):
+                raise ValueError("notification_action_document_contract_invalid")
+        elif document_keys & set(extra_payload):
+            raise ValueError("notification_action_document_without_method")
+
+    method = (
+        interaction_result.method
+        if interaction_result is not None
+        else "sendMessage"
+    )
     payload: dict[str, Any] = {
         "chat_id": int(getattr(outbox, "telegram_id_at_enqueue", 0) or 0),
-        "text": text,
-        "parse_mode": parse_mode,
     }
-    if reply_markup is not None:
-        payload["reply_markup"] = reply_markup
+    if method == "editMessageReplyMarkup":
+        payload["reply_markup"] = reply_markup or {"inline_keyboard": []}
+    elif method == "sendDocument":
+        payload.update(
+            {
+                "caption": text,
+                "document_base64": document_base64,
+                "document_filename": document_filename,
+                "document_sha256": document_sha256,
+            }
+        )
+        if parse_mode is not None:
+            payload["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+    else:
+        payload["text"] = text
+        payload["parse_mode"] = parse_mode
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
     canonical_telegram_delivery_payload(payload)
     return TelegramNotificationActionSource(
         policy=policy,
@@ -386,6 +448,9 @@ def _validate_source_contract(
         not_before=not_before,
         interaction_result=interaction_result,
         interaction_target=interaction_target,
+        document_base64=document_base64,
+        document_filename=document_filename,
+        document_sha256=document_sha256,
     )
 
 
@@ -410,6 +475,8 @@ def telegram_notification_action_source_natural_id(
                 if source.interaction_target
                 else None
             ),
+            "document_filename": source.document_filename,
+            "document_sha256": source.document_sha256,
             "parse_mode": source.parse_mode,
             "reply_markup": source.reply_markup,
             "template_version": source.policy.template_version,
@@ -612,6 +679,8 @@ async def telegram_notification_action_deleted_route_is_reassigned(
 def build_telegram_notification_action_snapshot(
     outbox: TelegramNotificationOutbox | Any,
     user: User | Any,
+    *,
+    resolved_target_message_id: int | None = None,
 ) -> TelegramNotificationActionSnapshot:
     source = _validate_source_contract(outbox)
     if _strict_positive_int(getattr(user, "id", None)) != source.recipient_user_id:
@@ -627,28 +696,44 @@ def build_telegram_notification_action_snapshot(
         raise ValueError("notification_action_current_chat_id_invalid")
     if user_sync_version is None:
         raise ValueError("notification_action_recipient_version_invalid")
-    payload: dict[str, Any] = {
-        "chat_id": telegram_id,
-        "text": source.text,
-        "parse_mode": source.parse_mode,
-    }
+    payload: dict[str, Any] = {"chat_id": telegram_id}
     method = (
         source.interaction_result.method
         if source.interaction_result is not None
         else "sendMessage"
     )
-    if method == "editMessageText":
+    if method in {"editMessageText", "editMessageReplyMarkup"}:
         target = source.interaction_target
-        if (
-            target is None
-            or target.kind != TelegramInteractionTargetKind.KNOWN_MESSAGE
-            or target.chat_id != telegram_id
-            or _strict_positive_int(target.message_id) is None
-        ):
+        if target is None or target.chat_id != telegram_id:
             raise ValueError("notification_action_edit_target_invalid")
-        payload["message_id"] = int(target.message_id)
-    if source.reply_markup is not None:
-        payload["reply_markup"] = source.reply_markup
+        target_message_id = (
+            _strict_positive_int(target.message_id)
+            if target.kind == TelegramInteractionTargetKind.KNOWN_MESSAGE
+            else _strict_positive_int(resolved_target_message_id)
+        )
+        if target_message_id is None:
+            raise ValueError("notification_action_edit_target_unresolved")
+        payload["message_id"] = target_message_id
+    if method == "editMessageReplyMarkup":
+        payload["reply_markup"] = source.reply_markup or {"inline_keyboard": []}
+    elif method == "sendDocument":
+        payload.update(
+            {
+                "caption": source.text,
+                "document_base64": source.document_base64,
+                "document_filename": source.document_filename,
+                "document_sha256": source.document_sha256,
+            }
+        )
+        if source.parse_mode is not None:
+            payload["parse_mode"] = source.parse_mode
+        if source.reply_markup is not None:
+            payload["reply_markup"] = source.reply_markup
+    else:
+        payload["text"] = source.text
+        payload["parse_mode"] = source.parse_mode
+        if source.reply_markup is not None:
+            payload["reply_markup"] = source.reply_markup
     normalized_payload, payload_hash = canonical_telegram_delivery_payload(payload)
     version_snapshot = json.dumps(
         {
@@ -688,6 +773,76 @@ def build_telegram_notification_action_snapshot(
         payload=normalized_payload,
         source_version=source_version or 1,
         method=method,
+    )
+
+
+async def resolve_telegram_notification_action_interaction_target(
+    db: AsyncSession,
+    outbox: TelegramNotificationOutbox | Any,
+) -> TelegramInteractionDependencyDecision | None:
+    """Resolve a receipt target without mutating either durable source."""
+
+    source = _validate_source_contract(outbox)
+    target = source.interaction_target
+    if target is None or target.kind == TelegramInteractionTargetKind.KNOWN_MESSAGE:
+        return None
+    child_id = _strict_positive_int(getattr(outbox, "id", None))
+    parent_id = _strict_positive_int(target.source_receipt_id)
+    if child_id is None or parent_id is None or parent_id >= child_id:
+        return TelegramInteractionDependencyDecision(
+            TelegramInteractionDependencyOutcome.QUARANTINED,
+            target.chat_id,
+            reason="notification_action_result_target_order_invalid",
+        )
+    parent = await db.get(TelegramNotificationOutbox, parent_id)
+    if parent is None:
+        return TelegramInteractionDependencyDecision(
+            TelegramInteractionDependencyOutcome.QUARANTINED,
+            target.chat_id,
+            reason="notification_action_result_target_source_missing",
+        )
+    if (
+        _strict_positive_int(parent.recipient_user_id) != source.recipient_user_id
+        or _strict_positive_int(parent.telegram_id_at_enqueue) != target.chat_id
+    ):
+        return TelegramInteractionDependencyDecision(
+            TelegramInteractionDependencyOutcome.QUARANTINED,
+            target.chat_id,
+            reason="notification_action_result_target_source_route_mismatch",
+        )
+    try:
+        parent_source = _validate_source_contract(parent)
+    except (TypeError, ValueError, OverflowError):
+        return TelegramInteractionDependencyDecision(
+            TelegramInteractionDependencyOutcome.QUARANTINED,
+            target.chat_id,
+            reason="notification_action_result_target_source_invalid",
+        )
+    if (
+        parent_source.interaction_result is None
+        or parent_source.interaction_result.method != "sendMessage"
+    ):
+        return TelegramInteractionDependencyDecision(
+            TelegramInteractionDependencyOutcome.QUARANTINED,
+            target.chat_id,
+            reason="notification_action_result_target_source_not_send",
+        )
+    status = _enum_value(parent.status)
+    if status == TelegramNotificationOutboxStatus.SENT.value:
+        delivery_state = "sent"
+    elif status in {
+        TelegramNotificationOutboxStatus.SKIPPED.value,
+        TelegramNotificationOutboxStatus.TERMINAL_FAILED.value,
+    }:
+        delivery_state = "superseded"
+    elif status in _ACTIVE_STATUSES:
+        delivery_state = "pending"
+    else:
+        delivery_state = "quarantined"
+    return resolve_interaction_target(
+        target,
+        source_state=delivery_state,
+        source_telegram_message_id=parent.telegram_message_id,
     )
 
 
@@ -762,7 +917,12 @@ def _validate_static_route(
         return policy, _quarantined(
             "notification_action_freshness_destination_class_mismatch"
         )
-    if str(job.method or "") not in {"sendMessage", "editMessageText"}:
+    if str(job.method or "") not in {
+        "sendMessage",
+        "sendDocument",
+        "editMessageText",
+        "editMessageReplyMarkup",
+    }:
         return policy, _quarantined("notification_action_freshness_method_mismatch")
     if str(job.bot_identity or "") != "primary":
         return policy, _quarantined(
@@ -930,8 +1090,46 @@ async def validate_notification_action_telegram_delivery_freshness(
                 TelegramFreshnessOutcome.SUPERSEDED,
                 reason="notification_action_freshness_recipient_access_denied",
             )
+    target_decision = await resolve_telegram_notification_action_interaction_target(
+        db,
+        outbox,
+    )
+    if target_decision is not None:
+        if (
+            target_decision.outcome
+            == TelegramInteractionDependencyOutcome.WAIT_DEPENDENCY
+        ):
+            return _decision(
+                TelegramFreshnessOutcome.WAIT_DEPENDENCY,
+                reason="notification_action_freshness_result_target_pending",
+            )
+        if (
+            target_decision.outcome
+            == TelegramInteractionDependencyOutcome.SUPERSEDED
+        ):
+            return _decision(
+                TelegramFreshnessOutcome.SUPERSEDED,
+                reason=target_decision.reason
+                or "notification_action_freshness_result_target_superseded",
+            )
+        if (
+            target_decision.outcome
+            != TelegramInteractionDependencyOutcome.READY
+        ):
+            return _quarantined(
+                target_decision.reason
+                or "notification_action_freshness_result_target_quarantined"
+            )
     try:
-        current = build_telegram_notification_action_snapshot(outbox, user)
+        current = build_telegram_notification_action_snapshot(
+            outbox,
+            user,
+            resolved_target_message_id=(
+                target_decision.message_id
+                if target_decision is not None
+                else None
+            ),
+        )
     except (TelegramDeliveryQueueValidationError, TypeError, ValueError):
         return _quarantined("notification_action_freshness_current_payload_invalid")
     if (

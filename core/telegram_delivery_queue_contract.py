@@ -16,6 +16,11 @@ import math
 from typing import Any, Protocol
 
 
+TELEGRAM_NON_IDEMPOTENT_SEND_METHODS = frozenset(
+    {"sendMessage", "sendDocument"}
+)
+
+
 class TelegramGatewayResultLike(Protocol):
     ok: bool
     method: str
@@ -69,6 +74,8 @@ class TelegramDeliveryAction(str, Enum):
     OFFER_EXPIRY_CALLBACK = "offer_expiry_callback"
     OFFER_REPEAT_RESPONSE = "offer_repeat_response"
     GENERAL_IMMEDIATE = "general_immediate"
+    PREAUTH_INTERACTION = "preauth_interaction"
+    PREAUTH_INTERACTION_EDIT = "preauth_interaction_edit"
     TRADE_RESULT = "trade_result"
     TRADE_RESPONSE = "trade_response"
     TRADE_ALTERNATIVE = "trade_alternative"
@@ -240,6 +247,8 @@ _ACTION_PRIORITY_AND_RANK: dict[TelegramDeliveryAction, tuple[TelegramDeliveryPr
     TelegramDeliveryAction.TRADE_ALTERNATIVE: (TelegramDeliveryPriority.M1, 3),
     TelegramDeliveryAction.TRADE_UNAVAILABLE: (TelegramDeliveryPriority.M1, 3),
     TelegramDeliveryAction.GENERAL_IMMEDIATE: (TelegramDeliveryPriority.M1, 4),
+    TelegramDeliveryAction.PREAUTH_INTERACTION: (TelegramDeliveryPriority.M1, 4),
+    TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT: (TelegramDeliveryPriority.M1, 4),
     TelegramDeliveryAction.PARTIAL_OFFER_EDIT: (TelegramDeliveryPriority.M2, 0),
     TelegramDeliveryAction.NEW_USER_MEMBERSHIP: (TelegramDeliveryPriority.M2, 1),
     TelegramDeliveryAction.TRADED_OFFER_EDIT: (TelegramDeliveryPriority.M3, 0),
@@ -304,6 +313,8 @@ _FEEDER_INTERNAL_RANK: dict[
     (TelegramFeederKind.TIMED_BOT, TelegramDeliveryAction.COSMETIC_CLEANUP): 4,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.CALLBACK_DEADLINE): 0,
     (TelegramFeederKind.DIRECT, TelegramDeliveryAction.GENERAL_IMMEDIATE): 0,
+    (TelegramFeederKind.DIRECT, TelegramDeliveryAction.PREAUTH_INTERACTION): 1,
+    (TelegramFeederKind.DIRECT, TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT): 2,
 }
 
 _TERMINAL_EDIT_REPLACEMENTS = {
@@ -754,7 +765,10 @@ def apply_gateway_result(
         and result.response_json.get("ok") is True
     )
     if result.ok and envelope_ok:
-        if job.method == "sendMessage" and result.message_id is None:
+        if (
+            job.method in TELEGRAM_NON_IDEMPOTENT_SEND_METHODS
+            and result.message_id is None
+        ):
             job.state = TelegramDeliveryState.AMBIGUOUS
             return TelegramDeliveryDecision(
                 TelegramDeliveryOutcome.AMBIGUOUS,
@@ -904,7 +918,7 @@ def apply_gateway_result(
             reason="telegram_malformed_payload",
         )
 
-    if job.method == "sendMessage" and (
+    if job.method in TELEGRAM_NON_IDEMPOTENT_SEND_METHODS and (
         transport_phase == "write_unknown"
         or normalized_error in _AMBIGUOUS_SEND_ERRORS
         or (status_code is not None and 500 <= status_code <= 599)

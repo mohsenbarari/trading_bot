@@ -50,6 +50,7 @@ _DELIVERY_HOLD_OUTCOMES = {
 _SUPERSEDED_SKIP_REASONS = {
     "admin_broadcast_freshness_recipient_missing",
     "admin_broadcast_freshness_recipient_unlinked",
+    "admin_broadcast_freshness_recipient_relinked",
     "admin_broadcast_freshness_recipient_access_denied",
 }
 

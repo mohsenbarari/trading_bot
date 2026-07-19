@@ -101,11 +101,12 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
         trade_number: int,
         recipient_user_id: int,
         recipient_role: str,
+        telegram_id: int,
         message: str,
     ) -> dict:
         return {
             "message": message,
-            "telegram_id_at_audience_build": 900000 + recipient_user_id,
+            "telegram_id_at_audience_build": telegram_id,
             "extra_payload": {
                 "trade_number": trade_number,
                 "recipient_user_id": recipient_user_id,
@@ -190,6 +191,7 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
                     trade_number=trade.trade_number,
                     recipient_user_id=buyer.id,
                     recipient_role="responder",
+                    telegram_id=int(buyer.telegram_id),
                     message="نتیجه معامله خریدار",
                 ),
                 event_created_at=committed_at,
@@ -213,6 +215,7 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
                     trade_number=trade.trade_number,
                     recipient_user_id=seller.id,
                     recipient_role="offer_owner",
+                    telegram_id=int(seller.telegram_id),
                     message="نتیجه معامله فروشنده",
                 ),
                 event_created_at=committed_at,
@@ -282,7 +285,7 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
             await db.commit()
         self.assertEqual(at_deadline.id, pending_job.id)
 
-    async def test_recipient_linkage_race_reclassifies_after_database_reread(self):
+    async def test_recipient_linkage_race_is_suppressed_after_database_reread(self):
         committed_at = datetime(2026, 7, 17, 10, 30, tzinfo=timezone.utc)
         async with self.Session() as db:
             user = self._user(
@@ -330,6 +333,7 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
                     trade_number=trade.trade_number,
                     recipient_user_id=user.id,
                     recipient_role="responder",
+                    telegram_id=int(user.telegram_id),
                     message="نتیجه معامله",
                 ),
                 event_created_at=committed_at,
@@ -357,10 +361,10 @@ class TelegramDeliveryTradeFreshnessPostgresTests(unittest.IsolatedAsyncioTestCa
             )
 
         self.assertEqual(first.outcome, TelegramFreshnessOutcome.SEND)
-        self.assertEqual(after_relink.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+        self.assertEqual(after_relink.outcome, TelegramFreshnessOutcome.SUPERSEDED)
         self.assertEqual(
-            after_relink.replacement_action,
-            TelegramDeliveryAction.TRADE_RESULT,
+            after_relink.reason,
+            "trade_freshness_recipient_relinked",
         )
 
 

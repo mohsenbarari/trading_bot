@@ -26,6 +26,7 @@ from core.telegram_delivery_queue_contract import (
     FINAL_DELIVERY_STATES,
     MINIMUM_LEASE_MARGIN_SECONDS,
     NON_DURABLE_TELEGRAM_QUEUE_ACTIONS,
+    TELEGRAM_NON_IDEMPOTENT_SEND_METHODS,
     TelegramDeliveryAction,
     TelegramDeliveryDedupeConflictError,
     TelegramDeliveryDecision,
@@ -76,6 +77,7 @@ SUPPORTED_TELEGRAM_QUEUE_METHODS = frozenset(
         "deleteMessage",
         "editMessageReplyMarkup",
         "editMessageText",
+        "sendDocument",
         "sendMessage",
         "unbanChatMember",
     }
@@ -1892,7 +1894,7 @@ async def recover_expired_telegram_delivery_leases(
             record.next_retry_at = current_time
             record.outcome_reason = "lease_expired_before_dispatch"
             released_unstarted += 1
-        elif record.method == "sendMessage":
+        elif record.method in TELEGRAM_NON_IDEMPOTENT_SEND_METHODS:
             record.state = TelegramDeliveryState.AMBIGUOUS
             record.next_retry_at = None
             record.outcome_reason = "lease_expired_after_send_started"

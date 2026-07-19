@@ -954,6 +954,26 @@ class TelegramDeliveryQueueContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(decision.outcome, TelegramDeliveryOutcome.AMBIGUOUS)
 
+    async def test_document_send_without_message_id_is_ambiguous(self):
+        queue = InMemoryTelegramDeliveryQueue()
+        job = await self.enqueue(
+            queue,
+            "missing-document-result",
+            method="sendDocument",
+        )
+        await self.claim(queue)
+        decision = await self.resolve(
+            queue,
+            job,
+            gateway_result(
+                ok=True,
+                method="sendDocument",
+                response_json={"ok": True, "result": {}},
+            ),
+        )
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.AMBIGUOUS)
+        self.assertIsNone(job.next_retry_at)
+
     async def test_parseable_incomplete_send_2xx_is_ambiguous_not_retryable(self):
         for response_json in ({}, {"ok": True}, {"ok": True, "result": None}):
             with self.subTest(response_json=response_json):

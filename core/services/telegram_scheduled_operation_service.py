@@ -44,6 +44,13 @@ class TelegramScheduledOperationEnqueueResult:
     operation: TelegramScheduledOperation
     created: bool
 
+    @property
+    def message_id(self) -> int | None:
+        value = getattr(self.operation, "telegram_message_id", None)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return None
+        return value
+
 
 @dataclass(frozen=True, slots=True)
 class TelegramScheduledOperationHandoffResult:
@@ -167,7 +174,11 @@ async def enqueue_telegram_scheduled_operation_once(
         or message_id <= 0
     ):
         raise ValueError("telegram_scheduled_operation_message_id_invalid")
-    if destination_class != policy.destination_class:
+    preauth_shared_chat = (
+        action == TelegramDeliveryAction.PREAUTH_INTERACTION
+        and destination_class == TelegramDestinationClass.CHANNEL
+    )
+    if destination_class != policy.destination_class and not preauth_shared_chat:
         raise ValueError("telegram_scheduled_operation_destination_invalid")
     if policy.cleanup and (
         not isinstance(recipient_user_id, int)
@@ -290,6 +301,107 @@ async def enqueue_noncritical_market_notice_once(
         due_at=normalized_due,
         freshness_deadline_at=deadline,
         scope_allowed=False,
+    )
+
+
+async def enqueue_pre_auth_interaction_once(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    chat_id: int,
+    source_id: str,
+    text: str,
+    method: str = "sendMessage",
+    destination_class: TelegramDestinationClass | str = TelegramDestinationClass.PRIVATE,
+    message_id: int | None = None,
+    parse_mode: str | None = None,
+    reply_markup: Mapping[str, Any] | None = None,
+    due_at: datetime | None = None,
+    ttl_seconds: int = 120,
+) -> TelegramScheduledOperationEnqueueResult:
+    """Persist a short-lived private response before a local User exists."""
+
+    normalized_method = str(method or "").strip()
+    if normalized_method == "sendMessage":
+        action = TelegramDeliveryAction.PREAUTH_INTERACTION
+        if message_id is not None:
+            raise ValueError("telegram_preauth_send_target_forbidden")
+    elif normalized_method == "editMessageText":
+        action = TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT
+        if (
+            isinstance(message_id, bool)
+            or not isinstance(message_id, int)
+            or message_id <= 0
+        ):
+            raise ValueError("telegram_preauth_edit_target_invalid")
+    else:
+        raise ValueError("telegram_preauth_method_unsupported")
+    try:
+        normalized_destination = TelegramDestinationClass(
+            str(getattr(destination_class, "value", destination_class))
+        )
+    except ValueError as exc:
+        raise ValueError("telegram_preauth_destination_invalid") from exc
+    if normalized_destination not in {
+        TelegramDestinationClass.PRIVATE,
+        TelegramDestinationClass.CHANNEL,
+    }:
+        raise ValueError("telegram_preauth_destination_invalid")
+    if action == TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT and (
+        normalized_destination != TelegramDestinationClass.PRIVATE
+    ):
+        raise ValueError("telegram_preauth_edit_destination_invalid")
+    if (
+        isinstance(chat_id, bool)
+        or not isinstance(chat_id, int)
+        or (
+            normalized_destination == TelegramDestinationClass.PRIVATE
+            and chat_id <= 0
+        )
+        or (
+            normalized_destination == TelegramDestinationClass.CHANNEL
+            and chat_id >= 0
+        )
+    ):
+        raise ValueError("telegram_preauth_chat_invalid")
+    clean_text = str(text or "").strip()
+    if not clean_text or len(clean_text) > 4096:
+        raise ValueError("telegram_preauth_text_invalid")
+    if parse_mode is not None and parse_mode not in {
+        "HTML",
+        "Markdown",
+        "MarkdownV2",
+    }:
+        raise ValueError("telegram_preauth_parse_mode_invalid")
+    if reply_markup is not None and not isinstance(reply_markup, Mapping):
+        raise ValueError("telegram_preauth_reply_markup_invalid")
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+        raise ValueError("telegram_preauth_ttl_invalid")
+    bounded_ttl = max(5, min(ttl_seconds, 300))
+    normalized_due = _utc(due_at or utc_now())
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": clean_text}
+    if message_id is not None:
+        payload["message_id"] = message_id
+    if parse_mode is not None:
+        payload["parse_mode"] = parse_mode
+    if reply_markup is not None:
+        payload["reply_markup"] = dict(reply_markup)
+    return await enqueue_telegram_scheduled_operation_once(
+        db,
+        current_server=current_server,
+        action=action,
+        source_id=source_id,
+        source_version=1,
+        recipient_user_id=None,
+        destination_class=normalized_destination,
+        chat_id=chat_id,
+        message_id=message_id,
+        payload=payload,
+        due_at=normalized_due,
+        freshness_deadline_at=(
+            normalized_due + timedelta(seconds=bounded_ttl)
+        ),
+        scope_allowed=True,
     )
 
 
@@ -468,7 +580,9 @@ async def handoff_next_due_telegram_scheduled_operation(
         action=policy.action,
         bot_identity="primary",
         destination_key=destination_key,
-        destination_class=policy.destination_class,
+        destination_class=TelegramDestinationClass(
+            str(operation.destination_class)
+        ),
         method=policy.method,
         payload=operation.payload,
         template_version=policy.template_version,

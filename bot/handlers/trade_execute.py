@@ -26,6 +26,12 @@ from core.services.bot_access_policy import bot_access_denial_message, evaluate_
 from core.services.block_service import is_trade_blocked_by_principals
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import (
+    answer_callback_message_via_runtime,
+    edit_callback_message_via_runtime,
+    edit_callback_reply_markup_via_runtime,
+    schedule_delivery_receipt_markup_cleanup_via_runtime,
+)
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively_with_transient_retry
 from core.services.trade_service import (
@@ -420,6 +426,7 @@ async def send_or_update_trade_suggestion_message(
     bot: Bot,
     target_chat_id: int,
     payload: dict,
+    user: User | None = None,
 ) -> None:
     """ارسال یا به‌روزرسانی پیام پیشنهاد معامله با دکمه‌های لات باقی‌مانده."""
     reply_markup = build_trade_amount_buttons(
@@ -437,30 +444,71 @@ async def send_or_update_trade_suggestion_message(
 
     if is_private_suggestion_message:
         try:
-            await callback_message.edit_text(payload["message"], reply_markup=reply_markup)
+            if (
+                configured_telegram_delivery_runtime().mode
+                == TelegramDeliveryRuntimeMode.QUEUE_V1
+            ):
+                if user is None:
+                    raise ValueError("trade_suggestion_user_missing")
+                await edit_callback_message_via_runtime(
+                    callback,
+                    user,
+                    payload["message"],
+                    action=TelegramDeliveryAction.TRADE_ALTERNATIVE,
+                    reply_markup=reply_markup,
+                )
+            else:
+                await callback_message.edit_text(
+                    payload["message"],
+                    reply_markup=reply_markup,
+                )
             await upsert_trade_suggestion_record(
                 offer_id=int(payload["offer_id"]),
                 chat_id=target_chat_id,
                 message_id=callback_message.message_id,
                 requested_amount=int(payload["requested_amount"]),
             )
-            schedule_trade_suggestion_cleanup(bot, int(payload["offer_id"]), target_chat_id, callback_message.message_id)
+            await schedule_trade_suggestion_cleanup(bot, int(payload["offer_id"]), target_chat_id, callback_message.message_id)
             return
         except Exception as exc:
             logger.debug(f"Failed to update existing trade suggestion message: {exc}")
 
-    sent_message = await bot.send_message(
-        chat_id=target_chat_id,
-        text=payload["message"],
-        reply_markup=reply_markup,
-    )
+    if user is not None and int(user.telegram_id or 0) == int(target_chat_id):
+        sent_message = await answer_callback_message_via_runtime(
+            callback,
+            user,
+            payload["message"],
+            action=TelegramDeliveryAction.TRADE_ALTERNATIVE,
+            reply_markup=reply_markup,
+        )
+    else:
+        if (
+            configured_telegram_delivery_runtime().mode
+            == TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
+            raise ValueError("trade_suggestion_queue_route_invalid")
+        sent_message = await bot.send_message(
+            chat_id=target_chat_id,
+            text=payload["message"],
+            reply_markup=reply_markup,
+        )
+    if sent_message.message_id is None:
+        receipt_id = int(sent_message.notification.outbox.id)
+        await schedule_delivery_receipt_markup_cleanup_via_runtime(
+            callback,
+            user,
+            receipt_id,
+            delay_seconds=15.2,
+            source_key="trade-suggestion-cleanup",
+        )
+        return
     await upsert_trade_suggestion_record(
         offer_id=int(payload["offer_id"]),
         chat_id=target_chat_id,
         message_id=sent_message.message_id,
         requested_amount=int(payload["requested_amount"]),
     )
-    schedule_trade_suggestion_cleanup(bot, int(payload["offer_id"]), target_chat_id, sent_message.message_id)
+    await schedule_trade_suggestion_cleanup(bot, int(payload["offer_id"]), target_chat_id, sent_message.message_id)
 
 
 def _json_response_body(response: JSONResponse) -> dict:
@@ -593,6 +641,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
                 bot=bot,
                 target_chat_id=target_chat_id,
                 payload=body,
+                user=user,
             )
             await answer_callback_query_via_runtime(
                 callback,
@@ -610,7 +659,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
 
     try:
         if callback.message and callback.message.chat.id != settings.channel_id:
-            await callback.message.edit_reply_markup(reply_markup=None)
+            await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=None)
             await remove_trade_suggestion_record(offer_id, callback.message.chat.id, callback.message.message_id)
     except Exception as exc:
         logger.debug(f"Failed to clear private suggestion buttons: {exc}")
@@ -817,7 +866,7 @@ async def _handle_channel_trade(
                             pending_amount=actual_amount,
                             offer_public_id=getattr(offer, "offer_public_id", None),
                         )
-                        await callback.message.edit_reply_markup(reply_markup=pending_keyboard)
+                        await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=pending_keyboard)
                         await upsert_trade_suggestion_record(
                             offer_id=offer.id,
                             chat_id=callback.message.chat.id,
@@ -825,8 +874,8 @@ async def _handle_channel_trade(
                             requested_amount=actual_amount,
                             preserve_requested_amount=True,
                         )
-                        schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
-                        schedule_trade_suggestion_pending_reset(bot, offer.id)
+                        await schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
+                        await schedule_trade_suggestion_pending_reset(bot, offer.id)
                     except Exception as exc:
                         logger.debug(f"Failed to set pending state for remote-home offer: {exc}")
                 await answer_callback_query_via_runtime(
@@ -880,6 +929,7 @@ async def _handle_channel_trade(
                     bot=bot,
                     target_chat_id=target_chat_id,
                     payload=body,
+                    user=user,
                 )
                 await answer_callback_query_via_runtime(
                     callback,
@@ -891,7 +941,7 @@ async def _handle_channel_trade(
             if 200 <= status_code < 300:
                 try:
                     if callback.message and callback.message.chat.id != settings.channel_id:
-                        await callback.message.edit_reply_markup(reply_markup=None)
+                        await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=None)
                         await remove_trade_suggestion_record(remote_offer_id, callback.message.chat.id, callback.message.message_id)
                 except Exception as exc:
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
@@ -978,6 +1028,7 @@ async def _handle_channel_trade(
                     bot=bot,
                     target_chat_id=target_chat_id,
                     payload=suggestion_payload,
+                    user=user,
                 )
                 await answer_callback_query_via_runtime(
                     callback,
@@ -1022,7 +1073,7 @@ async def _handle_channel_trade(
                         pending_amount=actual_amount,
                         offer_public_id=getattr(offer, "offer_public_id", None),
                     )
-                    await callback.message.edit_reply_markup(reply_markup=pending_keyboard)
+                    await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=pending_keyboard)
                     await upsert_trade_suggestion_record(
                         offer_id=offer.id,
                         chat_id=callback.message.chat.id,
@@ -1030,8 +1081,8 @@ async def _handle_channel_trade(
                         requested_amount=actual_amount,
                         preserve_requested_amount=True,
                     )
-                    schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
-                    schedule_trade_suggestion_pending_reset(bot, offer.id)
+                    await schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
+                    await schedule_trade_suggestion_pending_reset(bot, offer.id)
                 except Exception as exc:
                     logger.debug(f"Failed to set pending confirmation state for suggestion message: {exc}")
             await answer_callback_query_via_runtime(

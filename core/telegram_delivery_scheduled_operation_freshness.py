@@ -29,6 +29,8 @@ from models.user import User
 SCHEDULED_OPERATION_FRESHNESS_ACTIONS = frozenset(
     {
         TelegramDeliveryAction.NONCRITICAL_MARKET,
+        TelegramDeliveryAction.PREAUTH_INTERACTION,
+        TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
         TelegramDeliveryAction.TEMPORARY_CLEANUP,
         TelegramDeliveryAction.COSMETIC_CLEANUP,
     }
@@ -54,6 +56,20 @@ SCHEDULED_OPERATION_POLICIES = MappingProxyType(
             TelegramDestinationClass.CHANNEL,
             "sendMessage",
             "noncritical-market-v1",
+        ),
+        TelegramDeliveryAction.PREAUTH_INTERACTION: TelegramScheduledOperationPolicy(
+            TelegramDeliveryAction.PREAUTH_INTERACTION,
+            TelegramFeederKind.DIRECT,
+            TelegramDestinationClass.PRIVATE,
+            "sendMessage",
+            "preauth-interaction-v1",
+        ),
+        TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT: TelegramScheduledOperationPolicy(
+            TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
+            TelegramFeederKind.DIRECT,
+            TelegramDestinationClass.PRIVATE,
+            "editMessageText",
+            "preauth-interaction-edit-v1",
         ),
         TelegramDeliveryAction.TEMPORARY_CLEANUP: TelegramScheduledOperationPolicy(
             TelegramDeliveryAction.TEMPORARY_CLEANUP,
@@ -129,11 +145,28 @@ def telegram_scheduled_operation_destination_key(
     operation: TelegramScheduledOperation | Any,
 ) -> str:
     policy = scheduled_operation_policy(getattr(operation, "action_kind", None))
-    if policy.destination_class == TelegramDestinationClass.CHANNEL:
+    operation_destination = _enum_value(
+        getattr(operation, "destination_class", None)
+    )
+    if (
+        policy.destination_class == TelegramDestinationClass.CHANNEL
+        or (
+            policy.action == TelegramDeliveryAction.PREAUTH_INTERACTION
+            and operation_destination == TelegramDestinationClass.CHANNEL.value
+        )
+    ):
         chat_id = _nonzero_int(getattr(operation, "chat_id", None))
         if chat_id is None:
             raise ValueError("scheduled_operation_channel_invalid")
         return f"channel:{chat_id}"
+    if policy.action in {
+        TelegramDeliveryAction.PREAUTH_INTERACTION,
+        TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
+    }:
+        chat_id = _positive_int(getattr(operation, "chat_id", None))
+        if chat_id is None:
+            raise ValueError("scheduled_operation_preauth_chat_invalid")
+        return f"private:chat:{chat_id}"
     recipient_user_id = _positive_int(
         getattr(operation, "recipient_user_id", None)
     )
@@ -186,7 +219,16 @@ def validate_telegram_scheduled_operation_contract(
         raise ValueError("scheduled_operation_source_id_invalid")
     if _positive_int(getattr(operation, "source_version", None)) is None:
         raise ValueError("scheduled_operation_source_version_invalid")
-    if _enum_value(getattr(operation, "destination_class", None)) != policy.destination_class.value:
+    operation_destination = _enum_value(
+        getattr(operation, "destination_class", None)
+    )
+    if policy.action == TelegramDeliveryAction.PREAUTH_INTERACTION:
+        if operation_destination not in {
+            TelegramDestinationClass.PRIVATE.value,
+            TelegramDestinationClass.CHANNEL.value,
+        }:
+            raise ValueError("scheduled_operation_destination_class_invalid")
+    elif operation_destination != policy.destination_class.value:
         raise ValueError("scheduled_operation_destination_class_invalid")
     if str(getattr(operation, "method", "") or "") != policy.method:
         raise ValueError("scheduled_operation_method_invalid")
@@ -196,11 +238,32 @@ def validate_telegram_scheduled_operation_contract(
     if chat_id is None:
         raise ValueError("scheduled_operation_chat_invalid")
     message_id = _positive_int(getattr(operation, "message_id", None))
+    preauth = policy.action in {
+        TelegramDeliveryAction.PREAUTH_INTERACTION,
+        TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
+    }
     if policy.cleanup:
         if message_id is None:
             raise ValueError("scheduled_operation_cleanup_scope_invalid")
         if _positive_int(getattr(operation, "recipient_user_id", None)) is None:
             raise ValueError("scheduled_operation_recipient_invalid")
+    elif preauth:
+        if getattr(operation, "recipient_user_id", None) is not None:
+            raise ValueError("scheduled_operation_preauth_recipient_forbidden")
+        expected_sign_valid = (
+            chat_id > 0
+            if operation_destination == TelegramDestinationClass.PRIVATE.value
+            else chat_id < 0
+        )
+        if not expected_sign_valid or not bool(getattr(operation, "scope_allowed", False)):
+            raise ValueError("scheduled_operation_preauth_scope_invalid")
+        if not isinstance(getattr(operation, "freshness_deadline_at", None), datetime):
+            raise ValueError("scheduled_operation_preauth_deadline_required")
+        if policy.action == TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT:
+            if message_id is None:
+                raise ValueError("scheduled_operation_preauth_edit_target_invalid")
+        elif message_id is not None:
+            raise ValueError("scheduled_operation_preauth_send_target_forbidden")
     else:
         if chat_id != expected_channel_id or message_id is not None:
             raise ValueError("scheduled_operation_market_route_invalid")
@@ -225,6 +288,21 @@ def validate_telegram_scheduled_operation_contract(
         if not text or len(text) > 4096:
             raise ValueError("scheduled_operation_market_text_invalid")
         expected_payload["text"] = text
+    elif preauth:
+        text = str(normalized_payload.get("text") or "").strip()
+        if not text or len(text) > 4096:
+            raise ValueError("scheduled_operation_preauth_text_invalid")
+        expected_payload["text"] = text
+        parse_mode = normalized_payload.get("parse_mode")
+        if parse_mode is not None:
+            if parse_mode not in {"HTML", "Markdown", "MarkdownV2"}:
+                raise ValueError("scheduled_operation_preauth_parse_mode_invalid")
+            expected_payload["parse_mode"] = parse_mode
+        reply_markup = normalized_payload.get("reply_markup")
+        if reply_markup is not None:
+            if not isinstance(reply_markup, dict):
+                raise ValueError("scheduled_operation_preauth_markup_invalid")
+            expected_payload["reply_markup"] = reply_markup
     if normalized_payload != expected_payload:
         raise ValueError("scheduled_operation_payload_shape_invalid")
     return policy
@@ -238,7 +316,8 @@ def _validate_static_job_route(
 ) -> TelegramFreshnessDecision | None:
     if _enum_value(job.feeder_kind) != policy.feeder.value:
         return _quarantined("scheduled_operation_freshness_feeder_mismatch")
-    if _enum_value(job.destination_class) != policy.destination_class.value:
+    expected_destination = _enum_value(operation.destination_class)
+    if _enum_value(job.destination_class) != expected_destination:
         return _quarantined("scheduled_operation_freshness_destination_mismatch")
     if str(job.method or "") != policy.method:
         return _quarantined("scheduled_operation_freshness_method_mismatch")
@@ -336,7 +415,10 @@ async def validate_scheduled_operation_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="scheduled_operation_freshness_deadline_passed",
         )
-    if policy.cleanup and not bool(operation.scope_allowed):
+    if (policy.cleanup or policy.action in {
+        TelegramDeliveryAction.PREAUTH_INTERACTION,
+        TelegramDeliveryAction.PREAUTH_INTERACTION_EDIT,
+    }) and not bool(operation.scope_allowed):
         return _decision(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="scheduled_operation_freshness_scope_revoked",

@@ -48,6 +48,7 @@ _SUPERSEDED_SKIP_REASONS = {
     "trade_freshness_recipient_access_denied",
     "trade_freshness_recipient_missing",
     "trade_freshness_recipient_unlinked",
+    "trade_freshness_recipient_relinked",
     "trade_freshness_trade_not_completed",
 }
 _DELIVERY_HOLD_OUTCOMES = {

@@ -102,6 +102,10 @@ from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.telegram_interaction_message import (
     answer_callback_message_via_runtime,
     answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+    edit_delivery_receipt_via_runtime,
+    edit_explicit_private_message_via_runtime,
+    edit_known_message_via_runtime,
 )
 from core.services.telegram_notification_outbox_service import (
     TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT,
@@ -272,7 +276,13 @@ async def _show_price_prompt(
     )
     text = "💰 قیمت را وارد کنید (5 یا 6 رقم):"
     if edit:
-        await message.edit_text(text, reply_markup=markup)
+        await edit_known_message_via_runtime(
+            message,
+            user,
+            text,
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=markup,
+        )
     else:
         await answer_incoming_message_via_runtime(
             message,
@@ -307,7 +317,13 @@ async def _show_lot_sizes_prompt(
         "⚠️ حداقل و حداکثر هر بخش مطابق تنظیمات بازار است"
     )
     if edit:
-        await message.edit_text(text, reply_markup=markup)
+        await edit_known_message_via_runtime(
+            message,
+            user,
+            text,
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=markup,
+        )
     else:
         await answer_incoming_message_via_runtime(
             message,
@@ -351,7 +367,13 @@ async def _show_notes_prompt(
         "حداکثر 200 کاراکتر"
     )
     if edit:
-        await message.edit_text(text, reply_markup=markup)
+        await edit_known_message_via_runtime(
+            message,
+            user,
+            text,
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=markup,
+        )
     else:
         await answer_incoming_message_via_runtime(
             message,
@@ -392,7 +414,13 @@ async def _show_wizard_review(
     )
     review_text = f"متن استاندارد آفر شما:\n\n{draft_text}\n\nاطلاعات را بررسی کنید."
     if edit:
-        await message.edit_text(review_text, reply_markup=get_wizard_review_keyboard())
+        await edit_known_message_via_runtime(
+            message,
+            user,
+            review_text,
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup=get_wizard_review_keyboard(),
+        )
     else:
         await answer_incoming_message_via_runtime(
             message,
@@ -500,11 +528,11 @@ async def handle_trade_type_selection(
     trade_type_fa = "🟢 خرید" if trade_type == "buy" else "🔴 فروش"
     await state.update_data(trade_type=trade_type, trade_type_fa=trade_type_fa)
     if return_to_review:
-        await _show_wizard_review(callback.message, state, edit=True)
+        await _show_wizard_review(callback.message, state, edit=True, user=user)
         await answer_callback_query_via_runtime(callback)
         return
 
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {trade_type_fa}\n\n"
         "نوع تسویه را انتخاب کنید:",
@@ -535,13 +563,13 @@ async def handle_settlement_type_selection(
     return_to_review = bool(data.get("wizard_return_to_review"))
     await state.update_data(settlement_type=settlement_type)
     if return_to_review:
-        await _show_wizard_review(callback.message, state, edit=True)
+        await _show_wizard_review(callback.message, state, edit=True, user=user)
         await answer_callback_query_via_runtime(callback)
         return
 
     trade_type = str(data.get("trade_type") or "buy")
     keyboard = await get_commodities_keyboard(trade_type)
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {_trade_type_label(trade_type)}\n"
         f"تسویه: {_settlement_type_label(settlement_type)}\n\n"
@@ -574,7 +602,7 @@ async def handle_commodity_page(
         page=callback_data.page,
         return_to_review=bool(data.get("wizard_return_to_review")),
     )
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {trade_type_fa}\n\n"
         f"کالای مورد نظر را انتخاب کنید:",
@@ -610,10 +638,10 @@ async def handle_commodity_selection(
     return_to_review = bool(data.get("wizard_return_to_review"))
     await state.update_data(commodity_id=commodity.id, commodity_name=commodity.name)
     if return_to_review:
-        await _show_wizard_review(callback.message, state, edit=True)
+        await _show_wizard_review(callback.message, state, edit=True, user=user)
         await answer_callback_query_via_runtime(callback)
         return
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {data.get('trade_type_fa', '🟢 خرید')}\n"
         f"کالا: {commodity.name}\n\n"
@@ -670,12 +698,12 @@ async def handle_quick_quantity(
     if data.get("wizard_return_to_review"):
         if data.get("is_wholesale") is False:
             await state.update_data(lot_sizes=None, wizard_edit_field="lot_sizes")
-            await _show_lot_sizes_prompt(callback.message, state, edit=True)
+            await _show_lot_sizes_prompt(callback.message, state, edit=True, user=user)
         else:
-            await _show_wizard_review(callback.message, state, edit=True)
+            await _show_wizard_review(callback.message, state, edit=True, user=user)
         await answer_callback_query_via_runtime(callback)
         return
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {data.get('trade_type_fa', '🟢 خرید')}\n"
         f"کالا: {data.get('commodity_name', 'نامشخص')}\n"
@@ -769,9 +797,9 @@ async def handle_lot_wholesale(callback: types.CallbackQuery, state: FSMContext,
     data = await state.get_data()
     await state.update_data(is_wholesale=True, lot_sizes=None)
     if data.get("wizard_return_to_review"):
-        await _show_wizard_review(callback.message, state, edit=True)
+        await _show_wizard_review(callback.message, state, edit=True, user=user)
     else:
-        await _show_price_prompt(callback.message, state, edit=True)
+        await _show_price_prompt(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -782,7 +810,7 @@ async def handle_lot_split(callback: types.CallbackQuery, state: FSMContext, use
         return
 
     await state.update_data(is_wholesale=False, lot_sizes=None)
-    await _show_lot_sizes_prompt(callback.message, state, edit=True)
+    await _show_lot_sizes_prompt(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -871,9 +899,9 @@ async def handle_accept_suggested_lots(
         return
     await state.update_data(lot_sizes=lot_sizes)
     if data.get("wizard_return_to_review"):
-        await _show_wizard_review(callback.message, state, edit=True)
+        await _show_wizard_review(callback.message, state, edit=True, user=user)
     else:
-        await _show_price_prompt(callback.message, state, edit=True)
+        await _show_price_prompt(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -914,7 +942,7 @@ async def handle_skip_notes(callback: types.CallbackQuery, state: FSMContext, us
         return
 
     await state.update_data(notes=None)
-    await _show_wizard_review(callback.message, state, edit=True)
+    await _show_wizard_review(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -999,7 +1027,7 @@ async def handle_wizard_edit(
         await answer_callback_query_via_runtime(callback)
         return
     data = await state.get_data()
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "کدام بخش آفر را می‌خواهید اصلاح کنید؟",
         reply_markup=get_wizard_edit_keyboard(is_wholesale=bool(data.get("is_wholesale", True))),
     )
@@ -1040,20 +1068,20 @@ async def handle_wizard_edit_field(
 
     await state.update_data(wizard_return_to_review=True, wizard_edit_field=field)
     if field == "trade_type":
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "نوع معامله را انتخاب کنید:",
             reply_markup=get_trade_type_keyboard(return_to_review=True),
         )
         await state.set_state(Trade.awaiting_trade_type)
     elif field == "settlement_type":
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "نوع تسویه را انتخاب کنید:",
             reply_markup=get_settlement_type_keyboard(return_to_review=True),
         )
         await state.set_state(Trade.awaiting_settlement_type)
     elif field == "commodity":
         trade_type = str(data.get("trade_type") or "buy")
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "کالای مورد نظر را انتخاب کنید:",
             reply_markup=await get_commodities_keyboard(trade_type, return_to_review=True),
         )
@@ -1062,7 +1090,7 @@ async def handle_wizard_edit_field(
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "تعداد را انتخاب کنید یا عدد دلخواه را وارد کنید:",
             reply_markup=get_quantity_keyboard(
                 min_quantity=ts.offer_min_quantity,
@@ -1072,17 +1100,17 @@ async def handle_wizard_edit_field(
         )
         await state.set_state(Trade.awaiting_quantity)
     elif field == "lot_type":
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "نحوه معامله را انتخاب کنید:",
             reply_markup=get_lot_type_keyboard(return_to_review=True),
         )
         await state.set_state(Trade.awaiting_lot_type)
     elif field == "lot_sizes":
-        await _show_lot_sizes_prompt(callback.message, state, edit=True)
+        await _show_lot_sizes_prompt(callback.message, state, edit=True, user=user)
     elif field == "price":
-        await _show_price_prompt(callback.message, state, edit=True)
+        await _show_price_prompt(callback.message, state, edit=True, user=user)
     else:
-        await _show_notes_prompt(callback.message, state, edit=True)
+        await _show_notes_prompt(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -1097,7 +1125,7 @@ async def handle_wizard_return_to_review(
     if not _wizard_data_is_complete(await state.get_data()):
         await answer_callback_query_via_runtime(callback, "اطلاعات این آفر کامل نیست؛ فرآیند را از ابتدا شروع کنید.", show_alert=True)
         return
-    await _show_wizard_review(callback.message, state, edit=True)
+    await _show_wizard_review(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -1135,7 +1163,7 @@ async def handle_wizard_cancel(
     if not user or not await _wizard_callback_is_current(callback, state):
         return
     await state.clear()
-    await callback.message.edit_text("❌ فرآیند ثبت آفر لغو شد.")
+    await edit_callback_message_via_runtime(callback, user, "❌ فرآیند ثبت آفر لغو شد.")
     await answer_callback_query_via_runtime(callback)
 
 
@@ -1158,7 +1186,7 @@ async def _handle_trade_confirm_core(
         return
 
     if not await _bot_market_is_open():
-        await callback.message.edit_text(BOT_MARKET_CLOSED_MESSAGE)
+        await edit_callback_message_via_runtime(callback, user, BOT_MARKET_CLOSED_MESSAGE)
         await state.clear()
         await answer_callback_query_via_runtime(callback)
         return
@@ -1181,7 +1209,7 @@ async def _handle_trade_confirm_core(
             countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
             expiry_jalali = to_jalali_str_fn(user.limitations_expire_at, "%Y/%m/%d - %H:%M")
             error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
-        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
+        await edit_callback_message_via_runtime(callback, user, f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
         await state.clear()
         await answer_callback_query_via_runtime(callback)
         return
@@ -1197,7 +1225,7 @@ async def _handle_trade_confirm_core(
             countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
             expiry_jalali = to_jalali_str_fn(user.limitations_expire_at, "%Y/%m/%d - %H:%M")
             error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
-        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
+        await edit_callback_message_via_runtime(callback, user, f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
         await state.clear()
         await answer_callback_query_via_runtime(callback)
         return
@@ -1212,7 +1240,7 @@ async def _handle_trade_confirm_core(
             )
         )
         if active_count >= ts.max_active_offers:
-            await callback.message.edit_text(
+            await edit_callback_message_via_runtime(callback, user,
                 f"❌ شما حداکثر {ts.max_active_offers} لفظ فعال دارید.\n"
                 f"لطفاً ابتدا یکی از لفظ‌های قبلی را منقضی کنید.",
                 parse_mode="Markdown",
@@ -1257,13 +1285,13 @@ async def _handle_trade_confirm_core(
                 user_id=user.id,
             )
     if not is_valid_comp:
-        await callback.message.edit_text(err_comp, parse_mode="Markdown")
+        await edit_callback_message_via_runtime(callback, user, err_comp, parse_mode="Markdown")
         await state.clear()
         await answer_callback_query_via_runtime(callback)
         return
 
     if price_warning and not warning_acknowledged:
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             price_warning["message"],
             reply_markup=_get_price_warning_keyboard(
                 confirm_callback_data=warning_confirm_callback_data,
@@ -1274,7 +1302,7 @@ async def _handle_trade_confirm_core(
         return
 
     if not settings.channel_id:
-        await callback.message.edit_text("❌ کانال تنظیم نشده است.")
+        await edit_callback_message_via_runtime(callback, user, "❌ کانال تنظیم نشده است.")
         await state.clear()
         await answer_callback_query_via_runtime(callback)
         return
@@ -1541,7 +1569,7 @@ async def _handle_trade_confirm_core(
             logger.warning(f"Market offer Web Push schedule error: {push_error}")
 
         if not queue_owns_telegram_delivery:
-            await callback.message.edit_text(
+            await edit_callback_message_via_runtime(callback, user,
                 f"{success_message_text}\n\n**لفظ شما:**\n\n{published_channel_message}",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(
@@ -1570,7 +1598,7 @@ async def _handle_trade_confirm_core(
                 "reason": exc.reason,
             },
         )
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "این لفظ دیگر قابل تکرار نیست. منو را دوباره باز کنید."
         )
         await _send_repeat_offer_menu_refresh(
@@ -1593,7 +1621,7 @@ async def _handle_trade_confirm_core(
             },
         )
         if republish_source_public_id:
-            await callback.message.edit_text(
+            await edit_callback_message_via_runtime(callback, user,
                 "این لفظ قبلاً از طریق بات تکرار شده است."
             )
             await _send_repeat_offer_menu_refresh(
@@ -1606,7 +1634,7 @@ async def _handle_trade_confirm_core(
                 ),
             )
         else:
-            await callback.message.edit_text(
+            await edit_callback_message_via_runtime(callback, user,
                 f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید."
             )
     except MarketOfferAdmissionError as exc:
@@ -1618,7 +1646,7 @@ async def _handle_trade_confirm_core(
                 "error_class": type(exc).__name__,
             },
         )
-        await callback.message.edit_text(BOT_MARKET_CLOSED_MESSAGE)
+        await edit_callback_message_via_runtime(callback, user, BOT_MARKET_CLOSED_MESSAGE)
     except OfferCreationLimitExceededError as exc:
         logger.info(
             "Offer creation rejected at final local quota admission",
@@ -1628,7 +1656,7 @@ async def _handle_trade_confirm_core(
                 "reason": exc.reason,
             },
         )
-        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{exc.detail}", parse_mode="Markdown")
+        await edit_callback_message_via_runtime(callback, user, f"⚠️ **محدودیت**\n\n{exc.detail}", parse_mode="Markdown")
     except OfferCreationQuotaUnavailableError as exc:
         logger.warning(
             "Offer creation local quota admission unavailable",
@@ -1638,7 +1666,7 @@ async def _handle_trade_confirm_core(
                 "reason": exc.reason,
             },
         )
-        await callback.message.edit_text(exc.detail)
+        await edit_callback_message_via_runtime(callback, user, exc.detail)
     except OfferCreationAdmissionError as exc:
         logger.warning(
             "Offer creation rejected by local quota admission",
@@ -1648,7 +1676,7 @@ async def _handle_trade_confirm_core(
                 "reason": exc.reason,
             },
         )
-        await callback.message.edit_text(exc.detail)
+        await edit_callback_message_via_runtime(callback, user, exc.detail)
     except TelegramBadRequest as exc:
         logger.warning(
             "Telegram rejected offer channel publication",
@@ -1673,7 +1701,7 @@ async def _handle_trade_confirm_core(
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after Telegram error: {rollback_error}")
         if not (queue_owns_telegram_delivery and offer_acceptance_committed):
-            await callback.message.edit_text("❌ خطا در ارسال به کانال. لطفاً مجدداً تلاش کنید.")
+            await edit_callback_message_via_runtime(callback, user, "❌ خطا در ارسال به کانال. لطفاً مجدداً تلاش کنید.")
     except Exception as exc:
         logger.exception(
             "Unexpected offer channel publication failure",
@@ -1698,7 +1726,7 @@ async def _handle_trade_confirm_core(
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after unexpected error: {rollback_error}")
         if not (queue_owns_telegram_delivery and offer_acceptance_committed):
-            await callback.message.edit_text(f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید.")
+            await edit_callback_message_via_runtime(callback, user, f"{unexpected_error_prefix}. لطفاً مجدداً تلاش کنید.")
 
     await state.clear()
     await answer_callback_query_via_runtime(callback)
@@ -1744,7 +1772,7 @@ async def handle_back_to_type(callback: types.CallbackQuery, state: FSMContext, 
         return
 
     await state.update_data(wizard_return_to_review=False)
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "📈 **ثبت لفظ جدید**\n\nنوع معامله را انتخاب کنید:",
         parse_mode="Markdown",
         reply_markup=get_trade_type_keyboard(),
@@ -1758,7 +1786,7 @@ async def handle_back_to_settlement(callback: types.CallbackQuery, state: FSMCon
     if not user:
         await answer_callback_query_via_runtime(callback)
         return
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "نوع تسویه را انتخاب کنید:",
         reply_markup=get_settlement_type_keyboard(),
     )
@@ -1773,7 +1801,7 @@ async def handle_back_to_commodity(callback: types.CallbackQuery, state: FSMCont
         return
     data = await state.get_data()
     trade_type = str(data.get("trade_type") or "buy")
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "کالای مورد نظر را انتخاب کنید:",
         reply_markup=await get_commodities_keyboard(trade_type),
     )
@@ -1789,7 +1817,7 @@ async def handle_back_to_quantity(callback: types.CallbackQuery, state: FSMConte
     from core.trading_settings import get_trading_settings_async
 
     ts = await get_trading_settings_async()
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "تعداد را انتخاب کنید یا عدد دلخواه را وارد کنید:",
         reply_markup=get_quantity_keyboard(
             min_quantity=ts.offer_min_quantity,
@@ -1805,7 +1833,7 @@ async def handle_back_to_lot_type(callback: types.CallbackQuery, state: FSMConte
     if not user or await state.get_state() not in {Trade.awaiting_lot_sizes.state, Trade.awaiting_price.state}:
         await answer_callback_query_via_runtime(callback, "این مرحله دیگر فعال نیست.", show_alert=True)
         return
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         "نحوه معامله را انتخاب کنید:",
         reply_markup=get_lot_type_keyboard(),
     )
@@ -1818,7 +1846,7 @@ async def handle_back_to_price(callback: types.CallbackQuery, state: FSMContext,
     if not user:
         await answer_callback_query_via_runtime(callback)
         return
-    await _show_price_prompt(callback.message, state, edit=True)
+    await _show_price_prompt(callback.message, state, edit=True, user=user)
     await answer_callback_query_via_runtime(callback)
 
 
@@ -1831,7 +1859,7 @@ async def handle_trade_cancel(callback: types.CallbackQuery, state: FSMContext, 
     if not await _wizard_callback_is_current(callback, state):
         return
     await state.clear()
-    await callback.message.edit_text("❌ فرآیند ثبت لفظ لغو شد.")
+    await edit_callback_message_via_runtime(callback, user, "❌ فرآیند ثبت لفظ لغو شد.")
     await answer_callback_query_via_runtime(callback)
 
 # ============================================
@@ -1847,23 +1875,23 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
         "امام 40تا 87000 خرید نقد: فقط نقدی",
         "امام 30تا 75800 ف ن 15 15"
     ]
-    
+
     hint = "💡 **فرمت صحیح:**\n"
     hint += "`[کالا] [تعداد]تا [قیمت] + [خ ن/ف ن/خ ن ف/ف ن ف]`\n"
     hint += "ترتیب بخش‌ها آزاد است.\n\n"
-    
+
     # پیشنهادات بر اساس نوع خطا
     if "تعداد" in error_message:
         hint += "📌 تعداد باید با `تا` یا `عدد` همراه باشد\n"
         hint += "مثال: `30تا` یا `30 عدد`\n"
-    
+
     elif "قیمت" in error_message:
         if "چندین" in error_message:
             hint += "📌 فقط یک عدد 5 یا 6 رقمی (قیمت) مجاز است\n"
         else:
             hint += "📌 قیمت باید 5 یا 6 رقم باشد\n"
         hint += "مثال: `75800` یا `758000`\n"
-    
+
     elif any(
         marker in error_message
         for marker in ("خرید", "فروش", "نوع معامله", "تسویه")
@@ -1871,28 +1899,28 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
         hint += "📌 نوع معامله و تسویه باید یک بلوک کامل و فقط یک بار باشند؛ جای بلوک آزاد است\n"
         hint += "نقد حاضر: `خ ن` یا `ف ن`\n"
         hint += "فردایی: `خ ن ف` یا `ف ن ف`\n"
-    
+
     elif "بخش" in error_message or "جمع" in error_message:
         hint += "📌 برای خُرده‌فروشی:\n"
         hint += "- حداکثر 3 بخش\n"
         hint += "- هر بخش حداقل 5 عدد\n"
         hint += "- جمع بخش‌ها = تعداد کل\n"
         hint += "مثال: `خ ن 30تا 75800 15 15`\n"
-    
+
     elif "کاراکتر" in error_message:
         hint += "📌 از علائم خاص استفاده نکنید\n"
         hint += "فقط: حروف، اعداد، فاصله، `-` `/` `,`\n"
-    
+
     elif "حداقل" in error_message or "حداکثر" in error_message:
         from core.trading_settings import get_trading_settings
         ts = get_trading_settings()
         hint += f"📌 تعداد مجاز: {ts.offer_min_quantity} تا {ts.offer_max_quantity}\n"
-    
+
     else:
         hint += "📌 نمونه‌های صحیح:\n"
         for ex in examples[:2]:
             hint += f"  `{ex}`\n"
-    
+
     return hint
 
 # فیلتر اولیه برای پیام‌هایی که ممکن است درخواست آفر باشند.
@@ -1975,6 +2003,7 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
 
 async def _text_offer_response(
     message: types.Message,
+    user: User | object,
     text: str,
     *,
     edit: bool,
@@ -1987,23 +2016,72 @@ async def _text_offer_response(
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
     if edit:
-        response = await message.edit_text(text, **kwargs)
+        response = await edit_known_message_via_runtime(
+            message,
+            user,
+            text,
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            **kwargs,
+        )
     else:
-        response = await message.answer(text, **kwargs)
-    return response if isinstance(response, types.Message) else None
+        response = await answer_incoming_message_via_runtime(
+            message,
+            user,
+            text,
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            **kwargs,
+        )
+    return response
 
 
 async def _disable_pending_text_offer_confirmation(
     state: FSMContext,
     bot: Bot | object,
+    *,
+    message: types.Message | None = None,
+    user: User | object | None = None,
 ) -> None:
     """Best-effort removal of buttons from the superseded offer preview."""
     data = await state.get_data()
     if not isinstance(data, Mapping):
         return
+    receipt_id = data.get("text_offer_confirmation_receipt_id")
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+        and isinstance(receipt_id, int)
+        and not isinstance(receipt_id, bool)
+    ):
+        if message is None or user is None:
+            raise ValueError("text_offer_confirmation_receipt_context_missing")
+        await edit_delivery_receipt_via_runtime(
+            message,
+            user,
+            receipt_id,
+            "این پیش‌نمایش با درخواست جدیدتر جایگزین شد.",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup={"inline_keyboard": []},
+        )
+        return
     chat_id = data.get("text_offer_confirmation_chat_id")
     message_id = data.get("text_offer_confirmation_message_id")
     if not isinstance(chat_id, int) or not isinstance(message_id, int):
+        return
+
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        if message is None or user is None or message.chat.id != chat_id:
+            raise ValueError("text_offer_confirmation_target_context_missing")
+        await edit_explicit_private_message_via_runtime(
+            message,
+            user,
+            message_id,
+            "این پیش‌نمایش با درخواست جدیدتر جایگزین شد.",
+            action=TelegramDeliveryAction.OFFER_VALIDATION_RESPONSE,
+            reply_markup={"inline_keyboard": []},
+        )
         return
 
     try:
@@ -2099,6 +2177,7 @@ async def _prepare_text_offer(
     if denial_reason:
         await _text_offer_response(
             message,
+            user,
             bot_access_denial_message(denial_reason),
             edit=edit_response,
         )
@@ -2118,6 +2197,7 @@ async def _prepare_text_offer(
             expiry_jalali = to_jalali_str(user.trading_restricted_until, "%Y/%m/%d - %H:%M")
             await _text_offer_response(
                 message,
+                user,
                 "⛔️ حساب شما مسدود است\n\n"
                 f"📅 تاریخ رفع مسدودیت: {expiry_jalali}\n"
                 f"⏳ زمان باقی‌مانده: {countdown}\n\n"
@@ -2129,7 +2209,7 @@ async def _prepare_text_offer(
             return False
 
     if not await _bot_market_is_open():
-        await _text_offer_response(message, BOT_MARKET_CLOSED_MESSAGE, edit=edit_response)
+        await _text_offer_response(message, user, BOT_MARKET_CLOSED_MESSAGE, edit=edit_response)
         if wizard_source:
             await state.clear()
         return False
@@ -2141,6 +2221,7 @@ async def _prepare_text_offer(
         if wizard_source:
             await _text_offer_response(
                 message,
+                user,
                 "متن ساخته‌شده قابل تشخیص نیست. گزینه‌ها را اصلاح کنید.",
                 edit=edit_response,
                 reply_markup=get_wizard_review_keyboard(),
@@ -2152,6 +2233,7 @@ async def _prepare_text_offer(
         error_msg = f"{error.message}\n\n{suggestion}"
         await _text_offer_response(
             message,
+            user,
             error_msg,
             edit=edit_response,
             reply_markup=get_wizard_review_keyboard() if wizard_source else None,
@@ -2173,6 +2255,7 @@ async def _prepare_text_offer(
         if active_count >= ts.max_active_offers:
             await _text_offer_response(
                 message,
+                user,
                 f"❌ شما حداکثر {ts.max_active_offers} لفظ فعال دارید.\n"
                 "لطفاً ابتدا یکی از لفظ‌های قبلی را منقضی کنید.",
                 edit=edit_response,
@@ -2215,15 +2298,35 @@ async def _prepare_text_offer(
     ])
     confirmation_message = await _text_offer_response(
         message,
+        user,
         preview,
         edit=edit_response,
         reply_markup=confirm_kb,
     )
-    if confirmation_message is not None:
+    if isinstance(confirmation_message, types.Message):
         await state.update_data(
             text_offer_confirmation_chat_id=confirmation_message.chat.id,
             text_offer_confirmation_message_id=confirmation_message.message_id,
         )
+    else:
+        outbox = getattr(
+            getattr(confirmation_message, "notification", None),
+            "outbox",
+            None,
+        )
+        receipt_id = getattr(outbox, "id", None)
+        if isinstance(receipt_id, int) and not isinstance(receipt_id, bool):
+            await state.update_data(
+                text_offer_confirmation_receipt_id=(
+                    None if edit_response else receipt_id
+                ),
+                text_offer_confirmation_chat_id=(
+                    message.chat.id if edit_response else None
+                ),
+                text_offer_confirmation_message_id=(
+                    message.message_id if edit_response else None
+                ),
+            )
     await state.set_state(Trade.awaiting_text_confirm)
     return True
 
@@ -2337,7 +2440,12 @@ async def handle_text_offer_while_confirmation_pending(
         return
 
     runtime_bot = bot or message.bot
-    await _disable_pending_text_offer_confirmation(state, runtime_bot)
+    await _disable_pending_text_offer_confirmation(
+        state,
+        runtime_bot,
+        message=message,
+        user=user,
+    )
     await state.clear()
     await handle_text_offer(message, state, user, runtime_bot)
 
@@ -2504,7 +2612,7 @@ async def handle_text_offer_cancel(callback: types.CallbackQuery, state: FSMCont
     if await _reject_stale_text_offer_callback(callback, state):
         return
 
-    await callback.message.edit_text("❌ لفظ لغو شد.")
+    await edit_callback_message_via_runtime(callback, user, "❌ لفظ لغو شد.")
     await state.clear()
     await answer_callback_query_via_runtime(callback)
 

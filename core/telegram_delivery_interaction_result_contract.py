@@ -54,8 +54,9 @@ class TelegramInteractionResultOutcome(str, Enum):
 
 
 _SUPPORTED_INTERACTION_METHODS = frozenset(
-    {"sendMessage", "editMessageText", "editMessageReplyMarkup"}
+    {"sendMessage", "sendDocument", "editMessageText", "editMessageReplyMarkup"}
 )
+_SEND_INTERACTION_METHODS = frozenset({"sendMessage", "sendDocument"})
 _UNRESOLVED_DELIVERY_STATES = frozenset(
     {
         TelegramDeliveryState.AMBIGUOUS,
@@ -205,7 +206,7 @@ def build_interaction_result_contract(
     except ValueError as exc:
         raise ValueError("telegram_interaction_result_contract_enum_invalid") from exc
 
-    if normalized_method != "sendMessage" and (
+    if normalized_method not in _SEND_INTERACTION_METHODS and (
         normalized_requirement
         == TelegramInteractionResultRequirement.CAPTURE_MESSAGE_ID
     ):

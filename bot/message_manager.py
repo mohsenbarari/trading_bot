@@ -7,6 +7,10 @@ from aiogram import Bot
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
 from enum import Enum
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 
 # زمان‌های حذف (به ثانیه)
 class DeleteDelay(Enum):
@@ -22,6 +26,8 @@ _anchor_messages: dict[int, int] = {}  # chat_id -> message_id
 
 def set_anchor(chat_id: int, message_id: int):
     """تنظیم پیام لنگر کیبورد"""
+    if isinstance(message_id, bool) or not isinstance(message_id, int) or message_id <= 0:
+        return
     _anchor_messages[chat_id] = message_id
 
 
@@ -42,6 +48,11 @@ def is_anchor(chat_id: int, message_id: int) -> bool:
 
 async def _delete_message_task(bot: Bot, chat_id: int, message_id: int, delay: int):
     """تسک پس‌زمینه برای حذف پیام"""
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return
     await asyncio.sleep(delay)
     
     # اگر پیام لنگر است، حذف نکن
@@ -78,6 +89,15 @@ def schedule_delete(
     
     if delay_seconds <= 0:
         return  # حذف نشود
+
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        # Keep anchors and user messages in queue mode.  This matches the
+        # product rule that the reply keyboard must remain recoverable without
+        # requiring /start and avoids an untracked in-memory delete timer.
+        return
     
     asyncio.create_task(_delete_message_task(bot, chat_id, message_id, delay_seconds))
 
@@ -100,6 +120,11 @@ async def delete_previous_anchor(bot: Bot, chat_id: int, delay: int = 0):
     """
     previous_anchor = get_anchor(chat_id)
     if previous_anchor:
+        if (
+            configured_telegram_delivery_runtime().mode
+            == TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
+            return
         clear_anchor(chat_id)
         if delay > 0:
             schedule_delete(bot, chat_id, previous_anchor, delay)

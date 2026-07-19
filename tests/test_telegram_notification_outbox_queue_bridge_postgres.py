@@ -81,6 +81,8 @@ from models.telegram_notification_outbox import (
 from models.user import User, UserRole
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
 
+TEST_CHANNEL_ID = -1001234567890
+
 
 @unittest.skipUnless(
     DATABASE_URLS,
@@ -212,6 +214,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             result = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server="foreign",
+                expected_channel_id=TEST_CHANNEL_ID,
                 now=utc_now(),
             )
             await db.commit()
@@ -607,6 +610,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             result = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server="foreign",
+                expected_channel_id=TEST_CHANNEL_ID,
                 now=utc_now(),
             )
             self.assertEqual(result.disposition, NOTIFICATION_OUTBOX_QUEUE_HANDOFF)
@@ -1489,6 +1493,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             second = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server="foreign",
+                expected_channel_id=TEST_CHANNEL_ID,
                 now=utc_now() + timedelta(seconds=2),
             )
             await db.commit()
@@ -1516,6 +1521,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             second = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server="foreign",
+                expected_channel_id=TEST_CHANNEL_ID,
                 now=utc_now() + timedelta(seconds=2),
             )
             await db.commit()
@@ -1601,6 +1607,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
             handoff = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server="foreign",
+                expected_channel_id=TEST_CHANNEL_ID,
                 now=due,
             )
             await db.commit()

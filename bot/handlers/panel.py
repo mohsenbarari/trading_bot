@@ -26,9 +26,11 @@ from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.telegram_interaction_message import (
     answer_callback_message_via_runtime,
     answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+    send_private_document_via_runtime,
 )
 from bot.message_manager import (
-    set_anchor, 
+    set_anchor,
     delete_previous_anchor,
     DeleteDelay
 )
@@ -237,7 +239,7 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         if not queue_mode:
             set_anchor(message.chat.id, anchor_msg.message_id)
         return
-    
+
     async with AsyncSessionLocal() as session:
         await attach_customer_management_names(session, [user])
 
@@ -252,11 +254,11 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         f"🔗 **لینک پروفایل عمومی:**\n"
         f"`{profile_link}`"
     )
-    
+
     anchor_msg = await answer_incoming_message_via_runtime(
         message,
         user,
-        profile_text, 
+        profile_text,
         source_key="panel-user-profile-menu",
         parse_mode="Markdown",
         reply_markup=await build_user_panel_navigation_keyboard(user),
@@ -299,14 +301,14 @@ async def show_admin_panel_and_change_keyboard(message: types.Message, state: FS
 @router.message(F.text == "⚙️ تنظیمات کاربری")
 async def handle_user_settings_button(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
-    
+
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     from core.db import AsyncSessionLocal
     from core.services.block_service import get_block_status
-    
+
     async with AsyncSessionLocal() as session:
         block_status = await get_block_status(session, user.id)
-    
+
     settings_text = (
         f"⚙️ **تنظیمات کاربری**\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
@@ -314,7 +316,7 @@ async def handle_user_settings_button(message: types.Message, state: FSMContext,
         f"   • وضعیت: {'✅ فعال' if block_status.get('can_block') else '❌ غیرفعال'}\n"
         f"   • مسدود شده: {block_status.get('current_blocked', 0)} از {block_status.get('max_blocked', 10)}\n"
     )
-    
+
     from bot.handlers.block_manage import BlockMenuCallback
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -322,7 +324,7 @@ async def handle_user_settings_button(message: types.Message, state: FSMContext,
             callback_data=BlockMenuCallback(action="main").pack()
         )]
     ])
-    
+
     await answer_incoming_message_via_runtime(
         message,
         user,
@@ -337,7 +339,7 @@ async def handle_user_settings_button(message: types.Message, state: FSMContext,
 @router.message(F.text == "⚙️ تنظیمات")
 async def handle_simple_settings_button(message: types.Message, user: Optional[User]):
     if not user: return
-    
+
     await answer_incoming_message_via_runtime(
         message,
         user,
@@ -468,7 +470,7 @@ async def show_colleagues_list(message: types.Message, state: FSMContext, user: 
         colleagues = await _load_colleagues_for_user(session, user.id)
 
     for text in _build_colleagues_list_messages(colleagues):
-        await message.answer(text)
+        await answer_incoming_message_via_runtime(message, user, text)
 
 
 def _user_panel_back_keyboard() -> InlineKeyboardMarkup:
@@ -532,9 +534,14 @@ async def show_recent_trades_pdf(message: types.Message, state: FSMContext, user
             date_range_label=build_trade_history_date_range_label(from_date, today),
             rows=build_trade_history_export_rows(trades, user.id),
         )
-        await message.answer_document(
-            document=FSInputFile(output_path, filename=_history_download_filename(subject_name, "pdf")),
+        export_filename = _history_download_filename(subject_name, "pdf")
+        await send_private_document_via_runtime(
+            message,
+            user,
+            FSInputFile(output_path, filename=export_filename),
+            filename=export_filename,
             caption="📄 معاملات اخیر شما در هفت روز گذشته",
+            source_key="panel-recent-trades-pdf",
         )
     except Exception as exc:
         await answer_incoming_message_via_runtime(
@@ -594,13 +601,13 @@ async def unblock_user_from_user_panel(
 
     await answer_callback_query_via_runtime(callback, result_message, show_alert=not success)
     if blocked_users:
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "📋 **کاربران مسدود شده**\n\nبرای رفع مسدودیت روی نام کاربر بزنید:",
             parse_mode="Markdown",
             reply_markup=get_user_panel_blocked_keyboard(blocked_users),
         )
     else:
-        await callback.message.edit_text(
+        await edit_callback_message_via_runtime(callback, user,
             "📋 لیست کاربران مسدود شده شما خالی است.",
             reply_markup=_user_panel_back_keyboard(),
         )
@@ -611,7 +618,7 @@ async def back_to_user_panel_from_blocked(callback: types.CallbackQuery, user: O
     if not user:
         await answer_callback_query_via_runtime(callback)
         return
-    await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
+    await edit_callback_message_via_runtime(callback, user, "👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
     await answer_callback_query_via_runtime(callback)
 
 
@@ -735,7 +742,15 @@ async def _edit_or_answer_customers_panel(
         text += "هنوز مشتری ثبت نشده است."
     keyboard = get_user_panel_customers_keyboard(relations)
     if edit:
-        await target.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+        if user is None:
+            raise ValueError("panel_customers_queue_user_missing")
+        await edit_callback_message_via_runtime(
+            target,
+            user,
+            text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
     else:
         await answer_incoming_message_via_runtime(
             target,
@@ -773,7 +788,7 @@ async def show_user_panel_customers_callback(callback: types.CallbackQuery, user
             await answer_callback_query_via_runtime(callback, "این بخش برای حساب شما فعال نیست.", show_alert=True)
             return
     await _edit_or_answer_customers_panel(
-        callback.message,
+        callback,
         user.id,
         edit=True,
         user=user,
@@ -794,7 +809,7 @@ async def show_user_panel_customer_detail(
     if not relation:
         await answer_callback_query_via_runtime(callback, "مشتری یافت نشد.", show_alert=True)
         return
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         _customer_relation_detail_text(relation),
         parse_mode="Markdown",
         reply_markup=get_customer_detail_keyboard(relation),
@@ -1117,10 +1132,14 @@ async def confirm_customer_invite_tier1(callback: types.CallbackQuery, state: FS
             source_key="panel-invite-projection-pending",
         )
         return
-    await callback.message.answer(_customer_invite_result_message(status_code, body))
+    await answer_callback_message_via_runtime(
+        callback,
+        user,
+        _customer_invite_result_message(status_code, body),
+    )
     try:
         await _edit_or_answer_customers_panel(
-            callback.message,
+            callback,
             user.id,
             edit=True,
             user=user,
@@ -1146,7 +1165,7 @@ async def back_to_user_panel_from_customers(callback: types.CallbackQuery, user:
     if not user:
         await answer_callback_query_via_runtime(callback)
         return
-    await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
+    await edit_callback_message_via_runtime(callback, user, "👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
     await answer_callback_query_via_runtime(callback)
 
 
@@ -1165,7 +1184,7 @@ SETTINGS_LABELS = {
 def get_settings_keyboard():
     """کیبورد تنظیمات با دکمه ویرایش برای هر آیتم"""
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    
+
     buttons = [
         [InlineKeyboardButton(text="📨 دعوت‌نامه (روز)", callback_data="settings_edit_invitation_expiry_days")],
         [InlineKeyboardButton(text="📋 مدت لفظ", callback_data="settings_edit_offer_expiry_minutes")],
@@ -1187,7 +1206,7 @@ async def get_settings_text():
     """متن نمایش تنظیمات"""
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
-    
+
     return (
         "⚙️ **تنظیمات سیستم**\n"
         "━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1213,7 +1232,7 @@ async def get_settings_text():
 async def handle_admin_settings_button(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
         return
-    
+
     await state.clear()
     await answer_incoming_message_via_runtime(
         message,
@@ -1233,24 +1252,24 @@ async def handle_settings_edit_click(callback: types.CallbackQuery, state: FSMCo
         return
     if await _reject_settings_callback_if_not_authoritative(callback, "update"):
         return
-    
+
     from bot.states import TradingSettingsEdit
     from core.trading_settings import get_trading_settings_async
-    
+
     setting_key = callback.data.replace("settings_edit_", "")
     ts = await get_trading_settings_async()
     current_value = getattr(ts, setting_key, None)
     label = SETTINGS_LABELS.get(setting_key, setting_key)
-    
+
     await state.update_data(editing_setting=setting_key)
     await state.set_state(TradingSettingsEdit.awaiting_value)
-    
+
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ انصراف", callback_data="settings_cancel_edit")]
     ])
-    
-    await callback.message.edit_text(
+
+    await edit_callback_message_via_runtime(callback, user,
         f"✏️ **ویرایش تنظیم**\n\n"
         f"📌 **{label}**\n"
         f"مقدار فعلی: `{current_value}`\n\n"
@@ -1271,16 +1290,16 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
 
     if await handoff_navigation_button(message, state, user):
         return
-    
+
     from core.trading_settings import load_trading_settings_async, save_trading_settings_async, refresh_settings_cache_async
-    
+
     data = await state.get_data()
     setting_key = data.get("editing_setting")
-    
+
     if not setting_key:
         await state.clear()
         return
-    
+
     # اعتبارسنجی عدد
     try:
         new_value = int(message.text.strip())
@@ -1297,26 +1316,26 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
 
     if await _reject_settings_message_if_not_authoritative(message, user, "update"):
         return
-    
+
     # ذخیره
     ts = await load_trading_settings_async()
     settings_dict = ts.model_dump()
     settings_dict[setting_key] = new_value
-    
+
     if await save_trading_settings_async(settings_dict):
         await refresh_settings_cache_async()
         label = SETTINGS_LABELS.get(setting_key, setting_key)
-        await message.answer(
+        await answer_incoming_message_via_runtime(message, user,
             f"✅ **{label}** به `{new_value}` تغییر کرد.",
             parse_mode="Markdown"
         )
     else:
-        await message.answer("❌ خطا در ذخیره تنظیمات")
-    
+        await answer_incoming_message_via_runtime(message, user, "❌ خطا در ذخیره تنظیمات")
+
     await state.clear()
-    
+
     # نمایش مجدد تنظیمات
-    await message.answer(
+    await answer_incoming_message_via_runtime(message, user,
         await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
@@ -1329,9 +1348,9 @@ async def handle_settings_cancel(callback: types.CallbackQuery, state: FSMContex
     if not user or user.role != UserRole.SUPER_ADMIN:
         await answer_callback_query_via_runtime(callback)
         return
-    
+
     await state.clear()
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(callback, user,
         await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
@@ -1347,7 +1366,7 @@ async def handle_settings_reset(callback: types.CallbackQuery, user: Optional[Us
         return
     if await _reject_settings_callback_if_not_authoritative(callback, "reset"):
         return
-    
+
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -1355,8 +1374,8 @@ async def handle_settings_reset(callback: types.CallbackQuery, user: Optional[Us
             InlineKeyboardButton(text="❌ خیر", callback_data="settings_reset_cancel"),
         ]
     ])
-    
-    await callback.message.edit_text(
+
+    await edit_callback_message_via_runtime(callback, user,
         "⚠️ **هشدار**\n\n"
         "آیا مطمئن هستید که می‌خواهید تمام تنظیمات را به مقادیر پیش‌فرض بازنشانی کنید؟",
         parse_mode="Markdown",
@@ -1372,17 +1391,17 @@ async def handle_settings_reset_confirm(callback: types.CallbackQuery, user: Opt
         return
     if await _reject_settings_callback_if_not_authoritative(callback, "reset"):
         return
-    
+
     from core.trading_settings import TradingSettings, save_trading_settings_async, refresh_settings_cache_async
-    
+
     default_settings = TradingSettings()
     if await save_trading_settings_async(default_settings.model_dump()):
         await refresh_settings_cache_async()
         await answer_callback_query_via_runtime(callback, "✅ تنظیمات بازنشانی شد")
     else:
         await answer_callback_query_via_runtime(callback, "❌ خطا در بازنشانی")
-    
-    await callback.message.edit_text(
+
+    await edit_callback_message_via_runtime(callback, user,
         await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
@@ -1394,8 +1413,8 @@ async def handle_settings_reset_cancel(callback: types.CallbackQuery, user: Opti
     if not user or user.role != UserRole.SUPER_ADMIN:
         await answer_callback_query_via_runtime(callback)
         return
-    
-    await callback.message.edit_text(
+
+    await edit_callback_message_via_runtime(callback, user,
         await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()

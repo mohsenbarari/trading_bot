@@ -100,6 +100,23 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_redacts_payload_and_provider_outcome_after_seven_days(self):
         async with self.Session() as db:
             job = await self._job(db, key="redact", age_days=8)
+            document_outbox = TelegramNotificationOutbox(
+                dedupe_key="retention-document-source",
+                source_type="queue_action:trade_noncritical",
+                source_id="retention-document-source",
+                telegram_id_at_enqueue=8_477_001,
+                text="document source",
+                status=TelegramNotificationOutboxStatus.SENT,
+                queue_job_id=job.id,
+                queue_handed_off_at=utc_now() - timedelta(days=8),
+                terminal_at=utc_now() - timedelta(days=8),
+                extra_payload={
+                    "document_base64": "c2Vuc2l0aXZlLWJ5dGVz",
+                    "document_filename": "report.xlsx",
+                    "document_sha256": "c" * 64,
+                },
+            )
+            db.add(document_outbox)
             db.add(
                 TelegramDeliveryProviderOutcomeRecord(
                     job_id=job.id,
@@ -118,6 +135,8 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             job_id = int(job.id)
+            await db.flush()
+            document_outbox_id = int(document_outbox.id)
             await db.commit()
 
         async with self.Session() as db:
@@ -139,6 +158,10 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             ).scalar_one()
+            document_outbox = await db.get(
+                TelegramNotificationOutbox,
+                document_outbox_id,
+            )
             self.assertEqual(job.payload, TELEGRAM_DELIVERY_REDACTED_PAYLOAD)
             self.assertIsNone(job.provider_response)
             self.assertIsNone(job.last_error_message)
@@ -146,6 +169,11 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(outcome.provider_response)
             self.assertIsNone(outcome.last_apply_error_message)
             self.assertIsNotNone(outcome.payload_redacted_at)
+            self.assertIsNone(document_outbox.extra_payload["document_base64"])
+            self.assertEqual(
+                document_outbox.extra_payload["document_filename"],
+                "report.xlsx",
+            )
 
             replay = await run_telegram_delivery_retention_cycle(
                 db,

@@ -52,12 +52,13 @@ class TelegramScheduledOperation(Base):
         ),
         Index("ix_telegram_scheduled_operations_run", "run_id", "status"),
         CheckConstraint(
-            "action_kind IN ('noncritical_market', 'temporary_cleanup', "
+            "action_kind IN ('noncritical_market', 'preauth_interaction', "
+            "'preauth_interaction_edit', 'temporary_cleanup', "
             "'cosmetic_cleanup')",
             name="ck_telegram_scheduled_operations_action",
         ),
         CheckConstraint(
-            "method IN ('sendMessage', 'deleteMessage', "
+            "method IN ('sendMessage', 'editMessageText', 'deleteMessage', "
             "'editMessageReplyMarkup')",
             name="ck_telegram_scheduled_operations_method",
         ),

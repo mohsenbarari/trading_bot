@@ -1,4 +1,6 @@
 import unittest
+import base64
+import hashlib
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -11,8 +13,14 @@ from core.telegram_delivery_notification_action_contract import (
     telegram_notification_action_policy,
     telegram_notification_action_policy_from_source,
 )
+from core.telegram_delivery_interaction_result_contract import (
+    TelegramInteractionAnchorEffect,
+    TelegramInteractionResultRequirement,
+    build_interaction_result_contract,
+)
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
+    TelegramDestinationClass,
     TelegramFeederKind,
 )
 from core.telegram_delivery_runtime_composition import (
@@ -139,6 +147,86 @@ class TelegramDeliveryNotificationActionContractTests(
                 user_sync_version=5,
                 reply_markup={"keyboard": [[{"text": "منوی اصلی"}]]},
             )
+
+    async def test_document_enqueue_validates_and_persists_bounded_content(self):
+        document = b"safe-report"
+        encoded = base64.b64encode(document).decode("ascii")
+        digest = hashlib.sha256(document).hexdigest()
+        contract = build_interaction_result_contract(
+            logical_message_key="private-document:7:report:91",
+            method="sendDocument",
+            destination_class=TelegramDestinationClass.PRIVATE,
+            result_requirement=TelegramInteractionResultRequirement.NONE,
+            anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
+            authenticated=True,
+        )
+        expected = SimpleNamespace(outbox=object(), created=True)
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+        with patch.object(
+            outbox_service,
+            "enqueue_telegram_notification_once",
+            new=AsyncMock(return_value=expected),
+        ) as enqueue:
+            result = await outbox_service.enqueue_telegram_action_notification_once(
+                object(),
+                recipient=recipient,
+                action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+                source_id="document:7:report:91",
+                text="گزارش",
+                user_sync_version=5,
+                interaction_result=contract,
+                document_base64=encoded,
+                document_filename="report.xlsx",
+                document_sha256=digest,
+            )
+
+        self.assertIs(result, expected)
+        payload = enqueue.await_args.kwargs["extra_payload"]
+        self.assertEqual(payload["document_base64"], encoded)
+        self.assertEqual(payload["document_filename"], "report.xlsx")
+        self.assertEqual(payload["document_sha256"], digest)
+        self.assertEqual(payload["interaction_result"]["method"], "sendDocument")
+
+    async def test_document_enqueue_rejects_tampering_and_unsafe_filename(self):
+        document = b"safe-report"
+        encoded = base64.b64encode(document).decode("ascii")
+        contract = build_interaction_result_contract(
+            logical_message_key="private-document:7:report:91",
+            method="sendDocument",
+            destination_class=TelegramDestinationClass.PRIVATE,
+            result_requirement=TelegramInteractionResultRequirement.NONE,
+            anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
+            authenticated=True,
+        )
+        recipient = outbox_service.TelegramNotificationRecipient(
+            user_id=7,
+            telegram_id=7007,
+        )
+        invalid_cases = (
+            ({"document_base64": "not-base64"}, "encoding_invalid"),
+            ({"document_sha256": "0" * 64}, "hash_invalid"),
+            ({"document_filename": "../report.xlsx"}, "filename_invalid"),
+        )
+        defaults = {
+            "document_base64": encoded,
+            "document_filename": "report.xlsx",
+            "document_sha256": hashlib.sha256(document).hexdigest(),
+        }
+        for overrides, error in invalid_cases:
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                await outbox_service.enqueue_telegram_action_notification_once(
+                    object(),
+                    recipient=recipient,
+                    action=TelegramDeliveryAction.TRADE_NONCRITICAL,
+                    source_id=f"document:7:{error}:91",
+                    text="گزارش",
+                    user_sync_version=5,
+                    interaction_result=contract,
+                    **{**defaults, **overrides},
+                )
 
     async def test_account_enqueue_requires_explicit_state_snapshot(self):
         recipient = outbox_service.TelegramNotificationRecipient(

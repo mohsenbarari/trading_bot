@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from core.enums import SettlementType, UserAccountStatus
 from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueValidationError,
+    apply_telegram_delivery_provider_outcome,
     apply_telegram_delivery_freshness_result,
     claim_next_telegram_delivery_job,
     mark_telegram_delivery_dispatch_started,
@@ -32,6 +33,7 @@ from core.services.trade_telegram_delivery_service import (
     deliver_telegram_trade_notification,
 )
 from core.telegram_delivery_queue_contract import (
+    TelegramDeliveryOutcome,
     TelegramDeliveryState,
     TelegramFreshnessDecision,
     TelegramFreshnessOutcome,
@@ -58,6 +60,11 @@ from models.customer_relation import (
     CustomerTier,
 )
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_provider_outcome import (
+    TELEGRAM_PROVIDER_OUTCOME_APPLIED,
+    TELEGRAM_PROVIDER_OUTCOME_PENDING,
+    TelegramDeliveryProviderOutcomeRecord,
+)
 from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import (
     TradeDeliveryChannel,
@@ -922,7 +929,7 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
         self.assertEqual(second_job.state, TelegramDeliveryState.SENT)
         self.assertEqual(second_receipt.status, TradeDeliveryReceiptStatus.SENT)
 
-    async def test_feedback_failure_rolls_back_result_and_recovers_as_ambiguous(self):
+    async def test_feedback_failure_preserves_provider_fact_for_replay(self):
         receipt_id, _ = await self._seed_receipt(trade_number=19104)
         handoff = await self._handoff()
         gateway = AsyncMock(
@@ -957,6 +964,16 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
                 trade_result_queue_job_id_from_receipt(receipt),
                 handoff.job_id,
             )
+            outcome = (
+                await db.execute(
+                    select(TelegramDeliveryProviderOutcomeRecord).where(
+                        TelegramDeliveryProviderOutcomeRecord.job_id
+                        == handoff.job_id
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(outcome.apply_state, TELEGRAM_PROVIDER_OUTCOME_PENDING)
+            self.assertEqual(outcome.telegram_message_id, 880104)
             report = await recover_expired_telegram_delivery_leases(
                 db,
                 current_server="foreign",
@@ -964,12 +981,36 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
                 now=before_recovery.lease_until + timedelta(seconds=1),
             )
             await db.commit()
-        self.assertEqual(report.ambiguous_sends, 1)
+        self.assertEqual(report.job_ids, ())
+
+        async with self.Session() as db:
+            decision = await apply_telegram_delivery_provider_outcome(
+                db,
+                current_server="foreign",
+                outcome_id=int(outcome.id),
+                retry_after_safety_seconds=0.1,
+                retry_base_seconds=1.0,
+                retry_max_seconds=30.0,
+                global_rate_limit_window_seconds=2.0,
+                feedback=TradeResultQueueLifecycleFeedback().apply_delivery_result,
+                now=utc_now(),
+            )
+            await db.commit()
+        self.assertEqual(decision.outcome, TelegramDeliveryOutcome.SENT)
+        gateway.assert_awaited_once()
         async with self.Session() as db:
             recovered = await db.get(TelegramDeliveryJobRecord, handoff.job_id)
-        self.assertEqual(recovered.state, TelegramDeliveryState.AMBIGUOUS)
+            receipt = await db.get(TradeDeliveryReceipt, receipt_id)
+            applied = await db.get(
+                TelegramDeliveryProviderOutcomeRecord,
+                int(outcome.id),
+            )
+        self.assertEqual(recovered.state, TelegramDeliveryState.SENT)
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.SENT)
+        self.assertEqual(receipt.telegram_message_id, 880104)
+        self.assertEqual(applied.apply_state, TELEGRAM_PROVIDER_OUTCOME_APPLIED)
 
-    async def test_reclassify_releases_old_binding_and_handoff_creates_new_version(self):
+    async def test_relink_supersedes_old_binding_without_new_delivery(self):
         receipt_id, user_id = await self._seed_receipt(trade_number=19105)
         first = await self._handoff()
         async with self.Session() as db:
@@ -984,25 +1025,19 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
             worker_id="trade-bridge-reclassify",
         )
 
-        self.assertEqual(report.status_counts, {"reclassify": 1})
+        self.assertEqual(report.status_counts, {"superseded": 1})
         gateway.assert_not_awaited()
         async with self.Session() as db:
             receipt = await db.get(TradeDeliveryReceipt, receipt_id)
             old_job = await db.get(TelegramDeliveryJobRecord, first.job_id)
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.SKIPPED)
         self.assertIsNone(receipt.worker_id)
-        self.assertEqual(old_job.state, TelegramDeliveryState.PENDING_RECONCILE)
+        self.assertEqual(old_job.state, TelegramDeliveryState.SUPERSEDED)
 
-        second = await self._handoff()
-        self.assertTrue(second.job_created)
-        self.assertNotEqual(first.job_id, second.job_id)
+        self.assertIsNone(await self._handoff())
         async with self.Session() as db:
-            new_job = await db.get(TelegramDeliveryJobRecord, second.job_id)
             receipt = await db.get(TradeDeliveryReceipt, receipt_id)
-        self.assertEqual(new_job.source_version, 2)
-        self.assertEqual(
-            trade_result_queue_job_id_from_receipt(receipt),
-            second.job_id,
-        )
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.SKIPPED)
 
     async def test_private_forbidden_skips_receipt_and_malformed_payload_fails_it(self):
         for trade_number, result, expected_status in (

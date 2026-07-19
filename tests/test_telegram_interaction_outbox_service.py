@@ -16,6 +16,7 @@ from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionAnchorEffect,
     TelegramInteractionResultRequirement,
     build_interaction_result_contract,
+    build_delivery_result_target,
     build_known_message_target,
     serialize_interaction_result_contract,
     serialize_interaction_target_reference,
@@ -235,6 +236,59 @@ class TelegramInteractionOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.payload["chat_id"], 7007)
         self.assertEqual(snapshot.payload["message_id"], 44)
         self.assertEqual(snapshot.payload["text"], "متن ویرایش‌شده")
+
+    async def test_delivery_result_target_is_persisted_without_fabricated_id(self):
+        outbox = SimpleNamespace(id=18, telegram_message_id=None)
+        with (
+            patch.object(
+                interaction_service,
+                "_find_existing",
+                new=AsyncMock(return_value=None),
+            ),
+            patch.object(
+                interaction_service,
+                "enqueue_telegram_action_notification_once",
+                new=AsyncMock(
+                    return_value=TelegramNotificationEnqueueResult(outbox, True)
+                ),
+            ) as enqueue,
+        ):
+            result = await interaction_service.enqueue_private_interaction_edit_once(
+                SimpleNamespace(),
+                current_server="foreign",
+                recipient=recipient(),
+                action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                source_id="result-edit:18",
+                logical_message_key="user:7:result-edit:18",
+                source_receipt_id=17,
+                text="متن نهایی",
+                user_sync_version=4,
+            )
+
+        target = enqueue.await_args.kwargs["interaction_target"]
+        self.assertEqual(target, build_delivery_result_target(
+            chat_id=7007,
+            source_receipt_id=17,
+        ))
+        self.assertIsNone(result.message_id)
+
+    async def test_edit_requires_exactly_one_target_kind(self):
+        for kwargs in ({}, {"target_message_id": 44, "source_receipt_id": 17}):
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(
+                ValueError,
+                "target_choice_invalid",
+            ):
+                await interaction_service.enqueue_private_interaction_edit_once(
+                    SimpleNamespace(),
+                    current_server="foreign",
+                    recipient=recipient(),
+                    action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                    source_id="result-edit:invalid",
+                    logical_message_key="user:7:result-edit:invalid",
+                    text="متن نهایی",
+                    user_sync_version=4,
+                    **kwargs,
+                )
 
     async def test_non_anchor_interaction_reuses_notification_outbox_without_anchor_state(self):
         outbox = SimpleNamespace(id=11)

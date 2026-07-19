@@ -38,6 +38,7 @@ from core.telegram_delivery_notification_action_contract import (
 )
 from core.telegram_delivery_notification_action_freshness import (
     build_telegram_notification_action_snapshot,
+    resolve_telegram_notification_action_interaction_target,
     telegram_notification_action_deleted_route_is_reassigned,
     telegram_notification_action_destination_key,
     telegram_notification_action_outbox_is_deleted_account_notice,
@@ -67,6 +68,9 @@ from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDestinationClass,
     TelegramFeederKind,
+)
+from core.telegram_delivery_interaction_result_contract import (
+    TelegramInteractionDependencyOutcome,
 )
 from core.utils import utc_now
 from models.telegram_notification_outbox import (
@@ -271,6 +275,20 @@ async def handoff_next_due_telegram_notification_outbox(
             error_class="TelegramNotificationSuperseded",
             now=current_time,
         )
+    if (
+        action_policy is not None
+        and not deleted_account_notice
+        and _positive_int(user.telegram_id)
+        != _positive_int(outbox.telegram_id_at_enqueue)
+    ):
+        return await _finalize_unhandoffable_outbox(
+            db,
+            outbox=outbox,
+            status=TelegramNotificationOutboxStatus.SKIPPED,
+            reason="notification_action_recipient_relinked",
+            error_class="TelegramNotificationSuperseded",
+            now=current_time,
+        )
     offer_success_offer = None
     if source_type == TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS:
         try:
@@ -331,6 +349,62 @@ async def handoff_next_due_telegram_notification_outbox(
                 disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
                 reason="notification_action_recipient_version_pending",
             )
+        try:
+            target_decision = (
+                await resolve_telegram_notification_action_interaction_target(
+                    db,
+                    outbox,
+                )
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            return await _finalize_unhandoffable_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+                reason=str(exc)[:120] or "notification_action_target_invalid",
+                error_class="TelegramPayloadError",
+                now=current_time,
+            )
+        if target_decision is not None:
+            if (
+                target_decision.outcome
+                == TelegramInteractionDependencyOutcome.WAIT_DEPENDENCY
+            ):
+                outbox.reason = "notification_action_result_target_pending"
+                outbox.next_retry_at = current_time + timedelta(seconds=1)
+                outbox.updated_at = current_time
+                await _flush(db)
+                return TelegramNotificationOutboxQueueHandoffResult(
+                    outbox_id=int(outbox.id),
+                    disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
+                    reason="notification_action_result_target_pending",
+                )
+            if (
+                target_decision.outcome
+                == TelegramInteractionDependencyOutcome.SUPERSEDED
+            ):
+                return await _finalize_unhandoffable_outbox(
+                    db,
+                    outbox=outbox,
+                    status=TelegramNotificationOutboxStatus.SKIPPED,
+                    reason=target_decision.reason
+                    or "notification_action_result_target_superseded",
+                    error_class="TelegramNotificationSuperseded",
+                    now=current_time,
+                )
+            if (
+                target_decision.outcome
+                != TelegramInteractionDependencyOutcome.READY
+            ):
+                return await _finalize_unhandoffable_outbox(
+                    db,
+                    outbox=outbox,
+                    status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+                    reason=target_decision.reason
+                    or "notification_action_result_target_quarantined",
+                    error_class="TelegramPayloadError",
+                    now=current_time,
+                )
         await ensure_telegram_channel_membership_removal_saga(
             db,
             current_server=current_server,
@@ -451,7 +525,15 @@ async def handoff_next_due_telegram_notification_outbox(
                     error_class="TelegramNotificationSuperseded",
                     now=current_time,
                 )
-            snapshot = build_telegram_notification_action_snapshot(outbox, user)
+            snapshot = build_telegram_notification_action_snapshot(
+                outbox,
+                user,
+                resolved_target_message_id=(
+                    target_decision.message_id
+                    if target_decision is not None
+                    else None
+                ),
+            )
             source_version = snapshot.source_version
             payload = snapshot.payload
             method = snapshot.method

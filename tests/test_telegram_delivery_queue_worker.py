@@ -90,6 +90,13 @@ class _NoopLifecycleFeedback:
 
 class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self._channel_id_patcher = patch.object(
+            worker.settings,
+            "channel_id",
+            -1001234567890,
+        )
+        self._channel_id_patcher.start()
+        self.addCleanup(self._channel_id_patcher.stop)
         self._preflight_success_patcher = patch.object(
             worker,
             "_persist_preflight_success_gate",

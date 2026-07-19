@@ -24,13 +24,13 @@ class BotTradeExecuteSuggestionMessageTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)), patch(
             "bot.handlers.trade_execute.build_trade_amount_buttons", return_value="KB"
         ), patch("bot.handlers.trade_execute.upsert_trade_suggestion_record", new=AsyncMock()) as upsert_mock, patch(
-            "bot.handlers.trade_execute.schedule_trade_suggestion_cleanup"
+            "bot.handlers.trade_execute.schedule_trade_suggestion_cleanup", new=AsyncMock()
         ) as cleanup_mock:
             await send_or_update_trade_suggestion_message(callback, bot, target_chat_id=200, payload=payload)
 
         callback.message.edit_text.assert_awaited_once_with("MSG", reply_markup="KB")
         upsert_mock.assert_awaited_once_with(offer_id=7, chat_id=200, message_id=50, requested_amount=3)
-        cleanup_mock.assert_called_once()
+        cleanup_mock.assert_awaited_once()
         bot.send_message.assert_not_awaited()
 
     async def test_send_or_update_trade_suggestion_message_falls_back_to_send_message(self):
@@ -42,13 +42,13 @@ class BotTradeExecuteSuggestionMessageTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)), patch(
             "bot.handlers.trade_execute.build_trade_amount_buttons", return_value="KB"
         ), patch("bot.handlers.trade_execute.upsert_trade_suggestion_record", new=AsyncMock()) as upsert_mock, patch(
-            "bot.handlers.trade_execute.schedule_trade_suggestion_cleanup"
+            "bot.handlers.trade_execute.schedule_trade_suggestion_cleanup", new=AsyncMock()
         ) as cleanup_mock:
             await send_or_update_trade_suggestion_message(callback, bot, target_chat_id=200, payload=payload)
 
         bot.send_message.assert_awaited_once_with(chat_id=200, text="MSG", reply_markup="KB")
         upsert_mock.assert_awaited_once_with(offer_id=7, chat_id=200, message_id=88, requested_amount=3)
-        cleanup_mock.assert_called_once()
+        cleanup_mock.assert_awaited_once()
 
 
 if __name__ == "__main__":

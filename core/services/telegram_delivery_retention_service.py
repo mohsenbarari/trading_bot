@@ -258,6 +258,27 @@ async def _redact_payload_batch(
     if dry_run or not jobs:
         return len(jobs), 0
     job_ids = tuple(int(job.id) for job in jobs)
+    terminal_outboxes = (
+        await db.execute(
+            select(TelegramNotificationOutbox)
+            .where(
+                TelegramNotificationOutbox.queue_job_id.in_(job_ids),
+                TelegramNotificationOutbox.status.in_(
+                    tuple(TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES)
+                ),
+            )
+            .with_for_update(skip_locked=True)
+        )
+    ).scalars().all()
+    for outbox in terminal_outboxes:
+        extra_payload = getattr(outbox, "extra_payload", None)
+        if (
+            isinstance(extra_payload, dict)
+            and extra_payload.get("document_base64") is not None
+        ):
+            redacted = dict(extra_payload)
+            redacted["document_base64"] = None
+            outbox.extra_payload = redacted
     for job in jobs:
         job.payload = dict(TELEGRAM_DELIVERY_REDACTED_PAYLOAD)
         job.provider_response = None

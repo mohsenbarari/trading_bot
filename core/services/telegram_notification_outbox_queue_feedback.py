@@ -126,7 +126,9 @@ def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
     elif is_notification_action:
         method_valid = str(job.method or "") in {
             "sendMessage",
+            "sendDocument",
             "editMessageText",
+            "editMessageReplyMarkup",
         }
     else:
         method_valid = str(job.method or "") == "sendMessage"

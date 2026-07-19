@@ -40,6 +40,10 @@ from core.telegram_delivery_runtime_policy import (
 from core.utils import utc_now
 from bot.callbacks import ExpireOfferCallback
 from bot.repeat_offer import build_persistent_navigation_keyboard
+from bot.telegram_interaction_message import (
+    answer_callback_message_via_runtime,
+    edit_callback_reply_markup_via_runtime,
+)
 from core.public_webapp_url import user_facing_webapp_url
 
 logger = logging.getLogger(__name__)
@@ -322,13 +326,21 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 await session.commit()
 
             # حذف دکمه از پیام کاربر
-            await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.message.answer(
+            await edit_callback_reply_markup_via_runtime(
+                callback,
+                user,
+                action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+                reply_markup=None,
+            )
+            await answer_callback_message_via_runtime(
+                callback,
+                user,
                 "✅ لفظ شما منقضی شد.",
                 reply_markup=await build_persistent_navigation_keyboard(
                     user,
                     user_facing_webapp_url(settings_obj=settings),
                 ),
+                set_persistent_anchor=True,
             )
     finally:
         await lease.release()

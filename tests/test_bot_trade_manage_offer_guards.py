@@ -43,6 +43,15 @@ def make_callback():
 
 
 class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.expiry_lease = SimpleNamespace(acquired=True, release=AsyncMock())
+        self.expiry_gate_patcher = patch(
+            "bot.handlers.trade_manage.try_acquire_offer_expiry_gate",
+            new=AsyncMock(return_value=self.expiry_lease),
+        )
+        self.expiry_gate_patcher.start()
+        self.addCleanup(self.expiry_gate_patcher.stop)
+
     async def test_handle_expire_offer_handles_not_found_not_owner_and_inactive(self):
         settings_obj = SimpleNamespace(offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
         user = SimpleNamespace(id=4)

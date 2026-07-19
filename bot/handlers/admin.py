@@ -14,6 +14,10 @@ from core.invitation_creation_contracts import (
 )
 from core.invitation_creation_forwarding import forward_standard_invitation_to_iran
 from core.server_routing import SERVER_FOREIGN
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import normalize_account_name, normalize_persian_numerals
 from bot.states import InvitationCreation
 from bot.keyboards import (
@@ -24,6 +28,11 @@ from bot.keyboards import (
 )
 from bot.repeat_offer import build_admin_panel_navigation_keyboard
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import (
+    answer_callback_message_via_runtime,
+    answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+)
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -79,7 +88,10 @@ async def _return_to_admin_panel(
     # --- حذف لنگر قبلی (مثلاً منوی اصلی) ---
     data = await state.get_data()
     last_anchor_id = data.get("anchor_message_id")
-    if last_anchor_id:
+    if last_anchor_id and (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
         try:
             await bot.delete_message(chat_id, last_anchor_id)
         except Exception:
@@ -89,18 +101,40 @@ async def _return_to_admin_panel(
         user_role = _deserialize_user_role(data.get("inviter_role"))
             
     # --- ارسال لنگر جدید پنل مدیریت ---
-    return_msg = await bot.send_message(
-        chat_id=chat_id,
-        text="...بازگشت به پنل مدیریت",
-        reply_markup=(
-            await build_admin_panel_navigation_keyboard(user)
-            if user is not None
-            else get_admin_panel_keyboard(user_role)
-        ),
+    keyboard = (
+        await build_admin_panel_navigation_keyboard(user)
+        if user is not None
+        else get_admin_panel_keyboard(user_role)
     )
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return_msg = await bot.send_message(
+            chat_id=chat_id,
+            text="...بازگشت به پنل مدیریت",
+            reply_markup=keyboard,
+        )
+    elif isinstance(message, types.CallbackQuery):
+        return_msg = await answer_callback_message_via_runtime(
+            message,
+            user,
+            "...بازگشت به پنل مدیریت",
+            reply_markup=keyboard,
+            set_persistent_anchor=True,
+        )
+    else:
+        return_msg = await answer_incoming_message_via_runtime(
+            message,
+            user,
+            "...بازگشت به پنل مدیریت",
+            reply_markup=keyboard,
+            set_persistent_anchor=True,
+        )
     
     # --- ذخیره ID لنگر جدید ---
-    await state.update_data(anchor_message_id=return_msg.message_id)
+    if return_msg.message_id is not None:
+        await state.update_data(anchor_message_id=return_msg.message_id)
 
 # --- شروع FSM ---
 @router.message(F.text == "➕ ارسال لینک دعوت")
@@ -110,13 +144,18 @@ async def start_invitation_creation(message: types.Message, state: FSMContext, u
         
     
     await state.set_state(InvitationCreation.awaiting_account_name)
-    prompt_msg = await message.answer(
+    prompt_msg = await answer_incoming_message_via_runtime(
+        message,
+        user,
         "لطفاً **نام کاربری (Account Name)** را وارد کنید.\n"
         "(حروف، اعداد، آندرلاین و فاصله بین کلمات مجاز است، حداقل ۳ کاراکتر)",
         reply_markup=get_commodity_fsm_cancel_keyboard(),
         parse_mode="Markdown"
     )
-    await state.update_data(last_prompt_message_id=prompt_msg.message_id, inviter_role=user.role.value)
+    await state.update_data(
+        last_prompt_message_id=prompt_msg.message_id,
+        inviter_role=user.role.value,
+    )
 
 @router.callback_query(F.data == "create_invitation_inline")
 async def start_invitation_creation_inline(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
@@ -129,7 +168,9 @@ async def start_invitation_creation_inline(callback: types.CallbackQuery, state:
         return
     
     await state.set_state(InvitationCreation.awaiting_account_name)
-    await callback.message.edit_text(
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
         "لطفاً **نام کاربری (Account Name)** را وارد کنید.\n"
         "(حروف، اعداد، آندرلاین و فاصله بین کلمات مجاز است، حداقل ۳ کاراکتر)",
         reply_markup=get_commodity_fsm_cancel_keyboard(),
@@ -140,11 +181,18 @@ async def start_invitation_creation_inline(callback: types.CallbackQuery, state:
 
 # --- دریافت نام کاربری ---
 @router.message(InvitationCreation.awaiting_account_name)
-async def process_invitation_account_name(message: types.Message, state: FSMContext):
+async def process_invitation_account_name(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User] = None,
+):
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     
-    if last_prompt_id:
+    if last_prompt_id and (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
         try:
             await message.bot.delete_message(message.chat.id, last_prompt_id)
         except Exception:
@@ -153,7 +201,9 @@ async def process_invitation_account_name(message: types.Message, state: FSMCont
     account_name_raw = re.sub(r" {2,}", " ", message.text.strip())
     
     if not 3 <= len(account_name_raw) <= 32 or not _ACCOUNT_NAME_PATTERN.fullmatch(account_name_raw):
-        error_msg = await message.answer(
+        error_msg = await answer_incoming_message_via_runtime(
+            message,
+            user,
             "❌ **نام کاربری نامعتبر است.**\n"
             "لطفاً فقط از حروف، اعداد، آندرلاین و فاصله بین کلمات استفاده کنید (۳ تا ۳۲ کاراکتر).",
             reply_markup=get_commodity_fsm_cancel_keyboard(),
@@ -166,7 +216,9 @@ async def process_invitation_account_name(message: types.Message, state: FSMCont
     await state.update_data(account_name=normalized_name)
     await state.set_state(InvitationCreation.awaiting_mobile_number)
     
-    prompt_msg = await message.answer(
+    prompt_msg = await answer_incoming_message_via_runtime(
+        message,
+        user,
         f"✅ نام کاربری `{normalized_name}` ثبت شد.\n"
         "حالا **شماره موبایل** کاربر را وارد کنید (مثال: 09123456789):",
         reply_markup=get_commodity_fsm_cancel_keyboard(),
@@ -176,11 +228,18 @@ async def process_invitation_account_name(message: types.Message, state: FSMCont
 
 # --- دریافت شماره موبایل ---
 @router.message(InvitationCreation.awaiting_mobile_number)
-async def process_invitation_mobile(message: types.Message, state: FSMContext):
+async def process_invitation_mobile(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User] = None,
+):
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     
-    if last_prompt_id:
+    if last_prompt_id and (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
         try:
             await message.bot.delete_message(message.chat.id, last_prompt_id)
         except Exception:
@@ -189,7 +248,9 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
     mobile_number_raw = message.text.strip()
     
     if not re.match(r"^[0۰٠][9۹٩][0-9۰-۹٠-٩]{9}$", mobile_number_raw):
-        error_msg = await message.answer(
+        error_msg = await answer_incoming_message_via_runtime(
+            message,
+            user,
             "❌ **شماره موبایل نامعتبر است.**\n"
             "لطفاً شماره را با فرمت 09123456789 (فارسی یا انگلیسی) وارد کنید.",
             reply_markup=get_commodity_fsm_cancel_keyboard(),
@@ -203,7 +264,9 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
     await state.set_state(InvitationCreation.awaiting_role)
     inviter_role = _deserialize_user_role(data.get("inviter_role"))
     
-    prompt_msg = await message.answer(
+    prompt_msg = await answer_incoming_message_via_runtime(
+        message,
+        user,
         f"✅ شماره موبایل `{normalized_mobile}` ثبت شد.\n"
         "لطفاً **نقش (سطح دسترسی)** کاربر را انتخاب کنید:",
         reply_markup=get_role_selection_keyboard(get_invitable_roles_for_admin(inviter_role)),
@@ -227,8 +290,16 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
     
     if last_prompt_id:
         try:
-            await callback.message.edit_text("⏳ در حال ساخت لینک...")
-            await callback.message.delete()
+            await edit_callback_message_via_runtime(
+                callback,
+                user,
+                "⏳ در حال ساخت لینک...",
+            )
+            if (
+                configured_telegram_delivery_runtime().mode
+                != TelegramDeliveryRuntimeMode.QUEUE_V1
+            ):
+                await callback.message.delete()
         except Exception:
             pass
 
@@ -257,7 +328,11 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
     await state.clear()
 
     if not account_name or not mobile_number:
-        error_msg = await callback.message.answer("خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.",
+        )
         await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
         return
 
@@ -282,13 +357,19 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
     try:
         status_code, result = await forward_standard_invitation_to_iran(payload)
     except Exception:
-        await callback.message.answer("❌ خطای سیستمی در ارتباط با سرور ایران.")
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
+            "❌ خطای سیستمی در ارتباط با سرور ایران.",
+        )
         await _return_to_admin_panel(callback, state, bot, user=user, user_role=user.role)
         await answer_callback_query_via_runtime(callback)
         return
     if status_code >= 400 or not isinstance(result, dict):
         detail = result.get("detail") if isinstance(result, dict) else None
-        await callback.message.answer(
+        await answer_callback_message_via_runtime(
+            callback,
+            user,
             f"❌ **خطا در ایجاد دعوت‌نامه:**\n\n{str(detail or 'پاسخ نامعتبر از سرور ایران').replace('**', '')}",
             parse_mode="Markdown",
         )
@@ -296,9 +377,15 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
         bot_link = result.get("bot_link") or result.get("link")
         web_link = result.get("web_link")
         if not bot_link or not web_link:
-            await callback.message.answer("❌ پاسخ ساخت دعوت‌نامه ناقص است.")
+            await answer_callback_message_via_runtime(
+                callback,
+                user,
+                "❌ پاسخ ساخت دعوت‌نامه ناقص است.",
+            )
         else:
-            await callback.message.answer(
+            await answer_callback_message_via_runtime(
+                callback,
+                user,
                 f"✅ لینک دعوت برای نقش **{role.value}** آماده است:\n\n"
                 f"**نام کاربری:** `{account_name}`\n"
                 f"**موبایل:** `{mobile_number}`\n\n"
@@ -325,13 +412,20 @@ async def cancel_invitation_creation(
 
     await state.clear()
     
-    if last_prompt_id:
+    if last_prompt_id and (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
         try:
             await callback.message.delete()
         except Exception:
             pass
 
-    cancel_msg = await callback.message.answer("عملیات لغو شد.")
+    await answer_callback_message_via_runtime(
+        callback,
+        user,
+        "عملیات لغو شد.",
+    )
     
     await _return_to_admin_panel(
         callback,

@@ -21,6 +21,7 @@ from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionResultContract,
     TelegramInteractionResultRequirement,
     TelegramInteractionTargetReference,
+    build_delivery_result_target,
     build_known_message_target,
     build_interaction_result_contract,
     parse_interaction_target_reference,
@@ -44,6 +45,15 @@ class TelegramInteractionEnqueueResult:
     notification: TelegramNotificationEnqueueResult
     contract: TelegramInteractionResultContract
     anchor_state: TelegramInteractionAnchorState | None
+
+    @property
+    def message_id(self) -> int | None:
+        """Expose only a provider-confirmed id; enqueue never fabricates one."""
+
+        value = getattr(self.notification.outbox, "telegram_message_id", None)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return None
+        return value
 
 
 class TelegramInteractionOutboxSurfaceError(PermissionError):
@@ -387,13 +397,15 @@ async def enqueue_private_interaction_edit_once(
     action: TelegramDeliveryAction | str,
     source_id: str,
     logical_message_key: str,
-    target_message_id: int,
+    target_message_id: int | None = None,
+    source_receipt_id: int | None = None,
     text: str,
     user_sync_version: int,
+    method: str = "editMessageText",
     parse_mode: str | None = None,
     reply_markup: Mapping[str, Any] | None = None,
 ) -> TelegramInteractionEnqueueResult:
-    """Persist one private ``editMessageText`` with a known Telegram target."""
+    """Persist one private edit with a known or receipt-dependent target."""
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         raise TelegramInteractionOutboxSurfaceError(
             "telegram_interaction_outbox_is_foreign_local"
@@ -416,16 +428,27 @@ async def enqueue_private_interaction_edit_once(
         raise ValueError("telegram_interaction_source_id_invalid")
     if not logical_key or len(logical_key) > 192:
         raise ValueError("telegram_interaction_logical_message_key_invalid")
-    target = build_known_message_target(
-        chat_id=recipient.telegram_id,
-        message_id=target_message_id,
+    if (target_message_id is None) == (source_receipt_id is None):
+        raise ValueError("telegram_interaction_edit_target_choice_invalid")
+    target = (
+        build_known_message_target(
+            chat_id=recipient.telegram_id,
+            message_id=target_message_id,
+        )
+        if target_message_id is not None
+        else build_delivery_result_target(
+            chat_id=recipient.telegram_id,
+            source_receipt_id=source_receipt_id,
+        )
     )
+    if method not in {"editMessageText", "editMessageReplyMarkup"}:
+        raise ValueError("telegram_interaction_edit_method_unsupported")
     menu_present = _persistent_menu_present(reply_markup)
     if menu_present:
         raise ValueError("telegram_interaction_edit_persistent_menu_forbidden")
     contract = build_interaction_result_contract(
         logical_message_key=logical_key,
-        method="editMessageText",
+        method=method,
         destination_class=TelegramDestinationClass.PRIVATE,
         result_requirement=TelegramInteractionResultRequirement.NONE,
         anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
@@ -451,7 +474,7 @@ async def enqueue_private_interaction_edit_once(
             user_sync_version=user_sync_version,
             parse_mode=parse_mode,
             reply_markup=reply_markup,
-            method="editMessageText",
+            method=method,
             logical_message_key=logical_key,
             result_requirement=TelegramInteractionResultRequirement.NONE,
             anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
@@ -471,5 +494,61 @@ async def enqueue_private_interaction_edit_once(
         reply_markup=reply_markup,
         interaction_result=contract,
         interaction_target=target,
+    )
+    return TelegramInteractionEnqueueResult(notification, contract, None)
+
+
+async def enqueue_private_document_interaction_once(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    recipient: TelegramNotificationRecipient,
+    action: TelegramDeliveryAction | str,
+    source_id: str,
+    logical_message_key: str,
+    caption: str,
+    document_base64: str,
+    document_filename: str,
+    document_sha256: str,
+    user_sync_version: int,
+    parse_mode: str | None = None,
+    reply_markup: Mapping[str, Any] | None = None,
+) -> TelegramInteractionEnqueueResult:
+    """Persist one bounded document upload in the authenticated private lane."""
+
+    if str(current_server or "").strip().lower() != SERVER_FOREIGN:
+        raise TelegramInteractionOutboxSurfaceError(
+            "telegram_interaction_outbox_is_foreign_local"
+        )
+    normalized_source_id = str(source_id or "").strip()
+    logical_key = str(logical_message_key or "").strip()
+    if not normalized_source_id or len(normalized_source_id) > 120:
+        raise ValueError("telegram_interaction_source_id_invalid")
+    if not logical_key or len(logical_key) > 192:
+        raise ValueError("telegram_interaction_logical_message_key_invalid")
+    if _persistent_menu_present(reply_markup):
+        raise ValueError("telegram_interaction_document_persistent_menu_forbidden")
+    contract = build_interaction_result_contract(
+        logical_message_key=logical_key,
+        method="sendDocument",
+        destination_class=TelegramDestinationClass.PRIVATE,
+        result_requirement=TelegramInteractionResultRequirement.NONE,
+        anchor_effect=TelegramInteractionAnchorEffect.PRESERVE_CURRENT,
+        authenticated=True,
+        persistent_menu_present=False,
+    )
+    notification = await enqueue_telegram_action_notification_once(
+        db,
+        recipient=recipient,
+        action=action,
+        source_id=normalized_source_id,
+        text=caption,
+        user_sync_version=user_sync_version,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        interaction_result=contract,
+        document_base64=document_base64,
+        document_filename=document_filename,
+        document_sha256=document_sha256,
     )
     return TelegramInteractionEnqueueResult(notification, contract, None)

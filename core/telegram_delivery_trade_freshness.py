@@ -553,9 +553,6 @@ async def validate_trade_result_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="trade_freshness_recipient_missing",
         )
-    version_decision = _source_version_decision(job, user=user)
-    if version_decision is not None:
-        return version_decision
     if _strict_positive_int(getattr(user, "telegram_id", None)) is None:
         return _decision(
             TelegramFreshnessOutcome.SUPERSEDED,
@@ -576,6 +573,14 @@ async def validate_trade_result_telegram_delivery_freshness(
             TelegramFreshnessOutcome.SUPERSEDED,
             reason="trade_freshness_recipient_relinked",
         )
+    # A Telegram route change is a privacy boundary, not an ordinary source
+    # version refresh.  Check the immutable audience before allowing a newer
+    # sync version to request reclassification, otherwise a normal relink
+    # (which also increments sync_version) could rebuild the old trade notice
+    # for the newly linked account.
+    version_decision = _source_version_decision(job, user=user)
+    if version_decision is not None:
+        return version_decision
     access_decision = await evaluate_bot_access(db, user)
     if not access_decision.allowed:
         return _decision(

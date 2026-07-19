@@ -23,6 +23,7 @@ from core.services.telegram_notification_outbox_queue_feedback import (
 )
 from core.services.telegram_notification_outbox_queue_service import (
     NOTIFICATION_OUTBOX_QUEUE_HANDOFF,
+    NOTIFICATION_OUTBOX_QUEUE_SKIPPED,
     handoff_next_due_telegram_notification_outbox,
 )
 from core.services.telegram_notification_outbox_service import (
@@ -449,38 +450,30 @@ class TelegramInteractionAnchorPostgresTests(unittest.IsolatedAsyncioTestCase):
             user.sync_version = int(user.sync_version) + 1
             await db.commit()
 
-        job = await self._handoff_and_claim(worker_id="interaction-anchor-relink")
-        self.assertEqual(job.payload["chat_id"], CHAT_ID + 100)
-        feedback = TelegramNotificationOutboxQueueLifecycleFeedback()
         async with self.Session() as db:
-            current = await db.get(TelegramDeliveryJobRecord, int(job.id))
-            freshness = await validate_notification_action_telegram_delivery_freshness(
-                db,
-                current,
-                utc_now(),
-            )
-            self.assertEqual(freshness.outcome, TelegramFreshnessOutcome.SUPERSEDED)
-            self.assertEqual(
-                freshness.reason,
-                "notification_action_freshness_anchor_route_changed",
-            )
-            may_send = await apply_telegram_delivery_freshness_result(
+            handoff = await handoff_next_due_telegram_notification_outbox(
                 db,
                 current_server="foreign",
-                job_id=int(current.id),
-                worker_id="interaction-anchor-relink",
-                lease_token=int(current.lease_token),
-                decision=freshness,
-                feedback=feedback.apply_freshness,
                 now=utc_now(),
             )
-            self.assertFalse(may_send)
             await db.commit()
+        self.assertEqual(handoff.disposition, NOTIFICATION_OUTBOX_QUEUE_SKIPPED)
+        self.assertEqual(handoff.reason, "notification_action_recipient_relinked")
 
         async with self.Session() as db:
             outbox = await db.get(TelegramNotificationOutbox, outbox_id)
             anchor = await db.get(TelegramInteractionAnchorState, CHAT_ID)
+            jobs = int(
+                (
+                    await db.execute(
+                        select(text("count(*)")).select_from(
+                            TelegramDeliveryJobRecord
+                        )
+                    )
+                ).scalar_one()
+            )
         self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.SKIPPED)
+        self.assertEqual(jobs, 0)
         self.assertIsNone(anchor.active_generation)
         self.assertIsNone(anchor.active_message_id)
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import base64
+import binascii
 import hashlib
+import re
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -58,6 +61,8 @@ TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE = "offer_repeat_response"
 
 TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_MENU_REFRESH = "menu_refresh"
 TELEGRAM_OFFER_REPEAT_RESPONSE_KIND_STALE_BUTTON = "stale_button"
+TELEGRAM_DOCUMENT_EXPORT_MAX_BYTES = 5 * 1024 * 1024
+_TELEGRAM_DOCUMENT_FILENAME = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
 TELEGRAM_OFFER_REPEAT_MENU_REFRESH_TEXT = "منو با آخرین وضعیت به‌روزرسانی شد"
 TELEGRAM_OFFER_REPEAT_STALE_BUTTON_TEXT = (
     "متن این دکمه قدیمی است. منو با آخرین وضعیت به‌روزرسانی شد؛ "
@@ -514,6 +519,9 @@ async def enqueue_telegram_action_notification_once(
     reply_markup: Mapping[str, Any] | None = None,
     interaction_result: TelegramInteractionResultContract | None = None,
     interaction_target: TelegramInteractionTargetReference | None = None,
+    document_base64: str | None = None,
+    document_filename: str | None = None,
+    document_sha256: str | None = None,
 ) -> TelegramNotificationEnqueueResult:
     """Persist one allowlisted private send or known-target edit intent."""
     policy = telegram_notification_action_policy(action)
@@ -544,9 +552,44 @@ async def enqueue_telegram_action_notification_once(
     )
     if persistent_menu_present and interaction_result is None:
         raise ValueError("telegram_notification_persistent_menu_requires_interaction")
+    document_mode = bool(
+        interaction_result is not None
+        and interaction_result.method == "sendDocument"
+    )
+    if document_mode:
+        filename = str(document_filename or "").strip()
+        encoded = str(document_base64 or "").strip()
+        digest = str(document_sha256 or "").strip().lower()
+        if _TELEGRAM_DOCUMENT_FILENAME.fullmatch(filename) is None:
+            raise ValueError("telegram_notification_document_filename_invalid")
+        try:
+            decoded = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("telegram_notification_document_encoding_invalid") from exc
+        if not decoded or len(decoded) > TELEGRAM_DOCUMENT_EXPORT_MAX_BYTES:
+            raise ValueError("telegram_notification_document_size_invalid")
+        if len(digest) != 64 or hashlib.sha256(decoded).hexdigest() != digest:
+            raise ValueError("telegram_notification_document_hash_invalid")
+        extra_payload.update(
+            {
+                "document_base64": encoded,
+                "document_filename": filename,
+                "document_sha256": digest,
+            }
+        )
+    elif any(
+        value is not None
+        for value in (document_base64, document_filename, document_sha256)
+    ):
+        raise ValueError("telegram_notification_document_without_method")
     if interaction_result is not None:
         if (
-            interaction_result.method not in {"sendMessage", "editMessageText"}
+            interaction_result.method not in {
+                "sendMessage",
+                "sendDocument",
+                "editMessageText",
+                "editMessageReplyMarkup",
+            }
             or interaction_result.destination_class.value != "private"
             or not interaction_result.authenticated
         ):
@@ -562,14 +605,12 @@ async def enqueue_telegram_action_notification_once(
         extra_payload["interaction_result"] = (
             serialize_interaction_result_contract(interaction_result)
         )
-        if interaction_result.method == "sendMessage":
+        if interaction_result.method in {"sendMessage", "sendDocument"}:
             if interaction_target is not None:
                 raise ValueError("telegram_notification_send_target_forbidden")
         else:
             if interaction_target is None:
                 raise ValueError("telegram_notification_edit_target_required")
-            if interaction_target.kind != TelegramInteractionTargetKind.KNOWN_MESSAGE:
-                raise ValueError("telegram_notification_edit_target_kind_unsupported")
             if interaction_target.chat_id != recipient.telegram_id:
                 raise ValueError("telegram_notification_edit_target_route_mismatch")
             extra_payload["interaction_target"] = (

@@ -15,6 +15,14 @@ from sqlalchemy.orm import selectinload
 from bot.callbacks import CommodityCatalogPageCallback
 from bot.message_manager import DeleteDelay, delete_previous_anchor, set_anchor
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
+from bot.telegram_interaction_message import (
+    answer_incoming_message_via_runtime,
+    edit_callback_message_via_runtime,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import is_user_global_web_locked
 from models.commodity import Commodity
@@ -222,15 +230,19 @@ async def show_commodity_catalog(message: types.Message, user: User | None):
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     text, keyboard = await _render_catalog(1)
     try:
-        anchor_msg = await message.answer(text, reply_markup=keyboard)
+        anchor_msg = await answer_incoming_message_via_runtime(message, user, text, reply_markup=keyboard)
     except TelegramBadRequest:
         logger.warning("Failed to send commodity catalog message", exc_info=True)
         try:
-            anchor_msg = await message.answer(_CATALOG_SEND_ERROR_TEXT)
+            anchor_msg = await answer_incoming_message_via_runtime(message, user, _CATALOG_SEND_ERROR_TEXT)
         except TelegramBadRequest:
             logger.warning("Failed to send commodity catalog fallback message", exc_info=True)
             return
-    set_anchor(message.chat.id, anchor_msg.message_id)
+    if (
+        configured_telegram_delivery_runtime().mode
+        != TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        set_anchor(message.chat.id, anchor_msg.message_id)
 
 
 @router.callback_query(CommodityCatalogPageCallback.filter())
@@ -249,7 +261,7 @@ async def paginate_commodity_catalog(
 
     text, keyboard = await _render_catalog(callback_data.page)
     try:
-        await callback.message.edit_text(text, reply_markup=keyboard)
+        await edit_callback_message_via_runtime(callback, user, text, reply_markup=keyboard)
     except TelegramBadRequest:
         pass
     await answer_callback_query_via_runtime(callback)
