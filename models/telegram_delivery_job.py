@@ -65,6 +65,13 @@ class TelegramDeliveryJobRecord(Base):
             name="ck_telegram_delivery_jobs_bot_identity",
         ),
         CheckConstraint(
+            "(retention_legal_hold = false AND "
+            "retention_hold_reason_code IS NULL AND retention_hold_set_at IS NULL) OR "
+            "(retention_legal_hold = true AND "
+            "retention_hold_reason_code IS NOT NULL AND retention_hold_set_at IS NOT NULL)",
+            name="ck_telegram_delivery_jobs_retention_hold",
+        ),
+        CheckConstraint(
             "bot_identity = 'primary' OR ("
             "destination_class = 'channel' AND "
             "method IN ('editMessageText', 'editMessageReplyMarkup') AND "
@@ -171,6 +178,14 @@ class TelegramDeliveryJobRecord(Base):
             ),
         ),
         Index("ix_telegram_delivery_jobs_run", "run_id", "state"),
+        Index(
+            "ix_telegram_delivery_jobs_retention",
+            "terminal_at",
+            "id",
+            postgresql_where=text(
+                "terminal_at IS NOT NULL AND retention_legal_hold = false"
+            ),
+        ),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -246,5 +261,13 @@ class TelegramDeliveryJobRecord(Base):
     sent_at = Column(DateTime(timezone=True), nullable=True)
     terminal_at = Column(DateTime(timezone=True), nullable=True)
     payload_redacted_at = Column(DateTime(timezone=True), nullable=True)
+    retention_legal_hold = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    retention_hold_reason_code = Column(String(64), nullable=True)
+    retention_hold_set_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

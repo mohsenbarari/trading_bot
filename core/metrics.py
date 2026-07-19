@@ -580,6 +580,35 @@ def record_business_action(*, action: str, result: str) -> None:
     )
 
 
+def record_telegram_delivery_retention(report: Mapping[str, Any]) -> None:
+    """Publish bounded retention health without job, route, or payload labels."""
+    registry.counter(
+        "trading_bot_telegram_delivery_retention_cycles_total",
+        "Telegram delivery retention cycles by execution mode.",
+        mode="dry_run" if bool(report.get("dry_run")) else "apply",
+    )
+    for field in (
+        "payload_candidates",
+        "payload_redacted",
+        "provider_outcomes_redacted",
+        "terminal_candidates",
+        "terminal_purged",
+        "legal_hold_due",
+        "unresolved_due",
+        "source_blocked_due",
+    ):
+        try:
+            value = max(float(report.get(field) or 0), 0.0)
+        except (TypeError, ValueError, OverflowError):
+            value = 0.0
+        registry.gauge(
+            "trading_bot_telegram_delivery_retention_rows",
+            "Latest Telegram delivery retention row counts by bounded phase.",
+            value,
+            phase=field,
+        )
+
+
 def metrics_response_body() -> str:
     return registry.render_prometheus()
 

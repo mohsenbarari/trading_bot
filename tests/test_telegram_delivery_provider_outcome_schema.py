@@ -9,6 +9,7 @@ from models.telegram_delivery_reconciliation_evidence import (
     TelegramDeliveryReconciliationEvidence,
 )
 from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
+from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
 
 class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
@@ -86,6 +87,35 @@ class TelegramProviderOutcomeSchemaTests(unittest.TestCase):
         )
         self.assertIn("telegram_channel_membership_sagas", membership_migration)
         self.assertIn('op.drop_table("telegram_channel_membership_sagas")', membership_migration)
+
+        retention_migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/a052f3a4b6c7_add_telegram_queue_retention_controls.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "ff41e2f3a5b6"',
+            retention_migration,
+        )
+        self.assertIn("retention_legal_hold", retention_migration)
+        self.assertIn("payload_redacted_at", retention_migration)
+        self.assertIn(
+            'op.drop_column("telegram_delivery_jobs", "retention_legal_hold")',
+            retention_migration,
+        )
+
+    def test_retention_hold_is_atomic_and_indexed(self):
+        table = TelegramDeliveryJobRecord.__table__
+        constraint_names = {constraint.name for constraint in table.constraints}
+        index_names = {index.name for index in table.indexes}
+        self.assertIn(
+            "ck_telegram_delivery_jobs_retention_hold",
+            constraint_names,
+        )
+        self.assertIn("ix_telegram_delivery_jobs_retention", index_names)
+        self.assertIn(
+            "payload_redacted_at",
+            TelegramDeliveryProviderOutcomeRecord.__table__.columns,
+        )
 
     def test_runtime_gate_has_strict_scope_and_identity_constraints(self):
         table = TelegramDeliveryRuntimeGate.__table__

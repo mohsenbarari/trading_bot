@@ -92,6 +92,7 @@ class TelegramDeliveryProviderOutcomeRecord(Base):
     applied_at = Column(DateTime(timezone=True), nullable=True)
     last_apply_error_class = Column(String(120), nullable=True)
     last_apply_error_message = Column(Text, nullable=True)
+    payload_redacted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True),

@@ -52,6 +52,9 @@ from core.services.telegram_delivery_queue_service import (
 from core.services.telegram_delivery_reconciliation_service import (
     reconcile_telegram_delivery_jobs,
 )
+from core.services.telegram_delivery_retention_service import (
+    run_telegram_delivery_retention_cycle,
+)
 from core.services.telegram_delivery_runtime_gate_service import (
     TELEGRAM_RUNTIME_GATE_COOLDOWN,
     load_active_telegram_runtime_gates,
@@ -102,6 +105,7 @@ from models.telegram_delivery_job import TelegramDeliveryJobRecord
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
 _RESULT_PERSISTENCE_MAX_ATTEMPTS = 3
+_RETENTION_INTERVAL_SECONDS = 3600.0
 
 TelegramQueueGatewayCall = Callable[..., Awaitable[telegram_gateway.TelegramGatewayResult]]
 TelegramQueueFreshnessValidator = Callable[
@@ -140,6 +144,30 @@ class TelegramQueueLifecycleFeedback(Protocol):
 
 class TelegramDeliveryQueueImplementationIncompleteError(RuntimeError):
     """Refuses a claim when no authoritative pre-dispatch adapter is installed."""
+
+
+async def telegram_delivery_retention_loop() -> None:
+    """Run bounded retention only under the foreign queue runtime owner."""
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                await run_telegram_delivery_retention_cycle(
+                    db,
+                    current_server=current_server(),
+                )
+                await db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if _loop_errors.should_log("telegram_delivery_retention"):
+                logger.exception(
+                    "Telegram delivery retention cycle failed",
+                    extra={
+                        "event": "telegram_delivery_retention.failed",
+                        "error_class": type(exc).__name__,
+                    },
+                )
+        await asyncio.sleep(_RETENTION_INTERVAL_SECONDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1682,6 +1710,12 @@ async def telegram_delivery_queue_loop(
                 }
             ),
             name="telegram-delivery-provider-outcome-replay",
+        )
+    )
+    tasks.append(
+        asyncio.create_task(
+            telegram_delivery_retention_loop(),
+            name="telegram-delivery-retention",
         )
     )
     tasks.append(
