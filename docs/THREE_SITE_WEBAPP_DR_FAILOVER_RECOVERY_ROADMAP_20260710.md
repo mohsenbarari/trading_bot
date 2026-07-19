@@ -63,11 +63,17 @@ If this roadmap conflicts with an existing accepted business rule, implementatio
 |---|---|---:|---|
 | `bot_fi` | Hetzner Finland | `65.109.216.187` | Telegram Bot and foreign authority |
 | `webapp_fi` | Hetzner Finland | `65.109.220.59` | Normal WebApp primary and recovery sync hub |
-| `webapp_ir` | Iran | `87.236.212.194` | Normal standby and national-outage WebApp primary |
+| `webapp_ir` | Arvan Tehran, Simin | `185.206.95.250` | Normal standby and national-outage WebApp primary |
 
 The current Iran address is an observed deployment input, not a permanent
-provider commitment. Network, storage layout, origin TLS, replacement SLA, and
-Iran-local redundancy remain unresolved deployment decisions.
+provider commitment. The replacement has 4 vCPU, 8 GiB RAM, and 75 GB root
+storage. Origin TLS, replacement SLA, and Iran-local redundancy remain
+unresolved deployment decisions.
+
+The primary Writer Witness is `185.206.95.94`; `185.231.182.6` remains a
+transitional Witness until controlled retirement. Bot-FI, WebApp-FI, WebApp-IR,
+and both Witness hosts use UTC with synchronized NTP. User-visible time remains
+rendered explicitly in `Asia/Tehran`.
 
 ### 4.2 Accepted ingress topology
 
@@ -386,6 +392,30 @@ The target policy model should explicitly declare both dimensions, for example:
 product_sync_policy = sync | no-sync | bookkeeping
 webapp_dr_policy    = replicate | rebuild | local-only | exclude
 ```
+
+### 10.3 DPI-aware bulk transport and Object Storage
+
+The accepted bulk data plane uses the private, versioned Arvan bucket
+`production-sync-coin` in region `ir-thr-at1`:
+
+- large release, snapshot, file, and later immutable event-batch objects move
+  through Object Storage instead of a persistent Finland-Iran SSH stream;
+- WebApp-IR downloads with short-lived presigned HTTPS URLs and never receives
+  the bucket HMAC credential;
+- every payload is encrypted before upload with an independently custodied age
+  X25519 key and verified by ciphertext and content manifests;
+- SSH remains a low-volume management/control path, not the bulk data plane;
+- Arvan CDN remains public ingress/control infrastructure and is not a second
+  durable queue or backup store;
+- direct sync may remain only as a bounded fallback after measured DPI-safe
+  limits and an explicit activation decision.
+
+Live compatibility testing found that Arvan accepts Public Access Block and
+default bucket SSE control calls but rejects actual `PutObject` requests while
+either setting is active. Those controls are absent; the bucket ACL remains
+private, anonymous reads return `403`, versioning is enabled, and client-side
+encryption is mandatory. Revalidate this provider behavior before any future
+attempt to enable those controls.
 
 ## 11. Conflict Prevention Principles
 
@@ -3305,3 +3335,59 @@ custody remains `BEFORE_RH001`; controller-loss recovery remains
 `BEFORE_REMAINING_MATRIX`; Full Matrix, `main` integration, first lease,
 production activation, WebApp mutation, and CDN/traffic changes remain
 forbidden.
+
+## 48. Encrypted WebApp-IR Data-Ready Dark Standby - 2026-07-19
+
+This section records the separately authorized emergency-readiness track. It
+does not change the Writer Witness review verdict, authorize RH-001, merge the
+feature into `main`, start a WebApp-IR writer, or mutate CDN/DNS.
+
+### 48.1 Current infrastructure
+
+- the two Iran-access-only Bamdad replacements were deleted;
+- current WA-IR is Arvan Simin `185.206.95.250`, Ubuntu 24.04, 4 vCPU,
+  8 GiB RAM, and 75 GB provisioned storage;
+- primary Witness is `185.206.95.94`; `185.231.182.6` remains transitional;
+- Bot-FI, WebApp-FI, WA-IR, and both Witnesses report `UTC` with synchronized
+  NTP; application presentation remains `Asia/Tehran`;
+- UFW on WA-IR permits SSH only from Bot-FI and the two Witness addresses and
+  exposes no 80/443/8000/8100 listener.
+
+### 48.2 Object Storage and encrypted release evidence
+
+Private versioned bucket `production-sync-coin` is the bulk path. The exact
+production release `2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5` was rebuilt,
+bundled with frontend and Docker images, age-encrypted, uploaded, downloaded
+directly by WA-IR, verified, decrypted, and installed without starting Compose.
+
+- release ciphertext SHA-256:
+  `b0316ed49b768d41e0eca701b22b27a88bb04d1abcbf10a6d755a2489e918f6e`;
+- object version: `i09WelutxloIEN6YOmddHP7Ib4Mgx91`;
+- anonymous GET: `403`;
+- S3 HMAC credentials were not copied to WA-IR; only a root-owned `0600` age
+  identity and a short-lived presigned GET were used.
+
+### 48.3 Snapshot, restore, and parity evidence
+
+At `20260719T103238Z`, WebApp-FI produced an online PostgreSQL/uploads/audit
+backup. Redis was excluded from restore. The bundle was age-encrypted before
+upload and restored only into an empty WA-IR database.
+
+- snapshot ciphertext SHA-256:
+  `746fdb9a58c1714a67510615d5d17a0854ca50f43a612c0d6144e6a407b36a9c`;
+- object version: `Xrg-lpXSDtG3jGzSvLsHeSpJAw2NrPP`;
+- anonymous GET: `403`;
+- restored schema: 46 public tables at Alembic `f2c7d8e9a0b1`;
+- reference-vs-WA-IR comparison: all tables and sequences matched across 83
+  fingerprint lines; evidence SHA-256:
+  `5fdedf21268cdf6b94c330053bcb5cc8f61e89546c7d84d56ec4b997dc42ca64`;
+- one uploads file was restored; Redis was not restored;
+- Compose safety overlay exposes only `db`; `app`, `sync_worker`, `migration`,
+  and Redis remain behind `activation-forbidden`;
+- final state is `data-ready-dark`, not origin-ready or writer-ready.
+
+The operational contract and fail-closed manifest verifier are in
+`docs/WEBAPP_IR_DARK_STANDBY_RUNBOOK.md` and
+`deploy/production/webapp-ir-dark-standby.env.example`. A later refresh must
+restore into an empty generation or use the approved incremental DR protocol;
+this one-time snapshot must never be replayed over locally written state.

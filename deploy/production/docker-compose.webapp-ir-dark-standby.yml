@@ -1,0 +1,14 @@
+# Safety overlay for data-ready WebApp-IR. Use together with
+# docker-compose.iran.yml. Services capable of application writes are hidden
+# behind an intentionally unavailable activation profile.
+services:
+  app:
+    profiles: ["activation-forbidden"]
+  sync_worker:
+    profiles: ["activation-forbidden"]
+  migration:
+    profiles: ["activation-forbidden"]
+  redis:
+    profiles: ["activation-forbidden"]
+  db:
+    restart: unless-stopped
