@@ -54,6 +54,8 @@ class ApiSuccessDB:
         return self.get_results.pop(0)
 
     async def execute(self, _stmt):
+        if "WHERE offers.idempotency_key =" in str(_stmt):
+            return FakeExecuteResult(None)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -84,6 +86,11 @@ class ApiGuardDB:
 
     async def get(self, _model, _id):
         return None
+
+    async def execute(self, _stmt):
+        if "WHERE offers.idempotency_key =" in str(_stmt):
+            return FakeExecuteResult(None)
+        raise AssertionError("Unexpected execute() call")
 
 
 class ScalarSession:
@@ -149,6 +156,7 @@ def make_offer(**overrides):
         "lot_sizes": None,
         "notes": "urgent",
         "republished_from_id": None,
+        "idempotency_key": "test-offer-request-0001",
     }
     data.update(overrides)
     return OfferCreate(**data)

@@ -11,6 +11,7 @@ from bot.handlers.trade_create import (
 from bot.repeat_offer import BotRepeatOfferCandidate
 from core.services.offer_creation_service import OfferCreationAdmissionError
 from core.services.offer_republish_service import OfferNotRepeatableError
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 class FakeSessionContext:
@@ -30,6 +31,11 @@ class FakeScalarSession:
 
     async def scalar(self, stmt):
         return self.value
+
+
+class FailingOfferLoadSession:
+    async def get(self, *_args, **_kwargs):
+        raise RuntimeError("synthetic_post_commit_offer_load_failure")
 
 
 class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
@@ -124,6 +130,76 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         state.update_data.assert_not_awaited()
         self.assertIn("دکمه جدید را بزنید", message.answer.await_args.args[0])
         self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "MENU")
+
+    async def test_stale_button_queue_owner_persists_response_without_direct_send(self):
+        message = SimpleNamespace(
+            text="🔁 خ ن سکه 10 عدد 100000",
+            message_id=81,
+            chat=SimpleNamespace(id=99),
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+        user = SimpleNamespace(id=9, telegram_id=99)
+        queued = SimpleNamespace(created=True)
+
+        with patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(None, True, "stale_button")),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=queued),
+        ) as enqueue, patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            await handle_repeat_offer_button(message, state, user, message.bot)
+
+        message.answer.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_id"],
+            "stale-button:81",
+        )
+
+    async def test_stale_button_fails_closed_if_queue_handoff_returns_none(self):
+        message = SimpleNamespace(
+            text="🔁 خ ن سکه 10 عدد 100000",
+            message_id=81,
+            chat=SimpleNamespace(id=99),
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+        user = SimpleNamespace(id=9, telegram_id=99)
+
+        with patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            return_value=FakeSessionContext(),
+        ), patch(
+            "bot.handlers.trade_create.resolve_bot_repeat_offer_button_candidate",
+            new=AsyncMock(return_value=(None, True, "stale_button")),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ), patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "repeat_offer_direct_delivery_requires_legacy_owner",
+            ):
+                await handle_repeat_offer_button(message, state, user, message.bot)
+
+        message.answer.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
 
     async def test_confirm_revalidates_source_and_creates_foreign_provenance(self):
         creation_session = SimpleNamespace()
@@ -239,6 +315,110 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(offer.republished_from_offer_public_id)
         expire.assert_awaited_once()
 
+    async def test_queue_post_commit_failure_never_expires_or_reports_rejection(self):
+        state = SimpleNamespace(
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 5,
+                    "trade_type": "buy",
+                    "settlement_type": "cash",
+                    "commodity_id": 7,
+                    "commodity_name": "ربع",
+                    "price": 178000,
+                    "is_wholesale": True,
+                    "lot_sizes": None,
+                    "notes": None,
+                }
+            ),
+            clear=AsyncMock(),
+        )
+        callback = SimpleNamespace(
+            message=SimpleNamespace(
+                message_id=81,
+                chat=SimpleNamespace(id=99),
+                edit_text=AsyncMock(),
+            ),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=99),
+        )
+        user = SimpleNamespace(id=9, limitations_expire_at=None, sync_version=3)
+        offer = SimpleNamespace(
+            id=55,
+            offer_public_id="ofr_post_commit_55",
+            version_id=1,
+            offer_type=SimpleNamespace(value="buy"),
+            settlement_type="cash",
+            commodity_id=7,
+            quantity=5,
+            price=178000,
+            notes=None,
+        )
+        creation_session = SimpleNamespace(
+            flush=AsyncMock(),
+            commit=AsyncMock(),
+        )
+
+        with patch(
+            "bot.handlers.trade_create._bot_market_is_open",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=4),
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeScalarSession(0)),
+                FakeSessionContext(SimpleNamespace()),
+                FakeSessionContext(creation_session),
+                FakeSessionContext(FailingOfferLoadSession()),
+            ],
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.create_authoritative_offer_with_outcome",
+            new=AsyncMock(return_value=SimpleNamespace(offer=offer, created=True)),
+        ), patch(
+            "bot.handlers.trade_create.get_or_create_telegram_publication_state",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.trade_create._canonical_commodity_name_from_session",
+            new=AsyncMock(return_value="ربع"),
+        ), patch(
+            "bot.handlers.trade_create.enqueue_offer_success_preview_notification_once",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ), patch(
+            "bot.handlers.trade_create._expire_offer_after_publication_failure",
+            new=AsyncMock(),
+        ) as expire, patch(
+            "bot.handlers.trade_create.settings",
+            SimpleNamespace(channel_id=-100),
+        ):
+            await _handle_trade_confirm_core(
+                callback,
+                state,
+                user,
+                SimpleNamespace(),
+                check_user_limits_fn=lambda *_args: (True, None),
+                to_jalali_str_fn=lambda *_args: "",
+                success_message_text="OK",
+                unexpected_error_prefix="ERR",
+                warning_confirm_callback_data="confirm_warning",
+                cancel_callback_data="cancel",
+            )
+
+        creation_session.commit.assert_awaited_once_with()
+        expire.assert_not_awaited()
+        callback.message.edit_text.assert_not_awaited()
+        state.clear.assert_awaited_once_with()
+        callback.answer.assert_awaited_once_with()
+
     async def test_final_ineligible_repeat_refreshes_stale_keyboard(self):
         state = SimpleNamespace(
             get_data=AsyncMock(
@@ -312,7 +492,12 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIn("دیگر قابل تکرار نیست", callback.message.edit_text.await_args.args[0])
-        refresh.assert_awaited_once_with(bot, chat_id=99, user=user)
+        refresh.assert_awaited_once_with(
+            bot,
+            chat_id=99,
+            user=user,
+            source_id="repeat-ineligible:ofr_source_41",
+        )
         state.clear.assert_awaited_once_with()
         callback.answer.assert_awaited_once_with()
 
@@ -339,6 +524,54 @@ class BotTradeCreateRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value="MENU"),
         ):
             await _send_repeat_offer_menu_refresh(failing_bot, chat_id=99, user=user)
+
+    async def test_menu_refresh_queue_owner_never_calls_telegram_directly(self):
+        user = SimpleNamespace(id=9)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        queued = SimpleNamespace(created=True)
+        with patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=queued),
+        ) as enqueue, patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            await _send_repeat_offer_menu_refresh(
+                bot,
+                chat_id=99,
+                user=user,
+                source_id="repeat-success:bot-repeat:intent-1",
+            )
+
+        bot.send_message.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_id"],
+            "repeat-success:bot-repeat:intent-1",
+        )
+
+    async def test_menu_refresh_fails_closed_if_queue_handoff_returns_none(self):
+        user = SimpleNamespace(id=9)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        with patch(
+            "bot.handlers.trade_create.enqueue_repeat_offer_response_if_queue_owner",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ), patch(
+            "bot.handlers.trade_create.build_persistent_navigation_keyboard",
+            new=AsyncMock(),
+        ) as build_keyboard:
+            await _send_repeat_offer_menu_refresh(
+                bot,
+                chat_id=99,
+                user=user,
+                source_id="repeat-success:bot-repeat:intent-2",
+            )
+
+        bot.send_message.assert_not_awaited()
+        build_keyboard.assert_not_awaited()
 
 
 if __name__ == "__main__":

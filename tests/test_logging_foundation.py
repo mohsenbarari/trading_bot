@@ -64,15 +64,22 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertNotIn("123456", json.dumps(redacted))
 
     def test_redact_masks_jwt_like_values_inside_messages(self):
-        token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"
+        # Assemble credential-shaped fixtures at runtime so the committed Git
+        # tree cannot be mistaken for a repository containing a live token.
+        token = ".".join(
+            ("eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxIn0", "signature")
+        )
 
         self.assertEqual(redact(f"token={token}"), f"token={REDACTED}")
         self.assertEqual(redact(f"raw {token}"), f"raw {REDACTED_JWT}")
 
     def test_redact_masks_telegram_bot_api_tokens_inside_httpx_messages(self):
+        bot_token = ":".join(
+            ("1234567890", "abcdefghijklmnopqrstuvwxyz")
+        )
         message = (
             'HTTP Request: POST '
-            'https://api.telegram.org/bot1234567890:abcdefghijklmnopqrstuvwxyz/editMessageText '
+            f'https://api.telegram.org/bot{bot_token}/editMessageText '
             '"HTTP/1.1 400 Bad Request"'
         )
 
@@ -269,7 +276,13 @@ class LoggingFoundationTests(unittest.TestCase):
         with patch("sys.stdout", managed_stream):
             configure_logging("api-test")
 
-        token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature123456789"
+        token = ".".join(
+            (
+                "eyJhbGciOiJIUzI1NiJ9",
+                "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+                "signature123456789",
+            )
+        )
         uvicorn_error.info("WebSocket /api/realtime/ws?token=%s [accepted]", token)
 
         self.assertEqual(raw_stream.getvalue(), "")

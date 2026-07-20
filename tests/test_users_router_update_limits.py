@@ -28,6 +28,7 @@ def make_user(**overrides):
         "commodities_traded_count": 2,
         "channel_messages_count": 3,
         "max_sessions": 1,
+        "sync_version": 1,
         "created_at": datetime(2026, 1, 1, 8, 0, 0),
     }
     data.update(overrides)
@@ -38,18 +39,71 @@ class FakeDB:
     def __init__(self, user):
         self.user = user
         self.commits = 0
+        self.events = []
 
     async def get(self, model, user_id):
         return self.user
 
     async def commit(self):
         self.commits += 1
+        self.events.append("commit")
+
+    async def flush(self):
+        self.events.append("flush")
 
     async def refresh(self, obj):
         return None
 
 
 class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_mode_commits_restriction_intent_with_user_change(self):
+        user = make_user(sync_version=9)
+        db = FakeDB(user)
+        until = datetime(2026, 1, 1, 12, 0, 0)
+
+        async def record_intent(*args, **kwargs):
+            db.events.append("telegram_intent")
+
+        with patch(
+            "api.routers.users.convert_to_utc",
+            return_value=until,
+        ), patch(
+            "api.routers.users.track_limitation_changes",
+            return_value=([], False, False),
+        ), patch(
+            "api.routers.users.sync_mandatory_channel_for_user_state_change",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.users.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "api.routers.users.enqueue_account_restriction_telegram_notification_once",
+            new=AsyncMock(side_effect=record_intent),
+        ) as enqueue, patch(
+            "core.cache.invalidate_user_cache",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.users.send_block_notification",
+            new=AsyncMock(),
+        ) as block_mock, patch(
+            "api.routers.users.send_limitation_notification",
+            new=AsyncMock(),
+        ), patch("api.routers.users.asyncio.create_task"):
+            await update_user(
+                5,
+                schemas.UserUpdate(trading_restricted_until=until),
+                db=db,
+            )
+
+        self.assertEqual(db.events[:3], ["flush", "telegram_intent", "commit"])
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 9)
+        block_mock.assert_awaited_once_with(
+            db,
+            user,
+            until,
+            telegram_intent_persisted=True,
+        )
+
     async def test_update_user_sends_block_and_limitation_notifications(self):
         user = make_user()
         db = FakeDB(user)

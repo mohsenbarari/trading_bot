@@ -167,7 +167,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "market_channel_notice_receipts": _entry(
         "market_channel_notice_receipts",
         SyncPolicy.NO_SYNC,
-        ("telegram_bot", "sync_reconciliation"),
+        (
+            "telegram_bot",
+            "sync_reconciliation",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign local Telegram side-effect ledger",
         "no cross-server merge; dedupe key only protects local Telegram notice replay",
         "foreign-only market open/close channel notice idempotency",
@@ -335,7 +339,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "telegram_admin_broadcasts": _entry(
         "telegram_admin_broadcasts",
         SyncPolicy.SYNC,
-        ("telegram_bot_admin", "telegram_admin_broadcast_worker"),
+        (
+            "telegram_bot_admin",
+            "telegram_admin_broadcast_worker",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign Telegram admin broadcast authority",
         "foreign creates broadcast rows; id remains partitioned and receipt rows carry dedupe identity",
         "Telegram-only management broadcast audit",
@@ -344,7 +352,10 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "telegram_admin_broadcast_receipts": _entry(
         "telegram_admin_broadcast_receipts",
         SyncPolicy.SYNC,
-        ("telegram_admin_broadcast_worker",),
+        (
+            "telegram_admin_broadcast_worker",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign Telegram admin broadcast delivery owner",
         "dedupe key plus terminal-state precedence; local lease fields are not cross-server execution authority",
         "Telegram-only management broadcast delivery audit and repair",
@@ -353,13 +364,119 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "telegram_notification_outbox": _entry(
         "telegram_notification_outbox",
         SyncPolicy.SYNC,
-        ("webapp_notification_producer", "telegram_notification_outbox_worker"),
+        (
+            "webapp_notification_producer",
+            "telegram_notification_outbox_worker",
+            "telegram_delivery_queue_worker",
+        ),
         "foreign Telegram delivery owner",
         "dedupe key plus terminal-state precedence; local lease fields are not cross-server execution authority",
         "Generic Telegram private-message notification delivery audit and repair",
         notes=(
             "Iran may enqueue rows for Telegram delivery without calling Telegram directly. "
             "Workers must execute only on foreign; synced rows on Iran are visibility/audit data only."
+        ),
+    ),
+    "telegram_delivery_jobs": _entry(
+        "telegram_delivery_jobs",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram execution owner",
+        "never cross-sync execution leases, attempts, payloads, or provider results",
+        "Foreign-only Telegram delivery execution and audit",
+        notes=(
+            "Domain intent syncs through its authoritative table. This execution table is local to foreign "
+            "and must never be copied to Iran."
+        ),
+    ),
+    "telegram_delivery_provider_outcomes": _entry(
+        "telegram_delivery_provider_outcomes",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram provider outcome owner",
+        "never cross-sync provider facts or local apply lifecycle",
+        "Foreign-only replayable Telegram provider outcome inbox",
+        notes=(
+            "One immutable provider fact is fenced to one job lease; domain feedback may be "
+            "replayed without repeating the Telegram API call."
+        ),
+    ),
+    "telegram_delivery_reconciliation_evidence": _entry(
+        "telegram_delivery_reconciliation_evidence",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue", "telegram_delivery_queue_operations"),
+        "foreign local Telegram reconciliation audit owner",
+        "append-only evidence; never cross-sync provider or operator metadata",
+        "Foreign-only redacted ambiguity and retry decision audit",
+        notes="Evidence references and operator references are hashed before persistence.",
+    ),
+    "telegram_delivery_runtime_gates": _entry(
+        "telegram_delivery_runtime_gates",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue", "telegram_delivery_queue_operations"),
+        "foreign local Telegram bot/gateway control owner",
+        "never cross-sync runtime cooldown, pause, preflight, or resume journal",
+        "Foreign-only durable bot/gateway execution gate",
+        notes="Preflight 429 is committed here before Redis mirroring or sleep.",
+    ),
+    "telegram_channel_membership_sagas": _entry(
+        "telegram_channel_membership_sagas",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram channel-membership saga owner",
+        "never cross-sync membership targets, job bindings, or provider lifecycle",
+        "Foreign-only ordered ban/unban removal saga and audit",
+        notes=(
+            "The authoritative product intent is the synced account-status notification outbox; "
+            "this derived execution saga exists only on foreign."
+        ),
+    ),
+    "telegram_scheduled_operations": _entry(
+        "telegram_scheduled_operations",
+        SyncPolicy.NO_SYNC,
+        ("telegram_bot_runtime", "telegram_delivery_queue"),
+        "foreign local Telegram scheduled-source owner",
+        "never cross-sync scheduled cleanup or market side-effect receipts",
+        "Foreign-only bounded scheduled Telegram source state",
+        notes=(
+            "The row has no credential and is a source receipt for queue-v1; "
+            "it must never be copied to Iran."
+        ),
+    ),
+    "telegram_interaction_anchor_states": _entry(
+        "telegram_interaction_anchor_states",
+        SyncPolicy.NO_SYNC,
+        ("telegram_bot_runtime", "telegram_delivery_queue"),
+        "foreign local Telegram interaction anchor owner",
+        "never cross-sync private Telegram message ids or anchor generations",
+        "Foreign-only durable Bot reply-keyboard anchor state",
+        notes=(
+            "The state fences asynchronous send results and contains no credential; "
+            "it must never be copied to Iran."
+        ),
+    ),
+    "telegram_delivery_feeder_states": _entry(
+        "telegram_delivery_feeder_states",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue",),
+        "foreign local Telegram feeder coordinator",
+        "never cross-sync queue fairness counters or feeder cursors",
+        "Foreign-only Telegram subordinate-feeder scheduling state",
+        notes=(
+            "This row is updated atomically with foreign Telegram queue feedback "
+            "and is never domain authority on Iran."
+        ),
+    ),
+    "telegram_delivery_resume_operations": _entry(
+        "telegram_delivery_resume_operations",
+        SyncPolicy.NO_SYNC,
+        ("telegram_delivery_queue_operations",),
+        "foreign local Telegram execution control owner",
+        "never cross-sync operator identity, pause evidence, or activation phases",
+        "Foreign-only Telegram channel resume audit and crash recovery",
+        notes=(
+            "This operation is the foreign-local fail-closed boundary between PostgreSQL pause "
+            "evidence, Telegram preflight, and Redis activation."
         ),
     ),
     "trading_settings": _entry(

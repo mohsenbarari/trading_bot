@@ -27,6 +27,12 @@ from models.trade_delivery_receipt import (
     TradeDeliveryReceipt,
     TradeDeliveryReceiptStatus,
 )
+from core.services.trade_notification_audience_service import (
+    TELEGRAM_CHANNEL,
+    WEBAPP_CHANNEL,
+    TradeNotificationAudience,
+    build_trade_completion_notification_audience,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -125,6 +131,12 @@ class ReceiptSkipResult:
     outage_class: str
     age_seconds: float
     reason: str
+
+
+@dataclass(frozen=True)
+class TradeDeliveryIntentBatch:
+    audience: TradeNotificationAudience
+    receipts: tuple[TradeDeliveryReceipt, ...]
 
 
 def _enum_value(value: Any) -> str:
@@ -447,6 +459,89 @@ async def upsert_trade_delivery_receipt(
     return ReceiptUpsertResult(receipt=receipt, created=False, changed=changed)
 
 
+async def persist_trade_completion_delivery_intents(
+    db: AsyncSession,
+    trade: Any,
+    *,
+    now: datetime | None = None,
+) -> TradeDeliveryIntentBatch:
+    """Persist every recipient/channel obligation without performing delivery.
+
+    The caller owns the transaction that creates the completed Trade.  This
+    function never commits and never calls Redis, Telegram, Web Push, or a
+    realtime provider, so a failed intent write rolls the Trade back as one
+    atomic unit.
+    """
+
+    audience = await build_trade_completion_notification_audience(db, trade)
+    if audience.skipped_reason:
+        raise ReceiptLifecycleError(
+            f"trade_delivery_intent_audience_invalid:{audience.skipped_reason}"
+        )
+    if audience.trade_number is None:
+        raise ReceiptLifecycleError("trade_delivery_intent_trade_number_missing")
+
+    current_time = now or utc_now()
+    event_created_at = getattr(trade, "created_at", None) or current_time
+    receipts: list[TradeDeliveryReceipt] = []
+    for recipient in audience.recipients:
+        payload = dict(recipient.extra_payload or {})
+        payload.setdefault("trade_id", audience.trade_id)
+        payload.setdefault("trade_number", int(audience.trade_number))
+        payload.setdefault("offer_id", audience.offer_id)
+        payload.setdefault("offer_home_server", audience.offer_home_server)
+        payload.setdefault("recipient_user_id", int(recipient.recipient_user_id))
+        payload.setdefault("recipient_role", recipient.recipient_role)
+        payload.setdefault("principal_user_id", recipient.principal_user_id)
+        payload.setdefault("side", recipient.side)
+
+        for requirement in recipient.channel_requirements:
+            channel = str(requirement.channel or "").strip().lower()
+            if channel == WEBAPP_CHANNEL:
+                normalized_channel = TradeDeliveryChannel.WEBAPP
+                message = requirement.message or recipient.webapp_message
+                audit_payload: dict[str, Any] = {
+                    "message": message,
+                    "extra_payload": payload,
+                }
+            elif channel == TELEGRAM_CHANNEL:
+                normalized_channel = TradeDeliveryChannel.TELEGRAM
+                audit_payload = {
+                    "message": requirement.message,
+                    "telegram_id_at_audience_build": requirement.telegram_id,
+                    "extra_payload": payload,
+                }
+            else:
+                raise ReceiptLifecycleError(
+                    f"trade_delivery_intent_channel_unknown:{channel or 'missing'}"
+                )
+
+            result = await upsert_trade_delivery_receipt(
+                db,
+                event_type=audience.event_type,
+                trade_number=int(audience.trade_number),
+                recipient_user_id=int(recipient.recipient_user_id),
+                recipient_role=recipient.recipient_role,
+                channel=normalized_channel,
+                destination_server=requirement.destination_server,
+                required=bool(requirement.required),
+                reason=requirement.reason,
+                trade_id=audience.trade_id,
+                offer_id=audience.offer_id,
+                event_created_at=event_created_at,
+                audit_payload=audit_payload,
+                now=current_time,
+            )
+            receipts.append(result.receipt)
+
+    if not receipts:
+        raise ReceiptLifecycleError("trade_delivery_intent_set_empty")
+    return TradeDeliveryIntentBatch(
+        audience=audience,
+        receipts=tuple(receipts),
+    )
+
+
 def transition_receipt_status(
     receipt: TradeDeliveryReceipt | Any,
     target_status: Any,
@@ -522,6 +617,8 @@ def build_claim_receipt_statement(
         TradeDeliveryReceipt.status.in_(
             [TradeDeliveryReceiptStatus.PENDING, TradeDeliveryReceiptStatus.RETRY_PENDING]
         ),
+        TradeDeliveryReceipt.worker_id.is_(None),
+        TradeDeliveryReceipt.lease_until.is_(None),
         or_(
             TradeDeliveryReceipt.next_retry_at.is_(None),
             TradeDeliveryReceipt.next_retry_at <= current_time,
@@ -563,6 +660,8 @@ def build_claim_receipt_by_identity_statement(
             TradeDeliveryReceipt.status.in_(
                 [TradeDeliveryReceiptStatus.PENDING, TradeDeliveryReceiptStatus.RETRY_PENDING]
             ),
+            TradeDeliveryReceipt.worker_id.is_(None),
+            TradeDeliveryReceipt.lease_until.is_(None),
             or_(
                 TradeDeliveryReceipt.next_retry_at.is_(None),
                 TradeDeliveryReceipt.next_retry_at <= current_time,

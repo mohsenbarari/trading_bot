@@ -102,6 +102,8 @@ def make_receipt(**overrides):
         "last_error_message": None,
         "worker_id": "worker",
         "lease_until": object(),
+        "queue_job_id": None,
+        "queue_handed_off_at": None,
         "sent_at": None,
         "terminal_at": None,
         "updated_at": None,
@@ -111,6 +113,28 @@ def make_receipt(**overrides):
 
 
 class TelegramAdminBroadcastDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_delivery_refuses_queue_owner_before_gateway(self):
+        gateway_send = AsyncMock()
+        with patch(
+            "core.services.telegram_admin_broadcast_delivery_service."
+            "configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                legacy_workers_enabled=False,
+                queue_worker_enabled=True,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "legacy_admin_broadcast_direct_sender_is_not_runtime_owner",
+            ):
+                await service.deliver_claimed_telegram_admin_broadcast_receipt(
+                    FakeDeliveryDB(),
+                    make_receipt(),
+                    current_server="foreign",
+                    gateway_send=gateway_send,
+                )
+        gateway_send.assert_not_awaited()
+
     def test_failure_classifier_splits_retryable_skipped_and_terminal_errors(self):
         rate_limited = service.classify_telegram_admin_broadcast_failure(
             telegram_gateway.TelegramGatewayResult(

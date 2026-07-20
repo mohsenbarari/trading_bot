@@ -535,6 +535,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "offer_home_server": "foreign",
                 "surface": "telegram_channel",
                 "publication_owner_server": "foreign",
+                "publisher_bot_identity": "primary",
                 "status": "sent",
                 "dedupe_key": "offer-publication:telegram_channel:ofr_41",
                 "offer_version_id": 3,
@@ -549,6 +550,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("offer_publication_states.offer_version_id < excluded.offer_version_id", compiled)
         self.assertIn("CASE WHEN (excluded.status =", compiled)
         self.assertIn("CASE WHEN (offer_publication_states.status =", compiled)
+        self.assertIn("publisher_bot_identity", compiled)
 
     async def test_user_block_uses_pair_identity_for_upsert_and_delete_resolution(self):
         stmt = _build_upsert_stmt(

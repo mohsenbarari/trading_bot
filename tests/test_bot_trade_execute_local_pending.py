@@ -88,15 +88,15 @@ class BotTradeExecuteLocalPendingTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=False)
         ), patch("bot.handlers.trade_execute.build_trade_amount_buttons", return_value="KB"), patch(
             "bot.handlers.trade_execute.upsert_trade_suggestion_record", new=AsyncMock()
-        ) as upsert_mock, patch("bot.handlers.trade_execute.schedule_trade_suggestion_cleanup") as cleanup_mock, patch(
-            "bot.handlers.trade_execute.schedule_trade_suggestion_pending_reset"
+        ) as upsert_mock, patch("bot.handlers.trade_execute.schedule_trade_suggestion_cleanup", new=AsyncMock()) as cleanup_mock, patch(
+            "bot.handlers.trade_execute.schedule_trade_suggestion_pending_reset", new=AsyncMock()
         ) as pending_reset_mock, patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=SimpleNamespace())
 
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup="KB")
         upsert_mock.assert_awaited_once()
-        cleanup_mock.assert_called_once()
-        pending_reset_mock.assert_called_once()
+        cleanup_mock.assert_awaited_once()
+        pending_reset_mock.assert_awaited_once()
         callback.answer.assert_awaited_with("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
 
 

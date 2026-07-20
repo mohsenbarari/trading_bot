@@ -40,6 +40,7 @@ def make_offer(**overrides):
         "notes": None,
         "republished_from_id": None,
         "republished_from_public_id": None,
+        "idempotency_key": "test-offer-request-0001",
     }
     data.update(overrides)
     return OfferCreate(**data)
@@ -70,6 +71,20 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         self.market_eval_mock = market_eval_patcher.start()
         self.addCleanup(market_eval_patcher.stop)
+
+    def test_offer_create_requires_a_stable_well_formed_idempotency_key(self):
+        base = {
+            "offer_type": "buy",
+            "commodity_id": 1,
+            "quantity": 10,
+            "price": 123456,
+        }
+        for invalid in (None, "", "short", "contains whitespace"):
+            payload = dict(base)
+            if invalid is not None:
+                payload["idempotency_key"] = invalid
+            with self.subTest(idempotency_key=invalid), self.assertRaises(ValueError):
+                OfferCreate(**payload)
 
     async def test_create_offer_rejects_watch_users(self):
         with self.assertRaises(HTTPException) as exc_info:

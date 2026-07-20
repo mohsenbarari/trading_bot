@@ -6,6 +6,7 @@ from models.customer_relation import CustomerRelationStatus, CustomerTier
 from core.enums import UserRole
 from core.services.block_service import BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED
 from bot.handlers import panel
+from bot.keyboards import get_user_panel_keyboard
 
 
 class FakeSessionContext:
@@ -76,6 +77,15 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.accountant_relation_service.is_user_accountant", new=AsyncMock(return_value=False)
         ), patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.panel.build_user_panel_navigation_keyboard",
+            new=AsyncMock(
+                return_value=get_user_panel_keyboard(
+                    UserRole.STANDARD,
+                    standard_actions=True,
+                    show_support=True,
+                )
+            ),
+        ), patch(
             "bot.handlers.panel.set_anchor"
         ) as set_anchor:
             await panel.show_my_profile_and_change_keyboard(message, state=SimpleNamespace(), user=user)
@@ -177,6 +187,15 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.panel.attach_customer_management_names",
             new=AsyncMock(),
+        ), patch(
+            "bot.handlers.panel.build_user_panel_navigation_keyboard",
+            new=AsyncMock(
+                return_value=get_user_panel_keyboard(
+                    UserRole.STANDARD,
+                    standard_actions=False,
+                    show_support=False,
+                )
+            ),
         ), patch("bot.handlers.panel.set_anchor"):
             await panel.show_my_profile_and_change_keyboard(
                 message,

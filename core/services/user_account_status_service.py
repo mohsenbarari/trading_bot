@@ -15,6 +15,11 @@ from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.accountant_relation_service import list_active_accountants_for_owner
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import remove_user_from_telegram_channel
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
+from core.telegram_delivery_queue_contract import TelegramDeliveryAction
 from core.utils import create_user_notification, send_telegram_notification, utc_now
 from models.user import User
 
@@ -127,17 +132,76 @@ async def _build_activation_join_line(user_id: int) -> str | None:
             await bot.session.close()
 
 
+async def _send_or_enqueue_account_status_telegram(
+    db: AsyncSession,
+    *,
+    user: User | object,
+    message: str,
+    source_id: str,
+    account_status: UserAccountStatus,
+    messenger_blocked: bool,
+    queue_action: TelegramDeliveryAction = TelegramDeliveryAction.ACCOUNT_STATUS,
+) -> None:
+    user_id = int(getattr(user, "id"))
+    telegram_id = int(getattr(user, "telegram_id"))
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        # Local import avoids a cycle through bot_access_policy, which reads
+        # the account-status helpers during notification freshness checks.
+        from core.services.telegram_notification_outbox_service import (
+            TelegramNotificationRecipient,
+            enqueue_account_status_telegram_notification_once,
+        )
+
+        flush = getattr(db, "flush", None)
+        if callable(flush):
+            await flush()
+        user_sync_version = int(getattr(user, "sync_version", 0) or 0)
+
+        await enqueue_account_status_telegram_notification_once(
+            db,
+            recipient=TelegramNotificationRecipient(
+                user_id=int(user_id),
+                telegram_id=int(telegram_id),
+            ),
+            source_id=source_id,
+            text=message,
+            account_status=account_status,
+            messenger_blocked=messenger_blocked,
+            user_sync_version=user_sync_version,
+            action=queue_action,
+        )
+    else:
+        await send_telegram_notification(telegram_id, message)
+
+
 async def _notify_user_and_optional_telegram(
     db: AsyncSession,
-    user_id: int,
-    telegram_id: int | None,
+    user: User | object,
     message: str,
     *,
     level: NotificationLevel,
+    source_id: str,
+    account_status: UserAccountStatus,
+    messenger_blocked: bool,
+    include_telegram: bool = True,
+    queue_action: TelegramDeliveryAction = TelegramDeliveryAction.ACCOUNT_STATUS,
 ) -> None:
+    user_id = int(getattr(user, "id"))
+    telegram_id = getattr(user, "telegram_id", None)
     await create_user_notification(db, user_id, message, level, NotificationCategory.SYSTEM)
-    if telegram_id is not None:
-        await send_telegram_notification(telegram_id, message)
+    if include_telegram and telegram_id is not None:
+        await _send_or_enqueue_account_status_telegram(
+            db,
+            user=user,
+            message=message,
+            source_id=source_id,
+            account_status=account_status,
+            messenger_blocked=messenger_blocked,
+            queue_action=queue_action,
+        )
 
 
 async def transition_user_account_status(
@@ -166,13 +230,19 @@ async def transition_user_account_status(
 
         await _notify_user_and_optional_telegram(
             db,
-            user.id,
-            user.telegram_id,
+            user,
             INACTIVE_USER_NOTIFICATION,
             level=NotificationLevel.WARNING,
+            source_id=f"account-inactive:{user.id}:{now.isoformat()}",
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_blocked=False,
         )
 
-        if user.telegram_id is not None:
+        if (
+            user.telegram_id is not None
+            and configured_telegram_delivery_runtime().mode
+            != TelegramDeliveryRuntimeMode.QUEUE_V1
+        ):
             try:
                 await remove_user_from_telegram_channel(user.telegram_id)
             except Exception:
@@ -208,10 +278,13 @@ async def transition_user_account_status(
 
     await _notify_user_and_optional_telegram(
         db,
-        user.id,
-        None,
+        user,
         REACTIVATED_USER_NOTIFICATION,
         level=NotificationLevel.SUCCESS,
+        source_id=f"account-reactivated-web:{user.id}:{now.isoformat()}",
+        account_status=UserAccountStatus.ACTIVE,
+        messenger_blocked=False,
+        include_telegram=False,
     )
 
     if user.telegram_id is not None:
@@ -219,7 +292,14 @@ async def transition_user_account_status(
         join_line = await _build_activation_join_line(user.id)
         if join_line:
             telegram_message = f"{telegram_message}\n\n{join_line}"
-        await send_telegram_notification(user.telegram_id, telegram_message)
+        await _send_or_enqueue_account_status_telegram(
+            db,
+            user=user,
+            message=telegram_message,
+            source_id=f"account-reactivated:{user.id}:{now.isoformat()}",
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked=False,
+        )
 
     return UserAccountStatusTransitionResult(
         changed=True,
@@ -253,10 +333,13 @@ async def mark_due_users_globally_locked(db: AsyncSession, *, limit: int = 100) 
         user.messenger_blocked_at = now
         await _notify_user_and_optional_telegram(
             db,
-            user.id,
-            user.telegram_id,
+            user,
             GLOBAL_LOCKED_NOTIFICATION,
             level=NotificationLevel.WARNING,
+            source_id=f"account-locked:{user.id}:{now.isoformat()}",
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_blocked=True,
+            queue_action=TelegramDeliveryAction.TIMED_SECURITY,
         )
 
         accountant_relations = await list_active_accountants_for_owner(db, user.id)
@@ -266,10 +349,18 @@ async def mark_due_users_globally_locked(db: AsyncSession, *, limit: int = 100) 
                 continue
             await _notify_user_and_optional_telegram(
                 db,
-                accountant_user.id,
-                accountant_user.telegram_id,
+                accountant_user,
                 GLOBAL_LOCKED_NOTIFICATION,
                 level=NotificationLevel.WARNING,
+                source_id=(
+                    f"owner-account-locked:{user.id}:{accountant_user.id}:"
+                    f"{now.isoformat()}"
+                ),
+                account_status=get_user_account_status(accountant_user),
+                messenger_blocked=bool(
+                    getattr(accountant_user, "messenger_blocked_at", None)
+                ),
+                queue_action=TelegramDeliveryAction.TIMED_SECURITY,
             )
 
         try:

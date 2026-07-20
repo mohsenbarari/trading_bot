@@ -53,6 +53,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling = AsyncMock()
         fake_dp.update.outer_middleware = MagicMock()
         auth_middleware = object()
+        callback_receipt_middleware = object()
         navigation_middleware = object()
         trade_gate_middleware = object()
         storage = MagicMock()
@@ -70,6 +71,8 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ) as storage_from_url, patch('run_bot.Dispatcher', return_value=fake_dp) as dispatcher_ctor, patch(
             'run_bot.AuthMiddleware', return_value=auth_middleware
         ) as auth_ctor, patch(
+            'run_bot.CallbackReceiptMiddleware', return_value=callback_receipt_middleware
+        ) as callback_receipt_ctor, patch(
             'run_bot.TradeContentionGateMiddleware', return_value=trade_gate_middleware
         ) as gate_ctor, patch(
             'run_bot.StaleNavigationHandoffMiddleware', return_value=navigation_middleware
@@ -92,13 +95,18 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             storage=storage,
             events_isolation=event_isolation,
         )
+        callback_receipt_ctor.assert_called_once_with()
         gate_ctor.assert_called_once_with()
         auth_ctor.assert_called_once_with(run_bot.AsyncSessionLocal)
         navigation_ctor.assert_called_once_with()
-        self.assertEqual(fake_dp.update.outer_middleware.call_count, 4)
-        self.assertIs(fake_dp.update.outer_middleware.call_args_list[0].args[0], trade_gate_middleware)
-        self.assertIs(fake_dp.update.outer_middleware.call_args_list[1].args[0], auth_middleware)
-        self.assertIs(fake_dp.update.outer_middleware.call_args_list[3].args[0], navigation_middleware)
+        self.assertEqual(fake_dp.update.outer_middleware.call_count, 5)
+        self.assertIs(
+            fake_dp.update.outer_middleware.call_args_list[0].args[0],
+            callback_receipt_middleware,
+        )
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[1].args[0], trade_gate_middleware)
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[2].args[0], auth_middleware)
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[4].args[0], navigation_middleware)
         self.assertEqual(fake_dp.include_router.call_count, 14)
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()

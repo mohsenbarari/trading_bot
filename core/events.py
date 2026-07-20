@@ -594,6 +594,11 @@ def _offer_publication_state_sync_payload(target) -> Dict[str, Any]:
         "offer_home_server": target.offer_home_server,
         "surface": surface.value if hasattr(surface, "value") else surface,
         "publication_owner_server": target.publication_owner_server,
+        "publisher_bot_identity": getattr(
+            target,
+            "publisher_bot_identity",
+            None,
+        ),
         "status": status.value if hasattr(status, "value") else status,
         "dedupe_key": target.dedupe_key,
         "surface_resource_id": target.surface_resource_id,

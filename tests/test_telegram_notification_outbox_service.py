@@ -95,6 +95,31 @@ class TelegramNotificationOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].dedupe_key, "telegram-notification:project_user_joined:9:7")
         self.assertEqual(rows[1].dedupe_key, "telegram-notification:project_user_joined:9:8")
 
+    async def test_direct_sender_refuses_queue_owner_before_gateway(self):
+        db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
+        gateway_send = AsyncMock()
+        queue_runtime = SimpleNamespace(
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        with patch.object(
+            service,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "legacy_notification_outbox_direct_sender_is_not_runtime_owner",
+            ):
+                await service.deliver_claimed_telegram_notification_outbox(
+                    db,
+                    _outbox(),
+                    current_server="foreign",
+                    gateway_send=gateway_send,
+                    now=NOW,
+                )
+        gateway_send.assert_not_awaited()
+
     async def test_deliver_sends_current_telegram_id_and_marks_sent(self):
         db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
         outbox = _outbox()

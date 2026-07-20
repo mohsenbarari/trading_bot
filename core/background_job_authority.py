@@ -22,6 +22,7 @@ JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
 JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
 JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
+JOB_TELEGRAM_DELIVERY_QUEUE = "telegram_delivery_queue"
 JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
 JOB_OTP_SMS_FALLBACK = "otp_sms_fallback"
 
@@ -37,6 +38,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
         JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
         JOB_OFFER_TELEGRAM_PUBLICATION,
+        JOB_TELEGRAM_DELIVERY_QUEUE,
         JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
         JOB_OTP_SMS_FALLBACK,
     }
@@ -107,7 +109,11 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
     ),
     JOB_MARKET_SCHEDULE: BackgroundJobAuthorityEntry(
         job_name=JOB_MARKET_SCHEDULE,
-        mutated_tables=("market_runtime_state", "offers"),
+        mutated_tables=(
+            "market_runtime_state",
+            "offers",
+            "market_channel_notice_receipts",
+        ),
         allowed_servers=(SERVER_FOREIGN, SERVER_IRAN),
         authority_rule=(
             "iran is authoritative for market_runtime_state; foreign must only observe the synced iran runtime state "
@@ -269,6 +275,39 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         offer_impacting=True,
         external_state=("Telegram Bot API",),
         side_effects=("Telegram channel offer post", "Telegram channel offer message text/markup"),
+    ),
+    JOB_TELEGRAM_DELIVERY_QUEUE: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
+        mutated_tables=(
+            "telegram_delivery_jobs",
+            "telegram_delivery_provider_outcomes",
+            "telegram_delivery_reconciliation_evidence",
+            "telegram_delivery_runtime_gates",
+            "trade_delivery_receipts",
+            "telegram_admin_broadcasts",
+            "telegram_admin_broadcast_receipts",
+            "telegram_notification_outbox",
+            "telegram_interaction_anchor_states",
+            "market_channel_notice_receipts",
+        ),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only shared Telegram execution owner; it may claim local delivery jobs only after "
+            "the atomic execution-owner cutover guard has disabled every legacy Telegram sender"
+        ),
+        outage_behavior=(
+            "retain durable jobs during DB, Redis, gateway, or Telegram outage; never run on Iran and never "
+            "blindly replay an ambiguous send"
+        ),
+        sync_outbox_behavior=(
+            "telegram_delivery_jobs, provider outcomes, and market-channel receipts are foreign-local "
+            "no-sync execution state; "
+            "trade, admin-broadcast, and notification-outbox receipts remain sync-visible domain audit while "
+            "queue bindings and lease fields are local-only"
+        ),
+        local_runtime=True,
+        external_state=("Telegram Bot API",),
+        side_effects=("all queued Telegram send/edit/callback methods after cutover",),
     ),
     JOB_TELEGRAM_REGISTRATION_RECONCILIATION: BackgroundJobAuthorityEntry(
         job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,

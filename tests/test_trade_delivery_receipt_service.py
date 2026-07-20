@@ -2,7 +2,7 @@ import inspect
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -191,6 +191,106 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.receipt.status, TradeDeliveryReceiptStatus.NOT_REQUIRED)
         self.assertEqual(result.receipt.terminal_at, NOW)
 
+    async def test_trade_completion_intents_persist_all_channels_without_commit_or_delivery(self):
+        audience = SimpleNamespace(
+            event_type="trade_completed",
+            trade_id=501,
+            trade_number=10025,
+            offer_id=77,
+            offer_home_server="foreign",
+            skipped_reason=None,
+            recipients=(
+                SimpleNamespace(
+                    recipient_user_id=7,
+                    recipient_role="offer_owner",
+                    principal_user_id=7,
+                    side="offer_owner",
+                    webapp_message="webapp-copy",
+                    extra_payload={"route": "/trades/10025"},
+                    channel_requirements=(
+                        SimpleNamespace(
+                            channel="webapp",
+                            destination_server="iran",
+                            required=True,
+                            reason="webapp_required",
+                            message="webapp-copy",
+                            telegram_id=None,
+                        ),
+                        SimpleNamespace(
+                            channel="telegram",
+                            destination_server="foreign",
+                            required=True,
+                            reason="telegram_required",
+                            message="telegram-copy",
+                            telegram_id=7007,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        db = FakeDB([FakeScalarResult(), FakeScalarResult()])
+        trade = SimpleNamespace(id=501, trade_number=10025, created_at=NOW)
+
+        with patch.object(
+            service,
+            "build_trade_completion_notification_audience",
+            new=AsyncMock(return_value=audience),
+        ):
+            result = await service.persist_trade_completion_delivery_intents(
+                db,
+                trade,
+                now=NOW,
+            )
+
+        self.assertEqual(len(result.receipts), 2)
+        self.assertEqual(
+            {receipt.channel for receipt in result.receipts},
+            {TradeDeliveryChannel.WEBAPP, TradeDeliveryChannel.TELEGRAM},
+        )
+        telegram_receipt = next(
+            receipt
+            for receipt in result.receipts
+            if receipt.channel == TradeDeliveryChannel.TELEGRAM
+        )
+        self.assertEqual(
+            telegram_receipt.audit_payload["telegram_id_at_audience_build"],
+            7007,
+        )
+        self.assertEqual(
+            telegram_receipt.audit_payload["extra_payload"]["offer_home_server"],
+            "foreign",
+        )
+        self.assertEqual(db.commit_count, 0)
+
+    async def test_trade_completion_intent_failure_leaves_transaction_to_caller(self):
+        audience = SimpleNamespace(
+            event_type="trade_completed",
+            trade_id=501,
+            trade_number=10025,
+            offer_id=77,
+            offer_home_server="foreign",
+            skipped_reason=None,
+            recipients=(),
+        )
+        db = FakeDB()
+
+        with patch.object(
+            service,
+            "build_trade_completion_notification_audience",
+            new=AsyncMock(return_value=audience),
+        ):
+            with self.assertRaisesRegex(
+                service.ReceiptLifecycleError,
+                "intent_set_empty",
+            ):
+                await service.persist_trade_completion_delivery_intents(
+                    db,
+                    SimpleNamespace(id=501, trade_number=10025),
+                    now=NOW,
+                )
+
+        self.assertEqual(db.commit_count, 0)
+
     async def test_upsert_preserves_terminal_receipt_from_reopen(self):
         existing = make_receipt(
             status=TradeDeliveryReceiptStatus.SENT,
@@ -313,6 +413,8 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("channel = 'webapp'", compiled)
         self.assertIn("status IN ('pending', 'retry_pending')", compiled)
         self.assertIn("next_retry_at IS NULL", compiled)
+        self.assertIn("worker_id IS NULL", compiled)
+        self.assertIn("lease_until IS NULL", compiled)
         self.assertNotIn("status IN ('processing'", compiled)
 
     def test_atomic_claim_by_identity_scopes_exact_webapp_receipt(self):
@@ -333,6 +435,8 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trade_number = 10025", compiled)
         self.assertIn("recipient_user_id = 7", compiled)
         self.assertIn("channel = 'webapp'", compiled)
+        self.assertIn("worker_id IS NULL", compiled)
+        self.assertIn("lease_until IS NULL", compiled)
         self.assertIn("destination_server = 'iran'", compiled)
         self.assertIn("status IN ('pending', 'retry_pending')", compiled)
 

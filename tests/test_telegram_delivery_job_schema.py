@@ -1,0 +1,301 @@
+from pathlib import Path
+import unittest
+
+from core.config import Settings
+from core.sync_registry import SyncPolicy, get_sync_registry_entry
+from core.telegram_delivery_queue_contract import TelegramDeliveryState
+from models.telegram_delivery_job import TelegramDeliveryJobRecord
+from models.telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
+
+
+class TelegramDeliveryJobSchemaTests(unittest.TestCase):
+    def test_model_contains_identity_scheduling_fencing_and_audit_fields(self):
+        columns = TelegramDeliveryJobRecord.__table__.columns
+        required = {
+            "id",
+            "enqueued_seq",
+            "dedupe_key",
+            "feeder_kind",
+            "feeder_rank",
+            "source_natural_id",
+            "source_version",
+            "action_kind",
+            "bot_identity",
+            "destination_key",
+            "destination_class",
+            "method",
+            "payload",
+            "template_version",
+            "payload_hash",
+            "priority",
+            "priority_rank",
+            "delivery_deadline_at",
+            "eligible_at",
+            "freshness_deadline_at",
+            "campaign_id",
+            "run_id",
+            "state",
+            "attempt_count",
+            "next_retry_at",
+            "worker_id",
+            "lease_token",
+            "lease_until",
+            "dispatch_started_at",
+            "rate_limit_probe",
+            "provider_ok",
+            "provider_status_code",
+            "provider_error_code",
+            "provider_response",
+            "last_retry_after_seconds",
+            "last_rate_limited_at",
+            "last_rate_limit_until",
+            "bot_cooldown_until",
+            "last_error_class",
+            "last_error_message",
+            "outcome_reason",
+            "telegram_message_id",
+            "sent_at",
+            "terminal_at",
+            "payload_redacted_at",
+            "created_at",
+            "updated_at",
+        }
+        self.assertEqual(required - set(columns.keys()), set())
+
+    def test_model_has_dedupe_identity_and_queue_indexes(self):
+        self.assertEqual(
+            TelegramDeliveryJobRecord.__table__.columns.dedupe_key.type.length,
+            1024,
+        )
+        unique_constraints = {
+            constraint.name: tuple(column.name for column in constraint.columns)
+            for constraint in TelegramDeliveryJobRecord.__table__.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        }
+        self.assertEqual(
+            unique_constraints["ux_telegram_delivery_jobs_dedupe_key"],
+            ("dedupe_key",),
+        )
+        self.assertEqual(
+            unique_constraints["ux_telegram_delivery_jobs_logical_identity"],
+            (
+                "feeder_kind",
+                "source_natural_id",
+                "source_version",
+                "action_kind",
+                "destination_key",
+            ),
+        )
+        index_names = {index.name for index in TelegramDeliveryJobRecord.__table__.indexes}
+        self.assertTrue(
+            {
+                "ix_telegram_delivery_jobs_claim",
+                "ix_telegram_delivery_jobs_lease_recovery",
+                "ix_telegram_delivery_jobs_source",
+                "ix_telegram_delivery_jobs_campaign",
+                "ix_telegram_delivery_jobs_bot_destination_state",
+                "ix_telegram_delivery_jobs_destination_gate",
+                "ix_telegram_delivery_jobs_hard_pause_gate",
+                "ix_telegram_delivery_jobs_bot_cooldown",
+                "ix_telegram_delivery_jobs_recent_rate_limit",
+                "ix_telegram_delivery_jobs_bot_probe_gate",
+                "ix_telegram_delivery_jobs_run",
+            }.issubset(index_names)
+        )
+        claim_index = next(
+            index
+            for index in TelegramDeliveryJobRecord.__table__.indexes
+            if index.name == "ix_telegram_delivery_jobs_claim"
+        )
+        self.assertEqual(
+            tuple(column.name for column in claim_index.columns),
+            (
+                "bot_identity",
+                "priority",
+                "priority_rank",
+                "delivery_deadline_at",
+                "eligible_at",
+                "next_retry_at",
+                "enqueued_seq",
+            ),
+        )
+        check_names = {
+            constraint.name
+            for constraint in TelegramDeliveryJobRecord.__table__.constraints
+            if constraint.__class__.__name__ == "CheckConstraint"
+        }
+        self.assertTrue(
+            {
+                "ck_telegram_delivery_jobs_bot_identity",
+                "ck_telegram_delivery_jobs_editor_route",
+            }.issubset(check_names)
+        )
+
+    def test_all_contract_states_are_persistable_enum_values(self):
+        enum_values = set(TelegramDeliveryJobRecord.__table__.columns.state.type.enums)
+        self.assertEqual(enum_values, {state.value for state in TelegramDeliveryState})
+
+    def test_execution_table_is_explicitly_foreign_local_no_sync(self):
+        entry = get_sync_registry_entry("telegram_delivery_jobs")
+        self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+        self.assertIn("foreign", entry.authority)
+        self.assertIn("never cross-sync", entry.conflict_rule)
+
+    def test_feature_flags_default_to_legacy_and_queue_off(self):
+        fields = Settings.model_fields
+        self.assertEqual(fields["telegram_delivery_execution_owner"].default, "legacy")
+        self.assertFalse(fields["telegram_delivery_queue_worker_enabled"].default)
+        self.assertFalse(fields["telegram_delivery_queue_cutover_ready"].default)
+        self.assertFalse(fields["telegram_delivery_queue_channel_editor_enabled"].default)
+        self.assertIsNone(
+            fields["telegram_delivery_queue_channel_editor_bot_token"].default
+        )
+        self.assertIsNone(
+            fields["telegram_delivery_queue_expected_primary_bot_id"].default
+        )
+        self.assertIsNone(
+            fields[
+                "telegram_delivery_queue_expected_channel_editor_bot_id"
+            ].default
+        )
+        self.assertIsNone(
+            fields["telegram_delivery_queue_expected_channel_id"].default
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_preflight_timeout_seconds"].default,
+            10.0,
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_bot_min_interval_seconds"].default,
+            0.035,
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_destination_min_interval_seconds"].default,
+            1.05,
+        )
+        self.assertEqual(
+            fields["telegram_delivery_queue_rate_limit_probe_delay_seconds"].default,
+            0.1,
+        )
+
+    def test_migration_is_additive_and_points_to_previous_head(self):
+        source = Path(
+            "migrations/versions/f2c7d8e9a0bd_add_telegram_delivery_jobs.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "f1b6e7f8a9dc"', source)
+        self.assertIn('"telegram_delivery_jobs"', source)
+        self.assertIn('"telegram_delivery_jobs_enqueued_seq_seq"', source)
+        self.assertIn('"ux_telegram_delivery_jobs_logical_identity"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_claim"', source)
+        self.assertIn("postgresql_where", source)
+        self.assertNotIn('drop_table("offers")', source)
+        self.assertNotIn('drop_table("offer_publication_states")', source)
+        self.assertNotIn('drop_table("telegram_notification_outbox")', source)
+
+    def test_destination_gate_index_migration_is_additive_and_reversible(self):
+        source = Path(
+            "migrations/versions/"
+            "f4e9a0b1c2df_add_telegram_destination_gate_index.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f3d8e9a0b1ce"',
+            source,
+        )
+        self.assertIn(
+            '"ix_telegram_delivery_jobs_destination_gate"',
+            source,
+        )
+        self.assertIn("telegram_rate_limited", source)
+        self.assertIn("postgresql_where", source)
+        self.assertNotIn("drop_table", source)
+
+    def test_bot_cooldown_evidence_migration_is_additive_and_reversible(self):
+        source = Path(
+            "migrations/versions/"
+            "f5e0b1c2d3ea_add_telegram_bot_cooldown_evidence.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f4e9a0b1c2df"',
+            source,
+        )
+        self.assertIn('"last_rate_limited_at"', source)
+        self.assertIn('"last_rate_limit_until"', source)
+        self.assertIn('"bot_cooldown_until"', source)
+        self.assertIn('"rate_limit_probe"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_hard_pause_gate"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_bot_cooldown"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_recent_rate_limit"', source)
+        self.assertIn('"ix_telegram_delivery_jobs_bot_probe_gate"', source)
+        self.assertIn("postgresql_where", source)
+        self.assertNotIn("drop_table", source)
+
+    def test_resume_operation_is_durable_foreign_local_control_state(self):
+        columns = TelegramDeliveryResumeOperation.__table__.columns
+        self.assertTrue(
+            {
+                "request_id",
+                "destination_key",
+                "bot_identities",
+                "pause_job_ids",
+                "pause_evidence_hash",
+                "requested_by",
+                "attempt_history",
+                "preflight_evidence",
+                "state",
+                "attempt_count",
+                "failure_class",
+                "db_applied_at",
+                "redis_applied_at",
+                "completed_at",
+            }.issubset(columns.keys())
+        )
+        index_names = {
+            index.name
+            for index in TelegramDeliveryResumeOperation.__table__.indexes
+        }
+        self.assertIn(
+            "ux_telegram_delivery_resume_active_destination",
+            index_names,
+        )
+        entry = get_sync_registry_entry("telegram_delivery_resume_operations")
+        self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+        self.assertIn("foreign", entry.authority)
+
+    def test_resume_operation_migration_is_linear_reversible_and_scoped(self):
+        source = Path(
+            "migrations/versions/"
+            "f6f1c2d3e4fb_add_telegram_delivery_resume_operations.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f5e0b1c2d3ea"',
+            source,
+        )
+        self.assertIn('"telegram_delivery_resume_operations"', source)
+        self.assertIn(
+            '"ux_telegram_delivery_resume_active_destination"',
+            source,
+        )
+        self.assertIn("postgresql_where", source)
+        self.assertIn('op.drop_table("telegram_delivery_resume_operations")', source)
+
+    def test_admin_broadcast_queue_binding_migration_follows_resume_head(self):
+        source = Path(
+            "migrations/versions/"
+            "f7a2b3c4d5ec_bind_admin_broadcast_to_delivery_queue.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "f6f1c2d3e4fb"',
+            source,
+        )
+        self.assertIn('"telegram_admin_broadcast_receipts"', source)
+        self.assertIn('"queue_job_id"', source)
+        self.assertIn('"queue_handed_off_at"', source)
+        self.assertIn('"queue_last_handed_off_at"', source)
+        self.assertIn(
+            'op.drop_column("telegram_admin_broadcast_receipts", "queue_job_id")',
+            source,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

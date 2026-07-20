@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from sqlalchemy.orm.exc import StaleDataError
 
 from core import offer_expiry
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from models.offer import OfferStatus
 
 
@@ -23,6 +24,22 @@ def scalar_one_or_none_result(value):
 
 
 class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_remove_channel_buttons_is_queue_owned_without_gateway_call(self):
+        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+        with patch(
+            "core.offer_expiry.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.offer_expiry.configured_telegram_delivery_runtime",
+            return_value=runtime,
+        ), patch(
+            "core.telegram_gateway.edit_message_reply_markup",
+            new=AsyncMock(),
+        ) as gateway:
+            await offer_expiry.remove_channel_buttons(10)
+
+        gateway.assert_not_awaited()
+
     async def test_remove_channel_buttons_skips_when_token_or_channel_missing(self):
         with patch.object(offer_expiry.settings, "bot_token", None), \
              patch.object(offer_expiry.settings, "channel_id", None), \

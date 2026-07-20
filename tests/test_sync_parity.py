@@ -263,6 +263,32 @@ class SyncParityTests(unittest.TestCase):
         self.assertEqual(report["status"], "business_drift")
         self.assertEqual(report["tables"]["offer_publication_states"]["severity"], "business_drift")
 
+    def test_publication_publisher_identity_mismatch_is_business_drift(self):
+        base = {
+            "offer_public_id": "ofr_1",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "status": "sent",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+            "offer_version_id": 4,
+        }
+        local = snapshot(
+            "offer_publication_states",
+            [{**base, "publisher_bot_identity": "primary"}],
+        )
+        peer = snapshot(
+            "offer_publication_states",
+            [{**base, "publisher_bot_identity": None}],
+        )
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "business_drift")
+        self.assertEqual(
+            report["tables"]["offer_publication_states"]["severity"],
+            "business_drift",
+        )
+
     def test_missing_row_is_critical_drift(self):
         local = snapshot("trades", [{"id": 1, "trade_number": 10001, "price": 100}])
         peer = snapshot(

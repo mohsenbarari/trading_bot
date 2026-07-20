@@ -35,6 +35,7 @@ class FakeLookupSession:
     def __init__(self, offer, user):
         self.offer = offer
         self.user = user
+        self.commit_count = 0
 
     async def get(self, model, record_id):
         if model is Offer and int(record_id) == int(self.offer.id):
@@ -42,6 +43,9 @@ class FakeLookupSession:
         if model is User and int(record_id) == int(self.user.id):
             return self.user
         return None
+
+    async def commit(self):
+        self.commit_count += 1
 
 
 def make_offer(**overrides):
@@ -209,6 +213,59 @@ class BotRepeatOfferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(sent)
         bot.send_message.assert_not_awaited()
+
+    async def test_expiry_event_queue_owner_persists_refresh_without_telegram(self):
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="time_limit",
+            home_server="foreign",
+            expire_source_surface="system",
+            user_id=9,
+        )
+        user = SimpleNamespace(id=9, telegram_id=99, role=UserRole.STANDARD)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        session = FakeLookupSession(offer, user)
+        queue_runtime = SimpleNamespace(mode="queue-v1")
+        enqueue_result = SimpleNamespace(created=True)
+
+        from bot import repeat_offer as repeat_offer_module
+
+        repeat_offer_module._repeat_offer_refresh_sent_at.clear()
+
+        with patch(
+            "bot.repeat_offer.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.repeat_offer.evaluate_bot_access",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True)),
+        ), patch(
+            "bot.repeat_offer.configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch(
+            "bot.repeat_offer.enqueue_offer_repeat_response_notification",
+            new=AsyncMock(return_value=enqueue_result),
+        ) as enqueue, patch(
+            "bot.repeat_offer.time.monotonic",
+            side_effect=[100.0, 100.5],
+        ):
+            first = await refresh_repeat_offer_menu_for_expired_offer(
+                bot,
+                offer.id,
+            )
+            second = await refresh_repeat_offer_menu_for_expired_offer(
+                bot,
+                offer.id,
+            )
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertEqual(session.commit_count, 1)
+        bot.send_message.assert_not_awaited()
+        enqueue.assert_awaited_once()
+        self.assertEqual(
+            enqueue.await_args.kwargs["source_id"],
+            f"expiry:{offer.offer_public_id}",
+        )
 
     async def test_decorator_prepends_row_and_fails_open(self):
         keyboard = ReplyKeyboardMarkup(

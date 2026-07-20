@@ -25,6 +25,10 @@ from core.services.invitation_lifecycle_service import derive_invitation_state, 
 from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from core.services.offer_expiry_service import OfferExpiryReason, OfferExpirySourceSurface
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import send_telegram_notification, utc_now_naive
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
@@ -471,6 +475,10 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
         raise ValueError("User already deleted")
 
     effects: list[_DeletedUserEffect] = []
+    queue_mode = (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
 
     try:
         await _delete_user_account_in_transaction(
@@ -479,6 +487,35 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
             processed_user_ids=set(),
             effects=effects,
         )
+        if queue_mode:
+            from core.services.telegram_notification_outbox_service import (
+                TelegramNotificationRecipient,
+                enqueue_account_deletion_telegram_notification_once,
+            )
+
+            await db.flush()
+            for effect in effects:
+                if not effect.telegram_id:
+                    continue
+                deleted_user = await db.get(User, effect.user_id)
+                if deleted_user is None:
+                    raise RuntimeError("Deleted user effect lost its source user")
+                user_sync_version = int(
+                    getattr(deleted_user, "sync_version", 0) or 0
+                )
+                await enqueue_account_deletion_telegram_notification_once(
+                    db,
+                    recipient=TelegramNotificationRecipient(
+                        user_id=int(effect.user_id),
+                        telegram_id=int(effect.telegram_id),
+                    ),
+                    source_id=(
+                        f"account-deleted:{effect.user_id}:{user_sync_version}"
+                    ),
+                    text=REMOVAL_TELEGRAM_MESSAGE,
+                    user=deleted_user,
+                    user_sync_version=user_sync_version,
+                )
         await db.commit()
     except Exception:
         await db.rollback()
@@ -491,7 +528,7 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
             except Exception as exc:
                 logger.warning(f"Failed to mark deleted telegram user {effect.telegram_id}: {exc}")
 
-            if current_server() == SERVER_FOREIGN:
+            if current_server() == SERVER_FOREIGN and not queue_mode:
                 try:
                     await send_telegram_notification(effect.telegram_id, REMOVAL_TELEGRAM_MESSAGE)
                 except Exception as exc:
@@ -499,7 +536,11 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
 
         await publish_session_revocation(effect.user_id, effect.revoked_sessions)
 
-        if effect.telegram_id and current_server() == SERVER_FOREIGN:
+        if (
+            effect.telegram_id
+            and current_server() == SERVER_FOREIGN
+            and not queue_mode
+        ):
             try:
                 await remove_user_from_telegram_channel(effect.telegram_id)
             except Exception as exc:

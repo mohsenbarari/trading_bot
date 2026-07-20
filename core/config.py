@@ -5,6 +5,9 @@
 این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
+import math
+
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -96,6 +99,35 @@ class Settings(BaseSettings):
     telegram_notification_outbox_worker_lease_seconds: int = 30
     telegram_notification_outbox_worker_recover_limit: int = 100
     telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
+    # Shared Telegram queue rollout controls. Defaults preserve legacy ownership.
+    telegram_delivery_execution_owner: str = "legacy"
+    telegram_delivery_queue_worker_enabled: bool = False
+    telegram_delivery_queue_cutover_ready: bool = False
+    telegram_delivery_queue_channel_editor_enabled: bool = False
+    telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
+    telegram_delivery_queue_expected_primary_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_id: int | None = None
+    telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_interval_seconds: float = 1.0
+    telegram_delivery_queue_worker_batch_limit: int = 25
+    telegram_delivery_queue_primary_concurrency: int = 4
+    telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
+    telegram_delivery_queue_channel_editor_concurrency: int = 1
+    telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_lease_seconds: float = 30.0
+    telegram_delivery_queue_worker_recover_limit: int = 100
+    telegram_offer_queue_feeder_batch_limit: int = 25
+    telegram_offer_queue_feeder_interval_seconds: float = 0.5
+    telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
+    telegram_delivery_queue_retry_base_seconds: float = 1.0
+    telegram_delivery_queue_retry_max_seconds: float = 300.0
+    telegram_delivery_queue_retry_jitter_ratio: float = 0.2
+    telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
+    telegram_delivery_queue_destination_min_interval_seconds: float = 1.05
+    telegram_delivery_queue_rate_limit_probe_delay_seconds: float = 0.1
+    telegram_delivery_queue_global_rate_limit_window_seconds: float = 2.0
+    telegram_delivery_queue_limiter_key_ttl_seconds: int = 86400
     telegram_direct_registration_enabled: bool = False
     telegram_registration_reconciliation_enabled: bool = False
     telegram_login_otp_enabled: bool = False
@@ -160,6 +192,63 @@ class Settings(BaseSettings):
     smsir_customer_invitation_template_id: str | None = "903643"
     invitation_registration_session_ttl_seconds: int = 600
     staging_log_otp_codes: bool = False
+
+    @model_validator(mode="after")
+    def validate_telegram_delivery_queue_settings(self):
+        positive_float_fields = (
+            "telegram_delivery_queue_preflight_timeout_seconds",
+            "telegram_delivery_queue_worker_interval_seconds",
+            "telegram_delivery_queue_worker_request_timeout_seconds",
+            "telegram_delivery_queue_worker_lease_seconds",
+            "telegram_offer_queue_feeder_interval_seconds",
+            "telegram_delivery_queue_retry_base_seconds",
+            "telegram_delivery_queue_retry_max_seconds",
+            "telegram_delivery_queue_bot_min_interval_seconds",
+            "telegram_delivery_queue_destination_min_interval_seconds",
+            "telegram_delivery_queue_rate_limit_probe_delay_seconds",
+            "telegram_delivery_queue_global_rate_limit_window_seconds",
+        )
+        for name in positive_float_fields:
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name}_must_be_finite_positive")
+        safety = float(self.telegram_delivery_queue_retry_after_safety_seconds)
+        if not math.isfinite(safety) or safety < 0:
+            raise ValueError(
+                "telegram_delivery_queue_retry_after_safety_seconds_invalid"
+            )
+        jitter = float(self.telegram_delivery_queue_retry_jitter_ratio)
+        if not math.isfinite(jitter) or jitter < 0 or jitter > 1:
+            raise ValueError("telegram_delivery_queue_retry_jitter_ratio_invalid")
+        if (
+            self.telegram_delivery_queue_retry_base_seconds
+            > self.telegram_delivery_queue_retry_max_seconds
+        ):
+            raise ValueError("telegram_delivery_queue_retry_base_exceeds_max")
+        if (
+            self.telegram_delivery_queue_worker_lease_seconds
+            < self.telegram_delivery_queue_worker_request_timeout_seconds + 15.0
+        ):
+            raise ValueError("telegram_delivery_queue_lease_too_short")
+        for name in (
+            "telegram_delivery_queue_worker_batch_limit",
+            "telegram_delivery_queue_worker_recover_limit",
+            "telegram_delivery_queue_primary_concurrency",
+            "telegram_delivery_queue_primary_m0_reserved_concurrency",
+            "telegram_delivery_queue_channel_editor_concurrency",
+            "telegram_offer_queue_feeder_batch_limit",
+            "telegram_delivery_queue_limiter_key_ttl_seconds",
+        ):
+            if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
+                raise ValueError(f"{name}_must_be_positive")
+        if (
+            self.telegram_delivery_queue_primary_m0_reserved_concurrency
+            >= self.telegram_delivery_queue_primary_concurrency
+        ):
+            raise ValueError(
+                "telegram_delivery_queue_primary_m0_reservation_must_leave_general_capacity"
+            )
+        return self
     
     class Config:
         env_file = ".env"

@@ -1,0 +1,70 @@
+# TOPQ-ADR-04 — scheduler، fairness، freshness و outage
+
+- وضعیت: Accepted
+- تاریخ: `2026-07-16`
+- owner: Backend + Operations
+- چالش‌ها: `TOPQ-C10`, `TOPQ-C12`, `TOPQ-C25`, `TOPQ-C26`, `TOPQ-C30`, `TOPQ-C31`, `TOPQ-C37`, `TOPQ-C42`, `TOPQ-C56`, `TOPQ-C57`, `TOPQ-C58`, `TOPQ-C68`
+
+## تصمیم
+
+- صف اصلی تنها scheduler/control plane Bot API در scope این Roadmap با اولویت `M0..M7` است، اما dispatcher تک‌اسلاتی سراسری نیست. زیر owner واحد `queue-v1` دو claim/execution lane هم‌زمان و work-conserving برای `primary` و `channel_editor` وجود دارد. ترتیب `M0`: callback deadlineدار، اعلان معامله عبورکرده از پنج ثانیه، publication آفر. OTP به‌علت محرمانگی payload در مسیر امضاشده و Redis کوتاه‌عمر فعلی می‌ماند و وارد PostgreSQL صف نمی‌شود.
+- هر lane فقط `bot_identity` خود را claim می‌کند و limiter، semaphore/in-flight و token budget مستقل دارد. هر دو lane همان repository، state machine، lease، fencing، retry classifier و feedback را استفاده می‌کنند.
+- priority فقط میان jobهای رقیب همان lane یا منبع مشترک اعمال می‌شود. backlog، sleep، retry یا `M0` در primary حق بیکار نگه‌داشتن ظرفیت editor را ندارد و برعکس.
+- اعلان هر recipient معامله در `M1` شروع و مستقل در `trade_committed_at+5s` به `M0` ارتقا می‌یابد؛ cooldown و retry_after دور زده نمی‌شود.
+- feeder edit ترتیب partial active، traded، expired، cancelled، سایر edit و repair را همیشه اعمال می‌کند. هر Offer یک edit مؤثر دارد و partial terminal‌شده reclassify می‌شود.
+- stale edit بالای پنج دقیقه در stale bucket همان طبقه است. پس از هر ۲۰ edit تازه، یک stale واجد ارسال رزرو می‌شود؛ priority اصلی تغییر نمی‌کند.
+- `M6/M7` فقط ظرفیت باقی‌مانده می‌گیرند. عبور max-age alert/SLO breach است، نه priority inversion.
+- 429 مقدار خام `retry_after + safety_margin` را بدون cap اعمال می‌کند. safety margin اولیه `100ms` است و interval/safety فقط با Stage 4 تنظیم می‌شوند.
+- limiter برای هر `bot_identity` بودجه token جدا و برای destination یک gate محافظه‌کارانه دارد: 429 ابتدا token/gate مقصد مرتبط را می‌بندد؛ probe فقط مطابق state machine کنترل‌شده مجاز است. gate مشترک مقصد فقط admission به منبع واقعاً مشترک را نگه می‌دارد و نباید به قفل claim یا dispatcher سراسری تبدیل شود. editor دوم تا پایان Stage 4 حق مستقل فرض‌کردن ظرفیت همان کانال را ندارد.
+- هر retry پس از claim و بلافاصله قبل از side effect revalidate می‌شود. payload یا دکمه stale به `SUPERSEDED/EXPIRED_INTERACTION` می‌رود.
+
+## گزینه‌های ردشده
+
+- sleep یا limiter مستقل در feederها، یک dispatcher سراسری برای دو bot role، retry هر `0.1s`، cap کردن retry_after، newest-first بدون catch-up، priority aging برای عبور از `M0` و ارسال payload snapshot قدیمی.
+
+## داده، migration و sync
+
+priority، internal rank، deadline، eligibility، `next_retry_at` خام، freshness version و cooldown در schema افزایشی ADR-02 ذخیره می‌شوند. deadline و state دامنه از authority sync می‌شوند؛ cooldown، lease و attempt فقط foreign هستند. migration هیچ مقدار interval production را فعال نمی‌کند.
+
+## failure mode و degraded mode
+
+- DB unavailable: commit انجام نمی‌شود و success نمایش داده نمی‌شود.
+- Redis unavailable: send fail-closed و صف PostgreSQL محفوظ می‌ماند.
+- Telegram outage: circuit-break، backlog و recovery probe/drain.
+- destination cooldown مقصدهای آماده دیگر را جز probe safety متوقف نمی‌کند؛ خطای bot-specific lane دیگر را متوقف نمی‌کند و فقط circuit gateway/config یا gate مقصد دارای شاهد می‌تواند هر دو lane را نگه دارد.
+
+## تست و observability
+
+تست matrix تمام priorityها، promotion پنج‌ثانیه‌ای، coalescing/reclassification، catch-up یک‌به‌بیست، 429 چندمقصد/چند bot role، retry_after بزرگ، freshness و outageهای DB/Redis/Telegram الزامی است. تست head-of-line باید حداقل ۳۰۰ job `M0/M1` primary را که دست‌کم ۲۰۰ مورد آن private/admin و خارج gate کانال‌اند، همراه ۱۰۰ edit editor نگه دارد و ثابت کند editor پیش از صفرشدن backlog primary جلو می‌رود، مگر در بازه‌ای که gate مقصد خودش با شاهد فعال است؛ زیرآزمون جداگانه publication کانال انتظار gate مشترک را اندازه می‌گیرد و تست معکوس نیز نباید primary را پشت backlog editor نگه دارد. metric به تفکیک bot role/priority/method/destination-class و علت انتظار `bot_lane|destination_gate|circuit` کم‌کاردینال است.
+
+## feature flag و rollback
+
+limiter و scheduler فقط همراه execution-owner flag فعال می‌شوند و lifecycle هر دو lane زیر همان flag/owner است. rollback claim هر دو lane را متوقف و cooldown/jobها را حفظ می‌کند؛ feeder حق شروع ارسال مستقیم هم‌زمان ندارد.
+
+## الحاقیه ممیزی `2026-07-18`
+
+- claim باید resource-aware باشد و job مقصد channel که gate آن بسته است batch را اشغال نکند؛ private primary آماده باید در همان cycle قابل dispatch بماند.
+- در startup، channel cooldown editor فقط channel work را defer می‌کند. primary پس از identity-only preflight می‌تواند private work را اجرا کند، ولی publication تا full channel preflight و gate پاک متوقف می‌ماند.
+- `429` preflight قبل از هر sleep در PostgreSQL ثبت و پس از Redis loss rehydrate می‌شود.
+- Lua limiter از Redis `TIME` استفاده می‌کند. config باید `0 < base_backoff <= max_backoff`، مقادیر finite/bounded و jitter کنترل‌شده را enforce کند؛ provider attempt از claim/admission attempt جداست.
+- newest-first edit باید در کل backlog قابل‌اجرا باشد، نه فقط در انتخاب هر cycle feeder.
+
+## الحاقیه پیاده‌سازی resource-aware `2026-07-19`
+
+- query claim پیش از lease، blockerهای committed همان destination، resume ناتمام، bot pause/cooldown/probe و gateway pause را با subquery correlated حذف می‌کند. marker سریال‌شونده همچنان همین gateها را دوباره می‌خواند تا race بین claim و dispatch پوشش داده شود.
+- یک 429 مقصد به‌تنهایی در restart به bot-wide pause تبدیل نمی‌شود؛ فقط `bot_cooldown_until` یا probe/bot evidence صریح کل bot را می‌بندد. تست هم‌زمان دو destination همچنان escalation واقعی bot-wide را اثبات می‌کند.
+- primary در channel cooldown/hard-pause با preflight فقط هویت وارد loop خصوصی می‌شود و claim آن به `destination_class=private` محدود است. با پاک‌شدن gate loop خارج می‌شود؛ channel job فقط پس از preflight کامل permission دوباره eligible می‌شود. editor در همان gate شروع نمی‌شود.
+- ماتریس واقعی PostgreSQL ثابت می‌کند M0 کانال بسته، M1 خصوصی را اشغال نمی‌کند؛ تست final marker نیز با lease مصنوعی ثابت می‌کند bypass scheduler هنوز پیش از side effect رد می‌شود.
+
+## الحاقیه gate پایدار پیش‌پرواز `2026-07-19`
+
+- `429` پیش‌پرواز پیش از sleep در `telegram_delivery_runtime_gates` ثبت می‌شود؛ deadline برابر retry_after خام به‌اضافه safety است و Redis فقط mirror اجرایی آن است.
+- startup از PostgreSQL cooldown و pauseهای bot/gateway را بازسازی می‌کند. claim و marker نهایی هر دو gate را می‌خوانند؛ خرابی یا پاک‌شدن Redis اجازهٔ ارسال زودرس نمی‌دهد.
+- preflight کامل موفق، cooldown منقضی را با evidence هویت/permission به `active` می‌برد. preflight هویتی private-only حق پاک‌کردن destination pause یا hard pause را ندارد.
+- pause ناشی از پاسخ provider و transition job در یک transaction ثبت می‌شوند؛ rollback هیچ gate یتیمی باقی نمی‌گذارد.
+
+## الحاقیه bounded concurrency پس از review نهایی `2026-07-19`
+
+- هر role یک pool محدود دارد، نه یک coroutine شبکه تک‌اسلاتی. default primary برابر چهار slot است: سه slot عمومی و یک slot رزروشده که SQL فقط effective priority `M0`—از جمله trade عبورکرده از پنج ثانیه—را claim می‌کند. editor default یک slot مستقل دارد.
+- slot عمومی همچنان M0 را claim می‌کند؛ reservation ظرفیت اضافه و work-conserving برای deadline است، نه یک صف موازی یا تغییر ترتیب M0..M7. Redis bot/destination gate authority admission و ordering منبع مشترک باقی می‌ماند.
+- یک provider call کند روی مقصد مستقل نمی‌تواند slot رزروشده M0 را نگه دارد. عملیات همان destination همچنان پشت gate/in-flight واقعی serialize می‌شوند و lease حداقل timeout شبکه به‌اضافه margin را پوشش می‌دهد.

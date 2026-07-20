@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from api.routers.realtime import REALTIME_SOURCE_SYNC_APPLY
-from api.routers.sync import receive_sync_data
+from api.routers.sync import (
+    _enqueue_synced_deleted_user_telegram_notices,
+    _run_synced_deleted_user_telegram_effects,
+    receive_sync_data,
+)
+
+OTP_TEXT = "🔐 کد ورود شما: `12345`\n\nاین کد تا ۲ دقیقه معتبر است."
 
 
 class FakeDB:
@@ -79,6 +85,56 @@ class TerminalOfferRealtimeDB(FakeDB):
 
 
 class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_mode_persists_synced_deletion_notice_and_skips_direct_send(self):
+        deleted_user = SimpleNamespace(
+            id=4,
+            is_deleted=True,
+            deleted_at=datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc),
+            telegram_id=None,
+            sync_version=9,
+        )
+        db = SimpleNamespace(get=AsyncMock(return_value=deleted_user))
+        effects = [(4, 998877)]
+
+        with patch(
+            "api.routers.sync.current_server",
+            return_value="foreign",
+        ), patch(
+            "api.routers.sync.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "api.routers.sync.enqueue_account_deletion_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue:
+            await _enqueue_synced_deleted_user_telegram_notices(db, effects)
+
+        enqueue.assert_awaited_once()
+        self.assertEqual(
+            enqueue.await_args.kwargs["recipient"].telegram_id,
+            998877,
+        )
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 9)
+
+        with patch(
+            "api.routers.sync.current_server",
+            return_value="foreign",
+        ), patch(
+            "api.routers.sync.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "bot.utils.redis_helpers.mark_deleted_telegram_user",
+            new=AsyncMock(),
+        ), patch(
+            "core.utils.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send, patch(
+            "core.services.user_deletion_service.remove_user_from_telegram_channel",
+            new=AsyncMock(),
+        ):
+            await _run_synced_deleted_user_telegram_effects(effects)
+
+        direct_send.assert_not_awaited()
+
     async def test_fake_db_helper_paths(self):
         db = FakeDB()
         await db.rollback()
@@ -90,7 +146,13 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
     async def test_receive_sync_data_relays_notifications_and_refreshes_unread_counts(self):
         db = FakeDB()
         items = [
-            {"type": "notification", "chat_id": 123, "text": "hi", "parse_mode": "HTML"},
+            {
+                "type": "notification",
+                "purpose": "legacy_login_otp",
+                "chat_id": 123,
+                "text": OTP_TEXT,
+                "parse_mode": "Markdown",
+            },
             {"table": "notifications", "operation": "INSERT", "id": 9, "data": {"user_id": 5, "message": "x"}},
         ]
 
@@ -103,7 +165,12 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         ) as refresh_mock, patch("api.routers.sync.settings.server_mode", "iran"):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        send_mock.assert_awaited_once_with(chat_id=123, text="hi", parse_mode="HTML")
+        send_mock.assert_awaited_once_with(
+            chat_id=123,
+            text=OTP_TEXT,
+            parse_mode="Markdown",
+            purpose="legacy_login_otp",
+        )
         apply_mock.assert_awaited_once()
         rollout_mock.assert_not_awaited()
         refresh_mock.assert_awaited_once_with(db, {5})

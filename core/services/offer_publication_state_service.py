@@ -25,13 +25,25 @@ ACTIVE_PUBLICATION_STATUSES = {
     OfferPublicationStatus.VISIBLE.value,
     OfferPublicationStatus.LAGGED.value,
 }
+TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY = "primary"
 
 
-@dataclass(frozen=True)
+class CanonicalPublicationIdentityError(ValueError):
+    """Raised when a publication tries to replace canonical provider identity."""
+
+
+@dataclass(frozen=True, slots=True)
 class PublicationStateApplyResult:
     applied: bool
     reason: str
     status: OfferPublicationStatus
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramPublicationIdentity:
+    publisher_bot_identity: str
+    destination_chat_id: int
+    message_id: int
 
 
 def normalize_publication_surface(value: Any) -> OfferPublicationSurface:
@@ -64,6 +76,165 @@ def publication_dedupe_key(offer_public_id: str, surface: Any) -> str:
     return f"offer-publication:{normalized.value}:{offer_public_id}"
 
 
+def _strict_provider_integer(
+    value: Any,
+    *,
+    field: str,
+    allow_negative: bool,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise CanonicalPublicationIdentityError(
+            f"canonical_telegram_{field}_invalid"
+        )
+    if value == 0 or (not allow_negative and value < 0):
+        raise CanonicalPublicationIdentityError(
+            f"canonical_telegram_{field}_invalid"
+        )
+    return value
+
+
+def _identity_publication_surface(state: OfferPublicationState) -> OfferPublicationSurface:
+    try:
+        return normalize_publication_surface(getattr(state, "surface", None))
+    except (TypeError, ValueError) as exc:
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_surface_mismatch"
+        ) from exc
+
+
+def ensure_telegram_publication_publisher_identity(
+    state: OfferPublicationState,
+) -> str:
+    surface = _identity_publication_surface(state)
+    if surface != OfferPublicationSurface.TELEGRAM_CHANNEL:
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_surface_mismatch"
+        )
+    current = str(getattr(state, "publisher_bot_identity", "") or "").strip()
+    if current and current != TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY:
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_publisher_mismatch"
+        )
+    state.publisher_bot_identity = TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+    return TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+
+
+def canonical_telegram_publication_identity(
+    state: OfferPublicationState,
+) -> TelegramPublicationIdentity:
+    surface = _identity_publication_surface(state)
+    if surface != OfferPublicationSurface.TELEGRAM_CHANNEL:
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_surface_mismatch"
+        )
+    publisher = str(
+        getattr(state, "publisher_bot_identity", "") or ""
+    ).strip()
+    if publisher != TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY:
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_publisher_mismatch"
+        )
+    chat_id = _strict_provider_integer(
+        getattr(state, "telegram_chat_id", None),
+        field="chat_id",
+        allow_negative=True,
+    )
+    message_id = _strict_provider_integer(
+        getattr(state, "telegram_message_id", None),
+        field="message_id",
+        allow_negative=False,
+    )
+    return TelegramPublicationIdentity(
+        publisher_bot_identity=publisher,
+        destination_chat_id=chat_id,
+        message_id=message_id,
+    )
+
+
+def _validate_canonical_telegram_update(
+    state: OfferPublicationState,
+    *,
+    publisher_bot_identity: str | None,
+    surface_resource_id: str | None,
+    telegram_chat_id: int | None,
+    telegram_message_id: int | None,
+) -> bool:
+    surface = _identity_publication_surface(state)
+    if surface != OfferPublicationSurface.TELEGRAM_CHANNEL:
+        if any(
+            value is not None
+            for value in (
+                publisher_bot_identity,
+                telegram_chat_id,
+                telegram_message_id,
+            )
+        ):
+            raise CanonicalPublicationIdentityError(
+                "canonical_telegram_fields_on_non_telegram_surface"
+            )
+        if getattr(state, "publisher_bot_identity", None) is not None:
+            raise CanonicalPublicationIdentityError(
+                "canonical_telegram_publisher_on_non_telegram_surface"
+            )
+        return False
+
+    current_publisher = str(
+        getattr(state, "publisher_bot_identity", "") or ""
+    ).strip()
+    if (
+        current_publisher
+        and current_publisher != TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+    ):
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_publisher_mismatch"
+        )
+    if (
+        publisher_bot_identity is not None
+        and str(publisher_bot_identity).strip()
+        != TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+    ):
+        raise CanonicalPublicationIdentityError(
+            "canonical_telegram_publisher_mismatch"
+        )
+
+    incoming_values = (
+        ("chat_id", telegram_chat_id, True, "telegram_chat_id"),
+        ("message_id", telegram_message_id, False, "telegram_message_id"),
+    )
+    for field, incoming, allow_negative, attribute in incoming_values:
+        if incoming is None:
+            continue
+        validated = _strict_provider_integer(
+            incoming,
+            field=field,
+            allow_negative=allow_negative,
+        )
+        existing = getattr(state, attribute, None)
+        if existing is not None:
+            existing_value = _strict_provider_integer(
+                existing,
+                field=field,
+                allow_negative=allow_negative,
+            )
+            if existing_value != validated:
+                raise CanonicalPublicationIdentityError(
+                    f"canonical_telegram_{field}_mismatch"
+                )
+
+    if surface_resource_id is not None:
+        resource = str(surface_resource_id)
+        existing_resource = getattr(state, "surface_resource_id", None)
+        if existing_resource is not None and str(existing_resource) != resource:
+            raise CanonicalPublicationIdentityError(
+                "canonical_telegram_surface_resource_mismatch"
+            )
+        if telegram_message_id is not None and resource != str(telegram_message_id):
+            raise CanonicalPublicationIdentityError(
+                "canonical_telegram_surface_resource_message_mismatch"
+            )
+    return True
+
+
 def build_offer_publication_state(
     offer: Any,
     surface: Any,
@@ -84,6 +255,11 @@ def build_offer_publication_state(
         offer_home_server=str(getattr(offer, "home_server", "") or ""),
         surface=normalized_surface,
         publication_owner_server=publication_owner_server_for_surface(normalized_surface),
+        publisher_bot_identity=(
+            TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
+            if normalized_surface == OfferPublicationSurface.TELEGRAM_CHANNEL
+            else None
+        ),
         status=normalized_status,
         dedupe_key=publication_dedupe_key(offer_public_id, normalized_surface),
         offer_version_id=getattr(offer, "version_id", None),
@@ -102,6 +278,7 @@ def apply_publication_state_update(
     now: datetime | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
+    publisher_bot_identity: str | None = None,
     surface_resource_id: str | None = None,
     telegram_chat_id: int | None = None,
     telegram_message_id: int | None = None,
@@ -115,10 +292,21 @@ def apply_publication_state_update(
             status=normalize_publication_status(state.status),
         )
 
+    is_telegram_publication = _validate_canonical_telegram_update(
+        state,
+        publisher_bot_identity=publisher_bot_identity,
+        surface_resource_id=surface_resource_id,
+        telegram_chat_id=telegram_chat_id,
+        telegram_message_id=telegram_message_id,
+    )
+
     normalized_offer_status = normalize_offer_status(offer_status)
     normalized_requested_status = normalize_publication_status(requested_status)
     applied_status = normalized_requested_status
     reason = "applied"
+
+    if is_telegram_publication:
+        state.publisher_bot_identity = TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY
 
     if (
         normalized_offer_status in TERMINAL_OFFER_STATUSES

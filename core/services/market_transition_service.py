@@ -26,6 +26,11 @@ from core.services.offer_expiry_service import (
     expire_offers_authoritatively,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 from core.trading_settings import get_trading_settings_async
 from core.utils import utc_now
 from models.market_channel_notice_receipt import MarketChannelNoticeReceipt
@@ -109,6 +114,23 @@ class MarketChannelNoticeRetrySummary:
 
 
 _market_runtime_view_cache: tuple[float, MarketRuntimeView] | None = None
+
+
+def _market_notice_queue_mode() -> bool:
+    runtime = configured_telegram_delivery_runtime()
+    return (
+        runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1
+        and runtime.queue_worker_enabled
+        and not runtime.legacy_workers_enabled
+    )
+
+
+def _assert_legacy_market_notice_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_market_notice_sender_is_not_runtime_owner"
+        )
 
 
 def invalidate_market_runtime_view_cache() -> None:
@@ -274,6 +296,15 @@ def _market_notice_staleness_seconds() -> int:
         return MARKET_NOTICE_STALENESS_SECONDS
 
 
+def market_channel_notice_freshness_deadline(
+    transition_at: datetime,
+) -> datetime | None:
+    max_age_seconds = _market_notice_staleness_seconds()
+    if max_age_seconds <= 0:
+        return None
+    return _coerce_utc_now(transition_at) + timedelta(seconds=max_age_seconds)
+
+
 def _foreign_independent_grace_seconds() -> int:
     raw = os.getenv("TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS")
     if raw is None:
@@ -303,10 +334,8 @@ def _market_offer_admission_lock_timeout_ms() -> int:
 
 
 def _market_notice_is_stale(*, transition_at: datetime, now: datetime) -> bool:
-    max_age_seconds = _market_notice_staleness_seconds()
-    if max_age_seconds <= 0:
-        return False
-    return now - _coerce_utc_now(transition_at) > timedelta(seconds=max_age_seconds)
+    deadline = market_channel_notice_freshness_deadline(transition_at)
+    return deadline is not None and _coerce_utc_now(now) > deadline
 
 
 async def _suppress_stale_market_notice(
@@ -352,6 +381,7 @@ async def _send_market_channel_notice(
     idempotency_key: str | None = None,
     raise_on_failure: bool = True,
 ) -> telegram_gateway.TelegramGatewayResult | None:
+    _assert_legacy_market_notice_owner()
     channel_id = settings.channel_id
     if not channel_id:
         return None
@@ -463,8 +493,10 @@ async def reconcile_market_channel_notice_for_state(
     receipt.notice_text = notice_text
     receipt.transition = transition
     receipt.transition_at = transition_at
-    receipt.last_attempt_at = now
-    receipt.attempt_count = int(receipt.attempt_count or 0) + 1
+    queue_mode = _market_notice_queue_mode()
+    if not queue_mode:
+        receipt.last_attempt_at = now
+        receipt.attempt_count = int(receipt.attempt_count or 0) + 1
 
     channel_id = settings.channel_id
     if not channel_id:
@@ -486,6 +518,21 @@ async def reconcile_market_channel_notice_for_state(
         return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="missing_channel_id")
 
     receipt.channel_id = str(channel_id)
+    if queue_mode:
+        # The market transition worker remains the domain producer, but queue-v1
+        # exclusively owns every Telegram side effect, retry, and limiter gate.
+        # Existing failed receipts retain their durable retry deadline; new
+        # pending receipts are immediately visible to the subordinate feeder.
+        if receipt.status == MARKET_NOTICE_STATUS_PENDING:
+            receipt.next_retry_at = None
+        await db.commit()
+        return MarketChannelNoticeResult(
+            status="queued",
+            dedupe_key=dedupe_key,
+            reason="telegram_delivery_queue",
+        )
+
+    _assert_legacy_market_notice_owner()
     try:
         result = await _send_market_channel_notice(
             notice_text,
@@ -572,6 +619,8 @@ async def reconcile_due_market_channel_notice_receipts(
         return MarketChannelNoticeRetrySummary()
     if market_channel_notice_delivery_disabled():
         return MarketChannelNoticeRetrySummary(disabled=True)
+    if _market_notice_queue_mode():
+        return MarketChannelNoticeRetrySummary()
 
     now = _coerce_utc_now(current_time)
     max_rows = max(1, int(limit)) if limit is not None else _market_notice_retry_limit()

@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 import time
+from datetime import timedelta
 from typing import Optional
 
 import redis.asyncio as redis
@@ -17,6 +19,12 @@ from core.services.trade_service import (
     get_available_trade_amounts,
 )
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
+from core.server_routing import current_server
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
+from core.utils import utc_now
 from models.offer import Offer, OfferStatus
 
 logger = logging.getLogger(__name__)
@@ -217,7 +225,50 @@ async def get_trade_suggestion_records(offer_id: int) -> list[dict]:
     return records
 
 
-async def _clear_suggestion_markup(bot: Bot, chat_id: int, message_id: int) -> None:
+async def _enqueue_suggestion_markup_cleanup(
+    *,
+    chat_id: int,
+    message_id: int,
+    source_id: str,
+    due_at,
+) -> None:
+    from core.services.telegram_scheduled_operation_service import (
+        enqueue_cosmetic_markup_cleanup_once,
+    )
+
+    async with AsyncSessionLocal() as session:
+        await enqueue_cosmetic_markup_cleanup_once(
+            session,
+            current_server=current_server(),
+            chat_id=chat_id,
+            message_id=message_id,
+            source_id=source_id,
+            due_at=due_at,
+        )
+        await session.commit()
+
+
+async def _clear_suggestion_markup(
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    *,
+    source_id: str | None = None,
+) -> None:
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        await _enqueue_suggestion_markup_cleanup(
+            chat_id=chat_id,
+            message_id=message_id,
+            source_id=(
+                source_id
+                or f"trade-suggestion-clear:{chat_id}:{message_id}"
+            ),
+            due_at=utc_now(),
+        )
+        return
     try:
         await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
     except Exception as exc:
@@ -225,7 +276,106 @@ async def _clear_suggestion_markup(bot: Bot, chat_id: int, message_id: int) -> N
             logger.debug(f"Failed to clear suggestion markup chat={chat_id} message={message_id}: {exc}")
 
 
+async def _enqueue_trade_suggestion_sync_operations(
+    offer_id: int,
+    *,
+    due_at,
+) -> None:
+    """Persist exact known-target edits without waiting in process memory."""
+
+    from core.services.telegram_scheduled_operation_service import (
+        enqueue_pre_auth_interaction_once,
+    )
+
+    records = await get_trade_suggestion_records(offer_id)
+    if not records:
+        return
+    async with AsyncSessionLocal() as session:
+        offer = await session.get(Offer, offer_id)
+        if offer:
+            await session.refresh(offer, ["commodity"])
+        if not offer or offer.status != OfferStatus.ACTIVE:
+            for record in records:
+                await _enqueue_suggestion_markup_cleanup(
+                    chat_id=int(record["chat_id"]),
+                    message_id=int(record["message_id"]),
+                    source_id=(
+                        f"trade-suggestion-state:{offer_id}:"
+                        f"{record['chat_id']}:{record['message_id']}"
+                    ),
+                    due_at=due_at,
+                )
+            return
+
+        available_amounts = get_available_trade_amounts(
+            quantity=offer.quantity,
+            remaining_quantity=offer.remaining_quantity,
+            is_wholesale=offer.is_wholesale,
+            lot_sizes=offer.lot_sizes,
+        )
+        for record in records:
+            chat_id = int(record["chat_id"])
+            message_id = int(record["message_id"])
+            requested_amount = int(record.get("requested_amount") or 0)
+            payload = build_lot_unavailable_suggestion_payload(
+                offer_id=offer.id,
+                offer_public_id=getattr(offer, "offer_public_id", None),
+                requested_amount=requested_amount,
+                offer_type=offer.offer_type,
+                settlement_type=getattr(offer, "settlement_type", None),
+                commodity_name=offer.commodity.name if offer.commodity else None,
+                price=offer.price,
+                remaining_quantity=coalesce_offer_remaining_quantity(
+                    offer.remaining_quantity,
+                    offer.quantity,
+                ),
+                available_amounts=available_amounts,
+            )
+            reply_markup = build_trade_amount_buttons(
+                offer.id,
+                available_amounts,
+                offer_public_id=getattr(offer, "offer_public_id", None),
+            )
+            route_hash = hashlib.sha256(
+                f"{offer_id}:{chat_id}:{message_id}:{due_at.isoformat()}".encode(
+                    "utf-8"
+                )
+            ).hexdigest()[:32]
+            await enqueue_pre_auth_interaction_once(
+                session,
+                current_server=current_server(),
+                chat_id=chat_id,
+                message_id=message_id,
+                source_id=f"trade-suggestion-sync:{route_hash}",
+                text=payload["message"],
+                method="editMessageText",
+                reply_markup=(
+                    reply_markup.model_dump(mode="json", exclude_none=True)
+                    if reply_markup is not None
+                    else {"inline_keyboard": []}
+                ),
+                due_at=due_at,
+                ttl_seconds=30,
+            )
+            if not available_amounts:
+                await remove_trade_suggestion_record(
+                    offer_id,
+                    chat_id,
+                    message_id,
+                )
+        await session.commit()
+
+
 async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        await _enqueue_trade_suggestion_sync_operations(
+            offer_id,
+            due_at=utc_now(),
+        )
+        return
     records = await get_trade_suggestion_records(offer_id)
     if not records:
         return
@@ -237,7 +387,15 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
 
     if not offer or offer.status != OfferStatus.ACTIVE:
         for record in records:
-            await _clear_suggestion_markup(bot, int(record["chat_id"]), int(record["message_id"]))
+            await _clear_suggestion_markup(
+                bot,
+                int(record["chat_id"]),
+                int(record["message_id"]),
+                source_id=(
+                    f"trade-suggestion-state:{offer_id}:"
+                    f"{record['chat_id']}:{record['message_id']}"
+                ),
+            )
             await remove_trade_suggestion_record(offer_id, int(record["chat_id"]), int(record["message_id"]))
         return
 
@@ -287,20 +445,61 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
             await remove_trade_suggestion_record(offer_id, chat_id, message_id)
 
 
-def schedule_trade_suggestion_cleanup(bot: Bot, offer_id: int, chat_id: int, message_id: int) -> None:
+async def schedule_trade_suggestion_cleanup(
+    bot: Bot,
+    offer_id: int,
+    chat_id: int,
+    message_id: int,
+) -> None:
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        await _enqueue_suggestion_markup_cleanup(
+            chat_id=chat_id,
+            message_id=message_id,
+            source_id=(
+                f"trade-suggestion-ttl:{offer_id}:{chat_id}:{message_id}"
+            ),
+            due_at=utc_now()
+            + timedelta(seconds=TRADE_SUGGESTION_TTL_SECONDS + 0.2),
+        )
+        return
+
     async def _runner() -> None:
         await asyncio.sleep(TRADE_SUGGESTION_TTL_SECONDS + 0.2)
         records = await get_trade_suggestion_records(offer_id)
         for record in records:
             if int(record["chat_id"]) == chat_id and int(record["message_id"]) == message_id and float(record.get("expires_at", 0)) <= time.time():
-                await _clear_suggestion_markup(bot, chat_id, message_id)
+                await _clear_suggestion_markup(
+                    bot,
+                    chat_id,
+                    message_id,
+                    source_id=(
+                        f"trade-suggestion-ttl:{offer_id}:{chat_id}:{message_id}"
+                    ),
+                )
                 await remove_trade_suggestion_record(offer_id, chat_id, message_id)
                 break
 
     asyncio.create_task(_runner())
 
 
-def schedule_trade_suggestion_pending_reset(bot: Bot, offer_id: int) -> None:
+async def schedule_trade_suggestion_pending_reset(bot: Bot, offer_id: int) -> None:
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        due_at = utc_now() + timedelta(
+            seconds=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT + 0.2
+        )
+
+        await _enqueue_trade_suggestion_sync_operations(
+            offer_id,
+            due_at=due_at,
+        )
+        return
+
     async def _runner() -> None:
         await asyncio.sleep(PRIVATE_SUGGESTION_CONFIRM_TIMEOUT + 0.2)
         await sync_trade_suggestions_for_offer(bot, offer_id)

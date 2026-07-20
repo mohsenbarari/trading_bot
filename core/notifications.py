@@ -1,36 +1,45 @@
 # core/notifications.py
-"""
-Notification system that handles cross-server delivery.
-If on Iran server, relays notifications to Foreign server via sync mechanism.
-If on Foreign server, sends directly via Telegram Bot.
-"""
+"""Mixed-version legacy login-OTP relay; general notifications are rejected."""
 import logging
 from core.config import settings
 from core.sync_push import push_sync_direct
 from core import telegram_gateway
+from core.telegram_legacy_otp_relay_contract import (
+    LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
+    validate_legacy_telegram_otp_relay,
+)
 from core.utils import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
-async def send_telegram_message(chat_id: int, text: str, parse_mode: str = "Markdown"):
-    """
-    Send Telegram message independent of server location.
-    - Iran: Push to sync queue -> Foreign server sends it.
-    - Foreign: Send directly via Bot API.
-    """
+async def send_telegram_message(
+    chat_id: int,
+    text: str,
+    parse_mode: str = "Markdown",
+    *,
+    purpose: str | None = LEGACY_TELEGRAM_OTP_RELAY_PURPOSE,
+):
+    """Relay only the exact legacy login-OTP envelope to the foreign bot."""
+    relay = validate_legacy_telegram_otp_relay(
+        chat_id=chat_id,
+        text=text,
+        parse_mode=parse_mode,
+        purpose=purpose,
+    )
     if settings.server_mode == "iran":
-        logger.info(f"🇮🇷 Relaying notification to Foreign server for {chat_id}")
+        logger.info("Relaying legacy Telegram OTP to Foreign server")
         
         payload = {
             "type": "notification",
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": parse_mode,
+            "purpose": relay.purpose,
+            "chat_id": relay.chat_id,
+            "text": relay.text,
+            "parse_mode": relay.parse_mode,
             "timestamp": utc_now_naive().timestamp()
         }
         
-        # Direct Push only (no Redis backup for notifications to avoid double-send)
-        # Notifications are ephemeral - if delivery fails, user can retry
+        # Direct Push only; the OTP itself remains short-lived and outside the
+        # durable shared queue by explicit product decision.
         try:
             push_sync_direct(payload)
         except Exception as e:
@@ -38,12 +47,12 @@ async def send_telegram_message(chat_id: int, text: str, parse_mode: str = "Mark
             
     else:
         # We are on Foreign server (or standalone) - Send directly
-        logger.info(f"🌍 Sending Telegram message directly to {chat_id}")
+        logger.info("Sending legacy Telegram OTP directly on Foreign server")
         result = await telegram_gateway.send_message(
-            chat_id,
-            text,
-            parse_mode=parse_mode,
-            idempotency_key=f"notification:{chat_id}",
+            relay.chat_id,
+            relay.text,
+            parse_mode=relay.parse_mode,
+            idempotency_key=f"legacy-login-otp:{relay.chat_id}",
         )
         if not result.ok:
             message = f"Telegram gateway failed for sendMessage: {result.error or result.status_code}"

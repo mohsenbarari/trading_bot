@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -33,6 +34,79 @@ class _HttpClientContext:
 
 
 class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_mode_persists_deletion_notice_before_commit(self):
+        original_telegram_id = 44112233
+        user = SimpleNamespace(
+            id=117,
+            telegram_id=original_telegram_id,
+            is_deleted=False,
+            deleted_at=None,
+            sync_version=11,
+        )
+        db = SimpleNamespace(
+            flush=AsyncMock(),
+            get=AsyncMock(return_value=user),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
+        revoked_sessions = [SimpleNamespace(id="s1")]
+
+        async def mutate_deleted_user(
+            _db,
+            target,
+            *,
+            processed_user_ids,
+            effects,
+        ):
+            self.assertEqual(processed_user_ids, set())
+            target.is_deleted = True
+            target.deleted_at = datetime(2026, 7, 18, 12, 0, 0)
+            target.telegram_id = None
+            target.sync_version = 12
+            effects.append(
+                SimpleNamespace(
+                    user_id=target.id,
+                    telegram_id=original_telegram_id,
+                    revoked_sessions=revoked_sessions,
+                )
+            )
+
+        with patch(
+            "core.services.user_deletion_service.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="queue-v1"),
+        ), patch(
+            "core.services.user_deletion_service._delete_user_account_in_transaction",
+            new=AsyncMock(side_effect=mutate_deleted_user),
+        ), patch(
+            "core.services.telegram_notification_outbox_service.enqueue_account_deletion_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue, patch(
+            "core.services.user_deletion_service.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send, patch(
+            "core.services.user_deletion_service.mark_deleted_telegram_user",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_deletion_service.publish_session_revocation",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_deletion_service.remove_user_from_telegram_channel",
+            new=AsyncMock(),
+        ):
+            result = await delete_user_account(db, user)
+
+        db.flush.assert_awaited_once_with()
+        enqueue.assert_awaited_once()
+        self.assertEqual(
+            enqueue.await_args.kwargs["recipient"].telegram_id,
+            original_telegram_id,
+        )
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 12)
+        direct_send.assert_not_awaited()
+        db.commit.assert_awaited_once_with()
+        db.rollback.assert_not_awaited()
+        self.assertEqual(result.telegram_id, original_telegram_id)
+
     async def test_remove_user_from_telegram_channel_respects_config_and_posts_ban_unban(self):
         with patch("core.services.user_deletion_service.settings", SimpleNamespace(channel_id=None, bot_token="bot-token")), patch(
             "core.telegram_gateway.httpx.AsyncClient"
