@@ -14,6 +14,7 @@ docs/*
 .env.staging
 .env.staging.*
 .env.iran
+deploy/monitoring/.env.monitoring.local
 # Environments
 frontend/node_modules/
 .idea/
