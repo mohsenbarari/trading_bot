@@ -9,10 +9,19 @@ from __future__ import annotations
 import os
 import json
 import unittest
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
+
+from core.dr_event_protocol import (
+    canonical_json_bytes,
+    destination_transaction_hash,
+    sha256_json,
+    transaction_hash_from_envelopes,
+    validate_envelope,
+)
 
 
 URL_NAMES = {
@@ -113,20 +122,70 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
         record_id: int,
         operation: str,
         payload: dict[str, object],
+        corrupt_envelope_hash: bool = False,
     ) -> None:  # noqa: ANN001
         event_id = str(uuid4())
+        transaction_id = str(uuid4())
         sequence = uuid4().int % 9_000_000_000 + 1
+        created_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        canonical_payload = json.loads(canonical_json_bytes(payload))
+        streams = {
+            site: {
+                "sequence": sequence + offset,
+                "transaction_id": transaction_id,
+                "transaction_position": 1,
+                "transaction_size": 1,
+                "transaction_hash": "0" * 64,
+            }
+            for offset, site in enumerate(("bot_fi", "webapp_ir"), 1)
+        }
+        envelope = {
+            "protocol_version": 2,
+            "event_id": event_id,
+            "origin_authority": "webapp",
+            "origin_physical_site": "webapp_fi",
+            "producer_epoch": 1,
+            "producer_sequence": sequence,
+            "aggregate_type": table,
+            "aggregate_id": str(record_id),
+            "aggregate_db_id": str(record_id),
+            "aggregate_version": None,
+            "operation": operation,
+            "canonical_payload": canonical_payload,
+            "canonical_payload_hash": sha256_json(canonical_payload),
+            "schema_version": 1,
+            "causation_id": None,
+            "idempotency_key": None,
+            "writer_epoch": 1,
+            "tombstone": operation == "DELETE",
+            "created_at": created_at,
+            "transaction_id": transaction_id,
+            "transaction_position": 1,
+            "transaction_size": 1,
+            "transaction_hash": "0" * 64,
+            "destination_streams": streams,
+        }
+        envelope["transaction_hash"] = transaction_hash_from_envelopes([envelope])
+        for site in streams:
+            streams[site]["transaction_hash"] = destination_transaction_hash(
+                [envelope], destination_site=site
+            )
+        validated = validate_envelope(envelope)
         connection.execute(
             text(
                 "INSERT INTO dr_events ("
                 "event_id, protocol_version, origin_authority, origin_physical_site, "
                 "producer_epoch, producer_sequence, aggregate_type, aggregate_id, "
-                "aggregate_db_id, operation, canonical_payload, canonical_payload_hash, "
-                "envelope_hash, schema_version, writer_epoch, tombstone, source_xid"
+                "aggregate_db_id, aggregate_version, operation, canonical_payload, "
+                "canonical_payload_hash, envelope_hash, schema_version, causation_id, "
+                "idempotency_key, writer_epoch, tombstone, created_at, transaction_id, "
+                "transaction_position, transaction_size, transaction_hash, "
+                "destination_streams, source_xid"
                 ") VALUES ("
-                ":event_id, 1, 'webapp', 'webapp_fi', 1, :sequence, :table, :record_id, "
-                ":record_id, :operation, CAST(:payload AS JSONB), repeat('a', 64), repeat('b', 64), "
-                "1, 1, :tombstone, txid_current())"
+                ":event_id, 2, 'webapp', 'webapp_fi', 1, :sequence, :table, :record_id, "
+                ":record_id, NULL, :operation, CAST(:payload AS JSONB), :payload_hash, "
+                ":envelope_hash, 1, NULL, NULL, 1, :tombstone, CAST(:created_at AS TIMESTAMPTZ), "
+                ":transaction_id, 1, 1, :transaction_hash, CAST(:streams AS JSONB), txid_current())"
             ),
             {
                 "event_id": event_id,
@@ -135,9 +194,33 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 "record_id": str(record_id),
                 "operation": operation,
                 "tombstone": operation == "DELETE",
-                "payload": json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                "payload": canonical_json_bytes(canonical_payload).decode(),
+                "payload_hash": envelope["canonical_payload_hash"],
+                "envelope_hash": "b" * 64 if corrupt_envelope_hash else validated.envelope_hash,
+                "created_at": created_at,
+                "transaction_id": transaction_id,
+                "transaction_hash": envelope["transaction_hash"],
+                "streams": canonical_json_bytes(streams).decode(),
             },
         )
+
+    def test_application_cannot_fabricate_coverage_with_wrong_integrity_hashes(self) -> None:
+        record_id = self._scratch_id()
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                self._record_coverage_event(
+                    connection,
+                    table="commodities",
+                    record_id=record_id,
+                    operation="INSERT",
+                    payload={"id": record_id, "name": f"hash-{record_id}"},
+                    corrupt_envelope_hash=True,
+                )
+                connection.execute(
+                    text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                    {"id": record_id, "name": f"hash-{record_id}"},
+                )
 
     def test_application_role_fails_closed_without_writer_capability(self) -> None:
         record_id = self._scratch_id()
@@ -351,6 +434,30 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 {"event_id": event_id},
             )
         self.assertIsNone(source_xid)
+
+    def test_receiver_cannot_explicitly_supply_source_xid(self) -> None:
+        for source_xid in (None, 424242):
+            with self.subTest(source_xid=source_xid), self.assertRaises(DBAPIError):
+                with self.engines["receiver"].begin() as connection:
+                    self._projection_scope(connection, "receiver")
+                    connection.execute(
+                        text(
+                            "INSERT INTO dr_events ("
+                            "event_id, protocol_version, origin_authority, origin_physical_site, "
+                            "producer_epoch, producer_sequence, aggregate_type, aggregate_id, "
+                            "operation, canonical_payload, canonical_payload_hash, envelope_hash, "
+                            "schema_version, tombstone, source_xid"
+                            ") VALUES ("
+                            ":event_id, 1, 'foreign', 'bot_fi', 1, :sequence, "
+                            "'commodities', 'source-xid-test', 'INSERT', '{}'::jsonb, "
+                            "repeat('a',64), repeat('b',64), 1, false, :source_xid)"
+                        ),
+                        {
+                            "event_id": str(uuid4()),
+                            "sequence": uuid4().int % 9_000_000_000 + 1,
+                            "source_xid": source_xid,
+                        },
+                    )
 
     def test_projection_role_can_persist_encrypted_blob_identity(self) -> None:
         content_hash = uuid4().hex + uuid4().hex

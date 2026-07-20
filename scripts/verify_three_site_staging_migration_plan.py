@@ -63,6 +63,7 @@ SUPPORTED_SOURCE_REVISIONS = frozenset(
         "a274f5a6b8c9",  # Telegram queue parent
         "e9e4f5a6b7c8",  # three-site DR parent
         "c431d2e3f5a6",  # reconciled integration head (repeat/recovery input)
+        "d542e3f4a6b7",  # hardened integration head (repeat/recovery input)
     }
 )
 

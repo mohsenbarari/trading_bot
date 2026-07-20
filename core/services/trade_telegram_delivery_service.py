@@ -30,6 +30,8 @@ from core.services.trade_notification_audience_service import (
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
     configured_telegram_delivery_runtime,
 )
 from core.utils import utc_now
@@ -167,10 +169,11 @@ def _normalize_current_server(value: str | None) -> str:
 
 
 def _telegram_delivery_runtime_mode() -> TelegramDeliveryRuntimeMode:
-    return configured_telegram_delivery_runtime().mode
+    return configured_telegram_delivery_producer_mode()
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
         raise TelegramDeliveryRuntimeConfigurationError(

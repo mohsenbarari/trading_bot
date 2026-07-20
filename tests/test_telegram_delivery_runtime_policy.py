@@ -66,6 +66,7 @@ class TelegramDeliveryRuntimePolicyTests(unittest.TestCase):
             execution_owner="queue-v1",
             queue_worker_enabled=True,
             cutover_ready=True,
+            implementation_ready=True,
         )
 
         self.assertEqual(decision.mode, TelegramDeliveryRuntimeMode.QUEUE_V1)

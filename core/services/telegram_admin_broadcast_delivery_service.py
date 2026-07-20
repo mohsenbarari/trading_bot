@@ -17,6 +17,7 @@ from core.services.telegram_admin_broadcast_service import validate_telegram_adm
 from core.utils import utc_now
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
     configured_telegram_delivery_runtime,
 )
 from models.telegram_admin_broadcast import (
@@ -84,6 +85,7 @@ TelegramSendCallable = Callable[..., Awaitable[telegram_gateway.TelegramGatewayR
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
         raise TelegramDeliveryRuntimeConfigurationError(

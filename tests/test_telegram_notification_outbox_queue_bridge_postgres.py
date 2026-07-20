@@ -1602,7 +1602,11 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 now=due + timedelta(seconds=1),
             )
             await db.rollback()
-        self.assertIsNone(legacy)
+        self.assertIsNotNone(legacy)
+        self.assertEqual(
+            legacy.source_type,
+            f"queue_action:{TelegramDeliveryAction.DELAYED_RESTRICTION.value}",
+        )
         async with self.Session() as db:
             handoff = await handoff_next_due_telegram_notification_outbox(
                 db,
@@ -1630,7 +1634,7 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
         self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SUPERSEDED)
         self.assertEqual(outbox.status, TelegramNotificationOutboxStatus.PENDING)
 
-    async def test_generic_action_is_never_claimed_by_legacy_outbox_worker(self):
+    async def test_generic_action_is_claimed_by_legacy_owner_before_cutover(self):
         await self._seed_action_outbox(
             action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
         )
@@ -1642,7 +1646,11 @@ class TelegramNotificationOutboxQueueBridgePostgresTests(
                 now=utc_now() + timedelta(hours=1),
             )
             await db.rollback()
-        self.assertIsNone(claimed)
+        self.assertIsNotNone(claimed)
+        self.assertEqual(
+            claimed.source_type,
+            f"queue_action:{TelegramDeliveryAction.GENERAL_IMMEDIATE.value}",
+        )
 
     async def test_offer_success_edit_handoff_and_success_are_atomic(self):
         outbox_id, _, _ = await self._seed_offer_success_outbox()

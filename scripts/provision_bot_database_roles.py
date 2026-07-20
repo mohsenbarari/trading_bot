@@ -78,7 +78,7 @@ BOT_APPLICATION_INTERNAL_GRANTS = {
 }
 BOT_DR_SERVICE_GRANTS = {
     "receiver": {
-        "dr_events": "SELECT, INSERT",
+        "dr_events": "SELECT",
         "dr_event_deliveries": "SELECT, INSERT, UPDATE",
         "dr_event_receipts": "SELECT, INSERT, UPDATE",
         "dr_stream_checkpoints": "SELECT, INSERT, UPDATE",
@@ -95,7 +95,6 @@ BOT_DR_SERVICE_GRANTS = {
         "dr_stream_checkpoints": "SELECT, UPDATE",
         "dr_projection_versions": "SELECT, INSERT, UPDATE",
         "dr_conflict_quarantine": "SELECT, INSERT, UPDATE",
-        "dr_replay_nonces": "SELECT, DELETE",
     },
 }
 
@@ -263,6 +262,25 @@ def main() -> int:
                         f"GRANT {permissions} ON TABLE public.{_ident(table)} "
                         f"TO {service_roles[scope]}"
                     )
+            receiver_event_columns = connection.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema='public' AND table_name='dr_events' "
+                    "AND column_name <> 'source_xid' ORDER BY ordinal_position"
+                )
+            ).scalars().all()
+            if not receiver_event_columns:
+                raise RuntimeError("dr_events receiver insert columns are missing")
+            statements.append(
+                "GRANT INSERT ("
+                + ", ".join(_ident(str(column)) for column in receiver_event_columns)
+                + f") ON TABLE public.dr_events TO {service_roles['receiver']}"
+            )
+            statements.append(
+                "GRANT EXECUTE ON FUNCTION "
+                "public.trading_bot_cleanup_expired_replay_nonces(timestamptz, integer) "
+                f"TO {service_roles['projector']}"
+            )
             tables = connection.execute(
                 text(
                     "SELECT table_name FROM dr_projection_table_allowlist "

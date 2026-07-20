@@ -28,6 +28,7 @@ from core.secure_file_io import (
 CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v1"
 POLICY_SCHEMA = "three-site-staging-full-matrix-approver-policy-v1"
 PHASE_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-phase-v1"
+SCENARIO_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-scenario-v2"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ARTIFACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
@@ -294,7 +295,7 @@ def verify_campaign(
         or campaign["required_scenarios"]
         != {phase: list(scenarios) for phase, scenarios in PHASE_SCENARIOS.items()}
         or type(campaign["repetitions"]) is not int
-        or not 2 <= campaign["repetitions"] <= 3
+        or campaign["repetitions"] != 2
         or campaign["no_skips"] is not True
         or campaign["cleanup_required"] is not True
         or campaign["production_forbidden"] is not True
@@ -399,6 +400,141 @@ def _relative_artifact(value: Any) -> str:
     return text
 
 
+def verify_scenario_evidence(
+    evidence: dict[str, Any],
+    *,
+    campaign: dict[str, Any],
+    campaign_hash: str,
+    phase: str,
+    scenario_id: str,
+    iteration: int,
+    artifact_root: Path,
+) -> dict[str, Any]:
+    """Re-open and semantically validate one retained scenario artifact.
+
+    The backend is not allowed to reduce a scenario to a boolean and a hash.
+    Every result has a closed oracle identity, three mandatory assertions, and
+    retained raw evidence files that can be independently re-hashed later.
+    """
+
+    fields = {
+        "schema", "status", "campaign_id", "campaign_hash", "release_sha",
+        "activation_sha", "phase", "scenario_id", "iteration", "oracle_id",
+        "started_at", "finished_at", "duration_seconds", "assertions",
+        "evidence_refs", "cleanup_residue_count", "production_touched",
+    }
+    if set(evidence) != fields or evidence.get("schema") != SCENARIO_EVIDENCE_SCHEMA:
+        raise FullMatrixCampaignError("Full Matrix scenario evidence schema is invalid")
+    if (
+        evidence.get("status") != "passed"
+        or evidence.get("campaign_id") != campaign["campaign_id"]
+        or evidence.get("campaign_hash") != campaign_hash
+        or evidence.get("release_sha") != campaign["release_sha"]
+        or evidence.get("activation_sha") != campaign["activation_sha"]
+        or evidence.get("phase") != phase
+        or evidence.get("scenario_id") != scenario_id
+        or evidence.get("iteration") != iteration
+        or evidence.get("oracle_id") != f"{phase}.{scenario_id}.v1"
+        or evidence.get("production_touched") is not False
+        or evidence.get("cleanup_residue_count") != 0
+    ):
+        raise FullMatrixCampaignError("Full Matrix scenario identity/status is invalid")
+    started = _utc(evidence["started_at"], label="scenario started_at")
+    finished = _utc(evidence["finished_at"], label="scenario finished_at")
+    duration = evidence["duration_seconds"]
+    if (
+        not isinstance(duration, (int, float))
+        or isinstance(duration, bool)
+        or duration < 0
+        or started > finished
+        or (finished - started).total_seconds() + 2 < float(duration)
+    ):
+        raise FullMatrixCampaignError("Full Matrix scenario duration is invalid")
+    if scenario_id == "twenty_four_hour_endurance_no_growth" and duration < 86400:
+        raise FullMatrixCampaignError("Full Matrix endurance scenario ran under 24 hours")
+
+    references = evidence["evidence_refs"]
+    if not isinstance(references, list) or not references:
+        raise FullMatrixCampaignError("Full Matrix scenario has no raw evidence")
+    retained: dict[str, dict[str, Any]] = {}
+    for item in references:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size"}:
+            raise FullMatrixCampaignError("Full Matrix raw evidence reference is malformed")
+        relative = _relative_artifact(item["path"])
+        if (
+            relative in retained
+            or SHA256.fullmatch(str(item["sha256"])) is None
+            or type(item["size"]) is not int
+            or item["size"] <= 0
+        ):
+            raise FullMatrixCampaignError("Full Matrix raw evidence identity is invalid")
+        try:
+            digest, size = sha256_secure_file(
+                artifact_root / relative,
+                label=f"Full Matrix {phase}/{scenario_id} raw evidence",
+            )
+        except Exception as exc:
+            raise FullMatrixCampaignError(
+                "Full Matrix raw scenario evidence is missing or unsafe"
+            ) from exc
+        if digest != item["sha256"] or size != item["size"]:
+            raise FullMatrixCampaignError("Full Matrix raw scenario evidence differs")
+        retained[relative] = {"path": relative, "sha256": digest, "size": size}
+
+    assertions = evidence["assertions"]
+    if not isinstance(assertions, list) or len(assertions) < 3:
+        raise FullMatrixCampaignError("Full Matrix scenario assertions are incomplete")
+    required = {
+        "operation_executed",
+        "expected_outcome",
+        "production_boundary",
+        f"oracle:{scenario_id}",
+    }
+    if scenario_id == "twenty_four_hour_endurance_no_growth":
+        required.add("minimum_duration")
+    seen: set[str] = set()
+    used_refs: set[str] = set()
+    for assertion in assertions:
+        if not isinstance(assertion, dict) or set(assertion) != {
+            "name", "status", "expected", "observed", "evidence_refs"
+        }:
+            raise FullMatrixCampaignError("Full Matrix scenario assertion is malformed")
+        name = str(assertion["name"])
+        refs = assertion["evidence_refs"]
+        if (
+            not name
+            or name in seen
+            or assertion["status"] != "passed"
+            or not isinstance(refs, list)
+            or not refs
+        ):
+            raise FullMatrixCampaignError("Full Matrix scenario assertion did not pass")
+        normalized = {_relative_artifact(item) for item in refs}
+        if not normalized.issubset(retained):
+            raise FullMatrixCampaignError("Full Matrix assertion references missing evidence")
+        if name == "production_boundary" and (
+            assertion["expected"] is not False or assertion["observed"] is not False
+        ):
+            raise FullMatrixCampaignError("Full Matrix production boundary was not preserved")
+        if name == "minimum_duration" and (
+            assertion["expected"] != 86400
+            or not isinstance(assertion["observed"], (int, float))
+            or isinstance(assertion["observed"], bool)
+            or assertion["observed"] < 86400
+        ):
+            raise FullMatrixCampaignError("Full Matrix duration assertion is invalid")
+        seen.add(name)
+        used_refs.update(normalized)
+    if not required.issubset(seen) or used_refs != set(retained):
+        raise FullMatrixCampaignError("Full Matrix scenario oracle coverage is incomplete")
+    return {
+        "assertion_count": len(assertions),
+        "duration_seconds": float(duration),
+        "raw_artifacts": [retained[path] for path in sorted(retained)],
+        "artifact_paths": set(retained),
+    }
+
+
 def _validate_artifact_root(path: Path) -> None:
     if not path.is_absolute():
         raise FullMatrixCampaignError("Full Matrix artifact root must be absolute")
@@ -463,20 +599,64 @@ def verify_phase_evidence(
     if not isinstance(scenarios, list) or len(scenarios) != len(expected):
         raise FullMatrixCampaignError("Full Matrix phase scenario cardinality is invalid")
     seen: set[str] = set()
+    scenario_artifact_paths: set[str] = set()
+    scenario_raw_paths: set[str] = set()
     for result in scenarios:
         if not isinstance(result, dict) or set(result) != {
-            "scenario_id", "status", "assertion_count", "evidence_hash"
+            "scenario_id", "status", "assertion_count", "evidence_hash",
+            "duration_seconds", "artifact",
         }:
             raise FullMatrixCampaignError("Full Matrix scenario result is malformed")
         scenario_id = str(result["scenario_id"])
+        artifact = result["artifact"]
         if (
             scenario_id not in expected or scenario_id in seen
             or result["status"] != "passed"
             or type(result["assertion_count"]) is not int
             or result["assertion_count"] < 1
             or SHA256.fullmatch(str(result["evidence_hash"])) is None
+            or not isinstance(result["duration_seconds"], (int, float))
+            or isinstance(result["duration_seconds"], bool)
+            or not isinstance(artifact, dict)
+            or set(artifact) != {"path", "sha256", "size"}
         ):
             raise FullMatrixCampaignError("Full Matrix scenario did not pass exactly once")
+        relative = _relative_artifact(artifact["path"])
+        if (
+            relative in scenario_artifact_paths
+            or artifact["sha256"] != result["evidence_hash"]
+            or type(artifact["size"]) is not int
+            or artifact["size"] <= 0
+        ):
+            raise FullMatrixCampaignError("Full Matrix scenario artifact record is invalid")
+        digest, size = sha256_secure_file(
+            artifact_root / relative,
+            label="Full Matrix retained scenario artifact",
+        )
+        if digest != artifact["sha256"] or size != artifact["size"]:
+            raise FullMatrixCampaignError("Full Matrix retained scenario artifact differs")
+        scenario_evidence = secure_json(
+            artifact_root / relative,
+            label="Full Matrix retained scenario evidence",
+        )
+        verified = verify_scenario_evidence(
+            scenario_evidence,
+            campaign=campaign,
+            campaign_hash=campaign_hash,
+            phase=phase,
+            scenario_id=scenario_id,
+            iteration=iteration,
+            artifact_root=artifact_root,
+        )
+        if (
+            verified["assertion_count"] != result["assertion_count"]
+            or verified["duration_seconds"] != float(result["duration_seconds"])
+        ):
+            raise FullMatrixCampaignError("Full Matrix scenario summary differs from evidence")
+        if scenario_raw_paths.intersection(verified["artifact_paths"]):
+            raise FullMatrixCampaignError("Full Matrix raw evidence was reused by scenarios")
+        scenario_artifact_paths.add(relative)
+        scenario_raw_paths.update(verified["artifact_paths"])
         seen.add(scenario_id)
     if seen != set(expected):
         raise FullMatrixCampaignError("Full Matrix required scenarios are incomplete")
@@ -503,6 +683,11 @@ def verify_phase_evidence(
             raise FullMatrixCampaignError("Full Matrix retained artifact hash/size differs")
         used_paths.add(relative)
         artifact_records.append({"path": relative, "sha256": digest, "size": size})
+    required_artifacts = scenario_artifact_paths | scenario_raw_paths
+    if not required_artifacts.issubset(used_paths):
+        raise FullMatrixCampaignError(
+            "Full Matrix phase does not retain every scenario/raw artifact"
+        )
     evidence_hash = hashlib.sha256(canonical_json_bytes(evidence)).hexdigest()
     return {
         "phase": phase,
@@ -571,6 +756,7 @@ def verify_complete_matrix(
             campaign=campaign,
             campaign_hash=approved["campaign_hash"],
             phase_evidence=phase_evidence,
+            artifact_root=artifact_root,
         )
     report_body = {
         **approved,
@@ -604,6 +790,7 @@ def _verify_execution_journal(
     campaign: dict[str, Any],
     campaign_hash: str,
     phase_evidence: list[dict[str, Any]],
+    artifact_root: Path,
 ) -> tuple[dict[str, Any], str | None]:
     records = verify_hash_chained_jsonl(path, label="Full Matrix execution journal")
     if not records or records[0].get("event") != "campaign_started":
@@ -621,6 +808,38 @@ def _verify_execution_journal(
     }
     campaign_start = _utc(campaign["generated_at"], label="campaign generated_at")
     campaign_end = _utc(campaign["expires_at"], label="campaign expires_at")
+    operation_artifacts: dict[str, dict[str, Any]] = {}
+
+    def retain_operation(result: Any, *, label: str) -> None:
+        if not isinstance(result, dict):
+            raise FullMatrixCampaignError(f"Full Matrix {label} result is missing")
+        relative = _relative_artifact(result.get("artifact_path"))
+        digest = str(result.get("artifact_sha256") or "")
+        size = result.get("artifact_size")
+        if (
+            SHA256.fullmatch(digest) is None
+            or type(size) is not int
+            or size <= 0
+            or result.get("evidence_hash") != digest
+        ):
+            raise FullMatrixCampaignError(f"Full Matrix {label} artifact record is invalid")
+        try:
+            measured_digest, measured_size = sha256_secure_file(
+                artifact_root / relative,
+                label=f"Full Matrix retained {label} artifact",
+            )
+        except Exception as exc:
+            raise FullMatrixCampaignError(
+                f"Full Matrix retained {label} artifact is missing or unsafe"
+            ) from exc
+        if measured_digest != digest or measured_size != size:
+            raise FullMatrixCampaignError(f"Full Matrix retained {label} artifact differs")
+        record = {"path": relative, "sha256": digest, "size": size, "operation": label}
+        previous = operation_artifacts.get(relative)
+        if previous is not None and previous != record:
+            raise FullMatrixCampaignError("Full Matrix operation artifact identity was reused")
+        operation_artifacts[relative] = record
+
     for record in records:
         if (
             record.get("schema") != "three-site-staging-full-matrix-journal-v1"
@@ -635,6 +854,24 @@ def _verify_execution_journal(
             raise FullMatrixCampaignError(
                 "Full Matrix execution journal time is outside campaign window"
             )
+        event = record.get("event")
+        if event == "campaign_started":
+            retain_operation(record.get("result"), label="preflight")
+        elif event == "scenario_recovered":
+            retain_operation(
+                record.get("result"),
+                label=(
+                    f"recovery:{record.get('iteration')}:"
+                    f"{record.get('phase')}:{record.get('scenario_id')}"
+                ),
+            )
+        elif event == "phase_passed":
+            retain_operation(
+                record.get("cleanup_result"),
+                label=f"cleanup:{record.get('iteration')}:{record.get('phase')}",
+            )
+        elif event == "campaign_finalized":
+            retain_operation(record.get("result"), label="finalization")
     if any(record.get("event") == "campaign_blocked" for record in records):
         raise FullMatrixCampaignError("Full Matrix execution journal is blocked")
     if sum(record.get("event") == "campaign_started" for record in records) != 1:
@@ -719,6 +956,10 @@ def _verify_execution_journal(
             "finalization_evidence_hash": finalization["finalization_evidence_hash"],
             "scenario_completion_count": len(scenario_hashes),
             "phase_completion_count": len(phase_hashes),
+            "operation_artifacts": [
+                operation_artifacts[path] for path in sorted(operation_artifacts)
+            ],
+            "operation_artifact_count": len(operation_artifacts),
         },
         completed_report_hash,
     )

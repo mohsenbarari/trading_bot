@@ -193,8 +193,8 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             "_get_or_create_market_notice_receipt",
             new=AsyncMock(return_value=receipt),
         ), patch(
-            "core.services.market_transition_service.configured_telegram_delivery_runtime",
-            return_value=queue_runtime,
+            "core.services.market_transition_service.configured_telegram_delivery_producer_mode",
+            return_value=queue_runtime.mode,
         ), patch.object(
             market_transition_service,
             "_send_market_channel_notice",

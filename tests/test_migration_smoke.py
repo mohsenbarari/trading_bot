@@ -38,7 +38,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['c431d2e3f5a6 (head)'])
+        self.assertEqual(heads, ['d542e3f4a6b7 (head)'])
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (
@@ -76,6 +76,12 @@ class MigrationSmokeTests(unittest.TestCase):
                 'trading_bot_dr_event_finalized()',
                 'trading_bot_enforce_writer_term()',
                 'trading_bot_require_same_transaction_dr_event()',
+            ),
+            'd542e3f4a6b7_harden_dr_event_integrity_and_role_boundaries.py': (
+                'trading_bot_cleanup_expired_replay_nonces(timestamptz, integer)',
+                'trading_bot_dr_event_integrity_valid(text)',
+                'trading_bot_require_same_transaction_dr_event()',
+                'trading_bot_reject_receiver_source_xid()',
             ),
         }
         for filename, functions in expected.items():

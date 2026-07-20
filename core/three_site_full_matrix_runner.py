@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 import re
-from typing import Any, Protocol
+import time
+from typing import Any, Callable, Protocol
 
 from core.dr_event_protocol import canonical_json_bytes
 from core.secure_file_io import (
@@ -34,6 +35,7 @@ from core.three_site_full_matrix_campaign import (
     verify_bound_artifacts,
     verify_campaign,
     verify_complete_matrix,
+    verify_scenario_evidence,
 )
 
 
@@ -106,6 +108,7 @@ def _validate_identity_result(
     identity: CampaignIdentity,
     fields: set[str],
     label: str,
+    artifact_root: Path,
 ) -> dict[str, Any]:
     if not isinstance(result, dict) or set(result) != fields:
         raise FullMatrixRunnerError(f"Full Matrix {label} fields are invalid")
@@ -113,18 +116,38 @@ def _validate_identity_result(
         raise FullMatrixRunnerError(f"Full Matrix {label} identity differs")
     if result.get("status") != "passed" or result.get("production_touched") is not False:
         raise FullMatrixRunnerError(f"Full Matrix {label} did not pass safely")
-    if SHA256.fullmatch(str(result.get("evidence_hash") or "")) is None:
+    if (
+        SHA256.fullmatch(str(result.get("evidence_hash") or "")) is None
+        or SHA256.fullmatch(str(result.get("artifact_sha256") or "")) is None
+        or type(result.get("artifact_size")) is not int
+        or result["artifact_size"] <= 0
+    ):
         raise FullMatrixRunnerError(f"Full Matrix {label} evidence hash is invalid")
-    return result
+    relative = _relative_artifact(result.get("artifact_path"))
+    digest, size = sha256_secure_file(
+        artifact_root / relative,
+        label=f"Full Matrix {label} retained artifact",
+    )
+    if (
+        digest != result["artifact_sha256"]
+        or size != result["artifact_size"]
+        or result["evidence_hash"] != digest
+    ):
+        raise FullMatrixRunnerError(f"Full Matrix {label} retained artifact differs")
+    return {**result, "artifact_path": relative}
 
 
-def _validate_preflight(result: Any, identity: CampaignIdentity) -> dict[str, Any]:
+def _validate_preflight(
+    result: Any, identity: CampaignIdentity, *, artifact_root: Path
+) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "production_touched", "evidence_hash",
+        "artifact_path", "artifact_sha256", "artifact_size",
     }
     return _validate_identity_result(
-        result, identity=identity, fields=fields, label="preflight"
+        result, identity=identity, fields=fields, label="preflight",
+        artifact_root=artifact_root,
     )
 
 
@@ -135,14 +158,17 @@ def _validate_recovery(
     phase: str,
     scenario_id: str,
     iteration: int,
+    artifact_root: Path,
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "phase", "scenario_id", "iteration",
         "residue_count", "production_touched", "evidence_hash",
+        "artifact_path", "artifact_sha256", "artifact_size",
     }
     value = _validate_identity_result(
-        result, identity=identity, fields=fields, label="interrupted recovery"
+        result, identity=identity, fields=fields, label="interrupted recovery",
+        artifact_root=artifact_root,
     )
     if (
         value["phase"] != phase
@@ -165,6 +191,7 @@ def _validate_scenario(
     scenario_id: str,
     iteration: int,
     artifact_root: Path,
+    controller_duration_seconds: float,
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
@@ -173,7 +200,8 @@ def _validate_scenario(
         "production_touched", "evidence_hash",
     }
     value = _validate_identity_result(
-        result, identity=identity, fields=fields, label="scenario"
+        result, identity=identity, fields=fields, label="scenario",
+        artifact_root=artifact_root,
     )
     relative = _relative_artifact(value["artifact_path"])
     if (
@@ -187,17 +215,44 @@ def _validate_scenario(
         or value["artifact_size"] <= 0
     ):
         raise FullMatrixRunnerError("Full Matrix scenario result is inconsistent")
-    digest, size = sha256_secure_file(
+    evidence = secure_json(
         artifact_root / relative,
-        label=f"Full Matrix {phase}/{scenario_id} artifact",
+        label=f"Full Matrix {phase}/{scenario_id} typed evidence",
     )
-    if digest != value["artifact_sha256"] or size != value["artifact_size"]:
-        raise FullMatrixRunnerError("Full Matrix scenario artifact differs from result")
-    if value["evidence_hash"] != digest:
+    verified = verify_scenario_evidence(
+        evidence,
+        campaign={
+            "campaign_id": identity.campaign_id,
+            "release_sha": identity.release_sha,
+            "activation_sha": identity.activation_sha,
+        },
+        campaign_hash=identity.campaign_hash,
+        phase=phase,
+        scenario_id=scenario_id,
+        iteration=iteration,
+        artifact_root=artifact_root,
+    )
+    if verified["assertion_count"] != value["assertion_count"]:
         raise FullMatrixRunnerError(
-            "Full Matrix scenario evidence hash is not its retained artifact hash"
+            "Full Matrix scenario assertion summary differs from typed evidence"
         )
-    return {**value, "artifact_path": relative}
+    if (
+        scenario_id == "twenty_four_hour_endurance_no_growth"
+        and controller_duration_seconds < 86400
+    ):
+        raise FullMatrixRunnerError(
+            "Full Matrix endurance scenario completed before 24 monotonic hours"
+        )
+    if verified["duration_seconds"] > controller_duration_seconds + 2:
+        raise FullMatrixRunnerError(
+            "Full Matrix scenario duration exceeds controller monotonic observation"
+        )
+    return {
+        **value,
+        "artifact_path": relative,
+        "duration_seconds": verified["duration_seconds"],
+        "raw_artifacts": verified["raw_artifacts"],
+    }
 
 
 def _validate_recorded_scenario(
@@ -214,12 +269,13 @@ def _validate_recorded_scenario(
         "activation_sha", "phase", "scenario_id", "iteration",
         "assertion_count", "artifact_path", "artifact_sha256", "artifact_size",
         "production_touched", "evidence_hash", "started_at", "finished_at",
+        "duration_seconds", "raw_artifacts",
     }:
         raise FullMatrixRunnerError("Full Matrix recorded scenario fields are invalid")
     base = {
         key: value
         for key, value in result.items()
-        if key not in {"started_at", "finished_at"}
+        if key not in {"started_at", "finished_at", "duration_seconds", "raw_artifacts"}
     }
     value = _validate_scenario(
         base,
@@ -228,6 +284,7 @@ def _validate_recorded_scenario(
         scenario_id=scenario_id,
         iteration=iteration,
         artifact_root=artifact_root,
+        controller_duration_seconds=float(result["duration_seconds"]),
     )
     try:
         started = datetime.fromisoformat(str(result["started_at"]).replace("Z", "+00:00"))
@@ -249,14 +306,17 @@ def _validate_cleanup(
     *,
     phase: str,
     iteration: int,
+    artifact_root: Path,
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "phase", "iteration", "residue_count",
         "production_touched", "evidence_hash",
+        "artifact_path", "artifact_sha256", "artifact_size",
     }
     value = _validate_identity_result(
-        result, identity=identity, fields=fields, label="phase cleanup"
+        result, identity=identity, fields=fields, label="phase cleanup",
+        artifact_root=artifact_root,
     )
     if (
         value["phase"] != phase
@@ -268,13 +328,17 @@ def _validate_cleanup(
     return value
 
 
-def _validate_finalize(result: Any, identity: CampaignIdentity) -> dict[str, Any]:
+def _validate_finalize(
+    result: Any, identity: CampaignIdentity, *, artifact_root: Path
+) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "residue_count", "production_touched", "evidence_hash",
+        "artifact_path", "artifact_sha256", "artifact_size",
     }
     value = _validate_identity_result(
-        result, identity=identity, fields=fields, label="finalization"
+        result, identity=identity, fields=fields, label="finalization",
+        artifact_root=artifact_root,
     )
     if type(value["residue_count"]) is not int or value["residue_count"] != 0:
         raise FullMatrixRunnerError("Full Matrix finalization left residue")
@@ -484,13 +548,37 @@ def _phase_documents(
                 "status": "passed",
                 "assertion_count": result["assertion_count"],
                 "evidence_hash": result["evidence_hash"],
+                "duration_seconds": result["duration_seconds"],
+                "artifact": {
+                    "path": result["artifact_path"],
+                    "sha256": result["artifact_sha256"],
+                    "size": result["artifact_size"],
+                },
             }
             for result in results
         ],
         "skip_count": 0,
         "production_touched": False,
         "artifacts": [
-            {"path": bundle_name, "sha256": bundle_hash, "size": len(bundle_bytes)}
+            {"path": bundle_name, "sha256": bundle_hash, "size": len(bundle_bytes)},
+            *[
+                {
+                    "path": result["artifact_path"],
+                    "sha256": result["artifact_sha256"],
+                    "size": result["artifact_size"],
+                }
+                for result in results
+            ],
+            *[
+                artifact
+                for result in results
+                for artifact in result["raw_artifacts"]
+            ],
+            {
+                "path": cleanup["artifact_path"],
+                "sha256": cleanup["artifact_sha256"],
+                "size": cleanup["artifact_size"],
+            },
         ],
         "cleanup_residue_count": 0 if phase == "cleanup_repeatability" else None,
     }
@@ -531,9 +619,11 @@ async def run_full_matrix_campaign(
     journal: Path,
     backend: FullMatrixExecutionBackend,
     now: datetime | None = None,
+    monotonic: Callable[[], float] | None = None,
 ) -> dict[str, Any]:
     """Execute or resume the one fixed campaign and return its final report."""
 
+    monotonic = monotonic or getattr(backend, "monotonic", time.monotonic)
     journal_exists = journal.exists() and journal.stat().st_size > 0
     approved = verify_campaign(
         campaign,
@@ -559,7 +649,9 @@ async def run_full_matrix_campaign(
             "completed Full Matrix campaign is immutable; use the evidence verifier"
         )
     if not records:
-        preflight = _validate_preflight(await backend.preflight(identity), identity)
+        preflight = _validate_preflight(
+            await backend.preflight(identity), identity, artifact_root=artifact_root
+        )
         _journal_event(journal, identity, event="campaign_started", result=preflight)
         records, completed = _journal_state(journal, identity)
         completed_phases = _completed_phase_hashes(records)
@@ -578,6 +670,7 @@ async def run_full_matrix_campaign(
             phase=phase,
             scenario_id=scenario_id,
             iteration=iteration,
+            artifact_root=artifact_root,
         )
         _journal_event(
             journal,
@@ -616,6 +709,7 @@ async def run_full_matrix_campaign(
                     identity,
                     phase=phase,
                     iteration=iteration,
+                    artifact_root=artifact_root,
                 )
                 cleanup_status = "passed"
             except Exception as exc:
@@ -706,6 +800,7 @@ async def run_full_matrix_campaign(
                         scenario_id=scenario_id,
                         iteration=iteration,
                     )
+                    monotonic_started = monotonic()
                     result = _validate_scenario(
                         await backend.execute_scenario(
                             identity,
@@ -718,6 +813,9 @@ async def run_full_matrix_campaign(
                         scenario_id=scenario_id,
                         iteration=iteration,
                         artifact_root=artifact_root,
+                        controller_duration_seconds=max(
+                            0.0, monotonic() - monotonic_started
+                        ),
                     )
                     result = {**result, "started_at": started_at, "finished_at": _now()}
                     if result["artifact_path"] in used_scenario_artifacts:
@@ -759,6 +857,7 @@ async def run_full_matrix_campaign(
                     identity,
                     phase=phase,
                     iteration=iteration,
+                    artifact_root=artifact_root,
                 )
                 evidence, evidence_hash = _phase_documents(
                     identity=identity,
@@ -777,18 +876,22 @@ async def run_full_matrix_campaign(
                     iteration=iteration,
                     evidence_hash=evidence_hash,
                     cleanup_evidence_hash=cleanup["evidence_hash"],
+                    cleanup_result=cleanup,
                 )
         fresh = verify_campaign(campaign, approver_policy=approver_policy, now=now)
         if fresh["campaign_hash"] != identity.campaign_hash:
             raise FullMatrixRunnerError(
                 "Full Matrix campaign identity changed before finalization"
             )
-        finalization = _validate_finalize(await backend.finalize(identity), identity)
+        finalization = _validate_finalize(
+            await backend.finalize(identity), identity, artifact_root=artifact_root
+        )
         _journal_event(
             journal,
             identity,
             event="campaign_finalized",
             finalization_evidence_hash=finalization["evidence_hash"],
+            result=finalization,
         )
         report = verify_complete_matrix(
             campaign=campaign,
@@ -823,6 +926,7 @@ async def run_full_matrix_campaign(
                     identity,
                     phase=active_phase,
                     iteration=active_iteration,
+                    artifact_root=artifact_root,
                 )
         except Exception as caught:  # cleanup failure must replace safe status
             cleanup_error = caught

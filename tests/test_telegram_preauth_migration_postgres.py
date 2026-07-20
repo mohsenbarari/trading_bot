@@ -1,12 +1,15 @@
 import unittest
+from uuid import uuid4
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
 
 
 PARENT_REVISION = "a163f4a5b7c8"
-HEAD_REVISION = "c431d2e3f5a6"
+ROUNDTRIP_REVISION = "a274f5a6b8c9"
+HEAD_REVISION = "d542e3f4a6b7"
 
 
 @unittest.skipUnless(
@@ -18,8 +21,33 @@ class TelegramPreAuthMigrationPostgresTests(unittest.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         sync_url, _ = DATABASE_URLS
-        cls.sync_url = sync_url
-        _run_alembic(sync_url, "upgrade", "head")
+        source = make_url(sync_url)
+        cls.database_name = (
+            "telegram_queue_stage3_preauth_" + uuid4().hex[:12] + "_test"
+        )
+        cls.admin_url = source.set(database="postgres").render_as_string(
+            hide_password=False
+        )
+        cls.admin_engine = create_engine(
+            cls.admin_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True
+        )
+        with cls.admin_engine.connect() as connection:
+            connection.exec_driver_sql(f'CREATE DATABASE "{cls.database_name}"')
+        cls.sync_url = source.set(database=cls.database_name).render_as_string(
+            hide_password=False
+        )
+        _run_alembic(cls.sync_url, "upgrade", ROUNDTRIP_REVISION)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            with cls.admin_engine.connect() as connection:
+                connection.exec_driver_sql(
+                    f'DROP DATABASE IF EXISTS "{cls.database_name}" WITH (FORCE)'
+                )
+        finally:
+            cls.admin_engine.dispose()
+            super().tearDownClass()
 
     def _engine(self):
         return create_engine(self.sync_url, pool_pre_ping=True)
@@ -62,7 +90,7 @@ class TelegramPreAuthMigrationPostgresTests(unittest.TestCase):
             with engine.begin() as connection:
                 self.assertEqual(
                     connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one(),
-                    HEAD_REVISION,
+                    ROUNDTRIP_REVISION,
                 )
                 self.assertEqual(
                     connection.execute(
@@ -100,13 +128,13 @@ class TelegramPreAuthMigrationPostgresTests(unittest.TestCase):
         finally:
             engine.dispose()
 
-        _run_alembic(self.sync_url, "upgrade", "head")
+        _run_alembic(self.sync_url, "upgrade", ROUNDTRIP_REVISION)
         engine = self._engine()
         try:
             with engine.connect() as connection:
                 self.assertEqual(
                     connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one(),
-                    HEAD_REVISION,
+                    ROUNDTRIP_REVISION,
                 )
                 values = set(
                     connection.execute(
@@ -119,6 +147,19 @@ class TelegramPreAuthMigrationPostgresTests(unittest.TestCase):
                 )
                 self.assertIn("preauth_interaction", values)
                 self.assertIn("preauth_interaction_edit", values)
+        finally:
+            engine.dispose()
+
+        _run_alembic(self.sync_url, "upgrade", "head")
+        with self.assertRaises(AssertionError):
+            _run_alembic(self.sync_url, "downgrade", ROUNDTRIP_REVISION)
+        engine = self._engine()
+        try:
+            with engine.connect() as connection:
+                self.assertEqual(
+                    connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one(),
+                    HEAD_REVISION,
+                )
         finally:
             engine.dispose()
 

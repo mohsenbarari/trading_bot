@@ -83,7 +83,7 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         or args.baseline_sha == args.activation_sha
         or not str(args.object_bucket).startswith("staging-")
         or type(args.repetitions) is not int
-        or not 2 <= args.repetitions <= 3
+        or args.repetitions != 2
         or type(args.valid_hours) is not int
         or not 1 <= args.valid_hours <= 72
     ):
@@ -220,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser.add_argument("--approver-policy", type=Path, required=True)
     prepare_parser.add_argument("--bound-artifact", action="append", default=[])
     prepare_parser.add_argument("--object-bucket", required=True)
-    prepare_parser.add_argument("--repetitions", type=int, choices=(2, 3), default=2)
+    prepare_parser.add_argument("--repetitions", type=int, choices=(2,), default=2)
     prepare_parser.add_argument("--valid-hours", type=int, choices=range(1, 73), default=72)
     prepare_parser.add_argument("--draft-output", type=Path, required=True)
     prepare_parser.add_argument("--approval-request-output", type=Path, required=True)

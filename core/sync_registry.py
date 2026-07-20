@@ -640,6 +640,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "never product-sync writer leases or local routing authority rows",
         "writer fencing and public-origin eligibility only",
     ),
+    "webapp_writer_activation_operations": _entry(
+        "webapp_writer_activation_operations",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_control_agent",),
+        "local WebApp writer control plane",
+        "operation-id-bound replay receipt; never replicate as business data",
+        "ambiguous Witness activation recovery only",
+    ),
     "webapp_writer_transitions": _entry(
         "webapp_writer_transitions",
         SyncPolicy.INTERNAL_BOOKKEEPING,

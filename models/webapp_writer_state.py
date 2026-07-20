@@ -82,6 +82,44 @@ class WebappWriterTransition(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class WebappWriterActivationOperation(Base):
+    """Replay receipt persisted before any remote target-term mutation."""
+
+    __tablename__ = "webapp_writer_activation_operations"
+    __table_args__ = (
+        CheckConstraint(
+            "target_site IN ('webapp_fi','webapp_ir')",
+            name="ck_webapp_writer_activation_site",
+        ),
+        CheckConstraint(
+            "target_epoch >= 2 AND predecessor_epoch = target_epoch - 1",
+            name="ck_webapp_writer_activation_epoch",
+        ),
+        CheckConstraint(
+            "state IN ('planned','witness_acquired','local_activated')",
+            name="ck_webapp_writer_activation_state",
+        ),
+        CheckConstraint(
+            "(state='planned' AND proof_json IS NULL AND proof_hash IS NULL) OR "
+            "(state<>'planned' AND proof_json IS NOT NULL AND proof_hash IS NOT NULL)",
+            name="ck_webapp_writer_activation_proof",
+        ),
+    )
+
+    operation_id = Column(String(36), primary_key=True)
+    status_request_id = Column(String(36), nullable=False)
+    acquire_request_id = Column(String(36), nullable=False, unique=True)
+    target_site = Column(String(16), nullable=False)
+    target_epoch = Column(BigInteger, nullable=False)
+    predecessor_epoch = Column(BigInteger, nullable=False)
+    predecessor_lease_id = Column(String(64), nullable=True)
+    state = Column(String(24), nullable=False, default="planned")
+    proof_json = Column(Text, nullable=True)
+    proof_hash = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class WebappWriterWitnessState(Base):
     __tablename__ = "webapp_writer_witness_state"
     __table_args__ = (

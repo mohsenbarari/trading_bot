@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.render_runtime_envs import build_runtime_env, collect_runtime_values, main as render_runtime_envs_main
+from scripts.render_runtime_envs import (
+    build_runtime_env,
+    build_service_runtime_env,
+    collect_runtime_values,
+    main as render_runtime_envs_main,
+)
 
 
 class RenderRuntimeEnvsTests(unittest.TestCase):
@@ -71,6 +76,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
             "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
+            "TELEGRAM_DELIVERY_PRODUCER_MODE": "queue-v1",
             "TELEGRAM_DELIVERY_EXECUTION_OWNER": "queue-v1",
             "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "true",
             "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "true",
@@ -158,11 +164,13 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
         self.assertEqual(iran["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
         self.assertEqual(foreign["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "queue-v1")
+        self.assertEqual(foreign["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
         self.assertEqual(
             foreign["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
             "editor-secret",
         )
         self.assertEqual(iran["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(iran["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
         self.assertEqual(
             iran["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"], ""
         )
@@ -216,6 +224,40 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
         self.assertNotIn("IRAN_OTP_DELIVERY_STATE_SECRET", foreign)
         self.assertNotIn("IRAN_OTP_DELIVERY_STATE_SECRET", iran)
+
+        foreign_api = build_service_runtime_env(
+            foreign, service="api", role="foreign"
+        )
+        foreign_bot = build_service_runtime_env(
+            foreign, service="bot", role="foreign"
+        )
+        self.assertEqual(foreign_api["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+        self.assertNotIn("BOT_TOKEN", foreign_api)
+        self.assertNotIn("TELEGRAM_DELIVERY_EXECUTION_OWNER", foreign_api)
+        self.assertNotIn("TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN", foreign_api)
+        self.assertEqual(foreign_bot["BOT_TOKEN"], "bot-token")
+        self.assertEqual(
+            foreign_bot["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
+            "editor-secret",
+        )
+        legacy_foreign = foreign.copy()
+        legacy_foreign["TELEGRAM_DELIVERY_PRODUCER_MODE"] = "legacy"
+        legacy_foreign["TELEGRAM_DELIVERY_EXECUTION_OWNER"] = "legacy"
+        legacy_api = build_service_runtime_env(
+            legacy_foreign, service="api", role="foreign"
+        )
+        self.assertEqual(legacy_api["BOT_TOKEN"], "bot-token")
+        self.assertNotIn("TELEGRAM_DELIVERY_EXECUTION_OWNER", legacy_api)
+        self.assertNotIn(
+            "BOT_TOKEN",
+            build_service_runtime_env(legacy_foreign, service="sync", role="foreign"),
+        )
+        legacy_iran = iran.copy()
+        legacy_iran["TELEGRAM_DELIVERY_PRODUCER_MODE"] = "legacy"
+        self.assertNotIn(
+            "BOT_TOKEN",
+            build_service_runtime_env(legacy_iran, service="api", role="iran"),
+        )
 
     def test_build_runtime_env_uses_iran_frontend_as_public_webapp_fallback(self):
         values = self.sample_values()
@@ -276,6 +318,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
             foreign_lines = foreign_path.read_text(encoding="utf-8").splitlines()
             iran_lines = iran_path.read_text(encoding="utf-8").splitlines()
+            foreign_api_lines = Path(f"{foreign_path}.api").read_text(encoding="utf-8").splitlines()
+            foreign_bot_lines = Path(f"{foreign_path}.bot").read_text(encoding="utf-8").splitlines()
+            iran_api_lines = Path(f"{iran_path}.api").read_text(encoding="utf-8").splitlines()
 
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
@@ -283,6 +328,13 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("PHYSICAL_SITE=bot_fi", foreign_lines)
             self.assertIn("LOGICAL_AUTHORITY=webapp", iran_lines)
             self.assertIn("PHYSICAL_SITE=webapp_fi", iran_lines)
+            self.assertIn("TELEGRAM_DELIVERY_PRODUCER_MODE=queue-v1", iran_api_lines)
+            self.assertNotIn("BOT_TOKEN=bot-token", foreign_api_lines)
+            self.assertNotIn(
+                "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN=editor-secret",
+                foreign_api_lines,
+            )
+            self.assertIn("BOT_TOKEN=bot-token", foreign_bot_lines)
             self.assertIn("API_WORKERS=2", foreign_lines)
             self.assertIn("API_WORKERS=4", iran_lines)
             self.assertIn("DB_POOL_SIZE=8", iran_lines)
@@ -360,6 +412,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values.pop("OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")
         for key in (
             "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+            "TELEGRAM_DELIVERY_PRODUCER_MODE",
             "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
             "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY",
             "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED",
@@ -400,6 +453,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["WEB_PUSH_TIMEOUT_SECONDS"], "5.0")
         self.assertEqual(collected["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "false")
         self.assertEqual(collected["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "legacy")
         self.assertEqual(
             collected["TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED"], "false"
         )
@@ -407,6 +461,26 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
         self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")
+
+    def test_collect_runtime_values_derives_new_producer_key_and_rejects_split_brain(self):
+        values = self.sample_values()
+        values.pop("TELEGRAM_DELIVERY_PRODUCER_MODE")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "runtime.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                collected = collect_runtime_values(str(source_path))
+            self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+
+            with patch.dict(
+                os.environ,
+                {"TELEGRAM_DELIVERY_PRODUCER_MODE": "legacy"},
+                clear=True,
+            ), self.assertRaisesRegex(SystemExit, "must match"):
+                collect_runtime_values(str(source_path))
 
 
 if __name__ == "__main__":

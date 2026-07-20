@@ -260,7 +260,7 @@ def verify_role_bundle(
         raise RoleBundleError("staging source root must be an absolute normalized path")
     if values.get("ORIGIN_EXPECTED_MIGRATION_REVISION") not in {
         None,
-        "c431d2e3f5a6",
+        "d542e3f4a6b7",
     }:
         raise RoleBundleError("role environment migration head is not the integration head")
     role_inventory = next(

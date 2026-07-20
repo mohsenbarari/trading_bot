@@ -3980,7 +3980,7 @@ does not authorize a `main` merge.
   previously recorded legacy service set. No official freeze or backup has yet
   been executed by this integration work.
 - Exact migration history equivalence is executable for empty, main-parent,
-  Queue-parent, and DR-parent paths through head `c431d2e3f5a6`; all four paths
+  Queue-parent, and DR-parent paths through head `d542e3f4a6b7`; all four paths
   produced the same effective role/fence/policy digest in scratch PostgreSQL.
 - A two-person-signed migration plan now binds the provisioned inventory, both
   frozen source identities, two independently restore-verified backups, all
@@ -4028,7 +4028,7 @@ and identity collisions, Queue and DR commit boundaries, partition and
 split-origin cases, failover/failback, certificate/DNS asymmetry, loss of each
 recovery role, Blob/database divergence, application regression, capacity/DPI,
 24-hour endurance, and cleanup/repeatability. Two-person campaign assembly,
-artifact re-hashing, exact scenario order, two-or-three repetitions,
+artifact re-hashing, exact scenario order, exactly two repetitions,
 hash-chained restart state, zero-residue interrupted recovery, terminal failure,
 and final no-skips verification have focused source tests. The same-key-under-
 two-identities loophole is also rejected for inventory, migration, failover,
@@ -4055,3 +4055,138 @@ partial evidence. Live host firewall/TLS/Arvan behavior, initial convergence,
 migration rollback, and the complete repeated Full Matrix must then be proven
 on the official three-site staging environment. No current result authorizes
 that migration, live Matrix execution, or a merge to `main`.
+
+## 53. Pre-Gate-D Re-Review Remediation - 2026-07-20
+
+This section records the disposition of the Claude, Gemini, ChatGPT Ultra, and
+ChatGPT Pro reviews of candidate `e8b17ada`. It describes source remediation
+only. No production/staging host, Arvan route, DNS/CDN record, provider, or
+live database was changed, and merge to `main` remains forbidden.
+
+### 53.1 Accepted source defects and remediation
+
+1. Telegram producers and provider executors are now separate concepts.
+   Tokenless Bot-FI/WebApp APIs receive only `TELEGRAM_DELIVERY_PRODUCER_MODE`
+   and cannot claim, classify, or call Telegram. Only the Bot-FI Bot process
+   receives executor controls and provider/editor credentials in Queue mode.
+   The legacy two-server foreign API retains its primary token only while the
+   explicit compatibility mode remains `legacy`. Direct-send, claim, and lease
+   boundaries also fail closed under the three-site provider-authority guard.
+   Relevant files: `core/config.py`,
+   `core/telegram_delivery_runtime_policy.py`, `api/routers/offers.py`,
+   `api/routers/trades.py`, `api/routers/users.py`, `core/services/*telegram*`,
+   `core/utils.py`, `scripts/render_runtime_envs.py`, both production Compose
+   files, the three-site staging Compose, and their tests.
+2. Database event coverage no longer accepts shape-only hash strings. Additive
+   forward-only migration `d542e3f4a6b7` installs database-side canonical JSON,
+   payload, transaction, destination-stream, and complete-envelope hash
+   verification. A deferred authoritative-write trigger accepts only an event
+   whose database-derived row image and complete integrity chain match.
+3. Receiver roles now have an exact column-level `dr_events` INSERT grant that
+   excludes source-local `source_xid`; a fail-closed trigger supplies defense
+   in depth. Projectors clean replay nonces only through a role-bound
+   `SECURITY DEFINER` function, rather than receiving broad UPDATE authority.
+   Real-role positive/negative tests cover omitted versus explicit
+   `source_xid`, wrong event hashes, bounded nonce cleanup, and continued
+   projection authority.
+4. The effective migration fingerprint now covers columns/defaults,
+   constraints, indexes, sequences/ownership/ACLs, trigger state, functions
+   including owner/security/ACL, role attributes/memberships, schema ACL, and
+   table/column grants. Fresh, main-parent, Queue-parent, and DR-parent scratch
+   PostgreSQL histories all reached sole head `d542e3f4a6b7` with the same
+   digest `af86a9f8dcb51950f1a2b4a794d46628c8bc908d4fc6d02f960472f0e93aacbe`.
+   The pre-auth round-trip now runs below the forward-only head and separately
+   proves that downgrade from the security head is rejected.
+5. Source fencing now stops public mutators, terminates and observes zero
+   application-role sessions, and only then captures the destination-specific
+   final source tail. Promotion evidence must explicitly prove that the
+   boundary was captured after drain. Every potentially remote saga step has a
+   durable `step_started` intent before invocation; an unmatched intent is
+   treated as ambiguous and forces typed safe-fenced recovery rather than
+   forward replay or `expired_without_mutation`.
+6. Target Writer-term acquisition is replay-safe across Witness response loss
+   and local-activation response loss. A new local, non-replicated operation
+   receipt stores exact request/predecessor/proof identity before and after the
+   remote transition and reconciles an already-active identical local term
+   without acquiring another epoch. Migration, model, registry, role grants,
+   client logic, and crash-boundary tests were updated together.
+7. The unsupported fast `source_restored` rollback and fake-only bounded-loss
+   source-unavailable promotion are no longer advertised as executable. The
+   current concrete contract is zero-loss plus `safe_fenced`; restoring either
+   site requires a new signed operation. A future source-unavailable/RPO path
+   needs its own signed design, independent fencing proof, bounded-loss oracle,
+   and live validation before it can be reintroduced.
+8. Migration acceptance uses tracked collectors that directly inspect Arvan
+   routing, database revision/identity, per-container image/running/health/
+   restart/release identity, direct-origin HTTP, Queue pre-cutover ownership,
+   and referenced checkpoint/database/Blob artifacts. The coordinator reopens
+   and hashes referenced files. Role startup waits for the exact release to
+   remain ready instead of recording success immediately after Compose start.
+9. The Full Matrix controller now requires typed per-scenario evidence,
+   scenario-specific oracle identity, all raw evidence references, unique
+   retained scenario/operation artifacts, zero cleanup residue, and an
+   independently re-openable preflight/recovery/cleanup/finalization manifest.
+   Exactly two repetitions are required. The 24-hour endurance assertion is
+   enforced by both evidence timestamps and the controller's own monotonic
+   clock. Deleted, replaced, reused, forged, or instant-duration evidence fails.
+   A hash-pinned, shell-free command backend and official execute/verify CLI
+   exist, and the CLI rejects a backend configuration that is not the exact
+   campaign-bound artifact.
+10. The Queue PostgreSQL fixture reset now uses scratch-owner maintenance
+    outside the strict application Session, so the 76-test strict-DR Queue
+    suite exercises application behavior instead of failing in setup. The
+    legacy/Queue bridge assertions and the Bot database-role startup test were
+    corrected and expanded. The Telegram call-site inventory was re-audited
+    with zero unclassified provider calls.
+
+### 53.2 Findings not accepted as code defects
+
+- Claude `IT-06/BB-02` was a reviewer error. The unchanged
+  `render_writer_witness_credentials.py` already calls its isolated-runtime
+  and strict environment allowlist at the first line of `main`; changing it
+  would weaken or duplicate an existing control.
+- Claude `IT-05` correctly identifies an owner/product decision, not a hidden
+  regression: authenticated WebApp reads intentionally do not write
+  `last_seen_at`. The value changes only through the versioned domain-sync
+  merge. Explicit product-owner acceptance remains required before `main`.
+- Ultra `GATE-005` is not a defect. Production host/domain/bucket exclusion is
+  an intentional Gate-D safety boundary; testing remains limited to the
+  isolated `gold-trading.ir` staging domain until separately authorized.
+- Gemini's final `GO` and claims that `e8b17ada` changed one file and already
+  represented an isolated Queue activation were rejected as factually
+  incorrect. That candidate changed many files, and hermetic unit results are
+  not live migration or Full Matrix evidence. Gemini's individual inherited
+  findings remain covered by the accepted/rejected dispositions in this
+  section; its verdict is not acceptance evidence.
+
+### 53.3 Deliberately open operational gates
+
+The following are not represented as closed by source code:
+
+1. The role migration, freeze/backup/restore, host identity, TLS/firewall,
+   provider read, rollback, and cross-role coordination doers still require an
+   owner-authorized disposable rehearsal and then execution on the official
+   migrated staging topology. Scratch PostgreSQL history tests do not replace
+   that rehearsal.
+2. The command backend is a closed execution boundary, not the live scenario
+   implementation. A reviewed driver implementing every catalog scenario must
+   be committed while Queue readiness is disabled, hash-bound unchanged into
+   the activation campaign, and exercised on the dedicated staging hosts.
+3. Initial event/database/Blob convergence, route hold, persistent
+   FI1 -> IR2 -> FI3, source-unavailable policy (if later approved), provider
+   ambiguity, 300-rps load, 24-hour endurance, rollback, cleanup, and the
+   combined Queue+DR Full Matrix remain live Gate-D evidence requirements.
+4. No official staging migration, Queue ownership cutover, or Full Matrix run
+   is authorized merely by these source changes or their unit/scratch-database
+   tests.
+
+### 53.4 Queue activation lineage
+
+The remediation baseline retains
+`TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = False`. After all source and
+test changes are committed, the activation candidate must be its direct child
+and change only that one line to `True` in
+`core/telegram_delivery_runtime_policy.py`. The repository transition verifier
+must pass against those real immutable SHAs. No source, test, or documentation
+edit is permitted in the activation commit, and the activation still does not
+authorize staging or production use.

@@ -13,8 +13,10 @@ from core.dr_event_protocol import canonical_json_bytes
 from core.secure_file_io import append_hash_chained_jsonl, verify_hash_chained_jsonl
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
+    FullMatrixCampaignError,
     PHASES,
     PHASE_SCENARIOS,
+    SCENARIO_EVIDENCE_SCHEMA,
     verify_complete_matrix,
 )
 from core.three_site_full_matrix_runner import (
@@ -46,6 +48,10 @@ class FakeBackend:
         self.executed: list[tuple[int, str, str]] = []
         self.recovered: list[tuple[int, str, str]] = []
         self.cleanups: list[tuple[int, str, bool]] = []
+        self.elapsed = 0.0
+
+    def monotonic(self) -> float:
+        return self.elapsed
 
     @staticmethod
     def _identity(identity: CampaignIdentity) -> dict:
@@ -55,9 +61,28 @@ class FakeBackend:
             "production_touched": False,
         }
 
+    def _operation_artifact(self, name: str, payload: dict) -> dict:
+        relative = f"operation-{name}.json"
+        body = canonical_json_bytes(payload) + b"\n"
+        path = self.root / relative
+        if path.exists() and path.read_bytes() != body:
+            raise AssertionError("operation artifact changed on replay")
+        path.write_bytes(body)
+        path.chmod(0o600)
+        digest = hashlib.sha256(body).hexdigest()
+        return {
+            "artifact_path": relative,
+            "artifact_sha256": digest,
+            "artifact_size": len(body),
+            "evidence_hash": digest,
+        }
+
     async def preflight(self, identity: CampaignIdentity) -> dict:
         self.preflight_calls += 1
-        return {**self._identity(identity), "evidence_hash": _hash("preflight")}
+        return {
+            **self._identity(identity),
+            **self._operation_artifact("preflight", {"operation": "preflight"}),
+        }
 
     async def recover_interrupted(
         self,
@@ -69,13 +94,19 @@ class FakeBackend:
     ) -> dict:
         key = (iteration, phase, scenario_id)
         self.recovered.append(key)
-        return {
+        value = {
             **self._identity(identity),
             "phase": phase,
             "scenario_id": scenario_id,
             "iteration": iteration,
             "residue_count": 0,
-            "evidence_hash": _hash(f"recover:{key}"),
+        }
+        return {
+            **value,
+            **self._operation_artifact(
+                f"recover-{iteration:02d}-{phase}-{scenario_id}",
+                {"operation": "recover", "key": key, "residue_count": 0},
+            ),
         }
 
     async def execute_scenario(
@@ -91,8 +122,58 @@ class FakeBackend:
         if self.crash_key == key and not self.crashed:
             self.crashed = True
             raise KeyboardInterrupt("simulated controller death")
+        duration = 86400 if scenario_id == "twenty_four_hour_endurance_no_growth" else 1
+        started_at = datetime.now(timezone.utc)
+        self.elapsed += duration
+        raw_name = f"raw-{iteration:02d}-{phase}-{scenario_id}.json"
+        raw_payload = canonical_json_bytes({"key": key, "observed": True}) + b"\n"
+        raw_path = self.root / raw_name
+        raw_path.write_bytes(raw_payload)
+        raw_path.chmod(0o600)
+        raw_record = {
+            "path": raw_name,
+            "sha256": hashlib.sha256(raw_payload).hexdigest(),
+            "size": len(raw_payload),
+        }
+        names = [
+            "operation_executed", "expected_outcome", "production_boundary",
+            f"oracle:{scenario_id}",
+        ]
+        if duration == 86400:
+            names.append("minimum_duration")
+        assertions = [
+            {
+                "name": assertion,
+                "status": "passed",
+                "expected": 86400 if assertion == "minimum_duration" else (
+                    False if assertion == "production_boundary" else True
+                ),
+                "observed": duration if assertion == "minimum_duration" else (
+                    False if assertion == "production_boundary" else True
+                ),
+                "evidence_refs": [raw_name],
+            }
+            for assertion in names
+        ]
         name = f"scenario-{iteration:02d}-{phase}-{scenario_id}.json"
-        payload = canonical_json_bytes({"key": key, "oracle": True}) + b"\n"
+        payload = canonical_json_bytes(
+            {
+                "schema": SCENARIO_EVIDENCE_SCHEMA,
+                "status": "passed" if self.fail_key != key else "failed",
+                **_identity_fields(identity),
+                "phase": phase,
+                "scenario_id": scenario_id,
+                "iteration": iteration,
+                "oracle_id": f"{phase}.{scenario_id}.v1",
+                "started_at": started_at.isoformat(),
+                "finished_at": (started_at + timedelta(seconds=duration)).isoformat(),
+                "duration_seconds": duration,
+                "assertions": assertions,
+                "evidence_refs": [raw_record],
+                "cleanup_residue_count": 0,
+                "production_touched": False,
+            }
+        ) + b"\n"
         path = self.root / name
         path.write_bytes(payload)
         path.chmod(0o600)
@@ -102,7 +183,7 @@ class FakeBackend:
             "phase": phase,
             "scenario_id": scenario_id,
             "iteration": iteration,
-            "assertion_count": 3,
+            "assertion_count": len(assertions),
             "artifact_path": name,
             "artifact_sha256": hashlib.sha256(payload).hexdigest(),
             "artifact_size": len(payload),
@@ -118,19 +199,36 @@ class FakeBackend:
         failed: bool,
     ) -> dict:
         self.cleanups.append((iteration, phase, failed))
-        return {
+        value = {
             **self._identity(identity),
             "phase": phase,
             "iteration": iteration,
             "residue_count": 0,
-            "evidence_hash": _hash(f"cleanup:{iteration}:{phase}:{failed}"),
+        }
+        return {
+            **value,
+            **self._operation_artifact(
+                f"cleanup-{iteration:02d}-{phase}-{'failed' if failed else 'passed'}",
+                {
+                    "operation": "cleanup",
+                    "iteration": iteration,
+                    "phase": phase,
+                    "failed": failed,
+                    "residue_count": 0,
+                },
+            ),
         }
 
     async def finalize(self, identity: CampaignIdentity) -> dict:
-        return {
+        value = {
             **self._identity(identity),
             "residue_count": 0,
-            "evidence_hash": _hash("finalize"),
+        }
+        return {
+            **value,
+            **self._operation_artifact(
+                "finalize", {"operation": "finalize", "residue_count": 0}
+            ),
         }
 
 
@@ -205,6 +303,101 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 now=now + timedelta(days=30),
             )
             self.assertEqual(retained_audit["report_hash"], report["report_hash"])
+
+            (root / "operation-preflight.json").unlink()
+            with self.assertRaisesRegex(
+                FullMatrixCampaignError, "retained preflight artifact"
+            ):
+                verify_complete_matrix(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    phase_evidence=retained,
+                    artifact_root=root,
+                    execution_journal=journal,
+                    now=now + timedelta(days=30),
+                )
+
+    async def test_endurance_claim_requires_controller_monotonic_duration(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            with self.assertRaisesRegex(
+                FullMatrixRunnerError, "before 24 monotonic hours"
+            ):
+                await run_full_matrix_campaign(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    artifact_root=root,
+                    journal=journal,
+                    backend=FakeBackend(root),
+                    now=now + timedelta(minutes=1),
+                    monotonic=lambda: 0.0,
+                )
+
+    async def test_operation_artifact_reuse_is_rejected_by_standalone_verifier(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            backend = FakeBackend(root)
+            report = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=backend,
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(report["status"], "passed")
+            records = verify_hash_chained_jsonl(journal, label="test journal")
+            preflight = next(
+                row for row in records if row["event"] == "campaign_started"
+            )["result"]
+            finalized = next(
+                row for row in records if row["event"] == "campaign_finalized"
+            )
+            final_path = root / finalized["result"]["artifact_path"]
+            preflight_path = root / preflight["artifact_path"]
+            final_path.write_bytes(preflight_path.read_bytes())
+            final_path.chmod(0o600)
+            finalized["result"].update(
+                artifact_path=preflight["artifact_path"],
+                artifact_sha256=preflight["artifact_sha256"],
+                artifact_size=preflight["artifact_size"],
+                evidence_hash=preflight["evidence_hash"],
+            )
+            # Rebuild the hash chain to model a fully re-signed journal forgery;
+            # the semantic verifier must still reject artifact reuse.
+            forged = root / "forged-journal.jsonl"
+            for row in records[:-1]:
+                append_hash_chained_jsonl(
+                    forged,
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key not in {"previous_hash", "event_hash"}
+                    },
+                )
+            retained = [
+                json.loads(
+                    (
+                        root
+                        / f"{campaign['campaign_id']}-i{iteration:02d}-{phase}-evidence.json"
+                    ).read_text()
+                )
+                for iteration in range(1, campaign["repetitions"] + 1)
+                for phase in PHASES
+            ]
+            with self.assertRaisesRegex(FullMatrixCampaignError, "reused"):
+                verify_complete_matrix(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    phase_evidence=retained,
+                    artifact_root=root,
+                    execution_journal=forged,
+                    now=now + timedelta(days=30),
+                )
 
     async def test_scenario_failure_cleans_and_permanently_blocks_campaign(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()

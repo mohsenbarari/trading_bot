@@ -14,16 +14,24 @@ from core.dr_projection_worker import cleanup_expired_replay_nonces
 
 
 PROJECTION_URL_ENV = "THREE_SITE_FENCING_TEST_PROJECTION_URL"
+RECEIVER_URL_ENV = "THREE_SITE_FENCING_TEST_RECEIVER_URL"
+OWNER_URL_ENV = "THREE_SITE_FENCING_TEST_OWNER_URL"
 
 
 @unittest.skipUnless(
-    os.environ.get(PROJECTION_URL_ENV),
+    os.environ.get(PROJECTION_URL_ENV)
+    and os.environ.get(RECEIVER_URL_ENV)
+    and os.environ.get(OWNER_URL_ENV),
     "scratch three-site projection URL is not configured",
 )
 class DrNonceRetentionPostgresTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.engine = create_engine(os.environ[PROJECTION_URL_ENV], pool_pre_ping=True)
+        cls.receiver_engine = create_engine(
+            os.environ[RECEIVER_URL_ENV], pool_pre_ping=True
+        )
+        cls.owner_engine = create_engine(os.environ[OWNER_URL_ENV], pool_pre_ping=True)
         with cls.engine.connect() as connection:
             database_name = str(connection.scalar(text("SELECT current_database()")))
             if not database_name.startswith("stage4_registration_"):
@@ -32,17 +40,25 @@ class DrNonceRetentionPostgresTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.engine.dispose()
+        cls.receiver_engine.dispose()
+        cls.owner_engine.dispose()
 
     def test_cleanup_is_indexed_bounded_and_preserves_replay_window(self) -> None:
         key_id = "retention-" + uuid4().hex[:24]
         old_nonce = uuid4().hex
         recent_nonce = uuid4().hex
         now = datetime.now(timezone.utc)
-        with self.engine.begin() as connection:
+        with self.receiver_engine.begin() as connection:
             connection.execute(
                 text(
                     "SELECT set_config('trading_bot.mutation_capability', "
                     "'projection', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "SELECT set_config('trading_bot.projection_scope', "
+                    "'receiver', true)"
                 )
             )
             connection.execute(
@@ -64,7 +80,7 @@ class DrNonceRetentionPostgresTests(unittest.TestCase):
 
         deleted = asyncio.run(cleanup_expired_replay_nonces(now=now))
 
-        with self.engine.connect() as connection:
+        with self.owner_engine.connect() as connection:
             remaining = set(
                 connection.execute(
                     text(

@@ -173,6 +173,32 @@ def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[s
     _run([*_compose(args), "stop", "--timeout", "30", *ROLE_PUBLIC[args.role]], timeout=180)
     if any(_run([*_compose(args), "ps", "--status", "running", "-q", service]) for service in ROLE_PUBLIC[args.role]):
         raise StagingSiteOperationError("source public mutation service remained running")
+    # Stopping containers does not prove that an already-open transaction has
+    # ended.  Terminate every application-role backend, prove the count is
+    # zero, and only then certify the immutable source tail.  Because all
+    # public mutators are already stopped, no new application connection can
+    # appear between this drain and the boundary query.
+    app_user = ROLE_DB[args.role][3]
+    _psql(
+        args,
+        env,
+        "SELECT count(*) FROM pg_terminate_backend(pid) "
+        "WHERE usename = '" + app_user + "' AND pid <> pg_backend_pid()",
+    )
+    deadline = time.monotonic() + 30.0
+    while True:
+        active_raw = _psql(
+            args,
+            env,
+            "SELECT count(*) FROM pg_stat_activity WHERE usename = '" + app_user + "'",
+        )
+        if active_raw.isdigit() and int(active_raw) == 0:
+            break
+        if time.monotonic() >= deadline:
+            raise StagingSiteOperationError(
+                "source application connections did not drain before tail capture"
+            )
+        time.sleep(0.25)
     destination = plan.target_site
     raw_tail = _psql(
         args,
@@ -224,7 +250,9 @@ def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[s
         {
             "status": "ok", "operation_id": plan.operation_id,
             "source_site": plan.source_site, "fenced": True,
-            "fence_mode": "all-public-mutators-stopped-live-witness-retained",
+            "active_connections": 0,
+            "boundary_captured_after_drain": True,
+            "fence_mode": "public-mutators-stopped-app-sessions-terminated-tail-captured",
             "source_tail_boundary": boundary,
         }
     )

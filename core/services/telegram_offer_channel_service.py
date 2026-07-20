@@ -13,7 +13,7 @@ from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
-    configured_telegram_delivery_runtime,
+    configured_telegram_delivery_producer_mode,
 )
 from core.services.trade_service import get_available_trade_amounts
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
@@ -282,7 +282,7 @@ async def apply_offer_channel_state_with_result(
     if current_server() != SERVER_FOREIGN:
         return OfferChannelStateApplyResult(ok=False, response_class="skipped", reason="non_foreign_server")
     if (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         # The Offer mutation is already durable. The Offer edit feeder owns the

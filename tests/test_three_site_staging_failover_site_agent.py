@@ -85,6 +85,10 @@ class ThreeSiteStagingFailoverSiteAgentTests(unittest.TestCase):
 
         def psql(_args, _env, sql):
             queries.append(sql)
+            if "pg_stat_activity" in sql:
+                return "0"
+            if "pg_terminate_backend" in sql:
+                return "0"
             return "7|" + "c" * 64
 
         with (
@@ -111,7 +115,11 @@ class ThreeSiteStagingFailoverSiteAgentTests(unittest.TestCase):
         self.assertEqual(result["source_tail_boundary"]["final_sequence"], 7)
         self.assertIn("webapp_fi_api", calls[0])
         self.assertIn("webapp_fi_effects", calls[0])
-        self.assertIn("destination_streams -> 'webapp_ir'", queries[0])
+        self.assertTrue(result["boundary_captured_after_drain"])
+        self.assertEqual(result["active_connections"], 0)
+        self.assertTrue(
+            any("destination_streams -> 'webapp_ir'" in query for query in queries)
+        )
 
     def test_source_drain_fails_if_application_connection_remains(self):
         args = SimpleNamespace(role="webapp_fi")

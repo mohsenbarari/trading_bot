@@ -131,7 +131,7 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "9ae5411a2bbb5d3805ccb41ba66f5c380b5eac958b2f9d984b047e53c9a2e836"
+    "5086e0cb47bc7c34a0c22e43e3df40b4e535c68b89e5e0f2178f0e823154dc11"
 )
 
 
@@ -368,6 +368,7 @@ def _queue_mode_condition_polarity(
     runtime_base = runtime_side.removesuffix(".mode")
     if not (
         "configured_telegram_delivery_runtime" in runtime_side
+        or "configured_telegram_delivery_producer_mode" in runtime_side
         or aliases.get(runtime_base) == _RUNTIME_OBJECT_ALIAS
         or aliases.get(runtime_side) in {-1, 1}
     ):
@@ -425,8 +426,14 @@ def _function_mode_aliases(
                 if rendered in {
                     "configured_telegram_delivery_runtime()",
                     "configured_telegram_delivery_runtime",
+                    "configured_telegram_delivery_producer_mode()",
+                    "configured_telegram_delivery_producer_mode",
                 }:
-                    polarity = _RUNTIME_OBJECT_ALIAS
+                    polarity = (
+                        1
+                        if "producer_mode" in rendered
+                        else _RUNTIME_OBJECT_ALIAS
+                    )
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
                 if isinstance(target, ast.Name) and polarity:

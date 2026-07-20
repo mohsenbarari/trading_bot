@@ -193,24 +193,14 @@ def parse_plan(payload: Any) -> FailoverPlan:
     reason = rpo_policy["approval_reason"]
     ticket = rpo_policy["approval_ticket"]
     if (
-        rpo_mode not in {"zero_loss", "bounded_loss"}
+        rpo_mode != "zero_loss"
         or type(max_unreplicated) is not int
         or max_unreplicated < 0
         or max_unreplicated > 1_000_000
     ):
         raise DrOrchestrationError("RPO policy is invalid")
-    if rpo_mode == "zero_loss":
-        if max_unreplicated != 0 or reason is not None or ticket is not None:
-            raise DrOrchestrationError("zero-loss RPO policy cannot authorize residual loss")
-    elif (
-        not isinstance(reason, str)
-        or not reason.strip()
-        or len(reason.strip()) > 500
-        or not isinstance(ticket, str)
-        or not ticket.strip()
-        or len(ticket.strip()) > 128
-    ):
-        raise DrOrchestrationError("bounded-loss RPO policy lacks explicit approval evidence")
+    if max_unreplicated != 0 or reason is not None or ticket is not None:
+        raise DrOrchestrationError("zero-loss RPO policy cannot authorize residual loss")
     readiness_hash = str(payload["readiness_hash"])
     if not re.fullmatch(r"[0-9a-f]{64}", readiness_hash):
         raise DrOrchestrationError("readiness evidence hash is malformed")
@@ -396,12 +386,6 @@ def _validate_source_tail_boundary(
     if mode == "proven":
         if estimated != 0:
             raise DrOrchestrationError("proven source tail cannot report residual loss")
-    elif mode == "approved_rpo_exception":
-        if (
-            plan.rpo_policy["mode"] != "bounded_loss"
-            or estimated > int(plan.rpo_policy["max_unreplicated_events"])
-        ):
-            raise DrOrchestrationError("source tail loss exceeds the approved RPO policy")
     else:
         raise DrOrchestrationError("source tail boundary mode is invalid")
     return dict(value)
@@ -432,7 +416,12 @@ def _validate_step_result(
             "classification step is not bound to fresh signed approved evidence"
         )
     if step == "source_fenced":
-        if result.get("source_site") != plan.source_site or result.get("fenced") is not True:
+        if (
+            result.get("source_site") != plan.source_site
+            or result.get("fenced") is not True
+            or result.get("active_connections") != 0
+            or result.get("boundary_captured_after_drain") is not True
+        ):
             raise DrOrchestrationError("source fencing evidence does not match the approved source")
         _validate_source_tail_boundary(result.get("source_tail_boundary"), plan=plan)
     if step == "target_ready":
@@ -499,30 +488,7 @@ def _validate_rollback_result(
     witness_request_id = str(result.get("witness_request_id") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", witness_receipt_hash) or not witness_request_id:
         raise DrOrchestrationError("orchestration rollback lacks a durable Witness receipt")
-    if rollback_state == "source_restored":
-        try:
-            failed_step_index = STEPS.index(failed_step)
-        except ValueError:
-            # An incomplete local journal cannot prove that the target term was
-            # never acquired.  Treat unknown as the unsafe, post-acquisition case.
-            failed_step_index = STEPS.index("target_term_acquired")
-        target_term_may_have_been_acquired = (
-            "target_term_acquired" in completed_steps
-            or failed_step_index >= STEPS.index("target_term_acquired")
-        )
-        required_epoch = (
-            plan.target_epoch + 1 if target_term_may_have_been_acquired else plan.expected_epoch
-        )
-        if (
-            result.get("holder_site") != plan.source_site
-            or type(result.get("writer_epoch")) is not int
-            or result["writer_epoch"] != required_epoch
-            or result.get("origin_ip") != plan.expected_current_ip
-            or result.get("domain") != plan.domain
-            or result.get("record") != plan.record
-        ):
-            raise DrOrchestrationError("source-restored rollback evidence is inconsistent")
-    elif rollback_state == "safe_fenced":
+    if rollback_state == "safe_fenced":
         if (
             result.get("witness_lease_live") is not False
             or result.get("holder_site") not in {None, plan.source_site, plan.target_site}
@@ -532,7 +498,9 @@ def _validate_rollback_result(
         ):
             raise DrOrchestrationError("safe-fenced rollback evidence is inconsistent")
     else:
-        raise DrOrchestrationError("orchestration rollback state is invalid")
+        raise DrOrchestrationError(
+            "orchestration rollback must remain safe-fenced; restoration requires a new signed plan"
+        )
     return result
 
 
@@ -649,16 +617,24 @@ async def _finish_expired_operation(
     ledger: OperationLedger,
     journal_path: Path,
     completed: set[str],
+    started: set[str] | None = None,
 ) -> dict[str, Any]:
     """Stop an expired saga without permitting another forward mutation."""
     completed_steps = tuple(step for step in STEPS[:-1] if step in completed)
-    mutating_steps = set(completed_steps) - {"classification_verified"}
+    ambiguous_started = set(started or ()) - set(completed)
+    mutating_steps = (
+        set(completed_steps) | ambiguous_started
+    ) - {"classification_verified"}
     if mutating_steps:
         result = await _rollback_after_failure(
             plan,
             adapter=adapter,
             journal_path=journal_path,
-            failed_step="expired_plan",
+            failed_step=(
+                "ambiguous:" + sorted(ambiguous_started)[-1]
+                if ambiguous_started
+                else "expired_plan"
+            ),
             completed_steps=completed_steps,
         )
         evidence_hash = str(result["evidence_hash"])
@@ -749,6 +725,20 @@ async def run_orchestration(
         for record in operation_records
         if record.get("event") == "dr.orchestration.step_completed"
     }
+    started = {
+        str(record.get("step"))
+        for record in operation_records
+        if record.get("event") == "dr.orchestration.step_started"
+    }
+    ambiguous_started = {
+        step
+        for step in started - completed
+        if not any(
+            record.get("event") == "dr.orchestration.step_failed"
+            and record.get("step") == step
+            for record in operation_records
+        )
+    }
     source_tail_boundary: dict[str, Any] | None = None
     source_boundary_records = [
         record
@@ -798,6 +788,7 @@ async def run_orchestration(
             ledger=ledger,
             journal_path=journal_path,
             completed=completed,
+            started=started,
         )
     failed_records = [
         record
@@ -811,6 +802,36 @@ async def run_orchestration(
         }
         for record in operation_records
     )
+    if ambiguous_started:
+        # A durable intent without a terminal step record means the remote
+        # mutation may have committed while its response was lost.  Never
+        # replay forward or call it "not started"; converge to the typed safe
+        # rollback contract first.
+        failed_step = "ambiguous:" + sorted(
+            ambiguous_started,
+            key=lambda item: STEPS.index(item),
+        )[-1]
+        completed_steps = tuple(step for step in STEPS[:-1] if step in completed)
+        result = await _rollback_after_failure(
+            plan,
+            adapter=adapter,
+            journal_path=journal_path,
+            failed_step=failed_step,
+            completed_steps=completed_steps,
+        )
+        await _finalize_ledger(
+            ledger,
+            plan,
+            outcome="rolled_back",
+            evidence_hash=result["evidence_hash"],
+        )
+        return {
+            "status": "rolled_back",
+            "operation_id": plan.operation_id,
+            "plan_hash": plan.plan_hash,
+            "rollback_state": result["rollback_state"],
+            "reason": "ambiguous_remote_step_recovered",
+        }
     if failed_records or rollback_incomplete:
         failed_step = str(failed_records[-1].get("step") if failed_records else "unknown")
         completed_steps = tuple(step for step in STEPS[:-1] if step in completed)
@@ -846,8 +867,16 @@ async def run_orchestration(
                 ledger=ledger,
                 journal_path=journal_path,
                 completed=completed,
+                started=started,
             )
         method = getattr(adapter, step)
+        _append_operation_record(
+            journal_path,
+            plan,
+            event="dr.orchestration.step_started",
+            step=step,
+        )
+        started.add(step)
         try:
             raw_result = (
                 await method(plan, source_tail_boundary=source_tail_boundary)
@@ -917,6 +946,7 @@ async def run_orchestration(
             ledger=ledger,
             journal_path=journal_path,
             completed=completed,
+            started=started,
         )
     completion_hash = hashlib.sha256(
         canonical_json_bytes({"operation_id": plan.operation_id, "plan_hash": plan.plan_hash})

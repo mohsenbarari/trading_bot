@@ -93,6 +93,7 @@ COMMON_RUNTIME_KEYS = (
     "REGISTRATION_SYNC_ACCEPT_UNVERSIONED",
     "INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE",
     "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED",
+    "TELEGRAM_DELIVERY_PRODUCER_MODE",
     "TELEGRAM_DELIVERY_EXECUTION_OWNER",
     "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
     "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY",
@@ -113,6 +114,20 @@ FOREIGN_TELEGRAM_QUEUE_RUNTIME_KEYS = (
         "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID",
         "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID",
         "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID",
+)
+
+TELEGRAM_EXECUTOR_ONLY_KEYS = frozenset(
+    {
+        "BOT_TOKEN",
+        "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+        "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
+        "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY",
+        "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED",
+        "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN",
+        "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID",
+        "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID",
+        "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID",
+    }
 )
 
 OPTIONAL_RUNTIME_DEFAULTS = {
@@ -174,6 +189,7 @@ OPTIONAL_RUNTIME_DEFAULTS = {
     "REGISTRATION_SYNC_ACCEPT_UNVERSIONED": "true",
     "INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE": "30",
     "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "false",
+    "TELEGRAM_DELIVERY_PRODUCER_MODE": "legacy",
     "TELEGRAM_DELIVERY_EXECUTION_OWNER": "legacy",
     "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "false",
     "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "false",
@@ -283,6 +299,11 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
     for key in COMMON_RUNTIME_KEYS:
         is_optional = key in OPTIONAL_RUNTIME_DEFAULTS
         value = os.environ.get(key, source_values.get(key))
+        if key == "TELEGRAM_DELIVERY_PRODUCER_MODE" and not value:
+            value = os.environ.get(
+                "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+                source_values.get("TELEGRAM_DELIVERY_EXECUTION_OWNER"),
+            )
         if isinstance(value, str):
             value = value.strip()
         if (value is None or value == "") and is_optional:
@@ -311,6 +332,17 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
     if missing:
         missing_list = ", ".join(missing)
         raise SystemExit(f"Missing required runtime env inputs: {missing_list}")
+    if values["TELEGRAM_DELIVERY_PRODUCER_MODE"] not in {"legacy", "queue-v1"}:
+        raise SystemExit("TELEGRAM_DELIVERY_PRODUCER_MODE must be legacy or queue-v1")
+    if values["TELEGRAM_DELIVERY_EXECUTION_OWNER"] not in {"legacy", "queue-v1"}:
+        raise SystemExit("TELEGRAM_DELIVERY_EXECUTION_OWNER must be legacy or queue-v1")
+    if (
+        values["TELEGRAM_DELIVERY_PRODUCER_MODE"]
+        != values["TELEGRAM_DELIVERY_EXECUTION_OWNER"]
+    ):
+        raise SystemExit(
+            "Telegram producer mode and foreign execution owner must match"
+        )
     return values
 
 
@@ -398,51 +430,93 @@ def build_runtime_env(
     return rendered
 
 
+def build_service_runtime_env(
+    runtime: OrderedDict[str, str], *, service: str, role: str
+) -> OrderedDict[str, str]:
+    """Return the exact environment allowed inside one process class.
+
+    The host-level runtime file remains the Compose interpolation source.  It
+    is never mounted into application containers.  The Bot executor on Bot-FI
+    receives all Telegram provider credentials and executor controls. During
+    compatibility-only legacy mode, the foreign API also receives the primary
+    token because that process still owns reviewed direct sends. Queue-v1 APIs,
+    every Iran API, sync, and migration remain tokenless.
+    """
+
+    allowed_services = {"api", "bot", "sync", "migration"}
+    if service not in allowed_services or (service == "bot" and role != "foreign"):
+        raise ValueError(f"invalid runtime service scope service={service!r} role={role!r}")
+    if service == "bot":
+        return OrderedDict(runtime)
+    result = OrderedDict(
+        (key, value)
+        for key, value in runtime.items()
+        if key not in TELEGRAM_EXECUTOR_ONLY_KEYS
+    )
+    if (
+        service == "api"
+        and role == "foreign"
+        and runtime.get("TELEGRAM_DELIVERY_PRODUCER_MODE") == "legacy"
+    ):
+        result["BOT_TOKEN"] = runtime["BOT_TOKEN"]
+    return result
+
+
 def write_env_file(path: str, payload: OrderedDict[str, str]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"{key}={value}" for key, value in payload.items()]
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.chmod(output_path, 0o600)
+
+
+def write_service_env_files(path: str, runtime: OrderedDict[str, str], *, role: str) -> None:
+    services = ("api", "bot", "sync", "migration") if role == "foreign" else (
+        "api", "sync", "migration"
+    )
+    for service in services:
+        write_env_file(
+            f"{path}.{service}",
+            build_service_runtime_env(runtime, service=service, role=role),
+        )
 
 
 def main() -> int:
     args = parse_args()
     values = collect_runtime_values(args.source_env_file)
 
-    write_env_file(
-        args.local_output,
-        build_runtime_env(
-            role="foreign",
-            physical_site=args.foreign_physical_site,
-            frontend_url=args.foreign_frontend_url,
-            public_webapp_url=args.iran_frontend_url,
-            foreign_server_url=args.foreign_server_url,
-            foreign_server_domain=args.foreign_server_domain,
-            iran_server_url=args.iran_server_url,
-            iran_server_domain=args.iran_server_domain,
-            metrics_backend=args.metrics_backend,
-            audit_trail_path=args.audit_trail_path,
-            api_workers=args.foreign_api_workers,
-            values=values,
-        ),
+    foreign_runtime = build_runtime_env(
+        role="foreign",
+        physical_site=args.foreign_physical_site,
+        frontend_url=args.foreign_frontend_url,
+        public_webapp_url=args.iran_frontend_url,
+        foreign_server_url=args.foreign_server_url,
+        foreign_server_domain=args.foreign_server_domain,
+        iran_server_url=args.iran_server_url,
+        iran_server_domain=args.iran_server_domain,
+        metrics_backend=args.metrics_backend,
+        audit_trail_path=args.audit_trail_path,
+        api_workers=args.foreign_api_workers,
+        values=values,
     )
-    write_env_file(
-        args.iran_output,
-        build_runtime_env(
-            role="iran",
-            physical_site=args.iran_physical_site,
-            frontend_url=args.iran_frontend_url,
-            public_webapp_url=args.iran_frontend_url,
-            foreign_server_url=args.foreign_server_url,
-            foreign_server_domain=args.foreign_server_domain,
-            iran_server_url=args.iran_server_url,
-            iran_server_domain=args.iran_server_domain,
-            metrics_backend=args.metrics_backend,
-            audit_trail_path=args.audit_trail_path,
-            api_workers=args.iran_api_workers,
-            values=values,
-        ),
+    iran_runtime = build_runtime_env(
+        role="iran",
+        physical_site=args.iran_physical_site,
+        frontend_url=args.iran_frontend_url,
+        public_webapp_url=args.iran_frontend_url,
+        foreign_server_url=args.foreign_server_url,
+        foreign_server_domain=args.foreign_server_domain,
+        iran_server_url=args.iran_server_url,
+        iran_server_domain=args.iran_server_domain,
+        metrics_backend=args.metrics_backend,
+        audit_trail_path=args.audit_trail_path,
+        api_workers=args.iran_api_workers,
+        values=values,
     )
+    write_env_file(args.local_output, foreign_runtime)
+    write_service_env_files(args.local_output, foreign_runtime, role="foreign")
+    write_env_file(args.iran_output, iran_runtime)
+    write_service_env_files(args.iran_output, iran_runtime, role="iran")
     return 0
 
 

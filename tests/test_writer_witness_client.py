@@ -81,10 +81,45 @@ def local_snapshot(*, expires_at: datetime) -> WriterStateSnapshot:
     )
 
 
+def target_snapshot(*, active: bool, proof=None) -> WriterStateSnapshot:  # noqa: ANN001
+    base = local_snapshot(expires_at=NOW)
+    return base.__class__(
+        **{
+            **base.__dict__,
+            "active_site": "webapp_ir" if active else None,
+            "writer_epoch": 2 if active else 1,
+            "control_state": CONTROL_ACTIVE if active else CONTROL_FENCED,
+            "witness_lease_id": proof.lease_id if active else None,
+            "witness_lease_issued_at": proof.issued_at if active else None,
+            "witness_lease_expires_at": proof.expires_at if active else None,
+            "witness_proof_hash": proof.proof_hash if active else None,
+            "witness_transition_id": proof.witness_transition_id if active else None,
+        }
+    )
+
+
+def target_readiness() -> dict:
+    return {
+        "evidence_id": "promotion-ready-ir-2",
+        "target_site": "webapp_ir",
+        "writer_epoch": 2,
+        "generated_at": (NOW - timedelta(seconds=5)).isoformat(),
+        "expires_at": (NOW + timedelta(minutes=5)).isoformat(),
+        **{name: True for name in REQUIRED_READY_EVIDENCE_FLAGS},
+    }
+
+
 class FakeSession:
-    def __init__(self):
+    def __init__(self, store):
+        self.store = store
         self.commit = AsyncMock()
         self.rollback = AsyncMock()
+
+    async def get(self, model, key, **_kwargs):
+        return self.store.get((model, key))
+
+    def add(self, value):
+        self.store[(type(value), value.operation_id)] = value
 
     async def __aenter__(self):
         return self
@@ -96,9 +131,10 @@ class FakeSession:
 class FakeSessionFactory:
     def __init__(self):
         self.sessions = []
+        self.store = {}
 
     def __call__(self):
-        session = FakeSession()
+        session = FakeSession(self.store)
         self.sessions.append(session)
         return session
 
@@ -413,6 +449,143 @@ class WriterWitnessRenewalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["expected_epoch"], 1)
         self.assertEqual(kwargs["witness_proof"].writer_epoch, 2)
         sessions.sessions[-1].commit.assert_awaited_once()
+
+    async def test_target_acquire_response_loss_replays_same_persisted_request(self):
+        private_key, public_key = keypair()
+        proof = sign_witness_lease_proof(
+            holder_site="webapp_ir",
+            writer_epoch=2,
+            lease_id="target-lease",
+            issued_at=NOW,
+            expires_at=NOW + timedelta(seconds=180),
+            witness_transition_id="witness-target",
+            private_key_base64=private_key,
+        )
+        remote = AsyncMock()
+        remote.status.return_value = {
+            "state": {
+                "writer_epoch": 1,
+                "lease_id": "source-lease",
+                "expires_at": (NOW - timedelta(seconds=1)).isoformat(),
+            }
+        }
+        remote.transition.side_effect = [
+            WriterWitnessClientError(
+                "response lost after possible Witness commit",
+                code="writer_witness_unreachable",
+                retryable=True,
+            ),
+            {"proof": proof},
+        ]
+        sessions = FakeSessionFactory()
+        call = dict(
+            client=remote,
+            status_request_id="11111111-1111-4111-8111-111111111111",
+            acquire_request_id="22222222-2222-4222-8222-222222222222",
+            operation_id="33333333-3333-4333-8333-333333333333",
+            target_epoch=2,
+            readiness_payload=target_readiness(),
+            identity=IR_IDENTITY,
+            now=NOW,
+            session_factory=sessions,
+            public_key_base64=public_key,
+            lease_duration_seconds=180,
+            safety_margin_seconds=15,
+            max_clock_skew_seconds=5,
+        )
+        with (
+            patch(
+                "core.writer_witness_client.load_writer_snapshot",
+                new=AsyncMock(return_value=target_snapshot(active=False)),
+            ),
+            patch(
+                "core.writer_witness_client.transition_writer_state",
+                new=AsyncMock(),
+            ),
+        ):
+            with self.assertRaises(WriterWitnessClientError):
+                await acquire_and_activate_local_writer_once(**call)
+            validated = await acquire_and_activate_local_writer_once(**call)
+
+        self.assertEqual(validated.writer_epoch, 2)
+        self.assertEqual(remote.status.await_count, 1)
+        self.assertEqual(remote.transition.await_count, 2)
+        self.assertEqual(
+            remote.transition.await_args_list[0].kwargs["request_id"],
+            remote.transition.await_args_list[1].kwargs["request_id"],
+        )
+        self.assertEqual(
+            remote.transition.await_args_list[1].kwargs["expected_lease_id"],
+            "source-lease",
+        )
+
+    async def test_retry_after_local_activation_commit_reconciles_without_new_term(self):
+        private_key, public_key = keypair()
+        proof_payload = sign_witness_lease_proof(
+            holder_site="webapp_ir",
+            writer_epoch=2,
+            lease_id="target-lease",
+            issued_at=NOW,
+            expires_at=NOW + timedelta(seconds=180),
+            witness_transition_id="witness-target",
+            private_key_base64=private_key,
+        )
+        remote = AsyncMock()
+        remote.status.return_value = {
+            "state": {
+                "writer_epoch": 1,
+                "lease_id": "source-lease",
+                "expires_at": (NOW - timedelta(seconds=1)).isoformat(),
+            }
+        }
+        remote.transition.return_value = {"proof": proof_payload}
+        sessions = FakeSessionFactory()
+        committed_proof = None
+
+        async def transition_then_lose_response(*_args, **kwargs):
+            nonlocal committed_proof
+            committed_proof = kwargs["witness_proof"]
+            raise KeyboardInterrupt("controller lost response after local commit")
+
+        async def snapshots(_session):
+            return target_snapshot(
+                active=committed_proof is not None,
+                proof=committed_proof,
+            )
+
+        call = dict(
+            client=remote,
+            status_request_id="11111111-1111-4111-8111-111111111111",
+            acquire_request_id="22222222-2222-4222-8222-222222222222",
+            operation_id="33333333-3333-4333-8333-333333333333",
+            target_epoch=2,
+            readiness_payload=target_readiness(),
+            identity=IR_IDENTITY,
+            now=NOW,
+            session_factory=sessions,
+            public_key_base64=public_key,
+            lease_duration_seconds=180,
+            safety_margin_seconds=15,
+            max_clock_skew_seconds=5,
+        )
+        with (
+            patch(
+                "core.writer_witness_client.load_writer_snapshot",
+                new=AsyncMock(side_effect=snapshots),
+            ),
+            patch(
+                "core.writer_witness_client.transition_writer_state",
+                new=AsyncMock(side_effect=transition_then_lose_response),
+            ) as local_transition,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                await acquire_and_activate_local_writer_once(**call)
+            validated = await acquire_and_activate_local_writer_once(**call)
+
+        self.assertEqual(validated.writer_epoch, 2)
+        self.assertEqual(remote.status.await_count, 1)
+        self.assertEqual(remote.transition.await_count, 1)
+        self.assertEqual(local_transition.await_count, 1)
 
     async def test_source_lease_drain_is_bound_to_local_term_and_request(self):
         snapshot = local_snapshot(expires_at=NOW + timedelta(seconds=90))

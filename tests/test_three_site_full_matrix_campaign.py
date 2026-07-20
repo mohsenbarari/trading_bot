@@ -20,6 +20,7 @@ from core.three_site_full_matrix_campaign import (
     PHASE_EVIDENCE_SCHEMA,
     PHASE_SCENARIOS,
     POLICY_SCHEMA,
+    SCENARIO_EVIDENCE_SCHEMA,
     FullMatrixCampaignError,
     verify_campaign,
     verify_complete_matrix,
@@ -102,8 +103,86 @@ def _phase_evidence(
     artifact_name: str,
     artifact_hash: str,
     artifact_size: int,
+    artifact_root: Path,
 ) -> dict:
     started = datetime.fromisoformat(campaign["generated_at"]) + timedelta(minutes=iteration)
+    scenario_results = []
+    artifacts = [
+        {"path": artifact_name, "sha256": artifact_hash, "size": artifact_size}
+    ]
+    for scenario in PHASE_SCENARIOS[phase]:
+        duration = 86400 if scenario == "twenty_four_hour_endurance_no_growth" else 1
+        raw_name = f"raw-{iteration}-{phase}-{scenario}.json"
+        raw_payload = canonical_json_bytes({"scenario": scenario, "observed": True}) + b"\n"
+        raw_path = artifact_root / raw_name
+        raw_path.write_bytes(raw_payload)
+        raw_path.chmod(0o600)
+        raw_record = {
+            "path": raw_name,
+            "sha256": hashlib.sha256(raw_payload).hexdigest(),
+            "size": len(raw_payload),
+        }
+        assertion_names = [
+            "operation_executed", "expected_outcome", "production_boundary",
+            f"oracle:{scenario}",
+        ]
+        if duration == 86400:
+            assertion_names.append("minimum_duration")
+        assertions = [
+            {
+                "name": name,
+                "status": "passed",
+                "expected": 86400 if name == "minimum_duration" else (
+                    False if name == "production_boundary" else True
+                ),
+                "observed": duration if name == "minimum_duration" else (
+                    False if name == "production_boundary" else True
+                ),
+                "evidence_refs": [raw_name],
+            }
+            for name in assertion_names
+        ]
+        scenario_name = f"scenario-{iteration}-{phase}-{scenario}.json"
+        scenario_payload = canonical_json_bytes(
+            {
+                "schema": SCENARIO_EVIDENCE_SCHEMA,
+                "status": "passed",
+                "campaign_id": campaign["campaign_id"],
+                "campaign_hash": campaign_hash,
+                "release_sha": campaign["release_sha"],
+                "activation_sha": campaign["activation_sha"],
+                "phase": phase,
+                "scenario_id": scenario,
+                "iteration": iteration,
+                "oracle_id": f"{phase}.{scenario}.v1",
+                "started_at": started.isoformat(),
+                "finished_at": (started + timedelta(seconds=duration)).isoformat(),
+                "duration_seconds": duration,
+                "assertions": assertions,
+                "evidence_refs": [raw_record],
+                "cleanup_residue_count": 0,
+                "production_touched": False,
+            }
+        ) + b"\n"
+        scenario_path = artifact_root / scenario_name
+        scenario_path.write_bytes(scenario_payload)
+        scenario_path.chmod(0o600)
+        scenario_record = {
+            "path": scenario_name,
+            "sha256": hashlib.sha256(scenario_payload).hexdigest(),
+            "size": len(scenario_payload),
+        }
+        artifacts.extend([scenario_record, raw_record])
+        scenario_results.append(
+            {
+                "scenario_id": scenario,
+                "status": "passed",
+                "assertion_count": len(assertions),
+                "evidence_hash": scenario_record["sha256"],
+                "duration_seconds": duration,
+                "artifact": scenario_record,
+            }
+        )
     return {
         "schema": PHASE_EVIDENCE_SCHEMA,
         "status": "passed",
@@ -114,27 +193,18 @@ def _phase_evidence(
         "phase": phase,
         "iteration": iteration,
         "started_at": started.isoformat(),
-        "finished_at": (started + timedelta(seconds=1)).isoformat(),
-        "scenario_results": [
-            {
-                "scenario_id": scenario,
-                "status": "passed",
-                "assertion_count": 1,
-                "evidence_hash": hashlib.sha256(
-                    f"{phase}:{iteration}:{scenario}".encode()
-                ).hexdigest(),
-            }
-            for scenario in PHASE_SCENARIOS[phase]
-        ],
+        "finished_at": (
+            started
+            + timedelta(
+                seconds=86400
+                if "twenty_four_hour_endurance_no_growth" in PHASE_SCENARIOS[phase]
+                else 1
+            )
+        ).isoformat(),
+        "scenario_results": scenario_results,
         "skip_count": 0,
         "production_touched": False,
-        "artifacts": [
-            {
-                "path": artifact_name,
-                "sha256": artifact_hash,
-                "size": artifact_size,
-            }
-        ],
+        "artifacts": artifacts,
         "cleanup_residue_count": 0 if phase == "cleanup_repeatability" else None,
     }
 
@@ -214,6 +284,7 @@ class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
                         artifact_name=artifact_name,
                         artifact_hash=hashlib.sha256(payload).hexdigest(),
                         artifact_size=len(payload),
+                        artifact_root=root,
                     )
                 )
         return stack, now, campaign, policy, bound, root, evidence
@@ -288,7 +359,60 @@ class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
             first_path.write_bytes(original_payload)
             first_path.chmod(0o600)
             evidence[1]["artifacts"] = list(evidence[0]["artifacts"])
-            with self.assertRaisesRegex(FullMatrixCampaignError, "reused"):
+            with self.assertRaisesRegex(
+                FullMatrixCampaignError, "reused|does not retain"
+            ):
+                verify_complete_matrix(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    phase_evidence=evidence,
+                    artifact_root=root,
+                    now=now + timedelta(minutes=10),
+                )
+
+    def test_deleted_raw_scenario_evidence_is_rejected(self):
+        stack, now, campaign, policy, bound, root, evidence = self._complete()
+        with stack:
+            raw = next(
+                item for item in evidence[0]["artifacts"] if item["path"].startswith("raw-")
+            )
+            (root / raw["path"]).unlink()
+            with self.assertRaises(FullMatrixCampaignError):
+                verify_complete_matrix(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    phase_evidence=evidence,
+                    artifact_root=root,
+                    now=now + timedelta(minutes=10),
+                )
+
+    def test_instant_endurance_evidence_is_rejected(self):
+        stack, now, campaign, policy, bound, root, evidence = self._complete()
+        with stack:
+            capacity = next(item for item in evidence if item["phase"] == "capacity_dpi")
+            endurance = next(
+                item
+                for item in capacity["scenario_results"]
+                if item["scenario_id"] == "twenty_four_hour_endurance_no_growth"
+            )
+            path = root / endurance["artifact"]["path"]
+            payload = json.loads(path.read_text())
+            payload["duration_seconds"] = 1
+            payload["finished_at"] = (
+                datetime.fromisoformat(payload["started_at"]) + timedelta(seconds=1)
+            ).isoformat()
+            raw = canonical_json_bytes(payload) + b"\n"
+            path.write_bytes(raw)
+            path.chmod(0o600)
+            digest = hashlib.sha256(raw).hexdigest()
+            endurance["artifact"].update(sha256=digest, size=len(raw))
+            endurance["evidence_hash"] = digest
+            for artifact in capacity["artifacts"]:
+                if artifact["path"] == endurance["artifact"]["path"]:
+                    artifact.update(sha256=digest, size=len(raw))
+            with self.assertRaisesRegex(FullMatrixCampaignError, "under 24 hours"):
                 verify_complete_matrix(
                     campaign=campaign,
                     approver_policy=policy,

@@ -279,7 +279,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "c431d2e3f5a6"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "d542e3f4a6b7"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -328,23 +328,25 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             expire_on_commit=False,
             autoflush=False,
         )
-        async with self.Session() as db:
-            await db.execute(
+        # Fixture maintenance deliberately bypasses the application Session
+        # listener.  The test body still exercises the exact strict-DR
+        # application path; only scratch-owner reset SQL belongs here.
+        async with self.engine.begin() as connection:
+            await connection.execute(
                 text(
                     "TRUNCATE TABLE telegram_delivery_runtime_gates, "
                     "telegram_delivery_resume_operations, "
                     "telegram_delivery_jobs RESTART IDENTITY CASCADE"
                 )
             )
-            await db.execute(text("ALTER SEQUENCE telegram_delivery_jobs_enqueued_seq_seq RESTART WITH 1"))
-            await db.execute(
+            await connection.execute(text("ALTER SEQUENCE telegram_delivery_jobs_enqueued_seq_seq RESTART WITH 1"))
+            await connection.execute(
                 text(
                     "UPDATE telegram_delivery_feeder_states "
                     "SET fresh_success_counts = '{}'::json, updated_at = now() "
                     "WHERE feeder_kind = 'offer_edit'"
                 )
             )
-            await db.commit()
 
     async def test_two_processes_cannot_own_queue_executor_simultaneously(self):
         sync_url, _ = DATABASE_URLS
@@ -1089,19 +1091,20 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         public_id = "ofr_feeder_db_clock_pg"
         commodity_name = "feeder-db-clock-commodity"
         channel_id = -100123456701
-        async with self.Session() as db:
-            await db.execute(
+        async with self.engine.begin() as connection:
+            await connection.execute(
                 text("DELETE FROM offer_publication_states WHERE offer_public_id = :id"),
                 {"id": public_id},
             )
-            await db.execute(
+            await connection.execute(
                 text("DELETE FROM offers WHERE offer_public_id = :id"),
                 {"id": public_id},
             )
-            await db.execute(
+            await connection.execute(
                 text("DELETE FROM commodities WHERE name = :name"),
                 {"name": commodity_name},
             )
+        async with self.Session() as db:
             commodity = Commodity(name=commodity_name)
             db.add(commodity)
             await db.flush()
@@ -1153,28 +1156,29 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_offer_publication_deadline_edges_ignore_host_clock_skew(self):
         commodity_name = "publication-db-deadline-commodity"
-        async with self.Session() as db:
-            await db.execute(
+        async with self.engine.begin() as connection:
+            await connection.execute(
                 text(
                     "DELETE FROM offer_publication_states "
                     "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')"
                 )
             )
-            await db.execute(
+            await connection.execute(
                 text(
                     "DELETE FROM offers "
                     "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')"
                 )
             )
-            await db.execute(
+            await connection.execute(
                 text("DELETE FROM commodities WHERE name = :name"),
                 {"name": commodity_name},
             )
+        async with self.Session() as db:
             commodity = Commodity(name=commodity_name)
             db.add(commodity)
             await db.flush()
             database_now = (
-                await db.execute(text("SELECT clock_timestamp()"))
+                await db.execute(select(func.clock_timestamp()))
             ).scalar_one()
             results = []
             for index, deadline_offset in enumerate((1, -1), start=1):
@@ -1855,8 +1859,8 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             await db.rollback()
 
     async def test_physical_schema_contains_route_constraints_and_dedupe_capacity(self):
-        async with self.Session() as db:
-            dedupe_length = await db.scalar(
+        async with self.engine.connect() as connection:
+            dedupe_length = await connection.scalar(
                 text(
                     "SELECT character_maximum_length FROM information_schema.columns "
                     "WHERE table_schema = current_schema() "
@@ -1865,7 +1869,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             constraint_names = set(
                 (
-                    await db.execute(
+                    await connection.execute(
                         text(
                             "SELECT conname FROM pg_constraint "
                             "WHERE conrelid = 'telegram_delivery_jobs'::regclass"
@@ -1873,7 +1877,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     )
                 ).scalars()
             )
-            claim_index_columns = await db.scalar(
+            claim_index_columns = await connection.scalar(
                 text(
                     "SELECT array_agg(attribute.attname ORDER BY indexed_column.ordinality) "
                     "FROM pg_index AS index_meta "
@@ -3180,21 +3184,20 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
 
         for case in cases:
             with self.subTest(scope=case["name"]):
-                async with self.Session() as db:
-                    await db.execute(
+                async with self.engine.begin() as connection:
+                    await connection.execute(
                         text(
                             "TRUNCATE TABLE telegram_delivery_runtime_gates, "
                             "telegram_delivery_jobs "
                             "RESTART IDENTITY CASCADE"
                         )
                     )
-                    await db.execute(
+                    await connection.execute(
                         text(
                             "ALTER SEQUENCE telegram_delivery_jobs_enqueued_seq_seq "
                             "RESTART WITH 1"
                         )
                     )
-                    await db.commit()
 
                 blocker_overrides = dict(case.get("blocker_overrides", {}))
                 await self._enqueue(
@@ -3824,22 +3827,23 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         public_id = "ofr_stage3_freshness_pg"
         commodity_name = "stage3-freshness-commodity"
         channel_id = -100123456700
-        async with self.Session() as db:
-            await db.execute(
+        async with self.engine.begin() as connection:
+            await connection.execute(
                 text(
                     "DELETE FROM offer_publication_states "
                     "WHERE offer_public_id = :public_id"
                 ),
                 {"public_id": public_id},
             )
-            await db.execute(
+            await connection.execute(
                 text("DELETE FROM offers WHERE offer_public_id = :public_id"),
                 {"public_id": public_id},
             )
-            await db.execute(
+            await connection.execute(
                 text("DELETE FROM commodities WHERE name = :name"),
                 {"name": commodity_name},
             )
+        async with self.Session() as db:
             commodity = Commodity(name=commodity_name)
             db.add(commodity)
             await db.flush()
@@ -4381,9 +4385,10 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             transition_at=transition_at,
             notice_text=MARKET_OPENED_CHANNEL_NOTICE,
         )
+        async with self.engine.begin() as connection:
+            await connection.execute(text("DELETE FROM market_channel_notice_receipts"))
+            await connection.execute(text("DELETE FROM market_runtime_state"))
         async with self.Session() as db:
-            await db.execute(text("DELETE FROM market_channel_notice_receipts"))
-            await db.execute(text("DELETE FROM market_runtime_state"))
             db.add(
                 MarketRuntimeState(
                     id=1,

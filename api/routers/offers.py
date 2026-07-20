@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 from uuid import UUID
@@ -43,7 +44,9 @@ from core.services.telegram_offer_publication_service import (
 )
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
-    configured_telegram_delivery_runtime,
+    TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
 )
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
@@ -987,10 +990,15 @@ async def send_offer_to_channel_with_result(offer: Offer, user: User) -> Telegra
     if current_server() != "foreign":
         return None
     if (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         raise RuntimeError("direct_offer_channel_send_forbidden_for_queue_owner")
+    assert_telegram_provider_execution_authority()
+    if not (getattr(settings, "bot_token", None) or os.getenv("BOT_TOKEN")):
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_channel_sender_has_no_provider_credentials"
+        )
 
     channel_id = settings.channel_id
     
@@ -1364,7 +1372,7 @@ async def create_offer(
             ) from exc
 
     queue_owns_telegram_delivery = (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
     try:

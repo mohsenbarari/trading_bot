@@ -47,7 +47,8 @@ services:
         soft: 65536
         hard: 65536
     env_file:
-      - .env
+      - path: .env.api
+        required: false
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -98,7 +99,8 @@ services:
       - ./schemas.py:/app/schemas.py
       - ./trading_settings.json:/app/trading_settings.json
     env_file:
-      - .env
+      - path: .env.sync
+        required: false
     depends_on:
       redis:
         condition: service_started
@@ -121,7 +123,8 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env
+      - path: .env.migration
+        required: false
     depends_on:
       db:
         condition: service_healthy

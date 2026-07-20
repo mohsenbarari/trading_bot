@@ -20,7 +20,7 @@ from core.services.telegram_notification_outbox_service import (
 )
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
-    configured_telegram_delivery_runtime,
+    configured_telegram_delivery_producer_mode,
 )
 from core.services.user_management_context_service import (
     apply_user_management_order,
@@ -117,7 +117,7 @@ async def send_block_notification(
     """ارسال نوتیفیکیشن مسدودیت"""
     message = _block_notification_message(restricted_until)
     queue_mode = (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
     if user.telegram_id is not None and queue_mode and not telegram_intent_persisted:
@@ -178,7 +178,7 @@ async def send_limitation_notification(
     """ارسال نوتیفیکیشن محدودیت"""
     message = _limitation_notification_message(user, limitations_changed)
     queue_mode = (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
     if user.telegram_id is not None and queue_mode and not telegram_intent_persisted:
@@ -486,7 +486,7 @@ async def update_user(
     )
 
     queue_mode = (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
     block_intent_persisted = False
@@ -575,7 +575,7 @@ async def update_user(
     # رفع محدودیت (با تاخیر)
     if unlimit_needed:
         queue_mode = (
-            configured_telegram_delivery_runtime().mode
+            configured_telegram_delivery_producer_mode()
             == TelegramDeliveryRuntimeMode.QUEUE_V1
         )
         if queue_mode:

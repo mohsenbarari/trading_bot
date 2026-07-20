@@ -92,6 +92,7 @@ from .change_log import ChangeLog
 from .sync_block import SyncBlock
 from .sync_apply_watermark import SyncApplyWatermark
 from .webapp_writer_state import (
+    WebappWriterActivationOperation,
     WebappWriterState,
     WebappWriterTransition,
     WebappWriterWitnessReceipt,
@@ -214,6 +215,7 @@ __all__ = [
     "SyncBlock",
     "SyncApplyWatermark",
     "WebappWriterState",
+    "WebappWriterActivationOperation",
     "WebappWriterTransition",
     "WebappWriterWitnessState",
     "WebappWriterWitnessReceipt",

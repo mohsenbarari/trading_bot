@@ -36,6 +36,7 @@ from core.writer_witness_contract import (
     WitnessProofError,
     validate_witness_lease_proof,
 )
+from models.webapp_writer_state import WebappWriterActivationOperation
 logger = logging.getLogger(__name__)
 
 
@@ -563,62 +564,112 @@ async def acquire_and_activate_local_writer_once(
         if lease_duration_seconds is not None
         else settings.writer_witness_lease_duration_seconds
     )
-    status_payload = await client.status(
-        request_id=status_request_id,
-        now=current,
-        client=http_client,
-    )
-    witness_state = status_payload["state"]
-    try:
-        witness_epoch = int(witness_state["writer_epoch"])
-        witness_lease_id = witness_state.get("lease_id")
-        expires_raw = witness_state.get("expires_at")
-        expires_at = (
-            datetime.fromisoformat(str(expires_raw).replace("Z", "+00:00"))
-            if expires_raw is not None
-            else None
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise WriterWitnessClientError(
-            "writer witness status state is malformed",
-            code="writer_witness_invalid_response",
-        ) from exc
-    if witness_epoch != target_epoch - 1:
-        raise WriterWitnessClientError(
-            "Witness is not at the exact predecessor epoch",
-            code="writer_witness_target_epoch_stale",
-        )
-    if expires_at is not None:
-        if expires_at.tzinfo is None:
-            raise WriterWitnessClientError(
-                "Witness lease expiry lacks timezone",
-                code="writer_witness_invalid_response",
-            )
-        if expires_at.astimezone(timezone.utc) > current:
-            raise WriterWitnessClientError(
-                "predecessor Witness lease is still live",
-                code="writer_witness_predecessor_lease_live",
-                retryable=True,
-            )
     readiness = validate_readiness_evidence(
         readiness_payload,
         target_site=runtime_identity.physical_site,
         writer_epoch=target_epoch,
         now=current,
     )
-    payload = await client.transition(
-        action="acquire",
-        expected_epoch=witness_epoch,
-        expected_lease_id=witness_lease_id,
-        request_id=acquire_request_id,
-        reason=f"approved failover operation {operation_id}",
-        lease_duration_seconds=duration,
-        now=current,
-        client=http_client,
-    )
+    active_session_factory = session_factory or DrControlSessionLocal
+
+    async with active_session_factory() as session:
+        operation = await session.get(
+            WebappWriterActivationOperation,
+            operation_id,
+            with_for_update=True,
+        )
+        if operation is not None and (
+            operation.status_request_id != status_request_id
+            or operation.acquire_request_id != acquire_request_id
+            or operation.target_site != runtime_identity.physical_site
+            or int(operation.target_epoch) != target_epoch
+            or int(operation.predecessor_epoch) != target_epoch - 1
+        ):
+            raise WriterWitnessClientError(
+                "target activation operation was reused with different parameters",
+                code="writer_witness_target_operation_conflict",
+            )
+
+    if operation is None:
+        status_payload = await client.status(
+            request_id=status_request_id,
+            now=current,
+            client=http_client,
+        )
+        witness_state = status_payload["state"]
+        try:
+            witness_epoch = int(witness_state["writer_epoch"])
+            witness_lease_id = witness_state.get("lease_id")
+            expires_raw = witness_state.get("expires_at")
+            expires_at = (
+                datetime.fromisoformat(str(expires_raw).replace("Z", "+00:00"))
+                if expires_raw is not None
+                else None
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WriterWitnessClientError(
+                "writer witness status state is malformed",
+                code="writer_witness_invalid_response",
+            ) from exc
+        if witness_epoch != target_epoch - 1:
+            raise WriterWitnessClientError(
+                "Witness is not at the exact predecessor epoch",
+                code="writer_witness_target_epoch_stale",
+            )
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                raise WriterWitnessClientError(
+                    "Witness lease expiry lacks timezone",
+                    code="writer_witness_invalid_response",
+                )
+            if expires_at.astimezone(timezone.utc) > current:
+                raise WriterWitnessClientError(
+                    "predecessor Witness lease is still live",
+                    code="writer_witness_predecessor_lease_live",
+                    retryable=True,
+                )
+        async with active_session_factory() as session:
+            operation = WebappWriterActivationOperation(
+                operation_id=operation_id,
+                status_request_id=status_request_id,
+                acquire_request_id=acquire_request_id,
+                target_site=runtime_identity.physical_site,
+                target_epoch=target_epoch,
+                predecessor_epoch=witness_epoch,
+                predecessor_lease_id=witness_lease_id,
+                state="planned",
+            )
+            session.add(operation)
+            await session.commit()
+
+    proof_payload: dict[str, Any]
+    if operation.proof_json:
+        try:
+            proof_payload = json.loads(operation.proof_json)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise WriterWitnessClientError(
+                "persisted target activation proof is invalid",
+                code="writer_witness_target_operation_corrupt",
+            ) from exc
+    else:
+        # The predecessor inputs were committed locally before this remote
+        # mutation.  An exact retry therefore reaches Witness's durable
+        # request receipt even if the first response was lost after commit.
+        payload = await client.transition(
+            action="acquire",
+            expected_epoch=int(operation.predecessor_epoch),
+            expected_lease_id=operation.predecessor_lease_id,
+            request_id=acquire_request_id,
+            reason=f"approved failover operation {operation_id}",
+            lease_duration_seconds=duration,
+            now=current,
+            client=http_client,
+        )
+        proof_payload = payload.get("proof")
+
     try:
         proof = validate_witness_lease_proof(
-            payload.get("proof"),
+            proof_payload,
             public_key_base64=(
                 str(public_key_base64)
                 if public_key_base64 is not None
@@ -644,7 +695,30 @@ async def acquire_and_activate_local_writer_once(
             "Writer Witness returned an unusable target lease proof",
             code="writer_witness_target_proof_invalid",
         ) from exc
-    active_session_factory = session_factory or DrControlSessionLocal
+
+    if operation.proof_json is None:
+        async with active_session_factory() as session:
+            stored = await session.get(
+                WebappWriterActivationOperation,
+                operation_id,
+                with_for_update=True,
+            )
+            if stored is None or stored.state != "planned":
+                raise WriterWitnessClientError(
+                    "target activation operation changed during Witness acquisition",
+                    code="writer_witness_target_operation_conflict",
+                )
+            stored.proof_json = json.dumps(
+                proof_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            stored.proof_hash = proof.proof_hash
+            stored.state = "witness_acquired"
+            stored.updated_at = current
+            await session.commit()
+
     async with active_session_factory() as session:
         snapshot = await load_writer_snapshot(session)
     if snapshot.control_state == CONTROL_ACTIVE:
@@ -654,6 +728,16 @@ async def acquire_and_activate_local_writer_once(
             and snapshot.witness_lease_id == proof.lease_id
             and snapshot.witness_proof_hash == proof.proof_hash
         ):
+            async with active_session_factory() as update_session:
+                stored = await update_session.get(
+                    WebappWriterActivationOperation,
+                    operation_id,
+                    with_for_update=True,
+                )
+                if stored is not None and stored.state != "local_activated":
+                    stored.state = "local_activated"
+                    stored.updated_at = current
+                    await update_session.commit()
             return proof
         raise WriterWitnessClientError(
             "target database already contains another active Writer term",
@@ -682,6 +766,18 @@ async def acquire_and_activate_local_writer_once(
                 witness_proof=proof,
                 now=current,
             )
+            stored = await session.get(
+                WebappWriterActivationOperation,
+                operation_id,
+                with_for_update=True,
+            )
+            if stored is None or stored.proof_hash != proof.proof_hash:
+                raise WriterWitnessClientError(
+                    "target activation receipt is missing during local activation",
+                    code="writer_witness_target_operation_conflict",
+                )
+            stored.state = "local_activated"
+            stored.updated_at = current
             await session.commit()
         except Exception:
             await session.rollback()

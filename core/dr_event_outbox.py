@@ -69,6 +69,7 @@ _INTERNAL_TABLES = frozenset(
         "sync_blocks",
         "user_counter_event_receipts",
         "webapp_writer_state",
+        "webapp_writer_activation_operations",
         "webapp_writer_transitions",
         "webapp_writer_witness_receipts",
         "webapp_writer_witness_state",

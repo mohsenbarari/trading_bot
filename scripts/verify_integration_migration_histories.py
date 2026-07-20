@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, text
 
 
 HISTORY_LABELS = frozenset({"fresh", "main_parent", "queue_parent", "dr_parent"})
-DEFAULT_EXPECTED_HEAD = "c431d2e3f5a6"
+DEFAULT_EXPECTED_HEAD = "d542e3f4a6b7"
 
 
 class MigrationHistoryError(RuntimeError):
@@ -51,7 +51,7 @@ def parse_history_urls(raw: str | None) -> dict[str, str]:
 
 
 FINGERPRINT_SQL = text(
-    """
+    r"""
     SELECT jsonb_build_object(
       'revision', (SELECT version_num FROM alembic_version),
       'runtime', (
@@ -86,12 +86,16 @@ FINGERPRINT_SQL = text(
             jsonb_build_object(
               'name', procedure.proname,
               'args', pg_get_function_identity_arguments(procedure.oid),
-              'definition', pg_get_functiondef(procedure.oid)
+              'definition', pg_get_functiondef(procedure.oid),
+              'owner', owner.rolname,
+              'security_definer', procedure.prosecdef,
+              'acl', COALESCE(procedure.proacl::text, '')
             ) ORDER BY procedure.proname, pg_get_function_identity_arguments(procedure.oid)
           ), '[]'::jsonb
         )
         FROM pg_proc procedure
         JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace
+        JOIN pg_roles owner ON owner.oid=procedure.proowner
         WHERE namespace.nspname='public'
           AND (procedure.proname LIKE 'trading_bot_%' OR procedure.proname LIKE 'dr_%')
       ),
@@ -101,7 +105,8 @@ FINGERPRINT_SQL = text(
             jsonb_build_object(
               'table', relation.relname,
               'name', trigger.tgname,
-              'definition', pg_get_triggerdef(trigger.oid, true)
+              'definition', pg_get_triggerdef(trigger.oid, true),
+              'enabled', trigger.tgenabled
             ) ORDER BY relation.relname, trigger.tgname
           ), '[]'::jsonb
         )
@@ -109,6 +114,112 @@ FINGERPRINT_SQL = text(
         JOIN pg_class relation ON relation.oid=trigger.tgrelid
         JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
         WHERE namespace.nspname='public' AND NOT trigger.tgisinternal
+      ),
+      'columns', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'table', table_name, 'column', column_name,
+              'ordinal', ordinal_position, 'data_type', data_type,
+              'udt', udt_name, 'nullable', is_nullable,
+              'default', COALESCE(column_default, ''),
+              'character_maximum_length', character_maximum_length,
+              'numeric_precision', numeric_precision,
+              'numeric_scale', numeric_scale
+            ) ORDER BY table_name, ordinal_position
+          ), '[]'::jsonb
+        )
+        FROM information_schema.columns WHERE table_schema='public'
+      ),
+      'constraints', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'table', relation.relname, 'name', constraint_row.conname,
+              'type', constraint_row.contype,
+              'definition', pg_get_constraintdef(constraint_row.oid, true),
+              'validated', constraint_row.convalidated,
+              'deferrable', constraint_row.condeferrable,
+              'initially_deferred', constraint_row.condeferred
+            ) ORDER BY relation.relname, constraint_row.conname
+          ), '[]'::jsonb
+        )
+        FROM pg_constraint constraint_row
+        JOIN pg_class relation ON relation.oid=constraint_row.conrelid
+        JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+        WHERE namespace.nspname='public'
+      ),
+      'indexes', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'table', tablename, 'name', indexname, 'definition', indexdef
+            ) ORDER BY tablename, indexname
+          ), '[]'::jsonb
+        ) FROM pg_indexes WHERE schemaname='public'
+      ),
+      'sequences', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'name', sequence.relname, 'owner', owner.rolname,
+              'acl', COALESCE(sequence.relacl::text, ''),
+              'owned_by', COALESCE(owned_relation.relname || '.' || owned_column.attname, '')
+            ) ORDER BY sequence.relname
+          ), '[]'::jsonb
+        )
+        FROM pg_class sequence
+        JOIN pg_namespace namespace ON namespace.oid=sequence.relnamespace
+        JOIN pg_roles owner ON owner.oid=sequence.relowner
+        LEFT JOIN pg_depend dependency
+          ON dependency.objid=sequence.oid AND dependency.classid='pg_class'::regclass
+         AND dependency.deptype IN ('a','i')
+        LEFT JOIN pg_class owned_relation ON owned_relation.oid=dependency.refobjid
+        LEFT JOIN pg_attribute owned_column
+          ON owned_column.attrelid=dependency.refobjid
+         AND owned_column.attnum=dependency.refobjsubid
+        WHERE namespace.nspname='public' AND sequence.relkind='S'
+      ),
+      'roles', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'name', role.rolname, 'login', role.rolcanlogin,
+              'inherit', role.rolinherit, 'superuser', role.rolsuper,
+              'create_role', role.rolcreaterole, 'create_db', role.rolcreatedb,
+              'replication', role.rolreplication, 'bypass_rls', role.rolbypassrls
+            ) ORDER BY role.rolname
+          ), '[]'::jsonb
+        ) FROM pg_roles role
+        WHERE left(role.rolname, 5) = 'hist_'
+           OR left(role.rolname, 7) = 'webapp_'
+           OR left(role.rolname, 4) = 'bot_'
+      ),
+      'role_memberships', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object('role', parent.rolname, 'member', member.rolname)
+            ORDER BY parent.rolname, member.rolname
+          ), '[]'::jsonb
+        )
+        FROM pg_auth_members membership
+        JOIN pg_roles parent ON parent.oid=membership.roleid
+        JOIN pg_roles member ON member.oid=membership.member
+        WHERE left(parent.rolname, 5) = 'hist_'
+           OR left(parent.rolname, 7) = 'webapp_'
+           OR left(parent.rolname, 4) = 'bot_'
+           OR left(member.rolname, 5) = 'hist_'
+           OR left(member.rolname, 7) = 'webapp_'
+           OR left(member.rolname, 4) = 'bot_'
+      ),
+      'schema_acl', (
+        SELECT jsonb_build_object(
+          'owner', owner.rolname,
+          'acl', COALESCE(namespace.nspacl::text, '')
+        )
+        FROM pg_namespace namespace
+        JOIN pg_roles owner ON owner.oid=namespace.nspowner
+        WHERE namespace.nspname='public'
       ),
       'table_grants', (
         SELECT COALESCE(
@@ -120,8 +231,8 @@ FINGERPRINT_SQL = text(
         )
         FROM information_schema.role_table_grants
         WHERE table_schema='public'
-          AND (grantee LIKE 'hist_%' OR grantee LIKE 'webapp\\_%' ESCAPE '\\'
-               OR grantee LIKE 'bot\\_%' ESCAPE '\\')
+          AND (left(grantee, 5) = 'hist_' OR left(grantee, 7) = 'webapp_'
+               OR left(grantee, 4) = 'bot_')
       ),
       'column_grants', (
         SELECT COALESCE(
@@ -134,8 +245,8 @@ FINGERPRINT_SQL = text(
         )
         FROM information_schema.role_column_grants
         WHERE table_schema='public'
-          AND (grantee LIKE 'hist_%' OR grantee LIKE 'webapp\\_%' ESCAPE '\\'
-               OR grantee LIKE 'bot\\_%' ESCAPE '\\')
+          AND (left(grantee, 5) = 'hist_' OR left(grantee, 7) = 'webapp_'
+               OR left(grantee, 4) = 'bot_')
       )
     )
     """

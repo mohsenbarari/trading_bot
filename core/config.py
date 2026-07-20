@@ -177,6 +177,11 @@ class Settings(BaseSettings):
     telegram_notification_outbox_worker_recover_limit: int = 100
     telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
     # Shared Telegram queue rollout controls. Defaults preserve legacy ownership.
+    # Producers (API/Bot business paths) only need the non-secret ownership mode.
+    # Executors additionally require the worker/cutover controls and credentials
+    # below.  None preserves the legacy single-runtime compatibility contract by
+    # inheriting telegram_delivery_execution_owner.
+    telegram_delivery_producer_mode: str | None = None
     telegram_delivery_execution_owner: str = "legacy"
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False

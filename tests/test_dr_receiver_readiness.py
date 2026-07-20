@@ -49,7 +49,7 @@ def _settings(keys):
         dr_event_protocol_enabled=True,
         dr_event_protocol_strict=True,
         dr_sync_pairwise_keys_json=keys,
-        origin_expected_migration_revision="c431d2e3f5a6",
+        origin_expected_migration_revision="d542e3f4a6b7",
     )
 
 
@@ -59,7 +59,7 @@ def _ready_row(**overrides):
         "physical_site": "webapp_fi",
         "receiver_role_bound": True,
         "enforcement_enabled": True,
-        "migration_revision": "c431d2e3f5a6",
+        "migration_revision": "d542e3f4a6b7",
         "nonce_privilege": True,
         "event_privilege": True,
         "receipt_privilege": True,

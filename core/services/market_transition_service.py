@@ -29,6 +29,8 @@ from core.services.telegram_offer_channel_service import apply_offer_channel_sta
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
     configured_telegram_delivery_runtime,
 )
 from core.trading_settings import get_trading_settings_async
@@ -117,11 +119,9 @@ _market_runtime_view_cache: tuple[float, MarketRuntimeView] | None = None
 
 
 def _market_notice_queue_mode() -> bool:
-    runtime = configured_telegram_delivery_runtime()
     return (
-        runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1
-        and runtime.queue_worker_enabled
-        and not runtime.legacy_workers_enabled
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
     )
 
 
@@ -130,6 +130,7 @@ def _legacy_market_notice_has_credentials() -> bool:
 
 
 def _assert_legacy_market_notice_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if (
         not runtime.legacy_workers_enabled

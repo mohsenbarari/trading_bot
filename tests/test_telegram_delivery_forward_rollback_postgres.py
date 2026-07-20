@@ -31,7 +31,7 @@ from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
 
 
-EXPECTED_HEAD = "c431d2e3f5a6"
+EXPECTED_HEAD = "d542e3f4a6b7"
 
 
 @unittest.skipUnless(

@@ -46,7 +46,7 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
 }
-EXPECTED_HEAD = "c431d2e3f5a6"
+EXPECTED_HEAD = "d542e3f4a6b7"
 ROLE_DB = {
     "bot_fi": ("bot_fi_db", "BOT_FI_POSTGRES_USER", "BOT_FI_POSTGRES_DB"),
     "webapp_fi": ("webapp_fi_db", "WEBAPP_FI_POSTGRES_USER", "WEBAPP_FI_POSTGRES_DB"),
@@ -289,6 +289,72 @@ class LocalRoleBackend:
     def _compose_run(self, service: str) -> None:
         _run([*self.prefix, "run", "--rm", "--no-deps", "-T", service], timeout=900)
 
+    def _wait_services_ready(
+        self,
+        services: tuple[str, ...],
+        *,
+        stable_seconds: int = 5,
+    ) -> None:
+        deadline = time.monotonic() + 90.0
+        stable_since: float | None = None
+        while time.monotonic() < deadline:
+            all_ready = True
+            for service in services:
+                container = _run([*self.prefix, "ps", "-q", service])
+                if not container:
+                    all_ready = False
+                    break
+                state_raw = _run(
+                    [
+                        DOCKER,
+                        "inspect",
+                        "--format",
+                        "{{json .State}}",
+                        container,
+                    ]
+                )
+                try:
+                    state = json.loads(state_raw)
+                except json.JSONDecodeError as exc:
+                    raise RoleMigrationError(
+                        f"service state is unreadable: {service}"
+                    ) from exc
+                health = (state.get("Health") or {}).get("Status")
+                if state.get("Running") is not True or health == "unhealthy":
+                    all_ready = False
+                    break
+                if health is not None and health != "healthy":
+                    all_ready = False
+                    break
+                observed_release = _run(
+                    [
+                        *self.prefix,
+                        "exec",
+                        "-T",
+                        service,
+                        "python",
+                        "-c",
+                        "from core.config import settings; "
+                        "print(str(settings.release_sha or ''))",
+                    ],
+                    timeout=30,
+                )
+                if observed_release != self.context["verified_plan"]["release_sha"]:
+                    raise RoleMigrationError(
+                        f"service release identity mismatch: {service}"
+                    )
+            if all_ready:
+                stable_since = stable_since or time.monotonic()
+                if time.monotonic() - stable_since >= stable_seconds:
+                    return
+            else:
+                stable_since = None
+            time.sleep(1)
+        raise RoleMigrationError(
+            "services did not retain exact running/healthy release identity: "
+            + ",".join(services)
+        )
+
     def restore_seed(self) -> None:
         _run([*self.prefix, "up", "-d", "--no-deps", self.db_service], timeout=180)
         self._wait_db()
@@ -407,6 +473,7 @@ class LocalRoleBackend:
             raise RoleMigrationError("Witness has no product worker phase")
         for service in ROLE_WORKERS[self.role]:
             _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._wait_services_ready(ROLE_WORKERS[self.role])
 
     def attest_writer_state(self) -> dict[str, Any]:
         if self.role not in {"webapp_fi", "webapp_ir"}:
@@ -498,6 +565,7 @@ class LocalRoleBackend:
             raise RoleMigrationError("Witness has no public application phase")
         for service in ROLE_PUBLIC[self.role]:
             _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._wait_services_ready(ROLE_PUBLIC[self.role])
 
     def rollback_stop(self) -> None:
         # Preserve every target byte for forensics; rollback of user access is

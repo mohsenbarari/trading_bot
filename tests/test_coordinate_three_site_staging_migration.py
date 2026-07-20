@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -53,6 +54,99 @@ def _secure_json(path: Path, value: dict) -> None:
     path.chmod(0o600)
 
 
+def _check(observation: dict) -> dict:
+    return {
+        "status": "passed",
+        "observation": observation,
+        "observation_sha256": hashlib.sha256(
+            json.dumps(observation, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+
+
+def _routing(root: Path, *, observed_at: str) -> Path:
+    artifacts = {}
+    for name, status in (
+        ("event_checkpoint", "converged"),
+        ("database_parity", "equivalent"),
+        ("blob_parity", "passed"),
+    ):
+        path = root / f"{name}.json"
+        payload = {"schema": f"test-{name}-v1", "status": status}
+        _secure_json(path, payload)
+        artifacts[name] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "schema": payload["schema"],
+            "status": status,
+        }
+    path = root / "routing.json"
+    _secure_json(
+        path,
+        {
+            "schema": "three-site-staging-routing-observation-v2",
+            "campaign_id": CAMPAIGN_ID,
+            "release_sha": RELEASE_SHA,
+            "plan_sha256": PLAN_SHA,
+            "observed_at": observed_at,
+            "domain": "gold-trading.ir",
+            "record": "app",
+            "current_origin_ip": "10.30.0.9",
+            "expected_legacy_origin_ip": "10.30.0.9",
+            "provider_read_sha256": "a" * 64,
+            "artifacts": artifacts,
+        },
+    )
+    return path
+
+
+def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
+    revision = "002" if role == "witness" else "d542e3f4a6b7"
+    observations = {
+        "database_identity": {"role": role},
+        "migration_head": {"observed": revision, "expected": revision},
+        "private_tls": {"verified": True},
+        "service_health": {
+            "services": [
+                {
+                    "name": f"{role}-service",
+                    "running": True,
+                    "health": "healthy",
+                    "restart_count": 0,
+                    "image_id": "sha256:" + "1" * 64,
+                }
+            ]
+        },
+        "direct_origin_http": {"status_code": 200},
+        "production_boundaries_untouched": {
+            "routing_change_applied": False,
+            "test_domain": "gold-trading.ir",
+        },
+        "unexpected_errors_absent": {"restart_count_total": 0},
+        "queue_owner_legacy": {"producer_mode": "legacy", "executor_mode": "legacy"},
+        "routing_still_held": {"verified": True},
+    }
+    path = root / f"accept-{role}.json"
+    _secure_json(
+        path,
+        {
+            "schema": "three-site-staging-role-observation-v2",
+            "campaign_id": CAMPAIGN_ID,
+            "release_sha": RELEASE_SHA,
+            "plan_sha256": PLAN_SHA,
+            "role": role,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "collector": "collect_three_site_staging_migration_observation.py",
+            "checks": {name: _check(observations[name]) for name in ACCEPTANCE_CHECKS},
+            "routing_observation": {
+                "path": str(routing),
+                "sha256": hashlib.sha256(routing.read_bytes()).hexdigest(),
+            },
+        },
+    )
+    return path
+
+
 class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
     def test_private_barrier_requires_all_cross_role_preconditions(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -78,26 +172,9 @@ class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
             journals, _states_initial = _journals(root)
             for role, phase in REQUIRED_PHASE["routing-hold"].items():
                 _advance(journals[role], phase)
-            observation = root / "routing.json"
-            _secure_json(
-                observation,
-                {
-                    "schema": "three-site-staging-routing-observation-v1",
-                    "campaign_id": CAMPAIGN_ID,
-                    "release_sha": RELEASE_SHA,
-                    "plan_sha256": PLAN_SHA,
-                    "observed_at": (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat(),
-                    "domain": "gold-trading.ir",
-                    "record": "app",
-                    "current_origin_ip": "10.30.0.9",
-                    "expected_legacy_origin_ip": "10.30.0.9",
-                    "routing_held": True,
-                    "change_applied": False,
-                    "initial_convergence": True,
-                    "event_checkpoint_evidence_sha256": "a" * 64,
-                    "database_parity_evidence_sha256": "b" * 64,
-                    "blob_parity_evidence_sha256": "c" * 64,
-                },
+            observation = _routing(
+                root,
+                observed_at=(datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat(),
             )
             with self.assertRaisesRegex(MigrationCoordinationError, "stale"):
                 build_documents(
@@ -107,7 +184,7 @@ class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
                 )
             payload = json.loads(observation.read_text())
             payload["observed_at"] = datetime.now(timezone.utc).isoformat()
-            payload["change_applied"] = True
+            payload["current_origin_ip"] = "10.30.0.10"
             _secure_json(observation, payload)
             with self.assertRaisesRegex(MigrationCoordinationError, "invalid"):
                 build_documents(
@@ -123,20 +200,9 @@ class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
             for role, phase in REQUIRED_PHASE["role-acceptance"].items():
                 _advance(journals[role], phase)
             observations = []
+            routing = _routing(root, observed_at=datetime.now(timezone.utc).isoformat())
             for role in ROLE_PHASES:
-                path = root / f"accept-{role}.json"
-                _secure_json(
-                    path,
-                    {
-                        "schema": "three-site-staging-role-observation-v1",
-                        "campaign_id": CAMPAIGN_ID,
-                        "release_sha": RELEASE_SHA,
-                        "plan_sha256": PLAN_SHA,
-                        "role": role,
-                        "observed_at": datetime.now(timezone.utc).isoformat(),
-                        "checks": {name: True for name in ACCEPTANCE_CHECKS},
-                    },
-                )
+                path = _acceptance(root, role=role, routing=routing)
                 observations.append(f"{role}={path}")
             documents = build_documents(
                 action="role-acceptance",

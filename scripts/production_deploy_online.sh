@@ -787,6 +787,15 @@ export_runtime_renderer_overrides() {
         REGISTRATION_SYNC_ACCEPT_UNVERSIONED
         INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE
         OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED
+        TELEGRAM_DELIVERY_PRODUCER_MODE
+        TELEGRAM_DELIVERY_EXECUTION_OWNER
+        TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED
+        TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY
+        TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED
+        TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN
+        TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID
+        TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID
+        TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID
         RELEASE_SHA
         IRAN_ORIGIN_READINESS_API_KEY
         ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS
@@ -1827,7 +1836,12 @@ install_foreign_runtime_env() {
         return 0
     fi
     cp "$LOCAL_ENV_SOURCE_PATH" "$project_env_path"
-    chmod 600 "$project_env_path" || true
+    local service
+    for service in api bot sync migration; do
+        cp "$LOCAL_ENV_SOURCE_PATH.$service" "$project_env_path.$service"
+    done
+    chmod 600 "$project_env_path" "$project_env_path.api" "$project_env_path.bot" \
+        "$project_env_path.sync" "$project_env_path.migration" || true
     log "Installed rendered foreign runtime env at $project_env_path"
 }
 
@@ -1884,6 +1898,10 @@ find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . ||
 grep -h -q 'api/offers/market-history' \"\$assets_dir\"/MarketView-*.js || exit 22" \
         || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only terminal market offers."
     scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
+    local service
+    for service in api sync migration; do
+        scp_iran "$IRAN_ENV_SOURCE_PATH.$service" "$IRAN_SSH_TARGET:$staging_dir/.env.$service"
+    done
     log "Production payload sync complete"
 }
 

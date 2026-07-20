@@ -225,7 +225,7 @@ an exact Object Storage version id is rejected.
 Each host begins with `run_three_site_staging_role_migration.py begin`. Run
 `restore-seed`, `configure-database`, and `start-private` on all four roles in
 their journal order. `configure-database` upgrades every supported predecessor
-to `c431d2e3f5a6`; on WebApp-IR it also converts the restored FI clone into a
+to `d542e3f4a6b7`; on WebApp-IR it also converts the restored FI clone into a
 locally fenced epoch-1 standby.
 
 The compatibility migration leaves WebApp-FI active at epoch 1 but does not
@@ -331,7 +331,7 @@ after the migration evidence is reviewed.
 The source-owned campaign catalog and crash-safe controller now live in
 `core/three_site_full_matrix_campaign.py` and
 `core/three_site_full_matrix_runner.py`. They fix the order and complete
-scenario set, require two or three complete repetitions, reject skips, bind all
+scenario set, require exactly two complete repetitions, reject skips, bind all
 inputs by SHA-256, retain one unique owner-only artifact for every scenario,
 run zero-residue cleanup after every phase, and use a hash-chained execution
 journal. A controller crash after `scenario_started` cannot silently continue:
@@ -384,10 +384,40 @@ outside Git with owner-only permissions. Reusing one Ed25519 public key under
 two names/custody labels is rejected across inventory, migration, failover, and
 Full Matrix approval policies.
 
-The controller core is source-complete and hermetically validated, but it does
-not by itself authorize or perform a live staging campaign. The deployment
-backend that implements every closed scenario operation on the migrated hosts,
-and the explicit owner-authorized execution window, remain mandatory before
-any evidence can be called authoritative. The standalone verifier
-`verify_three_site_staging_full_matrix_campaign.py` only validates retained
-evidence; it cannot manufacture or upgrade a partial campaign into a pass.
+`core/three_site_full_matrix_command_backend.py` and
+`scripts/run_three_site_staging_full_matrix_campaign.py` provide the concrete,
+shell-free execution boundary and the official execute/verify CLI. The bound
+backend config must name one regular, owner-controlled driver directly under
+`scripts/full_matrix_drivers/`, bind its SHA-256, enumerate the exact closed
+catalog, forbid production, and define bounded operation timeouts (the
+endurance timeout is at least 24 hours). Driver or catalog drift fails before
+preflight. The controller independently reopens typed scenario evidence, every
+raw reference, and preflight/recovery/cleanup/finalization artifacts. It also
+measures endurance with its own monotonic clock; a driver cannot instantly
+self-attest the 24-hour scenario.
+
+The command backend does not make an arbitrary or test-only driver
+authoritative. Before Gate D, the reviewed live driver and its exact hash must
+be committed in the disabled baseline, remain unchanged at the activation SHA,
+be exercised on the migrated dedicated
+staging hosts, and included in the already-bound backend config. No driver is
+permitted to use production hosts, domains, buckets, or credentials. Execute
+only in the separately authorized window:
+
+```text
+THREE_SITE_STAGING_FULL_MATRIX_CONFIRM=execute-authoritative-three-site-staging-full-matrix \
+python3 scripts/run_three_site_staging_full_matrix_campaign.py execute \
+  --campaign /root/secure/matrix/campaign.approved.json \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --backend-config /root/secure/matrix/full-matrix-backend.json \
+  --artifact-root /root/secure/matrix/evidence \
+  --journal /root/secure/matrix/evidence/campaign.jsonl \
+  --bound-artifact NAME=/absolute/path \
+  --output /root/secure/matrix/final-report.json
+```
+
+Repeat `--bound-artifact` once for every name shown in the preparation command.
+The standalone `verify` action and
+`verify_three_site_staging_full_matrix_campaign.py` only validate the complete
+retained evidence set; neither can manufacture or upgrade a partial campaign
+into a pass.

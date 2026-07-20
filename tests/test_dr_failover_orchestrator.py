@@ -169,6 +169,8 @@ class FakeAdapter:
             result.update(
                 source_site=plan.source_site,
                 fenced=True,
+                active_connections=0,
+                boundary_captured_after_drain=True,
                 source_tail_boundary=boundary,
             )
         if name == "source_connections_drained":
@@ -177,15 +179,15 @@ class FakeAdapter:
             result.update(origin_ip=plan.target_ip, domain=plan.domain, record=plan.record)
         if name == "rollback":
             result.update(
-                rollback_state="source_restored",
+                rollback_state="safe_fenced",
                 source_site=plan.source_site,
                 target_site=plan.target_site,
                 target_fenced=True,
                 target_active_connections=0,
                 source_fenced=True,
                 source_active_connections=0,
-                holder_site=plan.source_site,
-                writer_epoch=plan.target_epoch + 1,
+                witness_lease_live=False,
+                holder_site=None,
                 origin_ip=plan.expected_current_ip,
                 domain=plan.domain,
                 record=plan.record,
@@ -212,17 +214,6 @@ class FakeAdapter:
     async def public_route_verified(self, plan): return await self._result("public_route_verified", plan)
     async def rollback(self, plan, *, failed_step, completed_steps):
         result = await self._result("rollback", plan)
-        if (
-            "target_term_acquired" not in completed_steps
-            and failed_step
-            in {
-                "classification_verified",
-                "source_fenced",
-                "source_connections_drained",
-                "target_ready",
-            }
-        ):
-            result["writer_epoch"] = plan.expected_epoch
         return result
 
 
@@ -322,7 +313,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(DrOrchestrationError, "origin IP"):
             parse_plan(raw)
 
-    async def test_source_unavailable_requires_explicit_bounded_loss_approval(self):
+    async def test_source_unavailable_path_is_not_advertised_without_concrete_backend(self):
         raw, policy = approved_plan(
             rpo_policy={
                 "mode": "bounded_loss",
@@ -331,20 +322,9 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 "approval_ticket": "INC-2026-0719",
             }
         )
-        plan = parse_plan(raw)
-        verify_two_person_approvals(plan, policy)
-        ledger = FakeOperationLedger()
-        adapter = SourceUnavailableAdapter(estimated_unreplicated_events=2)
-        with tempfile.TemporaryDirectory() as directory:
-            result = await run_orchestration(
-                plan,
-                adapter=adapter,
-                ledger=ledger,
-                journal_path=Path(directory) / "failover.jsonl",
-            )
-
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(ledger.outcome, "completed")
+        del policy
+        with self.assertRaisesRegex(DrOrchestrationError, "RPO policy is invalid"):
+            parse_plan(raw)
 
     async def test_source_unavailable_tail_is_rejected_by_zero_loss_policy(self):
         raw, policy = approved_plan()
@@ -352,9 +332,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         verify_two_person_approvals(plan, policy)
         adapter = SourceUnavailableAdapter(estimated_unreplicated_events=1)
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(
-                DrOrchestrationError, "source tail loss exceeds"
-            ):
+            with self.assertRaisesRegex(DrOrchestrationError, "boundary mode"):
                 await run_orchestration(
                     plan,
                     adapter=adapter,
@@ -363,7 +341,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(adapter.calls, ["classification_verified", "source_fenced", "rollback"])
 
-    async def test_source_unavailable_tail_cannot_exceed_approved_event_budget(self):
+    async def test_source_unavailable_budget_is_rejected_at_plan_parse(self):
         raw, policy = approved_plan(
             rpo_policy={
                 "mode": "bounded_loss",
@@ -372,20 +350,9 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 "approval_ticket": "INC-2026-0720",
             }
         )
-        plan = parse_plan(raw)
-        verify_two_person_approvals(plan, policy)
-        adapter = SourceUnavailableAdapter(estimated_unreplicated_events=3)
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(
-                DrOrchestrationError, "source tail loss exceeds"
-            ):
-                await run_orchestration(
-                    plan,
-                    adapter=adapter,
-                    ledger=FakeOperationLedger(),
-                    journal_path=Path(directory) / "failover.jsonl",
-                )
-        self.assertEqual(adapter.calls, ["classification_verified", "source_fenced", "rollback"])
+        del policy
+        with self.assertRaisesRegex(DrOrchestrationError, "RPO policy is invalid"):
+            parse_plan(raw)
 
     async def test_two_person_plan_runs_once_and_resumes_from_hash_chained_journal(self):
         raw, policy = approved_plan()
@@ -401,7 +368,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["status"], "completed")
             self.assertEqual(len(first.calls), 7)
             records = verify_hash_chained_jsonl(journal)
-            self.assertEqual(len(records), 9)
+            self.assertEqual(len(records), 16)
             resumed = FakeAdapter()
             await run_orchestration(plan, adapter=resumed, ledger=ledger, journal_path=journal)
             self.assertEqual(resumed.calls, [])
@@ -513,8 +480,8 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                     journal_path=journal,
                 )
         self.assertEqual(result["status"], "rolled_back")
-        self.assertEqual(result["rollback_state"], "not_started")
-        self.assertEqual(resumed.calls, [])
+        self.assertEqual(result["rollback_state"], "safe_fenced")
+        self.assertEqual(resumed.calls, ["rollback"])
 
     async def test_expired_plan_after_source_fence_performs_only_rollback(self):
         class InterruptedBeforeDrain(FakeAdapter):
@@ -606,13 +573,13 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         class ObsoleteRollbackAdapter(LostRouteResponseAdapter):
             async def rollback(self, plan, *, failed_step, completed_steps):
                 result = await self._result("rollback", plan)
-                result["writer_epoch"] = plan.expected_epoch
+                result["rollback_state"] = "source_restored"
                 return result
 
         raw, _ = approved_plan()
         plan = parse_plan(raw)
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(DrOrchestrationError, "source-restored"):
+            with self.assertRaisesRegex(DrOrchestrationError, "safe-fenced"):
                 await run_orchestration(
                     plan,
                     adapter=ObsoleteRollbackAdapter(),

@@ -459,7 +459,10 @@ def append_local_dr_event(
         change_log_id=change_log_id,
         source_server=identity.legacy_server_mode,
     )
-    now = datetime.now(timezone.utc).isoformat()
+    # PostgreSQL independently reconstructs the complete envelope at commit.
+    # Fixed precision keeps both canonical timestamp encodings byte-identical.
+    now = datetime.now(timezone.utc)
+    canonical_created_at = now.isoformat(timespec="microseconds")
     event_id = str(uuid4())
     payload = json.loads(canonical_json_bytes(data))
     destination_streams = {
@@ -501,7 +504,7 @@ def append_local_dr_event(
         "idempotency_key": metadata.get("command_idempotency_id"),
         "writer_epoch": writer_epoch,
         "tombstone": str(operation).upper() == "DELETE",
-        "created_at": now,
+        "created_at": canonical_created_at,
         "transaction_id": transaction_id,
         "transaction_position": int(transaction_position),
         # Finalized after the Session flush has exposed every mapper event.
@@ -536,6 +539,9 @@ def append_local_dr_event(
             "canonical_payload": canonical_json_bytes(payload).decode("utf-8"),
             "destination_streams": canonical_json_bytes(destination_streams).decode("utf-8"),
             "envelope_hash": "0" * 64,
+            # asyncpg requires a native datetime for TIMESTAMPTZ binds.  The
+            # canonical envelope above retains the byte-stable ISO rendering.
+            "created_at": now,
         },
     )
     for destination in initial_delivery_destinations(

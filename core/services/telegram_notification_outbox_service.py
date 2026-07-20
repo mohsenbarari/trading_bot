@@ -27,6 +27,7 @@ from core.telegram_delivery_account_notice_contract import (
 )
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
     configured_telegram_delivery_runtime,
 )
 from core.telegram_delivery_notification_action_contract import (
@@ -125,6 +126,7 @@ TelegramSendCallable = Callable[..., Awaitable[telegram_gateway.TelegramGatewayR
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
         raise TelegramDeliveryRuntimeConfigurationError(
@@ -998,6 +1000,7 @@ async def claim_next_telegram_notification_outbox(
     worker_id: str = TELEGRAM_NOTIFICATION_OUTBOX_WORKER_ID,
     now: datetime | None = None,
 ) -> TelegramNotificationOutbox | None:
+    _assert_legacy_direct_delivery_owner()
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         return None
 
@@ -1056,6 +1059,7 @@ async def recover_expired_telegram_notification_outbox_leases(
     max_rows: int = 100,
     now: datetime | None = None,
 ) -> list[TelegramNotificationOutbox]:
+    _assert_legacy_direct_delivery_owner()
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         return []
     current_time = now or utc_now()

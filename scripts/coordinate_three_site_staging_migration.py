@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import ipaddress
+import re
 import sys
 from typing import Any
 
@@ -17,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import write_secure_atomic_bytes
+from core.secure_file_io import read_secure_bytes
 from scripts.run_three_site_staging_role_migration import _secure_json
 from scripts.three_site_staging_migration_journal import MigrationJournal, ROLE_PHASES
 
@@ -131,9 +133,7 @@ def _routing_observation(path: Path, identity: dict[str, str]) -> tuple[dict[str
     fields = {
         "schema", "campaign_id", "release_sha", "plan_sha256", "observed_at",
         "domain", "record", "current_origin_ip", "expected_legacy_origin_ip",
-        "routing_held", "change_applied", "initial_convergence",
-        "event_checkpoint_evidence_sha256", "database_parity_evidence_sha256",
-        "blob_parity_evidence_sha256",
+        "provider_read_sha256", "artifacts",
     }
     try:
         current_origin = str(ipaddress.ip_address(str(value.get("current_origin_ip", ""))))
@@ -144,26 +144,41 @@ def _routing_observation(path: Path, identity: dict[str, str]) -> tuple[dict[str
         raise MigrationCoordinationError("routing hold origin IP is invalid") from exc
     if (
         set(value) != fields
-        or value.get("schema") != "three-site-staging-routing-observation-v1"
+        or value.get("schema") != "three-site-staging-routing-observation-v2"
         or any(value.get(key) != expected for key, expected in identity.items())
         or value.get("domain") != "gold-trading.ir"
         or value.get("record") != "app"
         or current_origin != expected_origin
-        or value.get("routing_held") is not True
-        or value.get("change_applied") is not False
-        or value.get("initial_convergence") is not True
-        or any(
-            not isinstance(value.get(field), str)
-            or len(value[field]) != 64
-            or any(character not in "0123456789abcdef" for character in value[field])
-            for field in (
-                "event_checkpoint_evidence_sha256",
-                "database_parity_evidence_sha256",
-                "blob_parity_evidence_sha256",
-            )
-        )
+        or re.fullmatch(r"[0-9a-f]{64}", str(value.get("provider_read_sha256", ""))) is None
+        or not isinstance(value.get("artifacts"), dict)
+        or set(value["artifacts"]) != {"event_checkpoint", "database_parity", "blob_parity"}
     ):
         raise MigrationCoordinationError("routing hold observation is invalid")
+    for label, reference in value["artifacts"].items():
+        if not isinstance(reference, dict) or set(reference) != {
+            "path", "sha256", "schema", "status"
+        }:
+            raise MigrationCoordinationError(f"routing {label} artifact reference is invalid")
+        artifact_path = Path(str(reference["path"]))
+        if not artifact_path.is_absolute():
+            raise MigrationCoordinationError(f"routing {label} artifact path is not absolute")
+        raw = read_secure_bytes(
+            artifact_path,
+            label=f"routing {label} artifact",
+            max_size=64 * 1024 * 1024,
+        )
+        if hashlib.sha256(raw).hexdigest() != reference["sha256"]:
+            raise MigrationCoordinationError(f"routing {label} artifact changed")
+        try:
+            artifact = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise MigrationCoordinationError(f"routing {label} artifact is invalid") from exc
+        if (
+            not isinstance(artifact, dict)
+            or str(artifact.get("status") or "") != reference["status"]
+            or reference["status"] not in {"ok", "passed", "equivalent", "converged"}
+        ):
+            raise MigrationCoordinationError(f"routing {label} artifact is not passing")
     _observed_at(value["observed_at"], label="routing hold")
     digest = hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -180,18 +195,74 @@ def _acceptance_observations(
         value = _secure_json(path, label=f"{role} acceptance observation")
         fields = {
             "schema", "campaign_id", "release_sha", "plan_sha256", "role",
-            "observed_at", "checks",
+            "observed_at", "collector", "checks", "routing_observation",
         }
         if (
             set(value) != fields
-            or value.get("schema") != "three-site-staging-role-observation-v1"
+            or value.get("schema") != "three-site-staging-role-observation-v2"
             or any(value.get(key) != expected for key, expected in identity.items())
             or value.get("role") != role
+            or value.get("collector") != "collect_three_site_staging_migration_observation.py"
             or not isinstance(value.get("checks"), dict)
             or set(value["checks"]) != ACCEPTANCE_CHECKS
-            or any(check is not True for check in value["checks"].values())
         ):
             raise MigrationCoordinationError(f"{role} acceptance observation is invalid")
+        for check_name, check in value["checks"].items():
+            if (
+                not isinstance(check, dict)
+                or set(check) != {"status", "observation", "observation_sha256"}
+                or check.get("status") != "passed"
+                or not isinstance(check.get("observation"), dict)
+                or hashlib.sha256(
+                    json.dumps(
+                        check["observation"], sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest() != check.get("observation_sha256")
+            ):
+                raise MigrationCoordinationError(
+                    f"{role} acceptance check {check_name} is invalid"
+                )
+        observations = {
+            name: check["observation"] for name, check in value["checks"].items()
+        }
+        expected_revision = "002" if role == "witness" else "d542e3f4a6b7"
+        services = observations["service_health"].get("services")
+        if (
+            observations["migration_head"] != {
+                "observed": expected_revision,
+                "expected": expected_revision,
+            }
+            or not isinstance(services, list)
+            or not services
+            or any(
+                row.get("running") is not True
+                or row.get("health") not in {"healthy", "not-configured"}
+                or row.get("restart_count") != 0
+                or not row.get("image_id")
+                for row in services
+            )
+            or observations["direct_origin_http"].get("status_code") != 200
+            or observations["production_boundaries_untouched"].get("routing_change_applied") is not False
+            or observations["production_boundaries_untouched"].get("test_domain") != "gold-trading.ir"
+            or observations["unexpected_errors_absent"].get("restart_count_total") != 0
+            or observations["queue_owner_legacy"].get("producer_mode") != "legacy"
+            or observations["queue_owner_legacy"].get("executor_mode") != "legacy"
+        ):
+            raise MigrationCoordinationError(
+                f"{role} acceptance observations do not satisfy the closed policy"
+            )
+        routing_reference = value.get("routing_observation")
+        if not isinstance(routing_reference, dict) or set(routing_reference) != {"path", "sha256"}:
+            raise MigrationCoordinationError(f"{role} routing observation reference is invalid")
+        routing_path = Path(str(routing_reference["path"]))
+        routing_raw = read_secure_bytes(
+            routing_path,
+            label=f"{role} routing observation",
+            max_size=4 * 1024 * 1024,
+        )
+        if hashlib.sha256(routing_raw).hexdigest() != routing_reference["sha256"]:
+            raise MigrationCoordinationError(f"{role} routing observation changed")
+        _routing_observation(routing_path, identity)
         _observed_at(value["observed_at"], label=f"{role} acceptance")
         digest = hashlib.sha256(
             json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
