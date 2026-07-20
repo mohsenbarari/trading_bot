@@ -3717,3 +3717,88 @@ Work remains stopped before creating an integration branch. The sibling
 clean, immutable, and pushed; only then may both exact feature heads be
 integrated deliberately with the then-current `main`, including the Alembic and
 semantic-overlap plan, before the official Full Matrix.
+
+## 51. Isolated Integration Branch - 2026-07-20
+
+The pre-integration stop boundary above has now been crossed with explicit
+owner authorization. No merge to `main`, deployment, server mutation, CDN/DNS
+change, or official Full Matrix is authorized by this section.
+
+### 51.1 Exact integration inputs and topology
+
+- integration branch: `integration/three-site-dr-telegram-queue`;
+- immutable base: `origin/main` at
+  `2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5`;
+- Telegram queue input:
+  `candidate/telegram-offer-publication-queue` at
+  `51cf7504324b72e1165da6da5a7095758db57346`;
+- three-site DR input: `feature/arvan-controlled-origin-failover` at
+  `5031364087db1cc6c9042aa35eb2e05b632d2993`;
+- queue merge commit: `f81d2c8e`;
+- DR merge commit: `3c765b50`;
+- executable-code verification boundary after integration remediations:
+  `c57354fd`.
+
+Both feature histories remain parents of the integration commits. Neither
+feature branch was rewritten or merged into the other, and `main` remained at
+the immutable base throughout this work.
+
+### 51.2 Semantic integration decisions
+
+1. The queue-aware candidate versions of the fourteen repeat-offer conflicts
+   were retained because that branch already contains equivalents of all seven
+   newer `main` repeat/stale-state commits plus the durable queue adaptations.
+2. WebApp authentication remains read-only: the legacy `last_seen` commit was
+   removed because an authentication read cannot bypass DR event/fencing rules.
+3. The strict WebApp Telegram-effect guard runs before legacy OTP envelope
+   parsing. The foreign Bot still accepts only the exact allowlisted OTP relay.
+4. Background startup includes both queue ownership selection and conditional
+   Witness renewal; production rendering carries both offer-expiry receipt and
+   Witness/readiness controls.
+5. Legacy Bot/WebApp sync hashes the Web Push endpoint and drops `p256dh` and
+   `auth`. The authenticated private WebApp-FI/WebApp-IR DR stream explicitly
+   retains endpoint/key material, while Bot-FI remains an impossible
+   destination for those credentials.
+6. The independent Alembic heads `a274f5a6b8c9` and `e9e4f5a6b7c8` are joined
+   by the no-op merge revision `b320c1d2e3f4`. Runtime readiness examples and
+   guarded queue tests now bind to that single integration head.
+7. Telegram delivery inventory was re-attested after verifying that all 98
+   callsites kept identical counts and dispositions; only four line identities
+   moved because of DR additions. Three queue-aware interaction adapters also
+   received an explicit external-effect classification.
+8. The Writer-Witness release now has a closed three-file model package instead
+   of copying the full application model tree. Telegram/business models and
+   their transitive dependencies cannot enter the isolated control-plane
+   release.
+9. The every-table/every-field data matrix and external-effect inventory were
+   regenerated from the combined model/code tree and verify byte-for-byte.
+
+### 51.3 Verification at the executable-code boundary
+
+- `47` repeat-offer/stale-state/queue bridge tests passed after resolving the
+  first merge;
+- `27` direct semantic-conflict tests, `43` migration/data/effect tests, `220`
+  sensitive combined queue/DR tests, `20` Telegram callsite-inventory tests,
+  `8` artifact-security tests, `10` Bot startup/ownership tests, and `4`
+  staging secret/network tests passed;
+- the hermetic Writer-Witness source gate passed `464` unit tests with zero
+  skips, then passed `5` guarded real PostgreSQL tests and the complete
+  four-database partition/replay/pause/resume/monotonic-expiry drill;
+- a fresh PostgreSQL instance using the required monotonic extension migrated
+  from an empty database through both feature histories to
+  `b320c1d2e3f4 (head) (mergepoint)`;
+- Python compilation, Alembic single-head inspection, deterministic matrix
+  checks, command-surface attestation, tracked-secret scan, `git diff --check`,
+  secret/network verification, and `docker compose config --quiet` passed;
+- every temporary PostgreSQL/drill/debug resource created for these checks was
+  removed after verification.
+
+### 51.4 Remaining stop boundary
+
+The integration branch may be pushed for review and Full Matrix preparation,
+but it must not be merged into `main`. The next acceptance stage is the official
+immutable-SHA Full Matrix on the real project staging environment, including
+the combined Telegram queue, three-site database roles/migrations, private DR
+projection, effect delivery, failover/failback, and application regression
+matrix. A separate explicit owner instruction is required before any merge to
+`main` or production deployment.
