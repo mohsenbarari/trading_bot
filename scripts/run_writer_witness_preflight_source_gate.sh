@@ -67,6 +67,7 @@ python_sources=( \
     scripts/writer_witness_matrix_client.py \
     scripts/smoke_writer_witness_client.py \
     writer_witness_app.py \
+    deploy/writer-witness/models-package-init.py \
     deploy/writer-witness/writer-witness-activation.py \
     deploy/writer-witness/writer-witness-matrix-campaign.py \
     deploy/writer-witness/writer-witness-matrix-host-fault-state.py \

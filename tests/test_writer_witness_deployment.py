@@ -325,6 +325,14 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertIn("deploy/writer-witness/python-runtime.json", manifest)
             self.assertIn("deploy/writer-witness/nftables-policy.json", manifest)
             self.assertIn("deploy/writer-witness/wheelhouse.sha256", manifest)
+            self.assertEqual(
+                {path for path in manifest if path.startswith("models/")},
+                {
+                    "models/__init__.py",
+                    "models/database.py",
+                    "models/webapp_writer_state.py",
+                },
+            )
             self.assertIn("deploy/writer-witness/writer-witness-activation.py", manifest)
             self.assertIn(
                 "deploy/writer-witness/writer-witness-activation-recovery.service",
@@ -374,6 +382,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             ROOT / "scripts/build_writer_witness_wheelhouse.sh"
         ).read_text()
         executed_sources = {
+            "deploy/writer-witness/models-package-init.py",
             "deploy/writer-witness/writer-witness-activation.py",
             "deploy/writer-witness/writer-witness-activation-watchdog.sh",
             "deploy/writer-witness/writer-witness-backup.sh",

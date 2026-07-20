@@ -116,10 +116,12 @@ do
     install -m 0644 "$ROOT_DIR/core/$source" "$DESTINATION/core/$source"
 done
 
-find "$ROOT_DIR/models" -maxdepth 1 -type f -name '*.py' -print0 \
-    | while IFS= read -r -d '' source; do
-        install -m 0644 "$source" "$DESTINATION/models/$(basename "$source")"
-    done
+install -m 0644 \
+    "$ROOT_DIR/deploy/writer-witness/models-package-init.py" \
+    "$DESTINATION/models/__init__.py"
+for source in database.py webapp_writer_state.py; do
+    install -m 0644 "$ROOT_DIR/models/$source" "$DESTINATION/models/$source"
+done
 
 for source in \
     001_initial.sql \
