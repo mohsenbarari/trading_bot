@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 
-from sqlalchemy import delete, or_, select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.services.invitation_lifecycle_service import derive_invitation_state
@@ -146,15 +146,13 @@ async def prune_terminal_identity_reservations(
         )
     )
     rows = (await db.execute(stmt)).all()
-    terminal_ids = [
-        reservation.id
+    terminal_reservations = [
+        reservation
         for reservation, invitation in rows
         if derive_invitation_state(invitation) != InvitationDerivedState.PENDING
     ]
-    if terminal_ids:
-        await db.execute(
-            delete(InvitationIdentityReservation).where(InvitationIdentityReservation.id.in_(terminal_ids))
-        )
+    for reservation in terminal_reservations:
+        await db.delete(reservation)
 
 
 async def find_identity_reservation(
@@ -209,11 +207,17 @@ async def release_invitation_identity(
     *,
     invitation_id: int,
 ) -> None:
-    await db.execute(
-        delete(InvitationIdentityReservation).where(
-            InvitationIdentityReservation.invitation_id == int(invitation_id)
-        )
+    reservations = list(
+        (
+            await db.execute(
+                select(InvitationIdentityReservation).where(
+                    InvitationIdentityReservation.invitation_id == int(invitation_id)
+                )
+            )
+        ).scalars().all()
     )
+    for reservation in reservations:
+        await db.delete(reservation)
 
 
 async def release_invitation_identities_for_tokens(
@@ -224,9 +228,14 @@ async def release_invitation_identities_for_tokens(
     tokens = sorted({str(token).strip() for token in invitation_tokens if str(token).strip()})
     if not tokens:
         return
-    invitation_ids = select(Invitation.id).where(Invitation.token.in_(tokens))
-    await db.execute(
-        delete(InvitationIdentityReservation).where(
-            InvitationIdentityReservation.invitation_id.in_(invitation_ids)
-        )
+    reservations = list(
+        (
+            await db.execute(
+                select(InvitationIdentityReservation)
+                .join(Invitation, Invitation.id == InvitationIdentityReservation.invitation_id)
+                .where(Invitation.token.in_(tokens))
+            )
+        ).scalars().all()
     )
+    for reservation in reservations:
+        await db.delete(reservation)

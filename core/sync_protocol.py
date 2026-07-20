@@ -94,6 +94,20 @@ def build_sync_protocol_metadata(*, producer_server: str | None = None) -> dict[
 
 def validate_sync_protocol_metadata(metadata: Any) -> SyncProtocolValidationResult:
     if metadata is None:
+        try:
+            from core.config import settings
+
+            strict = bool(
+                getattr(settings, "three_site_dr_enabled", False)
+                and getattr(settings, "dr_event_protocol_strict", False)
+            )
+        except Exception:
+            strict = False
+        if strict:
+            return SyncProtocolValidationResult(
+                ok=False,
+                reason="missing_sync_protocol_in_three_site_mode",
+            )
         return SyncProtocolValidationResult(
             ok=True,
             details={"compatibility": "legacy_missing_sync_protocol"},

@@ -8,11 +8,19 @@
 
 ## Architecture Overview
 
-### Two-Server Deployment
-| Server | Location | Services | Domain |
+### Current Runtime And Accepted Three-Site Target
+| Site | Location | Services / Role | Address |
 |---|---|---|---|
-| **Foreign** | Germany (current machine) | Bot + API + Sync Worker + DB + Redis | — |
-| **Iran** | 65.109.220.59 (`SSH 37067`) | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
+| `bot_fi` | Hetzner Finland | Permanent Telegram/foreign authority | `65.109.216.187` |
+| `webapp_fi` | Hetzner Finland | Current WebApp writer and recovery hub | `65.109.220.59` |
+| `webapp_ir` | Iran | Planned standby/outage WebApp writer | `87.236.212.194` |
+
+The live application remains on the current Bot-FI/WebApp-FI runtime. WebApp-IR
+must not be started as a writer and Arvan must not be switched on the strength
+of source-only foundations. The accepted target and gates are recorded in
+`docs/THREE_SITE_WEBAPP_DR_FAILOVER_RECOVERY_ROADMAP_20260710.md`; the writer
+witness contract is in
+`docs/ADR_THREE_SITE_WEBAPP_WRITER_WITNESS_LEASE_20260714.md`.
 
 ### Tech Stack
 - **Backend**: FastAPI 0.111 + SQLAlchemy 2.0 (async, asyncpg) + PostgreSQL 15 + Redis 7
@@ -126,6 +134,20 @@ SQLAlchemy event listeners → durable `change_log`; after the outermost commit,
   fields; `last_seen_at` merges by maximum; generic User counters never travel in User patches.
   `users`, `invitations`, and both Relation tables apply only newer `sync_version` values. The three
   registration reservation/intent/receipt tables are local `no-sync` state.
+
+### Three-Site WebApp Writer Safety
+- `logical_authority=webapp` is independent from `physical_site=webapp_fi|webapp_ir`.
+- Local `webapp_writer_state` fencing is necessary but cannot alone prove the
+  remote site stopped. Global terms use the Iran-reachable durable witness
+  contract and a signed, time-bounded Ed25519 lease.
+- `WRITER_WITNESS_REQUIRED` stays false until the dedicated witness service,
+  private-key custody, automatic renewal, clock-offset readiness, and
+  independent partition drills pass. `/health/origin-ready` intentionally
+  stays false while witness enforcement is disabled.
+- Witness state and receipts are internal bookkeeping and must never enter the
+  ordinary product sync plane. Lease renewal preserves the local writer
+  transition id so in-flight transactions are not invalidated every 30 seconds.
+- No force takeover may bypass a non-expired prior lease. Ambiguity fails closed.
 
 ### Real-time
 WebSocket + SSE via Redis pub/sub. Events: `offer:created/expired/updated/cancelled/completed`, `trade:created`. Per-user events via `notifications:{user_id}` channel.
@@ -1748,3 +1770,4 @@ make status      # Container status
 | 2026-07-11 20:45 UTC | Codex | **Dual-Platform Registration Stage 5 Direct Telegram FSM Implemented**: Added the default-off eligible Telegram invitation flow using sender-owned contact, exact shared address validation, Invitation-bounded Redis state, commit-before-clear Stage 4 intent persistence, explicit pending-not-final outage behavior, and projection-gated reuse of the existing linked-account panel/channel/onboarding path. No foreign User/session is created; accountant, Tier-2, Watch, invalid, revoked, and expired paths remain blocked or Web-only through the shared policy. Added direct FSM, restart/resume, failure-boundary, Redis TTL, handoff, and real scratch PostgreSQL evidence. Active database and runtime flags remained unchanged; no deploy, push, migration, or production release occurred. |
 | 2026-07-12 15:49 UTC | Codex | **Direct Telegram Registration Tutorial Gate Decoupled From Channel Join**: Real staging acceptance with a channel owner exposed that Telegram emits no join request for an existing member, leaving onboarding at `0/0` and showing the welcome panel immediately. Successful direct-registration handoff now atomically enables the existing foreign-owned two-step tutorial gate before panel exposure; ordered acknowledgements reuse the current copy and send the existing welcome/channel/WebApp panel only after step 2. Out-of-order and duplicate callbacks fail closed, while `/start` and the existing channel join path retain recovery compatibility. Verified focused onboarding/sync suites, the 321-test Stage 9 registration lane, all 432 bot tests, py_compile, and roadmap integrity checks. Production release was not run. |
 | 2026-07-12 16:19 UTC | Codex | **Repeated Bot Start Welcome Copy Removed**: Kept the existing welcome/channel/WebApp panel as the one-time final onboarding message, while registered users entering through plain `/start`, a reopened account-link token, or a reopened invitation now receive the owner-approved active-account message with fresh channel and WebApp links and the persistent menu. Centralized channel-link resolution so join-request URL creation and fallback are not duplicated. Updated the dual-platform roadmap and covered all three returning-entry surfaces plus exact copy, both links, no repeated welcome text, and unchanged final-onboarding welcome. Verified 434 bot tests, the 321-test Stage 9 registration lane, py_compile, and `git diff --check`. Production release was not run. |
+| 2026-07-14 21:45 UTC | Codex | **Three-Site Writer Witness Foundation Added**: Published the three-site DR roadmap under `docs/`, accepted an Iran-reachable Ed25519 witness/lease ADR, added additive witness state/receipt storage, replay-safe acquire/renew/drain control, feature-gated HTTP/startup/background/commit fencing, dry-run operator CLIs, fail-closed origin readiness, runtime configuration defaults, and focused failure tests. Witness enforcement stays disabled; no migration, deploy, WebApp-IR start, Arvan change, or production action was performed. |

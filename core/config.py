@@ -18,6 +18,82 @@ class Settings(BaseSettings):
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
+    # Logical authority remains compatible with server_mode. physical_site is
+    # deployment identity and must not be reused as business/home authority.
+    logical_authority: str | None = None
+    physical_site: str | None = None
+    topology_schema_version: str | None = None
+    three_site_dr_enabled: bool = False
+    dark_standby_mode: bool = False
+    dr_event_protocol_enabled: bool = False
+    dr_event_protocol_strict: bool = False
+    dr_producer_epoch: int = 1
+    dr_sync_pairwise_keys_json: str | None = None
+    dr_sync_peer_urls_json: str | None = None
+    dr_sync_request_max_age_seconds: int = 30
+    dr_sync_http_timeout_seconds: float = 5.0
+    dr_sync_verify_tls: bool = True
+    dr_sync_ca_bundle: str | None = None
+    dr_projection_database_url: str | None = None
+    dr_control_database_url: str | None = None
+    dr_auxiliary_db_pool_size: int = 3
+    dr_auxiliary_db_max_overflow: int = 2
+    dr_delivery_batch_size: int = 100
+    dr_delivery_claim_seconds: int = 30
+    dr_delivery_poll_seconds: float = 0.25
+    dr_blob_root: str = "uploads/blobs"
+    dr_blob_object_prefix: str = "three-site-dr/blobs/sha256"
+    dr_blob_object_endpoint: str | None = None
+    dr_blob_object_region: str | None = None
+    dr_blob_object_bucket: str | None = None
+    dr_blob_s3_credentials_file: str | None = None
+    dr_blob_encryption_keyring_file: str | None = None
+    dr_blob_require_versioning: bool = True
+    dr_blob_gc_retention_days: int = 30
+    dr_blob_orphan_grace_seconds: int = 3600
+    dr_blob_orphan_quarantine_days: int = 30
+    dr_blob_orphan_scan_max_entries: int = 10000
+    dr_blob_local_quota_bytes: int = 20 * 1024 * 1024 * 1024
+    dr_audit_anchor_object_prefix: str = "three-site-dr/audit-anchors"
+    # Safe default until the owner approves RPO and a synchronous same-region
+    # journal has independently passed restoration drills.
+    dr_isolated_critical_write_policy: str = "freeze"
+    dr_effect_worker_enabled: bool = False
+    dr_effect_claim_seconds: int = 30
+    dr_effect_min_lease_remaining_seconds: int = 10
+    dr_effect_poll_seconds: float = 0.25
+    origin_readiness_api_key: str | None = None
+    origin_expected_migration_revision: str | None = None
+    origin_readiness_max_evidence_age_seconds: int = 900
+    origin_readiness_require_recovery_manifest: bool = True
+    # Disabled until the dedicated Iran-reachable witness service and drills exist.
+    writer_witness_required: bool = False
+    writer_witness_public_key: str | None = None
+    writer_witness_private_key_file: str | None = None
+    writer_witness_lease_duration_seconds: int = 180
+    writer_witness_renew_interval_seconds: int = 30
+    writer_witness_safety_margin_seconds: int = 15
+    writer_witness_max_clock_skew_seconds: int = 5
+    writer_witness_boot_id_file: str = "/proc/sys/kernel/random/boot_id"
+    writer_witness_authoritative_site: str = "webapp_ir"
+    # Dedicated witness service and renewal transport. All remain disabled and
+    # unset until the three-site rollout gate is explicitly approved.
+    writer_witness_service_enabled: bool = False
+    writer_witness_database_url: str | None = None
+    writer_witness_product_database_user: str | None = None
+    writer_witness_require_distinct_database_identity: bool = True
+    writer_witness_service_webapp_fi_key_id: str | None = None
+    writer_witness_service_webapp_fi_secret: str | None = None
+    writer_witness_service_webapp_ir_key_id: str | None = None
+    writer_witness_service_webapp_ir_secret: str | None = None
+    writer_witness_internal_url: str | None = None
+    writer_witness_client_key_id: str | None = None
+    writer_witness_client_secret: str | None = None
+    writer_witness_auth_max_age_seconds: int = 15
+    writer_witness_http_timeout_seconds: float = 3.0
+    writer_witness_verify_tls: bool = True
+    writer_witness_ca_bundle: str | None = None
+    writer_witness_auto_renew_enabled: bool = False
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None

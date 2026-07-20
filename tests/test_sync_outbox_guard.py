@@ -16,6 +16,7 @@ from core.sync_outbox_guard import (
     guard_sync_bulk_or_raw_execute,
     mark_sync_outbox_recorded,
     publish_sync_outbox_wakeup_after_commit,
+    raw_sql_is_provably_read_only,
     statement_write_target_table,
     sync_table_requires_outbox,
     verify_pending_sync_outbox,
@@ -414,6 +415,29 @@ class SyncOutboxGuardTests(unittest.TestCase):
             "offers",
         )
         self.assertIsNone(statement_write_target_table(text("SELECT * FROM offers")))
+
+    def test_unclassified_raw_sql_is_fail_closed(self):
+        unsafe = (
+            "WITH changed AS (UPDATE offers SET status = 'expired' RETURNING id) SELECT id FROM changed",
+            "/* hidden */ WITH gone AS (DELETE FROM offers RETURNING id) SELECT id FROM gone",
+            "WITH made AS (INSERT INTO offers (id) VALUES (1) RETURNING id) SELECT id FROM made",
+            "CALL mutate_offer(1)",
+            "SELECT mutate_offer(1)",
+            "SELECT id FROM offers; DELETE FROM offers",
+            "DO $$ BEGIN UPDATE offers SET status = 'expired'; END $$",
+        )
+        for sql in unsafe:
+            with self.subTest(sql=sql), self.assertRaises(SyncOutboxBypassError):
+                guard_sync_bulk_or_raw_execute(
+                    SimpleNamespace(execution_options={}, statement=text(sql))
+                )
+
+    def test_raw_sql_read_allowlist_is_deliberately_narrow(self):
+        self.assertTrue(raw_sql_is_provably_read_only("SELECT id, status FROM offers"))
+        self.assertTrue(raw_sql_is_provably_read_only("-- audit\n SHOW transaction_read_only"))
+        self.assertFalse(raw_sql_is_provably_read_only("WITH rows AS (SELECT 1) SELECT * FROM rows"))
+        self.assertFalse(raw_sql_is_provably_read_only("SELECT now()"))
+        self.assertFalse(raw_sql_is_provably_read_only("SELECT 1; SELECT 2"))
 
 
 if __name__ == "__main__":

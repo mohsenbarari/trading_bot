@@ -1,0 +1,4 @@
+comment = 'Host boot identity and CLOCK_BOOTTIME fencing primitives'
+default_version = '1.0'
+module_pathname = '$libdir/trading_bot_boottime'
+relocatable = false

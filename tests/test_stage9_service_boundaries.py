@@ -107,6 +107,7 @@ class _DB:
         self.commit = AsyncMock()
         self.rollback = AsyncMock()
         self.refresh = AsyncMock()
+        self.delete = AsyncMock()
         self.added = []
 
     async def _execute(self, *_args, **_kwargs):
@@ -200,9 +201,9 @@ class Stage9IdentityReservationBoundaryTests(unittest.IsolatedAsyncioTestCase):
             expires_at=utc_now() + timedelta(days=1),
         )
         rows = SimpleNamespace(all=Mock(return_value=[(reservation, invitation)]))
-        db = _DB([rows, _Result()])
+        db = _DB([rows])
         await prune_terminal_identity_reservations(db, identity)
-        self.assertEqual(db.execute.await_count, 2)
+        db.delete.assert_awaited_once_with(reservation)
 
     async def test_reservation_requires_flushed_invitation_and_classifies_conflicts(self):
         identity = NormalizedInvitationIdentity("09121112233", "stage9-user")

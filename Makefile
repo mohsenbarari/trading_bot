@@ -14,7 +14,7 @@ SSH_IRAN_OPTS = -o StrictHostKeyChecking=accept-new -p $(IRAN_SSH_PORT)
 LOCAL_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; else printf '%s' 'docker compose'; fi)
 IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate stage9-infrastructure-gate stage9-runtime-evidence stage9-evidence-gate stage9-mutation-gate stage9-test-matrix frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-data-hygiene production-data-hygiene-iran production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate stage9-infrastructure-gate stage9-runtime-evidence stage9-evidence-gate stage9-mutation-gate stage9-test-matrix frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-data-hygiene production-data-hygiene-iran production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan writer-witness-real-host-matrix-plan writer-witness-real-host-matrix-preflight writer-witness-real-host-scenario-plan writer-witness-real-host-scenario-approve writer-witness-real-host-scenario-run writer-witness-real-host-scenario-recover webapp-ir-dark-standby-check production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
 
 help:
 	@echo ""
@@ -94,6 +94,13 @@ help:
 	@echo "  make production-full-matrix-manifest ARGS='--prefix PFM_...' - Build the production full-matrix scenario manifest"
 	@echo "  make production-full-matrix-run ARGS='--manifest /tmp/...json' - Build the manifest-driven production matrix run plan"
 	@echo "  make production-full-matrix-plan ARGS='--prefix PFM_...' - Render the guarded production full-matrix command plan"
+	@echo "  make writer-witness-real-host-matrix-plan - Render the read-only dark-Witness real-host matrix plan"
+	@echo "  make writer-witness-real-host-matrix-preflight - Execute all read-only entry gates before that matrix"
+	@echo "  make writer-witness-real-host-scenario-plan ARGS='--scenario RH-001 --expected-commit SHA' - Render one executable scenario contract"
+	@echo "  make writer-witness-real-host-scenario-approve ARGS='...' - Bind observer/incident approval to one preflight and scenario"
+	@echo "  make writer-witness-real-host-scenario-run ARGS='...' - Execute exactly one confirmed dark-Witness scenario"
+	@echo "  make writer-witness-real-host-scenario-recover ARGS='--campaign-journal ...' - Reconcile one interrupted dirty campaign"
+	@echo "  make webapp-ir-dark-standby-check MANIFEST=/secure/path - Validate the data-only WA-IR manifest"
 	@echo "  make production-backup-foreign - Create an operational backup on the foreign host"
 	@echo "  make production-backup-iran    - Create an operational backup on the Iran host"
 	@echo "  make production-backup-all     - Create operational backups on both hosts"
@@ -453,3 +460,24 @@ production-full-matrix-run:
 
 production-full-matrix-plan:
 	@python3 ./scripts/plan_production_full_matrix.py $${ARGS}
+
+writer-witness-real-host-matrix-plan:
+	@./scripts/run_writer_witness_matrix_controller.sh preflight --mode plan $${ARGS}
+
+writer-witness-real-host-matrix-preflight:
+	@./scripts/run_writer_witness_matrix_controller.sh preflight --mode preflight $${ARGS}
+
+writer-witness-real-host-scenario-plan:
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode plan $${ARGS}
+
+writer-witness-real-host-scenario-approve:
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode approve $${ARGS}
+
+writer-witness-real-host-scenario-run:
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode execute $${ARGS}
+
+writer-witness-real-host-scenario-recover:
+	@./scripts/run_writer_witness_matrix_controller.sh scenario --mode recover $${ARGS}
+
+webapp-ir-dark-standby-check:
+	@python3 ./scripts/verify_webapp_ir_dark_standby_manifest.py --manifest $${MANIFEST:?set MANIFEST to the private dark-standby env} --check-files --json

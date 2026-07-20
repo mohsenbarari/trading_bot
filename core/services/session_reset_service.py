@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from sqlalchemy import delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.redis import pool
@@ -67,17 +67,22 @@ async def reset_user_session_state(
 ) -> dict[str, int | bool]:
     cleared = await force_clear_sessions(db, user_id)
 
-    login_requests_result = await db.execute(
-        delete(SessionLoginRequest).where(SessionLoginRequest.user_id == user_id)
-    )
-    recovery_requests_result = await db.execute(
-        delete(SingleSessionRecoveryRequest).where(SingleSessionRecoveryRequest.user_id == user_id)
-    )
+    async def delete_owned_rows(model) -> int:  # noqa: ANN001
+        rows = list(
+            (
+                await db.execute(select(model).where(model.user_id == user_id))
+            ).scalars().all()
+        )
+        for row in rows:
+            await db.delete(row)
+        return len(rows)
+
+    login_requests_deleted = await delete_owned_rows(SessionLoginRequest)
+    recovery_requests_deleted = await delete_owned_rows(SingleSessionRecoveryRequest)
 
     session_rows_deleted = 0
     if delete_session_rows:
-        session_rows_result = await db.execute(delete(UserSession).where(UserSession.user_id == user_id))
-        session_rows_deleted = int(getattr(session_rows_result, "rowcount", 0) or 0)
+        session_rows_deleted = await delete_owned_rows(UserSession)
 
     await db.commit()
 
@@ -87,8 +92,8 @@ async def reset_user_session_state(
 
     return {
         "revoked_active_sessions": int(cleared),
-        "deleted_login_requests": int(getattr(login_requests_result, "rowcount", 0) or 0),
-        "deleted_recovery_requests": int(getattr(recovery_requests_result, "rowcount", 0) or 0),
+        "deleted_login_requests": login_requests_deleted,
+        "deleted_recovery_requests": recovery_requests_deleted,
         "deleted_session_rows": session_rows_deleted,
         "deleted_redis_keys": int(redis_deleted),
         "delete_session_rows": bool(delete_session_rows),

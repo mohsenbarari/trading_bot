@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily encrypted off-host Writer Witness backup
+
+[Timer]
+OnCalendar=*-*-* 02:27:00 UTC
+OnUnitInactiveSec=1h
+RandomizedDelaySec=300
+Persistent=true
+Unit=writer-witness-offsite-backup.service
+
+[Install]
+WantedBy=timers.target

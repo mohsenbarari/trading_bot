@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from enum import Enum
 from typing import Any
 
@@ -53,6 +54,9 @@ def _post_smsir_result(
     path: str,
     payload: dict[str, Any],
 ) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    from core.dr_effects import assert_epoch_bound_effect_execution
+
+    assert_epoch_bound_effect_execution(provider="smsir")
     try:
         response = httpx.post(
             _api_url(path),
@@ -108,6 +112,9 @@ async def _post_smsir_result_async(
     path: str,
     payload: dict[str, Any],
 ) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    from core.dr_effects import assert_epoch_bound_effect_execution
+
+    assert_epoch_bound_effect_execution(provider="smsir")
     try:
         async with httpx.AsyncClient(timeout=settings.smsir_timeout_seconds) as client:
             response = await client.post(
@@ -242,6 +249,35 @@ def send_sms(mobile: str, message: str) -> bool:
 
     logger.info("SMS.ir SMS sent to %s", mask_mobile(normalized_mobile))
     return True
+
+
+async def execute_sms_bulk_effect(_session, payload: dict[str, Any]):  # noqa: ANN001
+    """Closed DR effect handler for non-OTP informational SMS messages."""
+
+    from core.dr_effects import ProviderEffectResult
+
+    if set(payload) != {"mobile", "message"}:
+        return ProviderEffectResult(outcome="not_sent", error_code="sms_payload_fields_invalid")
+    normalized_mobile = _normalize_mobile(str(payload["mobile"]))
+    message = str(payload["message"])
+    if not normalized_mobile or not message or len(message) > 2000 or not settings.smsir_line_number:
+        return ProviderEffectResult(outcome="not_sent", error_code="sms_payload_invalid")
+    request_payload = {
+        "lineNumber": settings.smsir_line_number,
+        "messageText": message,
+        "mobiles": [normalized_mobile],
+    }
+    outcome, data = await _post_smsir_result_async("v1/send/bulk", request_payload)
+    if outcome == SMSDeliveryOutcome.FAILED:
+        return ProviderEffectResult(outcome="not_sent", error_code="sms_provider_rejected")
+    if outcome == SMSDeliveryOutcome.AMBIGUOUS:
+        return ProviderEffectResult(outcome="ambiguous", error_code="sms_provider_ambiguous")
+    provider_data = data.get("data") if isinstance(data, dict) else None
+    message_ids = provider_data.get("messageIds") if isinstance(provider_data, dict) else None
+    if not isinstance(message_ids, list) or not message_ids or message_ids[0] in (None, 0, "0"):
+        return ProviderEffectResult(outcome="ambiguous", error_code="sms_receipt_missing")
+    receipt = hashlib.sha256(str(message_ids[0]).encode("utf-8")).hexdigest()
+    return ProviderEffectResult(outcome="succeeded", receipt=receipt)
 
 
 def send_otp_sms(mobile: str, code: str) -> bool:

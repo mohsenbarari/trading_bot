@@ -52,6 +52,92 @@ def _entry(
 
 
 _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
+    "dr_destination_cursors": _entry(
+        "dr_destination_cursors", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_outbox",), "local origin producer",
+        "monotonic per-origin/per-destination stream sequence", "DR ordering only",
+    ),
+    "dr_durability_state": _entry(
+        "dr_durability_state", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_orchestrator", "durability_health_controller"), "local DR control plane",
+        "signed expiring health evidence only", "write-freeze policy",
+    ),
+    "dr_blob_deliveries": _entry(
+        "dr_blob_deliveries", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_blob_worker",), "local DR file plane",
+        "destination-specific content-hash delivery", "blob transport only",
+    ),
+    "dr_blob_manifests": _entry(
+        "dr_blob_manifests", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("webapp_upload", "dr_blob_worker"), "local DR file plane",
+        "immutable SHA-256 content identity", "blob manifest only",
+    ),
+    "dr_blob_receipts": _entry(
+        "dr_blob_receipts", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_blob_worker",), "local DR file plane",
+        "verified content hash per destination", "blob parity evidence",
+    ),
+    "dr_file_intents": _entry(
+        "dr_file_intents", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("webapp_upload",), "WebApp writer term",
+        "one immutable content intent per chat file", "DB-plus-blob linkage",
+    ),
+    "dr_recovery_manifests": _entry(
+        "dr_recovery_manifests", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_recovery_gate",), "local DR recovery control plane",
+        "immutable DB/event/blob barrier hash", "promotion/failback evidence",
+    ),
+    "dr_conflict_quarantine": _entry(
+        "dr_conflict_quarantine", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_receiver", "operator_resolution"), "local DR control plane",
+        "never product-sync control rows", "DR conflict audit only",
+    ),
+    "dr_effect_outbox": _entry(
+        "dr_effect_outbox", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_effect_worker",), "local DR effect plane",
+        "never product-sync execution leases", "epoch-bound external effects",
+    ),
+    "dr_effect_fanouts": _entry(
+        "dr_effect_fanouts", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_outbox", "dr_effect_worker"), "local DR effect plane",
+        "immutable event-bound fanout intent with local expansion status",
+        "transactional recipient fanout only",
+    ),
+    "dr_event_deliveries": _entry(
+        "dr_event_deliveries", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_sender", "dr_relay"), "local DR delivery plane",
+        "destination-specific immutable-event delivery", "DR transport only",
+    ),
+    "dr_event_receipts": _entry(
+        "dr_event_receipts", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_receiver",), "local DR receipt plane",
+        "never relay as a business mutation", "DR receipt evidence only",
+    ),
+    "dr_events": _entry(
+        "dr_events", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_outbox", "dr_receiver", "dr_relay"), "immutable origin authority",
+        "preserve exact event identity and bytes", "DR event truth",
+    ),
+    "dr_producer_cursors": _entry(
+        "dr_producer_cursors", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_outbox",), "local origin producer",
+        "monotonic per-site/epoch sequence", "DR ordering only",
+    ),
+    "dr_replay_nonces": _entry(
+        "dr_replay_nonces", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_receiver",), "local DR transport",
+        "unique key-id/nonce", "transport replay defence",
+    ),
+    "dr_stream_checkpoints": _entry(
+        "dr_stream_checkpoints", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_receiver", "dr_projection_worker"), "local DR projection",
+        "contiguous origin-site/epoch sequence", "gap and parity evidence",
+    ),
+    "dr_projection_versions": _entry(
+        "dr_projection_versions", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("dr_projection_worker",), "local DR projection",
+        "highest applied authority term per aggregate", "stale-term suppression",
+    ),
     "accountant_relations": _entry(
         "accountant_relations",
         SyncPolicy.SYNC,
@@ -243,9 +329,10 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "push_subscriptions",
         SyncPolicy.NO_SYNC,
         ("webapp_browser_runtime",),
-        "iran local browser runtime",
-        "no cross-server merge",
-        "iran Web Push runtime only",
+        "WebApp authority private replica",
+        "WebApp-FI/WebApp-IR only; endpoint hash is the stable destination identity",
+        "Web Push destination and key material; never project to Bot-FI",
+        notes="Private WebApp DR state required for notification continuity after Writer promotion.",
     ),
     "session_login_requests": _entry(
         "session_login_requests",
@@ -544,6 +631,38 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "local server that produces or receives the event",
         "immutable event UUID ledger; never copied as a table",
         "counter period reconstruction and replay protection only",
+    ),
+    "webapp_writer_state": _entry(
+        "webapp_writer_state",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_control_plane", "origin_readiness"),
+        "local physical-site control plane",
+        "never product-sync writer leases or local routing authority rows",
+        "writer fencing and public-origin eligibility only",
+    ),
+    "webapp_writer_transitions": _entry(
+        "webapp_writer_transitions",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_control_plane", "operator_audit"),
+        "local physical-site control plane",
+        "append-only local audit; exchange only through signed recovery evidence",
+        "promotion, demotion, and readiness audit only",
+    ),
+    "webapp_writer_witness_state": _entry(
+        "webapp_writer_witness_state",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_witness_control_plane",),
+        "Iran-reachable witness database only",
+        "never product-sync or resolve this singleton through ordinary sync",
+        "global writer epoch and time-bounded lease authority only",
+    ),
+    "webapp_writer_witness_receipts": _entry(
+        "webapp_writer_witness_receipts",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("writer_witness_control_plane", "operator_audit"),
+        "Iran-reachable witness database only",
+        "replay-safe local request ledger; never product-sync",
+        "witness command idempotency and audit only",
     ),
 }
 

@@ -114,6 +114,28 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("trade_telegram_delivery", foreign_jobs)
         self.assertNotIn("trade_webapp_delivery", foreign_jobs)
 
+    async def test_witness_renewal_job_requires_both_safety_flags(self):
+        webapp_identity = SimpleNamespace(physical_site="webapp_fi")
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity), patch.object(
+            main.settings, "server_mode", "iran"
+        ), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch.object(
+            main.settings, "writer_witness_auto_renew_enabled", True
+        ):
+            enabled = {name for name, _ in main._background_job_factories()}
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity), patch.object(
+            main.settings, "server_mode", "iran"
+        ), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch.object(
+            main.settings, "writer_witness_auto_renew_enabled", False
+        ):
+            disabled = {name for name, _ in main._background_job_factories()}
+
+        self.assertIn("writer_witness_renewal", enabled)
+        self.assertNotIn("writer_witness_renewal", disabled)
+
     async def test_background_leader_starts_jobs_and_releases_lock_on_cancel(self):
         class FakeRedis:
             def __init__(self):

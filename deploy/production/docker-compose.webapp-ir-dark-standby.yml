@@ -1,0 +1,40 @@
+# Standalone DB-only manifest for data-ready WebApp-IR.
+#
+# Do NOT combine this file with docker-compose.iran.yml.  Application-capable
+# services are intentionally absent, so profiles and `docker compose run`
+# cannot make them available.  The database has no host port and no container
+# network while the site is dark.
+services:
+  db:
+    image: trading_bot_postgres_boottime:15-${RELEASE_SHA:?exact release SHA required}
+    build:
+      context: ../..
+      dockerfile: deploy/postgres-boottime/Dockerfile
+    container_name: trading_bot_db
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-150}
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
+volumes:
+  postgres_data:
+    name: ${DARK_STANDBY_DB_VOLUME_NAME:-trading_bot_dark_ir_postgres_data}

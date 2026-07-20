@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from jose import JWTError
-from sqlalchemy.orm.exc import StaleDataError
 
 from api import deps
 from core.enums import UserAccountStatus
@@ -84,7 +83,7 @@ class ApiDepsTests(unittest.IsolatedAsyncioTestCase):
                 await deps.get_current_user(db=db, token='token')
         self.assertEqual(ctx.exception.status_code, 401)
 
-    async def test_get_current_user_falls_back_to_telegram_lookup_and_updates_last_seen(self):
+    async def test_get_current_user_falls_back_to_telegram_lookup_without_writing_on_read(self):
         session_id = str(uuid.uuid4())
         user = SimpleNamespace(
             id=7,
@@ -99,6 +98,7 @@ class ApiDepsTests(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(side_effect=[_ResultStub(None), _ResultStub(user)])
         db.get = AsyncMock(return_value=active_session)
         db.commit = AsyncMock()
+        previous_last_seen = user.last_seen_at
 
         with patch('api.deps.jwt.decode', return_value={'sub': '700', 'sid': session_id}), patch(
             'core.services.session_service.is_session_blacklisted', AsyncMock(return_value=False)
@@ -106,69 +106,8 @@ class ApiDepsTests(unittest.IsolatedAsyncioTestCase):
             current_user = await deps.get_current_user(db=db, token='token')
 
         self.assertIs(current_user, user)
-        db.commit.assert_awaited_once()
-        self.assertIsNotNone(user.last_seen_at)
-
-    async def test_get_current_user_recovers_from_last_seen_version_race(self):
-        stale_user = SimpleNamespace(
-            id=7,
-            telegram_id=None,
-            is_deleted=False,
-            must_change_password=False,
-            role=UserRole.STANDARD,
-            last_seen_at=datetime.utcnow() - timedelta(minutes=5),
-        )
-        refreshed_user = SimpleNamespace(
-            id=7,
-            telegram_id=None,
-            is_deleted=False,
-            must_change_password=False,
-            role=UserRole.STANDARD,
-            last_seen_at=datetime.utcnow(),
-        )
-        db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[_ResultStub(stale_user), _ResultStub(refreshed_user)]
-        )
-        db.commit = AsyncMock(side_effect=StaleDataError("concurrent user update"))
-        db.rollback = AsyncMock()
-
-        with patch('api.deps.jwt.decode', return_value={'sub': '7'}):
-            current_user = await deps.get_current_user(db=db, token='token')
-
-        self.assertIs(current_user, refreshed_user)
-        db.rollback.assert_awaited_once()
-
-    async def test_get_current_user_rechecks_access_after_last_seen_version_race(self):
-        stale_user = SimpleNamespace(
-            id=7,
-            telegram_id=None,
-            is_deleted=False,
-            must_change_password=False,
-            role=UserRole.STANDARD,
-            last_seen_at=datetime.utcnow() - timedelta(minutes=5),
-        )
-        refreshed_user = SimpleNamespace(
-            id=7,
-            telegram_id=None,
-            is_deleted=True,
-            must_change_password=False,
-            role=UserRole.STANDARD,
-            last_seen_at=datetime.utcnow(),
-        )
-        db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[_ResultStub(stale_user), _ResultStub(refreshed_user)]
-        )
-        db.commit = AsyncMock(side_effect=StaleDataError("concurrent user update"))
-        db.rollback = AsyncMock()
-
-        with patch('api.deps.jwt.decode', return_value={'sub': '7'}):
-            with self.assertRaises(HTTPException) as ctx:
-                await deps.get_current_user(db=db, token='token')
-
-        self.assertEqual(ctx.exception.status_code, 403)
-        db.rollback.assert_awaited_once()
+        db.commit.assert_not_awaited()
+        self.assertEqual(user.last_seen_at, previous_last_seen)
 
     async def test_get_current_user_rejects_deleted_and_password_change_users(self):
         deleted_user = SimpleNamespace(

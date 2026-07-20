@@ -24,6 +24,24 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "SYNC_VERIFY_TLS": "true",
             "SYNC_CA_BUNDLE": "",
             "OBSERVABILITY_API_KEY": "obs-key",
+            "RELEASE_SHA": "abc123release",
+            "IRAN_ORIGIN_READINESS_API_KEY": "origin-ready-key",
+            "ORIGIN_EXPECTED_MIGRATION_REVISION": "d2e7f8a9b0c1",
+            "ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS": "900",
+            "WRITER_WITNESS_REQUIRED": "false",
+            "WRITER_WITNESS_PUBLIC_KEY": "witness-public-key",
+            "WRITER_WITNESS_LEASE_DURATION_SECONDS": "180",
+            "WRITER_WITNESS_RENEW_INTERVAL_SECONDS": "30",
+            "WRITER_WITNESS_SAFETY_MARGIN_SECONDS": "15",
+            "WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS": "5",
+            "WRITER_WITNESS_AUTHORITATIVE_SITE": "webapp_ir",
+            "WRITER_WITNESS_HTTP_TIMEOUT_SECONDS": "3.0",
+            "WRITER_WITNESS_AUTH_MAX_AGE_SECONDS": "15",
+            "IRAN_WRITER_WITNESS_INTERNAL_URL": "https://witness.internal",
+            "IRAN_WRITER_WITNESS_CLIENT_KEY_ID": "webapp-fi-v1",
+            "IRAN_WRITER_WITNESS_CLIENT_SECRET": "fi-secret-0123456789abcdef-0123456789abcdef",
+            "IRAN_WRITER_WITNESS_VERIFY_TLS": "true",
+            "IRAN_WRITER_WITNESS_CA_BUNDLE": "/run/secrets/witness-ca.pem",
             "CHANNEL_ID": "-100123",
             "CHANNEL_INVITE_LINK": "https://t.me/example",
             "SMSIR_API_KEY": "sms-key",
@@ -53,7 +71,6 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
             "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
-            "RELEASE_SHA": "abc123release",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -95,6 +112,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values = self.sample_values()
         foreign = build_runtime_env(
             role="foreign",
+            physical_site="bot_fi",
             frontend_url="https://coin.362514.ir",
             public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
@@ -108,6 +126,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
         iran = build_runtime_env(
             role="iran",
+            physical_site="webapp_fi",
             frontend_url="https://coin.gold-trade.ir",
             public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
@@ -122,6 +141,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         self.assertEqual(foreign["SERVER_MODE"], "foreign")
         self.assertEqual(iran["SERVER_MODE"], "iran")
+        self.assertEqual(foreign["LOGICAL_AUTHORITY"], "foreign")
+        self.assertEqual(foreign["PHYSICAL_SITE"], "bot_fi")
+        self.assertEqual(iran["LOGICAL_AUTHORITY"], "webapp")
+        self.assertEqual(iran["PHYSICAL_SITE"], "webapp_fi")
         self.assertEqual(foreign["API_WORKERS"], "2")
         self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
@@ -156,6 +179,20 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
         self.assertEqual(foreign["OTP_DELIVERY_STATE_SECRET"], "")
+        self.assertEqual(foreign["ORIGIN_READINESS_API_KEY"], "")
+        self.assertEqual(iran["ORIGIN_READINESS_API_KEY"], "origin-ready-key")
+        self.assertEqual(iran["ORIGIN_EXPECTED_MIGRATION_REVISION"], "d2e7f8a9b0c1")
+        self.assertEqual(iran["WRITER_WITNESS_REQUIRED"], "false")
+        self.assertEqual(iran["WRITER_WITNESS_PUBLIC_KEY"], "witness-public-key")
+        self.assertEqual(iran["WRITER_WITNESS_INTERNAL_URL"], "https://witness.internal")
+        self.assertEqual(iran["WRITER_WITNESS_CLIENT_KEY_ID"], "webapp-fi-v1")
+        self.assertEqual(
+            iran["WRITER_WITNESS_CLIENT_SECRET"],
+            "fi-secret-0123456789abcdef-0123456789abcdef",
+        )
+        self.assertEqual(foreign["WRITER_WITNESS_CLIENT_SECRET"], "")
+        self.assertNotIn("IRAN_WRITER_WITNESS_CLIENT_SECRET", iran)
+        self.assertEqual(iran["RELEASE_SHA"], "abc123release")
         self.assertEqual(
             iran["OTP_DELIVERY_STATE_SECRET"],
             "iran-only-otp-state-secret-0123456789abcdef",
@@ -169,6 +206,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         rendered = build_runtime_env(
             role="foreign",
+            physical_site="bot_fi",
             frontend_url="https://foreign.example.com",
             public_webapp_url="https://webapp.example.ir",
             foreign_server_url="https://sync.example.com",
@@ -210,6 +248,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "2",
                 "--iran-api-workers",
                 "4",
+                "--foreign-physical-site",
+                "bot_fi",
+                "--iran-physical-site",
+                "webapp_fi",
             ]
             with patch.dict(os.environ, values, clear=False):
                 with patch("sys.argv", argv):
@@ -220,6 +262,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
+            self.assertIn("LOGICAL_AUTHORITY=foreign", foreign_lines)
+            self.assertIn("PHYSICAL_SITE=bot_fi", foreign_lines)
+            self.assertIn("LOGICAL_AUTHORITY=webapp", iran_lines)
+            self.assertIn("PHYSICAL_SITE=webapp_fi", iran_lines)
             self.assertIn("API_WORKERS=2", foreign_lines)
             self.assertIn("API_WORKERS=4", iran_lines)
             self.assertIn("DB_POOL_SIZE=8", iran_lines)
@@ -261,6 +307,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("RELEASE_SHA=abc123release", foreign_lines)
             self.assertIn("RELEASE_SHA=abc123release", iran_lines)
             self.assertIn("OTP_DELIVERY_STATE_SECRET=", foreign_lines)
+            self.assertIn("ORIGIN_READINESS_API_KEY=", foreign_lines)
+            self.assertIn("ORIGIN_READINESS_API_KEY=origin-ready-key", iran_lines)
+            self.assertIn(
+                "ORIGIN_EXPECTED_MIGRATION_REVISION=d2e7f8a9b0c1",
+                iran_lines,
+            )
+            self.assertIn("WRITER_WITNESS_REQUIRED=false", iran_lines)
+            self.assertIn("WRITER_WITNESS_PUBLIC_KEY=witness-public-key", iran_lines)
             self.assertIn(
                 "OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
                 iran_lines,

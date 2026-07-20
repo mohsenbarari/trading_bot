@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
+from core.runtime_identity import SITE_BOT_FI, SITE_WEBAPP_FI, WEBAPP_SITES
 
 JOB_OFFER_EXPIRY = "offer_expiry"
 JOB_MARKET_SCHEDULE = "market_schedule"
@@ -25,6 +26,7 @@ JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 JOB_TELEGRAM_DELIVERY_QUEUE = "telegram_delivery_queue"
 JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
 JOB_OTP_SMS_FALLBACK = "otp_sms_fallback"
+JOB_WRITER_WITNESS_RENEWAL = "writer_witness_renewal"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -41,6 +43,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_TELEGRAM_DELIVERY_QUEUE,
         JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
         JOB_OTP_SMS_FALLBACK,
+        JOB_WRITER_WITNESS_RENEWAL,
     }
 )
 
@@ -69,6 +72,8 @@ class BackgroundJobAuthorityDecision:
     current_server: str
     allowed_servers: tuple[str, ...]
     reason: str | None = None
+    physical_site: str | None = None
+    runtime_role: str | None = None
 
     def as_log_extra(self) -> dict[str, object]:
         return {
@@ -77,6 +82,8 @@ class BackgroundJobAuthorityDecision:
             "current_server": self.current_server,
             "allowed_servers": list(self.allowed_servers),
             "reason": self.reason,
+            "physical_site": self.physical_site,
+            "runtime_role": self.runtime_role,
         }
 
 
@@ -90,6 +97,24 @@ class BackgroundJobAuthorityError(RuntimeError):
 
 
 BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
+    JOB_WRITER_WITNESS_RENEWAL: BackgroundJobAuthorityEntry(
+        job_name=JOB_WRITER_WITNESS_RENEWAL,
+        mutated_tables=("webapp_writer_state", "webapp_writer_transitions"),
+        allowed_servers=(SERVER_IRAN,),
+        authority_rule=(
+            "active WebApp physical site only; renew the same witness epoch/lease through the "
+            "private authenticated control API and atomically import the signed proof locally"
+        ),
+        outage_behavior=(
+            "retry an ambiguous transport result with the same request id; if renewal cannot be "
+            "proved, local lease fencing stops WebApp-authoritative writes before expiry"
+        ),
+        sync_outbox_behavior=(
+            "writer control state and transition audit are site-local DR bookkeeping and must not "
+            "enter ordinary product sync"
+        ),
+        external_state=("Iran-reachable writer witness API",),
+    ),
     JOB_OFFER_EXPIRY: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_EXPIRY,
         mutated_tables=("offers",),
@@ -359,9 +384,13 @@ def check_background_job_authority(
     job_name: str,
     *,
     server_mode: str | None = None,
+    physical_site: str | None = None,
+    runtime_role: str | None = None,
 ) -> BackgroundJobAuthorityDecision:
     normalized_job_name = str(job_name or "").strip()
     server = normalize_server(server_mode, current_server()) if server_mode is not None else current_server()
+    site = str(physical_site or (SITE_BOT_FI if server == SERVER_FOREIGN else SITE_WEBAPP_FI)).strip().lower()
+    role = str(runtime_role or "active").strip().lower()
     entry = BACKGROUND_JOB_AUTHORITY.get(normalized_job_name)
     if entry is None:
         return BackgroundJobAuthorityDecision(
@@ -370,6 +399,8 @@ def check_background_job_authority(
             current_server=server,
             allowed_servers=(),
             reason="unknown_background_job",
+            physical_site=site,
+            runtime_role=role,
         )
     if server not in entry.allowed_servers:
         return BackgroundJobAuthorityDecision(
@@ -378,12 +409,26 @@ def check_background_job_authority(
             current_server=server,
             allowed_servers=entry.allowed_servers,
             reason="background_job_not_allowed_on_server",
+            physical_site=site,
+            runtime_role=role,
+        )
+    if server == SERVER_IRAN and site in WEBAPP_SITES and role != "active" and not entry.local_runtime:
+        return BackgroundJobAuthorityDecision(
+            ok=False,
+            job_name=entry.job_name,
+            current_server=server,
+            allowed_servers=entry.allowed_servers,
+            reason="webapp_writer_not_active",
+            physical_site=site,
+            runtime_role=role,
         )
     return BackgroundJobAuthorityDecision(
         ok=True,
         job_name=entry.job_name,
         current_server=server,
         allowed_servers=entry.allowed_servers,
+        physical_site=site,
+        runtime_role=role,
     )
 
 
@@ -391,8 +436,15 @@ def assert_background_job_authority(
     job_name: str,
     *,
     server_mode: str | None = None,
+    physical_site: str | None = None,
+    runtime_role: str | None = None,
 ) -> BackgroundJobAuthorityDecision:
-    decision = check_background_job_authority(job_name, server_mode=server_mode)
+    decision = check_background_job_authority(
+        job_name,
+        server_mode=server_mode,
+        physical_site=physical_site,
+        runtime_role=runtime_role,
+    )
     if not decision.ok:
         raise BackgroundJobAuthorityError(decision)
     return decision
@@ -402,11 +454,18 @@ def filter_allowed_background_job_factories(
     factories: Iterable[tuple[str, _T]],
     *,
     server_mode: str | None = None,
+    physical_site: str | None = None,
+    runtime_role: str | None = None,
     on_rejected: Callable[[BackgroundJobAuthorityDecision], None] | None = None,
 ) -> list[tuple[str, _T]]:
     allowed: list[tuple[str, _T]] = []
     for job_name, factory in factories:
-        decision = check_background_job_authority(job_name, server_mode=server_mode)
+        decision = check_background_job_authority(
+            job_name,
+            server_mode=server_mode,
+            physical_site=physical_site,
+            runtime_role=runtime_role,
+        )
         if decision.ok:
             allowed.append((job_name, factory))
             continue

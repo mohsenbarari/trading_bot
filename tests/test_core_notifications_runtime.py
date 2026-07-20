@@ -8,6 +8,17 @@ OTP_TEXT = '🔐 کد ورود شما: `12345`\n\nاین کد تا ۲ دقیقه
 
 
 class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strict_webapp_cannot_emit_unbound_telegram_effect(self):
+        identity = SimpleNamespace(is_webapp_authority=True)
+        with patch.object(notifications.settings, "three_site_dr_enabled", True), patch.object(
+            notifications.settings, "dr_event_protocol_strict", True
+        ), patch("core.notifications.resolve_runtime_identity", return_value=identity), patch.object(
+            notifications.telegram_gateway, "send_message", new=AsyncMock()
+        ) as gateway_send:
+            with self.assertRaises(RuntimeError):
+                await notifications.send_telegram_message(2, "hello")
+        gateway_send.assert_not_awaited()
+
     async def test_send_telegram_message_relays_from_iran(self):
         with patch.object(notifications.settings, 'server_mode', 'iran'), patch(
             'core.notifications.push_sync_direct'

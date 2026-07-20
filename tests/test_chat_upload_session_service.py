@@ -91,6 +91,14 @@ class FakeExecuteResult:
         return FakeScalarResult(self.rows)
 
 
+async def _bind_test_blob(_db, *, chat_file, contents):  # noqa: ANN001
+    extension = str(chat_file.mime_type).split("/")[-1]
+    chat_file.s3_key = f"uploads/blobs/{chat_file.id}.{extension}"
+    chat_file.content_hash = "a" * 64
+    chat_file.storage_version = 1
+    return chat_file.content_hash, chat_file.s3_key
+
+
 class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
     def _future(self):
         return datetime.now(timezone.utc) + timedelta(days=1)
@@ -313,7 +321,6 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 413)
 
-        fake_file = FakeAsyncFile()
         async def fake_to_thread(fn, *args, **kwargs):
             result = fn(*args, **kwargs)
             return "video/webm" if result == "video/webm" else result
@@ -324,7 +331,10 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.chat_upload_session_service.magic.from_buffer", return_value="video/webm"), patch(
             "core.services.chat_upload_session_service.uuid.uuid4",
             return_value="voice-uuid",
-        ), patch("core.services.chat_upload_session_service.aiofiles.open", return_value=fake_file):
+        ), patch(
+            "core.services.chat_upload_session_service.bind_chat_file_blob",
+            new=AsyncMock(side_effect=_bind_test_blob),
+        ):
             result = await persist_chat_media_file_bytes(
                 db,
                 uploader_id=5,
@@ -337,7 +347,6 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_persist_chat_media_file_bytes_validates_and_writes(self):
         db = FakeDB()
-        fake_file = FakeAsyncFile()
 
         async def fake_to_thread(fn, *args, **kwargs):
             return fn(*args, **kwargs)
@@ -352,9 +361,9 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_upload_session_service.uuid.uuid4",
             return_value="uuid-1",
         ), patch(
-            "core.services.chat_upload_session_service.aiofiles.open",
-            return_value=fake_file,
-        ):
+            "core.services.chat_upload_session_service.bind_chat_file_blob",
+            new=AsyncMock(side_effect=_bind_test_blob),
+        ) as blob_bind:
             result = await persist_chat_media_file_bytes(
                 db,
                 uploader_id=5,
@@ -364,7 +373,8 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 thumbnail="thumb",
             )
 
-        fake_file.write.assert_awaited_once_with(b"pdf-bytes")
+        blob_bind.assert_awaited_once()
+        self.assertEqual(blob_bind.await_args.kwargs["contents"], b"pdf-bytes")
         db.flush.assert_awaited_once()
         self.assertEqual(result.chat_file.id, "uuid-1")
         self.assertEqual(result.chat_file.file_name, "report.pdf")
@@ -373,7 +383,6 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_persist_chat_media_file_bytes_covers_image_transpose_success_and_warning_fallback(self):
         db = FakeDB()
-        fake_success_file = FakeAsyncFile()
 
         async def fake_to_thread_success(fn, *args, **kwargs):
             if getattr(fn, "__name__", "") == "_exif_transpose_sync":
@@ -390,9 +399,9 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_upload_session_service.uuid.uuid4",
             return_value="image-success",
         ), patch(
-            "core.services.chat_upload_session_service.aiofiles.open",
-            return_value=fake_success_file,
-        ):
+            "core.services.chat_upload_session_service.bind_chat_file_blob",
+            new=AsyncMock(side_effect=_bind_test_blob),
+        ) as success_blob_bind:
             result = await persist_chat_media_file_bytes(
                 db,
                 uploader_id=5,
@@ -402,13 +411,11 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 thumbnail="thumb",
             )
 
-        fake_success_file.write.assert_awaited_once_with(b"rotated-image")
+        self.assertEqual(success_blob_bind.await_args.kwargs["contents"], b"rotated-image")
         self.assertEqual(result.width, 321)
         self.assertEqual(result.height, 123)
         self.assertEqual(result.size, len(b"rotated-image"))
         self.assertEqual(result.chat_file.mime_type, "image/png")
-
-        fake_webp_file = FakeAsyncFile()
 
         async def fake_to_thread_webp(fn, *args, **kwargs):
             if getattr(fn, "__name__", "") == "_exif_transpose_sync":
@@ -425,9 +432,9 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_upload_session_service.uuid.uuid4",
             return_value="image-webp",
         ), patch(
-            "core.services.chat_upload_session_service.aiofiles.open",
-            return_value=fake_webp_file,
-        ):
+            "core.services.chat_upload_session_service.bind_chat_file_blob",
+            new=AsyncMock(side_effect=_bind_test_blob),
+        ) as webp_blob_bind:
             webp_result = await persist_chat_media_file_bytes(
                 db,
                 uploader_id=5,
@@ -436,11 +443,9 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 contents=b"raw-heic",
             )
 
-        fake_webp_file.write.assert_awaited_once_with(b"webp-image")
+        self.assertEqual(webp_blob_bind.await_args.kwargs["contents"], b"webp-image")
         self.assertEqual(webp_result.chat_file.mime_type, "image/webp")
         self.assertTrue(webp_result.chat_file.s3_key.endswith(".webp"))
-
-        fake_warning_file = FakeAsyncFile()
 
         async def fake_to_thread_warning(fn, *args, **kwargs):
             if getattr(fn, "__name__", "") == "_exif_transpose_sync":
@@ -457,9 +462,9 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_upload_session_service.uuid.uuid4",
             return_value="image-warning",
         ), patch(
-            "core.services.chat_upload_session_service.aiofiles.open",
-            return_value=fake_warning_file,
-        ), patch("core.services.chat_upload_session_service.logger.warning") as warning_mock:
+            "core.services.chat_upload_session_service.bind_chat_file_blob",
+            new=AsyncMock(side_effect=_bind_test_blob),
+        ) as warning_blob_bind, patch("core.services.chat_upload_session_service.logger.warning") as warning_mock:
             warning_result = await persist_chat_media_file_bytes(
                 db,
                 uploader_id=5,
@@ -468,7 +473,7 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 contents=b"raw-image",
             )
 
-        fake_warning_file.write.assert_awaited_once_with(b"raw-image")
+        self.assertEqual(warning_blob_bind.await_args.kwargs["contents"], b"raw-image")
         self.assertIsNone(warning_result.width)
         self.assertIsNone(warning_result.height)
         warning_mock.assert_called_once()
