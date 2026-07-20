@@ -198,6 +198,54 @@ class WriterWitnessPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(durable.holder_site, "webapp_fi")
         self.assertEqual(durable.writer_epoch, 1)
 
+    async def test_persistent_fi_one_ir_two_fi_three_lifecycle_without_reset(self):
+        transitions = (
+            ("webapp_fi", 0, None, "persistent-fi-epoch-1", NOW),
+            ("webapp_ir", 1, "previous", "persistent-ir-epoch-2", NOW + timedelta(seconds=181)),
+            ("webapp_fi", 2, "previous", "persistent-fi-epoch-3", NOW + timedelta(seconds=362)),
+        )
+        previous_lease_id = None
+        observed = []
+        for site, expected_epoch, lease_selector, request_id, transition_time in transitions:
+            async with self.sessions() as session:
+                result = await transition_witness_state(
+                    session,
+                    action=ACTION_ACQUIRE,
+                    requester_site=site,
+                    expected_epoch=expected_epoch,
+                    expected_lease_id=(
+                        previous_lease_id if lease_selector == "previous" else None
+                    ),
+                    request_id=request_id,
+                    operator="integration@example",
+                    reason=f"persistent lifecycle transition to {site}",
+                    private_key_base64=self.private_key,
+                    now=transition_time,
+                )
+                await session.commit()
+            observed.append((result.state.holder_site, result.state.writer_epoch))
+            previous_lease_id = result.state.lease_id
+
+        async with self.sessions() as session:
+            durable = await load_witness_snapshot(session)
+            receipt_count = (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM webapp_writer_witness_receipts "
+                        "WHERE request_id LIKE 'persistent-%-epoch-%'"
+                    )
+                )
+            ).scalar_one()
+
+        self.assertEqual(
+            observed,
+            [("webapp_fi", 1), ("webapp_ir", 2), ("webapp_fi", 3)],
+        )
+        self.assertEqual(durable.holder_site, "webapp_fi")
+        self.assertEqual(durable.writer_epoch, 3)
+        self.assertEqual(durable.lease_id, previous_lease_id)
+        self.assertEqual(receipt_count, 3)
+
     async def test_campaign_expiry_is_rechecked_after_waiting_for_writer_row_lock(self):
         async with self.sessions() as blocker, self.sessions() as contender, self.sessions() as observer:
             await blocker.execute(

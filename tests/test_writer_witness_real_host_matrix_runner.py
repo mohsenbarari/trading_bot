@@ -21,6 +21,22 @@ from scripts.plan_writer_witness_real_host_matrix import abort_and_rollback_cont
 HEAD = "a" * 40
 HOST_TOOLCHAIN_SHA256 = "7" * 64
 CONTROLLER_TOOLCHAIN_SHA256 = "8" * 64
+FORBIDDEN_HELPER_ENVIRONMENT = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+    "PYTHONINSPECT",
+    "PYTHONUSERBASE",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+)
+
+
+def isolated_helper_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in FORBIDDEN_HELPER_ENVIRONMENT:
+        environment.pop(name, None)
+    return environment
 
 
 def lock_worker(path: str, action: str, ready, release, results) -> None:
@@ -1827,6 +1843,9 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 controller.tag = "wwm_0123456789ab"
                 controller.expected_head = expected_head
                 controller.scenario = "RH-001"
+                controller.campaign_not_after = (
+                    datetime.now(timezone.utc) + timedelta(minutes=10)
+                ).isoformat().replace("+00:00", "Z")
                 controller.remote_campaign_claimed = False
                 controller.remote_campaign_conflict = False
                 controller.remote_campaign_ambiguous = False
@@ -1858,6 +1877,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                         ],
                         capture_output=True,
                         text=True,
+                        env=isolated_helper_environment(),
                     )
 
                 controller.remote = mock.Mock(side_effect=local_remote)
@@ -1891,6 +1911,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
+                env=isolated_helper_environment(),
             )
             self.assertEqual(released.returncode, 0, released.stderr)
             exact.recover_postflight_release_pending()
@@ -1941,6 +1962,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                     ],
                     capture_output=True,
                     text=True,
+                    env=isolated_helper_environment(),
                 )
 
             absent.remote = mock.Mock(side_effect=absent_remote)

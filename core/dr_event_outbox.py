@@ -160,6 +160,24 @@ def _projection_or_sync_apply(connection: Any) -> bool:
     return projection is not None or marked_sync
 
 
+def _is_site_local_no_sync_table(table_name: str | None) -> bool:
+    """Return true only for rows that must never enter the DR event plane.
+
+    The durable Telegram executor intentionally uses SQLAlchemy Core DML for
+    idempotent enqueue/claim transitions.  Those tables are Bot-local
+    execution state, so rejecting their Core statements does not protect an
+    event stream; it makes the queue unusable.  WebApp private replica tables
+    also carry ``NO_SYNC`` in the legacy registry, but they *do* belong to the
+    authenticated FI/IR DR plane and must remain guarded.
+    """
+
+    if not table_name or _table_policy(table_name) != SyncPolicy.NO_SYNC:
+        return False
+    from core.dr_data_policy import WEBAPP_DR_REPLICA_TABLES
+
+    return table_name not in WEBAPP_DR_REPLICA_TABLES
+
+
 def _record(mapper: Any, connection: Any, target: Any, operation: str) -> None:
     if not _enabled() or _projection_or_sync_apply(connection):
         return
@@ -272,7 +290,11 @@ def _guard_bulk_or_raw_write(orm_execute_state: Any) -> None:
         raise DrEventOutboxError(
             "unclassified raw SQL could bypass immutable three-site DR recording"
         )
-    if table_name is None or _table_policy(table_name) == SyncPolicy.INTERNAL_BOOKKEEPING:
+    if (
+        table_name is None
+        or _table_policy(table_name) == SyncPolicy.INTERNAL_BOOKKEEPING
+        or _is_site_local_no_sync_table(table_name)
+    ):
         return
     raise DrEventOutboxError(
         f"bulk/raw mutation of {table_name} would bypass immutable three-site DR recording"

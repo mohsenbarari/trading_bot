@@ -25,6 +25,16 @@ class _AsyncSessionContext:
 
 
 class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.role_binding_patcher = patch(
+            "core.db.verify_three_site_database_role_bindings",
+            new=AsyncMock(),
+        )
+        self.role_binding_patcher.start()
+
+    async def asyncTearDown(self):
+        self.role_binding_patcher.stop()
+
     async def test_lifespan_validates_public_webapp_url_before_initializing_when_contract_v2_is_enabled(self):
         with patch.object(main.settings, "invitation_contract_v2_enabled", True), patch(
             "main.public_webapp_url_for_links",
@@ -92,7 +102,7 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("connectivity_monitor", foreign_jobs)
         self.assertNotIn("user_account_status", foreign_jobs)
         self.assertNotIn("trade_webapp_delivery", foreign_jobs)
-        self.assertIn("trade_telegram_delivery", foreign_jobs)
+        self.assertNotIn("trade_telegram_delivery", foreign_jobs)
         self.assertIn("connectivity_monitor", iran_jobs)
         self.assertIn("market_schedule", foreign_jobs)
         self.assertIn("user_account_status", iran_jobs)
@@ -114,7 +124,7 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("trade_telegram_delivery", foreign_jobs)
         self.assertNotIn("trade_webapp_delivery", foreign_jobs)
 
-    async def test_witness_renewal_job_requires_both_safety_flags(self):
+    async def test_public_api_never_owns_writer_witness_renewal(self):
         webapp_identity = SimpleNamespace(physical_site="webapp_fi")
         with patch.object(main, "RUNTIME_IDENTITY", webapp_identity), patch.object(
             main.settings, "server_mode", "iran"
@@ -123,7 +133,7 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             main.settings, "writer_witness_auto_renew_enabled", True
         ):
-            enabled = {name for name, _ in main._background_job_factories()}
+            enabled_flags = {name for name, _ in main._background_job_factories()}
         with patch.object(main, "RUNTIME_IDENTITY", webapp_identity), patch.object(
             main.settings, "server_mode", "iran"
         ), patch.object(
@@ -131,10 +141,10 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(
             main.settings, "writer_witness_auto_renew_enabled", False
         ):
-            disabled = {name for name, _ in main._background_job_factories()}
+            disabled_flags = {name for name, _ in main._background_job_factories()}
 
-        self.assertIn("writer_witness_renewal", enabled)
-        self.assertNotIn("writer_witness_renewal", disabled)
+        self.assertNotIn("writer_witness_renewal", enabled_flags)
+        self.assertNotIn("writer_witness_renewal", disabled_flags)
 
     async def test_background_leader_starts_jobs_and_releases_lock_on_cancel(self):
         class FakeRedis:

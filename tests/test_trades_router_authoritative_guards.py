@@ -491,7 +491,13 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
-        ), patch("api.routers.trades.trade_to_response", return_value={"id": 88}) as response_mock:
+        ), patch(
+            "api.routers.trades.persist_trade_completion_delivery_intents",
+            new=AsyncMock(),
+        ) as persist_delivery_intents, patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 88},
+        ) as response_mock:
             result = await _execute_trade_authoritatively(
                 TradeCreate(offer_id=7, quantity=4, idempotency_key="idem-1"),
                 BackgroundTasks(),
@@ -500,6 +506,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
             )
 
         db.refresh.assert_any_await(offer, ["user", "commodity"])
+        persist_delivery_intents.assert_awaited_once_with(db, existing_trade)
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(result, {"id": 88})
 

@@ -30,6 +30,7 @@ from core.background_job_authority import (
 )
 from core.invitation_sms_policy import invitation_sms_enabled
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN
+from core.runtime_identity import SITE_BOT_FI, SITE_WEBAPP_FI
 from core.services import authoritative_registration_service as registration
 from core.services import telegram_registration_intent_service as intent_service
 from core.services.canonical_invitation_creation_service import _is_exact_base_retry
@@ -821,6 +822,8 @@ class Stage9MutationContractTests(unittest.IsolatedAsyncioTestCase):
                 current_server=SERVER_FOREIGN,
                 allowed_servers=(SERVER_FOREIGN,),
                 reason=None,
+                physical_site=SITE_BOT_FI,
+                runtime_role="active",
             ),
         )
         rejected = check_background_job_authority(
@@ -835,6 +838,8 @@ class Stage9MutationContractTests(unittest.IsolatedAsyncioTestCase):
                 current_server=SERVER_IRAN,
                 allowed_servers=(SERVER_FOREIGN,),
                 reason="background_job_not_allowed_on_server",
+                physical_site=SITE_WEBAPP_FI,
+                runtime_role="active",
             ),
         )
         self.assertEqual(
@@ -848,6 +853,8 @@ class Stage9MutationContractTests(unittest.IsolatedAsyncioTestCase):
                 current_server=SERVER_IRAN,
                 allowed_servers=(SERVER_IRAN,),
                 reason=None,
+                physical_site=SITE_WEBAPP_FI,
+                runtime_role="active",
             ),
         )
         for raw_name, normalized_name in (("unknown", "unknown"), ("  unknown  ", "unknown"), (None, ""), ("", "")):
@@ -864,6 +871,8 @@ class Stage9MutationContractTests(unittest.IsolatedAsyncioTestCase):
                         current_server=SERVER_IRAN,
                         allowed_servers=(),
                         reason="unknown_background_job",
+                        physical_site=SITE_WEBAPP_FI,
+                        runtime_role="active",
                     ),
                 )
 

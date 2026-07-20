@@ -7,6 +7,7 @@ be pointed at a runtime database.
 from __future__ import annotations
 
 import os
+import json
 import unittest
 from uuid import uuid4
 
@@ -18,6 +19,10 @@ URL_NAMES = {
     "owner": "THREE_SITE_FENCING_TEST_OWNER_URL",
     "application": "THREE_SITE_FENCING_TEST_APP_URL",
     "projection": "THREE_SITE_FENCING_TEST_PROJECTION_URL",
+    "receiver": "THREE_SITE_FENCING_TEST_RECEIVER_URL",
+    "delivery": "THREE_SITE_FENCING_TEST_DELIVERY_URL",
+    "blob": "THREE_SITE_FENCING_TEST_BLOB_URL",
+    "effect": "THREE_SITE_FENCING_TEST_EFFECT_URL",
     "control": "THREE_SITE_FENCING_TEST_CONTROL_URL",
 }
 
@@ -83,17 +88,32 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
     def _scratch_id(self) -> int:
         return 900_000_000 + uuid4().int % 90_000_000
 
+    def _projection_scope(self, connection, scope: str) -> None:  # noqa: ANN001
+        connection.execute(
+            text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
+        )
+        connection.execute(
+            text("SELECT set_config('trading_bot.projection_scope', :scope, true)"),
+            {"scope": scope},
+        )
+
     def _seed_projection_commodity(self, record_id: int) -> None:
         with self.engines["projection"].begin() as connection:
-            connection.execute(
-                text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
-            )
+            self._projection_scope(connection, "projector")
             connection.execute(
                 text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
                 {"id": record_id, "name": f"projection-seed-{record_id}"},
             )
 
-    def _record_coverage_event(self, connection, *, table: str, record_id: int, operation: str) -> None:  # noqa: ANN001
+    def _record_coverage_event(
+        self,
+        connection,
+        *,
+        table: str,
+        record_id: int,
+        operation: str,
+        payload: dict[str, object],
+    ) -> None:  # noqa: ANN001
         event_id = str(uuid4())
         sequence = uuid4().int % 9_000_000_000 + 1
         connection.execute(
@@ -105,7 +125,7 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 "envelope_hash, schema_version, writer_epoch, tombstone, source_xid"
                 ") VALUES ("
                 ":event_id, 1, 'webapp', 'webapp_fi', 1, :sequence, :table, :record_id, "
-                ":record_id, :operation, '{}'::jsonb, repeat('a', 64), repeat('b', 64), "
+                ":record_id, :operation, CAST(:payload AS JSONB), repeat('a', 64), repeat('b', 64), "
                 "1, 1, :tombstone, txid_current())"
             ),
             {
@@ -115,6 +135,7 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 "record_id": str(record_id),
                 "operation": operation,
                 "tombstone": operation == "DELETE",
+                "payload": json.dumps(payload, sort_keys=True, separators=(",", ":")),
             },
         )
 
@@ -167,7 +188,11 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
         with self.engines["application"].begin() as connection:
             self._writer_settings(connection)
             self._record_coverage_event(
-                connection, table="commodities", record_id=record_id, operation="INSERT"
+                connection,
+                table="commodities",
+                record_id=record_id,
+                operation="INSERT",
+                payload={"id": record_id, "name": f"scoped-{record_id}"},
             )
             connection.execute(
                 text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
@@ -181,6 +206,24 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 )
                 connection.execute(
                     text("UPDATE commodities SET name = 'stale-scratch' WHERE id = :id"),
+                    {"id": record_id},
+                )
+
+    def test_application_cannot_fabricate_coverage_with_wrong_payload(self) -> None:
+        record_id = self._scratch_id()
+        self._seed_projection_commodity(record_id)
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                self._record_coverage_event(
+                    connection,
+                    table="commodities",
+                    record_id=record_id,
+                    operation="UPDATE",
+                    payload={"id": record_id, "name": "forged-event-payload"},
+                )
+                connection.execute(
+                    text("UPDATE commodities SET name = 'actual-row-payload' WHERE id = :id"),
                     {"id": record_id},
                 )
 
@@ -235,6 +278,7 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                         table="commodities",
                         record_id=record_id,
                         operation="UPDATE",
+                        payload={"id": record_id, "name": "expired-boottime"},
                     )
                     connection.execute(
                         text("UPDATE commodities SET name = 'expired-boottime' WHERE id = :id"),
@@ -255,21 +299,106 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
         record_id = self._scratch_id()
         self._seed_projection_commodity(record_id)
         with self.engines["projection"].begin() as connection:
-            connection.execute(
-                text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
-            )
+            self._projection_scope(connection, "projector")
             connection.execute(
                 text("UPDATE commodities SET name = :name WHERE id = :id"),
                 {"id": record_id, "name": f"projected-{record_id}"},
             )
         with self.assertRaises(DBAPIError):
             with self.engines["projection"].begin() as connection:
-                connection.execute(
-                    text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
-                )
+                self._projection_scope(connection, "projector")
                 connection.execute(
                     text("UPDATE users SET admin_password_hash = 'forbidden' WHERE id = -1")
                 )
+        with self.assertRaises(DBAPIError):
+            with self.engines["projection"].connect() as connection:
+                connection.execute(text("SELECT admin_password_hash FROM users LIMIT 1"))
+
+    def test_projection_role_can_store_remote_v2_event_without_source_xid(self) -> None:
+        event_id = str(uuid4())
+        transaction_id = str(uuid4())
+        sequence = uuid4().int % 9_000_000_000 + 1
+        with self.engines["receiver"].begin() as connection:
+            self._projection_scope(connection, "receiver")
+            connection.execute(
+                text(
+                    "INSERT INTO dr_events ("
+                    "event_id, protocol_version, origin_authority, origin_physical_site, "
+                    "producer_epoch, producer_sequence, aggregate_type, aggregate_id, "
+                    "aggregate_db_id, aggregate_version, operation, canonical_payload, "
+                    "canonical_payload_hash, envelope_hash, schema_version, writer_epoch, "
+                    "tombstone, transaction_id, transaction_position, transaction_size, "
+                    "transaction_hash, destination_streams"
+                    ") VALUES ("
+                    ":event_id, 2, 'foreign', 'bot_fi', 7, :sequence, 'commodities', '91', "
+                    "'91', 1, 'INSERT', CAST(:payload AS JSONB), "
+                    "repeat('a',64), repeat('b',64), 1, NULL, false, :transaction_id, 1, 1, "
+                    "repeat('c',64), CAST(:destination_streams AS JSONB))"
+                ),
+                {
+                    "event_id": event_id,
+                    "sequence": sequence,
+                    "transaction_id": transaction_id,
+                    "payload": json.dumps({"id": 91, "name": "remote"}),
+                    "destination_streams": json.dumps(
+                        {"webapp_fi": {"sequence": 1}}
+                    ),
+                },
+            )
+        with self.engines["owner"].connect() as connection:
+            source_xid = connection.scalar(
+                text("SELECT source_xid FROM dr_events WHERE event_id=:event_id"),
+                {"event_id": event_id},
+            )
+        self.assertIsNone(source_xid)
+
+    def test_projection_role_can_persist_encrypted_blob_identity(self) -> None:
+        content_hash = uuid4().hex + uuid4().hex
+        object_key = f"encrypted/scratch/{content_hash}"
+        with self.engines["blob"].begin() as connection:
+            self._projection_scope(connection, "blob")
+            connection.execute(
+                text(
+                    "INSERT INTO dr_blob_manifests ("
+                    "content_hash, size_bytes, mime_type, local_path, object_key, "
+                    "object_ciphertext_hash, object_ciphertext_size, encryption_key_id, "
+                    "encryption_algorithm, state"
+                    ") VALUES ("
+                    ":content_hash, 4, 'application/octet-stream', '/tmp/scratch', :object_key, "
+                    "repeat('d',64), 40, 'scratch-key', 'AES-256-GCM-v1', 'uploaded')"
+                ),
+                {"content_hash": content_hash, "object_key": object_key},
+            )
+            connection.execute(
+                text(
+                    "UPDATE dr_blob_manifests SET object_version_id='version-1', "
+                    "object_etag='etag-1' WHERE content_hash=:content_hash"
+                ),
+                {"content_hash": content_hash},
+            )
+
+    def test_each_dr_service_role_is_confined_to_its_own_scope(self) -> None:
+        with self.assertRaises(DBAPIError):
+            with self.engines["delivery"].begin() as connection:
+                self._projection_scope(connection, "receiver")
+                connection.execute(
+                    text(
+                        "INSERT INTO dr_replay_nonces "
+                        "(key_id, nonce, source_site, destination_site, request_hash, expires_at) "
+                        "VALUES ('scope-test', :nonce, 'bot_fi', 'webapp_fi', repeat('a',64), "
+                        "clock_timestamp() + interval '1 minute')"
+                    ),
+                    {"nonce": uuid4().hex},
+                )
+        with self.assertRaises(DBAPIError):
+            with self.engines["receiver"].begin() as connection:
+                self._projection_scope(connection, "receiver")
+                connection.execute(
+                    text("UPDATE commodities SET name='forbidden-receiver' WHERE id=-1")
+                )
+        with self.assertRaises(DBAPIError):
+            with self.engines["blob"].connect() as connection:
+                connection.execute(text("SELECT admin_password_hash FROM users LIMIT 1"))
 
     def test_control_role_is_limited_to_control_state(self) -> None:
         with self.assertRaises(DBAPIError):
@@ -354,14 +483,16 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                     "idempotency_key": idempotency_key,
                 },
             )
+        with self.engines["effect"].begin() as connection:
+            self._projection_scope(connection, "effect")
             connection.execute(
                 text("UPDATE dr_effect_outbox SET status = 'inflight' WHERE effect_id = :effect_id"),
                 {"effect_id": effect_id},
             )
 
         with self.assertRaises(DBAPIError):
-            with self.engines["application"].begin() as connection:
-                self._writer_settings(connection)
+            with self.engines["effect"].begin() as connection:
+                self._projection_scope(connection, "effect")
                 connection.execute(
                     text(
                         "UPDATE dr_effect_outbox SET payload = '{\"changed\": true}'::jsonb "

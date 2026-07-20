@@ -104,7 +104,15 @@ class WriterWitnessMatrixCampaignTests(unittest.TestCase):
             arguments.extend(("--preflight-sha256", preflight))
         if expect is not None:
             arguments.extend(("--expect", expect))
-        completed = subprocess.run(arguments, capture_output=True, text=True)
+        helper_environment = os.environ.copy()
+        for name in campaign.FORBIDDEN_RUNTIME_ENV:
+            helper_environment.pop(name, None)
+        completed = subprocess.run(
+            arguments,
+            capture_output=True,
+            text=True,
+            env=helper_environment,
+        )
         if check and completed.returncode != 0:
             self.fail(completed.stderr)
         return completed

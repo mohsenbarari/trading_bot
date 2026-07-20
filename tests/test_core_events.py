@@ -599,6 +599,30 @@ class CoreEventsTests(unittest.TestCase):
         self.assertNotIn('bcrypt-secret', json.dumps(inserted_change_log_data))
         self.assertNotIn('chat-file-user', json.dumps(inserted_change_log_data))
 
+    def test_strict_three_site_log_change_does_not_create_legacy_backlog(self):
+        connection = _FakeConnection()
+        with patch.object(events.settings, "three_site_dr_enabled", True), patch.object(
+            events.settings, "dr_event_protocol_enabled", True
+        ), patch.object(events.settings, "dr_event_protocol_strict", True), patch(
+            "core.events.mark_sync_outbox_recorded"
+        ) as mark_recorded:
+            events.log_change(
+                connection,
+                "offers",
+                5,
+                "UPDATE",
+                {"id": 5, "status": "active"},
+            )
+
+        connection.execute.assert_not_called()
+        mark_recorded.assert_called_once_with(
+            connection,
+            "offers",
+            "UPDATE",
+            5,
+            {"id": 5, "status": "active"},
+        )
+
     def test_publish_event_sync_success_and_failure(self):
         sync_redis = _FakeSyncRedis()
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch.object(events, 'logger') as logger:

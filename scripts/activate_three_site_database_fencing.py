@@ -18,6 +18,7 @@ CONTROL_TABLES = (
     "dr_durability_state",
     "dr_projection_table_allowlist",
     "dr_projection_field_allowlist",
+    "dr_projection_service_roles",
     "webapp_writer_state",
     "webapp_writer_transitions",
 )
@@ -34,11 +35,74 @@ APPLICATION_INTERNAL_GRANTS = {
     "dr_recovery_manifests": "SELECT, INSERT, UPDATE",
     "dr_durability_state": "SELECT",
 }
-PROJECTION_INTERNAL_GRANTS = {
-    "dr_blob_manifests": "SELECT, INSERT, UPDATE",
-    "dr_blob_deliveries": "SELECT, UPDATE",
-    "dr_blob_receipts": "SELECT, INSERT, UPDATE",
+DR_SERVICE_INTERNAL_GRANTS = {
+    "receiver": {
+        "dr_events": "SELECT, INSERT",
+        "dr_event_deliveries": "SELECT, INSERT, UPDATE",
+        "dr_event_receipts": "SELECT, INSERT, UPDATE",
+        "dr_stream_checkpoints": "SELECT, INSERT, UPDATE",
+        "dr_conflict_quarantine": "SELECT, INSERT, UPDATE",
+        "dr_replay_nonces": "SELECT, INSERT",
+        "dr_blob_manifests": "SELECT",
+        "dr_blob_deliveries": "SELECT, UPDATE",
+    },
+    "delivery": {
+        "dr_events": "SELECT",
+        "dr_event_deliveries": "SELECT, UPDATE",
+    },
+    "projector": {
+        "dr_events": "SELECT",
+        "dr_event_receipts": "SELECT, UPDATE",
+        "dr_stream_checkpoints": "SELECT, UPDATE",
+        "dr_projection_versions": "SELECT, INSERT, UPDATE",
+        "dr_conflict_quarantine": "SELECT, INSERT, UPDATE",
+        "dr_replay_nonces": "SELECT, DELETE",
+    },
+    "blob": {
+        "dr_events": "SELECT",
+        "dr_blob_manifests": "SELECT, INSERT, UPDATE",
+        "dr_blob_deliveries": "SELECT, INSERT, UPDATE",
+        "dr_blob_receipts": "SELECT, INSERT, UPDATE",
+    },
+    "effect": {
+        "dr_effect_outbox": "SELECT, UPDATE",
+    },
 }
+PROJECTOR_INTERNAL_TABLES = frozenset(
+    {
+        "sync_apply_watermarks",
+        "sync_blocks",
+        "user_counter_event_receipts",
+        "dr_events",
+        "dr_event_receipts",
+        "dr_event_deliveries",
+        "dr_stream_checkpoints",
+        "dr_conflict_quarantine",
+        "dr_replay_nonces",
+        "dr_effect_outbox",
+        "dr_effect_fanouts",
+        "dr_producer_cursors",
+        "dr_projection_versions",
+        "dr_blob_manifests",
+        "dr_file_intents",
+        "dr_blob_deliveries",
+        "dr_blob_receipts",
+        "dr_recovery_manifests",
+    }
+)
+BOT_LOCAL_EXECUTION_TABLES = frozenset(
+    {
+        "telegram_delivery_jobs",
+        "telegram_delivery_provider_outcomes",
+        "telegram_delivery_reconciliation_evidence",
+        "telegram_delivery_runtime_gates",
+        "telegram_delivery_resume_operations",
+        "telegram_delivery_feeder_states",
+        "telegram_scheduled_operations",
+        "telegram_interaction_anchor_states",
+        "telegram_channel_membership_sagas",
+    }
+)
 
 
 def _ident(value: str) -> str:
@@ -133,6 +197,8 @@ def _projection_grants(connection, projection_role: str) -> list[str]:  # noqa: 
     statements: list[str] = []
     for table_name in tables:
         table = str(table_name)
+        if table in PROJECTOR_INTERNAL_TABLES:
+            continue
         columns = connection.execute(
             text(
                 "SELECT column_name FROM dr_projection_field_allowlist "
@@ -145,6 +211,7 @@ def _projection_grants(connection, projection_role: str) -> list[str]:  # noqa: 
         column_list = ", ".join(str(column) for column in columns)
         statements.extend(
             (
+                f"GRANT SELECT ({column_list}) ON TABLE public.{table} TO {projection_role}",
                 f"GRANT INSERT ({column_list}) ON TABLE public.{table} TO {projection_role}",
                 f"GRANT UPDATE ({column_list}) ON TABLE public.{table} TO {projection_role}",
                 f"GRANT DELETE ON TABLE public.{table} TO {projection_role}",
@@ -159,12 +226,32 @@ def build_statements(
     site: str,
     application_role: str,
     projection_role: str,
+    receiver_role: str,
+    delivery_role: str,
+    blob_role: str,
+    effect_role: str,
     control_role: str,
     operator: str,
 ) -> list[str]:
-    roles = tuple(map(_ident, (application_role, projection_role, control_role)))
-    if len(set(roles)) != 3:
-        raise RuntimeError("application, projection, and control roles must be distinct")
+    service_roles = {
+        "receiver": _ident(receiver_role),
+        "delivery": _ident(delivery_role),
+        "projector": _ident(projection_role),
+        "blob": _ident(blob_role),
+        "effect": _ident(effect_role),
+    }
+    roles = tuple(
+        map(
+            _ident,
+            (
+                application_role,
+                control_role,
+                *service_roles.values(),
+            ),
+        )
+    )
+    if len(set(roles)) != len(roles):
+        raise RuntimeError("application, control, and DR service roles must all be distinct")
     if site not in {"webapp_fi", "webapp_ir"}:
         raise RuntimeError("physical site must be webapp_fi or webapp_ir")
     for role in roles:
@@ -172,28 +259,35 @@ def build_statements(
     if not operator.strip() or len(operator) > 128:
         raise RuntimeError("operator identity is required and must be at most 128 characters")
 
+    role_list = ", ".join(roles)
     statements = [
-        f"ALTER ROLE {application_role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
-        f"ALTER ROLE {projection_role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
-        f"ALTER ROLE {control_role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS",
-        f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {application_role}",
-        f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {projection_role}",
-        f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {control_role}",
-        f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {application_role}, {projection_role}, {control_role}",
-        f"GRANT CONNECT ON DATABASE {_ident(str(connection.scalar(text('SELECT current_database()'))))} TO {application_role}, {projection_role}, {control_role}",
-        f"GRANT USAGE ON SCHEMA public TO {application_role}, {projection_role}, {control_role}",
-        f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {application_role}, {projection_role}",
+        *(
+            f"ALTER ROLE {role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+            for role in roles
+        ),
+        f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role_list}",
+        f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role_list}",
+        f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {role_list}",
+        f"GRANT CONNECT ON DATABASE {_ident(str(connection.scalar(text('SELECT current_database()'))))} TO {role_list}",
+        f"GRANT USAGE ON SCHEMA public TO {role_list}",
+        f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {application_role}",
         f"GRANT SELECT ON TABLE public.dr_database_runtime, public.dr_durability_state, public.webapp_writer_state, public.webapp_writer_transitions TO {control_role}",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {application_role}, {projection_role}",
     ]
+    for role in service_roles.values():
+        statements.append(
+            "GRANT SELECT ON TABLE public.alembic_version, public.dr_database_runtime, "
+            "public.dr_projection_service_roles, public.dr_durability_state, "
+            f"public.webapp_writer_state TO {role}"
+        )
     owner_role = _ident(str(connection.scalar(text("SELECT current_user"))))
     statements.extend(
         (
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} IN SCHEMA public REVOKE ALL ON TABLES FROM {application_role}, {projection_role}, {control_role}",
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {application_role}, {projection_role}, {control_role}",
+            f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} IN SCHEMA public REVOKE ALL ON TABLES FROM {role_list}",
+            f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {role_list}",
             # PostgreSQL's built-in PUBLIC EXECUTE default for functions is
             # global. A per-schema REVOKE cannot override that global default.
-            f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, {application_role}, {projection_role}, {control_role}",
+            f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, {role_list}",
         )
     )
     security_definer_functions = connection.execute(
@@ -207,7 +301,7 @@ def build_statements(
     for function_identity in security_definer_functions:
         statements.append(
             f"REVOKE EXECUTE ON FUNCTION {function_identity} FROM PUBLIC, "
-            f"{application_role}, {projection_role}, {control_role}"
+            f"{role_list}"
         )
     writer_tables = connection.execute(
         text(
@@ -221,11 +315,19 @@ def build_statements(
     if not writer_tables:
         raise RuntimeError("database has no installed three-site Writer triggers")
     for table in writer_tables:
+        if table in BOT_LOCAL_EXECUTION_TABLES:
+            # The common database fence also protects Bot-local queue tables on
+            # the shared schema.  Trigger presence must never grant WebApp
+            # application roles access to those foreign-only execution rows.
+            continue
         statements.append(
             f"GRANT INSERT, UPDATE, DELETE ON TABLE public.{table} TO {application_role}"
         )
     for table in CONTROL_TABLES:
-        statements.append(f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.{table} FROM {application_role}, {projection_role}")
+        statements.append(
+            f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.{table} "
+            f"FROM {application_role}, {', '.join(service_roles.values())}"
+        )
     statements.extend(
         (
             f"GRANT UPDATE ON TABLE public.webapp_writer_state TO {control_role}",
@@ -235,9 +337,28 @@ def build_statements(
     )
     for table, permissions in APPLICATION_INTERNAL_GRANTS.items():
         statements.append(f"GRANT {permissions} ON TABLE public.{table} TO {application_role}")
-    for table, permissions in PROJECTION_INTERNAL_GRANTS.items():
-        statements.append(f"GRANT {permissions} ON TABLE public.{table} TO {projection_role}")
+    for scope, grants in DR_SERVICE_INTERNAL_GRANTS.items():
+        for table, permissions in grants.items():
+            statements.append(
+                f"GRANT {permissions} ON TABLE public.{table} TO {service_roles[scope]}"
+            )
+    statements.extend(
+        (
+            f"GRANT SELECT (id, content_hash, size, mime_type, created_at, s3_key) "
+            f"ON TABLE public.chat_files TO {service_roles['blob']}",
+            f"GRANT UPDATE (s3_key) ON TABLE public.chat_files TO {service_roles['blob']}",
+        )
+    )
     statements.extend(_projection_grants(connection, projection_role))
+    statements.append(
+        f"DELETE FROM public.dr_projection_service_roles WHERE physical_site = '{site}'"
+    )
+    for scope, role in service_roles.items():
+        statements.append(
+            "INSERT INTO public.dr_projection_service_roles "
+            "(physical_site, service_scope, database_role) VALUES "
+            f"('{site}', '{scope}', '{role}')"
+        )
     escaped_operator = operator.replace("'", "''")
     statements.append(
         "UPDATE public.dr_database_runtime SET "
@@ -254,6 +375,10 @@ def main() -> int:
     parser.add_argument("--site", required=True, choices=("webapp_fi", "webapp_ir"))
     parser.add_argument("--application-role", required=True)
     parser.add_argument("--projection-role", required=True)
+    parser.add_argument("--receiver-role", required=True)
+    parser.add_argument("--delivery-role", required=True)
+    parser.add_argument("--blob-role", required=True)
+    parser.add_argument("--effect-role", required=True)
     parser.add_argument("--control-role", required=True)
     parser.add_argument("--operator", required=True)
     parser.add_argument("--database-url-env", default="SYNC_DATABASE_URL")
@@ -273,6 +398,10 @@ def main() -> int:
                 site=args.site,
                 application_role=args.application_role,
                 projection_role=args.projection_role,
+                receiver_role=args.receiver_role,
+                delivery_role=args.delivery_role,
+                blob_role=args.blob_role,
+                effect_role=args.effect_role,
                 control_role=args.control_role,
                 operator=args.operator,
             )
@@ -284,6 +413,10 @@ def main() -> int:
                     "roles": {
                         "application": args.application_role,
                         "projection": args.projection_role,
+                        "receiver": args.receiver_role,
+                        "delivery": args.delivery_role,
+                        "blob": args.blob_role,
+                        "effect": args.effect_role,
                         "control": args.control_role,
                     },
                     "statement_count": len(statements),

@@ -394,9 +394,11 @@ async def _manifest_epoch(
     )
     if state is None or state.active_site == identity.physical_site:
         raise DrBlobPlaneError("promotion manifest target is missing or already the active writer")
-    epoch = int(state.writer_epoch) + 1
-    if expected_writer_epoch is None or int(expected_writer_epoch) != epoch:
-        raise DrBlobPlaneError("promotion manifest must bind the exact next Writer epoch")
+    if expected_writer_epoch is None:
+        raise DrBlobPlaneError("promotion manifest must bind a Writer epoch")
+    epoch = int(expected_writer_epoch)
+    if epoch <= int(state.writer_epoch):
+        raise DrBlobPlaneError("promotion manifest Writer epoch is not newer than local state")
     return identity, epoch
 
 

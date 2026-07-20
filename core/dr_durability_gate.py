@@ -100,13 +100,9 @@ def decide_durability(
 ) -> DurabilityDecision:
     tables = set(table_names)
     critical = tables & (FINANCIAL_TABLES | IDENTITY_TABLES | MESSENGER_TABLES)
-    if not critical or connectivity_mode == "online":
+    if not critical:
         return DurabilityDecision(True, ())
     reasons: list[str] = []
-    if connectivity_mode == "ambiguous":
-        reasons.append("connectivity_ambiguous")
-    if connectivity_mode == "isolated" and isolated_critical_write_policy != "same_region_sync":
-        reasons.append("isolated_critical_writes_not_owner_approved")
     expiry = evidence_expires_at
     if expiry is None:
         reasons.append("durability_evidence_missing")
@@ -115,12 +111,18 @@ def decide_durability(
             expiry = expiry.replace(tzinfo=timezone.utc)
         if expiry.astimezone(timezone.utc) <= now.astimezone(timezone.utc):
             reasons.append("durability_evidence_expired")
-    if connectivity_mode not in {"isolated", "ambiguous"}:
-        reasons.append("connectivity_mode_invalid")
     if not event_journal_healthy:
         reasons.append("same_region_event_journal_unhealthy")
     if tables & BLOB_TABLES and not blob_journal_healthy:
         reasons.append("same_region_blob_journal_unhealthy")
+    if connectivity_mode == "online":
+        return DurabilityDecision(not reasons, tuple(reasons))
+    if connectivity_mode == "ambiguous":
+        reasons.append("connectivity_ambiguous")
+    if connectivity_mode == "isolated" and isolated_critical_write_policy != "same_region_sync":
+        reasons.append("isolated_critical_writes_not_owner_approved")
+    if connectivity_mode not in {"isolated", "ambiguous"}:
+        reasons.append("connectivity_mode_invalid")
     return DurabilityDecision(not reasons, tuple(reasons))
 
 

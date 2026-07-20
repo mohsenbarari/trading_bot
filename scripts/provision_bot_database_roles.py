@@ -53,6 +53,22 @@ BOT_LOCAL_APPLICATION_TABLES = frozenset(
         "user_counter_event_receipts",
     }
 )
+# Site-local Telegram execution state is deliberately absent from every DR
+# projection route, but the credentialed Bot process still needs explicit
+# least-privilege CRUD to enqueue, claim, recover, and retain its durable jobs.
+# Keep this closed set separate from product tables so WebApp role provisioning
+# can never infer access from a shared migration/trigger list.
+BOT_LOCAL_QUEUE_APPLICATION_GRANTS = {
+    "telegram_delivery_jobs": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_delivery_provider_outcomes": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_delivery_reconciliation_evidence": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_delivery_runtime_gates": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_delivery_resume_operations": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_delivery_feeder_states": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_scheduled_operations": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_interaction_anchor_states": "SELECT, INSERT, UPDATE, DELETE",
+    "telegram_channel_membership_sagas": "SELECT, INSERT, UPDATE, DELETE",
+}
 BOT_APPLICATION_INTERNAL_GRANTS = {
     "dr_database_runtime": "SELECT",
     "dr_destination_cursors": "SELECT, INSERT, UPDATE",
@@ -60,15 +76,27 @@ BOT_APPLICATION_INTERNAL_GRANTS = {
     "dr_events": "SELECT, INSERT, UPDATE",
     "dr_event_deliveries": "SELECT, INSERT",
 }
-BOT_PROJECTION_INTERNAL_GRANTS = {
-    "dr_database_runtime": "SELECT",
-    "dr_events": "SELECT, INSERT",
-    "dr_event_deliveries": "SELECT, INSERT, UPDATE",
-    "dr_event_receipts": "SELECT, INSERT, UPDATE",
-    "dr_stream_checkpoints": "SELECT, INSERT, UPDATE",
-    "dr_projection_versions": "SELECT, INSERT, UPDATE",
-    "dr_conflict_quarantine": "SELECT, INSERT, UPDATE",
-    "dr_replay_nonces": "SELECT, INSERT",
+BOT_DR_SERVICE_GRANTS = {
+    "receiver": {
+        "dr_events": "SELECT, INSERT",
+        "dr_event_deliveries": "SELECT, INSERT, UPDATE",
+        "dr_event_receipts": "SELECT, INSERT, UPDATE",
+        "dr_stream_checkpoints": "SELECT, INSERT, UPDATE",
+        "dr_conflict_quarantine": "SELECT, INSERT, UPDATE",
+        "dr_replay_nonces": "SELECT, INSERT",
+    },
+    "delivery": {
+        "dr_events": "SELECT",
+        "dr_event_deliveries": "SELECT, UPDATE",
+    },
+    "projector": {
+        "dr_events": "SELECT",
+        "dr_event_receipts": "SELECT, UPDATE",
+        "dr_stream_checkpoints": "SELECT, UPDATE",
+        "dr_projection_versions": "SELECT, INSERT, UPDATE",
+        "dr_conflict_quarantine": "SELECT, INSERT, UPDATE",
+        "dr_replay_nonces": "SELECT, DELETE",
+    },
 }
 
 
@@ -168,9 +196,17 @@ def main() -> int:
     prefix = _ident(args.role_prefix)
     roles = {
         f"{prefix}_app": _required("BOT_APP_DB_PASSWORD"),
+        f"{prefix}_receiver": _required("BOT_RECEIVER_DB_PASSWORD"),
+        f"{prefix}_delivery": _required("BOT_DELIVERY_DB_PASSWORD"),
         f"{prefix}_projection": _required("BOT_PROJECTION_DB_PASSWORD"),
     }
-    app_role, projection_role = roles
+    app_role = f"{prefix}_app"
+    service_roles = {
+        "receiver": f"{prefix}_receiver",
+        "delivery": f"{prefix}_delivery",
+        "projector": f"{prefix}_projection",
+    }
+    projection_role = service_roles["projector"]
     engine = create_engine(_required(args.database_url_env))
     try:
         with engine.begin() as connection:
@@ -190,31 +226,43 @@ def main() -> int:
                 connection.exec_driver_sql(str(command))
                 _clear_memberships(connection, role)
                 _assert_closed_role(connection, role)
+            role_list = ", ".join(roles)
             statements = [
-                f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {app_role}, {projection_role}",
-                f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {app_role}, {projection_role}",
-                f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {app_role}, {projection_role}",
-                f"GRANT CONNECT ON DATABASE {database} TO {app_role}, {projection_role}",
-                f"GRANT USAGE ON SCHEMA public TO {app_role}, {projection_role}",
+                f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role_list}",
+                f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role_list}",
+                f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {role_list}",
+                f"GRANT CONNECT ON DATABASE {database} TO {role_list}",
+                f"GRANT USAGE ON SCHEMA public TO {role_list}",
                 f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {app_role}, {projection_role}",
-                f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON TABLES FROM {app_role}, {projection_role}",
-                f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {app_role}, {projection_role}",
+                f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON TABLES FROM {role_list}",
+                f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {role_list}",
                 # Function EXECUTE defaults are global in PostgreSQL; a
                 # schema-scoped REVOKE does not remove PUBLIC's global default.
-                f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, {app_role}, {projection_role}",
+                f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, {role_list}",
             ]
+            for role in service_roles.values():
+                statements.append(
+                    "GRANT SELECT ON TABLE public.alembic_version, public.dr_database_runtime, "
+                    f"public.dr_projection_service_roles TO {role}"
+                )
             for table in sorted(BOT_PRODUCT_TABLES | BOT_LOCAL_APPLICATION_TABLES):
                 statements.append(
                     f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.{_ident(table)} TO {app_role}"
+                )
+            for table, permissions in sorted(BOT_LOCAL_QUEUE_APPLICATION_GRANTS.items()):
+                statements.append(
+                    f"GRANT {permissions} ON TABLE public.{_ident(table)} TO {app_role}"
                 )
             for table, permissions in BOT_APPLICATION_INTERNAL_GRANTS.items():
                 statements.append(
                     f"GRANT {permissions} ON TABLE public.{_ident(table)} TO {app_role}"
                 )
-            for table, permissions in BOT_PROJECTION_INTERNAL_GRANTS.items():
-                statements.append(
-                    f"GRANT {permissions} ON TABLE public.{_ident(table)} TO {projection_role}"
-                )
+            for scope, grants in BOT_DR_SERVICE_GRANTS.items():
+                for table, permissions in grants.items():
+                    statements.append(
+                        f"GRANT {permissions} ON TABLE public.{_ident(table)} "
+                        f"TO {service_roles[scope]}"
+                    )
             tables = connection.execute(
                 text(
                     "SELECT table_name FROM dr_projection_table_allowlist "
@@ -235,11 +283,21 @@ def main() -> int:
                 table_name = _ident(str(table))
                 statements.extend(
                     (
-                        f"GRANT SELECT ON TABLE public.{table_name} TO {projection_role}",
+                        f"GRANT SELECT ({column_list}) ON TABLE public.{table_name} TO {projection_role}",
                         f"GRANT INSERT ({column_list}) ON TABLE public.{table_name} TO {projection_role}",
                         f"GRANT UPDATE ({column_list}) ON TABLE public.{table_name} TO {projection_role}",
                         f"GRANT DELETE ON TABLE public.{table_name} TO {projection_role}",
                     )
+                )
+            statements.append(
+                "DELETE FROM public.dr_projection_service_roles "
+                "WHERE physical_site='bot_fi'"
+            )
+            for scope, role in service_roles.items():
+                statements.append(
+                    "INSERT INTO public.dr_projection_service_roles "
+                    "(physical_site, service_scope, database_role) VALUES "
+                    f"('bot_fi', '{scope}', '{role}')"
                 )
             statements.append(
                 "UPDATE public.dr_database_runtime SET enforcement_enabled=true, "

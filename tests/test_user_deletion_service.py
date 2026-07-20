@@ -34,6 +34,18 @@ class _HttpClientContext:
 
 
 class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.enqueue_deletion_notice = AsyncMock()
+        self.enqueue_deletion_notice_patcher = patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_deletion_telegram_notification_once",
+            new=self.enqueue_deletion_notice,
+        )
+        self.enqueue_deletion_notice_patcher.start()
+
+    async def asyncTearDown(self):
+        self.enqueue_deletion_notice_patcher.stop()
+
     async def test_queue_mode_persists_deletion_notice_before_commit(self):
         original_telegram_id = 44112233
         user = SimpleNamespace(
@@ -282,9 +294,10 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         user.soft_delete.assert_called_once_with()
 
         mark_deleted_telegram_user.assert_awaited_once_with(user.telegram_id)
-        send_telegram_notification.assert_awaited_once()
+        send_telegram_notification.assert_not_awaited()
         publish_session_revocation.assert_awaited_once_with(user.id, revoked_sessions)
-        remove_user_from_channel.assert_awaited_once_with(user.telegram_id)
+        remove_user_from_channel.assert_not_awaited()
+        self.enqueue_deletion_notice.assert_awaited_once()
 
         self.assertEqual(result.user_id, user.id)
         self.assertEqual(result.telegram_id, user.telegram_id)
@@ -442,9 +455,10 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         user.soft_delete.assert_called_once_with()
         mandatory_sync.assert_awaited_once_with(db, user=user, previous_is_deleted=False, previous_deleted_at=None)
         mark_deleted_telegram_user.assert_awaited_once_with(user.telegram_id)
-        send_telegram_notification.assert_awaited_once_with(user.telegram_id, unittest.mock.ANY)
+        send_telegram_notification.assert_not_awaited()
         publish_session_revocation.assert_awaited_once_with(user.id, revoked_sessions)
-        remove_user_from_channel.assert_awaited_once_with(user.telegram_id)
+        remove_user_from_channel.assert_not_awaited()
+        self.enqueue_deletion_notice.assert_awaited_once()
         self.assertEqual(result.user_id, user.id)
         self.assertEqual(result.revoked_session_count, 1)
 
@@ -568,8 +582,9 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pending_relation.status.value, "revoked")
         self.assertEqual(active_relation.status.value, "deleted")
         self.assertEqual(mark_deleted_telegram_user.await_count, 2)
-        self.assertEqual(send_telegram_notification.await_count, 2)
-        self.assertEqual(remove_user_from_channel.await_count, 2)
+        self.assertEqual(send_telegram_notification.await_count, 0)
+        self.assertEqual(remove_user_from_channel.await_count, 0)
+        self.assertEqual(self.enqueue_deletion_notice.await_count, 2)
         publish_session_revocation.assert_any_await(accountant.id, accountant_revoked_sessions)
         publish_session_revocation.assert_any_await(owner.id, owner_revoked_sessions)
         self.assertEqual(result.user_id, owner.id)
@@ -694,8 +709,9 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pending_relation.status.value, "revoked")
         self.assertEqual(active_relation.status.value, "deleted")
         self.assertEqual(mark_deleted_telegram_user.await_count, 2)
-        self.assertEqual(send_telegram_notification.await_count, 2)
-        self.assertEqual(remove_user_from_channel.await_count, 2)
+        self.assertEqual(send_telegram_notification.await_count, 0)
+        self.assertEqual(remove_user_from_channel.await_count, 0)
+        self.assertEqual(self.enqueue_deletion_notice.await_count, 2)
         publish_session_revocation.assert_any_await(customer.id, customer_revoked_sessions)
         publish_session_revocation.assert_any_await(owner.id, owner_revoked_sessions)
         self.assertEqual(result.user_id, owner.id)

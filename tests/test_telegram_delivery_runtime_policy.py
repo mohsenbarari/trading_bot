@@ -49,7 +49,7 @@ class TelegramDeliveryRuntimePolicyTests(unittest.TestCase):
                         cutover_ready=cutover_ready,
                     )
 
-    def test_environment_cannot_activate_incomplete_queue_implementation(self):
+    def test_queue_activation_requires_the_reviewed_code_capability(self):
         with self.assertRaisesRegex(
             TelegramDeliveryRuntimeConfigurationError,
             "queue_implementation_not_cutover_ready",
@@ -58,6 +58,7 @@ class TelegramDeliveryRuntimePolicyTests(unittest.TestCase):
                 execution_owner="queue-v1",
                 queue_worker_enabled=True,
                 cutover_ready=True,
+                implementation_ready=False,
             )
 
     def test_queue_mode_is_reachable_only_with_explicit_code_capability(self):
@@ -65,7 +66,6 @@ class TelegramDeliveryRuntimePolicyTests(unittest.TestCase):
             execution_owner="queue-v1",
             queue_worker_enabled=True,
             cutover_ready=True,
-            implementation_ready=True,
         )
 
         self.assertEqual(decision.mode, TelegramDeliveryRuntimeMode.QUEUE_V1)

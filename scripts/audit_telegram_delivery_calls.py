@@ -123,7 +123,7 @@ REMAINING_DISPOSITION_BUDGETS = {
 }
 EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "durable_exempt": 4,
-    "legacy_mode_guarded": 69,
+    "legacy_mode_guarded": 66,
     "legacy_owner_guarded": 15,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
@@ -131,7 +131,7 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "113fda8321497b000c85daa399dffba1a1de5b482917067e43b40dd44555ed9e"
+    "9ae5411a2bbb5d3805ccb41ba66f5c380b5eac958b2f9d984b047e53c9a2e836"
 )
 
 

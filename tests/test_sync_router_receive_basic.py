@@ -60,6 +60,17 @@ class DeletedUserSyncDB(FakeDB):
     def __init__(self, row):
         super().__init__()
         self._deleted_user_rows = [row]
+        self._synced_deleted_user = SimpleNamespace(
+            id=4,
+            is_deleted=True,
+            telegram_id=None,
+            sync_version=9,
+        )
+
+    async def get(self, model, record_id):
+        if record_id == self._synced_deleted_user.id:
+            return self._synced_deleted_user
+        return None
 
     async def execute(self, stmt, *args, **kwargs):
         self.execute_calls.append((stmt, args, kwargs))
@@ -85,7 +96,7 @@ class TerminalOfferRealtimeDB(FakeDB):
 
 
 class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
-    async def test_queue_mode_persists_synced_deletion_notice_and_skips_direct_send(self):
+    async def test_synced_deletion_persists_notice_and_skips_direct_send(self):
         deleted_user = SimpleNamespace(
             id=4,
             is_deleted=True,
@@ -99,9 +110,6 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.sync.current_server",
             return_value="foreign",
-        ), patch(
-            "api.routers.sync.configured_telegram_delivery_runtime",
-            return_value=SimpleNamespace(mode="queue-v1"),
         ), patch(
             "api.routers.sync.enqueue_account_deletion_telegram_notification_once",
             new=AsyncMock(),
@@ -118,9 +126,6 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.sync.current_server",
             return_value="foreign",
-        ), patch(
-            "api.routers.sync.configured_telegram_delivery_runtime",
-            return_value=SimpleNamespace(mode="queue-v1"),
         ), patch(
             "bot.utils.redis_helpers.mark_deleted_telegram_user",
             new=AsyncMock(),
@@ -221,6 +226,9 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
             "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
         ) as rollout_mock, patch("api.routers.sync.settings.server_mode", "foreign"), patch(
+            "api.routers.sync.enqueue_account_deletion_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue_notice, patch(
             "bot.utils.redis_helpers.mark_deleted_telegram_user", new=AsyncMock()
         ) as mark_deleted, patch(
             "core.utils.send_telegram_notification", new=AsyncMock()
@@ -234,8 +242,11 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"status": "success", "processed": 1})
         self.assertGreaterEqual(db.commits, 2)
         mark_deleted.assert_awaited_once_with(998877)
-        send_notification.assert_awaited_once()
-        remove_from_channel.assert_awaited_once_with(998877)
+        enqueue_notice.assert_awaited_once()
+        self.assertEqual(enqueue_notice.await_args.kwargs["recipient"].telegram_id, 998877)
+        self.assertEqual(enqueue_notice.await_args.kwargs["user_sync_version"], 9)
+        send_notification.assert_not_awaited()
+        remove_from_channel.assert_not_awaited()
 
     async def test_receive_sync_data_skips_deleted_user_telegram_cleanup_when_already_deleted(self):
         db = DeletedUserSyncDB(SimpleNamespace(is_deleted=True, telegram_id=998877))

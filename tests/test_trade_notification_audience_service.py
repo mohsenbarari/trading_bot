@@ -119,7 +119,11 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         ) as identity_mock, patch(
             "core.services.trade_notification_audience_service.evaluate_bot_access",
             new=AsyncMock(side_effect=fake_bot_access),
-        ) as bot_access_mock:
+        ) as bot_access_mock, patch.object(
+            service.settings,
+            "bot_username",
+            "trading_test_bot",
+        ):
             result = await service.build_trade_completion_notification_audience(object(), trade)
 
         return SimpleNamespace(

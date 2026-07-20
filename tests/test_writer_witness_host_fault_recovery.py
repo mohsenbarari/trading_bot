@@ -17,6 +17,15 @@ HOST_FAULT_HELPER = (
     ROOT / "deploy/writer-witness/writer-witness-matrix-host-faults.sh"
 )
 TAG = "wwm_0123456789ab"
+FORBIDDEN_HELPER_ENVIRONMENT = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSTARTUP",
+    "PYTHONINSPECT",
+    "PYTHONUSERBASE",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+)
 
 
 class WriterWitnessHostFaultRecoveryTests(unittest.TestCase):
@@ -36,6 +45,9 @@ class WriterWitnessHostFaultRecoveryTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_state(self, command: str, *arguments: str, check: bool = True):
+        helper_environment = os.environ.copy()
+        for name in FORBIDDEN_HELPER_ENVIRONMENT:
+            helper_environment.pop(name, None)
         completed = subprocess.run(
             [
                 sys.executable,
@@ -61,6 +73,7 @@ class WriterWitnessHostFaultRecoveryTests(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            env=helper_environment,
         )
         if check and completed.returncode != 0:
             self.fail(completed.stderr)

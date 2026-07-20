@@ -92,7 +92,11 @@ class WitnessOperationLedger:
             )
         except (ValueError, binascii.Error, InvalidSignature) as exc:
             raise DrOrchestrationError("independent Witness ledger signature is invalid") from exc
-        allowed_statuses = {"reserved", "existing"} if action == "reserve" else {str(outcome)}
+        allowed_statuses = (
+            {"reserved", "existing", "expired"}
+            if action == "reserve"
+            else {str(outcome)}
+        )
         if (
             result["operation_id"] != plan.operation_id
             or result["operation_nonce"] != plan.operation_nonce

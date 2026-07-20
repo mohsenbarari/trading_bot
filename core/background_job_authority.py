@@ -22,6 +22,7 @@ JOB_TRADE_WEBAPP_DELIVERY = "trade_webapp_delivery"
 JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
 JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
 JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delivery"
+JOB_TELEGRAM_MARKET_NOTICE_DELIVERY = "telegram_market_notice_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 JOB_TELEGRAM_DELIVERY_QUEUE = "telegram_delivery_queue"
 JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
@@ -39,6 +40,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_TRADE_TELEGRAM_DELIVERY,
         JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
         JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
+        JOB_TELEGRAM_MARKET_NOTICE_DELIVERY,
         JOB_OFFER_TELEGRAM_PUBLICATION,
         JOB_TELEGRAM_DELIVERY_QUEUE,
         JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
@@ -277,6 +279,25 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         ),
         external_state=("Telegram Bot API",),
         side_effects=("Telegram private generic notification message",),
+    ),
+    JOB_TELEGRAM_MARKET_NOTICE_DELIVERY: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_MARKET_NOTICE_DELIVERY,
+        mutated_tables=("market_channel_notice_receipts",),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign credentialed Bot only; materialize and deliver the notice "
+            "for the latest synced market transition"
+        ),
+        outage_behavior=(
+            "retain failed receipts with bounded retry while Telegram is unavailable; "
+            "tokenless API processes never claim or terminalize them"
+        ),
+        sync_outbox_behavior=(
+            "market state is authoritative product data; delivery receipts are the "
+            "durable Telegram intent/evidence surface"
+        ),
+        external_state=("Telegram Bot API",),
+        side_effects=("Telegram market open/close channel notice",),
     ),
     JOB_OFFER_TELEGRAM_PUBLICATION: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_TELEGRAM_PUBLICATION,

@@ -1,0 +1,54 @@
+{
+  "schema": "three-site-staging-failover-backend-v1",
+  "campaign_id": "00000000-0000-4000-8000-000000000000",
+  "release_sha": "0000000000000000000000000000000000000000",
+  "domain": "gold-trading.ir",
+  "record": "app",
+  "connectivity_policy": "/etc/trading-bot/security/dr-connectivity-vantages.json",
+  "connectivity_evidence": "/root/secure/failover/connectivity-rounds.json",
+  "arvan_token_file": "/root/secure/failover/arvan-cdn-token",
+  "arvan_audit_log": "/root/secure/failover/arvan-origin-audit.jsonl",
+  "origin_readiness_key_file": "/root/secure/failover/origin-readiness-key",
+  "rollback_wait_seconds": 300,
+  "hosts": {
+    "webapp_fi": {
+      "host_ip": "192.0.2.12",
+      "ssh_port": 22,
+      "ssh_user": "root",
+      "ssh_identity_file": "/root/secure/failover/webapp-fi-ssh",
+      "ssh_known_hosts_file": "/root/secure/failover/webapp-fi-known-hosts",
+      "repo_root": "/srv/trading-bot-three-site/current",
+      "role_compose": "/etc/trading-bot-three-site/webapp-fi.compose.yml",
+      "env_file": "/etc/trading-bot-three-site/webapp-fi.env",
+      "plan_path": "/root/secure/failover/active-plan.json",
+      "command_manifest_path": "/root/secure/failover/typed-operation-manifest.json",
+      "approver_policy_path": "/etc/trading-bot/security/dr-failover-approvers.json",
+      "evidence_dir": "/root/secure/failover/evidence",
+      "recovery_input_path": "/root/secure/failover/failback-recovery-input.json"
+    },
+    "webapp_ir": {
+      "host_ip": "192.0.2.13",
+      "ssh_port": 22,
+      "ssh_user": "root",
+      "ssh_identity_file": "/root/secure/failover/webapp-ir-ssh",
+      "ssh_known_hosts_file": "/root/secure/failover/webapp-ir-known-hosts",
+      "repo_root": "/srv/trading-bot-three-site/current",
+      "role_compose": "/etc/trading-bot-three-site/webapp-ir.compose.yml",
+      "env_file": "/etc/trading-bot-three-site/webapp-ir.env",
+      "plan_path": "/root/secure/failover/active-plan.json",
+      "command_manifest_path": "/root/secure/failover/typed-operation-manifest.json",
+      "approver_policy_path": "/etc/trading-bot/security/dr-failover-approvers.json",
+      "evidence_dir": "/root/secure/failover/evidence",
+      "recovery_input_path": "/root/secure/failover/failback-recovery-input.json"
+    }
+  },
+  "witness": {
+    "base_url": "https://witness-dr.staging.internal:8444",
+    "key_id": "staging-webapp-fi-v1",
+    "site": "webapp_fi",
+    "secret_file": "/root/secure/failover/witness-controller-secret",
+    "ca_bundle": "/root/secure/failover/staging-dr-ca.crt",
+    "public_key": "CHANGE_ME_base64_ed25519_public_key",
+    "timeout_seconds": 3
+  }
+}

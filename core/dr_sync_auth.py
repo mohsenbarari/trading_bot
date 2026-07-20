@@ -107,6 +107,29 @@ def sign_request(**kwargs: Any) -> str:
     return hmac.new(secret.encode("utf-8"), canonical_request_bytes(**kwargs), hashlib.sha256).hexdigest()
 
 
+def canonical_acknowledgement_bytes(payload: dict[str, Any]) -> bytes:
+    return (
+        DR_SYNC_PROTOCOL.encode("ascii")
+        + b"\nACK\n"
+        + json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+
+
+def sign_acknowledgement(*, payload: dict[str, Any], secret: str) -> str:
+    return hmac.new(
+        secret.encode("utf-8"),
+        canonical_acknowledgement_bytes(payload),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def acknowledgement_signature_is_valid(
+    *, payload: dict[str, Any], signature: str, secret: str
+) -> bool:
+    expected = sign_acknowledgement(payload=payload, secret=secret)
+    return hmac.compare_digest(str(signature), expected)
+
+
 def verify_request(
     *,
     method: str,

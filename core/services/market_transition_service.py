@@ -125,9 +125,17 @@ def _market_notice_queue_mode() -> bool:
     )
 
 
+def _legacy_market_notice_has_credentials() -> bool:
+    return bool(getattr(settings, "bot_token", None) or os.getenv("BOT_TOKEN"))
+
+
 def _assert_legacy_market_notice_owner() -> None:
     runtime = configured_telegram_delivery_runtime()
-    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+    if (
+        not runtime.legacy_workers_enabled
+        or runtime.queue_worker_enabled
+        or not _legacy_market_notice_has_credentials()
+    ):
         raise TelegramDeliveryRuntimeConfigurationError(
             "legacy_market_notice_sender_is_not_runtime_owner"
         )
@@ -381,10 +389,10 @@ async def _send_market_channel_notice(
     idempotency_key: str | None = None,
     raise_on_failure: bool = True,
 ) -> telegram_gateway.TelegramGatewayResult | None:
-    _assert_legacy_market_notice_owner()
     channel_id = settings.channel_id
     if not channel_id:
         return None
+    _assert_legacy_market_notice_owner()
 
     result = await telegram_gateway.send_message(
         channel_id,
@@ -448,6 +456,14 @@ async def reconcile_market_channel_notice_for_state(
         return MarketChannelNoticeResult(status="skipped", reason="non_foreign_server")
     if market_channel_notice_delivery_disabled():
         return MarketChannelNoticeResult(status="skipped", reason="disabled")
+    if not _market_notice_queue_mode() and not _legacy_market_notice_has_credentials():
+        # Tokenless API processes observe/produce market state but never create
+        # a terminal receipt for an effect they cannot execute.  The
+        # credentialed Bot worker materializes and delivers the receipt.
+        return MarketChannelNoticeResult(
+            status="skipped",
+            reason="legacy_executor_not_credentialed",
+        )
 
     transition_at = _market_notice_transition_at_for_state(state)
     if transition_at is None:

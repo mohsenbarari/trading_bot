@@ -3802,3 +3802,256 @@ the combined Telegram queue, three-site database roles/migrations, private DR
 projection, effect delivery, failover/failback, and application regression
 matrix. A separate explicit owner instruction is required before any merge to
 `main` or production deployment.
+
+## 52. Independent Integration Review Remediation - 2026-07-20
+
+Four external reviews examined the immutable integration target
+`a42c7bed2819c3e5f960c85845c259f33c4d71cd`. Three evidence-bearing reviews
+independently rejected staging migration, authoritative Full Matrix execution,
+and merge to `main`. A fourth report returned an unsupported `GO` despite the
+code-owned queue cutover gate and absent Full Matrix evidence; it is not an
+acceptance vote. Direct source inspection confirmed the blockers below.
+
+This section supersedes the stop boundary in section 51 with a remediation
+program. It does not authorize staging mutation, provider traffic, CDN/DNS
+changes, production activation, or merge to `main`.
+
+### 52.1 Gate A - deterministic database policy and least privilege
+
+The following defects must be closed together because fixing only a grant or a
+trigger can expose the next unsafe layer:
+
+1. Strict DR bulk/raw-DML protection rejects SQLAlchemy Core mutations on the
+   Bot-local `NO_SYNC` Telegram execution tables. Queue enqueue, claim, lease,
+   outcome, retry, and recovery transitions cannot run with the committed
+   three-site strict-mode configuration.
+2. `bot_fi_app` has no CRUD grants on the nine Bot-local queue/scheduler/saga
+   tables. The role must receive a closed, operation-specific grant set while
+   all WebApp roles remain denied.
+3. The same local execution tables and `dr_destination_cursors` lack an
+   appropriate site/capability database fence. Trigger installation must not
+   accidentally make Bot-local tables writable by WebApp application roles.
+4. `dr_projection_field_allowlist` is populated by schema introspection in an
+   older migration. Later queue, protocol-v2 event, encrypted-Blob, and
+   publication fields therefore produce path-dependent policies across fresh,
+   `main`, queue-parent, and DR-parent upgrades.
+5. The protocol receiver must be allowed to insert transported transaction
+   envelope fields without receiving authority to choose source-local
+   `source_xid`. Encrypted Blob fields must also be permitted under the exact
+   projection role.
+6. Database Writer/event-coverage functions must reject a missing runtime row,
+   every missing required GUC, and every nullable mismatch explicitly. SQL
+   three-valued logic must never turn missing authority evidence into success.
+7. An application role must not satisfy event coverage with an arbitrary event
+   payload that merely matches transaction ID, table, primary key, and
+   operation. Coverage must be bound to a database-derived canonical row image
+   or an equivalently constrained security-definer mutation contract.
+
+Acceptance requires one additive integration reconciliation migration and real
+PostgreSQL tests that compare the exact allowlists, grants, triggers, and
+effective mutations after upgrades from all four predecessor histories. Tests
+must execute queue and DR operations with the actual least-privilege roles, not
+schema-owner fixtures.
+
+### 52.2 Gate B - Telegram execution ownership and process health
+
+1. The tokenless Bot-FI API and credentialed Bot process both run the legacy
+   trade Telegram receipt worker. The API can claim a receipt first and commit
+   `missing_bot_token` as a permanent failure. API services must own no
+   Telegram executor.
+2. Market, account-status, deletion, trade, publication, expiry, broadcast,
+   registration, membership, and scheduled Telegram effects must retain their
+   correct domain producer while materializing a durable intent for the sole
+   credentialed Bot/queue executor.
+3. Bot startup must attest its real database role before creating any provider
+   or worker task.
+4. Required Bot child workers must be supervised. A queue/legacy execution
+   child failure must make readiness fail and terminate the process for the
+   container restart policy; polling must not remain deceptively healthy.
+5. The code-owned queue readiness constant remains false until Gates A and B,
+   provider identity/permission preflight, and forward-rollback prerequisites
+   pass. The cutover commit and its exact allowed delta must be bound into the
+   Full Matrix campaign.
+
+Acceptance requires a topology test with a tokenless API and credentialed Bot
+against the same PostgreSQL database, plus crash/restart/429/ambiguous-send
+tests proving one execution owner, no terminal poisoning, and no blind retry.
+
+### 52.3 Gate C - Writer authority, durability, and convergence
+
+1. Public WebApp API processes currently hold application DB, control DB, and
+   Witness-client authority together. Renewal/proof import must move to a
+   dedicated private agent with a constrained database transition interface;
+   the public API must not be able to manufacture a Writer term.
+2. Durability decisions must validate missing/expired evidence and journal
+   health before accepting the `online` fast path.
+3. Transport `received` acknowledgement is not projection completion. Signed
+   destination-applied checkpoint evidence is required for global convergence
+   and failback.
+4. Source fencing must publish an immutable final stream/transaction watermark.
+   Promotion must prove the target received and applied through that boundary,
+   or require an explicit owner-approved residual-loss/RPO decision when the
+   source is unavailable.
+5. Mutable source connections must drain before target readiness and term
+   acquisition. A partially completed operation may not continue forward after
+   its plan/evidence expires; only safe-fenced rollback/recovery is permitted.
+6. The persistent FI epoch 1 -> IR epoch 2 -> FI epoch 3 lifecycle must succeed
+   without resetting Witness or local site state. Target readiness must use the
+   global next term rather than require the target's stale local epoch + 1.
+7. Enabled DR mode must require strict mode and distinct, attested application,
+   projection, and control credentials. Missing/equal auxiliary URLs must fail
+   closed.
+
+Acceptance requires real two-site PostgreSQL lifecycle tests, individually
+missing-GUC/runtime-row tests, expired-online tests, stopped-projector tests,
+source-tail-loss tests, expiry after every saga step, and a persistent
+FI1 -> IR2 -> FI3 drill.
+
+### 52.4 Gate D - staging migration and authoritative Full Matrix tooling
+
+The current `scripts/deploy_staging.sh` and staging documentation remain the
+legacy two-server workflow. The four-role Compose is a foundation, not a safe
+migration procedure. Before current staging is changed, tracked tooling must
+provide:
+
+1. exact-SHA and signed host/role inventory validation;
+2. backup and restore verification before data movement;
+3. deterministic database provisioning, reconciliation migration, role/fence
+   activation, and per-site seed order;
+4. role-scoped secret/certificate distribution and effective-environment proof;
+5. ordered service startup, dependency-aware readiness, routing hold points,
+   and rollback journal;
+6. separate least-privilege Witness migrator and runtime roles;
+7. official Queue/editor configuration surfaces without exposing provider
+   credentials to API, DR, WebApp, or Witness processes;
+8. a reviewed typed staging failover backend;
+9. one immutable campaign runner combining queue, DR, Witness, Blob/effects,
+   routing, application regression, fault injection, artifact integrity,
+   no-skips enforcement, cleanup, and repeatability.
+
+Legacy two-server tests remain regression evidence only. They cannot authorize
+the new topology.
+
+### 52.5 Remediation order and stop conditions
+
+The mandatory order is Gate A, Gate B, Gate C, then Gate D. Each gate receives
+focused tests before the next gate. The final source candidate must then pass a
+fresh independent review before official staging migration. Only the migrated
+three-site staging environment may produce authoritative Full Matrix evidence.
+
+Merge to `main` remains forbidden until every P0/P1 finding is closed, the
+staging migration and rollback are proven, the combined immutable-SHA Full
+Matrix passes, residual RPO/RTO and live-provider risks are owner-approved, and
+a separate explicit merge instruction is given.
+
+### 52.6 Integration remediation progress after the three-agent review
+
+This is source progress only. It records no staging/production mutation and
+does not authorize a `main` merge.
+
+- Gates A, B, and C have focused source and PostgreSQL evidence on the isolated
+  integration branch: the Queue/DR Core-DML collision, role grants, migration
+  reconciliation, database-bound event integrity, public Writer credential
+  separation, fail-closed durability, destination-applied acknowledgements,
+  immutable source-tail/RPO handling, expiry-only rollback, strict credential
+  separation, and persistent FI epoch 1 -> IR epoch 2 -> FI epoch 3 lifecycle
+  are implemented.
+- Gate D inventory now has two fresh Ed25519 approvals and two explicit stages.
+  A signed `planned` inventory permits only fresh-host/empty-volume setup; live
+  PostgreSQL IDs are measured from all four hosts, converted into an unsigned
+  `provisioned` inventory, and require two new signatures before data movement.
+- The canonical Compose has one exact profile per physical role and can render
+  deterministic, secret-minimized role bundles outside the exact-SHA Git tree.
+  A campaign verifier proves cross-host key pairing, Witness credential
+  agreement, global database-password separation, exact peer IP/name/port
+  mappings, and the common release/inventory hash.
+- Multi-host transport wiring was corrected: Docker-internal networks are no
+  longer mistaken for cross-host networks; DR and Witness clients have
+  dedicated egress, TLS receivers have inventory-bound host ports, and clients
+  receive only fixed signed peer aliases. Live host firewalls and TLS handshakes
+  remain an external staging gate.
+- The backup gate now has a dry-run-first local tool for each legacy staging
+  source. A separate reversible freeze first stops exactly the recorded legacy
+  application services while retaining PostgreSQL/Redis. Backup then creates
+  owner-only PostgreSQL/uploads/audit artifacts outside Git, forbids Redis
+  restore, rejects unsafe tar members, restores into an isolated PostgreSQL 15
+  container, proves a distinct cluster identity, and records exact
+  table/sequence fingerprints. A separate rollback tool can restart only the
+  previously recorded legacy service set. No official freeze or backup has yet
+  been executed by this integration work.
+- Exact migration history equivalence is executable for empty, main-parent,
+  Queue-parent, and DR-parent paths through head `c431d2e3f5a6`; all four paths
+  produced the same effective role/fence/policy digest in scratch PostgreSQL.
+- A two-person-signed migration plan now binds the provisioned inventory, both
+  frozen source identities, two independently restore-verified backups, all
+  four exact image inventories, encrypted seed object keys and immutable Arvan
+  `VersionId` values, the FI-to-IR clone rule, ordered phases, and a no-Alembic-
+  downgrade rollback policy. Object publication performs encrypted exact-
+  version readback/decrypt/plaintext verification; target fetch repeats all
+  provider metadata, ciphertext, plaintext, and tar-safety checks.
+- Four role-local migration journals are owner-only, self-hashed, fsync'd, and
+  phase ordered. Beginning a phase durably changes it to rollback-required, so
+  an interrupted destructive action cannot resume forward. The role executor
+  restores exact seed bytes, upgrades/provisions/fences databases, starts
+  private and public service groups in order, and binds rollback to the exact
+  Compose/env hashes recorded at journal creation.
+- WebApp-IR is explicitly converted from the FI clone into a locally fenced
+  epoch-1 standby. WebApp-FI cannot pass Writer initialization from migration
+  defaults: a persistent request id must acquire the real Witness epoch-1
+  lease, import it atomically, and then prove a successful renewal through the
+  isolated control agent.
+- A cross-role controller now issues fresh journal-bound private, routing-hold,
+  acceptance, and global-commit evidence. The routing barrier requires event
+  checkpoint, database parity, Blob parity, and unchanged-Arvan observations;
+  no role can finish without one global document proving all four journals had
+  committed.
+- The later Queue activation is mechanically constrained to one direct child
+  commit and one exact `False` -> `True` line. Any other parent, path, byte, or
+  dirty checkout invalidates the Full Matrix transition evidence.
+- The focused Gate-D staging suite currently passes `62` migration tests covering signed
+  inventory/finalization, role/campaign bundles, host identity, source
+  freeze/backup/restore, encrypted seed publish/fetch, migration plan, image
+  identity, journals, cross-role barriers, role execution, Queue transition,
+  transport topology, and secret boundaries. Seven focused Writer-client tests
+  additionally pass initial lease/import, renewal, drain, target activation,
+  and partition paths. The concrete typed staging backend now binds a fresh
+  signed provisioned inventory, closed SSH hosts/known-hosts, connectivity and
+  route scope, destination-specific source tail, exact Witness epoch, fresh
+  target-control renewal, crash-resumable evidence paths, Arvan readback, and
+  two-site safe-fenced rollback. Its backend/runner/site-agent/orchestrator and
+  readiness-focused suite passes `42` tests. These remain hermetic source
+  results, not live staging evidence.
+
+The immutable-SHA/no-skips Full Matrix campaign contract and crash-safe
+controller core are now implemented. The catalog explicitly names migration
+and identity collisions, Queue and DR commit boundaries, partition and
+split-origin cases, failover/failback, certificate/DNS asymmetry, loss of each
+recovery role, Blob/database divergence, application regression, capacity/DPI,
+24-hour endurance, and cleanup/repeatability. Two-person campaign assembly,
+artifact re-hashing, exact scenario order, two-or-three repetitions,
+hash-chained restart state, zero-residue interrupted recovery, terminal failure,
+and final no-skips verification have focused source tests. The same-key-under-
+two-identities loophole is also rejected for inventory, migration, failover,
+and Matrix signer policies.
+
+The post-integration source regression pass completed on 2026-07-20 at the
+unchanged integration baseline `a42c7bed`: the complete discovered Python
+suite ran `5073` tests with zero failures/errors and `329` explicitly skipped
+external-environment tests in `1398.476` seconds. The run included the slow
+Queue Stage-4 evidence verifier and Writer/Witness hard-kill recovery suites.
+It also exposed and closed integration-test drift around durable account-
+deletion outbox ownership, replayed-trade delivery-intent persistence, runtime
+Telegram profile configuration, and isolated helper environments. A second
+full-length run proved that campaign expiry in the real-helper test is derived
+when its controller is created rather than at module import. This is source
+regression evidence only; skipped external PostgreSQL/provider/live-host tests
+and the absence of a real Matrix backend mean it is not authoritative staging
+Full Matrix evidence.
+
+Gate D remains open at the deployment boundary. A reviewed concrete Matrix
+backend still has to execute every closed scenario against the migrated hosts;
+the controller deliberately cannot accept arbitrary commands or self-reported
+partial evidence. Live host firewall/TLS/Arvan behavior, initial convergence,
+migration rollback, and the complete repeated Full Matrix must then be proven
+on the official three-site staging environment. No current result authorizes
+that migration, live Matrix execution, or a merge to `main`.

@@ -269,6 +269,9 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
             new=AsyncMock(return_value={}),
         ), patch(
+            "api.routers.trades.persist_trade_completion_delivery_intents",
+            new=AsyncMock(),
+        ) as persist_delivery_intents, patch(
             "api.routers.trades.trade_to_response",
             return_value={"id": 88, "replayed": True},
         ) as response_mock:
@@ -288,6 +291,7 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
         db.rollback.assert_not_awaited()
         self.assertEqual(offer.remaining_quantity, 10)
         self.assertEqual(offer.status, OfferStatus.ACTIVE)
+        persist_delivery_intents.assert_awaited_once_with(db, existing_trade)
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
 
     async def test_remote_home_forward_payload_preserves_delegated_actor_context(self):

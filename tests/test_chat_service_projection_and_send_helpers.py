@@ -168,7 +168,6 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_location_snapshot_and_prepare_helpers(self):
         fixed_uuid = uuid.UUID("12345678-1234-5678-1234-567812345678")
-        file_context = FakeAsyncFileContext()
         db = SimpleNamespace(add=Mock(), flush=AsyncMock())
         ok_response = SimpleNamespace(status_code=200, content=b"png-bytes")
 
@@ -176,17 +175,21 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_service.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=ok_response),
         ), patch(
-            "core.services.chat_service.aiofiles.open",
-            return_value=file_context,
-        ), patch("core.services.chat_service.os.getcwd", return_value="/tmp/chat-service"), patch(
-            "core.services.chat_service.os.makedirs"
-        ) as makedirs, patch("core.services.chat_service.uuid.uuid4", return_value=fixed_uuid):
+            "core.dr_blob_plane.bind_chat_file_blob",
+            new=AsyncMock(),
+        ) as bind_blob, patch(
+            "core.services.chat_service.uuid.uuid4", return_value=fixed_uuid
+        ):
             file_id = await chat_service.generate_direct_location_snapshot(db, 1, 35.7, 51.4)
 
         self.assertEqual(file_id, str(fixed_uuid))
-        makedirs.assert_called_once()
-        file_context.handle.write.assert_awaited_once_with(b"png-bytes")
-        self.assertEqual(db.add.call_args.args[0].mime_type, "image/png")
+        chat_file = db.add.call_args.args[0]
+        self.assertEqual(chat_file.mime_type, "image/png")
+        bind_blob.assert_awaited_once_with(
+            db,
+            chat_file=chat_file,
+            contents=b"png-bytes",
+        )
         db.flush.assert_awaited_once()
 
         with patch(

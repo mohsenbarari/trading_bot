@@ -10,10 +10,12 @@ from core.config import settings
 LEGACY_TELEGRAM_EXECUTION_OWNER = "legacy"
 QUEUE_V1_TELEGRAM_EXECUTION_OWNER = "queue-v1"
 
-# Stage 3 foundation is deliberately not cutover-capable yet. This constant is
-# code-owned so an accidental environment variable cannot activate an executor
-# before limiter, domain revalidation, and producer handoff are complete.
-TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = False
+# The integrated queue/DR reconciliation migration, least-privilege Bot grants,
+# strict local-table guard, provider identity preflight, limiter, freshness
+# validators, and rollback contract are now present in this release. Runtime
+# activation still requires all three explicit operator controls below; this
+# code capability alone can never switch ownership.
+TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = True
 
 
 class TelegramDeliveryRuntimeMode(str, Enum):

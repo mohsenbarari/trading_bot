@@ -62,10 +62,6 @@ from core.services.telegram_notification_outbox_service import (
     TelegramNotificationRecipient,
     enqueue_account_deletion_telegram_notification_once,
 )
-from core.telegram_delivery_runtime_policy import (
-    TelegramDeliveryRuntimeMode,
-    configured_telegram_delivery_runtime,
-)
 from core.telegram_legacy_otp_relay_contract import (
     validate_legacy_telegram_otp_relay,
 )
@@ -1427,14 +1423,6 @@ async def _run_synced_deleted_user_telegram_effects(effects: list[tuple[int, int
         return
 
     from bot.utils.redis_helpers import mark_deleted_telegram_user
-    from core.services.user_deletion_service import REMOVAL_TELEGRAM_MESSAGE, remove_user_from_telegram_channel
-    from core.utils import send_telegram_notification
-
-    queue_mode = (
-        configured_telegram_delivery_runtime().mode
-        == TelegramDeliveryRuntimeMode.QUEUE_V1
-    )
-
     seen_telegram_ids: set[int] = set()
     for user_id, telegram_id in effects:
         if telegram_id in seen_telegram_ids:
@@ -1453,31 +1441,8 @@ async def _run_synced_deleted_user_telegram_effects(effects: list[tuple[int, int
                 },
             )
 
-        if not queue_mode:
-            try:
-                await send_telegram_notification(telegram_id, REMOVAL_TELEGRAM_MESSAGE)
-            except Exception as exc:
-                logger.warning(
-                    "Could not notify synced deleted Telegram user",
-                    extra={
-                        "event": "sync.deleted_user_telegram_notify_failed",
-                        "user_id": user_id,
-                        **_summarize_exception(exc),
-                    },
-                )
-
-        if not queue_mode:
-            try:
-                await remove_user_from_telegram_channel(telegram_id)
-            except Exception as exc:
-                logger.warning(
-                    "Could not remove synced deleted Telegram user from channel",
-                    extra={
-                        "event": "sync.deleted_user_telegram_channel_remove_failed",
-                        "user_id": user_id,
-                        **_summarize_exception(exc),
-                    },
-                )
+        # Telegram delivery and membership changes are materialized by the
+        # durable outbox below and executed only by the credentialed Bot.
 
 
 async def _enqueue_synced_deleted_user_telegram_notices(
@@ -1487,8 +1452,6 @@ async def _enqueue_synced_deleted_user_telegram_notices(
     if (
         current_server() != SERVER_FOREIGN
         or not effects
-        or configured_telegram_delivery_runtime().mode
-        != TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return
 

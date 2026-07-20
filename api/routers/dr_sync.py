@@ -16,6 +16,7 @@ from core.dr_event_receiver import reserve_replay_nonce
 from core.dr_event_protocol import canonical_json_bytes
 from core.dr_event_protocol import transport_peers
 from core.dr_sync_auth import DrSyncAuthError, parse_pairwise_keys, verify_request
+from core.dr_sync_auth import sign_acknowledgement
 from core.runtime_identity import resolve_runtime_identity
 from models.dr_event import DrBlobDelivery, DrBlobManifest
 
@@ -59,6 +60,11 @@ async def receive_dr_events(request: Request, db: AsyncSession = Depends(get_dr_
             nonce_ttl_seconds=settings.dr_sync_request_max_age_seconds * 2,
         )
         await db.commit()
+        key = parse_pairwise_keys(settings.dr_sync_pairwise_keys_json)[auth.key_id]
+        result["acknowledgement_mac"] = sign_acknowledgement(
+            payload=result,
+            secret=key.secret,
+        )
         return result
     except (json.JSONDecodeError, DrSyncAuthError, DrEventReceiveError, ValueError) as exc:
         await db.rollback()
@@ -157,15 +163,23 @@ async def receive_blob_receipt(request: Request, db: AsyncSession = Depends(get_
         await db.commit()
         unsigned_ack = {
             "destination_site": identity.physical_site,
+            "source_site": auth.source_site,
+            "key_id": auth.key_id,
             "request_hash": auth.request_hash,
             "content_hash": content_hash,
             "receipt_hash": expected_receipt_hash,
             "delivery_hash": delivery_hash,
         }
-        return {
+        acknowledgement = {
             **unsigned_ack,
             "acknowledgement_hash": hashlib.sha256(canonical_json_bytes(unsigned_ack)).hexdigest(),
         }
+        key = parse_pairwise_keys(settings.dr_sync_pairwise_keys_json)[auth.key_id]
+        acknowledgement["acknowledgement_mac"] = sign_acknowledgement(
+            payload=acknowledgement,
+            secret=key.secret,
+        )
+        return acknowledgement
     except (json.JSONDecodeError, DrSyncAuthError, DrEventReceiveError, ValueError) as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

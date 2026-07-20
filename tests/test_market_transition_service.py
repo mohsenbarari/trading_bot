@@ -47,8 +47,15 @@ class _FakeAsyncClient:
 class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         market_transition_service.invalidate_market_runtime_view_cache()
+        self.bot_credential = patch.object(
+            market_transition_service.settings,
+            "bot_token",
+            "test-bot-token",
+        )
+        self.bot_credential.start()
 
     def tearDown(self):
+        self.bot_credential.stop()
         market_transition_service.invalidate_market_runtime_view_cache()
 
     def test_runtime_helper_functions_cover_default_and_naive_times(self):
@@ -132,6 +139,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.services.market_transition_service.configured_telegram_delivery_runtime",
             return_value=queue_runtime,
+        ), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "@market",
         ), patch(
             "core.services.market_transition_service.telegram_gateway.send_message",
             new=AsyncMock(),

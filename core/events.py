@@ -130,6 +130,17 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
     still roll back. sync_worker is responsible for reading committed rows.
     """
     data = sanitize_sync_payload(table_name, data)
+    if (
+        settings.three_site_dr_enabled
+        and settings.dr_event_protocol_enabled
+        and settings.dr_event_protocol_strict
+    ):
+        # Strict three-site runtimes use the immutable same-transaction
+        # dr_events outbox and deliberately have no legacy sync_worker. Keep
+        # the legacy commit guard satisfied without creating an undrainable,
+        # permanently unsynced change_log backlog.
+        mark_sync_outbox_recorded(connection, table_name, operation, record_id, data)
+        return
     json_data = json.dumps(data, default=str)
     data_hash = hashlib.sha256(json_data.encode()).hexdigest()
     now = utc_now_naive()

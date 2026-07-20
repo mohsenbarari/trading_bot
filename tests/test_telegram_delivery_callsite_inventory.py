@@ -163,15 +163,21 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             {
                 ("api/routers/users.py", "send_block_notification"),
                 ("api/routers/users.py", "send_limitation_notification"),
-                (
-                    "core/services/user_deletion_service.py",
-                    "delete_user_account",
-                ),
-                (
-                    "api/routers/sync.py",
-                    "_run_synced_deleted_user_telegram_effects",
-                ),
             }.issubset(guarded_scopes)
+        )
+        self.assertFalse(
+            any(
+                item.path in {
+                    "api/routers/sync.py",
+                    "core/services/user_deletion_service.py",
+                }
+                and item.scope in {
+                    "_run_synced_deleted_user_telegram_effects",
+                    "delete_user_account",
+                }
+                and item.disposition.startswith("legacy_")
+                for item in self.inventory
+            )
         )
 
     def test_callback_inventory_excludes_new_private_messages(self):

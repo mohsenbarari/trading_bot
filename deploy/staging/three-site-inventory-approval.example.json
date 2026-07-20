@@ -1,0 +1,20 @@
+{
+  "schema": "three-site-staging-inventory-approval-v1",
+  "inventory_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "release_sha": "0000000000000000000000000000000000000000",
+  "policy_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "signed_at": "2026-07-20T00:00:00+00:00",
+  "expires_at": "2026-07-20T01:00:00+00:00",
+  "approvals": [
+    {
+      "operator": "replace-with-first-operator",
+      "key_id": "inventory-operator-1",
+      "signature": "replace-with-base64-ed25519-signature"
+    },
+    {
+      "operator": "replace-with-second-operator",
+      "key_id": "inventory-operator-2",
+      "signature": "replace-with-base64-ed25519-signature"
+    }
+  ]
+}

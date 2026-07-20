@@ -21,6 +21,7 @@ from core.db import DrProjectionSessionLocal, verify_three_site_database_role_bi
 from core.dr_event_protocol import canonical_json_bytes, transport_peers, validate_envelope
 from core.dr_sync_auth import (
     PairwiseDrKey,
+    acknowledgement_signature_is_valid,
     canonical_request_bytes,
     parse_pairwise_keys,
     sign_request,
@@ -219,15 +220,36 @@ async def claim_delivery_batch(*, local_site: str) -> ClaimedDeliveryBatch | Non
 
 
 def _verify_acknowledgement(
-    payload: Any, *, batch: ClaimedDeliveryBatch, request_hash: str
+    payload: Any,
+    *,
+    batch: ClaimedDeliveryBatch,
+    request_hash: str,
+    key: PairwiseDrKey,
 ) -> dict[str, dict[str, Any]]:
     if not isinstance(payload, dict) or set(payload) != {
-        "destination_site", "request_hash", "results", "acknowledgement_hash"
+        "destination_site", "source_site", "key_id", "request_hash", "results",
+        "acknowledgement_hash", "acknowledgement_mac",
     }:
         raise DrDeliveryError("DR acknowledgement fields are invalid")
-    if payload["destination_site"] != batch.destination_site or payload["request_hash"] != request_hash:
+    if (
+        payload["destination_site"] != batch.destination_site
+        or payload["source_site"] != key.source_site
+        or payload["key_id"] != key.key_id
+        or payload["request_hash"] != request_hash
+    ):
         raise DrDeliveryError("DR acknowledgement identity mismatch")
-    unsigned = {key: value for key, value in payload.items() if key != "acknowledgement_hash"}
+    signed = {name: value for name, value in payload.items() if name != "acknowledgement_mac"}
+    if not acknowledgement_signature_is_valid(
+        payload=signed,
+        signature=str(payload["acknowledgement_mac"]),
+        secret=key.secret,
+    ):
+        raise DrDeliveryError("DR acknowledgement signature is invalid")
+    unsigned = {
+        name: value
+        for name, value in payload.items()
+        if name not in {"acknowledgement_hash", "acknowledgement_mac"}
+    }
     expected_hash = hashlib.sha256(
         json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -248,10 +270,53 @@ def _verify_acknowledgement(
         if event_id not in expected_hashes or event_id in by_id:
             raise DrDeliveryError("DR acknowledgement contains unknown/duplicate event")
         status = str(result.get("status") or "")
-        if status not in {"received", "blocked_gap", "duplicate", "quarantined"}:
+        if status not in {"received", "applied", "blocked_gap", "duplicate", "quarantined"}:
             raise DrDeliveryError("DR acknowledgement status is invalid")
         if status != "quarantined" and result.get("envelope_hash") != expected_hashes[event_id]:
             raise DrDeliveryError("DR acknowledgement event hash mismatch")
+        if status == "applied":
+            envelope = next(
+                item for item in batch.envelopes if item["event_id"] == event_id
+            )
+            stream = (
+                envelope.get("destination_streams", {}).get(batch.destination_site)
+                if int(envelope.get("protocol_version") or 1) >= 2
+                else {"sequence": int(envelope["producer_sequence"])}
+            )
+            checkpoint = result.get("applied_checkpoint")
+            if not isinstance(stream, dict) or not isinstance(checkpoint, dict):
+                raise DrDeliveryError("applied acknowledgement lacks checkpoint evidence")
+            expected_checkpoint = {
+                "destination_site": batch.destination_site,
+                "origin_physical_site": envelope["origin_physical_site"],
+                "producer_epoch": envelope["producer_epoch"],
+                "contiguous_applied_sequence": checkpoint.get(
+                    "contiguous_applied_sequence"
+                ),
+                "event_id": event_id,
+                "envelope_hash": expected_hashes[event_id],
+            }
+            expected_checkpoint_hash = hashlib.sha256(
+                json.dumps(
+                    expected_checkpoint,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if (
+                set(checkpoint) != {*expected_checkpoint, "checkpoint_hash"}
+                or type(checkpoint["contiguous_applied_sequence"]) is not int
+                or checkpoint["contiguous_applied_sequence"] < int(stream["sequence"])
+                or any(
+                    checkpoint.get(name) != value
+                    for name, value in expected_checkpoint.items()
+                )
+                or not secrets.compare_digest(
+                    str(checkpoint.get("checkpoint_hash") or ""),
+                    expected_checkpoint_hash,
+                )
+            ):
+                raise DrDeliveryError("applied checkpoint evidence is inconsistent")
         by_id[event_id] = result
     return by_id
 
@@ -280,22 +345,45 @@ async def _finish_batch(
                 raise DrDeliveryError("claimed DR delivery rows disappeared")
             for row in rows:
                 result = results.get(row.event_id) if results is not None else None
-                if result is not None and result["status"] != "quarantined":
-                    row.status = "acknowledged"
-                    row.acknowledged_at = now
-                    row.acknowledgement_hash = acknowledgement_hash
-                    row.next_attempt_at = None
-                    row.last_error_code = None
-                elif result is not None:
-                    row.status = "quarantined"
-                    row.next_attempt_at = None
-                    row.last_error_code = str(result.get("reason") or "remote_quarantine")[:64]
-                else:
-                    row.status = "pending"
-                    delay = min(300, 2 ** min(8, int(row.attempt_count or 1)))
-                    row.next_attempt_at = now + timedelta(seconds=delay)
-                    row.last_error_code = str(error_code or "delivery_failed")[:64]
+                _update_delivery_from_result(
+                    row,
+                    result=result,
+                    now=now,
+                    acknowledgement_hash=acknowledgement_hash,
+                    error_code=error_code,
+                )
             await session.commit()
+
+
+def _update_delivery_from_result(
+    row: Any,
+    *,
+    result: dict[str, Any] | None,
+    now: datetime,
+    acknowledgement_hash: str | None,
+    error_code: str | None,
+) -> None:
+    """Persist only destination-applied evidence as a terminal ACK."""
+
+    if result is not None and result["status"] == "applied":
+        row.status = "acknowledged"
+        row.acknowledged_at = now
+        row.acknowledgement_hash = acknowledgement_hash
+        row.next_attempt_at = None
+        row.last_error_code = None
+        return
+    if result is not None and result["status"] == "quarantined":
+        row.status = "quarantined"
+        row.next_attempt_at = None
+        row.last_error_code = str(result.get("reason") or "remote_quarantine")[:64]
+        return
+    row.status = "pending"
+    delay = min(300, 2 ** min(8, int(row.attempt_count or 1)))
+    row.next_attempt_at = now + timedelta(seconds=delay)
+    remote_status = str(result.get("status")) if result is not None else None
+    row.last_error_code = str(
+        f"remote_{remote_status}" if remote_status else (error_code or "delivery_failed")
+    )[:64]
 
 
 async def deliver_batch(
@@ -347,7 +435,12 @@ async def deliver_batch(
         response = await client.post(peer_urls[batch.destination_site] + DR_EVENTS_PATH, content=body, headers=headers)
         response.raise_for_status()
         payload = response.json()
-        results = _verify_acknowledgement(payload, batch=batch, request_hash=request_hash)
+        results = _verify_acknowledgement(
+            payload,
+            batch=batch,
+            request_hash=request_hash,
+            key=key,
+        )
         await _finish_batch(
             batch,
             results=results,

@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
+import asyncio
+from unittest.mock import patch
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -20,6 +22,7 @@ from core.dr_failover_orchestrator import (
     ApproverPolicy,
     DrOrchestrationError,
     parse_plan,
+    load_approver_policy,
     run_orchestration,
     verify_two_person_approvals,
 )
@@ -34,7 +37,7 @@ def command_manifest(*, operation_id: str):
     }
 
 
-def approved_plan(*, manifest_payload=None):
+def approved_plan(*, manifest_payload=None, rpo_policy=None):
     operation_id = str(uuid4())
     if manifest_payload is None:
         manifest_payload = command_manifest(operation_id=operation_id)
@@ -75,6 +78,12 @@ def approved_plan(*, manifest_payload=None):
             "evidence_hash": "b" * 64,
             "campaign_id": str(uuid4()),
             "policy_hash": "d" * 64,
+        },
+        "rpo_policy": rpo_policy or {
+            "mode": "zero_loss",
+            "max_unreplicated_events": 0,
+            "approval_reason": None,
+            "approval_ticket": None,
         },
         "readiness_hash": "c" * 64,
         "command_manifest_hash": hashlib.sha256(
@@ -145,9 +154,23 @@ class FakeAdapter:
         if name == "classification_verified":
             result.update(plan.classification)
         if name == "source_fenced":
-            result.update(source_site=plan.source_site, fenced=True)
-        if name == "target_ready":
-            result.update(target_site=plan.target_site, readiness_hash=plan.readiness_hash)
+            boundary = {
+                "mode": "proven",
+                "origin_site": plan.source_site,
+                "target_site": plan.target_site,
+                "producer_epoch": plan.expected_epoch,
+                "final_sequence": 12,
+                "final_transaction_hash": "8" * 64,
+                "estimated_unreplicated_events": 0,
+            }
+            boundary["boundary_hash"] = hashlib.sha256(
+                canonical_json_bytes(boundary)
+            ).hexdigest()
+            result.update(
+                source_site=plan.source_site,
+                fenced=True,
+                source_tail_boundary=boundary,
+            )
         if name == "source_connections_drained":
             result.update(source_site=plan.source_site, active_connections=0)
         if name in {"route_switched", "public_route_verified"}:
@@ -159,6 +182,8 @@ class FakeAdapter:
                 target_site=plan.target_site,
                 target_fenced=True,
                 target_active_connections=0,
+                source_fenced=True,
+                source_active_connections=0,
                 holder_site=plan.source_site,
                 writer_epoch=plan.target_epoch + 1,
                 origin_ip=plan.expected_current_ip,
@@ -171,14 +196,34 @@ class FakeAdapter:
 
     async def classification_verified(self, plan): return await self._result("classification_verified", plan)
     async def source_fenced(self, plan): return await self._result("source_fenced", plan)
-    async def target_ready(self, plan): return await self._result("target_ready", plan)
+    async def target_ready(self, plan, *, source_tail_boundary):
+        result = await self._result("target_ready", plan)
+        result.update(
+            target_site=plan.target_site,
+            readiness_hash=plan.readiness_hash,
+            source_tail_boundary_hash=source_tail_boundary["boundary_hash"],
+            target_applied_sequence=source_tail_boundary["final_sequence"],
+            target_applied_through_boundary=True,
+        )
+        return result
     async def target_term_acquired(self, plan): return await self._result("target_term_acquired", plan)
     async def source_connections_drained(self, plan): return await self._result("source_connections_drained", plan)
     async def route_switched(self, plan): return await self._result("route_switched", plan)
     async def public_route_verified(self, plan): return await self._result("public_route_verified", plan)
     async def rollback(self, plan, *, failed_step, completed_steps):
-        del failed_step, completed_steps
-        return await self._result("rollback", plan)
+        result = await self._result("rollback", plan)
+        if (
+            "target_term_acquired" not in completed_steps
+            and failed_step
+            in {
+                "classification_verified",
+                "source_fenced",
+                "source_connections_drained",
+                "target_ready",
+            }
+        ):
+            result["writer_epoch"] = plan.expected_epoch
+        return result
 
 
 class LostRouteResponseAdapter(FakeAdapter):
@@ -186,6 +231,44 @@ class LostRouteResponseAdapter(FakeAdapter):
         del plan
         self.calls.append("public_route_verified")
         raise TimeoutError("provider response lost")
+
+
+class SourceUnavailableAdapter(FakeAdapter):
+    """Model an independently fenced source whose final tail cannot be read."""
+
+    def __init__(self, *, estimated_unreplicated_events: int):
+        super().__init__()
+        self.estimated_unreplicated_events = estimated_unreplicated_events
+
+    async def source_fenced(self, plan):
+        result = await self._result("source_fenced", plan)
+        boundary = {
+            "mode": "approved_rpo_exception",
+            "origin_site": plan.source_site,
+            "target_site": plan.target_site,
+            "producer_epoch": plan.expected_epoch,
+            # This is the last immutable tail that the target can prove.  The
+            # separately approved estimate describes the unavailable suffix.
+            "final_sequence": 10,
+            "final_transaction_hash": "7" * 64,
+            "estimated_unreplicated_events": self.estimated_unreplicated_events,
+        }
+        boundary["boundary_hash"] = hashlib.sha256(
+            canonical_json_bytes(boundary)
+        ).hexdigest()
+        result["source_tail_boundary"] = boundary
+        return result
+
+    async def target_ready(self, plan, *, source_tail_boundary):
+        result = await self._result("target_ready", plan)
+        result.update(
+            target_site=plan.target_site,
+            readiness_hash=plan.readiness_hash,
+            source_tail_boundary_hash=source_tail_boundary["boundary_hash"],
+            target_applied_sequence=source_tail_boundary["final_sequence"],
+            target_applied_through_boundary=True,
+        )
+        return result
 
 
 class RollbackFailsOnceAdapter(LostRouteResponseAdapter):
@@ -196,6 +279,114 @@ class RollbackFailsOnceAdapter(LostRouteResponseAdapter):
 
 
 class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failover_policy_cannot_alias_one_key_as_two_people(self):
+        private = Ed25519PrivateKey.generate()
+        public_key = base64.b64encode(
+            private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        ).decode()
+        policy = {
+            "schema": "three-site-failover-approver-policy-v1",
+            "policy_id": str(uuid4()),
+            "release_sha": "a" * 40,
+            "minimum_approvals": 2,
+            "signers": [
+                {
+                    "operator": f"person-{number}",
+                    "key_id": f"operator-{number}",
+                    "custody_domain": f"device-{number}",
+                    "public_key": public_key,
+                }
+                for number in (1, 2)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(policy), encoding="utf-8")
+            path.chmod(0o600)
+            with self.assertRaisesRegex(DrOrchestrationError, "not independent"):
+                load_approver_policy(path)
+
+    async def test_plan_rejects_coerced_epochs_and_route_scope_drift(self):
+        raw, _policy = approved_plan()
+        raw["expected_epoch"] = "7"
+        with self.assertRaisesRegex(DrOrchestrationError, "exact integers"):
+            parse_plan(raw)
+
+        raw, _policy = approved_plan()
+        raw["record"] = "other"
+        with self.assertRaisesRegex(DrOrchestrationError, "failover-test domain"):
+            parse_plan(raw)
+
+        raw, _policy = approved_plan()
+        raw["target_ip"] = "not-an-ip"
+        with self.assertRaisesRegex(DrOrchestrationError, "origin IP"):
+            parse_plan(raw)
+
+    async def test_source_unavailable_requires_explicit_bounded_loss_approval(self):
+        raw, policy = approved_plan(
+            rpo_policy={
+                "mode": "bounded_loss",
+                "max_unreplicated_events": 3,
+                "approval_reason": "Source storage is unavailable after host loss",
+                "approval_ticket": "INC-2026-0719",
+            }
+        )
+        plan = parse_plan(raw)
+        verify_two_person_approvals(plan, policy)
+        ledger = FakeOperationLedger()
+        adapter = SourceUnavailableAdapter(estimated_unreplicated_events=2)
+        with tempfile.TemporaryDirectory() as directory:
+            result = await run_orchestration(
+                plan,
+                adapter=adapter,
+                ledger=ledger,
+                journal_path=Path(directory) / "failover.jsonl",
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(ledger.outcome, "completed")
+
+    async def test_source_unavailable_tail_is_rejected_by_zero_loss_policy(self):
+        raw, policy = approved_plan()
+        plan = parse_plan(raw)
+        verify_two_person_approvals(plan, policy)
+        adapter = SourceUnavailableAdapter(estimated_unreplicated_events=1)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                DrOrchestrationError, "source tail loss exceeds"
+            ):
+                await run_orchestration(
+                    plan,
+                    adapter=adapter,
+                    ledger=FakeOperationLedger(),
+                    journal_path=Path(directory) / "failover.jsonl",
+                )
+        self.assertEqual(adapter.calls, ["classification_verified", "source_fenced", "rollback"])
+
+    async def test_source_unavailable_tail_cannot_exceed_approved_event_budget(self):
+        raw, policy = approved_plan(
+            rpo_policy={
+                "mode": "bounded_loss",
+                "max_unreplicated_events": 2,
+                "approval_reason": "Emergency promotion after independent source loss",
+                "approval_ticket": "INC-2026-0720",
+            }
+        )
+        plan = parse_plan(raw)
+        verify_two_person_approvals(plan, policy)
+        adapter = SourceUnavailableAdapter(estimated_unreplicated_events=3)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                DrOrchestrationError, "source tail loss exceeds"
+            ):
+                await run_orchestration(
+                    plan,
+                    adapter=adapter,
+                    ledger=FakeOperationLedger(),
+                    journal_path=Path(directory) / "failover.jsonl",
+                )
+        self.assertEqual(adapter.calls, ["classification_verified", "source_fenced", "rollback"])
+
     async def test_two_person_plan_runs_once_and_resumes_from_hash_chained_journal(self):
         raw, policy = approved_plan()
         plan = parse_plan(raw)
@@ -291,6 +482,125 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                     journal_path=Path(directory) / "failover.jsonl",
                 )
         self.assertIsNone(ledger.reservation)
+
+    async def test_expired_reserved_plan_never_resumes_forward_steps(self):
+        class InterruptedAfterClassification(FakeAdapter):
+            async def source_fenced(self, plan):
+                del plan
+                raise asyncio.CancelledError()
+
+        raw, _ = approved_plan()
+        plan = parse_plan(raw)
+        ledger = FakeOperationLedger()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "failover.jsonl"
+            with self.assertRaises(asyncio.CancelledError):
+                await run_orchestration(
+                    plan,
+                    adapter=InterruptedAfterClassification(),
+                    ledger=ledger,
+                    journal_path=journal,
+                )
+            resumed = FakeAdapter()
+            with patch(
+                "core.dr_failover_orchestrator.validate_plan_freshness",
+                side_effect=DrOrchestrationError("orchestration plan has expired"),
+            ):
+                result = await run_orchestration(
+                    plan,
+                    adapter=resumed,
+                    ledger=ledger,
+                    journal_path=journal,
+                )
+        self.assertEqual(result["status"], "rolled_back")
+        self.assertEqual(result["rollback_state"], "not_started")
+        self.assertEqual(resumed.calls, [])
+
+    async def test_expired_plan_after_source_fence_performs_only_rollback(self):
+        class InterruptedBeforeDrain(FakeAdapter):
+            async def source_connections_drained(self, plan):
+                del plan
+                raise asyncio.CancelledError()
+
+        raw, _ = approved_plan()
+        plan = parse_plan(raw)
+        ledger = FakeOperationLedger()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "failover.jsonl"
+            with self.assertRaises(asyncio.CancelledError):
+                await run_orchestration(
+                    plan,
+                    adapter=InterruptedBeforeDrain(),
+                    ledger=ledger,
+                    journal_path=journal,
+                )
+            resumed = FakeAdapter()
+            with patch(
+                "core.dr_failover_orchestrator.validate_plan_freshness",
+                side_effect=DrOrchestrationError("orchestration plan has expired"),
+            ):
+                result = await run_orchestration(
+                    plan,
+                    adapter=resumed,
+                    ledger=ledger,
+                    journal_path=journal,
+                )
+        self.assertEqual(result["status"], "rolled_back")
+        self.assertEqual(resumed.calls, ["rollback"])
+
+    async def test_expiry_at_each_saga_boundary_blocks_every_later_forward_step(self):
+        forward_steps = (
+            "classification_verified",
+            "source_fenced",
+            "source_connections_drained",
+            "target_ready",
+            "target_term_acquired",
+            "route_switched",
+            "public_route_verified",
+        )
+
+        for expiry_step in forward_steps:
+            with self.subTest(expiry_step=expiry_step):
+                class ExpiringAdapter(FakeAdapter):
+                    def __init__(self):
+                        super().__init__()
+                        self.expired = False
+
+                    async def _result(self, name, plan):
+                        result = await super()._result(name, plan)
+                        if name == expiry_step:
+                            self.expired = True
+                        return result
+
+                raw, _ = approved_plan()
+                plan = parse_plan(raw)
+                ledger = FakeOperationLedger()
+                adapter = ExpiringAdapter()
+
+                def boundary_freshness(_plan):
+                    if adapter.expired:
+                        raise DrOrchestrationError("orchestration plan has expired")
+
+                with tempfile.TemporaryDirectory() as directory, patch(
+                    "core.dr_failover_orchestrator.validate_plan_freshness",
+                    side_effect=boundary_freshness,
+                ):
+                    result = await run_orchestration(
+                        plan,
+                        adapter=adapter,
+                        ledger=ledger,
+                        journal_path=Path(directory) / "failover.jsonl",
+                    )
+
+                expected_forward = forward_steps[: forward_steps.index(expiry_step) + 1]
+                self.assertEqual(result["status"], "rolled_back")
+                self.assertEqual(result["reason"], "plan_expired")
+                self.assertEqual(ledger.outcome, "rolled_back")
+                if expiry_step == "classification_verified":
+                    self.assertEqual(adapter.calls, list(expected_forward))
+                    self.assertEqual(result["rollback_state"], "not_started")
+                else:
+                    self.assertEqual(adapter.calls, [*expected_forward, "rollback"])
 
     async def test_rollback_after_target_term_rejects_obsolete_source_epoch(self):
         class ObsoleteRollbackAdapter(LostRouteResponseAdapter):

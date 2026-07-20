@@ -71,6 +71,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
             "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
+            "TELEGRAM_DELIVERY_EXECUTION_OWNER": "queue-v1",
+            "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "true",
+            "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "true",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED": "true",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN": "editor-secret",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID": "12345",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID": "67890",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": "-100123",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -149,6 +157,15 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
         self.assertEqual(iran["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
+        self.assertEqual(foreign["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "queue-v1")
+        self.assertEqual(
+            foreign["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
+            "editor-secret",
+        )
+        self.assertEqual(iran["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(
+            iran["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"], ""
+        )
         self.assertEqual(foreign["RELEASE_SHA"], "abc123release")
         self.assertEqual(iran["RELEASE_SHA"], "abc123release")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
@@ -341,6 +358,17 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values.pop("WEB_PUSH_TTL_SECONDS")
         values.pop("WEB_PUSH_TIMEOUT_SECONDS")
         values.pop("OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")
+        for key in (
+            "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+            "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
+            "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID",
+        ):
+            values.pop(key)
         values.pop("RELEASE_SHA")
         values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
@@ -371,6 +399,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["WEB_PUSH_TTL_SECONDS"], "3600")
         self.assertEqual(collected["WEB_PUSH_TIMEOUT_SECONDS"], "5.0")
         self.assertEqual(collected["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "false")
+        self.assertEqual(collected["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(
+            collected["TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED"], "false"
+        )
         self.assertEqual(collected["RELEASE_SHA"], "")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")

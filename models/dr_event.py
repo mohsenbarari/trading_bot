@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.sql import func
 
@@ -95,7 +96,11 @@ class DrEvent(Base):
     # Local PostgreSQL transaction identity is never transported.  A deferred
     # database trigger uses it to prove every authoritative row mutation has a
     # same-transaction event before commit.
-    source_xid = Column(BigInteger, nullable=True)
+    # A received event must omit this source-local transaction identity from
+    # its INSERT column list.  Local producers set it explicitly to
+    # txid_current(); the harmless NULL server default makes SQLAlchemy omit it
+    # when the projection receiver materializes a remote event.
+    source_xid = Column(BigInteger, nullable=True, server_default=text("NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -208,6 +213,9 @@ class DrConflictQuarantine(Base):
 
 class DrReplayNonce(Base):
     __tablename__ = "dr_replay_nonces"
+    __table_args__ = (
+        Index("ix_dr_replay_nonces_expires_at", "expires_at"),
+    )
     key_id = Column(String(64), primary_key=True)
     nonce = Column(String(64), primary_key=True)
     source_site = Column(String(16), nullable=False)

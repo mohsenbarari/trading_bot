@@ -18,11 +18,13 @@ from core.config import settings
 from core.db import DrControlSessionLocal
 from core.runtime_identity import RuntimeIdentity, resolve_runtime_identity
 from core.webapp_writer_control import (
+    ACTION_ACTIVATE,
     ACTION_LEASE_REFRESH,
     CONTROL_ACTIVE,
     WriterControlError,
     load_writer_snapshot,
     transition_writer_state,
+    validate_readiness_evidence,
 )
 from core.writer_witness_auth import (
     WITNESS_TRANSITION_PATH,
@@ -176,6 +178,69 @@ class WriterWitnessClient:
             raise WriterWitnessClientError(
                 "writer witness response does not match the request contract",
                 code="writer_witness_invalid_response",
+            )
+        return payload
+
+    async def status(
+        self,
+        *,
+        request_id: str,
+        now: datetime | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any]:
+        from core.writer_witness_auth import WITNESS_STATUS_PATH
+
+        body = b""
+        headers = sign_witness_request(
+            credential=self.config.credential,
+            method="GET",
+            path=WITNESS_STATUS_PATH,
+            body=body,
+            request_id=request_id,
+            timestamp=int((now or _utc_now()).timestamp()),
+        )
+
+        async def send(active_client: httpx.AsyncClient):
+            return await active_client.get(WITNESS_STATUS_PATH, headers=headers)
+
+        try:
+            if client is not None:
+                response = await send(client)
+            else:
+                async with httpx.AsyncClient(
+                    base_url=self.config.base_url.rstrip("/"),
+                    timeout=self.config.timeout_seconds,
+                    verify=self.config.verify,
+                ) as active_client:
+                    response = await send(active_client)
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise WriterWitnessClientError(
+                "writer witness status is unreachable",
+                code="writer_witness_unreachable",
+                retryable=True,
+            ) from exc
+        try:
+            payload = response.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise WriterWitnessClientError(
+                "writer witness returned invalid status JSON",
+                code="writer_witness_invalid_response",
+                retryable=response.status_code >= 500,
+            ) from exc
+        expected = {"contract_version", "accepted", "request_id", "witness_time", "state"}
+        if (
+            response.status_code != 200
+            or not isinstance(payload, dict)
+            or set(payload) != expected
+            or payload.get("contract_version") != 1
+            or payload.get("accepted") is not True
+            or payload.get("request_id") != request_id
+            or not isinstance(payload.get("state"), dict)
+        ):
+            raise WriterWitnessClientError(
+                "writer witness status response is invalid",
+                code="writer_witness_invalid_response",
+                retryable=response.status_code >= 500,
             )
         return payload
 
@@ -349,6 +414,342 @@ async def renew_local_writer_lease_once(
             await session.rollback()
             raise
     return proof
+
+
+async def initialize_local_writer_lease_once(
+    *,
+    client: WriterWitnessClient,
+    request_id: str,
+    campaign_id: str,
+    identity: RuntimeIdentity | None = None,
+    now: datetime | None = None,
+    session_factory: Callable[[], Any] | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    public_key_base64: str | None = None,
+    lease_duration_seconds: int | None = None,
+    safety_margin_seconds: int | None = None,
+    max_clock_skew_seconds: int | None = None,
+) -> ValidatedWitnessLeaseProof:
+    """Acquire/import the one reviewed FI epoch-1 staging bootstrap lease.
+
+    The request id must be persisted by the operator before execution.  An
+    ambiguous transport retry therefore replays the Witness receipt instead of
+    acquiring a second term.  This function cannot initialize IR or any epoch
+    other than the compatibility-migration FI epoch 1.
+    """
+
+    runtime_identity = identity or resolve_runtime_identity(settings)
+    if runtime_identity.physical_site != "webapp_fi":
+        raise WriterWitnessClientError(
+            "initial Writer lease may be imported only on WebApp-FI",
+            code="writer_witness_bootstrap_site_invalid",
+        )
+    active_session_factory = session_factory or DrControlSessionLocal
+    current = now or _utc_now()
+    duration = int(
+        lease_duration_seconds
+        if lease_duration_seconds is not None
+        else settings.writer_witness_lease_duration_seconds
+    )
+    async with active_session_factory() as session:
+        snapshot = await load_writer_snapshot(session)
+    if (
+        snapshot.control_state != CONTROL_ACTIVE
+        or snapshot.active_site != "webapp_fi"
+        or snapshot.writer_epoch != 1
+    ):
+        raise WriterWitnessClientError(
+            "initial local Writer state is not WebApp-FI epoch 1",
+            code="writer_witness_bootstrap_local_state_invalid",
+        )
+    reason = f"initial three-site staging migration campaign {campaign_id}"
+    payload = await client.transition(
+        action="acquire",
+        expected_epoch=0,
+        expected_lease_id=None,
+        request_id=request_id,
+        reason=reason,
+        lease_duration_seconds=duration,
+        now=current,
+        client=http_client,
+    )
+    try:
+        proof = validate_witness_lease_proof(
+            payload.get("proof"),
+            public_key_base64=(
+                str(public_key_base64)
+                if public_key_base64 is not None
+                else str(settings.writer_witness_public_key or "")
+            ),
+            expected_site="webapp_fi",
+            expected_epoch=1,
+            now=current,
+            safety_margin_seconds=(
+                safety_margin_seconds
+                if safety_margin_seconds is not None
+                else settings.writer_witness_safety_margin_seconds
+            ),
+            max_clock_skew_seconds=(
+                max_clock_skew_seconds
+                if max_clock_skew_seconds is not None
+                else settings.writer_witness_max_clock_skew_seconds
+            ),
+            max_lifetime_seconds=duration,
+        )
+    except WitnessProofError as exc:
+        raise WriterWitnessClientError(
+            "Writer Witness returned an unusable initial lease proof",
+            code="writer_witness_bootstrap_invalid_proof",
+        ) from exc
+    if snapshot.witness_lease_id is not None:
+        if (
+            snapshot.witness_lease_id == proof.lease_id
+            and snapshot.witness_proof_hash == proof.proof_hash
+            and snapshot.witness_transition_id == proof.witness_transition_id
+        ):
+            return proof
+        raise WriterWitnessClientError(
+            "local Writer already contains a different Witness lease",
+            code="writer_witness_bootstrap_local_lease_conflict",
+        )
+    async with active_session_factory() as session:
+        try:
+            await transition_writer_state(
+                session,
+                action=ACTION_LEASE_REFRESH,
+                identity=runtime_identity,
+                expected_epoch=1,
+                expected_active_site="webapp_fi",
+                operator=f"staging-migration:{campaign_id}",
+                reason=reason,
+                witness_proof=proof,
+                now=current,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+    return proof
+
+
+async def acquire_and_activate_local_writer_once(
+    *,
+    client: WriterWitnessClient,
+    status_request_id: str,
+    acquire_request_id: str,
+    operation_id: str,
+    target_epoch: int,
+    readiness_payload: dict[str, Any],
+    identity: RuntimeIdentity | None = None,
+    now: datetime | None = None,
+    session_factory: Callable[[], Any] | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    public_key_base64: str | None = None,
+    lease_duration_seconds: int | None = None,
+    safety_margin_seconds: int | None = None,
+    max_clock_skew_seconds: int | None = None,
+) -> ValidatedWitnessLeaseProof:
+    """Acquire the exact next global term and activate one fenced target once."""
+
+    runtime_identity = identity or resolve_runtime_identity(settings)
+    if not runtime_identity.is_webapp_site or target_epoch < 2:
+        raise WriterWitnessClientError(
+            "target Writer activation identity/epoch is invalid",
+            code="writer_witness_target_activation_invalid",
+        )
+    current = now or _utc_now()
+    duration = int(
+        lease_duration_seconds
+        if lease_duration_seconds is not None
+        else settings.writer_witness_lease_duration_seconds
+    )
+    status_payload = await client.status(
+        request_id=status_request_id,
+        now=current,
+        client=http_client,
+    )
+    witness_state = status_payload["state"]
+    try:
+        witness_epoch = int(witness_state["writer_epoch"])
+        witness_lease_id = witness_state.get("lease_id")
+        expires_raw = witness_state.get("expires_at")
+        expires_at = (
+            datetime.fromisoformat(str(expires_raw).replace("Z", "+00:00"))
+            if expires_raw is not None
+            else None
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WriterWitnessClientError(
+            "writer witness status state is malformed",
+            code="writer_witness_invalid_response",
+        ) from exc
+    if witness_epoch != target_epoch - 1:
+        raise WriterWitnessClientError(
+            "Witness is not at the exact predecessor epoch",
+            code="writer_witness_target_epoch_stale",
+        )
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            raise WriterWitnessClientError(
+                "Witness lease expiry lacks timezone",
+                code="writer_witness_invalid_response",
+            )
+        if expires_at.astimezone(timezone.utc) > current:
+            raise WriterWitnessClientError(
+                "predecessor Witness lease is still live",
+                code="writer_witness_predecessor_lease_live",
+                retryable=True,
+            )
+    readiness = validate_readiness_evidence(
+        readiness_payload,
+        target_site=runtime_identity.physical_site,
+        writer_epoch=target_epoch,
+        now=current,
+    )
+    payload = await client.transition(
+        action="acquire",
+        expected_epoch=witness_epoch,
+        expected_lease_id=witness_lease_id,
+        request_id=acquire_request_id,
+        reason=f"approved failover operation {operation_id}",
+        lease_duration_seconds=duration,
+        now=current,
+        client=http_client,
+    )
+    try:
+        proof = validate_witness_lease_proof(
+            payload.get("proof"),
+            public_key_base64=(
+                str(public_key_base64)
+                if public_key_base64 is not None
+                else str(settings.writer_witness_public_key or "")
+            ),
+            expected_site=runtime_identity.physical_site,
+            expected_epoch=target_epoch,
+            now=current,
+            safety_margin_seconds=(
+                safety_margin_seconds
+                if safety_margin_seconds is not None
+                else settings.writer_witness_safety_margin_seconds
+            ),
+            max_clock_skew_seconds=(
+                max_clock_skew_seconds
+                if max_clock_skew_seconds is not None
+                else settings.writer_witness_max_clock_skew_seconds
+            ),
+            max_lifetime_seconds=duration,
+        )
+    except WitnessProofError as exc:
+        raise WriterWitnessClientError(
+            "Writer Witness returned an unusable target lease proof",
+            code="writer_witness_target_proof_invalid",
+        ) from exc
+    active_session_factory = session_factory or DrControlSessionLocal
+    async with active_session_factory() as session:
+        snapshot = await load_writer_snapshot(session)
+    if snapshot.control_state == CONTROL_ACTIVE:
+        if (
+            snapshot.active_site == runtime_identity.physical_site
+            and snapshot.writer_epoch == target_epoch
+            and snapshot.witness_lease_id == proof.lease_id
+            and snapshot.witness_proof_hash == proof.proof_hash
+        ):
+            return proof
+        raise WriterWitnessClientError(
+            "target database already contains another active Writer term",
+            code="writer_witness_target_local_conflict",
+        )
+    if (
+        snapshot.control_state != "fenced"
+        or snapshot.active_site is not None
+        or snapshot.writer_epoch >= target_epoch
+    ):
+        raise WriterWitnessClientError(
+            "target database is not a fenced older term",
+            code="writer_witness_target_local_state_invalid",
+        )
+    async with active_session_factory() as session:
+        try:
+            await transition_writer_state(
+                session,
+                action=ACTION_ACTIVATE,
+                identity=runtime_identity,
+                expected_epoch=snapshot.writer_epoch,
+                expected_active_site=None,
+                operator=f"failover-orchestrator:{operation_id}",
+                reason=f"approved failover operation {operation_id}",
+                evidence=readiness,
+                witness_proof=proof,
+                now=current,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+    return proof
+
+
+async def drain_local_writer_lease_once(
+    *,
+    client: WriterWitnessClient,
+    request_id: str,
+    operation_id: str,
+    expected_epoch: int,
+    identity: RuntimeIdentity | None = None,
+    now: datetime | None = None,
+    session_factory: Callable[[], Any] | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    lease_duration_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Place the current source lease into non-renewable drain state once."""
+
+    runtime_identity = identity or resolve_runtime_identity(settings)
+    if not runtime_identity.is_webapp_site:
+        raise WriterWitnessClientError(
+            "Writer lease drain requires a WebApp site",
+            code="writer_witness_drain_site_invalid",
+        )
+    active_session_factory = session_factory or DrControlSessionLocal
+    async with active_session_factory() as session:
+        snapshot = await load_writer_snapshot(session)
+    if (
+        snapshot.control_state != CONTROL_ACTIVE
+        or snapshot.active_site != runtime_identity.physical_site
+        or snapshot.writer_epoch != expected_epoch
+        or not snapshot.witness_lease_id
+    ):
+        raise WriterWitnessClientError(
+            "local source has no exact active Witness lease to drain",
+            code="writer_witness_drain_local_state_invalid",
+        )
+    payload = await client.transition(
+        action="drain",
+        expected_epoch=expected_epoch,
+        expected_lease_id=snapshot.witness_lease_id,
+        request_id=request_id,
+        reason=f"approved failover operation {operation_id}",
+        lease_duration_seconds=int(
+            lease_duration_seconds
+            if lease_duration_seconds is not None
+            else settings.writer_witness_lease_duration_seconds
+        ),
+        now=now or _utc_now(),
+        client=http_client,
+    )
+    state = payload.get("state")
+    if (
+        not isinstance(state, dict)
+        or state.get("holder_site") != runtime_identity.physical_site
+        or state.get("writer_epoch") != expected_epoch
+        or state.get("lease_id") != snapshot.witness_lease_id
+        or state.get("lease_status") != "draining"
+        or not isinstance(state.get("expires_at"), str)
+    ):
+        raise WriterWitnessClientError(
+            "Writer Witness returned an invalid drain receipt",
+            code="writer_witness_drain_receipt_invalid",
+        )
+    return payload
 
 
 async def writer_witness_renewal_loop() -> None:

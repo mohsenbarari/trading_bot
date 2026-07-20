@@ -38,7 +38,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['b320c1d2e3f4 (head)'])
+        self.assertEqual(heads, ['c431d2e3f5a6 (head)'])
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (
@@ -69,6 +69,11 @@ class MigrationSmokeTests(unittest.TestCase):
                 'trading_bot_dr_event_immutable()',
             ),
             'e9e4f5a6b7c8_enable_bot_database_event_fence.py': (
+                'trading_bot_enforce_writer_term()',
+                'trading_bot_require_same_transaction_dr_event()',
+            ),
+            'c431d2e3f5a6_reconcile_integrated_database_policy.py': (
+                'trading_bot_dr_event_finalized()',
                 'trading_bot_enforce_writer_term()',
                 'trading_bot_require_same_transaction_dr_event()',
             ),

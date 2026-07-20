@@ -1,0 +1,19 @@
+{
+  "schema": "three-site-staging-inventory-signers-v1",
+  "policy_id": "00000000-0000-4000-8000-000000000000",
+  "release_sha": "0000000000000000000000000000000000000000",
+  "signers": [
+    {
+      "key_id": "inventory-operator-1",
+      "operator": "replace-with-first-operator",
+      "custody_domain": "replace-with-first-independent-device",
+      "public_key": "replace-with-base64-raw-ed25519-public-key"
+    },
+    {
+      "key_id": "inventory-operator-2",
+      "operator": "replace-with-second-operator",
+      "custody_domain": "replace-with-second-independent-device",
+      "public_key": "replace-with-base64-raw-ed25519-public-key"
+    }
+  ]
+}

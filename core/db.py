@@ -50,8 +50,16 @@ AsyncSessionLocal = async_sessionmaker(
 
 def _auxiliary_session_factory(url: str | None, *, role: str):
     normalized = str(url or "").strip()
-    if not normalized or normalized == settings.database_url:
+    if not normalized:
         return AsyncSessionLocal
+    if normalized == settings.database_url:
+        return async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+            info={"three_site_db_role": role},
+        )
     auxiliary_engine = create_async_engine(
         normalized,
         pool_size=max(1, int(settings.dr_auxiliary_db_pool_size)),
@@ -136,17 +144,21 @@ async def verify_three_site_database_role_bindings() -> None:
     if not (settings.three_site_dr_enabled and settings.dr_event_protocol_strict):
         return
     from core.runtime_identity import resolve_runtime_identity
+    from core.dr_database_roles import projection_scope_for_service
 
     identity = resolve_runtime_identity(settings)
     service = str(getattr(settings, "trading_bot_service", "app") or "app")
     projection_services = {
         "dr_receiver", "dr_projection_worker", "dr_delivery_worker", "dr_blob_worker"
     }
-    required_roles = (
-        ("application", "projection")
-        if service == "dr_effect_worker"
-        else (("projection",) if service in projection_services else ("application",))
-    )
+    if service == "dr_effect_worker":
+        required_roles = ("application", "projection")
+    elif service == "writer_control_agent":
+        required_roles = ("control",)
+    elif service in projection_services:
+        required_roles = ("projection",)
+    else:
+        required_roles = ("application",)
 
     async def session_user(factory) -> str:  # noqa: ANN001
         async with factory() as session:
@@ -158,9 +170,15 @@ async def verify_three_site_database_role_bindings() -> None:
         "control": DrControlSessionLocal,
     }
     observed = {role: await session_user(factories[role]) for role in required_roles}
+    projection_scope = (
+        projection_scope_for_service(service) if "projection" in required_roles else None
+    )
     if identity.is_bot_site:
         for role, database_role in observed.items():
-            if not database_role.endswith(f"_{'app' if role == 'application' else role}"):
+            expected_suffix = (
+                "app" if role == "application" else str(projection_scope)
+            )
+            if not database_role.endswith(f"_{expected_suffix}"):
                 raise RuntimeError(f"Bot {role} process is not bound to its least-privilege role")
         read_factory = factories[required_roles[0]]
         async with read_factory() as session:
@@ -175,8 +193,21 @@ async def verify_three_site_database_role_bindings() -> None:
         if row is None or not row["enforcement_enabled"] or row["physical_site"] != identity.physical_site:
             raise RuntimeError("Bot database event fencing is not enabled for bot_fi")
         for role, database_role in observed.items():
-            if row[f"{role}_role"] != database_role:
-                raise RuntimeError("Bot database role binding does not match runtime identity")
+            if role == "application":
+                if row["application_role"] != database_role:
+                    raise RuntimeError("Bot database role binding does not match runtime identity")
+                continue
+            async with factories[role]() as session:
+                mapped = await session.scalar(
+                    text(
+                        "SELECT 1 FROM dr_projection_service_roles "
+                        "WHERE physical_site=:site AND service_scope=:scope "
+                        "AND database_role=session_user"
+                    ),
+                    {"site": identity.physical_site, "scope": projection_scope},
+                )
+            if mapped != 1:
+                raise RuntimeError("Bot DR service role binding does not match runtime identity")
         return
     if not identity.is_webapp_site:
         return
@@ -195,6 +226,24 @@ async def verify_three_site_database_role_bindings() -> None:
     if row is None or not row["enforcement_enabled"]:
         raise RuntimeError("three-site database enforcement is not enabled")
     expected = {"physical_site": identity.physical_site}
-    expected.update({f"{role}_role": value for role, value in observed.items()})
+    expected.update(
+        {
+            f"{role}_role": value
+            for role, value in observed.items()
+            if role != "projection"
+        }
+    )
     if any(row[key] != value for key, value in expected.items()):
         raise RuntimeError("three-site database role binding does not match runtime identity")
+    if "projection" in required_roles:
+        async with DrProjectionSessionLocal() as session:
+            mapped = await session.scalar(
+                text(
+                    "SELECT 1 FROM dr_projection_service_roles "
+                    "WHERE physical_site=:site AND service_scope=:scope "
+                    "AND database_role=session_user"
+                ),
+                {"site": identity.physical_site, "scope": projection_scope},
+            )
+        if mapped != 1:
+            raise RuntimeError("three-site DR service role binding does not match runtime identity")

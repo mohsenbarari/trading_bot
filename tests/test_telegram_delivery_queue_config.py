@@ -21,6 +21,30 @@ def _settings(**overrides):
 
 
 class TelegramDeliveryQueueConfigTests(unittest.TestCase):
+    def test_three_site_protocol_flags_are_atomic_and_replay_bounds_are_positive(self):
+        enabled = _settings(
+            three_site_dr_enabled=True,
+            dr_event_protocol_enabled=True,
+            dr_event_protocol_strict=True,
+        )
+        self.assertTrue(enabled.dr_event_protocol_strict)
+
+        invalid = (
+            {"three_site_dr_enabled": True},
+            {"dr_event_protocol_enabled": True},
+            {"dr_event_protocol_strict": True},
+            {
+                "three_site_dr_enabled": True,
+                "dr_event_protocol_enabled": True,
+                "dr_event_protocol_strict": False,
+            },
+            {"dr_sync_request_max_age_seconds": 0},
+            {"dr_replay_nonce_retention_seconds": 0},
+        )
+        for values in invalid:
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                _settings(**values)
+
     def test_default_queue_retry_and_lease_config_is_valid(self):
         settings = _settings()
         self.assertLessEqual(

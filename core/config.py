@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     dr_sync_pairwise_keys_json: str | None = None
     dr_sync_peer_urls_json: str | None = None
     dr_sync_request_max_age_seconds: int = 30
+    dr_replay_nonce_retention_seconds: int = 300
     dr_sync_http_timeout_seconds: float = 5.0
     dr_sync_verify_tls: bool = True
     dr_sync_ca_bundle: str | None = None
@@ -268,6 +269,25 @@ class Settings(BaseSettings):
     smsir_customer_invitation_template_id: str | None = "903643"
     invitation_registration_session_ttl_seconds: int = 600
     staging_log_otp_codes: bool = False
+
+    @model_validator(mode="after")
+    def validate_three_site_dr_settings(self):
+        enabled = bool(self.three_site_dr_enabled or self.dr_event_protocol_enabled)
+        if enabled and not (
+            self.three_site_dr_enabled
+            and self.dr_event_protocol_enabled
+            and self.dr_event_protocol_strict
+        ):
+            raise ValueError(
+                "three_site_dr_requires_enabled_strict_event_protocol"
+            )
+        if self.dr_event_protocol_strict and not enabled:
+            raise ValueError("strict_dr_event_protocol_requires_three_site_mode")
+        if int(self.dr_sync_request_max_age_seconds) <= 0:
+            raise ValueError("dr_sync_request_max_age_seconds_must_be_positive")
+        if int(self.dr_replay_nonce_retention_seconds) <= 0:
+            raise ValueError("dr_replay_nonce_retention_seconds_must_be_positive")
+        return self
 
     @model_validator(mode="after")
     def validate_telegram_delivery_queue_settings(self):

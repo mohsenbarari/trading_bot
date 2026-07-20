@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -9,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 import main
+from core.dr_event_protocol import canonical_json_bytes
 from core.runtime_identity import RuntimeIdentity
 from core.webapp_writer_control import WriterStateSnapshot
 from core.writer_fencing import WriterFenceError, current_writer_fence_context
@@ -72,6 +74,36 @@ def writer_snapshot(site: str = "webapp_fi", *, evidence: bool = False):
     )
 
 
+def source_tail_query(
+    *,
+    action: str,
+    target_epoch: int,
+    final_sequence: int = 0,
+    final_transaction_hash: str | None = None,
+) -> str:
+    if final_transaction_hash is None:
+        final_transaction_hash = "0" * 64 if final_sequence == 0 else "8" * 64
+    boundary = {
+        "mode": "proven",
+        "origin_site": "webapp_fi" if action == "promote_ir" else "webapp_ir",
+        "target_site": "webapp_ir" if action == "promote_ir" else "webapp_fi",
+        "producer_epoch": target_epoch - 1,
+        "final_sequence": final_sequence,
+        "final_transaction_hash": final_transaction_hash,
+        "estimated_unreplicated_events": 0,
+    }
+    boundary_hash = hashlib.sha256(canonical_json_bytes(boundary)).hexdigest()
+    return (
+        f"source_tail_mode={boundary['mode']}&"
+        f"source_tail_origin_site={boundary['origin_site']}&"
+        f"source_tail_producer_epoch={boundary['producer_epoch']}&"
+        f"source_tail_final_sequence={boundary['final_sequence']}&"
+        f"source_tail_final_transaction_hash={boundary['final_transaction_hash']}&"
+        "source_tail_estimated_unreplicated_events=0&"
+        f"source_tail_boundary_hash={boundary_hash}"
+    )
+
+
 class ScalarResult:
     def __init__(self, value):
         self.value = value
@@ -96,6 +128,18 @@ class MappingResult:
         return self.value
 
 
+class _FakeSourceTailDb:
+    def __init__(self, checkpoint):
+        self.checkpoint = checkpoint
+        self.statement = None
+        self.params = None
+
+    async def execute(self, statement, params=None):
+        self.statement = str(statement)
+        self.params = params
+        return MappingResult(self.checkpoint)
+
+
 class FakeFailbackHealthDb:
     def __init__(self, barrier):
         self.barrier = barrier
@@ -109,6 +153,39 @@ class FakeFailbackHealthDb:
 
 
 class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
+    async def test_promotion_source_tail_blocks_received_but_not_applied_event(self):
+        query = source_tail_query(
+            action="promote_ir",
+            target_epoch=5,
+            final_sequence=12,
+            final_transaction_hash="9" * 64,
+        )
+        checkpoint = {
+            "contiguous_applied_sequence": 11,
+            "receipt_status": "received",
+            "transaction_hash": "9" * 64,
+        }
+        database = _FakeSourceTailDb(checkpoint)
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity("webapp_ir")):
+            reasons, boundary, applied_sequence = (
+                await main._promotion_source_tail_reasons(
+                    request(
+                        "GET",
+                        "/health/promotion-ready",
+                        query_string=query,
+                    ),
+                    database,
+                    action="promote_ir",
+                    target_epoch=5,
+                )
+            )
+
+        self.assertEqual(reasons, ("source_tail_not_applied",))
+        self.assertEqual(boundary["final_sequence"], 12)
+        self.assertEqual(applied_sequence, 11)
+        self.assertIn("jsonb_extract_path_text(e.destination_streams", database.statement)
+        self.assertEqual(database.params["target_site"], "webapp_ir")
+
     async def test_promotion_readiness_requires_fenced_target_and_exact_next_epoch(self):
         fenced = writer_snapshot()
         fenced = WriterStateSnapshot(
@@ -132,8 +209,6 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             main.settings, "writer_witness_required", True
         ), patch(
             "main.witness_public_key_is_valid", return_value=True
-        ), patch(
-            "main.writer_witness_client_configuration_reasons", return_value=()
         ), patch.object(
             main.settings, "release_sha", "a" * 40
         ), patch.object(
@@ -147,7 +222,10 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
                 request(
                     "GET",
                     "/health/promotion-ready",
-                    query_string="action=promote_ir&expected_writer_epoch=5",
+                    query_string=(
+                        "action=promote_ir&expected_writer_epoch=5&"
+                        + source_tail_query(action="promote_ir", target_epoch=5)
+                    ),
                 ),
                 FakeHealthDb(),
             )
@@ -178,7 +256,8 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             "action=failback_fi&expected_writer_epoch=5&"
             f"expected_database_fingerprint_hash={database_hash}&"
             "expected_database_row_count=123&"
-            f"expected_blob_set_hash={blob_hash}&expected_blob_count=7"
+            f"expected_blob_set_hash={blob_hash}&expected_blob_count=7&"
+            + source_tail_query(action="failback_fi", target_epoch=5)
         )
         with patch.object(main, "RUNTIME_IDENTITY", webapp_identity("webapp_fi")), patch(
             "main._local_dependency_health", new=AsyncMock(return_value=(True, True, ()))
@@ -188,9 +267,9 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             "main.load_writer_snapshot", new=AsyncMock(return_value=fenced)
         ), patch.object(main.settings, "three_site_dr_enabled", True), patch.object(
             main.settings, "writer_witness_required", True
-        ), patch("main.witness_public_key_is_valid", return_value=True), patch(
-            "main.writer_witness_client_configuration_reasons", return_value=()
-        ), patch.object(main.settings, "release_sha", "a" * 40), patch.object(
+        ), patch("main.witness_public_key_is_valid", return_value=True), patch.object(
+            main.settings, "release_sha", "a" * 40
+        ), patch.object(
             main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
         ), patch.object(main.settings, "background_jobs_enabled", True), patch(
             "main.Path.is_file", return_value=True
@@ -204,6 +283,44 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["action"], "failback_fi")
         self.assertTrue(payload["promotion_ready"])
         self.assertTrue(dr_reasons.await_args.kwargs["require_global_convergence"])
+
+    async def test_failback_readiness_accepts_global_epoch_ahead_of_stale_local_site(self):
+        fenced = WriterStateSnapshot(
+            **{
+                **writer_snapshot().__dict__,
+                "writer_epoch": 1,
+                "active_site": None,
+                "control_state": "fenced",
+            }
+        )
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity("webapp_fi")), patch(
+            "main._local_dependency_health", new=AsyncMock(return_value=(True, True, ()))
+        ), patch(
+            "main._three_site_origin_readiness_reasons", new=AsyncMock(return_value=())
+        ), patch(
+            "main.load_writer_snapshot", new=AsyncMock(return_value=fenced)
+        ), patch.object(main.settings, "three_site_dr_enabled", True), patch.object(
+            main.settings, "writer_witness_required", True
+        ), patch("main.witness_public_key_is_valid", return_value=True), patch.object(
+            main.settings, "release_sha", "a" * 40
+        ), patch.object(
+            main.settings, "origin_expected_migration_revision", "d2e7f8a9b0c1"
+        ), patch.object(main.settings, "background_jobs_enabled", True), patch(
+            "main.Path.is_file", return_value=True
+        ):
+            response = await main.get_health_promotion_ready(
+                request(
+                    "GET",
+                    "/health/promotion-ready",
+                    query_string=(
+                        "action=failback_fi&expected_writer_epoch=3&"
+                        + source_tail_query(action="failback_fi", target_epoch=3)
+                    ),
+                ),
+                FakeHealthDb(),
+            )
+        payload = json.loads(response.body)
+        self.assertNotIn("promotion_epoch_not_newer_than_local", payload["reasons"])
 
     async def test_get_public_config_returns_non_sensitive_settings(self):
         with patch.object(main.settings, "bot_username", "bot_user"), patch.object(main.settings, "frontend_url", "https://front.example"):
@@ -328,8 +445,6 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             main.settings, "writer_witness_auto_renew_enabled", True
         ), patch(
             "main.witness_public_key_is_valid", return_value=True
-        ), patch(
-            "main.writer_witness_client_configuration_reasons", return_value=()
         ), patch.object(
             main.settings, "background_jobs_enabled", True
         ), patch(
@@ -363,8 +478,6 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
             main.settings, "writer_witness_auto_renew_enabled", True
         ), patch(
             "main.witness_public_key_is_valid", return_value=True
-        ), patch(
-            "main.writer_witness_client_configuration_reasons", return_value=()
         ), patch.object(
             main.settings, "background_jobs_enabled", True
         ), patch(

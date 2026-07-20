@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -15,6 +16,8 @@ URL_NAMES = {
     "owner": "BOT_FENCING_TEST_OWNER_URL",
     "application": "BOT_FENCING_TEST_APP_URL",
     "projection": "BOT_FENCING_TEST_PROJECTION_URL",
+    "receiver": "BOT_FENCING_TEST_RECEIVER_URL",
+    "delivery": "BOT_FENCING_TEST_DELIVERY_URL",
 }
 
 
@@ -67,7 +70,23 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
             text("SELECT set_config('trading_bot.physical_site', 'bot_fi', true)")
         )
 
-    def _coverage_event(self, connection, *, record_id: int, operation: str) -> None:  # noqa: ANN001
+    def _projection_scope(self, connection, scope: str) -> None:  # noqa: ANN001
+        connection.execute(
+            text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
+        )
+        connection.execute(
+            text("SELECT set_config('trading_bot.projection_scope', :scope, true)"),
+            {"scope": scope},
+        )
+
+    def _coverage_event(
+        self,
+        connection,
+        *,
+        record_id: int,
+        operation: str,
+        payload: dict[str, object],
+    ) -> None:  # noqa: ANN001
         connection.execute(
             text(
                 "INSERT INTO dr_events ("
@@ -77,7 +96,7 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                 "envelope_hash, schema_version, tombstone, source_xid"
                 ") VALUES ("
                 ":event_id, 1, 'foreign', 'bot_fi', 1, :sequence, 'commodities', "
-                ":record_id, :record_id, :operation, '{}'::jsonb, repeat('a',64), "
+                ":record_id, :record_id, :operation, CAST(:payload AS JSONB), repeat('a',64), "
                 "repeat('b',64), 1, :tombstone, txid_current())"
             ),
             {
@@ -86,14 +105,13 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                 "record_id": str(record_id),
                 "operation": operation,
                 "tombstone": operation == "DELETE",
+                "payload": json.dumps(payload, sort_keys=True, separators=(",", ":")),
             },
         )
 
     def _seed_projection_commodity(self, record_id: int) -> None:
         with self.engines["projection"].begin() as connection:
-            connection.execute(
-                text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
-            )
+            self._projection_scope(connection, "projector")
             connection.execute(
                 text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
                 {"id": record_id, "name": f"bot-projection-{record_id}"},
@@ -112,7 +130,10 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
         with self.engines["application"].begin() as connection:
             self._foreign_writer(connection)
             self._coverage_event(
-                connection, record_id=with_capability, operation="INSERT"
+                connection,
+                record_id=with_capability,
+                operation="INSERT",
+                payload={"id": with_capability, "name": f"bot-authority-{with_capability}"},
             )
             connection.execute(
                 text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
@@ -134,7 +155,7 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                 )
 
     def test_roles_have_no_owner_path_function_execution_or_control_write(self) -> None:
-        for role in ("application", "projection"):
+        for role in ("application", "projection", "receiver", "delivery"):
             with self.engines[role].connect() as connection:
                 state = connection.execute(
                     text(
@@ -180,9 +201,7 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
         self._seed_projection_commodity(record_id)
         with self.assertRaises(DBAPIError):
             with self.engines["projection"].begin() as connection:
-                connection.execute(
-                    text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
-                )
+                self._projection_scope(connection, "projector")
                 connection.execute(
                     text(
                         "INSERT INTO push_subscriptions "
@@ -190,6 +209,63 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                         "VALUES (:id,-1,repeat('a',64),'https://example.invalid','x','y',true)"
                     ),
                     {"id": record_id},
+                )
+
+    def test_bot_receiver_and_delivery_roles_cannot_impersonate_projector(self) -> None:
+        for role, scope in (("receiver", "projector"), ("delivery", "receiver")):
+            with self.subTest(role=role, scope=scope), self.assertRaises(DBAPIError):
+                with self.engines[role].begin() as connection:
+                    self._projection_scope(connection, scope)
+                    connection.execute(
+                        text("UPDATE commodities SET name='scope-bypass' WHERE id=-1")
+                    )
+
+    def test_bot_application_can_complete_local_queue_crud_but_not_webapp_private_dml(self) -> None:
+        source_id = "scratch-queue-" + uuid4().hex
+        with self.engines["application"].begin() as connection:
+            self._foreign_writer(connection)
+            job_id = connection.scalar(
+                text(
+                    "INSERT INTO telegram_delivery_jobs ("
+                    "dedupe_key, feeder_kind, feeder_rank, source_natural_id, source_version, "
+                    "action_kind, bot_identity, destination_key, destination_class, method, "
+                    "payload, template_version, payload_hash, priority, priority_rank"
+                    ") VALUES ("
+                    ":dedupe_key, 'direct', 0, :source_id, 1, 'general_immediate', "
+                    "'primary', :destination_key, 'private', 'sendMessage', "
+                    "CAST(:payload AS JSON), 'scratch-v1', repeat('a',64), 0, 0"
+                    ") RETURNING id"
+                ),
+                {
+                    "dedupe_key": source_id,
+                    "source_id": source_id,
+                    "destination_key": "private:" + source_id,
+                    "payload": json.dumps({"chat_id": 91, "text": source_id}),
+                },
+            )
+            connection.execute(
+                text(
+                    "UPDATE telegram_delivery_jobs SET state='leased', worker_id='scratch', "
+                    "lease_token=lease_token+1, lease_until=clock_timestamp()+interval '1 minute' "
+                    "WHERE id=:job_id"
+                ),
+                {"job_id": job_id},
+            )
+            connection.execute(
+                text("DELETE FROM telegram_delivery_jobs WHERE id=:job_id"),
+                {"job_id": job_id},
+            )
+
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._foreign_writer(connection)
+                connection.execute(
+                    text(
+                        "INSERT INTO push_subscriptions "
+                        "(id,user_id,endpoint_hash,endpoint,p256dh,auth,enabled) "
+                        "VALUES (:id,-1,repeat('b',64),'https://example.invalid','x','y',true)"
+                    ),
+                    {"id": self._scratch_id()},
                 )
 
     def test_real_protocol_v2_commit_has_contiguous_authorized_destination_streams(self) -> None:

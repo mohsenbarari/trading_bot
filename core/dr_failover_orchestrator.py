@@ -7,8 +7,10 @@ import binascii
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+import ipaddress
 from pathlib import Path
 import re
+import secrets
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -24,9 +26,9 @@ ORCHESTRATION_SCHEMA = "three-site-failover-operation-v1"
 STEPS = (
     "classification_verified",
     "source_fenced",
+    "source_connections_drained",
     "target_ready",
     "target_term_acquired",
-    "source_connections_drained",
     "route_switched",
     "public_route_verified",
     "completed",
@@ -59,6 +61,7 @@ class FailoverPlan:
     expected_current_ip: str
     target_ip: str
     classification: dict[str, Any]
+    rpo_policy: dict[str, Any]
     readiness_hash: str
     command_manifest_hash: str
     approver_policy_hash: str
@@ -69,7 +72,12 @@ class FailoverPlan:
 class OrchestrationAdapter(Protocol):
     async def classification_verified(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def source_fenced(self, plan: FailoverPlan) -> dict[str, Any]: ...
-    async def target_ready(self, plan: FailoverPlan) -> dict[str, Any]: ...
+    async def target_ready(
+        self,
+        plan: FailoverPlan,
+        *,
+        source_tail_boundary: dict[str, Any],
+    ) -> dict[str, Any]: ...
     async def target_term_acquired(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def source_connections_drained(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def route_switched(self, plan: FailoverPlan) -> dict[str, Any]: ...
@@ -109,7 +117,7 @@ def parse_plan(payload: Any) -> FailoverPlan:
         "schema", "operation_id", "operation_nonce", "generated_at", "expires_at",
         "action", "source_site", "target_site",
         "expected_epoch", "target_epoch", "release_sha", "domain", "record",
-        "expected_current_ip", "target_ip", "classification", "readiness_hash",
+        "expected_current_ip", "target_ip", "classification", "rpo_policy", "readiness_hash",
         "command_manifest_hash", "approver_policy_hash", "approvals",
     }
     if not isinstance(payload, dict) or set(payload) != expected or payload["schema"] != ORCHESTRATION_SCHEMA:
@@ -137,15 +145,24 @@ def parse_plan(payload: Any) -> FailoverPlan:
     )
     if (source, target) != expected_pair:
         raise DrOrchestrationError("source/target sites do not match the action")
-    expected_epoch = int(payload["expected_epoch"])
-    target_epoch = int(payload["target_epoch"])
+    if type(payload["expected_epoch"]) is not int or type(payload["target_epoch"]) is not int:
+        raise DrOrchestrationError("Writer epochs must be exact integers")
+    expected_epoch = payload["expected_epoch"]
+    target_epoch = payload["target_epoch"]
     if expected_epoch < 1 or target_epoch != expected_epoch + 1:
         raise DrOrchestrationError("target Writer epoch must advance exactly once")
     release_sha = str(payload["release_sha"]).lower()
     if not SHA_RE.fullmatch(release_sha):
         raise DrOrchestrationError("release SHA is malformed")
-    if payload["domain"] != "gold-trading.ir":
+    if payload["domain"] != "gold-trading.ir" or payload["record"] != "app":
         raise DrOrchestrationError("source orchestrator remains locked to the failover-test domain")
+    try:
+        current_ip = str(ipaddress.ip_address(str(payload["expected_current_ip"])))
+        target_ip = str(ipaddress.ip_address(str(payload["target_ip"])))
+    except ValueError as exc:
+        raise DrOrchestrationError("orchestration origin IP is invalid") from exc
+    if current_ip == target_ip:
+        raise DrOrchestrationError("source and target origin IPs must be distinct")
     classification = payload["classification"]
     if not isinstance(classification, dict) or set(classification) != {
         "mode", "confidence", "consecutive_rounds", "evidence_hash",
@@ -156,7 +173,8 @@ def parse_plan(payload: Any) -> FailoverPlan:
     if (
         classification["mode"] != required_mode
         or classification["confidence"] != "high"
-        or int(classification["consecutive_rounds"]) < 3
+        or type(classification["consecutive_rounds"]) is not int
+        or classification["consecutive_rounds"] < 3
         or not re.fullmatch(r"[0-9a-f]{64}", str(classification["evidence_hash"]))
         or not re.fullmatch(r"[0-9a-f]{64}", str(classification["policy_hash"]))
     ):
@@ -165,6 +183,34 @@ def parse_plan(payload: Any) -> FailoverPlan:
         UUID(str(classification["campaign_id"]))
     except ValueError as exc:
         raise DrOrchestrationError("classification campaign id is invalid") from exc
+    rpo_policy = payload["rpo_policy"]
+    if not isinstance(rpo_policy, dict) or set(rpo_policy) != {
+        "mode", "max_unreplicated_events", "approval_reason", "approval_ticket"
+    }:
+        raise DrOrchestrationError("RPO policy fields are invalid")
+    rpo_mode = str(rpo_policy["mode"])
+    max_unreplicated = rpo_policy["max_unreplicated_events"]
+    reason = rpo_policy["approval_reason"]
+    ticket = rpo_policy["approval_ticket"]
+    if (
+        rpo_mode not in {"zero_loss", "bounded_loss"}
+        or type(max_unreplicated) is not int
+        or max_unreplicated < 0
+        or max_unreplicated > 1_000_000
+    ):
+        raise DrOrchestrationError("RPO policy is invalid")
+    if rpo_mode == "zero_loss":
+        if max_unreplicated != 0 or reason is not None or ticket is not None:
+            raise DrOrchestrationError("zero-loss RPO policy cannot authorize residual loss")
+    elif (
+        not isinstance(reason, str)
+        or not reason.strip()
+        or len(reason.strip()) > 500
+        or not isinstance(ticket, str)
+        or not ticket.strip()
+        or len(ticket.strip()) > 128
+    ):
+        raise DrOrchestrationError("bounded-loss RPO policy lacks explicit approval evidence")
     readiness_hash = str(payload["readiness_hash"])
     if not re.fullmatch(r"[0-9a-f]{64}", readiness_hash):
         raise DrOrchestrationError("readiness evidence hash is malformed")
@@ -192,9 +238,10 @@ def parse_plan(payload: Any) -> FailoverPlan:
         release_sha=release_sha,
         domain=str(payload["domain"]),
         record=str(payload["record"]),
-        expected_current_ip=str(payload["expected_current_ip"]),
-        target_ip=str(payload["target_ip"]),
+        expected_current_ip=current_ip,
+        target_ip=target_ip,
         classification=dict(classification),
+        rpo_policy=dict(rpo_policy),
         readiness_hash=readiness_hash,
         command_manifest_hash=command_manifest_hash,
         approver_policy_hash=approver_policy_hash,
@@ -244,6 +291,7 @@ def load_approver_policy(path: Path = PINNED_APPROVER_POLICY_PATH) -> ApproverPo
     signers: dict[str, ApprovedSigner] = {}
     operators: set[str] = set()
     custody_domains: set[str] = set()
+    public_keys: set[bytes] = set()
     for raw in payload["signers"]:
         if not isinstance(raw, dict) or set(raw) != {
             "operator", "key_id", "custody_domain", "public_key"
@@ -259,11 +307,13 @@ def load_approver_policy(path: Path = PINNED_APPROVER_POLICY_PATH) -> ApproverPo
         if (
             not operator or operator in operators or not key_id or key_id in signers
             or not custody or custody in custody_domains or len(public_key) != 32
+            or public_key in public_keys
         ):
             raise DrOrchestrationError("failover signer identities/custody are not independent")
         signers[key_id] = ApprovedSigner(operator, key_id, custody, public_key)
         operators.add(operator)
         custody_domains.add(custody)
+        public_keys.add(public_key)
     if len(signers) < 2:
         raise DrOrchestrationError("failover approver policy needs two independent signers")
     policy_hash = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
@@ -301,7 +351,69 @@ def verify_two_person_approvals(plan: FailoverPlan, policy: ApproverPolicy) -> N
         custody_domains.add(signer.custody_domain)
 
 
-def _validate_step_result(step: str, result: Any, plan: FailoverPlan) -> dict[str, Any]:
+def _validate_source_tail_boundary(
+    value: Any,
+    *,
+    plan: FailoverPlan,
+) -> dict[str, Any]:
+    fields = {
+        "mode",
+        "origin_site",
+        "target_site",
+        "producer_epoch",
+        "final_sequence",
+        "final_transaction_hash",
+        "estimated_unreplicated_events",
+        "boundary_hash",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise DrOrchestrationError("source tail boundary fields are invalid")
+    unsigned = {key: value[key] for key in fields - {"boundary_hash"}}
+    expected_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+    if (
+        value["origin_site"] != plan.source_site
+        or value["target_site"] != plan.target_site
+        or type(value["producer_epoch"]) is not int
+        or value["producer_epoch"] != plan.expected_epoch
+        or type(value["final_sequence"]) is not int
+        or value["final_sequence"] < 0
+        or not re.fullmatch(r"[0-9a-f]{64}", str(value["final_transaction_hash"]))
+        or (
+            value["final_sequence"] == 0
+            and value["final_transaction_hash"] != "0" * 64
+        )
+        or (
+            value["final_sequence"] > 0
+            and value["final_transaction_hash"] == "0" * 64
+        )
+        or type(value["estimated_unreplicated_events"]) is not int
+        or value["estimated_unreplicated_events"] < 0
+        or not secrets.compare_digest(str(value["boundary_hash"]), expected_hash)
+    ):
+        raise DrOrchestrationError("source tail boundary is inconsistent")
+    mode = str(value["mode"])
+    estimated = int(value["estimated_unreplicated_events"])
+    if mode == "proven":
+        if estimated != 0:
+            raise DrOrchestrationError("proven source tail cannot report residual loss")
+    elif mode == "approved_rpo_exception":
+        if (
+            plan.rpo_policy["mode"] != "bounded_loss"
+            or estimated > int(plan.rpo_policy["max_unreplicated_events"])
+        ):
+            raise DrOrchestrationError("source tail loss exceeds the approved RPO policy")
+    else:
+        raise DrOrchestrationError("source tail boundary mode is invalid")
+    return dict(value)
+
+
+def _validate_step_result(
+    step: str,
+    result: Any,
+    plan: FailoverPlan,
+    *,
+    source_tail_boundary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if not isinstance(result, dict) or result.get("status") != "ok":
         raise DrOrchestrationError(f"orchestration step {step} did not return status=ok")
     if result.get("operation_id") != plan.operation_id:
@@ -319,12 +431,25 @@ def _validate_step_result(step: str, result: Any, plan: FailoverPlan) -> dict[st
         raise DrOrchestrationError(
             "classification step is not bound to fresh signed approved evidence"
         )
-    if step == "source_fenced" and (
-        result.get("source_site") != plan.source_site or result.get("fenced") is not True
-    ):
-        raise DrOrchestrationError("source fencing evidence does not match the approved source")
-    if step == "target_ready" and result.get("target_site") != plan.target_site:
-        raise DrOrchestrationError("target readiness evidence does not match the approved target")
+    if step == "source_fenced":
+        if result.get("source_site") != plan.source_site or result.get("fenced") is not True:
+            raise DrOrchestrationError("source fencing evidence does not match the approved source")
+        _validate_source_tail_boundary(result.get("source_tail_boundary"), plan=plan)
+    if step == "target_ready":
+        if result.get("target_site") != plan.target_site or source_tail_boundary is None:
+            raise DrOrchestrationError("target readiness evidence does not match the approved target")
+        boundary = _validate_source_tail_boundary(source_tail_boundary, plan=plan)
+        if result.get("source_tail_boundary_hash") != boundary["boundary_hash"]:
+            raise DrOrchestrationError("target readiness is not bound to the fenced source tail")
+        applied_through = result.get("target_applied_through_boundary")
+        applied_sequence = result.get("target_applied_sequence")
+        if type(applied_through) is not bool or type(applied_sequence) is not int:
+            raise DrOrchestrationError("target applied-boundary evidence is malformed")
+        if boundary["mode"] == "proven" and (
+            applied_through is not True
+            or applied_sequence < int(boundary["final_sequence"])
+        ):
+            raise DrOrchestrationError("target has not applied the proven source tail")
     if step == "target_term_acquired":
         if result.get("holder_site") != plan.target_site or int(result.get("writer_epoch") or 0) != plan.target_epoch:
             raise DrOrchestrationError("Witness term result does not match target site/epoch")
@@ -364,6 +489,9 @@ def _validate_rollback_result(
         or result.get("target_fenced") is not True
         or type(result.get("target_active_connections")) is not int
         or result["target_active_connections"] != 0
+        or result.get("source_fenced") is not True
+        or type(result.get("source_active_connections")) is not int
+        or result["source_active_connections"] != 0
     ):
         raise DrOrchestrationError("orchestration rollback lacks target fence/drain evidence")
     rollback_state = result.get("rollback_state")
@@ -396,8 +524,8 @@ def _validate_rollback_result(
             raise DrOrchestrationError("source-restored rollback evidence is inconsistent")
     elif rollback_state == "safe_fenced":
         if (
-            result.get("holder_site") is not None
-            or result.get("source_fenced") is not True
+            result.get("witness_lease_live") is not False
+            or result.get("holder_site") not in {None, plan.source_site, plan.target_site}
             or result.get("origin_ip") not in {plan.expected_current_ip, plan.target_ip}
             or result.get("domain") != plan.domain
             or result.get("record") != plan.record
@@ -514,6 +642,59 @@ async def _rollback_after_failure(
     return result
 
 
+async def _finish_expired_operation(
+    plan: FailoverPlan,
+    *,
+    adapter: OrchestrationAdapter,
+    ledger: OperationLedger,
+    journal_path: Path,
+    completed: set[str],
+) -> dict[str, Any]:
+    """Stop an expired saga without permitting another forward mutation."""
+    completed_steps = tuple(step for step in STEPS[:-1] if step in completed)
+    mutating_steps = set(completed_steps) - {"classification_verified"}
+    if mutating_steps:
+        result = await _rollback_after_failure(
+            plan,
+            adapter=adapter,
+            journal_path=journal_path,
+            failed_step="expired_plan",
+            completed_steps=completed_steps,
+        )
+        evidence_hash = str(result["evidence_hash"])
+        rollback_state = result["rollback_state"]
+    else:
+        evidence_hash = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "operation_id": plan.operation_id,
+                    "plan_hash": plan.plan_hash,
+                    "outcome": "expired_without_mutation",
+                }
+            )
+        ).hexdigest()
+        rollback_state = "not_started"
+        _append_operation_record(
+            journal_path,
+            plan,
+            event="dr.orchestration.expired_without_mutation",
+            evidence_hash=evidence_hash,
+        )
+    await _finalize_ledger(
+        ledger,
+        plan,
+        outcome="rolled_back",
+        evidence_hash=evidence_hash,
+    )
+    return {
+        "status": "rolled_back",
+        "operation_id": plan.operation_id,
+        "plan_hash": plan.plan_hash,
+        "rollback_state": rollback_state,
+        "reason": "plan_expired",
+    }
+
+
 async def run_orchestration(
     plan: FailoverPlan,
     *,
@@ -523,15 +704,24 @@ async def run_orchestration(
 ) -> dict[str, Any]:
     records = verify_hash_chained_jsonl(journal_path, label="failover journal") if journal_path.exists() else []
     operation_records = [record for record in records if record.get("operation_id") == plan.operation_id]
-    if not operation_records:
+    freshness_error: DrOrchestrationError | None = None
+    try:
         validate_plan_freshness(plan)
+    except DrOrchestrationError as exc:
+        if not operation_records:
+            raise
+        freshness_error = exc
     if any(record.get("plan_hash") != plan.plan_hash for record in operation_records):
         raise DrOrchestrationError("journal operation_id was reused with a different plan")
     reservation = _validate_ledger_result(
         await ledger.reserve(plan),
         plan,
-        allowed_statuses={"reserved", "existing"},
+        allowed_statuses={"reserved", "existing", "expired"},
     )
+    if reservation["status"] == "expired" and freshness_error is None:
+        freshness_error = DrOrchestrationError(
+            "independent operation ledger reports an expired plan"
+        )
     local_reservations = [
         record for record in operation_records
         if record.get("event") == "dr.orchestration.operation_reserved"
@@ -559,6 +749,36 @@ async def run_orchestration(
         for record in operation_records
         if record.get("event") == "dr.orchestration.step_completed"
     }
+    source_tail_boundary: dict[str, Any] | None = None
+    source_boundary_records = [
+        record
+        for record in operation_records
+        if record.get("event") == "dr.orchestration.step_completed"
+        and record.get("step") == "source_fenced"
+    ]
+    if source_boundary_records:
+        source_tail_boundary = _validate_source_tail_boundary(
+            source_boundary_records[-1].get("source_tail_boundary"),
+            plan=plan,
+        )
+    completion_records = [
+        record
+        for record in operation_records
+        if record.get("event") == "dr.orchestration.step_completed"
+        and record.get("step") == "completed"
+    ]
+    if completion_records:
+        await _finalize_ledger(
+            ledger,
+            plan,
+            outcome="completed",
+            evidence_hash=str(completion_records[-1]["evidence_hash"]),
+        )
+        return {
+            "status": "completed",
+            "operation_id": plan.operation_id,
+            "plan_hash": plan.plan_hash,
+        }
     if any(record.get("event") == "dr.orchestration.rollback_completed" for record in operation_records):
         rollback_record = next(
             record for record in reversed(operation_records)
@@ -571,6 +791,14 @@ async def run_orchestration(
             evidence_hash=str(rollback_record["evidence_hash"]),
         )
         return {"status": "rolled_back", "operation_id": plan.operation_id, "plan_hash": plan.plan_hash}
+    if freshness_error is not None:
+        return await _finish_expired_operation(
+            plan,
+            adapter=adapter,
+            ledger=ledger,
+            journal_path=journal_path,
+            completed=completed,
+        )
     failed_records = [
         record
         for record in operation_records
@@ -609,9 +837,29 @@ async def run_orchestration(
     for step in STEPS[:-1]:
         if step in completed:
             continue
+        try:
+            validate_plan_freshness(plan)
+        except DrOrchestrationError:
+            return await _finish_expired_operation(
+                plan,
+                adapter=adapter,
+                ledger=ledger,
+                journal_path=journal_path,
+                completed=completed,
+            )
         method = getattr(adapter, step)
         try:
-            result = _validate_step_result(step, await method(plan), plan)
+            raw_result = (
+                await method(plan, source_tail_boundary=source_tail_boundary)
+                if step == "target_ready"
+                else await method(plan)
+            )
+            result = _validate_step_result(
+                step,
+                raw_result,
+                plan,
+                source_tail_boundary=source_tail_boundary,
+            )
         except Exception as exc:
             _append_operation_record(
                 journal_path,
@@ -636,14 +884,40 @@ async def run_orchestration(
                     evidence_hash=rollback["evidence_hash"],
                 )
             raise
+        record_fields: dict[str, Any] = {}
+        if step == "source_fenced":
+            source_tail_boundary = _validate_source_tail_boundary(
+                result.get("source_tail_boundary"),
+                plan=plan,
+            )
+            record_fields["source_tail_boundary"] = source_tail_boundary
+        if step == "target_ready":
+            record_fields.update(
+                source_tail_boundary_hash=result["source_tail_boundary_hash"],
+                target_applied_sequence=result["target_applied_sequence"],
+                target_applied_through_boundary=result[
+                    "target_applied_through_boundary"
+                ],
+            )
         _append_operation_record(
             journal_path,
             plan,
             event="dr.orchestration.step_completed",
             step=step,
             evidence_hash=result["evidence_hash"],
+            **record_fields,
         )
         completed.add(step)
+    try:
+        validate_plan_freshness(plan)
+    except DrOrchestrationError:
+        return await _finish_expired_operation(
+            plan,
+            adapter=adapter,
+            ledger=ledger,
+            journal_path=journal_path,
+            completed=completed,
+        )
     completion_hash = hashlib.sha256(
         canonical_json_bytes({"operation_id": plan.operation_id, "plan_hash": plan.plan_hash})
     ).hexdigest()

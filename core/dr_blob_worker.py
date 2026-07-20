@@ -43,7 +43,13 @@ from core.dr_blob_crypto import (
 )
 from core.dr_delivery_worker import _key_for_destination, parse_peer_urls
 from core.dr_event_protocol import canonical_json_bytes
-from core.dr_sync_auth import canonical_request_bytes, parse_pairwise_keys, sign_request
+from core.dr_sync_auth import (
+    PairwiseDrKey,
+    acknowledgement_signature_is_valid,
+    canonical_request_bytes,
+    parse_pairwise_keys,
+    sign_request,
+)
 from core.runtime_identity import resolve_runtime_identity
 from core.secure_file_io import read_secure_text
 from core.writer_fencing import projection_fence_scope
@@ -531,25 +537,44 @@ def _verify_blob_receipt_ack(
     request_hash: str,
     content_hash: str,
     receipt_hash: str,
+    key: PairwiseDrKey,
 ) -> str:
     expected_fields = {
         "destination_site",
+        "source_site",
+        "key_id",
         "request_hash",
         "content_hash",
         "receipt_hash",
         "delivery_hash",
         "acknowledgement_hash",
+        "acknowledgement_mac",
     }
     if not isinstance(payload, dict) or set(payload) != expected_fields:
         raise DrBlobWorkerError("DR blob receipt acknowledgement fields are invalid")
     if (
         payload["destination_site"] != destination_site
+        or payload["source_site"] != key.source_site
+        or payload["key_id"] != key.key_id
         or payload["request_hash"] != request_hash
         or payload["content_hash"] != content_hash
         or payload["receipt_hash"] != receipt_hash
     ):
         raise DrBlobWorkerError("DR blob receipt acknowledgement identity mismatch")
-    unsigned = {key: value for key, value in payload.items() if key != "acknowledgement_hash"}
+    signed = {
+        name: value for name, value in payload.items() if name != "acknowledgement_mac"
+    }
+    if not acknowledgement_signature_is_valid(
+        payload=signed,
+        signature=str(payload["acknowledgement_mac"]),
+        secret=key.secret,
+    ):
+        raise DrBlobWorkerError("DR blob receipt acknowledgement signature is invalid")
+    unsigned = {
+        name: value
+        for name, value in payload.items()
+        if name not in {"acknowledgement_hash", "acknowledgement_mac"}
+    }
     expected = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
     if not secrets.compare_digest(str(payload["acknowledgement_hash"]), expected):
         raise DrBlobWorkerError("DR blob receipt acknowledgement hash mismatch")
@@ -640,6 +665,7 @@ async def report_one_blob_receipt(
             request_hash=request_hash,
             content_hash=str(snapshot["content_hash"]),
             receipt_hash=str(snapshot["receipt_hash"]),
+            key=key,
         )
     except (httpx.HTTPError, ValueError, DrBlobWorkerError):
         return "retry"

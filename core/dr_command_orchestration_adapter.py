@@ -32,7 +32,12 @@ TYPED_OPERATIONS = {
 class TypedOperationBackend(Protocol):
     async def classification_verified(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def source_fenced(self, plan: FailoverPlan) -> dict[str, Any]: ...
-    async def target_ready(self, plan: FailoverPlan) -> dict[str, Any]: ...
+    async def target_ready(
+        self,
+        plan: FailoverPlan,
+        *,
+        source_tail_boundary: dict[str, Any],
+    ) -> dict[str, Any]: ...
     async def target_term_acquired(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def source_connections_drained(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def route_switched(self, plan: FailoverPlan) -> dict[str, Any]: ...
@@ -94,8 +99,16 @@ class TypedOrchestrationAdapter:
     async def source_fenced(self, plan: FailoverPlan) -> dict[str, Any]:
         return await self.backend.source_fenced(plan)
 
-    async def target_ready(self, plan: FailoverPlan) -> dict[str, Any]:
-        result = await self.backend.target_ready(plan)
+    async def target_ready(
+        self,
+        plan: FailoverPlan,
+        *,
+        source_tail_boundary: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await self.backend.target_ready(
+            plan,
+            source_tail_boundary=source_tail_boundary,
+        )
         if result.get("readiness_hash") != plan.readiness_hash:
             raise DrOrchestrationError("target readiness hash differs from the approved plan")
         return result

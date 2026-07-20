@@ -32,6 +32,7 @@ from core.telegram_delivery_runtime_policy import (
 from core.telegram_delivery_notification_action_contract import (
     TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
     telegram_notification_action_policy,
+    telegram_notification_action_policy_from_source,
 )
 from core.telegram_delivery_interaction_result_contract import (
     TelegramInteractionResultContract,
@@ -1019,7 +1020,6 @@ async def claim_next_telegram_notification_outbox(
                             TELEGRAM_NOTIFICATION_SOURCE_PROJECT_USER_JOINED,
                             TELEGRAM_NOTIFICATION_SOURCE_OFFER_REPEAT_RESPONSE,
                             TELEGRAM_NOTIFICATION_SOURCE_OFFER_SUCCESS,
-                            *TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES,
                         }
                     )
                 )
@@ -1146,9 +1146,8 @@ async def deliver_claimed_telegram_notification_outbox(
         )
 
     user = await db.get(User, int(outbox.recipient_user_id)) if recipient_user_id is not None else None
-    telegram_id = _coerce_int(getattr(user, "telegram_id", None))
-    if user is None or telegram_id is None:
-        reason = "telegram_user_missing_current" if user is None else "telegram_unlinked_current"
+    if user is None:
+        reason = "telegram_user_missing_current"
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1166,9 +1165,111 @@ async def deliver_claimed_telegram_notification_outbox(
             reason=reason,
         )
 
-    access_decision = await evaluate_bot_access(db, user)
-    if not access_decision.allowed:
-        reason = access_decision.reason or "bot_access_denied_current"
+    try:
+        action_policy = telegram_notification_action_policy_from_source(
+            getattr(outbox, "source_type", None)
+        )
+    except ValueError:
+        action_policy = None
+
+    channel_removal_kind: str | None = None
+    if action_policy is not None:
+        # Queue-v1 and the rollback-safe legacy worker share the exact same
+        # state-bound route contract.  Inactive/deleted notices intentionally
+        # remain deliverable after normal bot access has been revoked.
+        from core.telegram_delivery_notification_action_freshness import (
+            telegram_notification_action_channel_removal_kind,
+            telegram_notification_action_deleted_route_is_reassigned,
+            telegram_notification_action_outbox_is_deleted_account_notice,
+            telegram_notification_action_outbox_matches_current_user,
+            telegram_notification_action_outbox_waits_for_current_user,
+        )
+
+        try:
+            deleted_notice = telegram_notification_action_outbox_is_deleted_account_notice(
+                outbox
+            )
+            if telegram_notification_action_outbox_waits_for_current_user(outbox, user):
+                await _mark_outbox(
+                    db,
+                    outbox=outbox,
+                    status=TelegramNotificationOutboxStatus.RETRYABLE_FAILED,
+                    current_time=current_time,
+                    reason="notification_action_source_version_pending",
+                    retry_after_seconds=1,
+                    error_class="TelegramNotificationDependencyPending",
+                    error_message="notification_action_source_version_pending",
+                )
+                return TelegramNotificationDeliveryResult(
+                    status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_RETRY_PENDING,
+                    current_server=normalized_server,
+                    outbox=outbox,
+                    recipient_user_id=recipient_user_id,
+                    reason="notification_action_source_version_pending",
+                    retry_after_seconds=1,
+                )
+            route_reassigned = bool(
+                deleted_notice
+                and await telegram_notification_action_deleted_route_is_reassigned(
+                    db, outbox
+                )
+            )
+            state_matches = telegram_notification_action_outbox_matches_current_user(
+                outbox, user, now=current_time
+            )
+            channel_removal_kind = telegram_notification_action_channel_removal_kind(
+                outbox
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            await _mark_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.TERMINAL_FAILED,
+                current_time=current_time,
+                reason="notification_action_payload_invalid",
+                error_class=type(exc).__name__,
+                error_message=str(exc)[:500],
+            )
+            return TelegramNotificationDeliveryResult(
+                status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_TERMINAL_FAILED,
+                current_server=normalized_server,
+                outbox=outbox,
+                recipient_user_id=recipient_user_id,
+                reason="notification_action_payload_invalid",
+                alert_required=True,
+            )
+        if route_reassigned or not state_matches:
+            reason = (
+                "notification_action_deleted_route_reassigned"
+                if route_reassigned
+                else "notification_action_source_superseded"
+            )
+            await _mark_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.SKIPPED,
+                current_time=current_time,
+                reason=reason,
+                error_class="TelegramNotificationSuperseded",
+                error_message=reason,
+            )
+            return TelegramNotificationDeliveryResult(
+                status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SKIPPED,
+                current_server=normalized_server,
+                outbox=outbox,
+                recipient_user_id=recipient_user_id,
+                reason=reason,
+            )
+        telegram_id = _coerce_int(
+            outbox.telegram_id_at_enqueue if deleted_notice else user.telegram_id
+        )
+        require_bot_access = bool(action_policy.require_bot_access)
+    else:
+        telegram_id = _coerce_int(getattr(user, "telegram_id", None))
+        require_bot_access = True
+
+    if telegram_id is None:
+        reason = "telegram_unlinked_current"
         await _mark_outbox(
             db,
             outbox=outbox,
@@ -1185,6 +1286,27 @@ async def deliver_claimed_telegram_notification_outbox(
             recipient_user_id=recipient_user_id,
             reason=reason,
         )
+
+    if require_bot_access:
+        access_decision = await evaluate_bot_access(db, user)
+        if not access_decision.allowed:
+            reason = access_decision.reason or "bot_access_denied_current"
+            await _mark_outbox(
+                db,
+                outbox=outbox,
+                status=TelegramNotificationOutboxStatus.SKIPPED,
+                current_time=current_time,
+                reason=reason,
+                error_class="BotAccessDenied",
+                error_message=reason,
+            )
+            return TelegramNotificationDeliveryResult(
+                status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SKIPPED,
+                current_server=normalized_server,
+                outbox=outbox,
+                recipient_user_id=recipient_user_id,
+                reason=reason,
+            )
 
     if await _outbox_excludes_current_customer(db, outbox, user):
         await _mark_outbox(
@@ -1205,15 +1327,62 @@ async def deliver_claimed_telegram_notification_outbox(
         )
 
     correlation_key = f"telegram-notification:{outbox.dedupe_key}:attempt:{int(outbox.attempt_count or 0)}"
-    gateway_result = await gateway_send(
-        telegram_id,
-        message,
-        parse_mode=outbox.parse_mode,
-        bot_token=bot_token,
-        idempotency_key=correlation_key,
+    previously_sent_message_id = (
+        _coerce_int(outbox.telegram_message_id)
+        if channel_removal_kind is not None
+        else None
     )
-    if gateway_result.ok:
-        telegram_message_id = gateway_result.message_id
+    gateway_result = None
+    if previously_sent_message_id is None:
+        gateway_result = await gateway_send(
+            telegram_id,
+            message,
+            parse_mode=outbox.parse_mode,
+            bot_token=bot_token,
+            idempotency_key=correlation_key,
+        )
+    if gateway_result is None or gateway_result.ok:
+        telegram_message_id = (
+            previously_sent_message_id
+            if gateway_result is None
+            else gateway_result.message_id
+        )
+        if channel_removal_kind is not None:
+            # Preserve successful message evidence before attempting the second
+            # provider effect.  A retry then performs only membership cleanup.
+            outbox.telegram_id_at_send = telegram_id
+            outbox.telegram_message_id = telegram_message_id
+            try:
+                from core.services.user_deletion_service import (
+                    remove_user_from_telegram_channel,
+                )
+
+                await remove_user_from_telegram_channel(
+                    telegram_id,
+                    require_delivery=True,
+                )
+            except Exception as exc:
+                await _mark_outbox(
+                    db,
+                    outbox=outbox,
+                    status=TelegramNotificationOutboxStatus.RETRYABLE_FAILED,
+                    current_time=current_time,
+                    reason="telegram_channel_membership_retry",
+                    telegram_id_at_send=telegram_id,
+                    telegram_message_id=telegram_message_id,
+                    retry_after_seconds=5,
+                    error_class=type(exc).__name__,
+                    error_message=str(exc)[:500],
+                )
+                return TelegramNotificationDeliveryResult(
+                    status=TELEGRAM_NOTIFICATION_DELIVERY_STATUS_RETRY_PENDING,
+                    current_server=normalized_server,
+                    outbox=outbox,
+                    recipient_user_id=recipient_user_id,
+                    telegram_message_id=telegram_message_id,
+                    reason="telegram_channel_membership_retry",
+                    retry_after_seconds=5,
+                )
         await _mark_outbox(
             db,
             outbox=outbox,

@@ -16,10 +16,11 @@ from sqlalchemy import update
 
 from core.dr_blob_plane import persist_content_addressed_bytes
 from core.dr_audit_anchor import build_audit_anchor, store_audit_anchor, verify_audit_anchor
-from core.dr_blob_worker import S3Config
+from core.dr_blob_worker import DrBlobWorkerError, S3Config, _verify_blob_receipt_ack
 from core.dr_delivery_worker import (
     ClaimedDeliveryBatch,
     DrDeliveryError,
+    _update_delivery_from_result,
     _verify_acknowledgement,
     parse_peer_urls,
 )
@@ -33,11 +34,13 @@ from core.dr_connectivity_classifier import (
 from core.dr_effects import DrEffectError, assert_epoch_bound_effect_execution
 from core.dr_event_outbox import DrEventOutboxError, _guard_bulk_or_raw_write, _record_identity, _row_payload
 from core.dr_event_protocol import canonical_json_bytes
+from core.dr_sync_auth import PairwiseDrKey, sign_acknowledgement
 from core.secure_file_io import append_hash_chained_jsonl
 from core.dr_projection_worker import projection_mode
 from core.dr_projection_worker import projection_version_decision
 from models.chat_file import ChatFile
 from models.user import User
+from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from scripts.verify_three_site_staging_inventory import InventoryError, verify_inventory
 
 
@@ -249,6 +252,32 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
             with self.assertRaisesRegex(DrEventOutboxError, "cannot bypass"):
                 _guard_bulk_or_raw_write(state)
 
+    def test_bulk_bot_local_queue_mutation_is_not_forced_onto_dr_event_plane(self):
+        state = SimpleNamespace(
+            execution_options={},
+            statement=update(TelegramDeliveryJobRecord)
+            .where(TelegramDeliveryJobRecord.id == 1)
+            .values(attempt_count=1),
+        )
+        with patch.multiple(
+            "core.dr_event_outbox.settings",
+            dr_event_protocol_enabled=True,
+            dr_event_protocol_strict=True,
+        ):
+            _guard_bulk_or_raw_write(state)
+
+        business_state = SimpleNamespace(
+            execution_options={},
+            statement=update(User).where(User.id == 1).values(full_name="unsafe"),
+        )
+        with patch.multiple(
+            "core.dr_event_outbox.settings",
+            dr_event_protocol_enabled=True,
+            dr_event_protocol_strict=True,
+        ):
+            with self.assertRaisesRegex(DrEventOutboxError, "bypass"):
+                _guard_bulk_or_raw_write(business_state)
+
     def test_projection_policy_separates_product_and_webapp_replica_data(self):
         self.assertEqual(
             projection_mode(table_name="offers", origin_site="bot_fi", destination_site="webapp_fi"),
@@ -306,10 +335,36 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         }
         event_hash = __import__("hashlib").sha256(canonical_json_bytes(envelope)).hexdigest()
         batch = ClaimedDeliveryBatch("claim", "webapp_ir", (envelope["event_id"],), (envelope,))
+        key = PairwiseDrKey("fi-to-ir", "webapp_fi", "webapp_ir", "s" * 32)
+        checkpoint_unsigned = {
+            "destination_site": "webapp_ir",
+            "origin_physical_site": "webapp_fi",
+            "producer_epoch": 2,
+            "contiguous_applied_sequence": 1,
+            "event_id": envelope["event_id"],
+            "envelope_hash": event_hash,
+        }
+        checkpoint = {
+            **checkpoint_unsigned,
+            "checkpoint_hash": __import__("hashlib").sha256(
+                json.dumps(
+                    checkpoint_unsigned,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest(),
+        }
         unsigned = {
             "destination_site": "webapp_ir",
+            "source_site": "webapp_fi",
+            "key_id": "fi-to-ir",
             "request_hash": "a" * 64,
-            "results": [{"event_id": envelope["event_id"], "status": "received", "envelope_hash": event_hash}],
+            "results": [{
+                "event_id": envelope["event_id"],
+                "status": "applied",
+                "envelope_hash": event_hash,
+                "applied_checkpoint": checkpoint,
+            }],
         }
         payload = {
             **unsigned,
@@ -317,10 +372,102 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
                 json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest(),
         }
-        self.assertIn(envelope["event_id"], _verify_acknowledgement(payload, batch=batch, request_hash="a" * 64))
+        payload["acknowledgement_mac"] = sign_acknowledgement(
+            payload=payload,
+            secret=key.secret,
+        )
+        self.assertIn(
+            envelope["event_id"],
+            _verify_acknowledgement(
+                payload,
+                batch=batch,
+                request_hash="a" * 64,
+                key=key,
+            ),
+        )
         payload["results"][0]["envelope_hash"] = "b" * 64
         with self.assertRaises(DrDeliveryError):
-            _verify_acknowledgement(payload, batch=batch, request_hash="a" * 64)
+            _verify_acknowledgement(
+                payload,
+                batch=batch,
+                request_hash="a" * 64,
+                key=key,
+            )
+
+    def test_transport_receipt_is_retryable_until_destination_applies(self):
+        now = datetime.now(timezone.utc)
+        row = SimpleNamespace(
+            attempt_count=1,
+            status="inflight",
+            acknowledged_at=None,
+            acknowledgement_hash=None,
+            next_attempt_at=None,
+            last_error_code=None,
+        )
+        _update_delivery_from_result(
+            row,
+            result={"status": "received"},
+            now=now,
+            acknowledgement_hash="a" * 64,
+            error_code=None,
+        )
+        self.assertEqual(row.status, "pending")
+        self.assertEqual(row.last_error_code, "remote_received")
+        self.assertIsNone(row.acknowledged_at)
+
+        _update_delivery_from_result(
+            row,
+            result={"status": "applied"},
+            now=now,
+            acknowledgement_hash="b" * 64,
+            error_code=None,
+        )
+        self.assertEqual(row.status, "acknowledged")
+        self.assertEqual(row.acknowledgement_hash, "b" * 64)
+        self.assertEqual(row.acknowledged_at, now)
+
+    def test_blob_receipt_acknowledgement_requires_pairwise_destination_signature(self):
+        key = PairwiseDrKey("ir-to-fi", "webapp_ir", "webapp_fi", "s" * 32)
+        unsigned = {
+            "destination_site": "webapp_fi",
+            "source_site": "webapp_ir",
+            "key_id": "ir-to-fi",
+            "request_hash": "a" * 64,
+            "content_hash": "b" * 64,
+            "receipt_hash": "c" * 64,
+            "delivery_hash": "d" * 64,
+        }
+        payload = {
+            **unsigned,
+            "acknowledgement_hash": __import__("hashlib").sha256(
+                canonical_json_bytes(unsigned)
+            ).hexdigest(),
+        }
+        payload["acknowledgement_mac"] = sign_acknowledgement(
+            payload=payload,
+            secret=key.secret,
+        )
+        self.assertEqual(
+            _verify_blob_receipt_ack(
+                payload,
+                destination_site="webapp_fi",
+                request_hash="a" * 64,
+                content_hash="b" * 64,
+                receipt_hash="c" * 64,
+                key=key,
+            ),
+            "d" * 64,
+        )
+        payload["delivery_hash"] = "e" * 64
+        with self.assertRaisesRegex(DrBlobWorkerError, "signature"):
+            _verify_blob_receipt_ack(
+                payload,
+                destination_site="webapp_fi",
+                request_hash="a" * 64,
+                content_hash="b" * 64,
+                receipt_hash="c" * 64,
+                key=key,
+            )
 
     def test_strict_webapp_provider_call_requires_effect_capability(self):
         with patch.multiple(
@@ -376,6 +523,40 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         )
         self.assertTrue(session_write.allowed)
 
+    def test_online_critical_write_requires_fresh_healthy_durability_evidence(self):
+        now = datetime.now(timezone.utc)
+        expired = decide_durability(
+            table_names={"trades"},
+            connectivity_mode="online",
+            event_journal_healthy=True,
+            blob_journal_healthy=True,
+            evidence_expires_at=now - timedelta(seconds=1),
+            now=now,
+        )
+        self.assertFalse(expired.allowed)
+        self.assertIn("durability_evidence_expired", expired.reasons)
+
+        unhealthy = decide_durability(
+            table_names={"offers"},
+            connectivity_mode="online",
+            event_journal_healthy=False,
+            blob_journal_healthy=True,
+            evidence_expires_at=now + timedelta(minutes=1),
+            now=now,
+        )
+        self.assertFalse(unhealthy.allowed)
+        self.assertIn("same_region_event_journal_unhealthy", unhealthy.reasons)
+
+        healthy = decide_durability(
+            table_names={"trades"},
+            connectivity_mode="online",
+            event_journal_healthy=True,
+            blob_journal_healthy=True,
+            evidence_expires_at=now + timedelta(minutes=1),
+            now=now,
+        )
+        self.assertTrue(healthy.allowed)
+
     def test_projection_version_rejects_old_term_and_same_epoch_other_site(self):
         self.assertEqual(
             projection_version_decision(
@@ -418,6 +599,7 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         with self.assertRaises(InventoryError):
             verify_inventory(payload, host_destructive=True)
         payload["campaign_id"] = "11111111-1111-4111-8111-111111111111"
+        payload["inventory_stage"] = "provisioned"
         payload["release_sha"] = "a" * 40
         payload["deployment_id"] = "staging-deployment-20260719"
         payload["object_storage"].update(
@@ -434,13 +616,21 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
             role["host_ip"] = f"10.20.0.{number}"
             role["release_sha"] = payload["release_sha"]
             role["deployment_id"] = payload["deployment_id"]
-            for field in (
-                "machine_id", "docker_daemon_id", "postgres_system_id",
-                "postgres_volume_id", "redis_volume_id", "uploads_volume_id",
-                "audit_root_id",
-            ):
-                if role[field] is not None:
-                    role[field] = f"staging-{role['role']}-{field}"
+            role["machine_id"] = f"{number:032x}"
+            role["docker_daemon_id"] = f"staging-docker-{role['role']}"
+            role["postgres_system_id"] = str(9000000000000000000 + number)
+            project = f"trading-bot-three-site-staging-{role['role'].replace('_', '-')}"
+            logical = {
+                "postgres_volume_id": f"{role['role']}_postgres",
+                "audit_root_id": f"{role['role']}_audit",
+            }
+            if role["role"] != "witness":
+                logical.update(
+                    redis_volume_id=f"{role['role']}_redis",
+                    uploads_volume_id=f"{role['role']}_uploads",
+                )
+            for field, volume in logical.items():
+                role[field] = f"{project}_{volume}"
         approved = verify_inventory(payload, host_destructive=True)
         self.assertEqual(approved["status"], "approved")
         valid_payload = json.loads(json.dumps(payload))

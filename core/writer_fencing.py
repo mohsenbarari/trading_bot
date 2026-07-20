@@ -318,9 +318,14 @@ def _set_database_capability_after_begin(session: Session, transaction, connecti
             "trading_bot.witness_lease_id": writer.witness_lease_id or "",
         }
     elif projection is not None or _is_projection_session(session):
+        from core.dr_database_roles import projection_scope_for_service
+
         settings_map = {
             "trading_bot.mutation_capability": "projection",
             "trading_bot.physical_site": str(getattr(settings, "physical_site", "") or ""),
+            "trading_bot.projection_scope": projection_scope_for_service(
+                getattr(settings, "trading_bot_service", None)
+            ),
         }
     elif _is_control_session(session):
         settings_map = {
@@ -349,7 +354,12 @@ def _enforce_writer_fence_before_commit(session: Session) -> None:
         getattr(session, "new", ()) or getattr(session, "dirty", ()) or getattr(session, "deleted", ())
     )
     if _strict_webapp_fencing_enabled() and (write_seen or pending):
-        if context is None and projection is None and not _is_control_session(session):
+        if (
+            context is None
+            and projection is None
+            and not _is_projection_session(session)
+            and not _is_control_session(session)
+        ):
             raise WriterFenceError("WebApp commit lacks an explicit writer/projection capability")
     if context is None:
         return

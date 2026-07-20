@@ -89,6 +89,52 @@ class WriterWitnessServiceRuntime:
     auth_max_age_seconds: int = 15
     auth_max_future_skew_seconds: int = 5
     clock: Callable[[AsyncSession], Awaitable[datetime]] = database_clock
+    database_user: str | None = None
+
+
+async def verify_witness_runtime_database_role(
+    session: AsyncSession,
+    *,
+    expected_user: str,
+) -> None:
+    """Reject owner, migrator, DDL-capable, or under-granted runtime identities."""
+
+    row = (
+        await session.execute(
+            text(
+                "SELECT current_user AS database_user, "
+                "pg_get_userbyid(database_definition.datdba) AS database_owner, "
+                "has_database_privilege(current_user, current_database(), 'CREATE') AS database_create, "
+                "has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create, "
+                "has_table_privilege(current_user, 'writer_witness_schema_version', 'SELECT') AS schema_read, "
+                "has_table_privilege(current_user, 'webapp_writer_witness_state', 'SELECT,UPDATE') AS state_dml, "
+                "has_table_privilege(current_user, 'webapp_writer_witness_receipts', 'SELECT,INSERT') AS receipt_dml, "
+                "has_table_privilege(current_user, 'dr_failover_operation_ledger', 'SELECT,INSERT,UPDATE') AS ledger_dml, "
+                "(SELECT count(*) FROM pg_class object "
+                " JOIN pg_namespace namespace ON namespace.oid=object.relnamespace "
+                " JOIN pg_roles owner ON owner.oid=object.relowner "
+                " WHERE namespace.nspname='public' AND owner.rolname=current_user) AS owned_objects "
+                "FROM pg_database database_definition "
+                "WHERE database_definition.datname=current_database()"
+            )
+        )
+    ).mappings().one_or_none()
+    if row is None:
+        raise WitnessServiceConfigurationError("writer witness database role evidence is missing")
+    if (
+        row["database_user"] != expected_user
+        or row["database_owner"] == expected_user
+        or row["database_create"] is True
+        or row["schema_create"] is True
+        or int(row["owned_objects"] or 0) != 0
+        or not all(
+            row[name]
+            for name in ("schema_read", "state_dml", "receipt_dml", "ledger_dml")
+        )
+    ):
+        raise WitnessServiceConfigurationError(
+            "writer witness runtime database identity is not least privilege"
+        )
 
 
 @dataclass(frozen=True)
@@ -502,6 +548,7 @@ def _build_runtime_from_settings(
         lease_duration_seconds=configured.writer_witness_lease_duration_seconds,
         auth_max_age_seconds=configured.writer_witness_auth_max_age_seconds,
         auth_max_future_skew_seconds=configured.writer_witness_max_clock_skew_seconds,
+        database_user=str(parsed_database_url.username),
     )
     return runtime, engine
 
@@ -518,6 +565,11 @@ def create_writer_witness_app(
                 app.state.writer_witness_runtime = active_runtime
                 async with active_runtime.session_factory() as session:
                     await verify_witness_schema(session)
+                    if active_runtime.database_user:
+                        await verify_witness_runtime_database_role(
+                            session,
+                            expected_user=active_runtime.database_user,
+                        )
                     await active_runtime.clock(session)
                     await load_witness_snapshot(session)
             else:
@@ -575,6 +627,11 @@ def create_writer_witness_app(
         try:
             async with service_runtime.session_factory() as session:
                 await verify_witness_schema(session)
+                if service_runtime.database_user:
+                    await verify_witness_runtime_database_role(
+                        session,
+                        expected_user=service_runtime.database_user,
+                    )
                 await service_runtime.clock(session)
                 await load_witness_snapshot(session)
         except Exception:
@@ -630,7 +687,7 @@ def create_writer_witness_app(
                         text(
                             "SELECT operation_id, operation_nonce, plan_hash, status, "
                             "reservation_receipt_id, reservation_receipt_hash, "
-                            "final_evidence_hash FROM dr_failover_operation_ledger "
+                            "final_evidence_hash, expires_at FROM dr_failover_operation_ledger "
                             "WHERE operation_id = :operation_id "
                             "OR operation_nonce = :operation_nonce FOR UPDATE"
                         ),
@@ -685,7 +742,12 @@ def create_writer_witness_app(
                             )
                         receipt_id = str(row["reservation_receipt_id"])
                         receipt_hash = str(row["reservation_receipt_hash"])
-                        status = "existing"
+                        status = (
+                            "expired"
+                            if row["status"] == "reserved"
+                            and witness_now >= row["expires_at"]
+                            else "existing"
+                        )
                 else:
                     if row is None or (
                         row["operation_id"] != command.operation_id

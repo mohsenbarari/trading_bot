@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import Date, DateTime, LargeBinary, Numeric, Time, and_, delete, select, update
+from sqlalchemy import Date, DateTime, LargeBinary, Numeric, Time, and_, delete, select, tuple_, update
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,7 @@ from models.dr_event import (
     DrEvent,
     DrEventReceipt,
     DrProjectionVersion,
+    DrReplayNonce,
     DrStreamCheckpoint,
 )
 from models.database import Base
@@ -423,13 +424,53 @@ async def apply_next_dr_projection() -> str:
             return "applied"
 
 
+async def cleanup_expired_replay_nonces(*, now: datetime | None = None) -> int:
+    """Delete expired replay keys in bounded batches after a safety grace."""
+
+    current = now or datetime.now(timezone.utc)
+    grace = max(
+        int(settings.dr_sync_request_max_age_seconds) * 2,
+        int(settings.dr_replay_nonce_retention_seconds),
+        60,
+    )
+    cutoff = current - timedelta(seconds=grace)
+    with projection_fence_scope(source="dr_nonce_retention"):
+        async with DrProjectionSessionLocal() as session:
+            keys = (
+                await session.execute(
+                    select(DrReplayNonce.key_id, DrReplayNonce.nonce)
+                    .where(DrReplayNonce.expires_at < cutoff)
+                    .order_by(DrReplayNonce.expires_at)
+                    .with_for_update(skip_locked=True)
+                    .limit(500)
+                )
+            ).all()
+            if not keys:
+                return 0
+            key_pairs = [tuple(row) for row in keys]
+            await session.execute(
+                delete(DrReplayNonce)
+                .where(
+                    tuple_(DrReplayNonce.key_id, DrReplayNonce.nonce).in_(key_pairs)
+                )
+                .execution_options(is_sync=True)
+            )
+            await session.commit()
+            return len(keys)
+
+
 async def dr_projection_loop() -> None:
     assert_not_dark_standby("dr_projection_worker")
     assert_background_job_authority(JOB_SYNC_WORKER)
     if not settings.dr_event_protocol_enabled:
         raise RuntimeError("DR projection worker requires DR_EVENT_PROTOCOL_ENABLED=true")
     await verify_three_site_database_role_bindings()
+    next_retention_at = 0.0
     while True:
+        loop_now = asyncio.get_running_loop().time()
+        if loop_now >= next_retention_at:
+            await cleanup_expired_replay_nonces()
+            next_retention_at = loop_now + 60.0
         result = await apply_next_dr_projection()
         await asyncio.sleep(0.05 if result == "applied" else 1.0)
 

@@ -1,5 +1,7 @@
 import logging
 import ipaddress
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -27,7 +29,7 @@ from core.deployment_surface import allowed_cors_origins
 from core.redis import init_redis, close_redis, get_redis_client
 from core.db import AsyncSessionLocal, get_db, init_db
 from core.events import setup_event_listeners
-from core.server_routing import SERVER_FOREIGN, normalize_server
+from core.server_routing import SERVER_FOREIGN, current_server, normalize_server
 from core.background_job_authority import (
     BackgroundJobAuthorityDecision,
     filter_allowed_background_job_factories,
@@ -36,7 +38,7 @@ from core.connectivity import connectivity_monitor_loop
 from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
-from core.trade_delivery_worker import telegram_trade_delivery_loop, webapp_trade_delivery_loop
+from core.trade_delivery_worker import webapp_trade_delivery_loop
 from core.telegram_delivery_runtime_policy import configured_telegram_delivery_runtime
 from core.telegram_registration_reconciliation_worker import (
     telegram_registration_reconciliation_loop,
@@ -62,6 +64,7 @@ from core.security import constant_time_secret_equals
 from core.request_logging import install_request_logging_middleware
 from core.public_webapp_url import public_webapp_url_for_links
 from core.runtime_identity import resolve_runtime_identity
+from core.dr_event_protocol import canonical_json_bytes
 from core.webapp_writer_control import (
     WriterControlError,
     WriterStateSnapshot,
@@ -75,10 +78,6 @@ from core.writer_fencing import (
     writer_fence_scope,
 )
 from core.writer_witness_contract import witness_public_key_is_valid
-from core.writer_witness_client import (
-    writer_witness_client_configuration_reasons,
-    writer_witness_renewal_loop,
-)
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -268,11 +267,11 @@ def _background_job_factories(writer_snapshot: WriterStateSnapshot | None = None
         ("user_account_status", user_account_status_loop),
         ("trade_webapp_delivery", webapp_trade_delivery_loop),
     ]
-    telegram_runtime = configured_telegram_delivery_runtime()
-    if telegram_runtime.legacy_workers_enabled:
-        jobs.append(("trade_telegram_delivery", telegram_trade_delivery_loop))
-    if settings.writer_witness_required and settings.writer_witness_auto_renew_enabled:
-        jobs.append(("writer_witness_renewal", writer_witness_renewal_loop))
+    # Product API processes never own Telegram execution.  They deliberately
+    # run without BOT_TOKEN in the split Bot-FI topology; every Telegram effect
+    # is claimed only by the credentialed run_bot.py process (legacy workers or
+    # the queue-v1 executor).
+    configured_telegram_delivery_runtime()
     if registration_reconciliation_runtime_ready(settings):
         jobs.append(
             (
@@ -297,7 +296,7 @@ def _background_job_factories(writer_snapshot: WriterStateSnapshot | None = None
         )
     return filter_allowed_background_job_factories(
         jobs,
-        server_mode=settings.server_mode,
+        server_mode=current_server(),
         physical_site=RUNTIME_IDENTITY.physical_site,
         runtime_role=runtime_role,
         on_rejected=_log_background_job_authority_rejection,
@@ -891,6 +890,101 @@ def _origin_readiness_request_allowed(request: Request) -> bool:
     return _is_loopback_client(request.client.host if request.client else None)
 
 
+async def _promotion_source_tail_reasons(
+    request: Request,
+    db: AsyncSession,
+    *,
+    action: str,
+    target_epoch: int,
+) -> tuple[tuple[str, ...], dict[str, object] | None, int | None]:
+    """Bind target readiness to the immutable tail captured after source fencing."""
+
+    if action not in {"promote_ir", "failback_fi"} or target_epoch < 2:
+        return ("source_tail_boundary_unavailable",), None, None
+    expected_source = "webapp_fi" if action == "promote_ir" else "webapp_ir"
+    expected_source_epoch = target_epoch - 1
+    try:
+        boundary = {
+            "mode": str(request.query_params.get("source_tail_mode") or ""),
+            "origin_site": str(
+                request.query_params.get("source_tail_origin_site") or ""
+            ),
+            "target_site": RUNTIME_IDENTITY.physical_site,
+            "producer_epoch": int(
+                request.query_params.get("source_tail_producer_epoch", "")
+            ),
+            "final_sequence": int(
+                request.query_params.get("source_tail_final_sequence", "")
+            ),
+            "final_transaction_hash": str(
+                request.query_params.get("source_tail_final_transaction_hash") or ""
+            ),
+            "estimated_unreplicated_events": int(
+                request.query_params.get(
+                    "source_tail_estimated_unreplicated_events", ""
+                )
+            ),
+        }
+    except (TypeError, ValueError):
+        return ("source_tail_boundary_invalid",), None, None
+    supplied_hash = str(request.query_params.get("source_tail_boundary_hash") or "")
+    expected_hash = hashlib.sha256(canonical_json_bytes(boundary)).hexdigest()
+    if (
+        boundary["mode"] != "proven"
+        or boundary["origin_site"] != expected_source
+        or boundary["producer_epoch"] != expected_source_epoch
+        or boundary["final_sequence"] < 0
+        or boundary["estimated_unreplicated_events"] != 0
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(boundary["final_transaction_hash"])
+        )
+        or not re.fullmatch(r"[0-9a-f]{64}", supplied_hash)
+        or not secrets.compare_digest(supplied_hash, expected_hash)
+    ):
+        return ("source_tail_boundary_invalid",), None, None
+    boundary["boundary_hash"] = supplied_hash
+    final_sequence = int(boundary["final_sequence"])
+    if final_sequence == 0:
+        return (), boundary, 0
+    try:
+        row = (
+            await db.execute(
+                text(
+                    "SELECT c.contiguous_applied_sequence, r.status AS receipt_status, "
+                    "jsonb_extract_path_text(e.destination_streams, "
+                    ":target_site, 'transaction_hash') AS transaction_hash "
+                    "FROM dr_stream_checkpoints c "
+                    "LEFT JOIN dr_event_receipts r ON "
+                    "r.destination_site = c.destination_site "
+                    "AND r.origin_physical_site = c.origin_physical_site "
+                    "AND r.producer_epoch = c.producer_epoch "
+                    "AND r.producer_sequence = :final_sequence "
+                    "LEFT JOIN dr_events e ON e.event_id = r.event_id "
+                    "WHERE c.destination_site = :target_site "
+                    "AND c.origin_physical_site = :source_site "
+                    "AND c.producer_epoch = :source_epoch"
+                ),
+                {
+                    "final_sequence": final_sequence,
+                    "target_site": RUNTIME_IDENTITY.physical_site,
+                    "source_site": expected_source,
+                    "source_epoch": expected_source_epoch,
+                },
+            )
+        ).mappings().one_or_none()
+    except Exception:
+        return ("source_tail_checkpoint_unavailable",), boundary, None
+    applied_sequence = int(row["contiguous_applied_sequence"]) if row is not None else -1
+    if (
+        row is None
+        or applied_sequence < final_sequence
+        or row["receipt_status"] != "applied"
+        or row["transaction_hash"] != boundary["final_transaction_hash"]
+    ):
+        return ("source_tail_not_applied",), boundary, applied_sequence
+    return (), boundary, applied_sequence
+
+
 @app.get("/health/live")
 async def get_health_live():
     return {
@@ -936,10 +1030,6 @@ async def get_health_origin_ready(
         reasons.append("writer_witness_not_enforced")
     elif not witness_public_key_is_valid(settings.writer_witness_public_key):
         reasons.append("writer_witness_public_key_invalid")
-    if settings.writer_witness_required and not settings.writer_witness_auto_renew_enabled:
-        reasons.append("writer_witness_auto_renew_disabled")
-    if settings.writer_witness_required:
-        reasons.extend(writer_witness_client_configuration_reasons(RUNTIME_IDENTITY))
     database_ok, redis_ok, dependency_reasons = await _local_dependency_health(db)
     reasons.extend(dependency_reasons)
     try:
@@ -1055,8 +1145,6 @@ async def get_health_promotion_ready(
         reasons.append("writer_witness_not_enforced")
     elif not witness_public_key_is_valid(settings.writer_witness_public_key):
         reasons.append("writer_witness_public_key_invalid")
-    if settings.writer_witness_required:
-        reasons.extend(writer_witness_client_configuration_reasons(RUNTIME_IDENTITY))
 
     database_ok, redis_ok, dependency_reasons = await _local_dependency_health(db)
     reasons.extend(dependency_reasons)
@@ -1064,8 +1152,12 @@ async def get_health_promotion_ready(
         writer_snapshot = await load_writer_snapshot(db)
         if writer_snapshot.control_state != "fenced" or writer_snapshot.active_site is not None:
             reasons.append("promotion_target_not_locally_fenced")
-        if expected_epoch and expected_epoch != writer_snapshot.writer_epoch + 1:
-            reasons.append("promotion_epoch_not_exact_next")
+        # A previously active site can legitimately lag the global Witness by
+        # more than one term (FI1 -> IR2 -> FI3).  Readiness must reject stale
+        # or equal local terms, while the Witness remains the authority that
+        # enforces the globally exact next epoch during acquisition.
+        if expected_epoch and expected_epoch <= writer_snapshot.writer_epoch:
+            reasons.append("promotion_epoch_not_newer_than_local")
     except WriterControlError:
         writer_snapshot = None
         reasons.append("writer_state_unavailable")
@@ -1100,6 +1192,15 @@ async def get_health_promotion_ready(
             manifest_kind="promotion",
         )
     )
+    source_tail_reasons, source_tail_boundary, target_applied_sequence = (
+        await _promotion_source_tail_reasons(
+            request,
+            db,
+            action=action,
+            target_epoch=expected_epoch,
+        )
+    )
+    reasons.extend(source_tail_reasons)
     if action == "failback_fi":
         expected_database_hash = str(
             request.query_params.get("expected_database_fingerprint_hash") or ""
@@ -1174,6 +1275,9 @@ async def get_health_promotion_ready(
             "no_critical_conflicts": True,
             "background_jobs_ready": True,
             "fencing_acknowledged": True,
+            "source_tail_boundary_hash": source_tail_boundary["boundary_hash"],
+            "target_applied_sequence": target_applied_sequence,
+            "target_applied_through_boundary": True,
         }
         evidence_hash = validate_readiness_evidence(
             evidence,
@@ -1193,6 +1297,8 @@ async def get_health_promotion_ready(
         "redis_ok": redis_ok,
         "readiness_evidence": evidence,
         "readiness_hash": evidence_hash,
+        "source_tail_boundary": source_tail_boundary,
+        "target_applied_sequence": target_applied_sequence,
         "reasons": reasons,
     }
     return JSONResponse(

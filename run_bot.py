@@ -23,7 +23,7 @@ from bot.handlers import (
     link_account, # 👈 Added
     default
 )
-from core.db import init_db, AsyncSessionLocal
+from core.db import init_db, AsyncSessionLocal, verify_three_site_database_role_bindings
 from core.events import setup_event_listeners
 from bot.middlewares import (
     AuthMiddleware,
@@ -37,6 +37,7 @@ from core.logging_config import configure_logging
 from core.offer_publication_worker import offer_telegram_publication_loop
 from core.telegram_admin_broadcast_worker import telegram_admin_broadcast_delivery_loop
 from core.telegram_notification_outbox_worker import telegram_notification_outbox_delivery_loop
+from core.telegram_market_notice_worker import telegram_market_notice_delivery_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop
 from core.telegram_delivery_queue_worker import telegram_delivery_queue_loop
 from core.telegram_delivery_queue_limiter import (
@@ -59,6 +60,50 @@ logger = logging.getLogger(__name__)
 
 class BotRuntimeSurfaceError(RuntimeError):
     """Raised when the Telegram bot entrypoint is started on a forbidden surface."""
+
+
+class BotRuntimeTaskError(RuntimeError):
+    """Raised when a required Bot child task exits before polling shuts down."""
+
+
+async def supervise_bot_runtime(
+    *,
+    polling_coro,
+    child_coroutines,
+) -> None:
+    """Fail the process if any required worker stops unexpectedly."""
+
+    polling_task = asyncio.create_task(polling_coro, name="telegram-polling")
+    child_tasks = [
+        asyncio.create_task(coro, name=f"bot-child-{index}")
+        for index, coro in enumerate(child_coroutines, start=1)
+    ]
+    runtime_tasks = [polling_task, *child_tasks]
+    try:
+        done, _ = await asyncio.wait(
+            runtime_tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if polling_task in done:
+            await polling_task
+            return
+        failed_task = next(task for task in child_tasks if task in done)
+        try:
+            await failed_task
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise BotRuntimeTaskError(
+                f"required Bot child task failed: {failed_task.get_name()}"
+            ) from exc
+        raise BotRuntimeTaskError(
+            f"required Bot child task exited unexpectedly: {failed_task.get_name()}"
+        )
+    finally:
+        for task in runtime_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*runtime_tasks, return_exceptions=True)
 
 
 def configured_telegram_delivery_queue_worker_factory(settings_obj):
@@ -105,6 +150,7 @@ def telegram_execution_worker_factories(
             telegram_trade_delivery_loop,
             telegram_admin_broadcast_delivery_loop,
             telegram_notification_outbox_delivery_loop,
+            telegram_market_notice_delivery_loop,
         )
     if runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
         if runtime.legacy_workers_enabled or not runtime.queue_worker_enabled:
@@ -154,6 +200,7 @@ async def main():
 
     # Initialize Database
     await init_db()
+    await verify_three_site_database_role_bindings()
 
     # Register SQLAlchemy event listeners for sync & realtime events
     setup_event_listeners()
@@ -196,20 +243,20 @@ async def main():
     dp.include_router(default.router)
 
     logger.info("🤖 Bot started...")
-    suggestion_sync_task = asyncio.create_task(listen_trade_suggestion_events(bot))
-    telegram_execution_tasks = [
-        asyncio.create_task(worker_factory())
-        for worker_factory in telegram_execution_worker_factories(telegram_runtime)
-    ]
-    runtime_tasks = [suggestion_sync_task, *telegram_execution_tasks]
     try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
+        await supervise_bot_runtime(
+            polling_coro=dp.start_polling(bot),
+            child_coroutines=[
+                listen_trade_suggestion_events(bot),
+                *(
+                    worker_factory()
+                    for worker_factory in telegram_execution_worker_factories(
+                        telegram_runtime
+                    )
+                ),
+            ],
+        )
     finally:
-        for task in runtime_tasks:
-            task.cancel()
-        await asyncio.gather(*runtime_tasks, return_exceptions=True)
         await bot.session.close()
 
 if __name__ == "__main__":

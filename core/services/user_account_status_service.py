@@ -14,13 +14,13 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.accountant_relation_service import list_active_accountants_for_owner
 from core.services.session_service import force_clear_sessions
-from core.services.user_deletion_service import remove_user_from_telegram_channel
-from core.telegram_delivery_runtime_policy import (
+from core.services.user_deletion_service import remove_user_from_telegram_channel  # compatibility import
+from core.telegram_delivery_runtime_policy import (  # compatibility import
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
-from core.utils import create_user_notification, send_telegram_notification, utc_now
+from core.utils import create_user_notification, send_telegram_notification, utc_now  # compatibility import
 from models.user import User
 
 
@@ -144,37 +144,33 @@ async def _send_or_enqueue_account_status_telegram(
 ) -> None:
     user_id = int(getattr(user, "id"))
     telegram_id = int(getattr(user, "telegram_id"))
-    if (
-        configured_telegram_delivery_runtime().mode
-        == TelegramDeliveryRuntimeMode.QUEUE_V1
-    ):
-        # Local import avoids a cycle through bot_access_policy, which reads
-        # the account-status helpers during notification freshness checks.
-        from core.services.telegram_notification_outbox_service import (
-            TelegramNotificationRecipient,
-            enqueue_account_status_telegram_notification_once,
-        )
+    # WebApp/API processes are intent producers only.  The durable outbox is
+    # consumed by the credentialed Bot process in both legacy and queue-v1
+    # modes, so missing API credentials can never silently lose this notice.
+    # Local import avoids a cycle through bot_access_policy.
+    from core.services.telegram_notification_outbox_service import (
+        TelegramNotificationRecipient,
+        enqueue_account_status_telegram_notification_once,
+    )
 
-        flush = getattr(db, "flush", None)
-        if callable(flush):
-            await flush()
-        user_sync_version = int(getattr(user, "sync_version", 0) or 0)
+    flush = getattr(db, "flush", None)
+    if callable(flush):
+        await flush()
+    user_sync_version = max(1, int(getattr(user, "sync_version", 1) or 1))
 
-        await enqueue_account_status_telegram_notification_once(
-            db,
-            recipient=TelegramNotificationRecipient(
-                user_id=int(user_id),
-                telegram_id=int(telegram_id),
-            ),
-            source_id=source_id,
-            text=message,
-            account_status=account_status,
-            messenger_blocked=messenger_blocked,
-            user_sync_version=user_sync_version,
-            action=queue_action,
-        )
-    else:
-        await send_telegram_notification(telegram_id, message)
+    await enqueue_account_status_telegram_notification_once(
+        db,
+        recipient=TelegramNotificationRecipient(
+            user_id=int(user_id),
+            telegram_id=int(telegram_id),
+        ),
+        source_id=source_id,
+        text=message,
+        account_status=account_status,
+        messenger_blocked=messenger_blocked,
+        user_sync_version=user_sync_version,
+        action=queue_action,
+    )
 
 
 async def _notify_user_and_optional_telegram(
@@ -237,16 +233,6 @@ async def transition_user_account_status(
             account_status=UserAccountStatus.INACTIVE,
             messenger_blocked=False,
         )
-
-        if (
-            user.telegram_id is not None
-            and configured_telegram_delivery_runtime().mode
-            != TelegramDeliveryRuntimeMode.QUEUE_V1
-        ):
-            try:
-                await remove_user_from_telegram_channel(user.telegram_id)
-            except Exception:
-                logger.exception("Failed to remove inactive user %s from Telegram channel", user.id)
 
         return UserAccountStatusTransitionResult(
             changed=True,
