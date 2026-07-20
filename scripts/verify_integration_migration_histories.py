@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, text
 
 
 HISTORY_LABELS = frozenset({"fresh", "main_parent", "queue_parent", "dr_parent"})
-DEFAULT_EXPECTED_HEAD = "d542e3f4a6b7"
+DEFAULT_EXPECTED_HEAD = "e653f4a5b7c8"
 
 
 class MigrationHistoryError(RuntimeError):
@@ -164,13 +164,20 @@ FINGERPRINT_SQL = text(
             jsonb_build_object(
               'name', sequence.relname, 'owner', owner.rolname,
               'acl', COALESCE(sequence.relacl::text, ''),
-              'owned_by', COALESCE(owned_relation.relname || '.' || owned_column.attname, '')
+              'owned_by', COALESCE(owned_relation.relname || '.' || owned_column.attname, ''),
+              'start', sequence_definition.seqstart,
+              'increment', sequence_definition.seqincrement,
+              'minimum', sequence_definition.seqmin,
+              'maximum', sequence_definition.seqmax,
+              'cache', sequence_definition.seqcache,
+              'cycle', sequence_definition.seqcycle
             ) ORDER BY sequence.relname
           ), '[]'::jsonb
         )
         FROM pg_class sequence
         JOIN pg_namespace namespace ON namespace.oid=sequence.relnamespace
         JOIN pg_roles owner ON owner.oid=sequence.relowner
+        JOIN pg_sequence sequence_definition ON sequence_definition.seqrelid=sequence.oid
         LEFT JOIN pg_depend dependency
           ON dependency.objid=sequence.oid AND dependency.classid='pg_class'::regclass
          AND dependency.deptype IN ('a','i')
@@ -187,7 +194,8 @@ FINGERPRINT_SQL = text(
               'name', role.rolname, 'login', role.rolcanlogin,
               'inherit', role.rolinherit, 'superuser', role.rolsuper,
               'create_role', role.rolcreaterole, 'create_db', role.rolcreatedb,
-              'replication', role.rolreplication, 'bypass_rls', role.rolbypassrls
+              'replication', role.rolreplication, 'bypass_rls', role.rolbypassrls,
+              'config', COALESCE(to_jsonb(role.rolconfig), '[]'::jsonb)
             ) ORDER BY role.rolname
           ), '[]'::jsonb
         ) FROM pg_roles role
@@ -220,6 +228,101 @@ FINGERPRINT_SQL = text(
         FROM pg_namespace namespace
         JOIN pg_roles owner ON owner.oid=namespace.nspowner
         WHERE namespace.nspname='public'
+      ),
+      'relations', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'name', relation.relname, 'kind', relation.relkind,
+              'persistence', relation.relpersistence,
+              'owner', owner.rolname,
+              'acl', COALESCE(relation.relacl::text, ''),
+              'row_security', relation.relrowsecurity,
+              'force_row_security', relation.relforcerowsecurity,
+              'replica_identity', relation.relreplident
+            ) ORDER BY relation.relname
+          ), '[]'::jsonb
+        )
+        FROM pg_class relation
+        JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+        JOIN pg_roles owner ON owner.oid=relation.relowner
+        WHERE namespace.nspname='public' AND relation.relkind IN ('r','p','S','v','m')
+      ),
+      'row_policies', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'table', policy.tablename, 'name', policy.policyname,
+              'permissive', policy.permissive, 'roles', policy.roles,
+              'command', policy.cmd, 'using', COALESCE(policy.qual, ''),
+              'check', COALESCE(policy.with_check, '')
+            ) ORDER BY policy.tablename, policy.policyname
+          ), '[]'::jsonb
+        ) FROM pg_policies policy WHERE policy.schemaname='public'
+      ),
+      'default_acls', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'owner', owner.rolname,
+              'schema', COALESCE(namespace.nspname, ''),
+              'object_type', default_acl.defaclobjtype,
+              'acl', COALESCE(default_acl.defaclacl::text, '')
+            ) ORDER BY owner.rolname, COALESCE(namespace.nspname, ''), default_acl.defaclobjtype
+          ), '[]'::jsonb
+        )
+        FROM pg_default_acl default_acl
+        JOIN pg_roles owner ON owner.oid=default_acl.defaclrole
+        LEFT JOIN pg_namespace namespace ON namespace.oid=default_acl.defaclnamespace
+      ),
+      'database', (
+        SELECT jsonb_build_object(
+          'owner', owner.rolname,
+          'acl', COALESCE(database_definition.datacl::text, '')
+        )
+        FROM pg_database database_definition
+        JOIN pg_roles owner ON owner.oid=database_definition.datdba
+        WHERE database_definition.datname=current_database()
+      ),
+      'role_database_settings', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'role', COALESCE(role.rolname, '*'),
+              'database', CASE WHEN setting.setdatabase=0 THEN '*' ELSE 'current' END,
+              'settings', setting.setconfig
+            ) ORDER BY COALESCE(role.rolname, '*'), setting.setdatabase=0
+          ), '[]'::jsonb
+        )
+        FROM pg_db_role_setting setting
+        LEFT JOIN pg_roles role ON role.oid=setting.setrole
+        LEFT JOIN pg_database database_definition ON database_definition.oid=setting.setdatabase
+        WHERE setting.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname=current_database()))
+          AND (
+            setting.setrole=0 OR left(role.rolname,5)='hist_'
+            OR left(role.rolname,7)='webapp_' OR left(role.rolname,4)='bot_'
+          )
+      ),
+      'parameter_acls', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object('parameter', parameter.parname, 'acl', parameter.paracl::text)
+            ORDER BY parameter.parname
+          ), '[]'::jsonb
+        ) FROM pg_parameter_acl parameter
+      ),
+      'extensions', (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'name', extension.extname, 'version', extension.extversion,
+              'owner', owner.rolname, 'schema', namespace.nspname
+            ) ORDER BY extension.extname
+          ), '[]'::jsonb
+        )
+        FROM pg_extension extension
+        JOIN pg_roles owner ON owner.oid=extension.extowner
+        JOIN pg_namespace namespace ON namespace.oid=extension.extnamespace
       ),
       'table_grants', (
         SELECT COALESCE(

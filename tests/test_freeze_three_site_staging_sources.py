@@ -41,6 +41,7 @@ class FreezeThreeSiteStagingSourcesTests(unittest.TestCase):
                 expected_source_release_sha={"bot_fi": "b" * 40, "webapp_fi": "c" * 40},
                 project_name="trading_bot_staging",
                 output=output,
+                rollback_bundle_dir=Path(directory) / "rollback-bundle",
                 confirm=confirmation_phrase(
                     "11111111-1111-4111-8111-111111111111",
                     ["bot_fi", "webapp_fi"],
@@ -57,12 +58,18 @@ class FreezeThreeSiteStagingSourcesTests(unittest.TestCase):
 
             def fake_run(arguments, *, timeout=30):  # noqa: ANN001, ARG001
                 nonlocal ps_calls
-                if "ps" in arguments:
+                if "config" in arguments and "--format" in arguments:
+                    return "services:\n  app:\n    image: pinned"
+                if arguments[:2] == ["/usr/bin/docker", "inspect"]:
+                    return "sha256:" + "1" * 64
+                if "ps" in arguments and "--status" in arguments:
                     ps_calls += 1
                     return (
                         "db\nredis\napp\nsync_worker\nforeign_app\nbot"
                         if ps_calls == 1 else "db\nredis"
                     )
+                if "ps" in arguments and "-q" in arguments:
+                    return "container-" + arguments[-1]
                 if "printenv" in arguments:
                     service = arguments[arguments.index("exec") + 2]
                     return "b" * 40 if service == "foreign_app" else "c" * 40
@@ -101,6 +108,16 @@ class FreezeThreeSiteStagingSourcesTests(unittest.TestCase):
             self.assertEqual(evidence["postgres"]["system_id"], "8000000000000000001")
             self.assertFalse(evidence["redis_observation"]["restore"])
             self.assertIn("bot", evidence["previously_running_services"])
+            reference = evidence["legacy_restore_bundle"]
+            self.assertEqual(
+                reference["schema"],
+                "three-site-staging-legacy-restore-bundle-reference-v1",
+            )
+            self.assertTrue(Path(reference["path"]).is_file())
+            manifest = json.loads(Path(reference["path"]).read_text(encoding="utf-8"))
+            self.assertEqual(
+                set(manifest["service_images"]), set(evidence["previously_running_services"])
+            )
 
 
 if __name__ == "__main__":

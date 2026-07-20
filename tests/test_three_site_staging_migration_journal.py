@@ -22,6 +22,7 @@ class ThreeSiteStagingMigrationJournalTests(unittest.TestCase):
                 role="webapp_fi",
                 role_compose_sha256="c" * 64,
                 role_env_sha256="d" * 64,
+                image_inventory_sha256="e" * 64,
             )
             started = journal.begin_phase("seed_restored")
             self.assertEqual(started["status"], "rollback_required")
@@ -42,6 +43,7 @@ class ThreeSiteStagingMigrationJournalTests(unittest.TestCase):
                 role="witness",
                 role_compose_sha256="c" * 64,
                 role_env_sha256="d" * 64,
+                image_inventory_sha256="e" * 64,
             )
             with self.assertRaisesRegex(MigrationJournalError, "out of order"):
                 journal.begin_phase("database_configured")
@@ -63,6 +65,7 @@ class ThreeSiteStagingMigrationJournalTests(unittest.TestCase):
                 role="bot_fi",
                 role_compose_sha256="c" * 64,
                 role_env_sha256="d" * 64,
+                image_inventory_sha256="e" * 64,
             )
             path.write_text(path.read_text().replace('"status": "active"', '"status": "finished"'))
             path.chmod(0o600)
@@ -79,6 +82,7 @@ class ThreeSiteStagingMigrationJournalTests(unittest.TestCase):
                 role="witness",
                 role_compose_sha256="c" * 64,
                 role_env_sha256="d" * 64,
+                image_inventory_sha256="e" * 64,
             )
             for phase in ROLE_PHASES["witness"]:
                 journal.begin_phase(phase)

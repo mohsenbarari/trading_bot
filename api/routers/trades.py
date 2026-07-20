@@ -1880,6 +1880,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return True
+    _assert_legacy_direct_delivery_owner()
 
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
@@ -2213,6 +2214,7 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     import asyncio
     
@@ -2254,6 +2256,7 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     
     bot_token = os.getenv("BOT_TOKEN")

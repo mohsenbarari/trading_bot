@@ -145,18 +145,31 @@ from models.market_runtime_state import MarketRuntimeState
 DATABASE_NAME_PATTERN = re.compile(r"^telegram_queue_stage3_[a-z0-9_]+_test$")
 
 
-def _test_database_urls() -> tuple[str, str] | None:
+def _test_database_urls() -> tuple[str, str, str] | None:
     explicit = str(os.getenv("TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL", "")).strip()
     if not explicit:
         return None
-    target = make_url(explicit)
-    if not DATABASE_NAME_PATTERN.fullmatch(str(target.database or "").lower()):
+    runtime_target = make_url(explicit)
+    owner_explicit = str(
+        os.getenv("TELEGRAM_QUEUE_STAGE3_TEST_OWNER_DATABASE_URL", explicit)
+    ).strip()
+    owner_target = make_url(owner_explicit)
+    if not DATABASE_NAME_PATTERN.fullmatch(str(runtime_target.database or "").lower()):
         raise RuntimeError(
             "Telegram queue PostgreSQL tests require a telegram_queue_stage3_*_test scratch database"
         )
+    if (
+        owner_target.host != runtime_target.host
+        or owner_target.port != runtime_target.port
+        or owner_target.database != runtime_target.database
+    ):
+        raise RuntimeError(
+            "Telegram queue owner and runtime URLs must address the same scratch database"
+        )
     return (
-        target.set(drivername="postgresql+psycopg2").render_as_string(hide_password=False),
-        target.set(drivername="postgresql+asyncpg").render_as_string(hide_password=False),
+        owner_target.set(drivername="postgresql+psycopg2").render_as_string(hide_password=False),
+        runtime_target.set(drivername="postgresql+psycopg2").render_as_string(hide_password=False),
+        runtime_target.set(drivername="postgresql+asyncpg").render_as_string(hide_password=False),
     )
 
 
@@ -279,7 +292,7 @@ def _run_alembic(sync_url: str, *args: str) -> None:
     env["DATABASE_URL"] = sync_url
     env["TRADING_BOT_MIGRATION_MODE"] = "scratch"
     env["TRADING_BOT_EXPECTED_CHECKOUT"] = os.getcwd()
-    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "d542e3f4a6b7"
+    env["TRADING_BOT_EXPECTED_ALEMBIC_HEAD"] = "e653f4a5b7c8"
     result = subprocess.run(
         [sys.executable, "scripts/run_guarded_scratch_alembic.py", *args],
         capture_output=True,
@@ -310,8 +323,8 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        sync_url, _ = DATABASE_URLS
-        _run_alembic(sync_url, "upgrade", "head")
+        owner_sync_url, _, _ = DATABASE_URLS
+        _run_alembic(owner_sync_url, "upgrade", "head")
 
     async def asyncSetUp(self):
         self.previous_process_owner_lease = (
@@ -320,8 +333,14 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         queue_worker._active_process_owner_lease = SimpleNamespace(
             assert_held=AsyncMock(return_value=None)
         )
-        _, async_url = DATABASE_URLS
+        owner_sync_url, _, async_url = DATABASE_URLS
         self.engine = create_async_engine(async_url, pool_pre_ping=True)
+        self.maintenance_engine = create_async_engine(
+            make_url(owner_sync_url)
+            .set(drivername="postgresql+asyncpg")
+            .render_as_string(hide_password=False),
+            pool_pre_ping=True,
+        )
         self.Session = async_sessionmaker(
             self.engine,
             class_=AsyncSession,
@@ -331,7 +350,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         # Fixture maintenance deliberately bypasses the application Session
         # listener.  The test body still exercises the exact strict-DR
         # application path; only scratch-owner reset SQL belongs here.
-        async with self.engine.begin() as connection:
+        async with self.maintenance_engine.begin() as connection:
             await connection.execute(
                 text(
                     "TRUNCATE TABLE telegram_delivery_runtime_gates, "
@@ -340,6 +359,23 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await connection.execute(text("ALTER SEQUENCE telegram_delivery_jobs_enqueued_seq_seq RESTART WITH 1"))
+        # The mutable feeder singleton is reset through the real application
+        # role and the exact Bot-FI database capability.  This proves the
+        # hardened writer trigger is active during every Queue test instead of
+        # silently weakening it for fixture setup.
+        async with self.engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "SELECT set_config('trading_bot.mutation_capability', "
+                    "'foreign_writer', true)"
+                )
+            )
+            await connection.execute(
+                text("SELECT set_config('trading_bot.physical_site', 'bot_fi', true)")
+            )
+            await connection.execute(
+                text("SELECT set_config('trading_bot.dr_producer_epoch', '1', true)")
+            )
             await connection.execute(
                 text(
                     "UPDATE telegram_delivery_feeder_states "
@@ -348,8 +384,39 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
+    async def _reset_authoritative_fixture(self, *statements) -> None:
+        """Reset scratch-only product rows without granting an owner bypass.
+
+        The production write guard correctly rejects direct owner writes.  A
+        fixture reset therefore disables enforcement only inside one owner
+        transaction, restores it before commit, and rolls the entire change
+        back if any reset statement fails.
+        """
+
+        async with self.maintenance_engine.begin() as connection:
+            disabled = await connection.scalar(
+                text(
+                    "UPDATE dr_database_runtime SET enforcement_enabled=false "
+                    "WHERE singleton_id=1 AND enforcement_enabled=true RETURNING 1"
+                )
+            )
+            if disabled != 1:
+                raise RuntimeError(
+                    "scratch fixture reset requires active database enforcement"
+                )
+            for statement, parameters in statements:
+                await connection.execute(text(statement), parameters)
+            restored = await connection.scalar(
+                text(
+                    "UPDATE dr_database_runtime SET enforcement_enabled=true "
+                    "WHERE singleton_id=1 AND enforcement_enabled=false RETURNING 1"
+                )
+            )
+            if restored != 1:
+                raise RuntimeError("scratch fixture reset failed to restore enforcement")
+
     async def test_two_processes_cannot_own_queue_executor_simultaneously(self):
-        sync_url, _ = DATABASE_URLS
+        _, sync_url, _ = DATABASE_URLS
         environment = os.environ.copy()
         environment["TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL"] = (
             make_url(sync_url)
@@ -416,6 +483,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             self.previous_process_owner_lease
         )
         await self.engine.dispose()
+        await self.maintenance_engine.dispose()
 
     @staticmethod
     def _enqueue_kwargs(
@@ -1091,19 +1159,11 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         public_id = "ofr_feeder_db_clock_pg"
         commodity_name = "feeder-db-clock-commodity"
         channel_id = -100123456701
-        async with self.engine.begin() as connection:
-            await connection.execute(
-                text("DELETE FROM offer_publication_states WHERE offer_public_id = :id"),
-                {"id": public_id},
-            )
-            await connection.execute(
-                text("DELETE FROM offers WHERE offer_public_id = :id"),
-                {"id": public_id},
-            )
-            await connection.execute(
-                text("DELETE FROM commodities WHERE name = :name"),
-                {"name": commodity_name},
-            )
+        await self._reset_authoritative_fixture(
+            ("DELETE FROM offer_publication_states WHERE offer_public_id = :id", {"id": public_id}),
+            ("DELETE FROM offers WHERE offer_public_id = :id", {"id": public_id}),
+            ("DELETE FROM commodities WHERE name = :name", {"name": commodity_name}),
+        )
         async with self.Session() as db:
             commodity = Commodity(name=commodity_name)
             db.add(commodity)
@@ -1156,23 +1216,19 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_offer_publication_deadline_edges_ignore_host_clock_skew(self):
         commodity_name = "publication-db-deadline-commodity"
-        async with self.engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "DELETE FROM offer_publication_states "
-                    "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')"
-                )
-            )
-            await connection.execute(
-                text(
-                    "DELETE FROM offers "
-                    "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')"
-                )
-            )
-            await connection.execute(
-                text("DELETE FROM commodities WHERE name = :name"),
-                {"name": commodity_name},
-            )
+        await self._reset_authoritative_fixture(
+            (
+                "DELETE FROM offer_publication_states "
+                "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')",
+                {},
+            ),
+            (
+                "DELETE FROM offers "
+                "WHERE offer_public_id IN ('ofr_db_deadline_edge_1', 'ofr_db_deadline_edge_2')",
+                {},
+            ),
+            ("DELETE FROM commodities WHERE name = :name", {"name": commodity_name}),
+        )
         async with self.Session() as db:
             commodity = Commodity(name=commodity_name)
             db.add(commodity)
@@ -3184,7 +3240,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
 
         for case in cases:
             with self.subTest(scope=case["name"]):
-                async with self.engine.begin() as connection:
+                async with self.maintenance_engine.begin() as connection:
                     await connection.execute(
                         text(
                             "TRUNCATE TABLE telegram_delivery_runtime_gates, "
@@ -3827,22 +3883,17 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         public_id = "ofr_stage3_freshness_pg"
         commodity_name = "stage3-freshness-commodity"
         channel_id = -100123456700
-        async with self.engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "DELETE FROM offer_publication_states "
-                    "WHERE offer_public_id = :public_id"
-                ),
+        await self._reset_authoritative_fixture(
+            (
+                "DELETE FROM offer_publication_states WHERE offer_public_id = :public_id",
                 {"public_id": public_id},
-            )
-            await connection.execute(
-                text("DELETE FROM offers WHERE offer_public_id = :public_id"),
+            ),
+            (
+                "DELETE FROM offers WHERE offer_public_id = :public_id",
                 {"public_id": public_id},
-            )
-            await connection.execute(
-                text("DELETE FROM commodities WHERE name = :name"),
-                {"name": commodity_name},
-            )
+            ),
+            ("DELETE FROM commodities WHERE name = :name", {"name": commodity_name}),
+        )
         async with self.Session() as db:
             commodity = Commodity(name=commodity_name)
             db.add(commodity)
@@ -4385,9 +4436,10 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
             transition_at=transition_at,
             notice_text=MARKET_OPENED_CHANNEL_NOTICE,
         )
-        async with self.engine.begin() as connection:
-            await connection.execute(text("DELETE FROM market_channel_notice_receipts"))
-            await connection.execute(text("DELETE FROM market_runtime_state"))
+        await self._reset_authoritative_fixture(
+            ("DELETE FROM market_channel_notice_receipts", {}),
+            ("DELETE FROM market_runtime_state", {}),
+        )
         async with self.Session() as db:
             db.add(
                 MarketRuntimeState(

@@ -225,7 +225,7 @@ an exact Object Storage version id is rejected.
 Each host begins with `run_three_site_staging_role_migration.py begin`. Run
 `restore-seed`, `configure-database`, and `start-private` on all four roles in
 their journal order. `configure-database` upgrades every supported predecessor
-to `d542e3f4a6b7`; on WebApp-IR it also converts the restored FI clone into a
+to `e653f4a5b7c8`; on WebApp-IR it also converts the restored FI clone into a
 locally fenced epoch-1 standby.
 
 The compatibility migration leaves WebApp-FI active at epoch 1 but does not
@@ -403,6 +403,24 @@ be exercised on the migrated dedicated
 staging hosts, and included in the already-bound backend config. No driver is
 permitted to use production hosts, domains, buckets, or credentials. Execute
 only in the separately authorized window:
+
+Every backend invocation is preceded by a hash-journaled intent carrying a
+deterministic operation ID. Scenario and recovery invocations also receive a
+strictly increasing `--attempt`; a controller crash replays only the same
+intent or creates the next recovery attempt and can never reinterpret stale
+evidence as the current execution. Preflight, recovery, cleanup and finalize
+must each return a typed `three-site-full-matrix-operation-evidence-v1`
+artifact. The controller reopens its raw evidence, exact expected/observed
+assertions, residue count and production boundary before recording success.
+Scenario evidence is likewise rejected when a named assertion says `passed`
+but its observed value differs from the catalog-bound expected value.
+
+There is intentionally no tracked live driver in the repository at this
+source-remediation stage. Consequently the source controller may be reviewed
+and tested, but Gate D cannot be assembled or executed yet. Adding the real
+driver, independent scenario oracles and dedicated staging evidence is an
+explicit later gate, not an implementation detail that can be supplied by an
+operator-local script.
 
 ```text
 THREE_SITE_STAGING_FULL_MATRIX_CONFIRM=execute-authoritative-three-site-staging-full-matrix \

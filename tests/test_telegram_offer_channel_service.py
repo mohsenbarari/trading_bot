@@ -203,14 +203,12 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_queue_owner_never_calls_legacy_channel_gateway(self):
         client = FakeHttpClientContext(response=SimpleNamespace(status_code=200, text=""))
-        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
-
         with patch(
             "core.services.telegram_offer_channel_service.current_server",
             return_value="foreign",
         ), patch(
-            "core.services.telegram_offer_channel_service.configured_telegram_delivery_runtime",
-            return_value=runtime,
+            "core.services.telegram_offer_channel_service.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ), patch(
             "core.telegram_gateway.httpx.AsyncClient",
             return_value=client,

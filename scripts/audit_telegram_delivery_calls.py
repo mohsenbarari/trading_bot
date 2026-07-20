@@ -123,15 +123,15 @@ REMAINING_DISPOSITION_BUDGETS = {
 }
 EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "durable_exempt": 4,
-    "legacy_mode_guarded": 66,
-    "legacy_owner_guarded": 15,
+    "legacy_mode_guarded": 68,
+    "legacy_owner_guarded": 13,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
     "non_message_control": 2,
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "5086e0cb47bc7c34a0c22e43e3df40b4e535c68b89e5e0f2178f0e823154dc11"
+    "11f0593311dce5cfc3bceaf18207ac1f3b8d032087845aeb4ad7b0970e6ff1e2"
 )
 
 
@@ -504,6 +504,11 @@ def _block_always_exits(statements: Sequence[ast.stmt]) -> bool:
 
 
 def _statement_contains_legacy_assert(statement: ast.AST) -> bool:
+    # Definitions are declarations, not executed predecessors. Descending into
+    # a sibling/nested function here made its guard appear to dominate later
+    # provider calls in another function and allowed the audit to false-green.
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        return False
     for node in _iter_scope_nodes(
         statement,
         scope_root=statement,

@@ -123,22 +123,46 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
         operation: str,
         payload: dict[str, object],
         corrupt_envelope_hash: bool = False,
+        destinations: tuple[str, ...] = ("bot_fi", "webapp_ir"),
     ) -> None:  # noqa: ANN001
         event_id = str(uuid4())
         transaction_id = str(uuid4())
-        sequence = uuid4().int % 9_000_000_000 + 1
+        sequence = int(
+            connection.scalar(
+                text(
+                    "INSERT INTO dr_producer_cursors ("
+                    "origin_authority,origin_physical_site,producer_epoch,last_sequence) "
+                    "VALUES ('webapp','webapp_fi',1,1) ON CONFLICT ("
+                    "origin_authority,origin_physical_site,producer_epoch) DO UPDATE SET "
+                    "last_sequence=dr_producer_cursors.last_sequence+1,updated_at=clock_timestamp() "
+                    "RETURNING last_sequence"
+                )
+            )
+        )
         created_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         canonical_payload = json.loads(canonical_json_bytes(payload))
-        streams = {
-            site: {
-                "sequence": sequence + offset,
+        streams = {}
+        for site in destinations:
+            destination_sequence = int(
+                connection.scalar(
+                    text(
+                        "INSERT INTO dr_destination_cursors ("
+                        "origin_authority,origin_physical_site,producer_epoch,destination_site,last_sequence) "
+                        "VALUES ('webapp','webapp_fi',1,:site,1) ON CONFLICT ("
+                        "origin_authority,origin_physical_site,producer_epoch,destination_site) "
+                        "DO UPDATE SET last_sequence=dr_destination_cursors.last_sequence+1,"
+                        "updated_at=clock_timestamp() RETURNING last_sequence"
+                    ),
+                    {"site": site},
+                )
+            )
+            streams[site] = {
+                "sequence": destination_sequence,
                 "transaction_id": transaction_id,
                 "transaction_position": 1,
                 "transaction_size": 1,
                 "transaction_hash": "0" * 64,
             }
-            for offset, site in enumerate(("bot_fi", "webapp_ir"), 1)
-        }
         envelope = {
             "protocol_version": 2,
             "event_id": event_id,
@@ -170,7 +194,11 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
             streams[site]["transaction_hash"] = destination_transaction_hash(
                 [envelope], destination_site=site
             )
-        validated = validate_envelope(envelope)
+        validated_envelope_hash = (
+            validate_envelope(envelope).envelope_hash
+            if set(destinations) == {"bot_fi", "webapp_ir"}
+            else sha256_json(envelope)
+        )
         connection.execute(
             text(
                 "INSERT INTO dr_events ("
@@ -196,7 +224,7 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 "tombstone": operation == "DELETE",
                 "payload": canonical_json_bytes(canonical_payload).decode(),
                 "payload_hash": envelope["canonical_payload_hash"],
-                "envelope_hash": "b" * 64 if corrupt_envelope_hash else validated.envelope_hash,
+                "envelope_hash": "b" * 64 if corrupt_envelope_hash else validated_envelope_hash,
                 "created_at": created_at,
                 "transaction_id": transaction_id,
                 "transaction_hash": envelope["transaction_hash"],
@@ -266,6 +294,132 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                     text("ALTER TABLE commodities DISABLE TRIGGER trg_three_site_writer_term")
                 )
 
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                connection.execute(text("SET session_replication_role = 'replica'"))
+
+        with self.engines["owner"].connect() as connection:
+            non_always = list(
+                connection.execute(
+                    text(
+                        "SELECT trigger.tgname FROM pg_trigger trigger "
+                        "JOIN pg_class relation ON relation.oid=trigger.tgrelid "
+                        "JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace "
+                        "WHERE namespace.nspname='public' AND NOT trigger.tgisinternal "
+                        "AND trigger.tgname IN ("
+                        "'trg_three_site_writer_term','trg_three_site_event_coverage',"
+                        "'trg_three_site_mutation_capture','trg_three_site_cursor_guard',"
+                        "'trg_three_site_cursor_tail','trg_dr_events_immutable',"
+                        "'trg_dr_event_finalized','trg_dr_receiver_source_xid',"
+                        "'trg_dr_bind_local_sequences','trg_dr_event_mutation_binding',"
+                        "'trg_dr_effect_intent_immutable','trg_dr_effect_fanout_intent_immutable') "
+                        "AND trigger.tgenabled <> 'A'"
+                    )
+                )
+            )
+        self.assertEqual(non_always, [])
+
+    def test_application_has_no_delete_capability_on_service_internal_state(self) -> None:
+        tables = (
+            "dr_event_deliveries",
+            "dr_replay_nonces",
+            "dr_stream_checkpoints",
+            "dr_projection_versions",
+            "dr_event_destination_sequences",
+        )
+        with self.engines["application"].connect() as connection:
+            effective = {
+                table: bool(
+                    connection.scalar(
+                        text("SELECT has_table_privilege(current_user, :table, 'DELETE')"),
+                        {"table": f"public.{table}"},
+                    )
+                )
+                for table in tables
+            }
+        self.assertEqual(effective, {table: False for table in tables})
+
+    def test_mutation_capture_is_transaction_temporary_and_rejects_temp_poisoning(self) -> None:
+        with self.engines["owner"].connect() as connection:
+            self.assertIsNone(
+                connection.scalar(text("SELECT to_regclass('public.dr_authoritative_mutations')"))
+            )
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                connection.execute(
+                    text("CREATE TEMP TABLE trading_bot_authoritative_mutations (value integer)")
+                )
+                self._writer_settings(connection)
+                record_id = self._scratch_id()
+                connection.execute(
+                    text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                    {"id": record_id, "name": f"temp-poison-{record_id}"},
+                )
+
+    def test_local_event_requires_exact_destinations_and_a_real_mutation(self) -> None:
+        for destinations in (("bot_fi",), ("bot_fi", "webapp_fi", "webapp_ir")):
+            with self.subTest(destinations=destinations), self.assertRaises(DBAPIError):
+                with self.engines["application"].begin() as connection:
+                    self._writer_settings(connection)
+                    record_id = self._scratch_id()
+                    self._record_coverage_event(
+                        connection,
+                        table="commodities",
+                        record_id=record_id,
+                        operation="INSERT",
+                        payload={"id": record_id, "name": f"entitlement-{record_id}"},
+                        destinations=destinations,
+                    )
+
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                record_id = self._scratch_id()
+                self._record_coverage_event(
+                    connection,
+                    table="commodities",
+                    record_id=record_id,
+                    operation="INSERT",
+                    payload={"id": record_id, "name": f"orphan-{record_id}"},
+                )
+
+    def test_application_cannot_jump_or_delete_local_sequence_cursors(self) -> None:
+        with self.engines["application"].begin() as connection:
+            self._writer_settings(connection)
+            record_id = self._scratch_id()
+            payload = {"id": record_id, "name": f"cursor-seed-{record_id}"}
+            self._record_coverage_event(
+                connection,
+                table="commodities",
+                record_id=record_id,
+                operation="INSERT",
+                payload=payload,
+            )
+            connection.execute(
+                text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                payload,
+            )
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                connection.execute(
+                    text(
+                        "UPDATE dr_producer_cursors SET last_sequence=last_sequence+2 "
+                        "WHERE origin_authority='webapp' AND origin_physical_site='webapp_fi' "
+                        "AND producer_epoch=1"
+                    )
+                )
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                connection.execute(
+                    text(
+                        "DELETE FROM dr_destination_cursors "
+                        "WHERE origin_authority='webapp' AND origin_physical_site='webapp_fi' "
+                        "AND producer_epoch=1 AND destination_site='bot_fi'"
+                    )
+                )
+
     def test_application_role_accepts_current_term_and_rejects_stale_term(self) -> None:
         record_id = self._scratch_id()
         with self.engines["application"].begin() as connection:
@@ -290,6 +444,55 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                 connection.execute(
                     text("UPDATE commodities SET name = 'stale-scratch' WHERE id = :id"),
                     {"id": record_id},
+                )
+
+    def test_fenced_source_rejects_a_fresh_application_reconnect(self) -> None:
+        """A process that reconnects after drain cannot extend the source tail."""
+        record_id = self._scratch_id()
+        with self.engines["owner"].begin() as connection:
+            original = dict(
+                connection.execute(
+                    text(
+                        "SELECT active_site, control_state, reason "
+                        "FROM webapp_writer_state WHERE authority='webapp'"
+                    )
+                ).mappings().one()
+            )
+            connection.execute(
+                text(
+                    "UPDATE webapp_writer_state SET active_site=NULL, "
+                    "control_state='fenced', reason='scratch-reconnect-fence' "
+                    "WHERE authority='webapp'"
+                )
+            )
+        try:
+            # This begins a new physical database session after the committed
+            # admission fence.  Supplying the old, otherwise-valid Writer term
+            # must not let it update cursors, append an event, or mutate data.
+            self.engines["application"].dispose()
+            with self.assertRaises(DBAPIError):
+                with self.engines["application"].begin() as connection:
+                    self._writer_settings(connection)
+                    self._record_coverage_event(
+                        connection,
+                        table="commodities",
+                        record_id=record_id,
+                        operation="INSERT",
+                        payload={"id": record_id, "name": f"late-{record_id}"},
+                    )
+                    connection.execute(
+                        text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                        {"id": record_id, "name": f"late-{record_id}"},
+                    )
+        finally:
+            with self.engines["owner"].begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE webapp_writer_state SET active_site=:active_site, "
+                        "control_state=:control_state, reason=:reason "
+                        "WHERE authority='webapp'"
+                    ),
+                    original,
                 )
 
     def test_application_cannot_fabricate_coverage_with_wrong_payload(self) -> None:
@@ -553,8 +756,11 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
         effect_id = str(uuid4())
         idempotency_key = "scratch-effect-" + uuid4().hex
         producer_sequence = uuid4().int % 9_000_000_000 + 1
-        with self.engines["application"].begin() as connection:
-            self._writer_settings(connection)
+        # This test isolates the effect-intent state machine. Seed its immutable
+        # foreign-key parent through the receiver's foreign-event path so the
+        # owner role is never used as a runtime-DML bypass.
+        with self.engines["receiver"].begin() as connection:
+            self._projection_scope(connection, "receiver")
             connection.execute(
                 text(
                     "INSERT INTO dr_events ("
@@ -563,7 +769,7 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                     "operation, canonical_payload, canonical_payload_hash, envelope_hash, "
                     "schema_version, writer_epoch"
                     ") VALUES ("
-                    ":event_id, 1, 'webapp', 'webapp_fi', 1, :producer_sequence, "
+                    ":event_id, 1, 'foreign', 'bot_fi', 1, :producer_sequence, "
                     "'scratch_effect', :aggregate_id, 'INSERT', '{}'::jsonb, repeat('b', 64), "
                     "repeat('c', 64), 1, 1"
                     ")"
@@ -574,6 +780,8 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                     "producer_sequence": producer_sequence,
                 },
             )
+        with self.engines["application"].begin() as connection:
+            self._writer_settings(connection)
             connection.execute(
                 text(
                     "INSERT INTO dr_effect_outbox ("

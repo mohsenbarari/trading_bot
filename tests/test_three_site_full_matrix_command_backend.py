@@ -40,6 +40,7 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 from pathlib import Path
                 parser = argparse.ArgumentParser()
                 parser.add_argument('--operation', required=True)
+                parser.add_argument('--operation-id', required=True)
                 parser.add_argument('--campaign-id', required=True)
                 parser.add_argument('--campaign-hash', required=True)
                 parser.add_argument('--release-sha', required=True)
@@ -48,6 +49,7 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 parser.add_argument('--phase')
                 parser.add_argument('--scenario-id')
                 parser.add_argument('--iteration', type=int)
+                parser.add_argument('--attempt', type=int)
                 parser.add_argument('--failed')
                 args = parser.parse_args()
                 path = args.artifact_root / f'{args.operation}.json'
@@ -59,6 +61,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                     'status': 'passed', 'campaign_id': args.campaign_id,
                     'campaign_hash': args.campaign_hash, 'release_sha': args.release_sha,
                     'activation_sha': args.activation_sha, 'production_touched': False,
+                    'operation_id': args.operation_id,
+                    'driver_attempt': args.attempt,
                     'evidence_hash': digest, 'artifact_path': path.name,
                     'artifact_sha256': digest, 'artifact_size': len(body),
                 }))
@@ -107,7 +111,9 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 campaign_id=identity.campaign_id,
                 release_sha=identity.release_sha,
             )
-            result = await backend.preflight(identity)
+            result = await backend.preflight(
+                identity, operation_id="22222222-2222-4222-8222-222222222222"
+            )
             self.assertEqual(result["status"], "passed")
             self.assertEqual(result["evidence_hash"], result["artifact_sha256"])
             self.assertTrue((artifact_root / result["artifact_path"]).is_file())
@@ -124,6 +130,46 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                     campaign_id=identity.campaign_id,
                     release_sha=identity.release_sha,
                 )
+
+    async def test_scenario_attempt_is_forwarded_as_fixed_argv(self):
+        stack, repo, artifact_root, config, identity = self._fixture()
+        with stack:
+            backend = CommandFullMatrixBackend(
+                config=config,
+                repo_root=repo,
+                artifact_root=artifact_root,
+                campaign_id=identity.campaign_id,
+                release_sha=identity.release_sha,
+            )
+            phase = next(iter(PHASES))
+            result = await backend.execute_scenario(
+                identity,
+                phase=phase,
+                scenario_id=PHASE_SCENARIOS[phase][0],
+                iteration=1,
+                attempt=2,
+                operation_id="22222222-2222-4222-8222-222222222222",
+            )
+            self.assertEqual(result["driver_attempt"], 2)
+            backend.close()
+
+    async def test_invocation_uses_sealed_bytes_after_path_replacement(self):
+        stack, repo, artifact_root, config, identity = self._fixture()
+        with stack:
+            backend = CommandFullMatrixBackend(
+                config=config,
+                repo_root=repo,
+                artifact_root=artifact_root,
+                campaign_id=identity.campaign_id,
+                release_sha=identity.release_sha,
+            )
+            driver = repo / config["driver"]["path"]
+            driver.write_text("raise SystemExit(91)\n")
+            result = await backend.preflight(
+                identity, operation_id="22222222-2222-4222-8222-222222222222"
+            )
+            self.assertEqual(result["status"], "passed")
+            backend.close()
 
     async def test_execute_rejects_backend_config_not_bound_by_campaign_inputs(self):
         with tempfile.TemporaryDirectory() as directory:

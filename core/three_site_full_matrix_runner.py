@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any, Callable, Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from core.dr_event_protocol import canonical_json_bytes
 from core.secure_file_io import (
@@ -35,6 +36,7 @@ from core.three_site_full_matrix_campaign import (
     verify_bound_artifacts,
     verify_campaign,
     verify_complete_matrix,
+    verify_operation_evidence,
     verify_scenario_evidence,
 )
 
@@ -57,7 +59,9 @@ class CampaignIdentity:
 
 
 class FullMatrixExecutionBackend(Protocol):
-    async def preflight(self, identity: CampaignIdentity) -> dict[str, Any]: ...
+    async def preflight(
+        self, identity: CampaignIdentity, *, operation_id: str
+    ) -> dict[str, Any]: ...
 
     async def recover_interrupted(
         self,
@@ -66,6 +70,8 @@ class FullMatrixExecutionBackend(Protocol):
         phase: str,
         scenario_id: str,
         iteration: int,
+        attempt: int,
+        operation_id: str,
     ) -> dict[str, Any]: ...
 
     async def execute_scenario(
@@ -75,6 +81,8 @@ class FullMatrixExecutionBackend(Protocol):
         phase: str,
         scenario_id: str,
         iteration: int,
+        attempt: int,
+        operation_id: str,
     ) -> dict[str, Any]: ...
 
     async def cleanup_phase(
@@ -84,9 +92,12 @@ class FullMatrixExecutionBackend(Protocol):
         phase: str,
         iteration: int,
         failed: bool,
+        operation_id: str,
     ) -> dict[str, Any]: ...
 
-    async def finalize(self, identity: CampaignIdentity) -> dict[str, Any]: ...
+    async def finalize(
+        self, identity: CampaignIdentity, *, operation_id: str
+    ) -> dict[str, Any]: ...
 
 
 def _now() -> str:
@@ -100,6 +111,23 @@ def _identity_fields(identity: CampaignIdentity) -> dict[str, Any]:
         "release_sha": identity.release_sha,
         "activation_sha": identity.activation_sha,
     }
+
+
+def _operation_id(
+    identity: CampaignIdentity,
+    kind: str,
+    *,
+    phase: str = "",
+    scenario_id: str = "",
+    iteration: int = 0,
+    failed: bool | None = None,
+    attempt: int = 0,
+) -> str:
+    material = (
+        f"{identity.campaign_hash}:{kind}:{iteration}:{phase}:{scenario_id}:"
+        f"{'' if failed is None else str(failed).lower()}:{attempt}"
+    )
+    return str(uuid5(NAMESPACE_URL, material))
 
 
 def _validate_identity_result(
@@ -137,18 +165,54 @@ def _validate_identity_result(
     return {**result, "artifact_path": relative}
 
 
+def _verify_typed_operation_result(
+    value: dict[str, Any],
+    *,
+    identity: CampaignIdentity,
+    operation_kind: str,
+    operation_id: str,
+    operation_context: dict[str, Any],
+    artifact_root: Path,
+) -> None:
+    evidence = secure_json(
+        artifact_root / value["artifact_path"],
+        label=f"Full Matrix {operation_kind} typed evidence",
+    )
+    verify_operation_evidence(
+        evidence,
+        campaign={
+            "campaign_id": identity.campaign_id,
+            "release_sha": identity.release_sha,
+            "activation_sha": identity.activation_sha,
+        },
+        campaign_hash=identity.campaign_hash,
+        operation_kind=operation_kind,
+        operation_id=operation_id,
+        operation_context=operation_context,
+        artifact_root=artifact_root,
+    )
+
+
 def _validate_preflight(
-    result: Any, identity: CampaignIdentity, *, artifact_root: Path
+    result: Any, identity: CampaignIdentity, *, operation_id: str, artifact_root: Path
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "production_touched", "evidence_hash",
-        "artifact_path", "artifact_sha256", "artifact_size",
+        "artifact_path", "artifact_sha256", "artifact_size", "operation_id",
     }
-    return _validate_identity_result(
+    value = _validate_identity_result(
         result, identity=identity, fields=fields, label="preflight",
         artifact_root=artifact_root,
     )
+    if value["operation_id"] != operation_id:
+        raise FullMatrixRunnerError("Full Matrix preflight operation ID differs")
+    _verify_typed_operation_result(
+        value, identity=identity, operation_kind="preflight",
+        operation_id=operation_id, operation_context=_operation_context(),
+        artifact_root=artifact_root,
+    )
+    return value
 
 
 def _validate_recovery(
@@ -158,13 +222,15 @@ def _validate_recovery(
     phase: str,
     scenario_id: str,
     iteration: int,
+    attempt: int,
+    operation_id: str,
     artifact_root: Path,
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
-        "activation_sha", "phase", "scenario_id", "iteration",
+        "activation_sha", "phase", "scenario_id", "iteration", "attempt",
         "residue_count", "production_touched", "evidence_hash",
-        "artifact_path", "artifact_sha256", "artifact_size",
+        "artifact_path", "artifact_sha256", "artifact_size", "operation_id",
     }
     value = _validate_identity_result(
         result, identity=identity, fields=fields, label="interrupted recovery",
@@ -174,12 +240,23 @@ def _validate_recovery(
         value["phase"] != phase
         or value["scenario_id"] != scenario_id
         or value["iteration"] != iteration
+        or value["attempt"] != attempt
+        or value["operation_id"] != operation_id
         or type(value["residue_count"]) is not int
         or value["residue_count"] != 0
     ):
         raise FullMatrixRunnerError(
             "Full Matrix interrupted scenario was not returned to a clean state"
         )
+    _verify_typed_operation_result(
+        value, identity=identity, operation_kind="recovery",
+        operation_id=operation_id,
+        operation_context=_operation_context(
+            phase=phase, scenario_id=scenario_id, iteration=iteration,
+            attempt=attempt,
+        ),
+        artifact_root=artifact_root,
+    )
     return value
 
 
@@ -190,14 +267,16 @@ def _validate_scenario(
     phase: str,
     scenario_id: str,
     iteration: int,
+    attempt: int,
+    operation_id: str,
     artifact_root: Path,
     controller_duration_seconds: float,
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
-        "activation_sha", "phase", "scenario_id", "iteration",
+        "activation_sha", "phase", "scenario_id", "iteration", "attempt",
         "assertion_count", "artifact_path", "artifact_sha256", "artifact_size",
-        "production_touched", "evidence_hash",
+        "production_touched", "evidence_hash", "operation_id",
     }
     value = _validate_identity_result(
         result, identity=identity, fields=fields, label="scenario",
@@ -208,6 +287,8 @@ def _validate_scenario(
         value["phase"] != phase
         or value["scenario_id"] != scenario_id
         or value["iteration"] != iteration
+        or value["attempt"] != attempt
+        or value["operation_id"] != operation_id
         or type(value["assertion_count"]) is not int
         or value["assertion_count"] < 1
         or SHA256.fullmatch(str(value["artifact_sha256"])) is None
@@ -230,6 +311,8 @@ def _validate_scenario(
         phase=phase,
         scenario_id=scenario_id,
         iteration=iteration,
+        attempt=attempt,
+        operation_id=operation_id,
         artifact_root=artifact_root,
     )
     if verified["assertion_count"] != value["assertion_count"]:
@@ -266,12 +349,14 @@ def _validate_recorded_scenario(
 ) -> dict[str, Any]:
     if not isinstance(result, dict) or set(result) != {
         "status", "campaign_id", "campaign_hash", "release_sha",
-        "activation_sha", "phase", "scenario_id", "iteration",
+        "activation_sha", "phase", "scenario_id", "iteration", "attempt",
         "assertion_count", "artifact_path", "artifact_sha256", "artifact_size",
         "production_touched", "evidence_hash", "started_at", "finished_at",
-        "duration_seconds", "raw_artifacts",
+        "duration_seconds", "raw_artifacts", "operation_id",
     }:
         raise FullMatrixRunnerError("Full Matrix recorded scenario fields are invalid")
+    if type(result.get("attempt")) is not int or result["attempt"] < 1:
+        raise FullMatrixRunnerError("Full Matrix recorded scenario attempt is invalid")
     base = {
         key: value
         for key, value in result.items()
@@ -283,6 +368,12 @@ def _validate_recorded_scenario(
         phase=phase,
         scenario_id=scenario_id,
         iteration=iteration,
+        attempt=result["attempt"],
+        operation_id=_operation_id(
+            identity, "scenario", phase=phase,
+            scenario_id=scenario_id, iteration=iteration,
+            attempt=result["attempt"],
+        ),
         artifact_root=artifact_root,
         controller_duration_seconds=float(result["duration_seconds"]),
     )
@@ -306,13 +397,15 @@ def _validate_cleanup(
     *,
     phase: str,
     iteration: int,
+    failed: bool,
+    operation_id: str,
     artifact_root: Path,
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "phase", "iteration", "residue_count",
         "production_touched", "evidence_hash",
-        "artifact_path", "artifact_sha256", "artifact_size",
+        "artifact_path", "artifact_sha256", "artifact_size", "operation_id",
     }
     value = _validate_identity_result(
         result, identity=identity, fields=fields, label="phase cleanup",
@@ -321,27 +414,45 @@ def _validate_cleanup(
     if (
         value["phase"] != phase
         or value["iteration"] != iteration
+        or value["operation_id"] != operation_id
         or type(value["residue_count"]) is not int
         or value["residue_count"] != 0
     ):
         raise FullMatrixRunnerError("Full Matrix phase cleanup left residue")
+    _verify_typed_operation_result(
+        value, identity=identity, operation_kind="cleanup",
+        operation_id=operation_id,
+        operation_context=_operation_context(
+            phase=phase, iteration=iteration, failed=failed
+        ),
+        artifact_root=artifact_root,
+    )
     return value
 
 
 def _validate_finalize(
-    result: Any, identity: CampaignIdentity, *, artifact_root: Path
+    result: Any, identity: CampaignIdentity, *, operation_id: str, artifact_root: Path
 ) -> dict[str, Any]:
     fields = {
         "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "residue_count", "production_touched", "evidence_hash",
-        "artifact_path", "artifact_sha256", "artifact_size",
+        "artifact_path", "artifact_sha256", "artifact_size", "operation_id",
     }
     value = _validate_identity_result(
         result, identity=identity, fields=fields, label="finalization",
         artifact_root=artifact_root,
     )
-    if type(value["residue_count"]) is not int or value["residue_count"] != 0:
+    if (
+        value["operation_id"] != operation_id
+        or type(value["residue_count"]) is not int
+        or value["residue_count"] != 0
+    ):
         raise FullMatrixRunnerError("Full Matrix finalization left residue")
+    _verify_typed_operation_result(
+        value, identity=identity, operation_kind="finalize",
+        operation_id=operation_id, operation_context=_operation_context(),
+        artifact_root=artifact_root,
+    )
     return value
 
 
@@ -364,6 +475,56 @@ def _journal_event(
     )
 
 
+def _operation_context(
+    *,
+    phase: str = "",
+    scenario_id: str = "",
+    iteration: int = 0,
+    failed: bool | None = None,
+    attempt: int = 0,
+) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "scenario_id": scenario_id,
+        "iteration": iteration,
+        "failed": failed,
+        "attempt": attempt,
+    }
+
+
+def _recorded_operation(
+    records: list[dict[str, Any]],
+    *,
+    operation_id: str,
+    operation_kind: str,
+    context: dict[str, Any],
+) -> tuple[bool, dict[str, Any] | None]:
+    starts = [
+        record for record in records
+        if record.get("operation_id") == operation_id
+        and record.get("event") in {"campaign_started", "operation_started"}
+    ]
+    passes = [
+        record for record in records
+        if record.get("operation_id") == operation_id
+        and record.get("event") == "operation_passed"
+    ]
+    if len(starts) > 1 or len(passes) > 1:
+        raise FullMatrixRunnerError("Full Matrix operation intent/completion is duplicated")
+    for record in [*starts, *passes]:
+        if (
+            record.get("operation_kind") != operation_kind
+            or record.get("operation_context") != context
+        ):
+            raise FullMatrixRunnerError("Full Matrix operation intent identity differs")
+    if passes and not starts:
+        raise FullMatrixRunnerError("Full Matrix operation completed without write-ahead intent")
+    result = passes[0].get("result") if passes else None
+    if passes and not isinstance(result, dict):
+        raise FullMatrixRunnerError("Full Matrix operation completion lacks a typed result")
+    return bool(starts), result
+
+
 def _journal_state(
     journal: Path,
     identity: CampaignIdentity,
@@ -374,7 +535,8 @@ def _journal_state(
     allowed_events = {
         "campaign_started", "scenario_started", "scenario_recovered",
         "scenario_passed", "phase_passed", "campaign_finalized",
-        "campaign_completed", "campaign_blocked",
+        "campaign_completed", "campaign_blocked", "operation_started",
+        "operation_passed",
     }
     if (
         not records
@@ -384,8 +546,10 @@ def _journal_state(
     ):
         raise FullMatrixRunnerError("Full Matrix journal event sequence is invalid")
     completed: dict[tuple[int, str, str], dict[str, Any]] = {}
-    started: set[tuple[int, str, str]] = set()
-    recovered: set[tuple[int, str, str]] = set()
+    attempts: dict[tuple[int, str, str], int] = {}
+    open_attempts: dict[tuple[int, str, str], int] = {}
+    operation_starts: dict[str, tuple[str, dict[str, Any]]] = {}
+    operation_passes: set[str] = set()
     for record in records:
         if (
             record.get("schema") != JOURNAL_SCHEMA
@@ -393,6 +557,66 @@ def _journal_state(
         ):
             raise FullMatrixRunnerError("Full Matrix journal identity/schema differs")
         event = record.get("event")
+        if event in {"campaign_started", "operation_started", "operation_passed"}:
+            operation_id = str(record.get("operation_id") or "")
+            operation_kind = str(record.get("operation_kind") or "")
+            context = record.get("operation_context")
+            if (
+                not operation_id
+                or not operation_kind
+                or not isinstance(context, dict)
+                or set(context) != {
+                    "phase", "scenario_id", "iteration", "failed", "attempt"
+                }
+                or operation_kind not in {"preflight", "recovery", "cleanup", "finalize"}
+                or not isinstance(context.get("phase"), str)
+                or not isinstance(context.get("scenario_id"), str)
+                or type(context.get("iteration")) is not int
+                or type(context.get("attempt")) is not int
+                or context.get("failed") not in {None, True, False}
+                or (operation_kind in {"preflight", "finalize"} and context != {
+                    "phase": "", "scenario_id": "", "iteration": 0,
+                    "failed": None, "attempt": 0,
+                })
+                or (operation_kind == "cleanup" and (
+                    context["phase"] not in PHASE_SCENARIOS
+                    or context["scenario_id"] != ""
+                    or not 1 <= context["iteration"] <= identity.repetitions
+                    or type(context["failed"]) is not bool
+                    or context["attempt"] != 0
+                ))
+                or (operation_kind == "recovery" and (
+                    context["phase"] not in PHASE_SCENARIOS
+                    or context["scenario_id"] not in PHASE_SCENARIOS.get(
+                        context["phase"], ()
+                    )
+                    or not 1 <= context["iteration"] <= identity.repetitions
+                    or context["failed"] is not None
+                    or context["attempt"] < 1
+                ))
+                or operation_id != _operation_id(
+                    identity, operation_kind,
+                    phase=context["phase"], scenario_id=context["scenario_id"],
+                    iteration=context["iteration"], failed=context["failed"],
+                    attempt=context["attempt"],
+                )
+            ):
+                raise FullMatrixRunnerError("Full Matrix operation journal fields are invalid")
+            if event in {"campaign_started", "operation_started"}:
+                if operation_id in operation_starts:
+                    raise FullMatrixRunnerError("Full Matrix operation intent is duplicated")
+                if event == "campaign_started" and operation_kind != "preflight":
+                    raise FullMatrixRunnerError("Full Matrix campaign start is not preflight intent")
+                operation_starts[operation_id] = (operation_kind, context)
+            else:
+                if (
+                    operation_id not in operation_starts
+                    or operation_id in operation_passes
+                    or operation_starts[operation_id] != (operation_kind, context)
+                    or not isinstance(record.get("result"), dict)
+                ):
+                    raise FullMatrixRunnerError("Full Matrix operation completion order is invalid")
+                operation_passes.add(operation_id)
         if event in {"scenario_started", "scenario_recovered", "scenario_passed"}:
             key = (record.get("iteration"), record.get("phase"), record.get("scenario_id"))
             if (
@@ -402,19 +626,44 @@ def _journal_state(
                 or key[2] not in PHASE_SCENARIOS[key[1]]
             ):
                 raise FullMatrixRunnerError("Full Matrix journal scenario identity is invalid")
+            attempt = record.get("attempt")
             if event == "scenario_started":
-                if key in started and key not in recovered:
-                    raise FullMatrixRunnerError("Full Matrix journal repeats an unclosed scenario")
-                started.add(key)
-                recovered.discard(key)
+                expected_attempt = attempts.get(key, 0) + 1
+                expected_operation_id = _operation_id(
+                    identity, "scenario", phase=str(key[1]),
+                    scenario_id=str(key[2]), iteration=int(key[0]),
+                    attempt=expected_attempt,
+                )
+                if (
+                    type(attempt) is not int
+                    or attempt != expected_attempt
+                    or key in open_attempts
+                    or key in completed
+                    or record.get("operation_id") != expected_operation_id
+                ):
+                    raise FullMatrixRunnerError("Full Matrix scenario intent ID is invalid")
+                attempts[key] = attempt
+                open_attempts[key] = attempt
             elif event == "scenario_recovered":
-                if key not in started or key in completed:
+                if open_attempts.get(key) != attempt or key in completed:
                     raise FullMatrixRunnerError("Full Matrix journal recovery order is invalid")
-                recovered.add(key)
+                del open_attempts[key]
             else:
                 result = record.get("result")
-                if key not in started or key in completed or not isinstance(result, dict):
+                expected_operation_id = _operation_id(
+                    identity, "scenario", phase=str(key[1]),
+                    scenario_id=str(key[2]), iteration=int(key[0]),
+                    attempt=int(attempt),
+                ) if type(attempt) is int else ""
+                if (
+                    open_attempts.get(key) != attempt
+                    or key in completed or not isinstance(result, dict)
+                    or record.get("operation_id") != expected_operation_id
+                    or result.get("operation_id") != expected_operation_id
+                    or result.get("attempt") != attempt
+                ):
                     raise FullMatrixRunnerError("Full Matrix journal completion order is invalid")
+                del open_attempts[key]
                 completed[key] = result
     completed_events = sum(record.get("event") == "campaign_completed" for record in records)
     finalized_events = [record for record in records if record.get("event") == "campaign_finalized"]
@@ -441,20 +690,24 @@ def _journal_state(
 def _interrupted_key(
     records: list[dict[str, Any]],
     completed: dict[tuple[int, str, str], dict[str, Any]],
-) -> tuple[int, str, str] | None:
-    pending: set[tuple[int, str, str]] = set()
+) -> tuple[int, str, str, int] | None:
+    pending: dict[tuple[int, str, str], int] = {}
     for record in records:
         if record.get("event") not in {"scenario_started", "scenario_recovered"}:
             continue
         key = (record["iteration"], record["phase"], record["scenario_id"])
         if record["event"] == "scenario_started":
-            pending.add(key)
+            pending[key] = record["attempt"]
         else:
-            pending.discard(key)
-    pending.difference_update(completed)
+            pending.pop(key, None)
+    for key in completed:
+        pending.pop(key, None)
     if len(pending) > 1:
         raise FullMatrixRunnerError("Full Matrix journal has multiple interrupted scenarios")
-    return next(iter(pending)) if pending else None
+    if not pending:
+        return None
+    key, attempt = next(iter(pending.items()))
+    return (*key, attempt)
 
 
 def _completed_phase_hashes(
@@ -545,6 +798,8 @@ def _phase_documents(
         "scenario_results": [
             {
                 "scenario_id": result["scenario_id"],
+                "operation_id": result["operation_id"],
+                "attempt": result["attempt"],
                 "status": "passed",
                 "assertion_count": result["assertion_count"],
                 "evidence_hash": result["evidence_hash"],
@@ -610,6 +865,59 @@ def _load_all_phase_evidence(
     return result
 
 
+async def _run_journaled_operation(
+    *,
+    journal: Path,
+    identity: CampaignIdentity,
+    records: list[dict[str, Any]],
+    operation_kind: str,
+    context: dict[str, Any],
+    invoke,  # noqa: ANN001
+    validate,  # noqa: ANN001
+    campaign_start_intent: bool = False,
+) -> dict[str, Any]:
+    operation_id = _operation_id(
+        identity,
+        operation_kind,
+        phase=str(context["phase"]),
+        scenario_id=str(context["scenario_id"]),
+        iteration=int(context["iteration"]),
+        failed=context["failed"],
+        attempt=int(context["attempt"]),
+    )
+    started, recorded_result = _recorded_operation(
+        records,
+        operation_id=operation_id,
+        operation_kind=operation_kind,
+        context=context,
+    )
+    if recorded_result is not None:
+        return validate(recorded_result, operation_id)
+    if not started:
+        event = "campaign_started" if campaign_start_intent else "operation_started"
+        appended = _journal_event(
+            journal,
+            identity,
+            event=event,
+            operation_id=operation_id,
+            operation_kind=operation_kind,
+            operation_context=context,
+        )
+        records.append(appended)
+    value = validate(await invoke(operation_id), operation_id)
+    appended = _journal_event(
+        journal,
+        identity,
+        event="operation_passed",
+        operation_id=operation_id,
+        operation_kind=operation_kind,
+        operation_context=context,
+        result=value,
+    )
+    records.append(appended)
+    return value
+
+
 async def run_full_matrix_campaign(
     *,
     campaign: dict[str, Any],
@@ -648,29 +956,46 @@ async def run_full_matrix_campaign(
         raise FullMatrixRunnerError(
             "completed Full Matrix campaign is immutable; use the evidence verifier"
         )
-    if not records:
-        preflight = _validate_preflight(
-            await backend.preflight(identity), identity, artifact_root=artifact_root
-        )
-        _journal_event(journal, identity, event="campaign_started", result=preflight)
-        records, completed = _journal_state(journal, identity)
-        completed_phases = _completed_phase_hashes(records)
+    preflight_context = _operation_context()
+    await _run_journaled_operation(
+        journal=journal,
+        identity=identity,
+        records=records,
+        operation_kind="preflight",
+        context=preflight_context,
+        campaign_start_intent=not records,
+        invoke=lambda operation_id: backend.preflight(
+            identity, operation_id=operation_id
+        ),
+        validate=lambda result, operation_id: _validate_preflight(
+            result, identity, operation_id=operation_id, artifact_root=artifact_root
+        ),
+    )
+    records, completed = _journal_state(journal, identity)
+    completed_phases = _completed_phase_hashes(records)
 
     interrupted = _interrupted_key(records, completed)
     if interrupted is not None:
-        iteration, phase, scenario_id = interrupted
-        recovery = _validate_recovery(
-            await backend.recover_interrupted(
-                identity,
-                phase=phase,
-                scenario_id=scenario_id,
-                iteration=iteration,
+        iteration, phase, scenario_id, attempt = interrupted
+        recovery_context = _operation_context(
+            phase=phase, scenario_id=scenario_id, iteration=iteration,
+            attempt=attempt,
+        )
+        recovery = await _run_journaled_operation(
+            journal=journal,
+            identity=identity,
+            records=records,
+            operation_kind="recovery",
+            context=recovery_context,
+            invoke=lambda operation_id: backend.recover_interrupted(
+                identity, phase=phase, scenario_id=scenario_id,
+                iteration=iteration, attempt=attempt, operation_id=operation_id,
             ),
-            identity,
-            phase=phase,
-            scenario_id=scenario_id,
-            iteration=iteration,
-            artifact_root=artifact_root,
+            validate=lambda result, operation_id: _validate_recovery(
+                result, identity, phase=phase, scenario_id=scenario_id,
+                iteration=iteration, attempt=attempt, operation_id=operation_id,
+                artifact_root=artifact_root,
+            ),
         )
         _journal_event(
             journal,
@@ -679,6 +1004,8 @@ async def run_full_matrix_campaign(
             phase=phase,
             scenario_id=scenario_id,
             iteration=iteration,
+            attempt=attempt,
+            operation_id=recovery["operation_id"],
             result=recovery,
         )
 
@@ -695,21 +1022,32 @@ async def run_full_matrix_campaign(
                         record["iteration"],
                         record["phase"],
                         str(record.get("scenario_id") or ""),
+                        int(record.get("attempt") or 0),
                     )
                     break
         cleanup_status = "not_required"
         cleanup_error: Exception | None = None
         if active is not None:
-            iteration, phase, _scenario_id = active
+            iteration, phase, _scenario_id, _attempt = active
             try:
-                _validate_cleanup(
-                    await backend.cleanup_phase(
-                        identity, phase=phase, iteration=iteration, failed=True
+                cleanup_context = _operation_context(
+                    phase=phase, iteration=iteration, failed=True
+                )
+                await _run_journaled_operation(
+                    journal=journal,
+                    identity=identity,
+                    records=records,
+                    operation_kind="cleanup",
+                    context=cleanup_context,
+                    invoke=lambda operation_id: backend.cleanup_phase(
+                        identity, phase=phase, iteration=iteration,
+                        failed=True, operation_id=operation_id,
                     ),
-                    identity,
-                    phase=phase,
-                    iteration=iteration,
-                    artifact_root=artifact_root,
+                    validate=lambda result, operation_id: _validate_cleanup(
+                        result, identity, phase=phase, iteration=iteration,
+                        failed=True,
+                        operation_id=operation_id, artifact_root=artifact_root,
+                    ),
                 )
                 cleanup_status = "passed"
             except Exception as exc:
@@ -792,6 +1130,18 @@ async def run_full_matrix_campaign(
                         results.append(result)
                         continue
                     started_at = _now()
+                    attempt = 1 + sum(
+                        record.get("event") == "scenario_started"
+                        and record.get("iteration") == iteration
+                        and record.get("phase") == phase
+                        and record.get("scenario_id") == scenario_id
+                        for record in records
+                    )
+                    scenario_operation_id = _operation_id(
+                        identity, "scenario", phase=phase,
+                        scenario_id=scenario_id, iteration=iteration,
+                        attempt=attempt,
+                    )
                     _journal_event(
                         journal,
                         identity,
@@ -799,6 +1149,8 @@ async def run_full_matrix_campaign(
                         phase=phase,
                         scenario_id=scenario_id,
                         iteration=iteration,
+                        attempt=attempt,
+                        operation_id=scenario_operation_id,
                     )
                     monotonic_started = monotonic()
                     result = _validate_scenario(
@@ -807,11 +1159,15 @@ async def run_full_matrix_campaign(
                             phase=phase,
                             scenario_id=scenario_id,
                             iteration=iteration,
+                            attempt=attempt,
+                            operation_id=scenario_operation_id,
                         ),
                         identity,
                         phase=phase,
                         scenario_id=scenario_id,
                         iteration=iteration,
+                        attempt=attempt,
+                        operation_id=scenario_operation_id,
                         artifact_root=artifact_root,
                         controller_duration_seconds=max(
                             0.0, monotonic() - monotonic_started
@@ -830,6 +1186,8 @@ async def run_full_matrix_campaign(
                         phase=phase,
                         scenario_id=scenario_id,
                         iteration=iteration,
+                        attempt=attempt,
+                        operation_id=scenario_operation_id,
                         result=result,
                     )
                     completed[key] = result
@@ -850,14 +1208,24 @@ async def run_full_matrix_campaign(
                         )
                     phase_evidence.append(evidence)
                     continue
-                cleanup = _validate_cleanup(
-                    await backend.cleanup_phase(
-                        identity, phase=phase, iteration=iteration, failed=False
+                cleanup_context = _operation_context(
+                    phase=phase, iteration=iteration, failed=False
+                )
+                cleanup = await _run_journaled_operation(
+                    journal=journal,
+                    identity=identity,
+                    records=records,
+                    operation_kind="cleanup",
+                    context=cleanup_context,
+                    invoke=lambda operation_id: backend.cleanup_phase(
+                        identity, phase=phase, iteration=iteration,
+                        failed=False, operation_id=operation_id,
                     ),
-                    identity,
-                    phase=phase,
-                    iteration=iteration,
-                    artifact_root=artifact_root,
+                    validate=lambda result, operation_id: _validate_cleanup(
+                        result, identity, phase=phase, iteration=iteration,
+                        failed=False,
+                        operation_id=operation_id, artifact_root=artifact_root,
+                    ),
                 )
                 evidence, evidence_hash = _phase_documents(
                     identity=identity,
@@ -883,8 +1251,20 @@ async def run_full_matrix_campaign(
             raise FullMatrixRunnerError(
                 "Full Matrix campaign identity changed before finalization"
             )
-        finalization = _validate_finalize(
-            await backend.finalize(identity), identity, artifact_root=artifact_root
+        finalization_context = _operation_context()
+        finalization = await _run_journaled_operation(
+            journal=journal,
+            identity=identity,
+            records=records,
+            operation_kind="finalize",
+            context=finalization_context,
+            invoke=lambda operation_id: backend.finalize(
+                identity, operation_id=operation_id
+            ),
+            validate=lambda result, operation_id: _validate_finalize(
+                result, identity, operation_id=operation_id,
+                artifact_root=artifact_root,
+            ),
         )
         _journal_event(
             journal,
@@ -916,17 +1296,25 @@ async def run_full_matrix_campaign(
         cleanup_error: Exception | None = None
         try:
             if active_iteration > 0 and active_phase in PHASE_SCENARIOS:
-                _validate_cleanup(
-                    await backend.cleanup_phase(
-                        identity,
-                        phase=active_phase,
-                        iteration=active_iteration,
-                        failed=True,
+                cleanup_context = _operation_context(
+                    phase=active_phase, iteration=active_iteration, failed=True
+                )
+                await _run_journaled_operation(
+                    journal=journal,
+                    identity=identity,
+                    records=records,
+                    operation_kind="cleanup",
+                    context=cleanup_context,
+                    invoke=lambda operation_id: backend.cleanup_phase(
+                        identity, phase=active_phase, iteration=active_iteration,
+                        failed=True, operation_id=operation_id,
                     ),
-                    identity,
-                    phase=active_phase,
-                    iteration=active_iteration,
-                    artifact_root=artifact_root,
+                    validate=lambda result, operation_id: _validate_cleanup(
+                        result, identity, phase=active_phase,
+                        iteration=active_iteration, failed=True,
+                        operation_id=operation_id,
+                        artifact_root=artifact_root,
+                    ),
                 )
         except Exception as caught:  # cleanup failure must replace safe status
             cleanup_error = caught

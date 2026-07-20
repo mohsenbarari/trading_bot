@@ -6,10 +6,19 @@ import os
 import json
 import unittest
 from unittest.mock import patch
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
+
+from core.dr_event_protocol import (
+    canonical_json_bytes,
+    destination_transaction_hash,
+    sha256_json,
+    transaction_hash_from_envelopes,
+    validate_envelope,
+)
 
 
 URL_NAMES = {
@@ -62,12 +71,16 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
     def _scratch_id(self) -> int:
         return 800_000_000 + uuid4().int % 90_000_000
 
-    def _foreign_writer(self, connection) -> None:  # noqa: ANN001
+    def _foreign_writer(self, connection, *, epoch: int = 1) -> None:  # noqa: ANN001
         connection.execute(
             text("SELECT set_config('trading_bot.mutation_capability', 'foreign_writer', true)")
         )
         connection.execute(
             text("SELECT set_config('trading_bot.physical_site', 'bot_fi', true)")
+        )
+        connection.execute(
+            text("SELECT set_config('trading_bot.dr_producer_epoch', :epoch, true)"),
+            {"epoch": str(epoch)},
         )
 
     def _projection_scope(self, connection, scope: str) -> None:  # noqa: ANN001
@@ -87,25 +100,106 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
         operation: str,
         payload: dict[str, object],
     ) -> None:  # noqa: ANN001
+        event_id = str(uuid4())
+        transaction_id = str(uuid4())
+        sequence = int(
+            connection.scalar(
+                text(
+                    "INSERT INTO dr_producer_cursors ("
+                    "origin_authority,origin_physical_site,producer_epoch,last_sequence) "
+                    "VALUES ('foreign','bot_fi',1,1) ON CONFLICT ("
+                    "origin_authority,origin_physical_site,producer_epoch) DO UPDATE SET "
+                    "last_sequence=dr_producer_cursors.last_sequence+1,updated_at=clock_timestamp() "
+                    "RETURNING last_sequence"
+                )
+            )
+        )
+        streams = {}
+        for site in ("webapp_fi", "webapp_ir"):
+            destination_sequence = int(
+                connection.scalar(
+                    text(
+                        "INSERT INTO dr_destination_cursors ("
+                        "origin_authority,origin_physical_site,producer_epoch,destination_site,last_sequence) "
+                        "VALUES ('foreign','bot_fi',1,:site,1) ON CONFLICT ("
+                        "origin_authority,origin_physical_site,producer_epoch,destination_site) "
+                        "DO UPDATE SET last_sequence=dr_destination_cursors.last_sequence+1,"
+                        "updated_at=clock_timestamp() RETURNING last_sequence"
+                    ),
+                    {"site": site},
+                )
+            )
+            streams[site] = {
+                "sequence": destination_sequence,
+                "transaction_id": transaction_id,
+                "transaction_position": 1,
+                "transaction_size": 1,
+                "transaction_hash": "0" * 64,
+            }
+        canonical_payload = json.loads(canonical_json_bytes(payload))
+        created_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        envelope = {
+            "protocol_version": 2,
+            "event_id": event_id,
+            "origin_authority": "foreign",
+            "origin_physical_site": "bot_fi",
+            "producer_epoch": 1,
+            "producer_sequence": sequence,
+            "aggregate_type": "commodities",
+            "aggregate_id": str(record_id),
+            "aggregate_db_id": str(record_id),
+            "aggregate_version": None,
+            "operation": operation,
+            "canonical_payload": canonical_payload,
+            "canonical_payload_hash": sha256_json(canonical_payload),
+            "schema_version": 1,
+            "causation_id": None,
+            "idempotency_key": None,
+            "writer_epoch": None,
+            "tombstone": operation == "DELETE",
+            "created_at": created_at,
+            "transaction_id": transaction_id,
+            "transaction_position": 1,
+            "transaction_size": 1,
+            "transaction_hash": "0" * 64,
+            "destination_streams": streams,
+        }
+        envelope["transaction_hash"] = transaction_hash_from_envelopes([envelope])
+        for site in streams:
+            streams[site]["transaction_hash"] = destination_transaction_hash(
+                [envelope], destination_site=site
+            )
+        validated = validate_envelope(envelope)
         connection.execute(
             text(
                 "INSERT INTO dr_events ("
                 "event_id, protocol_version, origin_authority, origin_physical_site, "
                 "producer_epoch, producer_sequence, aggregate_type, aggregate_id, "
-                "aggregate_db_id, operation, canonical_payload, canonical_payload_hash, "
-                "envelope_hash, schema_version, tombstone, source_xid"
+                "aggregate_db_id, aggregate_version, operation, canonical_payload, "
+                "canonical_payload_hash, envelope_hash, schema_version, causation_id, "
+                "idempotency_key, writer_epoch, tombstone, created_at, transaction_id, "
+                "transaction_position, transaction_size, transaction_hash, "
+                "destination_streams, source_xid"
                 ") VALUES ("
-                ":event_id, 1, 'foreign', 'bot_fi', 1, :sequence, 'commodities', "
-                ":record_id, :record_id, :operation, CAST(:payload AS JSONB), repeat('a',64), "
-                "repeat('b',64), 1, :tombstone, txid_current())"
+                ":event_id, 2, 'foreign', 'bot_fi', 1, :sequence, 'commodities', "
+                ":record_id, :record_id, NULL, :operation, CAST(:payload AS JSONB), "
+                ":payload_hash, :envelope_hash, 1, NULL, NULL, NULL, :tombstone, "
+                "CAST(:created_at AS TIMESTAMPTZ), :transaction_id, 1, 1, "
+                ":transaction_hash, CAST(:streams AS JSONB), txid_current())"
             ),
             {
-                "event_id": str(uuid4()),
-                "sequence": uuid4().int % 9_000_000_000 + 1,
+                "event_id": event_id,
+                "sequence": sequence,
                 "record_id": str(record_id),
                 "operation": operation,
                 "tombstone": operation == "DELETE",
-                "payload": json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                "payload": canonical_json_bytes(canonical_payload).decode(),
+                "payload_hash": envelope["canonical_payload_hash"],
+                "envelope_hash": validated.envelope_hash,
+                "created_at": created_at,
+                "transaction_id": transaction_id,
+                "transaction_hash": envelope["transaction_hash"],
+                "streams": canonical_json_bytes(streams).decode(),
             },
         )
 
@@ -175,17 +269,22 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                     or 0
                 )
                 self.assertEqual(memberships, 0, role)
-                executable = int(
-                    connection.scalar(
+                executable = set(
+                    connection.execute(
                         text(
-                            "SELECT count(*) FROM pg_proc procedure JOIN pg_namespace namespace "
+                            "SELECT procedure.proname FROM pg_proc procedure JOIN pg_namespace namespace "
                             "ON namespace.oid=procedure.pronamespace WHERE namespace.nspname='public' "
                             "AND has_function_privilege(current_user, procedure.oid, 'EXECUTE')"
                         )
-                    )
-                    or 0
+                    ).scalars()
                 )
-                self.assertEqual(executable, 0, role)
+                self.assertEqual(
+                    executable,
+                    {"trading_bot_cleanup_expired_replay_nonces"}
+                    if role == "projection"
+                    else set(),
+                    role,
+                )
                 with self.assertRaises(DBAPIError):
                     connection.execute(text(f'SET ROLE "{self.owner_role}"'))
                 connection.rollback()
@@ -286,7 +385,7 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
             dr_producer_epoch=17,
         ):
             with self.engines["application"].begin() as connection:
-                self._foreign_writer(connection)
+                self._foreign_writer(connection, epoch=17)
                 event_id = append_local_dr_event(
                     connection,
                     table_name="commodities",

@@ -60,6 +60,34 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             settings.telegram_delivery_queue_primary_m0_reserved_concurrency,
         )
 
+    def test_producer_and_expected_executor_split_brain_fails_startup(self):
+        invalid = (
+            {
+                "telegram_delivery_producer_mode": "queue-v1",
+                "telegram_delivery_expected_execution_owner": "legacy",
+            },
+            {
+                "telegram_delivery_producer_mode": "legacy",
+                "telegram_delivery_expected_execution_owner": "queue-v1",
+            },
+            {
+                "trading_bot_service": "bot",
+                "telegram_delivery_producer_mode": "queue-v1",
+                "telegram_delivery_expected_execution_owner": "queue-v1",
+                "telegram_delivery_execution_owner": "legacy",
+            },
+        )
+        for values in invalid:
+            with self.subTest(values=values), self.assertRaises(ValidationError):
+                _settings(**values)
+
+        api = _settings(
+            trading_bot_service="api",
+            telegram_delivery_producer_mode="queue-v1",
+            telegram_delivery_expected_execution_owner="queue-v1",
+        )
+        self.assertEqual(api.telegram_delivery_producer_mode, "queue-v1")
+
     def test_nonfinite_negative_and_inverted_retry_config_fail_startup(self):
         invalid = (
             {"telegram_delivery_queue_retry_base_seconds": float("nan")},

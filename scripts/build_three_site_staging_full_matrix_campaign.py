@@ -30,6 +30,15 @@ from core.three_site_full_matrix_campaign import (
     secure_json,
     verify_campaign,
 )
+from scripts.three_site_staging_migration_journal import (
+    ROLE_PHASES,
+    _validate as validate_migration_journal,
+)
+from scripts.verify_three_site_queue_activation_transition import verify_transition
+from scripts.verify_three_site_staging_inventory import (
+    verify_signed_inventory,
+)
+from scripts.verify_three_site_staging_migration_plan import verify_migration_plan
 
 
 APPROVAL_REQUEST_SCHEMA = "three-site-staging-full-matrix-approval-request-v1"
@@ -73,6 +82,174 @@ def _queue_transition(path: Path, *, baseline_sha: str, activation_sha: str) -> 
         raise FullMatrixCampaignError(
             "Queue activation transition does not bind the requested lineage"
         )
+    recomputed = verify_transition(
+        REPO_ROOT,
+        baseline_sha=baseline_sha,
+        activation_sha=activation_sha,
+        require_checkout=True,
+    )
+    stable_fields = fields - {"verified_at"}
+    if any(value.get(field) != recomputed.get(field) for field in stable_fields):
+        raise FullMatrixCampaignError(
+            "Queue activation transition differs from direct Git verification"
+        )
+
+
+def _global_commit(
+    value: dict[str, Any],
+    *,
+    campaign_id: str,
+    release_sha: str,
+    plan_sha256: str,
+) -> None:
+    fields = {
+        "schema", "status", "campaign_id", "release_sha", "plan_sha256",
+        "issued_at", "campaign_journals_sha256", "role_journals",
+        "committed_role_states", "all_roles_committed",
+    }
+    states = value.get("committed_role_states") if isinstance(value, dict) else None
+    hashes = value.get("role_journals") if isinstance(value, dict) else None
+    if (
+        set(value) != fields
+        or value.get("schema") != "three-site-staging-global-commit-v2"
+        or value.get("status") != "passed"
+        or value.get("campaign_id") != campaign_id
+        or value.get("release_sha") != release_sha
+        or value.get("plan_sha256") != plan_sha256
+        or value.get("all_roles_committed") is not True
+        or not isinstance(states, dict) or set(states) != set(ROLE_PHASES)
+        or not isinstance(hashes, dict) or set(hashes) != set(ROLE_PHASES)
+    ):
+        raise FullMatrixCampaignError("global migration commit is not authoritative")
+    try:
+        issued = datetime.fromisoformat(str(value["issued_at"]).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise FullMatrixCampaignError("global migration commit timestamp is invalid") from exc
+    current = datetime.now(timezone.utc)
+    if (
+        issued.tzinfo is None
+        or current - issued.astimezone(timezone.utc) > timedelta(hours=24)
+        or issued.astimezone(timezone.utc) > current + timedelta(minutes=2)
+    ):
+        raise FullMatrixCampaignError("global migration commit is stale/future-dated")
+    for role, state in states.items():
+        try:
+            validate_migration_journal(state)
+        except Exception as exc:
+            raise FullMatrixCampaignError("global commit embeds an invalid role journal") from exc
+        if (
+            state.get("role") != role
+            or state.get("campaign_id") != campaign_id
+            or state.get("release_sha") != release_sha
+            or state.get("plan_sha256") != plan_sha256
+            or state.get("status") != "committed"
+            or state.get("completed_phases") != list(ROLE_PHASES[role])
+            or hashes.get(role) != state.get("state_sha256")
+        ):
+            raise FullMatrixCampaignError("global commit role state/hash is invalid")
+    expected_campaign_hash = hashlib.sha256(
+        json.dumps(hashes, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if value.get("campaign_journals_sha256") != expected_campaign_hash:
+        raise FullMatrixCampaignError("global commit campaign journal hash is invalid")
+
+
+def _campaign_bundle_summary(
+    value: dict[str, Any], *, campaign_id: str, release_sha: str, inventory_sha256: str
+) -> None:
+    fields = {
+        "status", "campaign_id", "release_sha", "inventory_sha256",
+        "campaign_bundle_sha256", "roles", "directional_pairwise_key_count",
+        "database_credential_count", "file_attestation",
+    }
+    if (
+        set(value) != fields
+        or value.get("status") != "verified"
+        or value.get("campaign_id") != campaign_id
+        or value.get("release_sha") != release_sha
+        or value.get("inventory_sha256") != inventory_sha256
+        or SHA256.fullmatch(str(value.get("campaign_bundle_sha256", ""))) is None
+        or value.get("roles") != ["bot-fi", "webapp-fi", "webapp-ir", "witness"]
+        or value.get("directional_pairwise_key_count") != 4
+        or type(value.get("database_credential_count")) is not int
+        or value["database_credential_count"] < 10
+        or value.get("file_attestation") is not True
+    ):
+        raise FullMatrixCampaignError("role campaign bundle is not fully attested")
+
+
+def _verify_prerequisites(
+    mappings: dict[str, Path], *, baseline_sha: str, activation_sha: str
+) -> tuple[str, str]:
+    inventory = secure_json(mappings["provisioned_inventory"], label="provisioned inventory")
+    if inventory.get("release_sha") != activation_sha:
+        raise FullMatrixCampaignError(
+            "provisioned inventory must be re-attested at the activation SHA"
+        )
+    inventory_approval = secure_json(
+        mappings["inventory_approval"], label="inventory approval"
+    )
+    inventory_signers = secure_json(
+        mappings["inventory_signer_policy"], label="inventory signer policy"
+    )
+    inventory_result = verify_signed_inventory(
+        inventory,
+        approval=inventory_approval,
+        signer_policy=inventory_signers,
+        host_destructive=True,
+    )
+    if inventory_result["inventory_stage"] != "provisioned":
+        raise FullMatrixCampaignError("Full Matrix requires provisioned signed inventory")
+    campaign_id = _campaign_id(inventory_result["campaign_id"])
+
+    plan = secure_json(mappings["migration_plan"], label="migration plan")
+    migration_result = verify_migration_plan(
+        plan,
+        approval=secure_json(mappings["migration_approval"], label="migration approval"),
+        inventory=inventory,
+        inventory_approval=inventory_approval,
+        signer_policy=inventory_signers,
+        freeze_evidence=[
+            secure_json(mappings["source_freeze_bot_fi"], label="Bot-FI source freeze"),
+            secure_json(mappings["source_freeze_webapp_fi"], label="WebApp-FI source freeze"),
+        ],
+        image_inventories={
+            role: secure_json(mappings[f"image_inventory_{role}"], label=f"{role} image inventory")
+            for role in ("bot_fi", "webapp_fi", "webapp_ir", "witness")
+        },
+        backup_manifests={
+            role: secure_json(mappings[f"source_backup_{role}"], label=f"{role} source backup")
+            for role in ("bot_fi", "webapp_fi")
+        },
+        seed_manifests={
+            role: secure_json(mappings[f"seed_manifest_{role}"], label=f"{role} seed manifest")
+            for role in ("bot_fi", "webapp_fi")
+        },
+    )
+    if (
+        migration_result.get("campaign_id") != campaign_id
+        or migration_result.get("release_sha") != activation_sha
+    ):
+        raise FullMatrixCampaignError("approved migration differs from activation campaign")
+
+    _global_commit(
+        secure_json(mappings["global_commit"], label="global migration commit"),
+        campaign_id=campaign_id,
+        release_sha=activation_sha,
+        plan_sha256=migration_result["plan_sha256"],
+    )
+    _campaign_bundle_summary(
+        secure_json(mappings["campaign_bundle"], label="role campaign bundle"),
+        campaign_id=campaign_id,
+        release_sha=activation_sha,
+        inventory_sha256=inventory_result["inventory_sha256"],
+    )
+    _queue_transition(
+        mappings["queue_activation_transition"],
+        baseline_sha=baseline_sha,
+        activation_sha=activation_sha,
+    )
+    return campaign_id, str(inventory_result["inventory_sha256"])
 
 
 def prepare(args: argparse.Namespace) -> dict[str, Any]:
@@ -88,20 +265,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         or not 1 <= args.valid_hours <= 72
     ):
         raise FullMatrixCampaignError("Full Matrix preparation scope is invalid")
-    inventory = secure_json(mappings["provisioned_inventory"], label="provisioned inventory")
-    campaign_id = _campaign_id(inventory.get("campaign_id"))
-    if (
-        inventory.get("schema") != "three-site-staging-inventory-v1"
-        or inventory.get("inventory_stage") != "provisioned"
-        or inventory.get("release_sha") != args.activation_sha
-    ):
-        raise FullMatrixCampaignError(
-            "provisioned inventory must be re-attested at the activation SHA"
-        )
-    _queue_transition(
-        mappings["queue_activation_transition"],
-        baseline_sha=args.baseline_sha,
-        activation_sha=args.activation_sha,
+    campaign_id, _inventory_hash = _verify_prerequisites(
+        mappings, baseline_sha=args.baseline_sha, activation_sha=args.activation_sha
     )
     policy = secure_json(args.approver_policy, label="Full Matrix approver policy")
     _signers, policy_hash = _policy(policy, release_sha=args.activation_sha)

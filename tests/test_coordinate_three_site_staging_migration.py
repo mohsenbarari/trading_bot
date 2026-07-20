@@ -11,6 +11,8 @@ from scripts.coordinate_three_site_staging_migration import (
     ACCEPTANCE_CHECKS,
     MigrationCoordinationError,
     REQUIRED_PHASE,
+    ROLE_SERVICES,
+    ROLE_TLS,
     build_documents,
 )
 from scripts.three_site_staging_migration_journal import MigrationJournal, ROLE_PHASES
@@ -32,6 +34,7 @@ def _journals(root: Path) -> tuple[dict[str, MigrationJournal], dict[str, dict]]
             role=role,
             role_compose_sha256="c" * 64,
             role_env_sha256="d" * 64,
+            image_inventory_sha256="e" * 64,
         )
         objects[role] = journal
     return objects, {role: journal.load() for role, journal in objects.items()}
@@ -66,19 +69,94 @@ def _check(observation: dict) -> dict:
 
 def _routing(root: Path, *, observed_at: str) -> Path:
     artifacts = {}
-    for name, status in (
-        ("event_checkpoint", "converged"),
-        ("database_parity", "equivalent"),
-        ("blob_parity", "passed"),
-    ):
+    sites = ("bot_fi", "webapp_fi", "webapp_ir")
+    comparisons = (
+        ("bot-authority", "bot_fi", "webapp_fi"),
+        ("bot-authority", "bot_fi", "webapp_ir"),
+        ("webapp-authority", "webapp_fi", "bot_fi"),
+        ("webapp-authority", "webapp_fi", "webapp_ir"),
+    )
+    common = {
+        "campaign_id": CAMPAIGN_ID,
+        "release_sha": RELEASE_SHA,
+        "plan_sha256": PLAN_SHA,
+        "observed_at": observed_at,
+    }
+    payloads = {
+        "event_checkpoint": {
+            **common,
+            "schema": "three-site-staging-event-convergence-v1",
+            "status": "converged",
+            "conflict_count": 0,
+            "streams": [
+                {
+                    "origin_site": origin,
+                    "destination_site": destination,
+                    "producer_epoch": 1,
+                    "source_sequence": 1,
+                    "received_sequence": 1,
+                    "applied_sequence": 1,
+                    "source_transaction_hash": "1" * 64,
+                    "received_transaction_hash": "1" * 64,
+                    "applied_transaction_hash": "1" * 64,
+                }
+                for origin in sites for destination in sites if origin != destination
+            ],
+        },
+        "database_parity": {
+            **common,
+            "schema": "three-site-staging-database-parity-v1",
+            "status": "equivalent",
+            "mode": "deep",
+            "snapshot_id": "22222222-2222-4222-8222-222222222222",
+            "mismatch_count": 0,
+            "comparisons": [
+                {
+                    "scope": scope,
+                    "source_site": source,
+                    "target_site": target,
+                    "table_set_sha256": "2" * 64,
+                    "source_fingerprint_sha256": "3" * 64,
+                    "target_fingerprint_sha256": "3" * 64,
+                    "source_row_count": 10,
+                    "target_row_count": 10,
+                    "table_count": 2,
+                    "difference_count": 0,
+                }
+                for scope, source, target in comparisons
+            ],
+        },
+        "blob_parity": {
+            **common,
+            "schema": "three-site-staging-blob-parity-v1",
+            "status": "passed",
+            "object_storage_versioning": True,
+            "missing_object_count": 0,
+            "corrupt_object_count": 0,
+            "scopes": [
+                {
+                    "scope": scope,
+                    "source_site": source,
+                    "target_site": target,
+                    "source_set_sha256": "4" * 64,
+                    "target_set_sha256": "4" * 64,
+                    "source_object_count": 2,
+                    "target_object_count": 2,
+                    "readback_sample_count": 1,
+                }
+                for scope, source, target in comparisons
+            ],
+        },
+    }
+    for name, payload in payloads.items():
         path = root / f"{name}.json"
-        payload = {"schema": f"test-{name}-v1", "status": status}
         _secure_json(path, payload)
         artifacts[name] = {
             "path": str(path),
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "schema": payload["schema"],
-            "status": status,
+            "status": payload["status"],
+            "observed_at": payload["observed_at"],
         }
     path = root / "routing.json"
     _secure_json(
@@ -101,30 +179,59 @@ def _routing(root: Path, *, observed_at: str) -> Path:
 
 
 def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
-    revision = "002" if role == "witness" else "d542e3f4a6b7"
+    revision = "002" if role == "witness" else "e653f4a5b7c8"
+    _bind_key, tls_port, tls_name = ROLE_TLS[role]
     observations = {
         "database_identity": {"role": role},
         "migration_head": {"observed": revision, "expected": revision},
-        "private_tls": {"verified": True},
+        "private_tls": {
+            "services": [name for name in ROLE_SERVICES[role] if name.endswith("_tls")],
+            "handshake": {
+                "server_name": tls_name,
+                "bind_address": "127.0.0.1",
+                "port": tls_port,
+                "protocol": "TLSv1.3",
+                "certificate_sha256": "5" * 64,
+                "readiness_status_code": 200,
+            },
+        },
         "service_health": {
             "services": [
                 {
-                    "name": f"{role}-service",
+                    "service": service,
+                    "container_id": f"container-{service}",
                     "running": True,
                     "health": "healthy",
                     "restart_count": 0,
                     "image_id": "sha256:" + "1" * 64,
+                    "expected_image_reference": "example/image:pinned",
+                    "expected_image_id": "sha256:" + "1" * 64,
+                    "release_sha": None if service.endswith("_tls") else RELEASE_SHA,
+                    "log_window_seconds": 300,
+                    "log_sha256": "6" * 64,
+                    "unexpected_log_lines": 0,
                 }
+                for service in ROLE_SERVICES[role]
             ]
         },
-        "direct_origin_http": {"status_code": 200},
+        "direct_origin_http": {"status_code": 200, "response_sha256": "7" * 64},
         "production_boundaries_untouched": {
             "routing_change_applied": False,
             "test_domain": "gold-trading.ir",
+            "compose_project": "trading-bot-three-site-staging",
         },
-        "unexpected_errors_absent": {"restart_count_total": 0},
+        "unexpected_errors_absent": {
+            "restart_count_total": 0,
+            "window_seconds": 300,
+            "unexpected_log_lines_total": 0,
+        },
         "queue_owner_legacy": {"producer_mode": "legacy", "executor_mode": "legacy"},
         "routing_still_held": {"verified": True},
+        "signed_runtime_bundle": {
+            "role_compose_sha256": "c" * 64,
+            "role_env_sha256": "d" * 64,
+            "image_inventory_sha256": "e" * 64,
+        },
     }
     path = root / f"accept-{role}.json"
     _secure_json(
@@ -191,6 +298,30 @@ class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
                     action="routing-hold",
                     journals=_states(journals),
                     routing_observation=observation,
+                )
+
+    def test_routing_hold_rejects_status_only_self_attestation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journals, _states_initial = _journals(root)
+            for role, phase in REQUIRED_PHASE["routing-hold"].items():
+                _advance(journals[role], phase)
+            routing = _routing(root, observed_at=datetime.now(timezone.utc).isoformat())
+            value = json.loads(routing.read_text())
+            reference = value["artifacts"]["database_parity"]
+            artifact_path = Path(reference["path"])
+            forged = {
+                "schema": "three-site-staging-database-parity-v1",
+                "status": "equivalent",
+            }
+            _secure_json(artifact_path, forged)
+            reference["sha256"] = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+            _secure_json(routing, value)
+            with self.assertRaisesRegex(MigrationCoordinationError, "semantic convergence"):
+                build_documents(
+                    action="routing-hold",
+                    journals=_states(journals),
+                    routing_observation=routing,
                 )
 
     def test_acceptance_and_global_commit_are_four_role_barriers(self):

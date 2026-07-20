@@ -25,6 +25,7 @@ from scripts.run_three_site_staging_source_backup import DOCKER, verify_tar_arti
 from scripts.three_site_staging_migration_journal import (
     MigrationJournal,
     ROLE_PHASES,
+    _validate as validate_migration_journal,
 )
 from scripts.verify_three_site_staging_host_identity import (
     verify_host_snapshot,
@@ -46,7 +47,7 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
 }
-EXPECTED_HEAD = "d542e3f4a6b7"
+EXPECTED_HEAD = "e653f4a5b7c8"
 ROLE_DB = {
     "bot_fi": ("bot_fi_db", "BOT_FI_POSTGRES_USER", "BOT_FI_POSTGRES_DB"),
     "webapp_fi": ("webapp_fi_db", "WEBAPP_FI_POSTGRES_USER", "WEBAPP_FI_POSTGRES_DB"),
@@ -758,12 +759,12 @@ def _verify_global_commit(path: Path, *, role: str, state: dict[str, Any]) -> di
     fields = {
         "schema", "status", "campaign_id", "release_sha", "plan_sha256",
         "issued_at", "campaign_journals_sha256", "role_journals",
-        "all_roles_committed",
+        "committed_role_states", "all_roles_committed",
     }
     role_journals = value.get("role_journals")
     if (
         set(value) != fields
-        or value.get("schema") != "three-site-staging-global-commit-v1"
+        or value.get("schema") != "three-site-staging-global-commit-v2"
         or value.get("status") != "passed"
         or value.get("campaign_id") != state["campaign_id"]
         or value.get("release_sha") != state["release_sha"]
@@ -772,6 +773,9 @@ def _verify_global_commit(path: Path, *, role: str, state: dict[str, Any]) -> di
         or not isinstance(role_journals, dict)
         or set(role_journals) != set(ROLE_PHASES)
         or role_journals.get(role) != state["state_sha256"]
+        or not isinstance(value.get("committed_role_states"), dict)
+        or set(value["committed_role_states"]) != set(ROLE_PHASES)
+        or value["committed_role_states"].get(role) != state
     ):
         raise RoleMigrationError("global migration commit evidence is invalid")
     expected_campaign_hash = hashlib.sha256(
@@ -779,6 +783,17 @@ def _verify_global_commit(path: Path, *, role: str, state: dict[str, Any]) -> di
     ).hexdigest()
     if value["campaign_journals_sha256"] != expected_campaign_hash:
         raise RoleMigrationError("global migration commit journal hash is invalid")
+    for state_role, committed_state in value["committed_role_states"].items():
+        try:
+            validate_migration_journal(committed_state)
+        except Exception as exc:
+            raise RoleMigrationError("global commit embeds an invalid journal state") from exc
+        if (
+            committed_state.get("role") != state_role
+            or committed_state.get("status") != "committed"
+            or committed_state.get("state_sha256") != role_journals[state_role]
+        ):
+            raise RoleMigrationError("global commit journal state/hash is invalid")
     return value
 
 
@@ -877,6 +892,7 @@ def main(argv: list[str] | None = None) -> int:
                         role=args.role,
                         role_compose_sha256=context["bundle"]["compose_sha256"],
                         role_env_sha256=context["bundle"]["environment_sha256"],
+                        image_inventory_sha256=verified["image_inventory_sha256"][args.role],
                     )
                 else:
                     state = journal.load()

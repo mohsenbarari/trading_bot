@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -29,6 +29,7 @@ CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v1"
 POLICY_SCHEMA = "three-site-staging-full-matrix-approver-policy-v1"
 PHASE_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-phase-v1"
 SCENARIO_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-scenario-v2"
+OPERATION_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-operation-v1"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ARTIFACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
@@ -166,8 +167,19 @@ BOUND_ARTIFACTS = frozenset(
     {
         "provisioned_inventory",
         "inventory_approval",
+        "inventory_signer_policy",
         "migration_plan",
         "migration_approval",
+        "source_freeze_bot_fi",
+        "source_freeze_webapp_fi",
+        "source_backup_bot_fi",
+        "source_backup_webapp_fi",
+        "seed_manifest_bot_fi",
+        "seed_manifest_webapp_fi",
+        "image_inventory_bot_fi",
+        "image_inventory_webapp_fi",
+        "image_inventory_webapp_ir",
+        "image_inventory_witness",
         "global_commit",
         "campaign_bundle",
         "queue_activation_transition",
@@ -211,6 +223,23 @@ def _utc(value: Any, *, label: str) -> datetime:
     if parsed.tzinfo is None:
         raise FullMatrixCampaignError(f"{label} must include a timezone")
     return parsed.astimezone(timezone.utc)
+
+
+def _matrix_operation_id(
+    campaign_hash: str,
+    kind: str,
+    *,
+    phase: str = "",
+    scenario_id: str = "",
+    iteration: int = 0,
+    failed: bool | None = None,
+    attempt: int = 0,
+) -> str:
+    material = (
+        f"{campaign_hash}:{kind}:{iteration}:{phase}:{scenario_id}:"
+        f"{'' if failed is None else str(failed).lower()}:{attempt}"
+    )
+    return str(uuid5(NAMESPACE_URL, material))
 
 
 def _policy(payload: dict[str, Any], *, release_sha: str) -> tuple[dict[str, tuple[str, str, bytes]], str]:
@@ -408,6 +437,8 @@ def verify_scenario_evidence(
     phase: str,
     scenario_id: str,
     iteration: int,
+    attempt: int,
+    operation_id: str,
     artifact_root: Path,
 ) -> dict[str, Any]:
     """Re-open and semantically validate one retained scenario artifact.
@@ -420,6 +451,7 @@ def verify_scenario_evidence(
     fields = {
         "schema", "status", "campaign_id", "campaign_hash", "release_sha",
         "activation_sha", "phase", "scenario_id", "iteration", "oracle_id",
+        "operation_id", "attempt",
         "started_at", "finished_at", "duration_seconds", "assertions",
         "evidence_refs", "cleanup_residue_count", "production_touched",
     }
@@ -434,6 +466,8 @@ def verify_scenario_evidence(
         or evidence.get("phase") != phase
         or evidence.get("scenario_id") != scenario_id
         or evidence.get("iteration") != iteration
+        or evidence.get("attempt") != attempt
+        or evidence.get("operation_id") != operation_id
         or evidence.get("oracle_id") != f"{phase}.{scenario_id}.v1"
         or evidence.get("production_touched") is not False
         or evidence.get("cleanup_residue_count") != 0
@@ -516,6 +550,28 @@ def verify_scenario_evidence(
             assertion["expected"] is not False or assertion["observed"] is not False
         ):
             raise FullMatrixCampaignError("Full Matrix production boundary was not preserved")
+        if name == "operation_executed" and (
+            assertion["expected"] != {
+                "operation_id": operation_id,
+                "scenario_id": scenario_id,
+                "iteration": iteration,
+                "attempt": attempt,
+            }
+            or assertion["observed"] != assertion["expected"]
+        ):
+            raise FullMatrixCampaignError("Full Matrix scenario operation was not proven")
+        if name == "expected_outcome" and (
+            not isinstance(assertion["expected"], dict)
+            or not assertion["expected"]
+            or assertion["observed"] != assertion["expected"]
+        ):
+            raise FullMatrixCampaignError("Full Matrix expected outcome differs from observation")
+        if name == f"oracle:{scenario_id}" and (
+            not isinstance(assertion["expected"], dict)
+            or not assertion["expected"]
+            or assertion["observed"] != assertion["expected"]
+        ):
+            raise FullMatrixCampaignError("Full Matrix independent oracle did not match")
         if name == "minimum_duration" and (
             assertion["expected"] != 86400
             or not isinstance(assertion["observed"], (int, float))
@@ -530,6 +586,136 @@ def verify_scenario_evidence(
     return {
         "assertion_count": len(assertions),
         "duration_seconds": float(duration),
+        "raw_artifacts": [retained[path] for path in sorted(retained)],
+        "artifact_paths": set(retained),
+    }
+
+
+def verify_operation_evidence(
+    evidence: dict[str, Any],
+    *,
+    campaign: dict[str, Any],
+    campaign_hash: str,
+    operation_kind: str,
+    operation_id: str,
+    operation_context: dict[str, Any],
+    artifact_root: Path,
+) -> dict[str, Any]:
+    """Validate non-scenario operation evidence instead of trusting a pass bit."""
+
+    fields = {
+        "schema", "status", "campaign_id", "campaign_hash", "release_sha",
+        "activation_sha", "operation_kind", "operation_id", "operation_context",
+        "assertions", "evidence_refs", "residue_count", "production_touched",
+    }
+    if set(evidence) != fields or evidence.get("schema") != OPERATION_EVIDENCE_SCHEMA:
+        raise FullMatrixCampaignError("Full Matrix operation evidence schema is invalid")
+    if (
+        evidence.get("status") != "passed"
+        or evidence.get("campaign_id") != campaign["campaign_id"]
+        or evidence.get("campaign_hash") != campaign_hash
+        or evidence.get("release_sha") != campaign["release_sha"]
+        or evidence.get("activation_sha") != campaign["activation_sha"]
+        or evidence.get("operation_kind") != operation_kind
+        or evidence.get("operation_id") != operation_id
+        or evidence.get("operation_context") != operation_context
+        or evidence.get("production_touched") is not False
+        or evidence.get("residue_count") != 0
+    ):
+        raise FullMatrixCampaignError("Full Matrix operation identity/status is invalid")
+    required_by_kind = {
+        "preflight": {
+            "campaign_identity_bound", "prerequisites_verified", "topology_ready",
+            "production_boundary",
+        },
+        "recovery": {
+            "faults_removed", "writer_state_safe", "residue_zero",
+            "production_boundary",
+        },
+        "cleanup": {
+            "faults_removed", "writer_state_safe", "residue_zero",
+            "production_boundary",
+        },
+        "finalize": {
+            "all_faults_removed", "writer_state_safe", "residue_zero",
+            "production_boundary",
+        },
+    }
+    required = required_by_kind.get(operation_kind)
+    if required is None:
+        raise FullMatrixCampaignError("Full Matrix operation kind is invalid")
+    references = evidence.get("evidence_refs")
+    if not isinstance(references, list) or not references:
+        raise FullMatrixCampaignError("Full Matrix operation has no raw evidence")
+    retained: dict[str, dict[str, Any]] = {}
+    for item in references:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256", "size"}:
+            raise FullMatrixCampaignError(
+                "Full Matrix operation evidence reference is malformed"
+            )
+        relative = _relative_artifact(item["path"])
+        if (
+            relative in retained
+            or SHA256.fullmatch(str(item["sha256"])) is None
+            or type(item["size"]) is not int
+            or item["size"] <= 0
+        ):
+            raise FullMatrixCampaignError(
+                "Full Matrix operation evidence identity is invalid"
+            )
+        digest, size = sha256_secure_file(
+            artifact_root / relative,
+            label=f"Full Matrix {operation_kind} raw evidence",
+        )
+        if digest != item["sha256"] or size != item["size"]:
+            raise FullMatrixCampaignError("Full Matrix operation raw evidence differs")
+        retained[relative] = {"path": relative, "sha256": digest, "size": size}
+    assertions = evidence.get("assertions")
+    if not isinstance(assertions, list) or len(assertions) != len(required):
+        raise FullMatrixCampaignError("Full Matrix operation assertions are incomplete")
+    seen: set[str] = set()
+    used_refs: set[str] = set()
+    for assertion in assertions:
+        if not isinstance(assertion, dict) or set(assertion) != {
+            "name", "status", "expected", "observed", "evidence_refs"
+        }:
+            raise FullMatrixCampaignError("Full Matrix operation assertion is malformed")
+        name = str(assertion["name"])
+        refs = assertion["evidence_refs"]
+        if (
+            name not in required
+            or name in seen
+            or assertion["status"] != "passed"
+            or assertion["observed"] != assertion["expected"]
+            or not isinstance(refs, list)
+            or not refs
+        ):
+            raise FullMatrixCampaignError("Full Matrix operation assertion did not pass")
+        normalized = {_relative_artifact(item) for item in refs}
+        if not normalized.issubset(retained):
+            raise FullMatrixCampaignError(
+                "Full Matrix operation assertion lacks raw evidence"
+            )
+        if name == "production_boundary" and assertion["expected"] is not False:
+            raise FullMatrixCampaignError(
+                "Full Matrix production boundary was not preserved"
+            )
+        if name == "residue_zero" and assertion["expected"] != 0:
+            raise FullMatrixCampaignError("Full Matrix operation residue is not zero")
+        if name not in {"production_boundary", "residue_zero"} and (
+            assertion["expected"] is not True
+        ):
+            raise FullMatrixCampaignError(
+                "Full Matrix operation safety assertion is invalid"
+            )
+        seen.add(name)
+        used_refs.update(normalized)
+    if seen != required or used_refs != set(retained):
+        raise FullMatrixCampaignError(
+            "Full Matrix operation oracle coverage is incomplete"
+        )
+    return {
+        "assertion_count": len(assertions),
         "raw_artifacts": [retained[path] for path in sorted(retained)],
         "artifact_paths": set(retained),
     }
@@ -604,7 +790,7 @@ def verify_phase_evidence(
     for result in scenarios:
         if not isinstance(result, dict) or set(result) != {
             "scenario_id", "status", "assertion_count", "evidence_hash",
-            "duration_seconds", "artifact",
+            "duration_seconds", "artifact", "operation_id", "attempt",
         }:
             raise FullMatrixCampaignError("Full Matrix scenario result is malformed")
         scenario_id = str(result["scenario_id"])
@@ -615,6 +801,9 @@ def verify_phase_evidence(
             or type(result["assertion_count"]) is not int
             or result["assertion_count"] < 1
             or SHA256.fullmatch(str(result["evidence_hash"])) is None
+            or not isinstance(result.get("operation_id"), str)
+            or type(result.get("attempt")) is not int
+            or result["attempt"] < 1
             or not isinstance(result["duration_seconds"], (int, float))
             or isinstance(result["duration_seconds"], bool)
             or not isinstance(artifact, dict)
@@ -646,6 +835,8 @@ def verify_phase_evidence(
             phase=phase,
             scenario_id=scenario_id,
             iteration=iteration,
+            attempt=result["attempt"],
+            operation_id=result["operation_id"],
             artifact_root=artifact_root,
         )
         if (
@@ -798,7 +989,8 @@ def _verify_execution_journal(
     allowed_events = {
         "campaign_started", "scenario_started", "scenario_recovered",
         "scenario_passed", "phase_passed", "campaign_finalized",
-        "campaign_completed", "campaign_blocked",
+        "campaign_completed", "campaign_blocked", "operation_started",
+        "operation_passed",
     }
     identity = {
         "campaign_id": campaign["campaign_id"],
@@ -809,8 +1001,18 @@ def _verify_execution_journal(
     campaign_start = _utc(campaign["generated_at"], label="campaign generated_at")
     campaign_end = _utc(campaign["expires_at"], label="campaign expires_at")
     operation_artifacts: dict[str, dict[str, Any]] = {}
+    operation_raw_artifacts: set[str] = set()
+    operation_starts: dict[str, tuple[str, dict[str, Any]]] = {}
+    operation_results: dict[str, dict[str, Any]] = {}
 
-    def retain_operation(result: Any, *, label: str) -> None:
+    def retain_operation(
+        result: Any,
+        *,
+        label: str,
+        operation_kind: str,
+        operation_id: str,
+        operation_context: dict[str, Any],
+    ) -> None:
         if not isinstance(result, dict):
             raise FullMatrixCampaignError(f"Full Matrix {label} result is missing")
         relative = _relative_artifact(result.get("artifact_path"))
@@ -834,6 +1036,22 @@ def _verify_execution_journal(
             ) from exc
         if measured_digest != digest or measured_size != size:
             raise FullMatrixCampaignError(f"Full Matrix retained {label} artifact differs")
+        typed = secure_json(
+            artifact_root / relative,
+            label=f"Full Matrix retained {label} typed evidence",
+        )
+        verified = verify_operation_evidence(
+            typed,
+            campaign=campaign,
+            campaign_hash=campaign_hash,
+            operation_kind=operation_kind,
+            operation_id=operation_id,
+            operation_context=operation_context,
+            artifact_root=artifact_root,
+        )
+        if operation_raw_artifacts.intersection(verified["artifact_paths"]):
+            raise FullMatrixCampaignError("Full Matrix operation raw evidence was reused")
+        operation_raw_artifacts.update(verified["artifact_paths"])
         record = {"path": relative, "sha256": digest, "size": size, "operation": label}
         previous = operation_artifacts.get(relative)
         if previous is not None and previous != record:
@@ -855,27 +1073,97 @@ def _verify_execution_journal(
                 "Full Matrix execution journal time is outside campaign window"
             )
         event = record.get("event")
-        if event == "campaign_started":
-            retain_operation(record.get("result"), label="preflight")
-        elif event == "scenario_recovered":
-            retain_operation(
-                record.get("result"),
-                label=(
-                    f"recovery:{record.get('iteration')}:"
-                    f"{record.get('phase')}:{record.get('scenario_id')}"
-                ),
-            )
-        elif event == "phase_passed":
-            retain_operation(
-                record.get("cleanup_result"),
-                label=f"cleanup:{record.get('iteration')}:{record.get('phase')}",
-            )
-        elif event == "campaign_finalized":
-            retain_operation(record.get("result"), label="finalization")
+        if event in {"campaign_started", "operation_started", "operation_passed"}:
+            operation_id = str(record.get("operation_id") or "")
+            operation_kind = str(record.get("operation_kind") or "")
+            context = record.get("operation_context")
+            if (
+                not operation_id or not operation_kind or not isinstance(context, dict)
+                or set(context) != {
+                    "phase", "scenario_id", "iteration", "failed", "attempt"
+                }
+                or operation_kind not in {"preflight", "recovery", "cleanup", "finalize"}
+                or not isinstance(context.get("phase"), str)
+                or not isinstance(context.get("scenario_id"), str)
+                or type(context.get("iteration")) is not int
+                or type(context.get("attempt")) is not int
+                or context.get("failed") not in {None, True, False}
+                or (operation_kind in {"preflight", "finalize"} and context != {
+                    "phase": "", "scenario_id": "", "iteration": 0,
+                    "failed": None, "attempt": 0,
+                })
+                or (operation_kind == "cleanup" and (
+                    context["phase"] not in PHASE_SCENARIOS
+                    or context["scenario_id"] != ""
+                    or not 1 <= context["iteration"] <= campaign["repetitions"]
+                    or type(context["failed"]) is not bool
+                    or context["attempt"] != 0
+                ))
+                or (operation_kind == "recovery" and (
+                    context["phase"] not in PHASE_SCENARIOS
+                    or context["scenario_id"] not in PHASE_SCENARIOS.get(context["phase"], ())
+                    or not 1 <= context["iteration"] <= campaign["repetitions"]
+                    or context["failed"] is not None
+                    or context["attempt"] < 1
+                ))
+                or operation_id != _matrix_operation_id(
+                    campaign_hash, operation_kind,
+                    phase=str(context["phase"]),
+                    scenario_id=str(context["scenario_id"]),
+                    iteration=int(context["iteration"]),
+                    failed=context["failed"],
+                    attempt=int(context["attempt"]),
+                )
+            ):
+                raise FullMatrixCampaignError("Full Matrix operation intent identity is invalid")
+            if event in {"campaign_started", "operation_started"}:
+                if operation_id in operation_starts:
+                    raise FullMatrixCampaignError("Full Matrix operation intent is duplicated")
+                if event == "campaign_started" and operation_kind != "preflight":
+                    raise FullMatrixCampaignError("Full Matrix start is not a preflight intent")
+                operation_starts[operation_id] = (operation_kind, context)
+            else:
+                result = record.get("result")
+                if (
+                    operation_id not in operation_starts
+                    or operation_id in operation_results
+                    or operation_starts[operation_id] != (operation_kind, context)
+                    or not isinstance(result, dict)
+                    or result.get("operation_id") != operation_id
+                ):
+                    raise FullMatrixCampaignError("Full Matrix operation completion is invalid")
+                label = (
+                    f"{operation_kind}:{context['iteration']}:{context['phase']}:"
+                    f"{context['scenario_id']}:{context['failed']}:{context['attempt']}"
+                )
+                retain_operation(
+                    result,
+                    label=label,
+                    operation_kind=operation_kind,
+                    operation_id=operation_id,
+                    operation_context=context,
+                )
+                operation_results[operation_id] = result
     if any(record.get("event") == "campaign_blocked" for record in records):
         raise FullMatrixCampaignError("Full Matrix execution journal is blocked")
     if sum(record.get("event") == "campaign_started" for record in records) != 1:
         raise FullMatrixCampaignError("Full Matrix execution journal repeats start")
+    if set(operation_starts) != set(operation_results):
+        raise FullMatrixCampaignError("Full Matrix completed journal has an unfinished operation")
+    required_operations = {
+        _matrix_operation_id(campaign_hash, "preflight"),
+        _matrix_operation_id(campaign_hash, "finalize"),
+        *{
+            _matrix_operation_id(
+                campaign_hash, "cleanup", phase=phase,
+                iteration=iteration, failed=False,
+            )
+            for iteration in range(1, campaign["repetitions"] + 1)
+            for phase in PHASES
+        },
+    }
+    if not required_operations.issubset(operation_results):
+        raise FullMatrixCampaignError("Full Matrix journal lacks required operation completions")
 
     expected_scenarios = {
         (iteration, phase, scenario)
@@ -889,21 +1177,55 @@ def _verify_execution_journal(
         for phase in PHASES
     }
     scenario_hashes: dict[tuple[int, str, str], str] = {}
+    scenario_attempts: dict[tuple[int, str, str], int] = {}
+    open_scenarios: dict[tuple[int, str, str], int] = {}
     phase_hashes: dict[tuple[int, str], str] = {}
     for record in records:
         event = record["event"]
-        if event == "scenario_passed":
+        if event == "scenario_started":
+            key = (record.get("iteration"), record.get("phase"), record.get("scenario_id"))
+            attempt = record.get("attempt")
+            expected_attempt = scenario_attempts.get(key, 0) + 1
+            expected_operation_id = _matrix_operation_id(
+                campaign_hash, "scenario", phase=str(key[1]),
+                scenario_id=str(key[2]), iteration=int(key[0]),
+                attempt=expected_attempt,
+            ) if key in expected_scenarios else ""
+            if (
+                key not in expected_scenarios
+                or key in open_scenarios
+                or type(attempt) is not int
+                or attempt != expected_attempt
+                or record.get("operation_id") != expected_operation_id
+            ):
+                raise FullMatrixCampaignError(
+                    "Full Matrix journal scenario attempt is invalid"
+                )
+            scenario_attempts[key] = attempt
+            open_scenarios[key] = attempt
+        elif event == "scenario_passed":
             key = (record.get("iteration"), record.get("phase"), record.get("scenario_id"))
             result = record.get("result")
+            attempt = record.get("attempt")
+            expected_operation_id = _matrix_operation_id(
+                campaign_hash, "scenario", phase=str(key[1]),
+                scenario_id=str(key[2]), iteration=int(key[0]),
+                attempt=int(attempt),
+            ) if key in expected_scenarios and type(attempt) is int else ""
             if (
                 key not in expected_scenarios
                 or key in scenario_hashes
+                or open_scenarios.get(key) != attempt
                 or not isinstance(result, dict)
                 or SHA256.fullmatch(str(result.get("evidence_hash") or "")) is None
+                or record.get("operation_id") != expected_operation_id
+                or result.get("operation_id") != expected_operation_id
+                or result.get("attempt") != attempt
             ):
                 raise FullMatrixCampaignError(
                     "Full Matrix journal scenario completion is invalid"
                 )
+            del open_scenarios[key]
             scenario_hashes[key] = result["evidence_hash"]
         elif event == "phase_passed":
             key = (record.get("iteration"), record.get("phase"))
@@ -912,7 +1234,35 @@ def _verify_execution_journal(
                 raise FullMatrixCampaignError(
                     "Full Matrix journal phase completion is invalid"
                 )
+            cleanup_id = _matrix_operation_id(
+                campaign_hash, "cleanup", phase=str(key[1]),
+                iteration=int(key[0]), failed=False,
+            )
+            if record.get("cleanup_result") != operation_results.get(cleanup_id):
+                raise FullMatrixCampaignError(
+                    "Full Matrix phase completion differs from cleanup operation"
+                )
             phase_hashes[key] = value
+        elif event == "scenario_recovered":
+            key = (record.get("iteration"), record.get("phase"), record.get("scenario_id"))
+            attempt = record.get("attempt")
+            recovery_id = _matrix_operation_id(
+                campaign_hash, "recovery", phase=str(key[1]),
+                scenario_id=str(key[2]), iteration=int(key[0]),
+                attempt=int(attempt),
+            ) if key in expected_scenarios and type(attempt) is int else ""
+            if (
+                key not in expected_scenarios
+                or open_scenarios.get(key) != attempt
+                or record.get("operation_id") != recovery_id
+                or record.get("result") != operation_results.get(recovery_id)
+            ):
+                raise FullMatrixCampaignError(
+                    "Full Matrix recovery event differs from its operation completion"
+                )
+            del open_scenarios[key]
+    if open_scenarios:
+        raise FullMatrixCampaignError("Full Matrix journal has an interrupted scenario")
     if set(scenario_hashes) != expected_scenarios or set(phase_hashes) != expected_phases:
         raise FullMatrixCampaignError("Full Matrix execution journal is incomplete")
 
@@ -935,7 +1285,15 @@ def _verify_execution_journal(
     if len(finalized) != 1 or len(completed) > 1:
         raise FullMatrixCampaignError("Full Matrix journal finalization is invalid")
     finalization = finalized[0]
-    if SHA256.fullmatch(str(finalization.get("finalization_evidence_hash") or "")) is None:
+    finalization_operation = operation_results[
+        _matrix_operation_id(campaign_hash, "finalize")
+    ]
+    if (
+        SHA256.fullmatch(str(finalization.get("finalization_evidence_hash") or "")) is None
+        or finalization.get("result") != finalization_operation
+        or finalization.get("finalization_evidence_hash")
+        != finalization_operation.get("evidence_hash")
+    ):
         raise FullMatrixCampaignError("Full Matrix finalization evidence is invalid")
     completed_report_hash: str | None = None
     if completed:

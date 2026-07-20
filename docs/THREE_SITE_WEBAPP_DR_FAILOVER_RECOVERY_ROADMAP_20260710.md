@@ -4190,3 +4190,139 @@ and change only that one line to `True` in
 must pass against those real immutable SHAs. No source, test, or documentation
 edit is permitted in the activation commit, and the activation still does not
 authorize staging or production use.
+
+## 54. `9217c8e9` Re-Review Closure and Pre-Gate-D Boundary - 2026-07-20
+
+This section records the source remediation performed after the Claude,
+Gemini, ChatGPT Ultra and ChatGPT Pro re-reviews of activation candidate
+`9217c8e9`. No `main` merge, staging/production deployment, CDN/DNS/provider
+mutation or live Full Matrix execution is authorized or represented here.
+
+### 54.1 Accepted reviewer findings and exact closure
+
+1. Claude/Gemini `NG-01` was accepted. The 76-test Queue PostgreSQL harness now
+   separates its scratch-owner migration/reset connection from the real
+   `bot_fi_app` runtime connection. Authoritative fixture cleanup temporarily
+   disables enforcement only within one owner transaction and restores it
+   before commit; all tested application mutations still use the exact
+   `foreign_writer` capability and same-transaction event contract. Relevant
+   file: `tests/test_telegram_delivery_queue_postgres.py`.
+2. Claude/Gemini `NG-02` and `NG-03` were accepted. The Bot fencing test now
+   builds protocol-v2 events with exact destination streams and current role
+   boundaries, and the unrelated Offer router settings patch uses the current
+   field. Relevant files: `tests/test_bot_database_fencing_postgres.py` and
+   `tests/test_offers_router_create_success.py`.
+3. Ultra `RR-P1-01` through `RR-P1-03` were accepted. Non-Bot host/root and
+   migration environments no longer contain Telegram provider credentials;
+   producer and executor ownership must agree; only Bot-FI receives execution
+   owner/token state; low-level send/edit boundaries enforce authority; and the
+   call-site audit proves a guard in the same lexical function instead of
+   accepting a sibling function. Relevant files include `core/config.py`,
+   `scripts/render_runtime_envs.py`, `docker-compose.yml`,
+   `docker-compose.iran.yml`, `deploy/staging/docker-compose.three-site.yml`,
+   `api/routers/trades.py`, `core/offer_expiry.py`, Telegram services and
+   `scripts/audit_telegram_delivery_calls.py`.
+4. Ultra `RR-P1-04`, `RR-P1-05` and `RR-P1-10` were accepted. Migration
+   `e653f4a5b7c8` replaces inferred write access with closed service/application
+   ACLs, binds every local event bidirectionally to its database mutation,
+   requires exact destination entitlement, allocates and verifies producer and
+   destination sequence tails, rejects orphan/extra/omitted/reused sequences,
+   clears dangerous role/database settings and marks security triggers
+   `ENABLE ALWAYS`. Its mutation capture is a definer-owned transaction-local
+   temporary table with `ON COMMIT DELETE ROWS`, avoiding an unbounded
+   300-rps audit table while rejecting temp-table poisoning. Effective-policy
+   fingerprinting now includes the relevant ACL/default-ACL/role-setting/
+   parameter-ACL/trigger/function/sequence surface. Relevant files:
+   `migrations/versions/e653f4a5b7c8_close_three_site_database_trust_gaps.py`,
+   both role-provisioning scripts, the migration-history verifier and real
+   PostgreSQL fencing tests.
+5. Ultra `RR-P1-06` was accepted. Source admission is closed before drain and
+   tail capture, and remains closed while the boundary is proven; a fresh
+   application reconnect is adversarially rejected. Relevant files:
+   `scripts/freeze_three_site_staging_sources.py`,
+   `scripts/run_three_site_staging_failover_site_agent.py`, the staging backend
+   and their tests.
+6. Ultra `RR-P1-07` was accepted. Migration observations are typed and bound to
+   exact campaign/plan/release/role identity, signed service image/config
+   inventory, health/TLS/log windows and referenced raw evidence. The
+   coordinator semantically reopens them. Legacy rollback consumes an
+   immutable content-addressed Compose/env/image bundle and does not reconstruct
+   old services from the new checkout. Relevant files: migration collector,
+   coordinator, role migration, backup and restore scripts and tests.
+7. Ultra `RR-P1-08`, `RR-P1-09`, `RR-P2-03` and `RR-P2-04` were accepted for
+   the source controller boundary. The campaign builder cryptographically and
+   semantically reopens every prerequisite and reruns the Git transition
+   verifier. The command backend executes sealed verified driver bytes rather
+   than a mutable pathname. All mutating operations have write-ahead intent,
+   deterministic operation identity and typed retained evidence; scenario and
+   recovery attempt identity prevents a second controller crash from reusing
+   an earlier attempt. Expected and observed assertion values, raw-evidence
+   coverage, production exclusion and zero residue are independently reopened.
+   Relevant files: all three `core/three_site_full_matrix_*` modules, campaign
+   builder/runner scripts and tests.
+8. Ultra `RR-P2-01`, `RR-P2-02`, `RR-P2-05` and `RR-P2-06` were accepted.
+   Receiver/Witness readiness checks require every individual privilege;
+   replay-nonce cleanup clamps a caller-supplied future cutoff to database time;
+   the effective database fingerprint was expanded; and stale/false-green test
+   paths were repaired rather than waived. Relevant files include
+   `dr_receiver_app.py`, `writer_witness_app.py`, migration `e653f4a5b7c8`,
+   the history verifier and their real/adversarial tests.
+9. Pro `NEW-9217-P1-001` and `NEW-9217-P2-001` were accepted as release-process
+   constraints. Code capability readiness alone cannot activate traffic or
+   Queue ownership. The disabled remediation baseline and its direct activation
+   child remain bound by exact parent SHA, child SHA, one-line diff and signed
+   campaign inputs. Operational activation still requires migrated topology,
+   exact image/readiness attestation and complete Queue+DR Full Matrix evidence.
+
+### 54.2 Additional defects found during remediation
+
+- The ORM omitted the already-migrated `offers.republished_offer_public_id`
+  field. It is now represented in `models/offer.py`, keeping event payload and
+  physical schema aligned.
+- PostgreSQL native enums and timestamp JSON representations can be semantically
+  equal while their text differs. The database payload matcher now normalizes
+  only catalog-proven enum/date/time columns; ordinary text remains
+  case-sensitive and malformed values fail closed.
+- A deferred cursor-tail trigger initially compared every intermediate row in
+  a multi-event transaction with the final tail. It now ignores only superseded
+  deferred rows and validates the final cursor value against the committed
+  event sequence.
+- Non-scenario Full Matrix artifacts are now typed and raw-evidence-backed.
+  A new crash-after-preflight-effect test proves that resume uses the same
+  journaled operation ID and does not append a second intent.
+
+### 54.3 Verification ledger
+
+All commands below used isolated local scratch state; no live environment was
+addressed.
+
+- Clean migration from an empty PostgreSQL database to sole head
+  `e653f4a5b7c8`: passed.
+- Strict Queue plus DR event coverage: `76/76` passed using `bot_fi_app` and a
+  separate scratch owner.
+- Bot-FI effective ACL, event and role isolation: `7/7` passed.
+- WebApp-FI Writer/receiver/projector/control/blob/effect fencing:
+  `20/20` passed.
+- Replay-nonce expiry and hostile future-cutoff tests: `2/2` passed.
+- Full Matrix campaign/backend/controller tests: `30/30` passed, including
+  false expected/observed claims, sealed-driver replacement, repeated crash
+  recovery and preflight-effect replay.
+- Changed hermetic migration/DR/Queue/routing modules: `158/158` passed.
+- `git diff --check` and Python compileall for application, migration, scripts
+  and tests: passed.
+
+These counts are source and scratch-database evidence only. They are not the
+official staging migration or Gate-D result.
+
+### 54.4 Findings deliberately not claimed closed
+
+Ultra's observation that no reviewed live all-scenario driver exists is true
+and is not papered over with a fake implementation. The command backend is now
+a fail-closed execution boundary, but Gate D remains blocked until a real
+driver and independent per-scenario oracles are committed in the disabled
+baseline, reviewed, hash-bound and executed on the dedicated migrated staging
+topology. Likewise, live Arvan/TLS/firewall/Object Storage behavior, rollback,
+provider ambiguity, 300-rps behavior, persistent FI1 -> IR2 -> FI3 recovery,
+24-hour endurance, two clean repetitions and zero-residue cleanup still require
+authoritative staging evidence. Product-owner acceptance and permission to
+merge with `main` also remain open and cannot be inferred from these tests.

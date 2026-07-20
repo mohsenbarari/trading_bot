@@ -121,6 +121,14 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
                     "public_table_count": 10,
                 },
                 "redis_observation": redis_observation,
+                "legacy_restore_bundle": {
+                    "schema": "three-site-staging-legacy-restore-bundle-reference-v1",
+                    "path": f"/secure/{role}/legacy-restore-bundle.json",
+                    "sha256": hashlib.sha256(
+                        f"legacy-restore-{role}".encode()
+                    ).hexdigest(),
+                    "size": 1024,
+                },
             }
             freezes.append(freeze)
             freeze_hash = hashlib.sha256(_canonical_bytes(freeze)).hexdigest()

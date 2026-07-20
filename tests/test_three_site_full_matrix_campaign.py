@@ -22,6 +22,7 @@ from core.three_site_full_matrix_campaign import (
     POLICY_SCHEMA,
     SCENARIO_EVIDENCE_SCHEMA,
     FullMatrixCampaignError,
+    _matrix_operation_id,
     verify_campaign,
     verify_complete_matrix,
 )
@@ -111,6 +112,10 @@ def _phase_evidence(
         {"path": artifact_name, "sha256": artifact_hash, "size": artifact_size}
     ]
     for scenario in PHASE_SCENARIOS[phase]:
+        operation_id = _matrix_operation_id(
+            campaign_hash, "scenario", phase=phase,
+            scenario_id=scenario, iteration=iteration, attempt=1,
+        )
         duration = 86400 if scenario == "twenty_four_hour_endurance_no_growth" else 1
         raw_name = f"raw-{iteration}-{phase}-{scenario}.json"
         raw_payload = canonical_json_bytes({"scenario": scenario, "observed": True}) + b"\n"
@@ -128,20 +133,30 @@ def _phase_evidence(
         ]
         if duration == 86400:
             assertion_names.append("minimum_duration")
-        assertions = [
-            {
-                "name": name,
-                "status": "passed",
-                "expected": 86400 if name == "minimum_duration" else (
-                    False if name == "production_boundary" else True
-                ),
-                "observed": duration if name == "minimum_duration" else (
-                    False if name == "production_boundary" else True
-                ),
-                "evidence_refs": [raw_name],
-            }
-            for name in assertion_names
-        ]
+        assertions = []
+        for name in assertion_names:
+            if name == "minimum_duration":
+                expected, observed = 86400, duration
+            elif name == "production_boundary":
+                expected = observed = False
+            elif name == "operation_executed":
+                expected = observed = {
+                    "operation_id": operation_id,
+                    "scenario_id": scenario,
+                    "iteration": iteration,
+                    "attempt": 1,
+                }
+            else:
+                expected = observed = {"verified": True}
+            assertions.append(
+                {
+                    "name": name,
+                    "status": "passed",
+                    "expected": expected,
+                    "observed": observed,
+                    "evidence_refs": [raw_name],
+                }
+            )
         scenario_name = f"scenario-{iteration}-{phase}-{scenario}.json"
         scenario_payload = canonical_json_bytes(
             {
@@ -154,6 +169,8 @@ def _phase_evidence(
                 "phase": phase,
                 "scenario_id": scenario,
                 "iteration": iteration,
+                "operation_id": operation_id,
+                "attempt": 1,
                 "oracle_id": f"{phase}.{scenario}.v1",
                 "started_at": started.isoformat(),
                 "finished_at": (started + timedelta(seconds=duration)).isoformat(),
@@ -176,6 +193,8 @@ def _phase_evidence(
         scenario_results.append(
             {
                 "scenario_id": scenario,
+                "operation_id": operation_id,
+                "attempt": 1,
                 "status": "passed",
                 "assertion_count": len(assertions),
                 "evidence_hash": scenario_record["sha256"],

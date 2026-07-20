@@ -173,11 +173,35 @@ def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[s
     _run([*_compose(args), "stop", "--timeout", "30", *ROLE_PUBLIC[args.role]], timeout=180)
     if any(_run([*_compose(args), "ps", "--status", "running", "-q", service]) for service in ROLE_PUBLIC[args.role]):
         raise StagingSiteOperationError("source public mutation service remained running")
-    # Stopping containers does not prove that an already-open transaction has
-    # ended.  Terminate every application-role backend, prove the count is
-    # zero, and only then certify the immutable source tail.  Because all
-    # public mutators are already stopped, no new application connection can
-    # appear between this drain and the boundary query.
+    # Close database admission before observing zero sessions.  Stopping the
+    # known Compose services alone cannot exclude a stale/external process
+    # reconnecting.  The control-role transition takes the writer-state row
+    # lock, waits for earlier Writer transactions, then makes every later
+    # application write fail closed at the database trigger.
+    writer_control = f"{args.role}_writer_control"
+    _run(
+        [
+            *_compose(args), "run", "--rm", "--no-deps", "-T",
+            writer_control, "python", "scripts/manage_webapp_writer.py", "fence",
+            "--expected-epoch", str(plan.expected_epoch),
+            "--expected-active-site", args.role,
+            "--operator", f"failover-handoff:{plan.operation_id}",
+            "--reason", "close source write admission before zero-loss tail capture",
+            "--apply", "--confirm",
+            f"writer:fence:{args.role}:{plan.expected_epoch}:{plan.expected_epoch}",
+        ],
+        timeout=300,
+    )
+    fenced_state = _writer_state(args, env)
+    if (
+        fenced_state.get("control_state") != "fenced"
+        or fenced_state.get("active_site") is not None
+        or fenced_state.get("writer_epoch") != plan.expected_epoch
+    ):
+        raise StagingSiteOperationError("source database admission fence was not committed")
+    # Terminate every application-role backend and prove zero while the
+    # database admission fence remains held. A reconnect may read, but cannot
+    # pass the Writer trigger or append a later authoritative event.
     app_user = ROLE_DB[args.role][3]
     _psql(
         args,
@@ -252,7 +276,9 @@ def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[s
             "source_site": plan.source_site, "fenced": True,
             "active_connections": 0,
             "boundary_captured_after_drain": True,
-            "fence_mode": "public-mutators-stopped-app-sessions-terminated-tail-captured",
+            "admission_fence": True,
+            "control_state": "fenced",
+            "fence_mode": "database-writer-fenced-sessions-terminated-tail-captured",
             "source_tail_boundary": boundary,
         }
     )
@@ -262,6 +288,13 @@ def source_connections_drained(args: argparse.Namespace, plan, env: dict[str, st
     for service in ROLE_PUBLIC[args.role]:
         if _run([*_compose(args), "ps", "--status", "running", "-q", service]):
             raise StagingSiteOperationError("source mutation service resumed before drain proof")
+    state = _writer_state(args, env)
+    if (
+        state.get("control_state") != "fenced"
+        or state.get("active_site") is not None
+        or state.get("writer_epoch") != plan.expected_epoch
+    ):
+        raise StagingSiteOperationError("source database admission fence was released")
     app_user = ROLE_DB[args.role][3]
     raw = _psql(
         args,
@@ -274,6 +307,7 @@ def source_connections_drained(args: argparse.Namespace, plan, env: dict[str, st
         {
             "status": "ok", "operation_id": plan.operation_id,
             "source_site": plan.source_site, "active_connections": 0,
+            "admission_fence": True, "control_state": "fenced",
         }
     )
 

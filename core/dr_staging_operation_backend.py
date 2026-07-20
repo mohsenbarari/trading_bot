@@ -437,10 +437,27 @@ class StagingTypedOperationBackend:
 
     async def source_fenced(self, plan: FailoverPlan) -> dict[str, Any]:
         self.validate_plan_scope(plan)
+        # Stop renewals and durably put the Witness lease into draining before
+        # the site agent closes the local database Writer term.  Once the
+        # local term is fenced, no late/reconnecting app session can extend the
+        # source tail while the target catches up.
+        host = self.config.hosts[plan.source_site]
+        await asyncio.to_thread(
+            self._compose_service,
+            host,
+            "stop",
+            [ROLE_SERVICE[plan.source_site]],
+        )
+        drain = await asyncio.to_thread(self._drain_source_lease, plan)
         result = await asyncio.to_thread(
             self._site_agent, plan, role=plan.source_site, action="source-fenced"
         )
-        return result
+        payload = {
+            **{key: value for key, value in result.items() if key != "evidence_hash"},
+            "witness_drain_request_id": drain["request_id"],
+            "witness_drain_receipt_hash": drain["witness_receipt_hash"],
+        }
+        return {**payload, "evidence_hash": _result_hash(payload)}
 
     async def source_connections_drained(self, plan: FailoverPlan) -> dict[str, Any]:
         self.validate_plan_scope(plan)
@@ -502,7 +519,6 @@ class StagingTypedOperationBackend:
 
     async def target_term_acquired(self, plan: FailoverPlan) -> dict[str, Any]:
         self.validate_plan_scope(plan)
-        await asyncio.to_thread(self._drain_source_lease, plan)
         deadline = asyncio.get_running_loop().time() + min(
             self.config.rollback_wait_seconds, 300
         )

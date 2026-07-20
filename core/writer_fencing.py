@@ -336,6 +336,9 @@ def _set_database_capability_after_begin(session: Session, transaction, connecti
         settings_map = {
             "trading_bot.mutation_capability": "foreign_writer",
             "trading_bot.physical_site": identity.physical_site,
+            "trading_bot.dr_producer_epoch": str(
+                int(getattr(settings, "dr_producer_epoch", 0))
+            ),
         }
     else:
         return

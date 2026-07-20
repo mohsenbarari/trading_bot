@@ -14,15 +14,19 @@ from core.secure_file_io import append_hash_chained_jsonl, verify_hash_chained_j
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
     FullMatrixCampaignError,
+    OPERATION_EVIDENCE_SCHEMA,
     PHASES,
     PHASE_SCENARIOS,
     SCENARIO_EVIDENCE_SCHEMA,
     verify_complete_matrix,
+    verify_scenario_evidence,
 )
 from core.three_site_full_matrix_runner import (
     CampaignIdentity,
     FullMatrixRunnerError,
     _identity_fields,
+    _operation_id,
+    _validate_preflight,
     run_full_matrix_campaign,
 )
 from tests.test_three_site_full_matrix_campaign import _sign, _signed_campaign
@@ -61,7 +65,80 @@ class FakeBackend:
             "production_touched": False,
         }
 
-    def _operation_artifact(self, name: str, payload: dict) -> dict:
+    def _operation_artifact(
+        self,
+        name: str,
+        *,
+        identity: CampaignIdentity,
+        operation_kind: str,
+        operation_id: str,
+        operation_context: dict,
+        residue_count: int = 0,
+    ) -> dict:
+        raw_name = f"raw-operation-{name}.json"
+        raw_body = canonical_json_bytes(
+            {
+                "operation_kind": operation_kind,
+                "operation_id": operation_id,
+                "operation_context": operation_context,
+                "residue_count": residue_count,
+            }
+        ) + b"\n"
+        raw_path = self.root / raw_name
+        raw_path.write_bytes(raw_body)
+        raw_path.chmod(0o600)
+        raw_record = {
+            "path": raw_name,
+            "sha256": hashlib.sha256(raw_body).hexdigest(),
+            "size": len(raw_body),
+        }
+        names = {
+            "preflight": (
+                "campaign_identity_bound", "prerequisites_verified",
+                "topology_ready", "production_boundary",
+            ),
+            "recovery": (
+                "faults_removed", "writer_state_safe", "residue_zero",
+                "production_boundary",
+            ),
+            "cleanup": (
+                "faults_removed", "writer_state_safe", "residue_zero",
+                "production_boundary",
+            ),
+            "finalize": (
+                "all_faults_removed", "writer_state_safe", "residue_zero",
+                "production_boundary",
+            ),
+        }[operation_kind]
+        assertions = []
+        for assertion_name in names:
+            if assertion_name == "production_boundary":
+                expected = observed = False
+            elif assertion_name == "residue_zero":
+                expected = observed = 0
+            else:
+                expected = observed = True
+            assertions.append(
+                {
+                    "name": assertion_name,
+                    "status": "passed",
+                    "expected": expected,
+                    "observed": observed,
+                    "evidence_refs": [raw_name],
+                }
+            )
+        payload = {
+            "schema": OPERATION_EVIDENCE_SCHEMA,
+            "status": "passed",
+            **_identity_fields(identity),
+            "operation_kind": operation_kind,
+            "operation_id": operation_id,
+            "operation_context": operation_context,
+            "assertions": assertions,
+            "evidence_refs": [raw_record],
+            "residue_count": residue_count,
+            "production_touched": False,
+        }
         relative = f"operation-{name}.json"
         body = canonical_json_bytes(payload) + b"\n"
         path = self.root / relative
@@ -77,11 +154,21 @@ class FakeBackend:
             "evidence_hash": digest,
         }
 
-    async def preflight(self, identity: CampaignIdentity) -> dict:
+    async def preflight(
+        self, identity: CampaignIdentity, *, operation_id: str
+    ) -> dict:
         self.preflight_calls += 1
         return {
             **self._identity(identity),
-            **self._operation_artifact("preflight", {"operation": "preflight"}),
+            "operation_id": operation_id,
+            **self._operation_artifact(
+                "preflight", identity=identity, operation_kind="preflight",
+                operation_id=operation_id,
+                operation_context={
+                    "phase": "", "scenario_id": "", "iteration": 0,
+                    "failed": None, "attempt": 0,
+                },
+            ),
         }
 
     async def recover_interrupted(
@@ -91,6 +178,8 @@ class FakeBackend:
         phase: str,
         scenario_id: str,
         iteration: int,
+        attempt: int,
+        operation_id: str,
     ) -> dict:
         key = (iteration, phase, scenario_id)
         self.recovered.append(key)
@@ -99,13 +188,20 @@ class FakeBackend:
             "phase": phase,
             "scenario_id": scenario_id,
             "iteration": iteration,
+            "attempt": attempt,
             "residue_count": 0,
+            "operation_id": operation_id,
         }
         return {
             **value,
             **self._operation_artifact(
-                f"recover-{iteration:02d}-{phase}-{scenario_id}",
-                {"operation": "recover", "key": key, "residue_count": 0},
+                f"recover-{iteration:02d}-{phase}-{scenario_id}-a{attempt}",
+                identity=identity, operation_kind="recovery",
+                operation_id=operation_id,
+                operation_context={
+                    "phase": phase, "scenario_id": scenario_id,
+                    "iteration": iteration, "failed": None, "attempt": attempt,
+                },
             ),
         }
 
@@ -116,6 +212,8 @@ class FakeBackend:
         phase: str,
         scenario_id: str,
         iteration: int,
+        attempt: int,
+        operation_id: str,
     ) -> dict:
         key = (iteration, phase, scenario_id)
         self.executed.append(key)
@@ -141,20 +239,30 @@ class FakeBackend:
         ]
         if duration == 86400:
             names.append("minimum_duration")
-        assertions = [
-            {
-                "name": assertion,
-                "status": "passed",
-                "expected": 86400 if assertion == "minimum_duration" else (
-                    False if assertion == "production_boundary" else True
-                ),
-                "observed": duration if assertion == "minimum_duration" else (
-                    False if assertion == "production_boundary" else True
-                ),
-                "evidence_refs": [raw_name],
-            }
-            for assertion in names
-        ]
+        assertions = []
+        for assertion in names:
+            if assertion == "minimum_duration":
+                expected, observed = 86400, duration
+            elif assertion == "production_boundary":
+                expected = observed = False
+            elif assertion == "operation_executed":
+                expected = observed = {
+                    "operation_id": operation_id,
+                    "scenario_id": scenario_id,
+                    "iteration": iteration,
+                    "attempt": attempt,
+                }
+            else:
+                expected = observed = {"verified": True}
+            assertions.append(
+                {
+                    "name": assertion,
+                    "status": "passed",
+                    "expected": expected,
+                    "observed": observed,
+                    "evidence_refs": [raw_name],
+                }
+            )
         name = f"scenario-{iteration:02d}-{phase}-{scenario_id}.json"
         payload = canonical_json_bytes(
             {
@@ -164,6 +272,8 @@ class FakeBackend:
                 "phase": phase,
                 "scenario_id": scenario_id,
                 "iteration": iteration,
+                "attempt": attempt,
+                "operation_id": operation_id,
                 "oracle_id": f"{phase}.{scenario_id}.v1",
                 "started_at": started_at.isoformat(),
                 "finished_at": (started_at + timedelta(seconds=duration)).isoformat(),
@@ -183,6 +293,8 @@ class FakeBackend:
             "phase": phase,
             "scenario_id": scenario_id,
             "iteration": iteration,
+            "attempt": attempt,
+            "operation_id": operation_id,
             "assertion_count": len(assertions),
             "artifact_path": name,
             "artifact_sha256": hashlib.sha256(payload).hexdigest(),
@@ -197,6 +309,7 @@ class FakeBackend:
         phase: str,
         iteration: int,
         failed: bool,
+        operation_id: str,
     ) -> dict:
         self.cleanups.append((iteration, phase, failed))
         value = {
@@ -204,30 +317,39 @@ class FakeBackend:
             "phase": phase,
             "iteration": iteration,
             "residue_count": 0,
+            "operation_id": operation_id,
         }
         return {
             **value,
             **self._operation_artifact(
                 f"cleanup-{iteration:02d}-{phase}-{'failed' if failed else 'passed'}",
-                {
-                    "operation": "cleanup",
-                    "iteration": iteration,
-                    "phase": phase,
-                    "failed": failed,
-                    "residue_count": 0,
+                identity=identity, operation_kind="cleanup",
+                operation_id=operation_id,
+                operation_context={
+                    "phase": phase, "scenario_id": "", "iteration": iteration,
+                    "failed": failed, "attempt": 0,
                 },
             ),
         }
 
-    async def finalize(self, identity: CampaignIdentity) -> dict:
+    async def finalize(
+        self, identity: CampaignIdentity, *, operation_id: str
+    ) -> dict:
         value = {
             **self._identity(identity),
             "residue_count": 0,
+            "operation_id": operation_id,
         }
         return {
             **value,
             **self._operation_artifact(
-                "finalize", {"operation": "finalize", "residue_count": 0}
+                "finalize",
+                identity=identity, operation_kind="finalize",
+                operation_id=operation_id,
+                operation_context={
+                    "phase": "", "scenario_id": "", "iteration": 0,
+                    "failed": None, "attempt": 0,
+                },
             ),
         }
 
@@ -306,7 +428,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
 
             (root / "operation-preflight.json").unlink()
             with self.assertRaisesRegex(
-                FullMatrixCampaignError, "retained preflight artifact"
+                FullMatrixCampaignError, "retained preflight.*artifact"
             ):
                 verify_complete_matrix(
                     campaign=campaign,
@@ -335,6 +457,147 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     monotonic=lambda: 0.0,
                 )
 
+    async def test_preflight_cannot_pass_with_a_false_typed_assertion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            identity = CampaignIdentity(
+                campaign_id="11111111-1111-4111-8111-111111111111",
+                campaign_hash="b" * 64,
+                release_sha="a" * 40,
+                activation_sha="a" * 40,
+                repetitions=2,
+            )
+            operation_id = _operation_id(identity, "preflight")
+            result = await FakeBackend(root).preflight(
+                identity, operation_id=operation_id
+            )
+            path = root / result["artifact_path"]
+            evidence = json.loads(path.read_text())
+            assertion = next(
+                item for item in evidence["assertions"]
+                if item["name"] == "topology_ready"
+            )
+            assertion["observed"] = False
+            body = canonical_json_bytes(evidence) + b"\n"
+            path.write_bytes(body)
+            path.chmod(0o600)
+            digest = hashlib.sha256(body).hexdigest()
+            result.update(
+                artifact_sha256=digest,
+                artifact_size=len(body),
+                evidence_hash=digest,
+            )
+            with self.assertRaisesRegex(
+                FullMatrixCampaignError, "assertion did not pass"
+            ):
+                _validate_preflight(
+                    result, identity, operation_id=operation_id,
+                    artifact_root=root,
+                )
+
+    async def test_preflight_effect_crash_replays_same_journaled_operation(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+
+        class CrashAfterPreflightEffect(FakeBackend):
+            async def preflight(self, identity, *, operation_id):  # noqa: ANN001
+                await super().preflight(identity, operation_id=operation_id)
+                raise KeyboardInterrupt("synthetic crash after preflight effect")
+
+        with stack:
+            with self.assertRaises(KeyboardInterrupt):
+                await run_full_matrix_campaign(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    artifact_root=root,
+                    journal=journal,
+                    backend=CrashAfterPreflightEffect(root),
+                    now=now + timedelta(minutes=1),
+                )
+            artifact_before = (root / "operation-preflight.json").read_bytes()
+            resumed = FakeBackend(root)
+            report = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=resumed,
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(resumed.preflight_calls, 1)
+            self.assertEqual(
+                (root / "operation-preflight.json").read_bytes(),
+                artifact_before,
+            )
+            records = verify_hash_chained_jsonl(journal, label="test journal")
+            starts = [
+                row for row in records
+                if row["event"] == "campaign_started"
+                and row["operation_kind"] == "preflight"
+            ]
+            passes = [
+                row for row in records
+                if row["event"] == "operation_passed"
+                and row["operation_kind"] == "preflight"
+            ]
+            self.assertEqual(len(starts), 1)
+            self.assertEqual(len(passes), 1)
+            self.assertEqual(starts[0]["operation_id"], passes[0]["operation_id"])
+
+    async def test_load_scenario_cannot_self_report_300_rps_when_observed_is_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            identity = CampaignIdentity(
+                campaign_id="11111111-1111-4111-8111-111111111111",
+                campaign_hash="b" * 64,
+                release_sha="a" * 40,
+                activation_sha="a" * 40,
+                repetitions=2,
+            )
+            phase = next(
+                name for name, scenarios in PHASE_SCENARIOS.items()
+                if "three_hundred_rps_fifty_fifty" in scenarios
+            )
+            scenario_id = "three_hundred_rps_fifty_fifty"
+            operation_id = _operation_id(
+                identity, "scenario", phase=phase, scenario_id=scenario_id,
+                iteration=1, attempt=1,
+            )
+            result = await FakeBackend(root).execute_scenario(
+                identity, phase=phase, scenario_id=scenario_id,
+                iteration=1, attempt=1, operation_id=operation_id,
+            )
+            path = root / result["artifact_path"]
+            evidence = json.loads(path.read_text())
+            assertion = next(
+                item for item in evidence["assertions"]
+                if item["name"] == "expected_outcome"
+            )
+            assertion["expected"] = {"requests_per_second": 300}
+            assertion["observed"] = {"requests_per_second": 0}
+            with self.assertRaisesRegex(
+                FullMatrixCampaignError, "expected outcome differs"
+            ):
+                verify_scenario_evidence(
+                    evidence,
+                    campaign={
+                        "campaign_id": identity.campaign_id,
+                        "release_sha": identity.release_sha,
+                        "activation_sha": identity.activation_sha,
+                    },
+                    campaign_hash=identity.campaign_hash,
+                    phase=phase,
+                    scenario_id=scenario_id,
+                    iteration=1,
+                    attempt=1,
+                    operation_id=operation_id,
+                    artifact_root=root,
+                )
+
     async def test_operation_artifact_reuse_is_rejected_by_standalone_verifier(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
@@ -351,21 +614,26 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(report["status"], "passed")
             records = verify_hash_chained_jsonl(journal, label="test journal")
             preflight = next(
-                row for row in records if row["event"] == "campaign_started"
+                row for row in records
+                if row["event"] == "operation_passed"
+                and row["operation_kind"] == "preflight"
             )["result"]
             finalized = next(
                 row for row in records if row["event"] == "campaign_finalized"
             )
-            final_path = root / finalized["result"]["artifact_path"]
-            preflight_path = root / preflight["artifact_path"]
-            final_path.write_bytes(preflight_path.read_bytes())
-            final_path.chmod(0o600)
-            finalized["result"].update(
-                artifact_path=preflight["artifact_path"],
-                artifact_sha256=preflight["artifact_sha256"],
-                artifact_size=preflight["artifact_size"],
-                evidence_hash=preflight["evidence_hash"],
+            finalize_pass = next(
+                row for row in records
+                if row["event"] == "operation_passed"
+                and row["operation_kind"] == "finalize"
             )
+            reused_fields = {
+                "artifact_path": preflight["artifact_path"],
+                "artifact_sha256": preflight["artifact_sha256"],
+                "artifact_size": preflight["artifact_size"],
+                "evidence_hash": preflight["evidence_hash"],
+            }
+            finalize_pass["result"].update(**reused_fields)
+            finalized["result"].update(**reused_fields)
             # Rebuild the hash chain to model a fully re-signed journal forgery;
             # the semantic verifier must still reject artifact reuse.
             forged = root / "forged-journal.jsonl"
@@ -388,7 +656,9 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 for iteration in range(1, campaign["repetitions"] + 1)
                 for phase in PHASES
             ]
-            with self.assertRaisesRegex(FullMatrixCampaignError, "reused"):
+            with self.assertRaisesRegex(
+                FullMatrixCampaignError, "reused|identity/status"
+            ):
                 verify_complete_matrix(
                     campaign=campaign,
                     approver_policy=policy,

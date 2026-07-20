@@ -67,6 +67,7 @@ def _journal(path: Path, role: str) -> MigrationJournal:
         role=role,
         role_compose_sha256=COMPOSE_SHA,
         role_env_sha256=ENV_SHA,
+        image_inventory_sha256="e" * 64,
     )
     return journal
 
@@ -175,17 +176,24 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                     "start_workers", "start_public",
                 ],
             )
+            committed_states = {"webapp_fi": committed}
+            from scripts.three_site_staging_migration_journal import ROLE_PHASES
+            for other_role in ("bot_fi", "webapp_ir", "witness"):
+                other = _journal(root / f"{other_role}.json", other_role)
+                for phase in ROLE_PHASES[other_role]:
+                    other.begin_phase(phase)
+                    other.complete_phase(phase)
+                committed_states[other_role] = other.commit(
+                    acceptance_evidence_sha256="9" * 64
+                )
             role_journals = {
-                "bot_fi": "1" * 64,
-                "webapp_fi": committed["state_sha256"],
-                "webapp_ir": "2" * 64,
-                "witness": "3" * 64,
+                role: state["state_sha256"] for role, state in committed_states.items()
             }
             global_commit = root / "global-commit.json"
             global_commit.write_text(
                 json.dumps(
                     {
-                        "schema": "three-site-staging-global-commit-v1",
+                        "schema": "three-site-staging-global-commit-v2",
                         "status": "passed",
                         "campaign_id": CAMPAIGN_ID,
                         "release_sha": RELEASE_SHA,
@@ -197,6 +205,7 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                             ).encode()
                         ).hexdigest(),
                         "role_journals": role_journals,
+                        "committed_role_states": committed_states,
                         "all_roles_committed": True,
                     }
                 )

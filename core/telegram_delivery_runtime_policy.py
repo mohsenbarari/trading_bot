@@ -15,7 +15,7 @@ QUEUE_V1_TELEGRAM_EXECUTION_OWNER = "queue-v1"
 # validators, and rollback contract are now present in this release. Runtime
 # activation still requires all three explicit operator controls below; this
 # code capability alone can never switch ownership.
-TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = True
+TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = False
 
 
 class TelegramDeliveryRuntimeMode(str, Enum):

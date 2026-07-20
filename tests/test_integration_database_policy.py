@@ -89,7 +89,14 @@ class IntegrationDatabasePolicyTests(unittest.TestCase):
                     "transaction_position": 1,
                     "transaction_size": 1,
                     "transaction_hash": "4" * 64,
-                }
+                },
+                "webapp_ir": {
+                    "sequence": 1,
+                    "transaction_id": "00000000-0000-4000-8000-000000000002",
+                    "transaction_position": 1,
+                    "transaction_size": 1,
+                    "transaction_hash": "4" * 64,
+                },
             },
         }
         values = _event_values(validate_envelope(payload))

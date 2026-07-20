@@ -8,11 +8,13 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from core.three_site_full_matrix_campaign import BOUND_ARTIFACTS, FullMatrixCampaignError
 from scripts.build_three_site_staging_full_matrix_campaign import (
     APPROVAL_SCHEMA,
+    _queue_transition,
     finalize,
     prepare,
 )
@@ -80,7 +82,14 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
         values = self._inputs()
         stack, root, _baseline, activation, policy_path, _policy, keys, _mappings, draft, request, args = values
         with stack:
-            prepared = prepare(args)
+            campaign_id = json.loads(
+                values[7]["provisioned_inventory"].read_text()
+            )["campaign_id"]
+            with patch(
+                "scripts.build_three_site_staging_full_matrix_campaign._verify_prerequisites",
+                return_value=(campaign_id, "f" * 64),
+            ):
+                prepared = prepare(args)
             self.assertEqual(prepared["status"], "awaiting_two_approvals")
             draft_value = json.loads(draft.read_text())
             request_value = json.loads(request.read_text())
@@ -124,7 +133,11 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             transition["baseline_sha"] = "d" * 40
             _write(mappings["queue_activation_transition"], transition)
             with self.assertRaisesRegex(FullMatrixCampaignError, "lineage"):
-                prepare(args)
+                _queue_transition(
+                    mappings["queue_activation_transition"],
+                    baseline_sha=args.baseline_sha,
+                    activation_sha=args.activation_sha,
+                )
             self.assertFalse(draft.exists())
 
     def test_inventory_must_be_re_attested_at_activation_sha(self):
@@ -135,6 +148,14 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             inventory["release_sha"] = baseline
             _write(mappings["provisioned_inventory"], inventory)
             with self.assertRaisesRegex(FullMatrixCampaignError, "re-attested"):
+                prepare(args)
+            self.assertFalse(draft.exists())
+
+    def test_status_only_or_unsigned_prerequisites_cannot_create_a_draft(self):
+        values = self._inputs()
+        stack, _root, _baseline, _activation, _policy_path, _policy, _keys, _mappings, draft, _request, args = values
+        with stack:
+            with self.assertRaises(Exception):
                 prepare(args)
             self.assertFalse(draft.exists())
 

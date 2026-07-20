@@ -9,6 +9,7 @@ campaign/scenario identity as fixed argv fields.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
 import os
@@ -78,9 +79,52 @@ class CommandFullMatrixBackend:
             or stat.S_IMODE(metadata.st_mode) & 0o022
         ):
             raise FullMatrixRunnerError("Full Matrix driver ownership/mode is unsafe")
-        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        try:
+            source_fd = os.open(
+                resolved,
+                os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            )
+        except OSError as exc:
+            raise FullMatrixRunnerError("Full Matrix driver could not be opened safely") from exc
+        try:
+            opened = os.fstat(source_fd)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_dev != metadata.st_dev
+                or opened.st_ino != metadata.st_ino
+                or opened.st_size != metadata.st_size
+            ):
+                raise FullMatrixRunnerError("Full Matrix driver changed while being opened")
+            driver_bytes = os.pread(source_fd, opened.st_size + 1, 0)
+        finally:
+            os.close(source_fd)
+        if len(driver_bytes) != metadata.st_size:
+            raise FullMatrixRunnerError("Full Matrix driver read is incomplete")
+        digest = hashlib.sha256(driver_bytes).hexdigest()
         if digest != driver["sha256"]:
             raise FullMatrixRunnerError("Full Matrix driver hash differs from signed config")
+        try:
+            immutable_fd = os.memfd_create(
+                "three-site-full-matrix-driver",
+                os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING,
+            )
+            written = os.write(immutable_fd, driver_bytes)
+            if written != len(driver_bytes):
+                raise OSError("short write")
+            fcntl.fcntl(
+                immutable_fd,
+                fcntl.F_ADD_SEALS,
+                fcntl.F_SEAL_SEAL
+                | fcntl.F_SEAL_SHRINK
+                | fcntl.F_SEAL_GROW
+                | fcntl.F_SEAL_WRITE,
+            )
+        except (AttributeError, OSError) as exc:
+            if "immutable_fd" in locals():
+                os.close(immutable_fd)
+            raise FullMatrixRunnerError(
+                "Full Matrix driver could not be pinned into sealed memory"
+            ) from exc
         timeouts = config.get("timeouts_seconds")
         if not isinstance(timeouts, dict) or set(timeouts) != {
             "preflight", "recovery", "scenario", "endurance", "cleanup", "finalize"
@@ -92,6 +136,8 @@ class CommandFullMatrixBackend:
             if type(value) is not int or not minimum <= value <= maximum:
                 raise FullMatrixRunnerError("Full Matrix command backend timeout is unsafe")
         self.driver = resolved
+        self._driver_fd = immutable_fd
+        self.driver_sha256 = digest
         self.repo_root = repo_root.resolve()
         self.artifact_root = artifact_root.resolve()
         self.timeouts = dict(timeouts)
@@ -101,9 +147,11 @@ class CommandFullMatrixBackend:
         identity: CampaignIdentity,
         *,
         operation: str,
+        operation_id: str,
         phase: str | None = None,
         scenario_id: str | None = None,
         iteration: int | None = None,
+        attempt: int | None = None,
         failed: bool | None = None,
     ) -> dict[str, Any]:
         timeout_name = operation
@@ -114,8 +162,9 @@ class CommandFullMatrixBackend:
                 else "scenario"
             )
         command = [
-            PYTHON, "-I", "-B", str(self.driver),
+            PYTHON, "-I", "-B", f"/proc/self/fd/{self._driver_fd}",
             "--operation", operation,
+            "--operation-id", operation_id,
             "--campaign-id", identity.campaign_id,
             "--campaign-hash", identity.campaign_hash,
             "--release-sha", identity.release_sha,
@@ -128,6 +177,8 @@ class CommandFullMatrixBackend:
             command.extend(["--scenario-id", scenario_id])
         if iteration is not None:
             command.extend(["--iteration", str(iteration)])
+        if attempt is not None:
+            command.extend(["--attempt", str(attempt)])
         if failed is not None:
             command.extend(["--failed", "true" if failed else "false"])
 
@@ -136,6 +187,7 @@ class CommandFullMatrixBackend:
                 *command,
                 cwd=self.repo_root,
                 env=SAFE_ENV,
+                pass_fds=(self._driver_fd,),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -166,8 +218,24 @@ class CommandFullMatrixBackend:
             raise FullMatrixRunnerError(f"Full Matrix {operation} driver output is not an object")
         return payload
 
-    async def preflight(self, identity: CampaignIdentity) -> dict[str, Any]:
-        return await self._invoke(identity, operation="preflight")
+    def close(self) -> None:
+        descriptor = getattr(self, "_driver_fd", -1)
+        if descriptor >= 0:
+            os.close(descriptor)
+            self._driver_fd = -1
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except OSError:
+            pass
+
+    async def preflight(
+        self, identity: CampaignIdentity, *, operation_id: str
+    ) -> dict[str, Any]:
+        return await self._invoke(
+            identity, operation="preflight", operation_id=operation_id
+        )
 
     async def recover_interrupted(
         self,
@@ -176,10 +244,12 @@ class CommandFullMatrixBackend:
         phase: str,
         scenario_id: str,
         iteration: int,
+        attempt: int,
+        operation_id: str,
     ) -> dict[str, Any]:
         return await self._invoke(
-            identity, operation="recovery", phase=phase,
-            scenario_id=scenario_id, iteration=iteration,
+            identity, operation="recovery", operation_id=operation_id, phase=phase,
+            scenario_id=scenario_id, iteration=iteration, attempt=attempt,
         )
 
     async def execute_scenario(
@@ -189,12 +259,14 @@ class CommandFullMatrixBackend:
         phase: str,
         scenario_id: str,
         iteration: int,
+        attempt: int,
+        operation_id: str,
     ) -> dict[str, Any]:
         if phase not in PHASE_SCENARIOS or scenario_id not in PHASE_SCENARIOS[phase]:
             raise FullMatrixRunnerError("Full Matrix requested an unknown scenario")
         return await self._invoke(
-            identity, operation="scenario", phase=phase,
-            scenario_id=scenario_id, iteration=iteration,
+            identity, operation="scenario", operation_id=operation_id, phase=phase,
+            scenario_id=scenario_id, iteration=iteration, attempt=attempt,
         )
 
     async def cleanup_phase(
@@ -204,11 +276,16 @@ class CommandFullMatrixBackend:
         phase: str,
         iteration: int,
         failed: bool,
+        operation_id: str,
     ) -> dict[str, Any]:
         return await self._invoke(
-            identity, operation="cleanup", phase=phase,
+            identity, operation="cleanup", operation_id=operation_id, phase=phase,
             iteration=iteration, failed=failed,
         )
 
-    async def finalize(self, identity: CampaignIdentity) -> dict[str, Any]:
-        return await self._invoke(identity, operation="finalize")
+    async def finalize(
+        self, identity: CampaignIdentity, *, operation_id: str
+    ) -> dict[str, Any]:
+        return await self._invoke(
+            identity, operation="finalize", operation_id=operation_id
+        )

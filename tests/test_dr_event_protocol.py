@@ -175,7 +175,14 @@ class DrEventProtocolTests(unittest.TestCase):
                         "transaction_position": position,
                         "transaction_size": 2,
                         "transaction_hash": "0" * 64,
-                    }
+                    },
+                    "bot_fi": {
+                        "sequence": 100 + position,
+                        "transaction_id": "12345678-1234-4234-8234-123456789abc",
+                        "transaction_position": position,
+                        "transaction_size": 2,
+                        "transaction_hash": "0" * 64,
+                    },
                 },
             )
         group_hash = transaction_hash_from_envelopes([first, second])
@@ -186,6 +193,11 @@ class DrEventProtocolTests(unittest.TestCase):
         second["transaction_hash"] = group_hash
         first["destination_streams"]["webapp_fi"]["transaction_hash"] = destination_hash
         second["destination_streams"]["webapp_fi"]["transaction_hash"] = destination_hash
+        bot_hash = destination_transaction_hash(
+            [first, second], destination_site="bot_fi"
+        )
+        first["destination_streams"]["bot_fi"]["transaction_hash"] = bot_hash
+        second["destination_streams"]["bot_fi"]["transaction_hash"] = bot_hash
 
         validate_envelope(first)
         validate_envelope(second)
@@ -195,6 +207,11 @@ class DrEventProtocolTests(unittest.TestCase):
             transaction_hash_from_envelopes([first, tampered]),
             group_hash,
         )
+
+        omitted = copy.deepcopy(first)
+        del omitted["destination_streams"]["bot_fi"]
+        with self.assertRaisesRegex(DrEventProtocolError, "canonical entitlement"):
+            validate_envelope(omitted)
 
     def test_destination_streams_remove_private_event_gaps_without_leaking_payload(self):
         product = envelope(sequence=20, event_id="12345678-1234-4234-8234-123456789ab3")

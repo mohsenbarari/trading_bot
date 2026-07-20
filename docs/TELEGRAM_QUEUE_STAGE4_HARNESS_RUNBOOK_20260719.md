@@ -2,7 +2,7 @@
 
 ## Safety boundary
 
-This runbook prepares and verifies the final `1,800 valid + 400 invalid` staging workload. It does not authorize execution, merge, production access, or deployment. `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY` remains `False`; a separate owner approval is required before `execute`.
+This runbook prepares and verifies the final `1,800 valid + 400 invalid` staging workload. It does not authorize execution, merge, production access, or deployment. At the activation child, `TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY=True` means only that the reviewed code capability is present; runtime ownership still requires the explicit producer/executor, worker and cutover controls plus a separate owner approval before `execute`.
 
 The four commands are:
 

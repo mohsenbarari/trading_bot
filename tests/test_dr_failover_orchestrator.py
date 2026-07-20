@@ -171,10 +171,19 @@ class FakeAdapter:
                 fenced=True,
                 active_connections=0,
                 boundary_captured_after_drain=True,
+                admission_fence=True,
+                control_state="fenced",
+                witness_drain_request_id="drain-request",
+                witness_drain_receipt_hash="d" * 64,
                 source_tail_boundary=boundary,
             )
         if name == "source_connections_drained":
-            result.update(source_site=plan.source_site, active_connections=0)
+            result.update(
+                source_site=plan.source_site,
+                active_connections=0,
+                admission_fence=True,
+                control_state="fenced",
+            )
         if name in {"route_switched", "public_route_verified"}:
             result.update(origin_ip=plan.target_ip, domain=plan.domain, record=plan.record)
         if name == "rollback":

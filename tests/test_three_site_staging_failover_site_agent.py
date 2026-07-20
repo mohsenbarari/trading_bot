@@ -94,11 +94,15 @@ class ThreeSiteStagingFailoverSiteAgentTests(unittest.TestCase):
         with (
             patch(
                 "scripts.run_three_site_staging_failover_site_agent._writer_state",
-                return_value={
+                side_effect=[{
                     "active_site": "webapp_fi", "writer_epoch": 1,
                     "control_state": "active", "witness_lease_id": "lease",
                     "lease_seconds_remaining": 120,
-                },
+                }, {
+                    "active_site": None, "writer_epoch": 1,
+                    "control_state": "fenced", "witness_lease_id": None,
+                    "lease_seconds_remaining": None,
+                }],
             ),
             patch(
                 "scripts.run_three_site_staging_failover_site_agent._compose",
@@ -116,6 +120,8 @@ class ThreeSiteStagingFailoverSiteAgentTests(unittest.TestCase):
         self.assertIn("webapp_fi_api", calls[0])
         self.assertIn("webapp_fi_effects", calls[0])
         self.assertTrue(result["boundary_captured_after_drain"])
+        self.assertTrue(result["admission_fence"])
+        self.assertEqual(result["control_state"], "fenced")
         self.assertEqual(result["active_connections"], 0)
         self.assertTrue(
             any("destination_streams -> 'webapp_ir'" in query for query in queries)
@@ -129,6 +135,13 @@ class ThreeSiteStagingFailoverSiteAgentTests(unittest.TestCase):
                 return_value=["docker", "compose"],
             ),
             patch("scripts.run_three_site_staging_failover_site_agent._run", return_value=""),
+            patch(
+                "scripts.run_three_site_staging_failover_site_agent._writer_state",
+                return_value={
+                    "active_site": None, "writer_epoch": 1,
+                    "control_state": "fenced",
+                },
+            ),
             patch("scripts.run_three_site_staging_failover_site_agent._psql", return_value="1"),
         ):
             with self.assertRaisesRegex(StagingSiteOperationError, "not drained"):

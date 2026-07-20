@@ -186,7 +186,7 @@ def _load_freeze_evidence(
     fields = {
         "schema", "campaign_id", "target_release_sha", "project_name", "observed_at",
         "source_roles", "previously_running_services", "stopped_services",
-        "running_services", "postgres", "redis_observation",
+        "running_services", "postgres", "redis_observation", "legacy_restore_bundle",
     }
     if (
         not isinstance(evidence, dict)
@@ -198,6 +198,16 @@ def _load_freeze_evidence(
         or evidence["running_services"] != ["db", "redis"]
         or "db" in evidence["stopped_services"]
         or "redis" in evidence["stopped_services"]
+        or not isinstance(evidence["legacy_restore_bundle"], dict)
+        or set(evidence["legacy_restore_bundle"]) != {"schema", "path", "sha256", "size"}
+        or evidence["legacy_restore_bundle"].get("schema")
+        != "three-site-staging-legacy-restore-bundle-reference-v1"
+        or not Path(str(evidence["legacy_restore_bundle"].get("path", ""))).is_absolute()
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(evidence["legacy_restore_bundle"].get("sha256", ""))
+        ) is None
+        or type(evidence["legacy_restore_bundle"].get("size")) is not int
+        or not 1 <= evidence["legacy_restore_bundle"]["size"] <= 1024 * 1024
     ):
         raise StagingBackupError("source-freeze evidence identity/state is invalid")
     try:

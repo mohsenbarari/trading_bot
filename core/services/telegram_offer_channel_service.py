@@ -12,8 +12,11 @@ from core.offer_settlement import build_offer_summary_text
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
 from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
     configured_telegram_delivery_producer_mode,
+    configured_telegram_delivery_runtime,
 )
 from core.services.trade_service import get_available_trade_amounts
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
@@ -25,6 +28,15 @@ INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
 TELEGRAM_OFFER_EXPIRED_TAG = "❌"
+
+
+def _assert_legacy_channel_editor_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_channel_editor_is_not_runtime_owner"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +304,7 @@ async def apply_offer_channel_state_with_result(
             response_class="queued",
             reason="telegram_delivery_queue_owned",
         )
+    _assert_legacy_channel_editor_owner()
 
     channel_message_id = telegram_publication_message_id(offer, publication_state)
     if not channel_message_id:

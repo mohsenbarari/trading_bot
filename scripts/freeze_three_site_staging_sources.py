@@ -7,8 +7,10 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 
@@ -36,6 +38,7 @@ ROLE_APP_SERVICE = {"bot_fi": "foreign_app", "webapp_fi": "app"}
 SOURCE_ROLES = tuple(ROLE_APP_SERVICE)
 DATA_SERVICES = frozenset({"db", "redis"})
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class SourceFreezeError(RuntimeError):
@@ -67,6 +70,78 @@ def _compose(args: argparse.Namespace) -> list[str]:
         DOCKER, "compose", "-p", args.project_name,
         "-f", str(args.compose), "--env-file", str(args.env_file),
     ]
+
+
+def _secure_bundle_directory(path: Path) -> Path:
+    """Create/verify the owner-only durable rollback artifact directory."""
+    if path.exists() and path.is_symlink():
+        raise SourceFreezeError("rollback bundle directory cannot be a symlink")
+    resolved = path.resolve()
+    if not path.is_absolute():
+        raise SourceFreezeError("rollback bundle directory must be absolute")
+    resolved.mkdir(mode=0o700, parents=True, exist_ok=True)
+    metadata = resolved.lstat()
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise SourceFreezeError("rollback bundle directory must be owner-owned mode-0700")
+    return resolved
+
+
+def _capture_legacy_restore_bundle(
+    args: argparse.Namespace,
+    *,
+    prefix: list[str],
+    previously_running: list[str],
+    source_releases: dict[str, str],
+    campaign_id: str,
+    target_release_sha: str,
+) -> dict[str, object]:
+    """Pin resolved legacy Compose bytes and every running container image ID."""
+    bundle_dir = _secure_bundle_directory(args.rollback_bundle_dir)
+    compose_bytes = (_run([*prefix, "config", "--format", "yaml"]) + "\n").encode()
+    compose_hash = hashlib.sha256(compose_bytes).hexdigest()
+    compose_path = bundle_dir / f"legacy-compose-{compose_hash}.yaml"
+    _atomic_write(compose_path, compose_bytes, mode=0o600)
+
+    service_images: dict[str, str] = {}
+    for service in sorted(previously_running):
+        container_id = _run([*prefix, "ps", "-q", service])
+        if not container_id:
+            raise SourceFreezeError(f"running legacy service has no container: {service}")
+        image_id = _run([DOCKER, "inspect", "--format", "{{.Image}}", container_id])
+        if IMAGE_ID_RE.fullmatch(image_id) is None:
+            raise SourceFreezeError(f"legacy service image ID is invalid: {service}")
+        service_images[service] = image_id
+
+    manifest = {
+        "schema": "three-site-staging-legacy-restore-bundle-v1",
+        "campaign_id": campaign_id,
+        "target_release_sha": target_release_sha,
+        "project_name": args.project_name,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "source_releases": dict(sorted(source_releases.items())),
+        "previously_running_services": sorted(previously_running),
+        "compose": {
+            "path": str(compose_path),
+            "sha256": compose_hash,
+            "size": len(compose_bytes),
+        },
+        "service_images": service_images,
+    }
+    manifest_bytes = (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
+    manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
+    manifest_path = bundle_dir / f"legacy-restore-bundle-{manifest_hash}.json"
+    _atomic_write(manifest_path, manifest_bytes, mode=0o600)
+    return {
+        "schema": "three-site-staging-legacy-restore-bundle-reference-v1",
+        "path": str(manifest_path),
+        "sha256": manifest_hash,
+        "size": len(manifest_bytes),
+    }
 
 
 def confirmation_phrase(campaign_id: str, roles: list[str], target_sha: str) -> str:
@@ -140,6 +215,17 @@ def execute(
         if release != expected:
             raise SourceFreezeError(f"legacy runtime release differs for {role}")
         releases[role] = release
+    # Capture rollback material before stopping anything.  The bundle is
+    # content-addressed and contains expanded Compose bytes plus immutable
+    # Docker image IDs, so restore never depends on the target-release checkout.
+    restore_bundle = _capture_legacy_restore_bundle(
+        args,
+        prefix=prefix,
+        previously_running=previously_running,
+        source_releases=releases,
+        campaign_id=str(inventory_result["campaign_id"]),
+        target_release_sha=str(inventory_result["release_sha"]),
+    )
     mutating_services = sorted(set(services) - DATA_SERVICES)
     _run([*prefix, "stop", "--timeout", "30", *mutating_services], timeout=180)
     running_after = [
@@ -196,6 +282,7 @@ def execute(
             "lastsave_unix": int(lastsave),
             "restore": False,
         },
+        "legacy_restore_bundle": restore_bundle,
     }
     encoded = (json.dumps(evidence, sort_keys=True, indent=2) + "\n").encode()
     _atomic_write(args.output, encoded, mode=0o600)
@@ -233,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--inventory-approval", type=Path, required=True)
     parser.add_argument("--signer-policy", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--rollback-bundle-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)

@@ -38,7 +38,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['d542e3f4a6b7 (head)'])
+        self.assertEqual(heads, ['e653f4a5b7c8 (head)'])
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

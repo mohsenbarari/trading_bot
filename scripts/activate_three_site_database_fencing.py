@@ -103,6 +103,11 @@ BOT_LOCAL_EXECUTION_TABLES = frozenset(
         "telegram_channel_membership_sagas",
     }
 )
+APPLICATION_WRITE_EXCLUDED_TABLES = frozenset(CONTROL_TABLES) | PROJECTOR_INTERNAL_TABLES | BOT_LOCAL_EXECUTION_TABLES | frozenset(
+    {
+        "dr_event_destination_sequences",
+    }
+)
 
 
 def _ident(value: str) -> str:
@@ -260,15 +265,20 @@ def build_statements(
         raise RuntimeError("operator identity is required and must be at most 128 characters")
 
     role_list = ", ".join(roles)
+    database_name = _ident(str(connection.scalar(text("SELECT current_database()"))))
     statements = [
         *(
             f"ALTER ROLE {role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
             for role in roles
         ),
+        *(f"ALTER ROLE {role} RESET ALL" for role in roles),
+        *(f"ALTER ROLE {role} IN DATABASE {database_name} RESET session_replication_role" for role in roles),
+        f"ALTER DATABASE {database_name} RESET session_replication_role",
+        f"REVOKE SET, ALTER SYSTEM ON PARAMETER session_replication_role FROM {role_list}",
         f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role_list}",
         f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role_list}",
         f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {role_list}",
-        f"GRANT CONNECT ON DATABASE {_ident(str(connection.scalar(text('SELECT current_database()'))))} TO {role_list}",
+        f"GRANT CONNECT ON DATABASE {database_name} TO {role_list}",
         f"GRANT USAGE ON SCHEMA public TO {role_list}",
         f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {application_role}",
         f"GRANT SELECT ON TABLE public.dr_database_runtime, public.dr_durability_state, public.webapp_writer_state, public.webapp_writer_transitions TO {control_role}",
@@ -315,10 +325,11 @@ def build_statements(
     if not writer_tables:
         raise RuntimeError("database has no installed three-site Writer triggers")
     for table in writer_tables:
-        if table in BOT_LOCAL_EXECUTION_TABLES:
-            # The common database fence also protects Bot-local queue tables on
-            # the shared schema.  Trigger presence must never grant WebApp
-            # application roles access to those foreign-only execution rows.
+        if table in APPLICATION_WRITE_EXCLUDED_TABLES:
+            # A security trigger is never an authorization source.  Business
+            # tables receive application DML here; all control, transport,
+            # projection, provider and Bot-local state is granted only by a
+            # closed role-specific map below.
             continue
         statements.append(
             f"GRANT INSERT, UPDATE, DELETE ON TABLE public.{table} TO {application_role}"

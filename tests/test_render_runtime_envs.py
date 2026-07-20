@@ -166,11 +166,18 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "queue-v1")
         self.assertEqual(foreign["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
         self.assertEqual(
+            foreign["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "queue-v1"
+        )
+        self.assertEqual(
             foreign["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
             "editor-secret",
         )
         self.assertEqual(iran["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
         self.assertEqual(iran["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+        self.assertEqual(
+            iran["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "queue-v1"
+        )
+        self.assertNotIn("BOT_TOKEN", iran)
         self.assertEqual(
             iran["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"], ""
         )
@@ -329,6 +336,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("LOGICAL_AUTHORITY=webapp", iran_lines)
             self.assertIn("PHYSICAL_SITE=webapp_fi", iran_lines)
             self.assertIn("TELEGRAM_DELIVERY_PRODUCER_MODE=queue-v1", iran_api_lines)
+            self.assertNotIn("BOT_TOKEN=bot-token", iran_lines)
+            self.assertNotIn("BOT_TOKEN=bot-token", iran_api_lines)
             self.assertNotIn("BOT_TOKEN=bot-token", foreign_api_lines)
             self.assertNotIn(
                 "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN=editor-secret",
@@ -455,6 +464,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
         self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "legacy")
         self.assertEqual(
+            collected["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "legacy"
+        )
+        self.assertEqual(
             collected["TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED"], "false"
         )
         self.assertEqual(collected["RELEASE_SHA"], "")
@@ -474,6 +486,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             with patch.dict(os.environ, {}, clear=True):
                 collected = collect_runtime_values(str(source_path))
             self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+            self.assertEqual(
+                collected["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "queue-v1"
+            )
 
             with patch.dict(
                 os.environ,

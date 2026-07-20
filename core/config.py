@@ -182,6 +182,10 @@ class Settings(BaseSettings):
     # below.  None preserves the legacy single-runtime compatibility contract by
     # inheriting telegram_delivery_execution_owner.
     telegram_delivery_producer_mode: str | None = None
+    # Non-secret cross-service attestation. API/sync processes do not receive
+    # executor controls, but they must still prove that their producer contract
+    # matches the operator-selected global owner.
+    telegram_delivery_expected_execution_owner: str | None = None
     telegram_delivery_execution_owner: str = "legacy"
     telegram_delivery_queue_worker_enabled: bool = False
     telegram_delivery_queue_cutover_ready: bool = False
@@ -296,6 +300,25 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_telegram_delivery_queue_settings(self):
+        producer = str(
+            self.telegram_delivery_producer_mode
+            or self.telegram_delivery_execution_owner
+            or ""
+        ).strip().lower()
+        expected_owner = str(
+            self.telegram_delivery_expected_execution_owner
+            or self.telegram_delivery_execution_owner
+            or ""
+        ).strip().lower()
+        actual_owner = str(self.telegram_delivery_execution_owner or "").strip().lower()
+        if producer not in {"legacy", "queue-v1"}:
+            raise ValueError("telegram_delivery_producer_mode_invalid")
+        if expected_owner not in {"legacy", "queue-v1"}:
+            raise ValueError("telegram_delivery_expected_execution_owner_invalid")
+        if producer != expected_owner:
+            raise ValueError("telegram_delivery_producer_executor_split_brain")
+        if self.trading_bot_service == "bot" and actual_owner != expected_owner:
+            raise ValueError("telegram_delivery_bot_executor_split_brain")
         positive_float_fields = (
             "telegram_delivery_queue_preflight_timeout_seconds",
             "telegram_delivery_queue_worker_interval_seconds",

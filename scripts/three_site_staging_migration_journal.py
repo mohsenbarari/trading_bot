@@ -52,7 +52,7 @@ def _state_hash(payload: dict[str, Any]) -> str:
 def _validate(payload: dict[str, Any]) -> None:
     fields = {
         "schema", "campaign_id", "release_sha", "plan_sha256", "role",
-        "role_compose_sha256", "role_env_sha256",
+        "role_compose_sha256", "role_env_sha256", "image_inventory_sha256",
         "status", "completed_phases", "started_phase", "rollback_reason",
         "acceptance_evidence_sha256", "created_at", "updated_at", "state_sha256",
     }
@@ -70,6 +70,8 @@ def _validate(payload: dict[str, Any]) -> None:
         or SHA256_RE.fullmatch(payload["role_compose_sha256"]) is None
         or not isinstance(payload.get("role_env_sha256"), str)
         or SHA256_RE.fullmatch(payload["role_env_sha256"]) is None
+        or not isinstance(payload.get("image_inventory_sha256"), str)
+        or SHA256_RE.fullmatch(payload["image_inventory_sha256"]) is None
         or phases is None
         or payload.get("status") not in {
             "active", "rollback_required", "rolled_back", "committed", "finished"
@@ -156,6 +158,7 @@ class MigrationJournal:
         role: str,
         role_compose_sha256: str,
         role_env_sha256: str,
+        image_inventory_sha256: str,
     ):
         descriptor = self._lock()
         try:
@@ -170,6 +173,7 @@ class MigrationJournal:
                 "role": role,
                 "role_compose_sha256": role_compose_sha256,
                 "role_env_sha256": role_env_sha256,
+                "image_inventory_sha256": image_inventory_sha256,
                 "status": "active",
                 "completed_phases": [],
                 "started_phase": None,

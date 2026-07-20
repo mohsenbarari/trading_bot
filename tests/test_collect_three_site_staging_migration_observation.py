@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -42,8 +44,56 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             "BOT_FI_POSTGRES_DB=bot\n"
             "TELEGRAM_DELIVERY_PRODUCER_MODE=legacy\n"
             "TELEGRAM_DELIVERY_EXECUTION_OWNER=legacy\n"
+            "BOT_FI_DR_BIND_ADDRESS=127.0.0.1\n"
+            f"STAGING_DR_CA_CERT={root / 'ca.crt'}\n"
         )
         env_file.chmod(0o600)
+        role_compose = root / "compose.yml"
+        role_compose.write_text(
+            "services:\n"
+            + "".join(
+                f"  {service}:\n    image: "
+                + ("nginx:1.27-alpine" if service.endswith("_tls") else f"trading_bot_three_site_staging:{RELEASE_SHA}")
+                + "\n"
+                for service in ROLE_SERVICES["bot_fi"]
+            )
+        )
+        role_compose.chmod(0o640)
+        image_inventory = root / "images.json"
+        image_inventory.write_text(
+            json.dumps(
+                {
+                    "schema": "three-site-staging-image-inventory-v1",
+                    "campaign_id": CAMPAIGN_ID,
+                    "release_sha": RELEASE_SHA,
+                    "role": "bot-fi",
+                    "observed_at": datetime.now(timezone.utc).isoformat(),
+                    "role_compose_sha256": hashlib.sha256(role_compose.read_bytes()).hexdigest(),
+                    "role_env_sha256": hashlib.sha256(env_file.read_bytes()).hexdigest(),
+                    "images": [
+                        {
+                            "reference": f"trading_bot_three_site_staging:{RELEASE_SHA}",
+                            "image_id": "sha256:" + "c" * 64,
+                            "repo_digests": [],
+                            "release_label": RELEASE_SHA,
+                        },
+                        {
+                            "reference": "nginx:1.27-alpine",
+                            "image_id": "sha256:" + "c" * 64,
+                            "repo_digests": ["nginx@sha256:" + "d" * 64],
+                            "release_label": None,
+                        },
+                        {
+                            "reference": f"trading_bot_postgres_boottime:15-{RELEASE_SHA}",
+                            "image_id": "sha256:" + "c" * 64,
+                            "repo_digests": [],
+                            "release_label": RELEASE_SHA,
+                        },
+                    ],
+                }
+            )
+        )
+        image_inventory.chmod(0o600)
         routing = root / "routing.json"
         routing.write_text(
             json.dumps(
@@ -63,10 +113,11 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             release_sha=RELEASE_SHA,
             plan_sha256=PLAN_SHA,
             role="bot_fi",
-            role_compose=root / "compose.yml",
+            role_compose=role_compose,
             env_file=env_file,
+            image_inventory=image_inventory,
             routing_observation=routing,
-            expected_head="d542e3f4a6b7",
+            expected_head="e653f4a5b7c8",
         )
         return stack, args
 
@@ -76,7 +127,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             joined = " ".join(arguments)
             if "psql" in arguments:
                 return json.dumps(
-                    {"database": "bot", "user": "bot", "revision": "d542e3f4a6b7"}
+                    {"database": "bot", "user": "bot", "revision": "e653f4a5b7c8"}
                 )
             if " ps -q " in f" {joined} ":
                 return "container-id"
@@ -86,6 +137,8 @@ class MigrationObservationCollectorTests(unittest.TestCase):
                 return "sha256:" + "c" * 64
             if "{{.RestartCount}}" in arguments:
                 return "0"
+            if "logs" in arguments:
+                return ""
             if "settings.release_sha" in joined:
                 return "d" * 40 if wrong_release else RELEASE_SHA
             raise AssertionError(arguments)
@@ -100,6 +153,16 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             ), patch(
                 "scripts.collect_three_site_staging_migration_observation.urllib.request.urlopen",
                 return_value=_Response(),
+            ), patch(
+                "scripts.collect_three_site_staging_migration_observation._tls_observation",
+                return_value={
+                    "server_name": "bot-fi-dr.staging.internal",
+                    "bind_address": "127.0.0.1",
+                    "port": 8443,
+                    "protocol": "TLSv1.3",
+                    "certificate_sha256": "e" * 64,
+                    "readiness_status_code": 200,
+                },
             ):
             result = collect_role(args)
         services = result["checks"]["service_health"]["observation"]["services"]
@@ -121,6 +184,16 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             ), patch(
                 "scripts.collect_three_site_staging_migration_observation.urllib.request.urlopen",
                 return_value=_Response(),
+            ), patch(
+                "scripts.collect_three_site_staging_migration_observation._tls_observation",
+                return_value={
+                    "server_name": "bot-fi-dr.staging.internal",
+                    "bind_address": "127.0.0.1",
+                    "port": 8443,
+                    "protocol": "TLSv1.3",
+                    "certificate_sha256": "e" * 64,
+                    "readiness_status_code": 200,
+                },
             ):
             with self.assertRaisesRegex(ObservationError, "wrong release"):
                 collect_role(args)

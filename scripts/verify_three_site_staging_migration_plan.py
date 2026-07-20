@@ -63,7 +63,7 @@ SUPPORTED_SOURCE_REVISIONS = frozenset(
         "a274f5a6b8c9",  # Telegram queue parent
         "e9e4f5a6b7c8",  # three-site DR parent
         "c431d2e3f5a6",  # reconciled integration head (repeat/recovery input)
-        "d542e3f4a6b7",  # hardened integration head (repeat/recovery input)
+        "e653f4a5b7c8",  # hardened integration head (repeat/recovery input)
     }
 )
 
@@ -328,7 +328,7 @@ def verify_migration_plan(
         fields = {
             "schema", "campaign_id", "target_release_sha", "project_name", "observed_at",
             "source_roles", "previously_running_services", "stopped_services",
-            "running_services", "postgres", "redis_observation",
+            "running_services", "postgres", "redis_observation", "legacy_restore_bundle",
         }
         if (
             not isinstance(evidence, dict)
@@ -342,6 +342,17 @@ def verify_migration_plan(
             or "db" in evidence["stopped_services"]
             or "redis" in evidence["stopped_services"]
             or digest in observed_freeze_rows
+            or not isinstance(evidence["legacy_restore_bundle"], dict)
+            or set(evidence["legacy_restore_bundle"])
+            != {"schema", "path", "sha256", "size"}
+            or evidence["legacy_restore_bundle"].get("schema")
+            != "three-site-staging-legacy-restore-bundle-reference-v1"
+            or not Path(str(evidence["legacy_restore_bundle"].get("path", ""))).is_absolute()
+            or not SHA256_RE.fullmatch(
+                str(evidence["legacy_restore_bundle"].get("sha256", ""))
+            )
+            or type(evidence["legacy_restore_bundle"].get("size")) is not int
+            or not 1 <= evidence["legacy_restore_bundle"]["size"] <= 1024 * 1024
         ):
             raise MigrationPlanError("source-freeze evidence identity/state is invalid")
         observed_at = _utc(evidence["observed_at"], label="source-freeze observed_at")
@@ -389,6 +400,7 @@ def verify_migration_plan(
         raise MigrationPlanError("migration requires four image inventories")
     observed_image_ids: dict[str, str] = {}
     observed_repo_digests: dict[str, tuple[str, ...]] = {}
+    image_inventory_hashes: dict[str, str] = {}
     seen_image_roles: set[str] = set()
     for row in image_rows:
         expected = {
@@ -427,6 +439,7 @@ def verify_migration_plan(
             if previous != digests:
                 raise MigrationPlanError("same image reference has different provider digests across roles")
         seen_image_roles.add(role)
+        image_inventory_hashes[role] = str(row["document_sha256"])
     if seen_image_roles != set(TARGET_SEED_MAP) or set(image_inventories) != set(TARGET_SEED_MAP):
         raise MigrationPlanError("image-inventory role set is incomplete")
 
@@ -554,6 +567,7 @@ def verify_migration_plan(
         "plan_sha256": hashlib.sha256(_canonical_bytes(plan)).hexdigest(),
         "source_roles": list(SOURCE_ROLES),
         "target_roles": sorted(TARGET_SEED_MAP),
+        "image_inventory_sha256": image_inventory_hashes,
         **signed,
     }
 

@@ -421,6 +421,12 @@ def _validate_step_result(
             or result.get("fenced") is not True
             or result.get("active_connections") != 0
             or result.get("boundary_captured_after_drain") is not True
+            or result.get("admission_fence") is not True
+            or result.get("control_state") != "fenced"
+            or not str(result.get("witness_drain_request_id") or "")
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(result.get("witness_drain_receipt_hash") or "")
+            )
         ):
             raise DrOrchestrationError("source fencing evidence does not match the approved source")
         _validate_source_tail_boundary(result.get("source_tail_boundary"), plan=plan)
@@ -446,6 +452,8 @@ def _validate_step_result(
         result.get("source_site") != plan.source_site
         or type(result.get("active_connections")) is not int
         or result["active_connections"] != 0
+        or result.get("admission_fence") is not True
+        or result.get("control_state") != "fenced"
     ):
         raise DrOrchestrationError("source connection-drain evidence is incomplete")
     if step in {"route_switched", "public_route_verified"}:

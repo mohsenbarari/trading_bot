@@ -19,6 +19,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.secure_file_io import write_secure_atomic_bytes
 from core.secure_file_io import read_secure_bytes
+from scripts.collect_three_site_staging_migration_observation import (
+    ObservationError,
+    ROLE_SERVICES,
+    ROLE_TLS,
+    validate_convergence_artifact,
+)
 from scripts.run_three_site_staging_role_migration import _secure_json
 from scripts.three_site_staging_migration_journal import MigrationJournal, ROLE_PHASES
 
@@ -49,6 +55,7 @@ ACCEPTANCE_CHECKS = {
     "database_identity", "migration_head", "private_tls", "service_health",
     "direct_origin_http", "production_boundaries_untouched",
     "unexpected_errors_absent", "queue_owner_legacy", "routing_still_held",
+    "signed_runtime_bundle",
 }
 
 
@@ -156,7 +163,7 @@ def _routing_observation(path: Path, identity: dict[str, str]) -> tuple[dict[str
         raise MigrationCoordinationError("routing hold observation is invalid")
     for label, reference in value["artifacts"].items():
         if not isinstance(reference, dict) or set(reference) != {
-            "path", "sha256", "schema", "status"
+            "path", "sha256", "schema", "status", "observed_at"
         }:
             raise MigrationCoordinationError(f"routing {label} artifact reference is invalid")
         artifact_path = Path(str(reference["path"]))
@@ -173,12 +180,25 @@ def _routing_observation(path: Path, identity: dict[str, str]) -> tuple[dict[str
             artifact = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise MigrationCoordinationError(f"routing {label} artifact is invalid") from exc
+        artifact_label = label.replace("_", " ")
+        try:
+            validate_convergence_artifact(
+                artifact,
+                label=artifact_label,
+                campaign_id=identity["campaign_id"],
+                release_sha=identity["release_sha"],
+                plan_sha256=identity["plan_sha256"],
+            )
+        except ObservationError as exc:
+            raise MigrationCoordinationError(
+                f"routing {label} artifact lacks semantic convergence evidence"
+            ) from exc
         if (
-            not isinstance(artifact, dict)
-            or str(artifact.get("status") or "") != reference["status"]
-            or reference["status"] not in {"ok", "passed", "equivalent", "converged"}
+            artifact["schema"] != reference["schema"]
+            or artifact["status"] != reference["status"]
+            or artifact["observed_at"] != reference["observed_at"]
         ):
-            raise MigrationCoordinationError(f"routing {label} artifact is not passing")
+            raise MigrationCoordinationError(f"routing {label} artifact reference differs")
     _observed_at(value["observed_at"], label="routing hold")
     digest = hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
@@ -187,7 +207,7 @@ def _routing_observation(path: Path, identity: dict[str, str]) -> tuple[dict[str
 
 
 def _acceptance_observations(
-    values: list[str], identity: dict[str, str]
+    values: list[str], identity: dict[str, str], journals: dict[str, dict[str, Any]]
 ) -> dict[str, tuple[dict[str, Any], str]]:
     paths = _mapping(values, label="--acceptance-observation")
     result: dict[str, tuple[dict[str, Any], str]] = {}
@@ -225,8 +245,14 @@ def _acceptance_observations(
         observations = {
             name: check["observation"] for name, check in value["checks"].items()
         }
-        expected_revision = "002" if role == "witness" else "d542e3f4a6b7"
+        expected_revision = "002" if role == "witness" else "e653f4a5b7c8"
         services = observations["service_health"].get("services")
+        service_names = [row.get("service") for row in services] if isinstance(services, list) else []
+        tls = observations["private_tls"]
+        expected_tls_service = [name for name in ROLE_SERVICES[role] if name.endswith("_tls")]
+        tls_handshake = tls.get("handshake") if isinstance(tls, dict) else None
+        _bind_key, expected_tls_port, expected_tls_name = ROLE_TLS[role]
+        runtime_bundle = observations["signed_runtime_bundle"]
         if (
             observations["migration_head"] != {
                 "observed": expected_revision,
@@ -234,19 +260,53 @@ def _acceptance_observations(
             }
             or not isinstance(services, list)
             or not services
+            or service_names != list(ROLE_SERVICES[role])
             or any(
                 row.get("running") is not True
                 or row.get("health") not in {"healthy", "not-configured"}
                 or row.get("restart_count") != 0
-                or not row.get("image_id")
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", str(row.get("image_id", ""))) is None
+                or row.get("image_id") != row.get("expected_image_id")
+                or not row.get("expected_image_reference")
+                or row.get("log_window_seconds") != 300
+                or row.get("unexpected_log_lines") != 0
+                or re.fullmatch(r"[0-9a-f]{64}", str(row.get("log_sha256", ""))) is None
+                or (
+                    not str(row.get("service", "")).endswith("_tls")
+                    and row.get("release_sha") != identity["release_sha"]
+                )
                 for row in services
             )
+            or not isinstance(tls, dict)
+            or tls.get("services") != expected_tls_service
+            or not isinstance(tls_handshake, dict)
+            or tls_handshake.get("server_name") != expected_tls_name
+            or tls_handshake.get("port") != expected_tls_port
+            or tls_handshake.get("protocol") not in {"TLSv1.2", "TLSv1.3"}
+            or tls_handshake.get("readiness_status_code") != 200
+            or re.fullmatch(
+                r"[0-9a-f]{64}", str(tls_handshake.get("certificate_sha256", ""))
+            ) is None
             or observations["direct_origin_http"].get("status_code") != 200
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(observations["direct_origin_http"].get("response_sha256", "")),
+            ) is None
             or observations["production_boundaries_untouched"].get("routing_change_applied") is not False
             or observations["production_boundaries_untouched"].get("test_domain") != "gold-trading.ir"
+            or observations["production_boundaries_untouched"].get("compose_project")
+            != "trading-bot-three-site-staging"
             or observations["unexpected_errors_absent"].get("restart_count_total") != 0
+            or observations["unexpected_errors_absent"].get("window_seconds") != 300
+            or observations["unexpected_errors_absent"].get("unexpected_log_lines_total") != 0
             or observations["queue_owner_legacy"].get("producer_mode") != "legacy"
             or observations["queue_owner_legacy"].get("executor_mode") != "legacy"
+            or not isinstance(runtime_bundle, dict)
+            or runtime_bundle != {
+                "role_compose_sha256": journals[role]["role_compose_sha256"],
+                "role_env_sha256": journals[role]["role_env_sha256"],
+                "image_inventory_sha256": journals[role]["image_inventory_sha256"],
+            }
         ):
             raise MigrationCoordinationError(
                 f"{role} acceptance observations do not satisfy the closed policy"
@@ -285,12 +345,15 @@ def build_documents(
     if action == "global-commit":
         return {
             "global-commit": {
-                "schema": "three-site-staging-global-commit-v1",
+                "schema": "three-site-staging-global-commit-v2",
                 "status": "passed",
                 **identity,
                 "issued_at": issued_at,
                 "campaign_journals_sha256": campaign_hash,
                 "role_journals": hashes,
+                "committed_role_states": {
+                    role: state for role, state in sorted(journals.items())
+                },
                 "all_roles_committed": True,
             }
         }
@@ -301,7 +364,7 @@ def build_documents(
     else:
         observation_hash = ""
     observations = (
-        _acceptance_observations(acceptance_observations or [], identity)
+        _acceptance_observations(acceptance_observations or [], identity, journals)
         if action == "role-acceptance"
         else {}
     )

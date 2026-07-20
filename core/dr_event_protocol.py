@@ -181,6 +181,16 @@ def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
         streams = payload.get("destination_streams")
         if not isinstance(streams, dict) or not streams:
             raise DrEventProtocolError("DR destination streams are missing")
+        required_destinations = set(
+            ultimate_delivery_destinations(
+                str(payload["origin_physical_site"]),
+                aggregate_type=str(payload["aggregate_type"]),
+            )
+        )
+        if set(streams) != required_destinations:
+            raise DrEventProtocolError(
+                "DR destination streams do not match canonical entitlement"
+            )
         expected_stream_fields = {
             "sequence", "transaction_id", "transaction_position",
             "transaction_size", "transaction_hash",

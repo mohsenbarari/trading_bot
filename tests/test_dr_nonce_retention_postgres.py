@@ -11,11 +11,21 @@ from uuid import uuid4
 from sqlalchemy import create_engine, text
 
 from core.dr_projection_worker import cleanup_expired_replay_nonces
+from core.db import DrProjectionSessionLocal
 
 
 PROJECTION_URL_ENV = "THREE_SITE_FENCING_TEST_PROJECTION_URL"
 RECEIVER_URL_ENV = "THREE_SITE_FENCING_TEST_RECEIVER_URL"
 OWNER_URL_ENV = "THREE_SITE_FENCING_TEST_OWNER_URL"
+
+
+async def _cleanup_and_dispose_projection_pool(*, now: datetime) -> int:
+    try:
+        return await cleanup_expired_replay_nonces(now=now)
+    finally:
+        bind = DrProjectionSessionLocal.kw.get("bind")
+        if bind is not None:
+            await bind.dispose()
 
 
 @unittest.skipUnless(
@@ -78,7 +88,7 @@ class DrNonceRetentionPostgresTests(unittest.TestCase):
                 },
             )
 
-        deleted = asyncio.run(cleanup_expired_replay_nonces(now=now))
+        deleted = asyncio.run(_cleanup_and_dispose_projection_pool(now=now))
 
         with self.owner_engine.connect() as connection:
             remaining = set(
@@ -102,6 +112,42 @@ class DrNonceRetentionPostgresTests(unittest.TestCase):
         self.assertGreaterEqual(deleted, 1)
         self.assertEqual(remaining, {recent_nonce})
         self.assertEqual(index_count, 1)
+
+    def test_future_caller_cutoff_cannot_delete_a_live_nonce(self) -> None:
+        key_id = "future-cutoff-" + uuid4().hex[:20]
+        live_nonce = uuid4().hex
+        now = datetime.now(timezone.utc)
+        with self.receiver_engine.begin() as connection:
+            connection.execute(
+                text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
+            )
+            connection.execute(
+                text("SELECT set_config('trading_bot.projection_scope', 'receiver', true)")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO dr_replay_nonces "
+                    "(key_id, nonce, source_site, destination_site, request_hash, expires_at) "
+                    "VALUES (:key_id, :nonce, 'bot_fi', 'webapp_fi', repeat('c',64), :expiry)"
+                ),
+                {"key_id": key_id, "nonce": live_nonce, "expiry": now + timedelta(hours=1)},
+            )
+
+        asyncio.run(
+            _cleanup_and_dispose_projection_pool(now=now + timedelta(hours=2))
+        )
+
+        with self.owner_engine.connect() as connection:
+            present = bool(
+                connection.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM dr_replay_nonces "
+                        "WHERE key_id=:key_id AND nonce=:nonce)"
+                    ),
+                    {"key_id": key_id, "nonce": live_nonce},
+                )
+            )
+        self.assertTrue(present)
 
 
 if __name__ == "__main__":

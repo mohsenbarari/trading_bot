@@ -227,6 +227,10 @@ def main() -> int:
                 _assert_closed_role(connection, role)
             role_list = ", ".join(roles)
             statements = [
+                *(f"ALTER ROLE {role} RESET ALL" for role in roles),
+                *(f"ALTER ROLE {role} IN DATABASE {database} RESET session_replication_role" for role in roles),
+                f"ALTER DATABASE {database} RESET session_replication_role",
+                f"REVOKE SET, ALTER SYSTEM ON PARAMETER session_replication_role FROM {role_list}",
                 f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role_list}",
                 f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role_list}",
                 f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {role_list}",

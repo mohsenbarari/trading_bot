@@ -331,6 +331,7 @@ async def claim_next_telegram_admin_broadcast_receipt(
     worker_id: str = TELEGRAM_ADMIN_BROADCAST_WORKER_ID,
     now: datetime | None = None,
 ) -> TelegramAdminBroadcastReceipt | None:
+    _assert_legacy_direct_delivery_owner()
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         return None
 
@@ -382,6 +383,7 @@ async def recover_expired_telegram_admin_broadcast_leases(
     max_rows: int = 100,
     now: datetime | None = None,
 ) -> list[TelegramAdminBroadcastReceipt]:
+    _assert_legacy_direct_delivery_owner()
     if str(current_server or "").strip().lower() != SERVER_FOREIGN:
         return []
     current_time = now or utc_now()

@@ -94,6 +94,7 @@ COMMON_RUNTIME_KEYS = (
     "INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE",
     "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED",
     "TELEGRAM_DELIVERY_PRODUCER_MODE",
+    "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER",
     "TELEGRAM_DELIVERY_EXECUTION_OWNER",
     "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
     "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY",
@@ -190,6 +191,7 @@ OPTIONAL_RUNTIME_DEFAULTS = {
     "INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE": "30",
     "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "false",
     "TELEGRAM_DELIVERY_PRODUCER_MODE": "legacy",
+    "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER": "legacy",
     "TELEGRAM_DELIVERY_EXECUTION_OWNER": "legacy",
     "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "false",
     "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "false",
@@ -304,6 +306,11 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
                 "TELEGRAM_DELIVERY_EXECUTION_OWNER",
                 source_values.get("TELEGRAM_DELIVERY_EXECUTION_OWNER"),
             )
+        if key == "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER" and not value:
+            value = os.environ.get(
+                "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+                source_values.get("TELEGRAM_DELIVERY_EXECUTION_OWNER"),
+            )
         if isinstance(value, str):
             value = value.strip()
         if (value is None or value == "") and is_optional:
@@ -336,8 +343,14 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
         raise SystemExit("TELEGRAM_DELIVERY_PRODUCER_MODE must be legacy or queue-v1")
     if values["TELEGRAM_DELIVERY_EXECUTION_OWNER"] not in {"legacy", "queue-v1"}:
         raise SystemExit("TELEGRAM_DELIVERY_EXECUTION_OWNER must be legacy or queue-v1")
+    if values["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"] not in {"legacy", "queue-v1"}:
+        raise SystemExit(
+            "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER must be legacy or queue-v1"
+        )
     if (
         values["TELEGRAM_DELIVERY_PRODUCER_MODE"]
+        != values["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"]
+        or values["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"]
         != values["TELEGRAM_DELIVERY_EXECUTION_OWNER"]
     ):
         raise SystemExit(
@@ -371,6 +384,12 @@ def build_runtime_env(
     rendered["API_WORKERS"] = str(api_workers)
     for key in COMMON_RUNTIME_KEYS[:6]:
         rendered[key] = values[key]
+    if role == "iran":
+        # Telegram provider credentials must never cross the Bot-FI host
+        # boundary.  Iran has no Bot service and no reviewed provider-execution
+        # path, so retaining the token in its Compose interpolation file would
+        # defeat the per-service sidecars even when those sidecars are clean.
+        rendered.pop("BOT_TOKEN", None)
     rendered["FRONTEND_URL"] = frontend_url
     for key in COMMON_RUNTIME_KEYS[6:]:
         if key in {
@@ -392,6 +411,12 @@ def build_runtime_env(
             if role == "foreign"
             else OPTIONAL_RUNTIME_DEFAULTS[key]
         )
+    rendered["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"] = values.get(
+        "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"
+    ) or values.get(
+        "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+        OPTIONAL_RUNTIME_DEFAULTS["TELEGRAM_DELIVERY_EXECUTION_OWNER"],
+    )
     rendered["OTP_DELIVERY_STATE_SECRET"] = (
         values.get("IRAN_OTP_DELIVERY_STATE_SECRET", "") if role == "iran" else ""
     )

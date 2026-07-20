@@ -841,7 +841,6 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 *empty_customer_read_context_results(),
             ],
         )
-        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
         async def persist_intent(intent_db, offer):
@@ -872,8 +871,8 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=None),
         ), patch(
-            "api.routers.offers.configured_telegram_delivery_runtime",
-            return_value=runtime,
+            "api.routers.offers.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ), patch(
             "api.routers.offers.get_or_create_telegram_publication_state",
             new=AsyncMock(side_effect=persist_intent),
