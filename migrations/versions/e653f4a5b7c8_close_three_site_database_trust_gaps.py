@@ -598,170 +598,45 @@ CREATE OR REPLACE FUNCTION trading_bot_require_cursor_event_tail() RETURNS trigg
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
     cfg dr_database_runtime%ROWTYPE;
-    matching_rows bigint;
+    observed_tail bigint;
+    current_cursor bigint;
 BEGIN
     SELECT * INTO cfg FROM dr_database_runtime WHERE singleton_id=1;
     IF NOT FOUND OR cfg.enforcement_enabled IS NOT TRUE OR session_user IS DISTINCT FROM cfg.application_role THEN
         RETURN NULL;
     END IF;
     IF TG_TABLE_NAME='dr_producer_cursors' THEN
-        -- Validate every cursor transition independently.  Comparing only the
-        -- final max permits N and N+1 to be allocated in one transaction while
-        -- emitting only N+1, permanently creating an accepted stream gap.
-        SELECT count(*) INTO matching_rows FROM dr_events event
+        SELECT cursor.last_sequence INTO current_cursor
+          FROM dr_producer_cursors cursor
+         WHERE cursor.origin_authority=NEW.origin_authority
+           AND cursor.origin_physical_site=NEW.origin_physical_site
+           AND cursor.producer_epoch=NEW.producer_epoch;
+        -- A transaction may append several events.  Older deferred trigger
+        -- rows are superseded by the same cursor's final value; only that
+        -- final row may certify the committed event tail.
+        IF current_cursor IS DISTINCT FROM NEW.last_sequence THEN RETURN NULL; END IF;
+        SELECT max(event.producer_sequence) INTO observed_tail FROM dr_events event
          WHERE event.source_xid IS NOT NULL
-           AND event.source_xid=txid_current()
            AND event.origin_authority=NEW.origin_authority
            AND event.origin_physical_site=NEW.origin_physical_site
-           AND event.producer_epoch=NEW.producer_epoch
-           AND event.producer_sequence=NEW.last_sequence;
+           AND event.producer_epoch=NEW.producer_epoch;
     ELSE
-        SELECT count(*) INTO matching_rows
+        SELECT cursor.last_sequence INTO current_cursor
+          FROM dr_destination_cursors cursor
+         WHERE cursor.origin_authority=NEW.origin_authority
+           AND cursor.origin_physical_site=NEW.origin_physical_site
+           AND cursor.producer_epoch=NEW.producer_epoch
+           AND cursor.destination_site=NEW.destination_site;
+        IF current_cursor IS DISTINCT FROM NEW.last_sequence THEN RETURN NULL; END IF;
+        SELECT max(binding.destination_sequence) INTO observed_tail
           FROM dr_event_destination_sequences binding
-          JOIN dr_events event ON event.event_id=binding.event_id
          WHERE binding.origin_authority=NEW.origin_authority
            AND binding.origin_physical_site=NEW.origin_physical_site
            AND binding.producer_epoch=NEW.producer_epoch
-           AND binding.destination_site=NEW.destination_site
-           AND binding.destination_sequence=NEW.last_sequence
-           AND event.source_xid=txid_current();
+           AND binding.destination_site=NEW.destination_site;
     END IF;
-    IF matching_rows IS DISTINCT FROM 1::bigint THEN
-        RAISE EXCEPTION 'each DR cursor transition must bind exactly one same-transaction event sequence';
-    END IF;
-    RETURN NULL;
-END;
-$$;
-"""
-
-
-DR_EVENT_IMMUTABILITY_SQL = r"""
-CREATE OR REPLACE FUNCTION trading_bot_dr_event_immutable() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE
-    old_destination_sequences jsonb;
-    new_destination_sequences jsonb;
-BEGIN
-    IF TG_OP = 'UPDATE'
-       AND OLD.protocol_version = 2
-       AND OLD.transaction_size = 0
-       AND OLD.transaction_hash = repeat('0', 64)
-       AND OLD.envelope_hash = repeat('0', 64)
-       AND NEW.transaction_size > 0
-       AND NEW.transaction_hash ~ '^[0-9a-f]{64}$'
-       AND NEW.transaction_hash <> repeat('0', 64)
-       AND NEW.envelope_hash ~ '^[0-9a-f]{64}$'
-       AND NEW.envelope_hash <> repeat('0', 64)
-       AND NEW.event_id IS NOT DISTINCT FROM OLD.event_id
-       AND NEW.protocol_version IS NOT DISTINCT FROM OLD.protocol_version
-       AND NEW.origin_authority IS NOT DISTINCT FROM OLD.origin_authority
-       AND NEW.origin_physical_site IS NOT DISTINCT FROM OLD.origin_physical_site
-       AND NEW.producer_epoch IS NOT DISTINCT FROM OLD.producer_epoch
-       AND NEW.producer_sequence IS NOT DISTINCT FROM OLD.producer_sequence
-       AND NEW.aggregate_type IS NOT DISTINCT FROM OLD.aggregate_type
-       AND NEW.aggregate_id IS NOT DISTINCT FROM OLD.aggregate_id
-       AND NEW.aggregate_db_id IS NOT DISTINCT FROM OLD.aggregate_db_id
-       AND NEW.aggregate_version IS NOT DISTINCT FROM OLD.aggregate_version
-       AND NEW.operation IS NOT DISTINCT FROM OLD.operation
-       AND NEW.canonical_payload::jsonb IS NOT DISTINCT FROM OLD.canonical_payload::jsonb
-       AND NEW.canonical_payload_hash IS NOT DISTINCT FROM OLD.canonical_payload_hash
-       AND NEW.schema_version IS NOT DISTINCT FROM OLD.schema_version
-       AND NEW.causation_id IS NOT DISTINCT FROM OLD.causation_id
-       AND NEW.idempotency_key IS NOT DISTINCT FROM OLD.idempotency_key
-       AND NEW.writer_epoch IS NOT DISTINCT FROM OLD.writer_epoch
-       AND NEW.tombstone IS NOT DISTINCT FROM OLD.tombstone
-       AND NEW.created_at IS NOT DISTINCT FROM OLD.created_at
-       AND NEW.transaction_id IS NOT DISTINCT FROM OLD.transaction_id
-       AND NEW.transaction_position IS NOT DISTINCT FROM OLD.transaction_position
-       AND jsonb_typeof(OLD.destination_streams::jsonb) = 'object'
-       AND jsonb_typeof(NEW.destination_streams::jsonb) = 'object'
-       AND NEW.destination_streams::jsonb <> '{}'::jsonb THEN
-        SELECT jsonb_object_agg(stream.key, stream.value -> 'sequence')
-          INTO old_destination_sequences
-          FROM jsonb_each(OLD.destination_streams::jsonb) AS stream(key, value);
-        SELECT jsonb_object_agg(stream.key, stream.value -> 'sequence')
-          INTO new_destination_sequences
-          FROM jsonb_each(NEW.destination_streams::jsonb) AS stream(key, value);
-        IF new_destination_sequences IS NOT DISTINCT FROM old_destination_sequences THEN
-            RETURN NEW;
-        END IF;
-    END IF;
-    RAISE EXCEPTION 'dr_events are immutable';
-END;
-$$;
-"""
-
-
-LOCAL_DESTINATION_BINDING_SQL = r"""
-CREATE OR REPLACE FUNCTION trading_bot_local_dr_destination_binding_valid(
-    checked_event_id text
-) RETURNS boolean
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE
-    event_row dr_events%ROWTYPE;
-    destination record;
-    stream_fields text[];
-    stream_sequence bigint;
-    stream_count bigint;
-    binding_count bigint;
-BEGIN
-    SELECT * INTO event_row FROM dr_events WHERE event_id=checked_event_id;
-    IF NOT FOUND THEN RETURN false; END IF;
-    -- Receiver/projector events are remote and intentionally have no local
-    -- allocation binding.  Only database-bound local events are constrained.
-    IF event_row.source_xid IS NULL THEN RETURN true; END IF;
-    IF event_row.destination_streams IS NULL
-       OR jsonb_typeof(event_row.destination_streams::jsonb) <> 'object'
-       OR event_row.destination_streams::jsonb = '{}'::jsonb THEN
-        RETURN false;
-    END IF;
-    SELECT count(*) INTO stream_count
-      FROM jsonb_each(event_row.destination_streams::jsonb);
-    SELECT count(*) INTO binding_count
-      FROM dr_event_destination_sequences binding
-     WHERE binding.event_id=event_row.event_id;
-    IF binding_count IS DISTINCT FROM stream_count THEN RETURN false; END IF;
-    FOR destination IN
-        SELECT key AS site, value AS stream
-          FROM jsonb_each(event_row.destination_streams::jsonb)
-    LOOP
-        IF jsonb_typeof(destination.stream) <> 'object' THEN RETURN false; END IF;
-        SELECT array_agg(field.key ORDER BY field.key) INTO stream_fields
-          FROM jsonb_object_keys(destination.stream) AS field(key);
-        IF stream_fields IS DISTINCT FROM ARRAY[
-            'sequence','transaction_hash','transaction_id',
-            'transaction_position','transaction_size'
-        ]::text[] THEN
-            RETURN false;
-        END IF;
-        stream_sequence := (destination.stream ->> 'sequence')::bigint;
-        SELECT count(*) INTO binding_count
-          FROM dr_event_destination_sequences binding
-         WHERE binding.event_id=event_row.event_id
-           AND binding.destination_site=destination.site
-           AND binding.origin_authority=event_row.origin_authority
-           AND binding.origin_physical_site=event_row.origin_physical_site
-           AND binding.producer_epoch=event_row.producer_epoch
-           AND binding.destination_sequence=stream_sequence;
-        IF binding_count IS DISTINCT FROM 1::bigint THEN RETURN false; END IF;
-    END LOOP;
-    RETURN true;
-EXCEPTION
-    WHEN data_exception OR invalid_text_representation THEN
-        RETURN false;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION trading_bot_require_local_dr_destination_binding()
-RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE
-    event_source_xid bigint;
-BEGIN
-    SELECT source_xid INTO event_source_xid FROM dr_events WHERE event_id=NEW.event_id;
-    IF event_source_xid IS NULL THEN RETURN NULL; END IF;
-    IF NOT trading_bot_local_dr_destination_binding_valid(NEW.event_id) THEN
-        RAISE EXCEPTION 'local DR event destination streams differ from allocated bindings';
+    IF observed_tail IS DISTINCT FROM NEW.last_sequence THEN
+        RAISE EXCEPTION 'DR cursor is not exactly bound to its committed event tail';
     END IF;
     RETURN NULL;
 END;
@@ -841,8 +716,6 @@ def upgrade() -> None:
         "WHERE event.source_xid IS NOT NULL AND event.protocol_version=2"
     )
 
-    op.execute(DR_EVENT_IMMUTABILITY_SQL)
-    op.execute(LOCAL_DESTINATION_BINDING_SQL)
     op.execute(REQUIRED_DESTINATIONS_SQL)
     op.execute(PAYLOAD_MATCH_SQL)
     op.execute(
@@ -854,8 +727,7 @@ def upgrade() -> None:
         "RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER "
         "SET search_path=public,pg_temp AS $$ SELECT "
         "trading_bot_dr_event_payload_integrity_valid(checked_event_id) AND "
-        "trading_bot_dr_event_entitlement_valid(checked_event_id) AND "
-        "trading_bot_local_dr_destination_binding_valid(checked_event_id) $$"
+        "trading_bot_dr_event_entitlement_valid(checked_event_id) $$"
     )
     op.execute(MUTATION_CAPTURE_SQL)
     op.execute(EVENT_COVERAGE_SQL)
@@ -886,12 +758,6 @@ def upgrade() -> None:
         "CREATE TRIGGER trg_dr_bind_local_sequences AFTER INSERT ON dr_events "
         "FOR EACH ROW EXECUTE FUNCTION trading_bot_bind_local_dr_event_sequences()"
     )
-    op.execute("DROP TRIGGER IF EXISTS trg_dr_event_destination_binding ON dr_events")
-    op.execute(
-        "CREATE CONSTRAINT TRIGGER trg_dr_event_destination_binding "
-        "AFTER INSERT OR UPDATE ON dr_events DEFERRABLE INITIALLY DEFERRED "
-        "FOR EACH ROW EXECUTE FUNCTION trading_bot_require_local_dr_destination_binding()"
-    )
     op.execute("DROP TRIGGER IF EXISTS trg_dr_event_mutation_binding ON dr_events")
     op.execute(
         "CREATE CONSTRAINT TRIGGER trg_dr_event_mutation_binding "
@@ -913,8 +779,7 @@ def upgrade() -> None:
         "'trg_three_site_mutation_capture','trg_three_site_cursor_guard',"
         "'trg_three_site_cursor_tail','trg_dr_events_immutable',"
         "'trg_dr_event_finalized','trg_dr_receiver_source_xid',"
-        "'trg_dr_bind_local_sequences','trg_dr_event_destination_binding',"
-        "'trg_dr_event_mutation_binding',"
+        "'trg_dr_bind_local_sequences','trg_dr_event_mutation_binding',"
         "'trg_dr_effect_intent_immutable','trg_dr_effect_fanout_intent_immutable') "
         "LOOP EXECUTE format('ALTER TABLE %s ENABLE ALWAYS TRIGGER %I', "
         "item.relation_name, item.tgname); END LOOP; END $$"
@@ -923,8 +788,6 @@ def upgrade() -> None:
     for function_identity in (
         "trading_bot_required_dr_destinations(text, text)",
         "trading_bot_dr_event_entitlement_valid(text)",
-        "trading_bot_dr_event_immutable()",
-        "trading_bot_local_dr_destination_binding_valid(text)",
         "trading_bot_dr_event_payload_integrity_valid(text)",
         "trading_bot_dr_event_integrity_valid(text)",
         "trading_bot_projection_payload_matches(text, jsonb, jsonb)",
@@ -933,7 +796,6 @@ def upgrade() -> None:
         "trading_bot_require_event_mutation_binding()",
         "trading_bot_guard_local_dr_cursor()",
         "trading_bot_bind_local_dr_event_sequences()",
-        "trading_bot_require_local_dr_destination_binding()",
         "trading_bot_require_cursor_event_tail()",
         "trading_bot_cleanup_expired_replay_nonces(timestamptz, integer)",
     ):

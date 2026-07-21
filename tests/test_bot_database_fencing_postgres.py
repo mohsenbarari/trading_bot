@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import json
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest.mock import patch
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -659,6 +661,91 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                         "WHERE event_id = ANY(:event_ids) ORDER BY producer_sequence"
                     ),
                     {"event_ids": event_ids},
+                ).scalars()
+            )
+        self.assertEqual(len(sequences), 2)
+        self.assertEqual(sequences[1], sequences[0] + 1)
+
+    def test_rolled_back_savepoint_allocations_do_not_poison_bot_cursor_tail(self) -> None:
+        rolled_back_id = self._scratch_id()
+        committed_id = self._scratch_id()
+        with self.engines["application"].begin() as connection:
+            self._foreign_writer(connection)
+            savepoint = connection.begin_nested()
+            rolled_back_payload = {
+                "id": rolled_back_id,
+                "name": f"bot-savepoint-rollback-{rolled_back_id}",
+            }
+            self._coverage_event(
+                connection,
+                record_id=rolled_back_id,
+                operation="INSERT",
+                payload=rolled_back_payload,
+            )
+            connection.execute(
+                text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                rolled_back_payload,
+            )
+            savepoint.rollback()
+
+            committed_payload = {
+                "id": committed_id,
+                "name": f"bot-savepoint-commit-{committed_id}",
+            }
+            self._coverage_event(
+                connection,
+                record_id=committed_id,
+                operation="INSERT",
+                payload=committed_payload,
+            )
+            connection.execute(
+                text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                committed_payload,
+            )
+        with self.engines["owner"].connect() as connection:
+            rows = set(
+                connection.execute(
+                    text("SELECT id FROM commodities WHERE id IN (:rolled_back, :committed)"),
+                    {"rolled_back": rolled_back_id, "committed": committed_id},
+                ).scalars()
+            )
+        self.assertEqual(rows, {committed_id})
+
+    def test_two_concurrent_bot_allocators_commit_consecutive_historical_tail_events(self) -> None:
+        barrier = Barrier(2)
+        record_ids = (self._scratch_id(), self._scratch_id())
+
+        def allocate(record_id: int) -> None:
+            with self.engines["application"].begin() as connection:
+                self._foreign_writer(connection)
+                barrier.wait(timeout=10)
+                payload = {"id": record_id, "name": f"bot-concurrent-{record_id}"}
+                self._coverage_event(
+                    connection,
+                    record_id=record_id,
+                    operation="INSERT",
+                    payload=payload,
+                )
+                connection.execute(
+                    text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                    payload,
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(allocate, record_id) for record_id in record_ids]
+            for future in futures:
+                future.result(timeout=30)
+
+        with self.engines["owner"].connect() as connection:
+            sequences = list(
+                connection.execute(
+                    text(
+                        "SELECT producer_sequence FROM dr_events "
+                        "WHERE aggregate_type='commodities' "
+                        "AND aggregate_db_id IN (:first_id, :second_id) "
+                        "ORDER BY producer_sequence"
+                    ),
+                    {"first_id": str(record_ids[0]), "second_id": str(record_ids[1])},
                 ).scalars()
             )
         self.assertEqual(len(sequences), 2)

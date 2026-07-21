@@ -225,7 +225,7 @@ an exact Object Storage version id is rejected.
 Each host begins with `run_three_site_staging_role_migration.py begin`. Run
 `restore-seed`, `configure-database`, and `start-private` on all four roles in
 their journal order. `configure-database` upgrades every supported predecessor
-to `e653f4a5b7c8`; on WebApp-IR it also converts the restored FI clone into a
+to `f764a5b6c8d9`; on WebApp-IR it also converts the restored FI clone into a
 locally fenced epoch-1 standby.
 
 The compatibility migration leaves WebApp-FI active at epoch 1 but does not

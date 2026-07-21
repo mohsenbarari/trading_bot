@@ -117,7 +117,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             env_file=env_file,
             image_inventory=image_inventory,
             routing_observation=routing,
-            expected_head="e653f4a5b7c8",
+            expected_head="f764a5b6c8d9",
         )
         return stack, args
 
@@ -127,7 +127,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             joined = " ".join(arguments)
             if "psql" in arguments:
                 return json.dumps(
-                    {"database": "bot", "user": "bot", "revision": "e653f4a5b7c8"}
+                    {"database": "bot", "user": "bot", "revision": "f764a5b6c8d9"}
                 )
             if " ps -q " in f" {joined} ":
                 return "container-id"

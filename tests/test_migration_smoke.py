@@ -1,4 +1,5 @@
 import configparser
+import hashlib
 import subprocess
 import sys
 import unittest
@@ -38,7 +39,23 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['e653f4a5b7c8 (head)'])
+        self.assertEqual(heads, ['f764a5b6c8d9 (head)'])
+
+    def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
+        versions = REPO_ROOT / 'migrations' / 'versions'
+        executed = versions / 'e653f4a5b7c8_close_three_site_database_trust_gaps.py'
+        child = versions / 'f764a5b6c8d9_seal_dr_event_stream_contract.py'
+
+        self.assertEqual(
+            hashlib.sha256(executed.read_bytes()).hexdigest(),
+            '4507368ecb8b35034d90e3eed8d99fa20a3c8c0abff27c89cb1799b8f9359eaf',
+        )
+        child_source = child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "e653f4a5b7c8"', child_source)
+        self.assertIn("jsonb_typeof(value) <> 'number'", child_source)
+        self.assertIn('HISTORY_PREFLIGHT_SQL', child_source)
+        self.assertIn('trg_dr_event_destination_binding', child_source)
+        self.assertIn('op.execute(f"REVOKE ALL ON FUNCTION {function_identity} FROM PUBLIC")', child_source)
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

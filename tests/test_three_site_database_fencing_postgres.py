@@ -9,7 +9,9 @@ from __future__ import annotations
 import os
 import json
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Barrier
 from uuid import uuid4
 
 from sqlalchemy import create_engine, text
@@ -18,6 +20,7 @@ from sqlalchemy.exc import DBAPIError
 from core.dr_event_protocol import (
     canonical_json_bytes,
     destination_transaction_hash,
+    envelope_hash,
     sha256_json,
     transaction_hash_from_envelopes,
     validate_envelope,
@@ -124,6 +127,7 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
         payload: dict[str, object],
         corrupt_envelope_hash: bool = False,
         destinations: tuple[str, ...] = ("bot_fi", "webapp_ir"),
+        destination_numeric_override: tuple[str, object] | None = None,
     ) -> None:  # noqa: ANN001
         event_id = str(uuid4())
         transaction_id = str(uuid4())
@@ -194,10 +198,15 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
             streams[site]["transaction_hash"] = destination_transaction_hash(
                 [envelope], destination_site=site
             )
+        if destination_numeric_override is not None:
+            field, value = destination_numeric_override
+            for stream in streams.values():
+                stream[field] = value
         validated_envelope_hash = (
             validate_envelope(envelope).envelope_hash
             if set(destinations) == {"bot_fi", "webapp_ir"}
-            else sha256_json(envelope)
+            and destination_numeric_override is None
+            else envelope_hash(envelope)
         )
         connection.execute(
             text(
@@ -462,6 +471,132 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                     text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
                     payload,
                 )
+
+    def test_database_rejects_noncanonical_destination_numeric_scalars(self) -> None:
+        hostile_values = (
+            ("string", "1"),
+            ("fractional", 1.5),
+            ("zero", 0),
+            ("negative", -1),
+            ("boolean", True),
+            ("null", None),
+        )
+        maximums = {
+            "sequence": 9223372036854775808,
+            "transaction_position": 2147483648,
+            "transaction_size": 2147483648,
+        }
+        for field in maximums:
+            cases = hostile_values + (("oversized", maximums[field]),)
+            for label, value in cases:
+                with self.subTest(field=field, case=label), self.assertRaises(DBAPIError):
+                    with self.engines["application"].begin() as connection:
+                        self._writer_settings(connection)
+                        record_id = self._scratch_id()
+                        payload = {
+                            "id": record_id,
+                            "name": f"numeric-{field}-{label}-{record_id}",
+                        }
+                        self._record_coverage_event(
+                            connection,
+                            table="commodities",
+                            record_id=record_id,
+                            operation="INSERT",
+                            payload=payload,
+                            destination_numeric_override=(field, value),
+                        )
+                        connection.execute(
+                            text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                            payload,
+                        )
+
+    def test_rolled_back_savepoint_allocations_do_not_poison_cursor_tail(self) -> None:
+        rolled_back_id = self._scratch_id()
+        committed_id = self._scratch_id()
+        with self.engines["application"].begin() as connection:
+            self._writer_settings(connection)
+            savepoint = connection.begin_nested()
+            rolled_back_payload = {
+                "id": rolled_back_id,
+                "name": f"savepoint-rollback-{rolled_back_id}",
+            }
+            self._record_coverage_event(
+                connection,
+                table="commodities",
+                record_id=rolled_back_id,
+                operation="INSERT",
+                payload=rolled_back_payload,
+            )
+            connection.execute(
+                text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                rolled_back_payload,
+            )
+            savepoint.rollback()
+
+            committed_payload = {
+                "id": committed_id,
+                "name": f"savepoint-commit-{committed_id}",
+            }
+            self._record_coverage_event(
+                connection,
+                table="commodities",
+                record_id=committed_id,
+                operation="INSERT",
+                payload=committed_payload,
+            )
+            connection.execute(
+                text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                committed_payload,
+            )
+        with self.engines["owner"].connect() as connection:
+            rows = set(
+                connection.execute(
+                    text("SELECT id FROM commodities WHERE id IN (:rolled_back, :committed)"),
+                    {"rolled_back": rolled_back_id, "committed": committed_id},
+                ).scalars()
+            )
+        self.assertEqual(rows, {committed_id})
+
+    def test_two_concurrent_allocators_commit_consecutive_historical_tail_events(self) -> None:
+        barrier = Barrier(2)
+        record_ids = (self._scratch_id(), self._scratch_id())
+
+        def allocate(record_id: int) -> None:
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                barrier.wait(timeout=10)
+                payload = {"id": record_id, "name": f"concurrent-{record_id}"}
+                self._record_coverage_event(
+                    connection,
+                    table="commodities",
+                    record_id=record_id,
+                    operation="INSERT",
+                    payload=payload,
+                )
+                connection.execute(
+                    text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                    payload,
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(allocate, record_id) for record_id in record_ids]
+            for future in futures:
+                future.result(timeout=30)
+
+        with self.engines["owner"].connect() as connection:
+            sequences = list(
+                connection.execute(
+                    text(
+                        "SELECT producer_sequence FROM dr_events "
+                        "WHERE aggregate_type='commodities' "
+                        "AND aggregate_db_id IN (:first_id, :second_id) "
+                        "ORDER BY producer_sequence"
+                    ),
+                    {"first_id": str(record_ids[0]), "second_id": str(record_ids[1])},
+                ).scalars()
+            )
+        self.assertEqual(len(sequences), 2)
+        self.assertEqual(sequences[1], sequences[0] + 1)
 
     def test_application_role_accepts_current_term_and_rejects_stale_term(self) -> None:
         record_id = self._scratch_id()
