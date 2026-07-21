@@ -16,6 +16,8 @@ from core.dr_event_protocol import canonical_json_bytes
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
     CAMPAIGN_SCHEMA,
+    CUSTOMER_ACTOR_PAIR_POLICIES,
+    CUSTOMER_LIFECYCLE_MATRIX,
     PHASES,
     PHASE_EVIDENCE_SCHEMA,
     PHASE_SCENARIOS,
@@ -23,8 +25,11 @@ from core.three_site_full_matrix_campaign import (
     SCENARIO_EVIDENCE_SCHEMA,
     FullMatrixCampaignError,
     _matrix_operation_id,
+    customer_actor_pair_assertion_name,
+    customer_actor_pair_contracts,
     verify_campaign,
     verify_complete_matrix,
+    verify_scenario_evidence,
 )
 
 
@@ -127,6 +132,7 @@ def _phase_evidence(
             "sha256": hashlib.sha256(raw_payload).hexdigest(),
             "size": len(raw_payload),
         }
+        raw_records = [raw_record]
         assertion_names = [
             "operation_executed", "expected_outcome", "production_boundary",
             f"oracle:{scenario}",
@@ -157,6 +163,32 @@ def _phase_evidence(
                     "evidence_refs": [raw_name],
                 }
             )
+        for assertion_name, contract in customer_actor_pair_contracts(scenario).items():
+            pair_name = contract["actor_pair"]
+            pair_raw_name = (
+                f"raw-customer-{iteration}-{phase}-{scenario}-{pair_name}.json"
+            )
+            pair_raw_payload = canonical_json_bytes(
+                {"scenario": scenario, "customer_contract": contract}
+            ) + b"\n"
+            pair_raw_path = artifact_root / pair_raw_name
+            pair_raw_path.write_bytes(pair_raw_payload)
+            pair_raw_path.chmod(0o600)
+            pair_raw_record = {
+                "path": pair_raw_name,
+                "sha256": hashlib.sha256(pair_raw_payload).hexdigest(),
+                "size": len(pair_raw_payload),
+            }
+            raw_records.append(pair_raw_record)
+            assertions.append(
+                {
+                    "name": assertion_name,
+                    "status": "passed",
+                    "expected": contract,
+                    "observed": contract,
+                    "evidence_refs": [pair_raw_name],
+                }
+            )
         scenario_name = f"scenario-{iteration}-{phase}-{scenario}.json"
         scenario_payload = canonical_json_bytes(
             {
@@ -176,7 +208,7 @@ def _phase_evidence(
                 "finished_at": (started + timedelta(seconds=duration)).isoformat(),
                 "duration_seconds": duration,
                 "assertions": assertions,
-                "evidence_refs": [raw_record],
+                "evidence_refs": raw_records,
                 "cleanup_residue_count": 0,
                 "production_touched": False,
             }
@@ -189,7 +221,7 @@ def _phase_evidence(
             "sha256": hashlib.sha256(scenario_payload).hexdigest(),
             "size": len(scenario_payload),
         }
-        artifacts.extend([scenario_record, raw_record])
+        artifacts.extend([scenario_record, *raw_records])
         scenario_results.append(
             {
                 "scenario_id": scenario,
@@ -229,6 +261,142 @@ def _phase_evidence(
 
 
 class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
+    def test_customer_actor_matrix_is_explicit_in_all_four_lifecycle_states(self):
+        placements = {
+            "customer_actor_matrix_normal_fi_active": "combined_workload",
+            "customer_actor_matrix_iran_active_outage": "partitions_failover",
+            "customer_actor_matrix_recovery_ir_routed": "recovery_failback",
+            "customer_actor_matrix_post_failback_fi_active": "recovery_failback",
+        }
+        self.assertEqual(len(CUSTOMER_ACTOR_PAIR_POLICIES), 17)
+        self.assertEqual(set(CUSTOMER_LIFECYCLE_MATRIX), set(placements))
+        for scenario_id, phase in placements.items():
+            with self.subTest(scenario_id=scenario_id):
+                self.assertIn(scenario_id, PHASE_SCENARIOS[phase])
+                contracts = customer_actor_pair_contracts(scenario_id)
+                self.assertEqual(len(contracts), 17)
+                self.assertEqual(
+                    set(contracts),
+                    {
+                        customer_actor_pair_assertion_name(actor_pair)
+                        for actor_pair in CUSTOMER_ACTOR_PAIR_POLICIES
+                    },
+                )
+        outage_contracts = customer_actor_pair_contracts(
+            "customer_actor_matrix_iran_active_outage"
+        )
+        tier2_request = outage_contracts[
+            customer_actor_pair_assertion_name("user__tier2_same_owner")
+        ]
+        self.assertEqual(
+            tier2_request["required_result"],
+            "webapp_trade_completed_and_telegram_request_denied",
+        )
+        tier2_offer = outage_contracts[
+            customer_actor_pair_assertion_name("tier2__user_same_owner")
+        ]
+        self.assertEqual(
+            tier2_offer["required_result"],
+            "tier2_offer_creation_denied_with_zero_mutation",
+        )
+
+    def test_customer_lifecycle_scenario_rejects_missing_forged_or_shared_pair_proof(self):
+        now = datetime.now(timezone.utc)
+        campaign, _policy, keys = _signed_campaign(now)
+        _sign(campaign, keys)
+        unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
+        campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            phase = "partitions_failover"
+            phase_raw = b"phase\n"
+            phase_path = root / "phase.json"
+            phase_path.write_bytes(phase_raw)
+            phase_path.chmod(0o600)
+            phase_evidence = _phase_evidence(
+                campaign,
+                campaign_hash=campaign_hash,
+                phase=phase,
+                iteration=1,
+                artifact_name=phase_path.name,
+                artifact_hash=hashlib.sha256(phase_raw).hexdigest(),
+                artifact_size=len(phase_raw),
+                artifact_root=root,
+            )
+            scenario_id = "customer_actor_matrix_iran_active_outage"
+            result = next(
+                item for item in phase_evidence["scenario_results"]
+                if item["scenario_id"] == scenario_id
+            )
+            original = json.loads((root / result["artifact"]["path"]).read_text())
+            missing = json.loads(json.dumps(original))
+            missing_name = customer_actor_pair_assertion_name("tier1__tier1_other_owner")
+            missing["assertions"] = [
+                item for item in missing["assertions"] if item["name"] != missing_name
+            ]
+            with self.assertRaisesRegex(FullMatrixCampaignError, "oracle coverage"):
+                verify_scenario_evidence(
+                    missing,
+                    campaign=campaign,
+                    campaign_hash=campaign_hash,
+                    phase=phase,
+                    scenario_id=scenario_id,
+                    iteration=1,
+                    attempt=1,
+                    operation_id=result["operation_id"],
+                    artifact_root=root,
+                )
+
+            forged = json.loads(json.dumps(original))
+            forged_assertion = next(
+                item for item in forged["assertions"]
+                if item["name"] == customer_actor_pair_assertion_name(
+                    "tier2__user_same_owner"
+                )
+            )
+            forged_assertion["expected"]["required_result"] = (
+                "eligible_surface_trade_completed"
+            )
+            forged_assertion["observed"] = forged_assertion["expected"]
+            with self.assertRaisesRegex(FullMatrixCampaignError, "lifecycle proof"):
+                verify_scenario_evidence(
+                    forged,
+                    campaign=campaign,
+                    campaign_hash=campaign_hash,
+                    phase=phase,
+                    scenario_id=scenario_id,
+                    iteration=1,
+                    attempt=1,
+                    operation_id=result["operation_id"],
+                    artifact_root=root,
+                )
+
+            shared = json.loads(json.dumps(original))
+            first_pair = next(
+                item for item in shared["assertions"]
+                if item["name"] == customer_actor_pair_assertion_name("user__user")
+            )
+            second_pair = next(
+                item for item in shared["assertions"]
+                if item["name"] == customer_actor_pair_assertion_name(
+                    "user__tier1_same_owner"
+                )
+            )
+            second_pair["evidence_refs"] = first_pair["evidence_refs"]
+            with self.assertRaisesRegex(FullMatrixCampaignError, "lifecycle proof"):
+                verify_scenario_evidence(
+                    shared,
+                    campaign=campaign,
+                    campaign_hash=campaign_hash,
+                    phase=phase,
+                    scenario_id=scenario_id,
+                    iteration=1,
+                    attempt=1,
+                    operation_id=result["operation_id"],
+                    artifact_root=root,
+                )
+
     def test_required_real_world_failure_catalog_is_explicit(self):
         required = {
             "integer_id_collision_fixtures",

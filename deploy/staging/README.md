@@ -338,6 +338,18 @@ journal. A controller crash after `scenario_started` cannot silently continue:
 the deployment backend must first prove zero-residue recovery. A failed
 campaign is terminal and needs a newly approved campaign.
 
+Customer-chain coverage is not allowed to hide behind the broad application
+regression scenario. Four closed lifecycle scenarios run while WebApp-FI is
+normally active, while WebApp-IR is outage-active, while recovery remains
+routed to WebApp-IR, and after controlled failback to WebApp-FI. Each lifecycle
+scenario must retain one distinct raw artifact and one exact source-owned
+assertion for every one of the 17 actor-pair families. The controller rejects a
+missing pair, a shared pair artifact, an altered Tier1/Tier2 policy, wrong
+Writer/origin state, missing owner/privacy/notification invariant, or a false
+convergence claim. These four scenarios are repeated with the rest of the
+catalog; a generic `market_trade_account_admin_regression=passed` result cannot
+replace them.
+
 The Queue-enabled activation SHA must be one direct commit above the reviewed
 baseline and may change only the code-owned readiness constant. The
 provisioned inventory must then be re-attested at that activation SHA; evidence

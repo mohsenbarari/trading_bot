@@ -1371,6 +1371,14 @@ Required scenarios:
 - different local integer IDs representing one natural identity or command;
 - unique non-colliding IDs with a real business-state conflict, proving ID collision prevention alone is insufficient;
 - one-hour modeled backlog recovery under simultaneous live traffic and DPI-safe throttling.
+- all 17 customer actor-pair families while WebApp-FI is the normal Writer;
+- all 17 customer actor-pair families after WebApp-IR outage promotion;
+- all 17 customer actor-pair families during recovery while routing remains on WebApp-IR;
+- all 17 customer actor-pair families after controlled failback to WebApp-FI;
+- one distinct raw artifact per actor-pair/lifecycle cell, including explicit
+  Tier2 offer-creation denial, Tier2 Telegram denial, owner routing,
+  counterparty privacy, recipient policy, terminal ledger and convergence
+  evidence.
 
 Exit criteria:
 
@@ -4326,3 +4334,35 @@ provider ambiguity, 300-rps behavior, persistent FI1 -> IR2 -> FI3 recovery,
 24-hour endurance, two clean repetitions and zero-residue cleanup still require
 authoritative staging evidence. Product-owner acceptance and permission to
 merge with `main` also remain open and cannot be inferred from these tests.
+
+## 55. Mandatory Customer Actor-Pair Lifecycle Matrix - 2026-07-21
+
+The prior documents described all 17 customer actor-pair families, but the
+three-site executable catalog exposed only a broad market/trade/account/admin
+regression scenario. That allowed a future driver to claim a generic pass
+without proving every customer family across the materially different Writer
+states. This source gap is now closed at the controller boundary.
+
+Four immutable scenarios are part of the closed campaign catalog:
+
+1. `customer_actor_matrix_normal_fi_active`;
+2. `customer_actor_matrix_iran_active_outage`;
+3. `customer_actor_matrix_recovery_ir_routed`;
+4. `customer_actor_matrix_post_failback_fi_active`.
+
+For each scenario, `core/three_site_full_matrix_campaign.py` owns the exact 17
+pair names and three policy classes: positive eligible-surface execution,
+WebApp-positive/Tier2-Telegram-denied execution, and Tier2-offer-creation denial
+with zero mutation. It also binds the expected Writer, public origin,
+connectivity state, cross-surface rule and convergence requirement.
+
+The evidence verifier requires all 17 exact assertions and 17 distinct raw
+artifacts in every lifecycle scenario. Missing one pair, changing an expected
+policy, reusing one raw artifact for two pairs, or presenting a wrong
+Writer/origin/convergence contract fails the campaign. The complete four-state
+matrix is repeated in both mandatory campaign cycles.
+
+This is source-level enforcement only. It does not claim that the still-missing
+reviewed live driver has executed the customer cases on staging. Gate D remains
+blocked until that driver creates the required real business, notification,
+database and routing evidence on the migrated three-site staging topology.

@@ -18,6 +18,7 @@ from core.three_site_full_matrix_campaign import (
     PHASES,
     PHASE_SCENARIOS,
     SCENARIO_EVIDENCE_SCHEMA,
+    customer_actor_pair_contracts,
     verify_complete_matrix,
     verify_scenario_evidence,
 )
@@ -233,6 +234,7 @@ class FakeBackend:
             "sha256": hashlib.sha256(raw_payload).hexdigest(),
             "size": len(raw_payload),
         }
+        raw_records = [raw_record]
         names = [
             "operation_executed", "expected_outcome", "production_boundary",
             f"oracle:{scenario_id}",
@@ -263,6 +265,34 @@ class FakeBackend:
                     "evidence_refs": [raw_name],
                 }
             )
+        for assertion_name, contract in customer_actor_pair_contracts(
+            scenario_id
+        ).items():
+            pair_name = contract["actor_pair"]
+            pair_raw_name = (
+                f"raw-customer-{iteration:02d}-{scenario_id}-{pair_name}.json"
+            )
+            pair_raw_payload = canonical_json_bytes(
+                {"key": key, "customer_contract": contract}
+            ) + b"\n"
+            pair_raw_path = self.root / pair_raw_name
+            pair_raw_path.write_bytes(pair_raw_payload)
+            pair_raw_path.chmod(0o600)
+            pair_raw_record = {
+                "path": pair_raw_name,
+                "sha256": hashlib.sha256(pair_raw_payload).hexdigest(),
+                "size": len(pair_raw_payload),
+            }
+            raw_records.append(pair_raw_record)
+            assertions.append(
+                {
+                    "name": assertion_name,
+                    "status": "passed",
+                    "expected": contract,
+                    "observed": contract,
+                    "evidence_refs": [pair_raw_name],
+                }
+            )
         name = f"scenario-{iteration:02d}-{phase}-{scenario_id}.json"
         payload = canonical_json_bytes(
             {
@@ -279,7 +309,7 @@ class FakeBackend:
                 "finished_at": (started_at + timedelta(seconds=duration)).isoformat(),
                 "duration_seconds": duration,
                 "assertions": assertions,
-                "evidence_refs": [raw_record],
+                "evidence_refs": raw_records,
                 "cleanup_residue_count": 0,
                 "production_touched": False,
             }

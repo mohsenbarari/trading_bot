@@ -34,6 +34,118 @@ SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ARTIFACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
 
+CUSTOMER_ACTOR_PAIR_ASSERTION_PREFIX = "customer_actor_pair:"
+CUSTOMER_ACTOR_PAIR_POLICIES: dict[str, str] = {
+    "user__user": "positive_all_eligible_surfaces",
+    "user__tier1_same_owner": "positive_all_eligible_surfaces",
+    "user__tier2_same_owner": "positive_webapp_tier2_request_telegram_denied",
+    "user__tier1_other_owner": "positive_all_eligible_surfaces",
+    "user__tier2_other_owner": "positive_webapp_tier2_request_telegram_denied",
+    "tier1__user_same_owner": "positive_all_eligible_surfaces",
+    "tier2__user_same_owner": "negative_tier2_offer_creation_denied",
+    "tier1__user_other_owner": "positive_all_eligible_surfaces",
+    "tier2__user_other_owner": "negative_tier2_offer_creation_denied",
+    "tier1__tier1_same_owner": "positive_all_eligible_surfaces",
+    "tier1__tier2_same_owner": "positive_webapp_tier2_request_telegram_denied",
+    "tier2__tier1_same_owner": "negative_tier2_offer_creation_denied",
+    "tier2__tier2_same_owner": "negative_tier2_offer_creation_denied",
+    "tier1__tier1_other_owner": "positive_all_eligible_surfaces",
+    "tier1__tier2_other_owner": "positive_webapp_tier2_request_telegram_denied",
+    "tier2__tier1_other_owner": "negative_tier2_offer_creation_denied",
+    "tier2__tier2_other_owner": "negative_tier2_offer_creation_denied",
+}
+CUSTOMER_LIFECYCLE_MATRIX: dict[str, dict[str, str]] = {
+    "customer_actor_matrix_normal_fi_active": {
+        "runtime_state": "normal_fi_active",
+        "webapp_writer": "webapp_fi",
+        "public_origin": "webapp_fi",
+        "connectivity": "stable",
+        "cross_surface_policy": "execute_via_home_authority",
+        "convergence_requirement": "steady_state_three_site_parity",
+    },
+    "customer_actor_matrix_iran_active_outage": {
+        "runtime_state": "iran_active_outage",
+        "webapp_writer": "webapp_ir",
+        "public_origin": "webapp_ir",
+        "connectivity": "iran_international_cutoff",
+        "cross_surface_policy": "local_home_only_remote_home_mutation_denied",
+        "convergence_requirement": "durable_local_commit_deferred_remote_delivery",
+    },
+    "customer_actor_matrix_recovery_ir_routed": {
+        "runtime_state": "recovery_ir_routed",
+        "webapp_writer": "webapp_ir",
+        "public_origin": "webapp_ir",
+        "connectivity": "recovering",
+        "cross_surface_policy": "ir_authoritative_until_failback",
+        "convergence_requirement": "catch_up_while_ir_continues_serving",
+    },
+    "customer_actor_matrix_post_failback_fi_active": {
+        "runtime_state": "post_failback_fi_active",
+        "webapp_writer": "webapp_fi",
+        "public_origin": "webapp_fi",
+        "connectivity": "restored_stable",
+        "cross_surface_policy": "execute_via_home_authority",
+        "convergence_requirement": "final_three_site_database_blob_effect_parity",
+    },
+}
+
+
+def customer_actor_pair_assertion_name(actor_pair: str) -> str:
+    if actor_pair not in CUSTOMER_ACTOR_PAIR_POLICIES:
+        raise FullMatrixCampaignError("Full Matrix customer actor pair is unknown")
+    return f"{CUSTOMER_ACTOR_PAIR_ASSERTION_PREFIX}{actor_pair}"
+
+
+def customer_actor_pair_contracts(scenario_id: str) -> dict[str, dict[str, Any]]:
+    """Return the source-owned 17-cell oracle contract for one lifecycle state."""
+
+    state = CUSTOMER_LIFECYCLE_MATRIX.get(scenario_id)
+    if state is None:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for actor_pair, execution_policy in CUSTOMER_ACTOR_PAIR_POLICIES.items():
+        if execution_policy == "positive_all_eligible_surfaces":
+            required_result = "eligible_surface_trade_completed"
+            policy_invariants = [
+                "owner_routing_preserved",
+                "counterparty_privacy_preserved",
+                "recipient_policy_matched",
+                "terminal_request_ledger_recorded",
+                "zero_duplicate_trade_or_delivery",
+            ]
+        elif execution_policy == "positive_webapp_tier2_request_telegram_denied":
+            required_result = "webapp_trade_completed_and_telegram_request_denied"
+            policy_invariants = [
+                "owner_routing_preserved",
+                "counterparty_privacy_preserved",
+                "tier2_webapp_only_policy_preserved",
+                "recipient_policy_matched",
+                "terminal_request_ledger_recorded",
+                "zero_duplicate_trade_or_delivery",
+            ]
+        else:
+            required_result = "tier2_offer_creation_denied_with_zero_mutation"
+            policy_invariants = [
+                "zero_offer_created",
+                "zero_publication_intent_created",
+                "zero_trade_or_request_created",
+                "zero_notification_or_channel_side_effect",
+            ]
+        result[customer_actor_pair_assertion_name(actor_pair)] = {
+            "actor_pair": actor_pair,
+            "execution_policy": execution_policy,
+            "required_result": required_result,
+            "runtime_state": state["runtime_state"],
+            "webapp_writer": state["webapp_writer"],
+            "public_origin": state["public_origin"],
+            "telegram_authority": "bot_fi",
+            "connectivity": state["connectivity"],
+            "cross_surface_policy": state["cross_surface_policy"],
+            "convergence_requirement": state["convergence_requirement"],
+            "required_invariants": policy_invariants,
+        }
+    return result
+
 PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
     "migration_topology": (
         "fresh_main_queue_dr_histories_equal",
@@ -58,6 +170,7 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "relay_preserves_origin_without_echo",
         "dropped_wakeup_still_durably_drains",
         "ambiguous_client_command_retry_is_idempotent",
+        "customer_actor_matrix_normal_fi_active",
     ),
     "queue_faults": (
         "enqueue_commit_crash_boundaries",
@@ -94,6 +207,7 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "simultaneous_promotion_attempt_single_epoch",
         "controller_restart_each_failover_cutpoint",
         "queue_work_inflight_during_promotion",
+        "customer_actor_matrix_iran_active_outage",
         "arvan_pop_split_origin_is_safe",
         "certificate_expiry_during_national_outage",
         "dns_global_national_asymmetry",
@@ -108,6 +222,7 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "short_medium_long_outage_rules",
         "bot_remains_active_all_outage_classes",
         "ir_remains_active_during_recovery",
+        "customer_actor_matrix_recovery_ir_routed",
         "reconnect_flap_and_bounded_catchup",
         "applied_checkpoint_conflict_effect_gates",
         "database_and_blob_final_parity",
@@ -117,6 +232,7 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "recovery_and_failback_restart_resume",
         "file_transfer_interruption_resumes_by_hash",
         "database_blob_inverse_completion_reconciles",
+        "customer_actor_matrix_post_failback_fi_active",
     ),
     "security_isolation": (
         "set_role_and_cross_role_access_denied",
@@ -444,7 +560,7 @@ def verify_scenario_evidence(
     """Re-open and semantically validate one retained scenario artifact.
 
     The backend is not allowed to reduce a scenario to a boolean and a hash.
-    Every result has a closed oracle identity, three mandatory assertions, and
+    Every result has a closed oracle identity, four mandatory assertions, and
     retained raw evidence files that can be independently re-hashed later.
     """
 
@@ -524,10 +640,13 @@ def verify_scenario_evidence(
         "production_boundary",
         f"oracle:{scenario_id}",
     }
+    customer_contracts = customer_actor_pair_contracts(scenario_id)
+    required.update(customer_contracts)
     if scenario_id == "twenty_four_hour_endurance_no_growth":
         required.add("minimum_duration")
     seen: set[str] = set()
     used_refs: set[str] = set()
+    customer_pair_refs: set[str] = set()
     for assertion in assertions:
         if not isinstance(assertion, dict) or set(assertion) != {
             "name", "status", "expected", "observed", "evidence_refs"
@@ -572,6 +691,17 @@ def verify_scenario_evidence(
             or assertion["observed"] != assertion["expected"]
         ):
             raise FullMatrixCampaignError("Full Matrix independent oracle did not match")
+        if name in customer_contracts:
+            if (
+                assertion["expected"] != customer_contracts[name]
+                or assertion["observed"] != customer_contracts[name]
+                or len(normalized) != 1
+                or not customer_pair_refs.isdisjoint(normalized)
+            ):
+                raise FullMatrixCampaignError(
+                    "Full Matrix customer actor-pair lifecycle proof is invalid"
+                )
+            customer_pair_refs.update(normalized)
         if name == "minimum_duration" and (
             assertion["expected"] != 86400
             or not isinstance(assertion["observed"], (int, float))
@@ -583,6 +713,10 @@ def verify_scenario_evidence(
         used_refs.update(normalized)
     if not required.issubset(seen) or used_refs != set(retained):
         raise FullMatrixCampaignError("Full Matrix scenario oracle coverage is incomplete")
+    if customer_contracts and len(customer_pair_refs) != len(customer_contracts):
+        raise FullMatrixCampaignError(
+            "Full Matrix customer actor-pair raw evidence is incomplete"
+        )
     return {
         "assertion_count": len(assertions),
         "duration_seconds": float(duration),
