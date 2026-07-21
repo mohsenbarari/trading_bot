@@ -121,8 +121,7 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        sync_url, _ = DATABASE_URLS
-        _run_alembic(sync_url, "upgrade", "head")
+        _run_alembic(DATABASE_URLS.owner_sync, "upgrade", "head")
 
     async def asyncSetUp(self):
         self.previous_process_owner_lease = (
@@ -131,8 +130,7 @@ class TelegramTradeResultQueueBridgePostgresTests(unittest.IsolatedAsyncioTestCa
         queue_worker._active_process_owner_lease = SimpleNamespace(
             assert_held=AsyncMock(return_value=None)
         )
-        _, async_url = DATABASE_URLS
-        self.engine = create_async_engine(async_url, pool_pre_ping=True)
+        self.engine = create_async_engine(DATABASE_URLS.runtime_async, pool_pre_ping=True)
         self.Session = async_sessionmaker(
             self.engine,
             class_=AsyncSession,

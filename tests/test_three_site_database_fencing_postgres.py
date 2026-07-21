@@ -311,7 +311,8 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                         "'trg_three_site_mutation_capture','trg_three_site_cursor_guard',"
                         "'trg_three_site_cursor_tail','trg_dr_events_immutable',"
                         "'trg_dr_event_finalized','trg_dr_receiver_source_xid',"
-                        "'trg_dr_bind_local_sequences','trg_dr_event_mutation_binding',"
+                        "'trg_dr_bind_local_sequences','trg_dr_event_destination_binding',"
+                        "'trg_dr_event_mutation_binding',"
                         "'trg_dr_effect_intent_immutable','trg_dr_effect_fanout_intent_immutable') "
                         "AND trigger.tgenabled <> 'A'"
                     )
@@ -418,6 +419,48 @@ class ThreeSiteDatabaseFencingPostgresTests(unittest.TestCase):
                         "WHERE origin_authority='webapp' AND origin_physical_site='webapp_fi' "
                         "AND producer_epoch=1 AND destination_site='bot_fi'"
                     )
+                )
+
+    def test_webapp_cursor_transitions_reject_a_missing_intermediate_event(self) -> None:
+        record_id = self._scratch_id()
+        payload = {"id": record_id, "name": f"webapp-cursor-gap-{record_id}"}
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._writer_settings(connection)
+                connection.execute(
+                    text(
+                        "INSERT INTO dr_producer_cursors ("
+                        "origin_authority,origin_physical_site,producer_epoch,last_sequence) "
+                        "VALUES ('webapp','webapp_fi',1,1) ON CONFLICT ("
+                        "origin_authority,origin_physical_site,producer_epoch) DO UPDATE SET "
+                        "last_sequence=dr_producer_cursors.last_sequence+1,"
+                        "updated_at=clock_timestamp()"
+                    )
+                )
+                for site in ("bot_fi", "webapp_ir"):
+                    connection.execute(
+                        text(
+                            "INSERT INTO dr_destination_cursors ("
+                            "origin_authority,origin_physical_site,producer_epoch,"
+                            "destination_site,last_sequence) VALUES ("
+                            "'webapp','webapp_fi',1,:site,1) ON CONFLICT ("
+                            "origin_authority,origin_physical_site,producer_epoch,"
+                            "destination_site) DO UPDATE SET "
+                            "last_sequence=dr_destination_cursors.last_sequence+1,"
+                            "updated_at=clock_timestamp()"
+                        ),
+                        {"site": site},
+                    )
+                self._record_coverage_event(
+                    connection,
+                    table="commodities",
+                    record_id=record_id,
+                    operation="INSERT",
+                    payload=payload,
+                )
+                connection.execute(
+                    text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                    payload,
                 )
 
     def test_application_role_accepts_current_term_and_rejects_stale_term(self) -> None:

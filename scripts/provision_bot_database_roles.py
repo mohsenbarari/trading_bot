@@ -236,6 +236,10 @@ def main() -> int:
                 f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, {role_list}",
                 f"GRANT CONNECT ON DATABASE {database} TO {role_list}",
                 f"GRANT USAGE ON SCHEMA public TO {role_list}",
+                # Bot-FI API readiness and the read-only forward-rollback
+                # checker both verify the exact migration head through the
+                # application role.  This exposes metadata only, never DDL.
+                f"GRANT SELECT ON TABLE public.alembic_version TO {app_role}",
                 f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {app_role}, {projection_role}",
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON TABLES FROM {role_list}",
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {role_list}",

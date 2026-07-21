@@ -73,6 +73,11 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
                 ).decode()
                 observed = parse_env_values(role_env)
                 self.assertEqual(set(observed), set(required))
+                if role != "witness":
+                    self.assertEqual(
+                        observed["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"],
+                        "legacy",
+                    )
                 if role == "bot-fi":
                     self.assertNotIn("WEBAPP_JWT_SECRET_KEY", observed)
                     self.assertNotIn("WITNESS_POSTGRES_PASSWORD", observed)

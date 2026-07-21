@@ -126,6 +126,22 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 verify_files=False,
             )
 
+        unsafe_expected_owner = env_bytes.replace(
+            b"TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER=legacy",
+            b"TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER=queue-v1",
+        )
+        with self.assertRaisesRegex(RoleBundleError, "legacy Telegram"):
+            verify_role_bundle(
+                role="bot-fi",
+                canonical_compose=self.canonical,
+                role_compose_bytes=compose_bytes,
+                env_bytes=unsafe_expected_owner,
+                inventory=self.inventory,
+                approval=self.approval,
+                signer_policy=self.policy,
+                verify_files=False,
+            )
+
     def test_bind_address_and_peer_port_are_bound_to_signed_topology(self):
         compose_bytes, env_bytes = self._bundle("webapp-fi")
         wrong_bind = env_bytes.replace(

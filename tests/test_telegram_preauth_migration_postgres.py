@@ -20,8 +20,7 @@ class TelegramPreAuthMigrationPostgresTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        sync_url, _ = DATABASE_URLS
-        source = make_url(sync_url)
+        source = make_url(DATABASE_URLS.owner_sync)
         cls.database_name = (
             "telegram_queue_stage3_preauth_" + uuid4().hex[:12] + "_test"
         )

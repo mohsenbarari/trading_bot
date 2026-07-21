@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 from datetime import timedelta
 import json
 import os
@@ -145,7 +146,14 @@ from models.market_runtime_state import MarketRuntimeState
 DATABASE_NAME_PATTERN = re.compile(r"^telegram_queue_stage3_[a-z0-9_]+_test$")
 
 
-def _test_database_urls() -> tuple[str, str, str] | None:
+@dataclass(frozen=True)
+class TestDatabaseUrls:
+    owner_sync: str
+    runtime_sync: str
+    runtime_async: str
+
+
+def _test_database_urls() -> TestDatabaseUrls | None:
     explicit = str(os.getenv("TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL", "")).strip()
     if not explicit:
         return None
@@ -166,10 +174,16 @@ def _test_database_urls() -> tuple[str, str, str] | None:
         raise RuntimeError(
             "Telegram queue owner and runtime URLs must address the same scratch database"
         )
-    return (
-        owner_target.set(drivername="postgresql+psycopg2").render_as_string(hide_password=False),
-        runtime_target.set(drivername="postgresql+psycopg2").render_as_string(hide_password=False),
-        runtime_target.set(drivername="postgresql+asyncpg").render_as_string(hide_password=False),
+    return TestDatabaseUrls(
+        owner_sync=owner_target.set(drivername="postgresql+psycopg2").render_as_string(
+            hide_password=False
+        ),
+        runtime_sync=runtime_target.set(drivername="postgresql+psycopg2").render_as_string(
+            hide_password=False
+        ),
+        runtime_async=runtime_target.set(drivername="postgresql+asyncpg").render_as_string(
+            hide_password=False
+        ),
     )
 
 
@@ -314,6 +328,25 @@ class TelegramDeliveryQueueDatabaseSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "telegram_queue_stage3"):
                 _test_database_urls()
 
+    def test_database_urls_expose_named_owner_and_runtime_endpoints(self):
+        runtime = "postgresql://runtime:runtime@db/telegram_queue_stage3_named_test"
+        owner = "postgresql://owner:owner@db/telegram_queue_stage3_named_test"
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL": runtime,
+                "TELEGRAM_QUEUE_STAGE3_TEST_OWNER_DATABASE_URL": owner,
+            },
+            clear=False,
+        ):
+            urls = _test_database_urls()
+        self.assertIsNotNone(urls)
+        self.assertIn("owner:owner", urls.owner_sync)
+        self.assertIn("runtime:runtime", urls.runtime_sync)
+        self.assertTrue(urls.runtime_async.startswith("postgresql+asyncpg://"))
+        with self.assertRaises((AttributeError, TypeError)):
+            urls.runtime_sync = urls.owner_sync
+
 
 @unittest.skipUnless(
     DATABASE_URLS,
@@ -323,8 +356,7 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        owner_sync_url, _, _ = DATABASE_URLS
-        _run_alembic(owner_sync_url, "upgrade", "head")
+        _run_alembic(DATABASE_URLS.owner_sync, "upgrade", "head")
 
     async def asyncSetUp(self):
         self.previous_process_owner_lease = (
@@ -333,10 +365,9 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
         queue_worker._active_process_owner_lease = SimpleNamespace(
             assert_held=AsyncMock(return_value=None)
         )
-        owner_sync_url, _, async_url = DATABASE_URLS
-        self.engine = create_async_engine(async_url, pool_pre_ping=True)
+        self.engine = create_async_engine(DATABASE_URLS.runtime_async, pool_pre_ping=True)
         self.maintenance_engine = create_async_engine(
-            make_url(owner_sync_url)
+            make_url(DATABASE_URLS.owner_sync)
             .set(drivername="postgresql+asyncpg")
             .render_as_string(hide_password=False),
             pool_pre_ping=True,
@@ -416,10 +447,9 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("scratch fixture reset failed to restore enforcement")
 
     async def test_two_processes_cannot_own_queue_executor_simultaneously(self):
-        _, sync_url, _ = DATABASE_URLS
         environment = os.environ.copy()
         environment["TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL"] = (
-            make_url(sync_url)
+            make_url(DATABASE_URLS.runtime_sync)
             .set(drivername="postgresql")
             .render_as_string(hide_password=False)
         )

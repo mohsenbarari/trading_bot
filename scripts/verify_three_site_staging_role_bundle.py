@@ -284,6 +284,11 @@ def verify_role_bundle(
     for name in ("FRONTEND_URL", "PUBLIC_WEBAPP_URL"):
         if name in values and values[name] != canonical_url:
             raise RoleBundleError(f"{name} differs from the signed canonical staging domain")
+    if role != "witness" and (
+        values["TELEGRAM_DELIVERY_PRODUCER_MODE"] != "legacy"
+        or values["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"] != "legacy"
+    ):
+        raise RoleBundleError("initial staging migration must retain legacy Telegram ownership")
     if role == "bot-fi" and (
         values["TELEGRAM_DELIVERY_EXECUTION_OWNER"] != "legacy"
         or values["TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED"] != "false"

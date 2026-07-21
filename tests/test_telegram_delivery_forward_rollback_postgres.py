@@ -42,14 +42,20 @@ class TelegramDeliveryForwardRollbackPostgresTests(unittest.IsolatedAsyncioTestC
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        sync_url, _ = DATABASE_URLS
-        _run_alembic(sync_url, "upgrade", "head")
+        _run_alembic(DATABASE_URLS.owner_sync, "upgrade", "head")
 
     async def asyncSetUp(self):
-        _, async_url = DATABASE_URLS
-        self.engine = create_async_engine(async_url, pool_pre_ping=True)
+        self.engine = create_async_engine(DATABASE_URLS.runtime_async, pool_pre_ping=True)
+        self.maintenance_engine = create_async_engine(
+            make_url(DATABASE_URLS.owner_sync)
+            .set(drivername="postgresql+asyncpg")
+            .render_as_string(hide_password=False),
+            pool_pre_ping=True,
+        )
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
-        async with self.engine.begin() as connection:
+        # Destructive fixture reset is owner-only; product assertions continue
+        # to run through the fenced application role.
+        async with self.maintenance_engine.begin() as connection:
             await connection.execute(
                 text(
                     "TRUNCATE TABLE telegram_delivery_resume_operations, "
@@ -62,6 +68,7 @@ class TelegramDeliveryForwardRollbackPostgresTests(unittest.IsolatedAsyncioTestC
 
     async def asyncTearDown(self):
         await self.engine.dispose()
+        await self.maintenance_engine.dispose()
 
     async def _job(self, db, *, key: str) -> TelegramDeliveryJobRecord:
         result = await enqueue_telegram_delivery_job(
@@ -205,8 +212,7 @@ class TelegramDeliveryForwardRollbackPostgresTests(unittest.IsolatedAsyncioTestC
             terminal_id = int(terminal.id)
             await db.commit()
 
-        _, async_url = DATABASE_URLS
-        database_name = str(make_url(async_url).database)
+        database_name = str(make_url(DATABASE_URLS.runtime_async).database)
         repo = Path(__file__).resolve().parents[1]
         script = repo / "scripts" / "check_telegram_delivery_forward_rollback.py"
         with tempfile.TemporaryDirectory() as directory:

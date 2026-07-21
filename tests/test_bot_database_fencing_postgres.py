@@ -13,8 +13,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from core.dr_event_protocol import (
+    V1_ENVELOPE_FIELDS,
     canonical_json_bytes,
     destination_transaction_hash,
+    envelope_hash,
     sha256_json,
     transaction_hash_from_envelopes,
     validate_envelope,
@@ -200,6 +202,64 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
                 "transaction_id": transaction_id,
                 "transaction_hash": envelope["transaction_hash"],
                 "streams": canonical_json_bytes(streams).decode(),
+            },
+        )
+
+    def _finalize_with_tampered_destination_streams(
+        self,
+        connection,
+        *,
+        event_id: str,
+        tamper: str,
+    ) -> None:  # noqa: ANN001
+        row = connection.execute(
+            text("SELECT * FROM dr_events WHERE event_id=:event_id FOR UPDATE"),
+            {"event_id": event_id},
+        ).mappings().one()
+        created_at = row["created_at"]
+        if isinstance(created_at, datetime):
+            created_at = created_at.astimezone(timezone.utc).isoformat()
+        streams = json.loads(json.dumps(dict(row["destination_streams"] or {})))
+        first_destination = sorted(streams)[0]
+        if tamper == "sequence":
+            streams[first_destination]["sequence"] += 1
+        elif tamper == "remove_destination":
+            streams.pop(first_destination)
+        elif tamper == "extra_stream_field":
+            streams[first_destination]["unexpected"] = "not-canonical"
+        else:  # pragma: no cover - helper misuse guard
+            raise AssertionError(f"unknown destination tamper: {tamper}")
+        envelope = {
+            key: row[key]
+            for key in V1_ENVELOPE_FIELDS
+            if key != "created_at"
+        } | {
+            "created_at": created_at,
+            "transaction_id": row["transaction_id"],
+            "transaction_position": int(row["transaction_position"]),
+            "transaction_size": 1,
+            "transaction_hash": "0" * 64,
+            "destination_streams": streams,
+        }
+        group_hash = transaction_hash_from_envelopes([envelope])
+        for destination, stream in streams.items():
+            stream.update(transaction_position=1, transaction_size=1)
+            stream["transaction_hash"] = destination_transaction_hash(
+                [envelope], destination_site=destination
+            )
+        envelope["transaction_hash"] = group_hash
+        connection.execute(
+            text(
+                "UPDATE dr_events SET transaction_size=1, "
+                "transaction_hash=:transaction_hash, "
+                "destination_streams=CAST(:destination_streams AS JSONB), "
+                "envelope_hash=:envelope_hash WHERE event_id=:event_id"
+            ),
+            {
+                "transaction_hash": group_hash,
+                "destination_streams": canonical_json_bytes(streams).decode(),
+                "envelope_hash": envelope_hash(envelope),
+                "event_id": event_id,
             },
         )
 
@@ -461,6 +521,148 @@ class BotDatabaseFencingPostgresTests(unittest.TestCase):
             self.assertEqual(stream["transaction_size"], 1)
             self.assertNotEqual(stream["transaction_hash"], "0" * 64)
         self.assertNotEqual(row["envelope_hash"], "0" * 64)
+
+    def test_each_cursor_increment_requires_its_own_event_and_destination_binding(self) -> None:
+        record_id = self._scratch_id()
+        payload = {"id": record_id, "name": f"cursor-gap-{record_id}"}
+        with self.assertRaises(DBAPIError):
+            with self.engines["application"].begin() as connection:
+                self._foreign_writer(connection)
+                connection.execute(
+                    text(
+                        "INSERT INTO dr_producer_cursors ("
+                        "origin_authority,origin_physical_site,producer_epoch,last_sequence) "
+                        "VALUES ('foreign','bot_fi',1,1) ON CONFLICT ("
+                        "origin_authority,origin_physical_site,producer_epoch) DO UPDATE SET "
+                        "last_sequence=dr_producer_cursors.last_sequence+1,"
+                        "updated_at=clock_timestamp()"
+                    )
+                )
+                for site in ("webapp_fi", "webapp_ir"):
+                    connection.execute(
+                        text(
+                            "INSERT INTO dr_destination_cursors ("
+                            "origin_authority,origin_physical_site,producer_epoch,"
+                            "destination_site,last_sequence) VALUES ("
+                            "'foreign','bot_fi',1,:site,1) ON CONFLICT ("
+                            "origin_authority,origin_physical_site,producer_epoch,"
+                            "destination_site) DO UPDATE SET "
+                            "last_sequence=dr_destination_cursors.last_sequence+1,"
+                            "updated_at=clock_timestamp()"
+                        ),
+                        {"site": site},
+                    )
+                # A second allocation with only its final event used to make
+                # the deferred max-tail check accept the missing first event.
+                self._coverage_event(
+                    connection,
+                    record_id=record_id,
+                    operation="INSERT",
+                    payload=payload,
+                )
+                connection.execute(
+                    text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                    payload,
+                )
+
+    def test_finalization_cannot_rewrite_or_extend_allocated_destination_streams(self) -> None:
+        from core.dr_event_protocol import append_local_dr_event
+        from core.config import settings
+
+        for tamper in ("sequence", "remove_destination", "extra_stream_field"):
+            with self.subTest(tamper=tamper), self.assertRaises(DBAPIError):
+                with patch.multiple(
+                    settings,
+                    three_site_dr_enabled=True,
+                    dr_event_protocol_enabled=True,
+                    dr_event_protocol_strict=True,
+                    topology_schema_version="three-site-dr-v1",
+                    logical_authority="foreign",
+                    physical_site="bot_fi",
+                    server_mode="foreign",
+                    dr_producer_epoch=31,
+                ):
+                    with self.engines["application"].begin() as connection:
+                        self._foreign_writer(connection, epoch=31)
+                        record_id = self._scratch_id()
+                        payload = {
+                            "id": record_id,
+                            "name": f"finalize-{tamper}-{record_id}",
+                        }
+                        event_id = append_local_dr_event(
+                            connection,
+                            table_name="commodities",
+                            record_id=record_id,
+                            operation="INSERT",
+                            data=payload,
+                            change_log_id=None,
+                            transaction_id=str(uuid4()),
+                            transaction_position=1,
+                        )
+                        connection.execute(
+                            text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                            payload,
+                        )
+                        self._finalize_with_tampered_destination_streams(
+                            connection,
+                            event_id=str(event_id),
+                            tamper=tamper,
+                        )
+
+    def test_two_valid_events_can_share_one_transaction_without_sequence_gaps(self) -> None:
+        from core.dr_event_protocol import append_local_dr_event, finalize_local_dr_transaction
+        from core.config import settings
+
+        transaction_id = str(uuid4())
+        event_ids: list[str] = []
+        with patch.multiple(
+            settings,
+            three_site_dr_enabled=True,
+            dr_event_protocol_enabled=True,
+            dr_event_protocol_strict=True,
+            topology_schema_version="three-site-dr-v1",
+            logical_authority="foreign",
+            physical_site="bot_fi",
+            server_mode="foreign",
+            dr_producer_epoch=32,
+        ):
+            with self.engines["application"].begin() as connection:
+                self._foreign_writer(connection, epoch=32)
+                for position in (1, 2):
+                    record_id = self._scratch_id()
+                    payload = {
+                        "id": record_id,
+                        "name": f"valid-multi-{position}-{record_id}",
+                    }
+                    event_id = append_local_dr_event(
+                        connection,
+                        table_name="commodities",
+                        record_id=record_id,
+                        operation="INSERT",
+                        data=payload,
+                        change_log_id=None,
+                        transaction_id=transaction_id,
+                        transaction_position=position,
+                    )
+                    event_ids.append(str(event_id))
+                    connection.execute(
+                        text("INSERT INTO commodities (id, name) VALUES (:id, :name)"),
+                        payload,
+                    )
+                finalize_local_dr_transaction(connection, event_ids)
+
+        with self.engines["owner"].connect() as connection:
+            sequences = list(
+                connection.execute(
+                    text(
+                        "SELECT producer_sequence FROM dr_events "
+                        "WHERE event_id = ANY(:event_ids) ORDER BY producer_sequence"
+                    ),
+                    {"event_ids": event_ids},
+                ).scalars()
+            )
+        self.assertEqual(len(sequences), 2)
+        self.assertEqual(sequences[1], sequences[0] + 1)
 
 
 if __name__ == "__main__":
