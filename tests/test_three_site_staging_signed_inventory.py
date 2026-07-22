@@ -45,7 +45,7 @@ def _inventory() -> dict:
     )
     for field in (
         "machine_ids", "docker_daemon_ids", "postgres_system_ids",
-        "volume_ids", "audit_root_ids",
+        "volume_ids", "audit_root_ids", "storage_mount_uuids",
     ):
         payload["production_boundaries"][field] = [f"production-{field}-1"]
     for number, role in enumerate(payload["roles"], 1):
@@ -55,6 +55,7 @@ def _inventory() -> dict:
         role["machine_id"] = f"{number:032x}"
         role["docker_daemon_id"] = f"staging-docker-{role['role']}"
         role["postgres_system_id"] = str(9000000000000000000 + number)
+        role["storage_mount_uuid"] = f"00000000-0000-4000-8000-{number:012d}"
         for field, logical in ROLE_VOLUME_LOGICAL_NAMES[role["role"]].items():
             role[field] = f"{ROLE_COMPOSE_PROJECT[role['role']]}_{logical}"
     return payload
@@ -126,6 +127,14 @@ class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(InventoryError, "production boundary"):
             verify_inventory(payload, host_destructive=False)
 
+        payload = _inventory()
+        payload["host_safety_mode"] = SHARED_HOST_SAFE
+        payload["production_boundaries"]["storage_mount_uuids"] = [
+            payload["roles"][0]["storage_mount_uuid"]
+        ]
+        with self.assertRaisesRegex(InventoryError, "production storage"):
+            verify_inventory(payload, host_destructive=False)
+
     def test_execution_class_mismatch_and_destructive_production_host_are_rejected(self):
         payload = _inventory()
         payload["host_safety_mode"] = SHARED_HOST_SAFE
@@ -139,7 +148,7 @@ class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
 
     def test_legacy_inventory_schema_is_rejected(self):
         payload = _inventory()
-        payload["schema"] = "three-site-staging-inventory-v1"
+        payload["schema"] = "three-site-staging-inventory-v2"
         with self.assertRaisesRegex(InventoryError, "fields/schema"):
             verify_inventory(payload)
 

@@ -29,7 +29,7 @@ class FinalizeThreeSiteStagingInventoryTests(unittest.TestCase):
             physical = cli_role.replace("-", "_")
             role = next(item for item in planned["roles"] if item["role"] == physical)
             snapshots[cli_role] = {
-                "schema": "three-site-staging-host-snapshot-v1",
+                "schema": "three-site-staging-host-snapshot-v2",
                 "role": cli_role,
                 "stage": "measure-provisioned",
                 "release_sha": planned["release_sha"],
@@ -42,6 +42,18 @@ class FinalizeThreeSiteStagingInventoryTests(unittest.TestCase):
                 "clock_measurement_tool": "chronyc",
                 "volumes": {
                     field: role[field] for field in ROLE_VOLUME_FIELDS[cli_role]
+                },
+                "storage": {
+                    "root": role["storage_root"],
+                    "source": "/dev/disk/by-uuid/" + role["storage_mount_uuid"],
+                    "filesystem": "ext4",
+                    "mount_uuid": role["storage_mount_uuid"],
+                    "total_bytes": 60 * 1024**3,
+                    "available_bytes": 55 * 1024**3,
+                },
+                "resource_boundary": {
+                    "slice": "trading-bot-three-site-staging.slice",
+                    **role["resource_limits"],
                 },
                 "postgres_system_id": str(9100000000000000000 + number),
             }

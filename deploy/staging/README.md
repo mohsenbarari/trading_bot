@@ -108,11 +108,35 @@ Before rendering a shared-host role, review
 `trading-bot-three-site-staging.slice.example` against measured host headroom,
 install the reviewed unit as
 `/etc/systemd/system/trading-bot-three-site-staging.slice`, run
-`systemctl daemon-reload` and `systemctl start
+`systemctl daemon-reload` and `systemctl enable --now
 trading-bot-three-site-staging.slice`, and retain `systemctl show` plus cgroup
 limit evidence. The example's 200% CPU and 50% hard memory ceilings are
 starting bounds, not permission to consume capacity needed by production.
 Lower them or increase host capacity when production headroom requires it.
+
+The cgroup boundary does not limit disk growth. Every role therefore also
+requires an independently mounted staging filesystem at
+`/srv/trading-bot-three-site-staging-data`. The exact filesystem UUID is part
+of signed inventory v3 and the live host snapshot verifies the mount target,
+UUID, filesystem type, total capacity, and remaining capacity before Docker is
+allowed to provision the role volumes. All named Compose volumes are local
+bind volumes below that mount. If the disk is absent, the host attestation
+fails instead of falling back to the operating-system or production disk.
+
+Provision this boundary only after recording the new disk UUID and selecting
+limits below measured production headroom. The command plans by default and
+prints the exact confirmation phrase required by `--apply`:
+
+```bash
+sudo scripts/provision_three_site_staging_host_boundary.sh \
+  --role bot-fi \
+  --device /dev/disk/by-id/replace-with-staging-device \
+  --expected-uuid replace-with-filesystem-uuid \
+  --cpu-quota 200% --memory-high 4G --memory-max 5G --tasks-max 2048
+```
+
+The provisioner installs only the dedicated mount and the empty staging slice;
+it does not start Compose, restart Docker, or restart a production service.
 
 Its configuration shape is documented in
 `env.three-site.staging.example`. Copy that file to an untracked mode-0600

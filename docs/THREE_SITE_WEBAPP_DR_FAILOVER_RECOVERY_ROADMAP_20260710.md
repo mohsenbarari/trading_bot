@@ -4492,8 +4492,9 @@ classes, or assigned an unknown class.
   `wal_event_redis_blob_capacity_exhaustion_safe`. These require four distinct
   disposable hosts that do not overlap the signed production boundary.
 
-The inventory schema is now v2 and signs `host_safety_mode`. Callers derive the
-mode from the signed document and explicitly require it to equal the campaign
+The inventory schema introduced here signs `host_safety_mode`. It is superseded
+by inventory v3 in section 58, which also signs the independent staging storage
+mount. Callers derive the mode from the signed document and explicitly require it to equal the campaign
 execution class. In shared mode, production host/machine/Docker identity reuse
 is permitted; mutable production data identity overlap remains a hard failure.
 In destructive mode, both physical and mutable overlap remain forbidden.
@@ -4541,3 +4542,57 @@ that the reviewed all-scenario driver exists, that either campaign has run, or
 that the temporary destructive hosts have been provisioned. Those remain
 mandatory before Gate D. Production traffic, databases, containers, and Arvan
 routing were not changed by this source slice.
+
+## 58. Shared-host disk isolation and first live boundaries - 2026-07-22
+
+Host-level CPU and memory controls cannot prevent Docker volumes, PostgreSQL,
+Redis, uploads, audit evidence, or test logs from filling the operating-system
+disk. This is especially unsafe on Bot-FI: its production data already lives on
+a separate 30-GiB volume, while the OS/Docker root had only about 9 GiB free at
+the preflight measurement. The shared-host-safe campaign therefore now has a
+second, independent resource boundary.
+
+### 58.1 Signed, fail-closed storage boundary
+
+Inventory schema v3 adds `storage_root` and `storage_mount_uuid` to every role
+and records production filesystem UUIDs as forbidden boundaries. The only
+accepted data root is `/srv/trading-bot-three-site-staging-data`. The v2 host
+snapshot records and verifies the exact mount target, device, filesystem type,
+UUID, total bytes, available bytes, and the effective aggregate slice limits.
+Those live CPU, memory, and task values must equal the role's limits in the
+signed inventory, and an override/drop-in is rejected. It also rejects a plain directory on `/`, a
+symlink, an undersized filesystem, an unavailable mount, a UUID not present in
+the signed inventory, or a UUID that overlaps production.
+
+All fourteen mutable Compose volumes now use the local bind driver below that
+mount. Docker volume names remain deterministic and staging-only, but their
+physical bytes cannot fall back to `/var/lib/docker`. The host boundary
+provisioner installs a persistent mount, prepares only the selected role's
+directories, and installs the aggregate staging slice. It never starts
+Compose, restarts Docker, or restarts a production service.
+
+### 58.2 Installed live boundaries
+
+Two new 60-GiB Hetzner volumes were created and attached without automount:
+
+- Bot-FI: `trading-bot-three-site-staging-bot-fi-data`, mounted as ext4 at the
+  fixed staging root. Its empty staging slice is limited to 200% CPU,
+  MemoryHigh 4 GiB, MemoryMax 5 GiB, and 2048 tasks.
+- WA-FI: `trading-bot-three-site-staging-wa-fi-data`, mounted as ext4 at the
+  fixed staging root. Its empty staging slice is limited to 150% CPU,
+  MemoryHigh 2 GiB, MemoryMax 3 GiB, and 1536 tasks.
+
+The current Hetzner API rate for each 60-GiB volume is EUR 3.432/month, or EUR
+6.864/month in total before any later pricing change. Post-install checks
+confirmed that the production containers on both hosts retained their existing
+uptime. No staging container was started.
+
+### 58.3 Still blocked before staging migration
+
+WA-IR still needs a separate filesystem of at least 30 GiB. Witness needs at
+least 8 GiB of separate staging storage, Docker, and a memory increase from 2
+GiB to at least 4 GiB before its role can be deployed. The Arvan compute API
+credential must be supplied from a mode-0600 secure environment file; it must
+not be recovered from terminal/session history. Until those two boundaries are
+installed and all four live host snapshots pass against one signed planned
+inventory, migration and Full Matrix execution remain blocked.

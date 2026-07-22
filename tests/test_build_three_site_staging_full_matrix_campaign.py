@@ -44,7 +44,7 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             value = {"schema": f"fixture-{name}-v1", "value": name}
             if name == "provisioned_inventory":
                 value = {
-                    "schema": "three-site-staging-inventory-v2",
+                    "schema": "three-site-staging-inventory-v3",
                     "inventory_stage": "provisioned",
                     "campaign_id": campaign_id,
                     "release_sha": activation,

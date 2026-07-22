@@ -981,17 +981,45 @@ networks:
   webapp_ir_egress: {}
 
 volumes:
-  bot_fi_postgres: {}
-  bot_fi_redis: {}
-  bot_fi_uploads: {}
-  bot_fi_audit: {}
-  webapp_fi_postgres: {}
-  webapp_fi_redis: {}
-  webapp_fi_uploads: {}
-  webapp_fi_audit: {}
-  webapp_ir_postgres: {}
-  webapp_ir_redis: {}
-  webapp_ir_uploads: {}
-  webapp_ir_audit: {}
-  witness_postgres: {}
-  witness_audit: {}
+  bot_fi_postgres:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/postgres"}
+  bot_fi_redis:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/redis"}
+  bot_fi_uploads:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/uploads"}
+  bot_fi_audit:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/audit"}
+  webapp_fi_postgres:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/postgres"}
+  webapp_fi_redis:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/redis"}
+  webapp_fi_uploads:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/uploads"}
+  webapp_fi_audit:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/audit"}
+  webapp_ir_postgres:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/postgres"}
+  webapp_ir_redis:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/redis"}
+  webapp_ir_uploads:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/uploads"}
+  webapp_ir_audit:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/audit"}
+  witness_postgres:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/witness/postgres"}
+  witness_audit:
+    driver: local
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/witness/audit"}

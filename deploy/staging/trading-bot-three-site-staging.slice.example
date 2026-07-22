@@ -9,3 +9,6 @@ MemoryHigh=40%
 MemoryMax=50%
 TasksAccounting=true
 TasksMax=2048
+
+[Install]
+WantedBy=multi-user.target

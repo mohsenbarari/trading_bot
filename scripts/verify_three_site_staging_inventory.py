@@ -66,6 +66,7 @@ ROLE_VOLUME_LOGICAL_NAMES = {
         "audit_root_id": "witness_audit",
     },
 }
+STAGING_DATA_ROOT = "/srv/trading-bot-three-site-staging-data"
 SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 DOCUMENTATION_NETWORKS = tuple(
     ipaddress.ip_network(value)
@@ -115,7 +116,7 @@ def verify_inventory(
         "deployment_id", "object_storage", "roles", "credential_scope",
         "production_boundaries",
     }
-    if set(payload) != required or payload["schema"] != "three-site-staging-inventory-v2":
+    if set(payload) != required or payload["schema"] != "three-site-staging-inventory-v3":
         raise InventoryError("inventory fields/schema are invalid")
     def contains_placeholder(value: Any) -> bool:
         if isinstance(value, str):
@@ -158,7 +159,7 @@ def verify_inventory(
     boundaries = payload["production_boundaries"]
     boundary_fields = {
         "host_ips", "machine_ids", "docker_daemon_ids", "postgres_system_ids",
-        "volume_ids", "audit_root_ids", "domains", "buckets",
+        "volume_ids", "audit_root_ids", "storage_mount_uuids", "domains", "buckets",
     }
     if not isinstance(boundaries, dict) or set(boundaries) != boundary_fields:
         raise InventoryError("production boundary inventory is incomplete")
@@ -204,7 +205,8 @@ def verify_inventory(
     expected_fields = {
         "role", "physical_site", "host_ip", "machine_id", "docker_daemon_id",
         "postgres_system_id", "postgres_volume_id", "redis_volume_id",
-        "uploads_volume_id", "audit_root_id", "release_sha", "deployment_id",
+        "uploads_volume_id", "audit_root_id", "storage_root",
+        "storage_mount_uuid", "resource_limits", "release_sha", "deployment_id",
     }
     by_role: dict[str, dict[str, Any]] = {}
     for role in roles:
@@ -230,6 +232,34 @@ def verify_inventory(
             raise InventoryError("mixed release SHA detected")
         if role["deployment_id"] != payload["deployment_id"]:
             raise InventoryError("mixed deployment identity detected")
+        if role["storage_root"] != STAGING_DATA_ROOT:
+            raise InventoryError(f"{name} storage root is outside the fixed staging boundary")
+        try:
+            storage_mount_uuid = str(UUID(str(role["storage_mount_uuid"]))).lower()
+        except ValueError as exc:
+            raise InventoryError(f"{name} storage mount UUID is invalid") from exc
+        if storage_mount_uuid in normalized_boundaries["storage_mount_uuids"]:
+            raise InventoryError(f"{name} staging storage overlaps production storage")
+        limits = role["resource_limits"]
+        if not isinstance(limits, dict) or set(limits) != {
+            "cpu_quota_percent", "memory_high_bytes", "memory_max_bytes",
+            "tasks_max",
+        }:
+            raise InventoryError(f"{name} aggregate resource limits are incomplete")
+        if (
+            isinstance(limits["cpu_quota_percent"], bool)
+            or not isinstance(limits["cpu_quota_percent"], int)
+            or not 10 <= limits["cpu_quota_percent"] <= 800
+            or isinstance(limits["memory_high_bytes"], bool)
+            or not isinstance(limits["memory_high_bytes"], int)
+            or isinstance(limits["memory_max_bytes"], bool)
+            or not isinstance(limits["memory_max_bytes"], int)
+            or not 256 * 1024**2 <= limits["memory_high_bytes"] < limits["memory_max_bytes"]
+            or isinstance(limits["tasks_max"], bool)
+            or not isinstance(limits["tasks_max"], int)
+            or not 128 <= limits["tasks_max"] <= 8192
+        ):
+            raise InventoryError(f"{name} aggregate resource limits are unsafe")
         for field in ("machine_id", "docker_daemon_id", "postgres_volume_id", "audit_root_id"):
             if not str(role[field] or "").strip():
                 raise InventoryError(f"{name} lacks {field}")
@@ -288,6 +318,9 @@ def verify_inventory(
         values = [str(role[field]) for role in roles if role[field] is not None]
         if len(set(values)) != len(values):
             raise InventoryError(f"mutable staging boundary is shared: {field}")
+    storage_mount_uuids = [str(role["storage_mount_uuid"]).lower() for role in roles]
+    if len(set(storage_mount_uuids)) != len(storage_mount_uuids):
+        raise InventoryError("mutable staging storage mount is shared between roles")
     if effective_host_destructive:
         for field in ("host_ip", "machine_id", "docker_daemon_id"):
             values = [str(role[field]) for role in roles]
