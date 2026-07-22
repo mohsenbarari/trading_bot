@@ -71,6 +71,7 @@ STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-$S
 STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"
+STAGING_TRUSTED_ORIGIN_PROXY_CIDRS="${STAGING_TRUSTED_ORIGIN_PROXY_CIDRS:-}"
 STAGING_BASIC_AUTH_FILE="${STAGING_BASIC_AUTH_FILE:-/etc/nginx/.htpasswd-trading-bot-staging}"
 STAGING_NGINX_DEDUPLICATE="${STAGING_NGINX_DEDUPLICATE:-1}"
 STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"
@@ -401,9 +402,39 @@ foreign_public_surface_guard_nginx() {
 NGINX
 }
 
+trusted_origin_proxy_directives_nginx() {
+    [[ -n "$STAGING_TRUSTED_ORIGIN_PROXY_CIDRS" ]] || return
+    require_cmd python3
+    python3 - "$STAGING_TRUSTED_ORIGIN_PROXY_CIDRS" <<'PY'
+import ipaddress
+import sys
+
+raw = sys.argv[1]
+networks = []
+for item in raw.split(","):
+    candidate = item.strip()
+    if not candidate:
+        continue
+    try:
+        network = ipaddress.ip_network(candidate, strict=False)
+    except ValueError as exc:
+        raise SystemExit("invalid STAGING_TRUSTED_ORIGIN_PROXY_CIDRS entry") from exc
+    canonical = str(network)
+    if canonical not in networks:
+        networks.append(canonical)
+if not networks:
+    raise SystemExit("STAGING_TRUSTED_ORIGIN_PROXY_CIDRS is empty after parsing")
+for network in networks:
+    print(f"    set_real_ip_from {network};")
+print("    real_ip_header X-Forwarded-For;")
+print("    real_ip_recursive on;")
+PY
+}
+
 render_nginx_template() {
-    local redirect_server listen_directives ssl_directives foreign_public_surface_guard
+    local redirect_server listen_directives ssl_directives foreign_public_surface_guard trusted_origin_proxy_directives
     foreign_public_surface_guard="$(foreign_public_surface_guard_nginx)"
+    trusted_origin_proxy_directives="$(trusted_origin_proxy_directives_nginx)"
     if staging_ssl_enabled; then
         printf -v redirect_server '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             'server {' \
@@ -438,6 +469,7 @@ render_nginx_template() {
         $0 == "    __LISTEN_DIRECTIVES__" { print listen_directives; next }
         $0 == "    __SSL_DIRECTIVES__" { print ssl_directives; next }
         $0 == "    __FOREIGN_PUBLIC_SURFACE_GUARD__" { print foreign_public_surface_guard; next }
+        $0 == "    __TRUSTED_ORIGIN_PROXY_DIRECTIVES__" { print trusted_origin_proxy_directives; next }
         { print }
     ' "$NGINX_TEMPLATE"
 }
@@ -468,7 +500,7 @@ install_basic_auth_file() {
         chmod 0640 "$STAGING_BASIC_AUTH_FILE"
     else
         chown root:root "$STAGING_BASIC_AUTH_FILE"
-        chmod 0644 "$STAGING_BASIC_AUTH_FILE"
+        chmod 0600 "$STAGING_BASIC_AUTH_FILE"
     fi
 
     [[ -s "$STAGING_BASIC_AUTH_FILE" ]] || die "staging Basic Auth file is empty: $STAGING_BASIC_AUTH_FILE"
@@ -544,7 +576,7 @@ install_nginx() {
         -e "s#__DEV_API_KEY__#$dev_key#g" \
         >"$tmp"
 
-    install -m 0644 "$tmp" "$available"
+    install -o root -g root -m 0600 "$tmp" "$available"
     rm -f "$tmp"
     ln -sfn "$available" "$enabled"
     deduplicate_staging_nginx_sites "$available" "$enabled"

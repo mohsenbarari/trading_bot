@@ -10,6 +10,7 @@ server {
     __SSL_DIRECTIVES__
 
     client_max_body_size 50M;
+    __TRUSTED_ORIGIN_PROXY_DIRECTIVES__
     root __FRONTEND_ROOT__;
     index index.html;
 
