@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,6 +19,21 @@ from scripts.run_wa_ir_object_storage_preflight import (
 
 
 class RunWaIrObjectStoragePreflightTests(unittest.TestCase):
+    def test_direct_script_help_bootstraps_repository_imports(self):
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "run_wa_ir_object_storage_preflight.py"
+        )
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd="/tmp",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
     def _descriptor(self, root: Path) -> Path:
         payload = {
             "schema": SCHEMA,
