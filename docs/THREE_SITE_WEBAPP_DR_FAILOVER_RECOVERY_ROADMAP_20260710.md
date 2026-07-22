@@ -3933,9 +3933,10 @@ provide:
 7. official Queue/editor configuration surfaces without exposing provider
    credentials to API, DR, WebApp, or Witness processes;
 8. a reviewed typed staging failover backend;
-9. one immutable campaign runner combining queue, DR, Witness, Blob/effects,
-   routing, application regression, fault injection, artifact integrity,
-   no-skips enforcement, cleanup, and repeatability.
+9. two immutable, execution-class-scoped campaign runs combining Queue, DR,
+   Witness, Blob/effects, routing, application regression, fault injection,
+   artifact integrity, no-skips enforcement, cleanup, and repeatability, plus
+   one signed aggregate proving their disjoint/exhaustive coverage.
 
 Legacy two-server tests remain regression evidence only. They cannot authorize
 the new topology.
@@ -4179,7 +4180,8 @@ The following are not represented as closed by source code:
 2. The command backend is a closed execution boundary, not the live scenario
    implementation. A reviewed driver implementing every catalog scenario must
    be committed while Queue readiness is disabled, hash-bound unchanged into
-   the activation campaign, and exercised on the dedicated staging hosts.
+   each activation campaign, then exercised on shared production hosts only for
+   the safe class and on disposable hosts for the destructive class.
 3. Initial event/database/Blob convergence, route hold, persistent
    FI1 -> IR2 -> FI3, source-unavailable policy (if later approved), provider
    ambiguity, 300-rps load, 24-hour endurance, rollback, cleanup, and the
@@ -4328,8 +4330,9 @@ Ultra's observation that no reviewed live all-scenario driver exists is true
 and is not papered over with a fake implementation. The command backend is now
 a fail-closed execution boundary, but Gate D remains blocked until a real
 driver and independent per-scenario oracles are committed in the disabled
-baseline, reviewed, hash-bound and executed on the dedicated migrated staging
-topology. Likewise, live Arvan/TLS/firewall/Object Storage behavior, rollback,
+baseline, reviewed, hash-bound and executed across the safe shared-host and
+destructive disposable-host staging campaigns. Likewise, live
+Arvan/TLS/firewall/Object Storage behavior, rollback,
 provider ambiguity, 300-rps behavior, persistent FI1 -> IR2 -> FI3 recovery,
 24-hour endurance, two clean repetitions and zero-residue cleanup still require
 authoritative staging evidence. Product-owner acceptance and permission to
@@ -4457,3 +4460,143 @@ Queue, DR, failover, provider, application, security, capacity, endurance and
 cleanup case are committed, reviewed, hash-bound, and executed on migrated
 staging. This source work only makes the synchronization portion executable
 and auditable.
+
+## 57. Scenario-aware shared-host execution and two-part Gate D - 2026-07-22
+
+The earlier blanket staging-inventory rule treated every Full Matrix scenario
+as host-destructive and therefore rejected any production host IP, machine ID,
+or Docker daemon. That rule was safer than an unrestricted run, but it also
+prevented the established project practice of running an isolated staging
+Compose beside production. The approved replacement distinguishes physical
+co-location from mutable-resource overlap.
+
+### 57.1 Closed scenario partition
+
+Every one of the 110 catalog scenarios now has exactly one source-owned
+execution class. Import fails if a scenario is missing, duplicated across the
+classes, or assigned an unknown class.
+
+- `shared-host-safe`: 104 application, container-scoped fault, Queue, DR,
+  routing, customer, security, synchronization, load, endurance, and cleanup
+  scenarios. These may reuse an existing physical host only when the signed
+  inventory proves separate staging Compose projects, PostgreSQL/Redis/uploads
+  volumes, PostgreSQL system IDs, audit roots, credentials, domains, ports,
+  Object Storage, and evidence roots. Host reboot/power, host firewall/route,
+  Docker-daemon mutation, and host storage exhaustion remain forbidden.
+- `dedicated-host-destructive`: exactly six scenarios:
+  `witness_partition_and_vm_pause`,
+  `fi_host_loss_without_national_cutoff`,
+  `permanent_fi_recovery_hub_loss`,
+  `ir_only_active_origin_loss_is_safe_unavailable`,
+  `power_loss_between_fence_and_enable`, and
+  `wal_event_redis_blob_capacity_exhaustion_safe`. These require four distinct
+  disposable hosts that do not overlap the signed production boundary.
+
+The inventory schema introduced here signs `host_safety_mode`. It is superseded
+by inventory v3 in section 58, which also signs the independent staging storage
+mount. Callers derive the mode from the signed document and explicitly require it to equal the campaign
+execution class. In shared mode, production host/machine/Docker identity reuse
+is permitted; mutable production data identity overlap remains a hard failure.
+In destructive mode, both physical and mutable overlap remain forbidden.
+
+### 57.2 Shared-host resource and command boundary
+
+Every three-site Compose service now has an explicit CPU, memory, PID, and
+`STAGING_CGROUP_PARENT` boundary. Before a shared-host campaign, the aggregate
+staging slice must be configured below measured production headroom; individual
+container ceilings do not authorize overcommitting the host. The runtime
+backend schema is v2 and binds the campaign group, execution class, exact
+class-specific scenario list, sealed runtime bytes, and one closed host
+mutation policy: `forbidden` for shared hosts or
+`dedicated-staging-only` for disposable hosts. The driver receives the fixed
+group/class identity in argv and cannot select a scenario from the other
+class.
+
+This split does not make the existing production resources test data.
+`production_forbidden=true` means production containers, processes, databases,
+volumes, credentials, domains, buckets, routes, and effects are immutable and
+observe-only during both campaigns. Any production mutation or non-zero
+cleanup residue invalidates the report.
+
+### 57.3 Gate-D aggregate
+
+Each class uses a different campaign UUID and Object Storage prefix under one
+common Gate-D group UUID. Both campaigns must use the same activation/release
+SHA and each must execute its class catalog twice with no skips. An individual
+component report cannot pass Gate D.
+
+`core/three_site_full_matrix_gate.py` and
+`scripts/build_three_site_staging_gate_d_aggregate.py` require the two official
+controller-journal-backed reports, recompute their report hashes and exact
+catalog hashes, prove disjoint/exhaustive 110-scenario coverage and 220 total
+executions, and reject different groups/releases, reused campaigns, missing
+classes, residue, or production effects. Two independent operators then sign
+one aggregate hash that binds both component report hashes. Only the verified
+aggregate result has `status=passed` for Gate D.
+
+### 57.4 Remaining operational boundary
+
+This section changes source contracts and deployment manifests only. It does
+not claim that the aggregate cgroup slice has been installed on the live hosts,
+that the reviewed all-scenario driver exists, that either campaign has run, or
+that the temporary destructive hosts have been provisioned. Those remain
+mandatory before Gate D. Production traffic, databases, containers, and Arvan
+routing were not changed by this source slice.
+
+## 58. Shared-host disk isolation and first live boundaries - 2026-07-22
+
+Host-level CPU and memory controls cannot prevent Docker volumes, PostgreSQL,
+Redis, uploads, audit evidence, or test logs from filling the operating-system
+disk. This is especially unsafe on Bot-FI: its production data already lives on
+a separate 30-GiB volume, while the OS/Docker root had only about 9 GiB free at
+the preflight measurement. The shared-host-safe campaign therefore now has a
+second, independent resource boundary.
+
+### 58.1 Signed, fail-closed storage boundary
+
+Inventory schema v3 adds `storage_root` and `storage_mount_uuid` to every role
+and records production filesystem UUIDs as forbidden boundaries. The only
+accepted data root is `/srv/trading-bot-three-site-staging-data`. The v2 host
+snapshot records and verifies the exact mount target, device, filesystem type,
+UUID, total bytes, available bytes, and the effective aggregate slice limits.
+Those live CPU, memory, and task values must equal the role's limits in the
+signed inventory, and an override/drop-in is rejected. It also rejects a plain directory on `/`, a
+symlink, an undersized filesystem, an unavailable mount, a UUID not present in
+the signed inventory, or a UUID that overlaps production.
+
+All fourteen mutable Compose volumes now use the local bind driver below that
+mount. Docker volume names remain deterministic and staging-only, but their
+physical bytes cannot fall back to `/var/lib/docker`. The host boundary
+provisioner installs a persistent mount, prepares only the selected role's
+directories, and installs the aggregate staging slice. It never starts
+Compose, restarts Docker, or restarts a production service.
+
+### 58.2 Installed live boundaries
+
+Two new 60-GiB Hetzner volumes were created and attached without automount:
+
+- Bot-FI: `trading-bot-three-site-staging-bot-fi-data`, mounted as ext4 at the
+  fixed staging root. Its empty staging slice is limited to 200% CPU,
+  MemoryHigh 4 GiB, MemoryMax 5 GiB, and 2048 tasks.
+- WA-FI: `trading-bot-three-site-staging-wa-fi-data`, mounted as ext4 at the
+  fixed staging root. Its empty staging slice is limited to 150% CPU,
+  MemoryHigh 2 GiB, MemoryMax 3 GiB, and 1536 tasks.
+
+The current Hetzner API rate for each 60-GiB volume is EUR 3.432/month, or EUR
+6.864/month in total before any later pricing change. Post-install checks
+confirmed that the production containers on both hosts retained their existing
+uptime. No staging container was started.
+
+### 58.3 Still blocked before staging migration
+
+WA-IR still needs a separate filesystem of at least 30 GiB. Its `chrony`
+measurement tool is installed and NTP convergence has been verified without
+restarting its production database container. Witness now has Docker 29.1.3,
+Docker Compose 2.40.3, cgroup v2/systemd, and converged `chrony`; it has no
+running container. Witness still needs at least 8 GiB of separate staging
+storage and a memory increase from 2 GiB to at least 4 GiB before its role can
+be deployed. The Arvan compute API
+credential must be supplied from a mode-0600 secure environment file; it must
+not be recovered from terminal/session history. Until those two boundaries are
+installed and all four live host snapshots pass against one signed planned
+inventory, migration and Full Matrix execution remain blocked.

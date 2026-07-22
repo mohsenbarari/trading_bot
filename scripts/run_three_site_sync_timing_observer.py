@@ -160,7 +160,7 @@ def load_config(path: Path, *, campaign_id: str, release_sha: str, output: Path)
         inventory = json.loads(
             inventory_bytes.decode("utf-8"), object_pairs_hook=_strict_object
         )
-        verified_inventory = verify_inventory(inventory, host_destructive=True)
+        verified_inventory = verify_inventory(inventory, host_destructive=None)
     except Exception as exc:
         raise SyncObserverError("sync observer inventory is invalid") from exc
     if (

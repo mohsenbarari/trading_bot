@@ -1,0 +1,14 @@
+[Unit]
+Description=Aggregate resource ceiling for three-site staging containers
+
+[Slice]
+CPUAccounting=true
+CPUQuota=200%
+MemoryAccounting=true
+MemoryHigh=40%
+MemoryMax=50%
+TasksAccounting=true
+TasksMax=2048
+
+[Install]
+WantedBy=multi-user.target

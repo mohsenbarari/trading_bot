@@ -33,7 +33,7 @@ class ThreeSiteStagingHostIdentityTests(unittest.TestCase):
             for field in ROLE_VOLUME_FIELDS[self.role]
         }
         return {
-            "schema": "three-site-staging-host-snapshot-v1",
+            "schema": "three-site-staging-host-snapshot-v2",
             "role": self.role,
             "stage": stage,
             "release_sha": self.inventory["release_sha"],
@@ -45,6 +45,18 @@ class ThreeSiteStagingHostIdentityTests(unittest.TestCase):
             "ntp_synchronized": True,
             "clock_measurement_tool": "chronyc",
             "volumes": volumes,
+            "storage": {
+                "root": role_inventory["storage_root"],
+                "source": "/dev/disk/by-uuid/" + role_inventory["storage_mount_uuid"],
+                "filesystem": "ext4",
+                "mount_uuid": role_inventory["storage_mount_uuid"],
+                "total_bytes": 60 * 1024**3,
+                "available_bytes": 55 * 1024**3,
+            },
+            "resource_boundary": {
+                "slice": "trading-bot-three-site-staging.slice",
+                **role_inventory["resource_limits"],
+            },
             "postgres_system_id": (
                 None
                 if stage == "fresh-preflight"
@@ -111,6 +123,41 @@ class ThreeSiteStagingHostIdentityTests(unittest.TestCase):
                 role_inventory=self.role_inventory,
                 release_sha=self.inventory["release_sha"],
                 stage="provisioned",
+            )
+
+    def test_wrong_or_undersized_storage_mount_fails_closed(self):
+        snapshot = self._snapshot("fresh-preflight")
+        snapshot["storage"]["mount_uuid"] = "00000000-0000-4000-8000-999999999999"
+        with self.assertRaisesRegex(HostIdentityError, "storage"):
+            verify_host_snapshot(
+                snapshot,
+                role=self.role,
+                role_inventory=self._role_inventory("fresh-preflight"),
+                release_sha=self.inventory["release_sha"],
+                stage="fresh-preflight",
+            )
+
+    def test_resource_boundary_must_equal_signed_limits(self):
+        snapshot = self._snapshot("fresh-preflight")
+        snapshot["resource_boundary"]["memory_max_bytes"] += 1
+        with self.assertRaisesRegex(HostIdentityError, "resource boundary"):
+            verify_host_snapshot(
+                snapshot,
+                role=self.role,
+                role_inventory=self._role_inventory("fresh-preflight"),
+                release_sha=self.inventory["release_sha"],
+                stage="fresh-preflight",
+            )
+
+        snapshot = self._snapshot("fresh-preflight")
+        snapshot["storage"]["total_bytes"] = 8 * 1024**3
+        with self.assertRaisesRegex(HostIdentityError, "storage"):
+            verify_host_snapshot(
+                snapshot,
+                role=self.role,
+                role_inventory=self._role_inventory("fresh-preflight"),
+                release_sha=self.inventory["release_sha"],
+                stage="fresh-preflight",
             )
 
     def test_sync_role_requires_an_offset_capable_clock_tool(self):

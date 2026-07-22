@@ -334,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
             inventory,
             approval=load_inventory(args.inventory_approval),
             signer_policy=load_inventory(args.signer_policy),
-            host_destructive=True,
+            host_destructive=None,
         )
         if inventory_result["inventory_stage"] != "provisioned":
             raise SourceFreezeError("source freeze requires signed provisioned inventory")

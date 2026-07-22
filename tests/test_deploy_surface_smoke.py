@@ -466,11 +466,26 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
     def test_staging_env_sets_trusted_proxy_cidrs_for_nginx_container_hop(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+        three_site_compose = (REPO_ROOT / 'deploy/staging/docker-compose.three-site.yml').read_text(encoding='utf-8')
+        three_site_example = (REPO_ROOT / 'deploy/staging/env.three-site.staging.example').read_text(encoding='utf-8')
 
         self.assertIn('STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"', staging_script)
         self.assertIn('TRUSTED_PROXY_CIDRS=$STAGING_TRUSTED_PROXY_CIDRS', staging_script)
         self.assertIn('set_env_value TRUSTED_PROXY_CIDRS "$STAGING_TRUSTED_PROXY_CIDRS"', staging_script)
         self.assertIn('TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12', staging_example)
+        self.assertIn('TRUSTED_PROXY_CIDRS: ${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}', three_site_compose)
+        self.assertIn('STAGING_TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12', three_site_example)
+
+    def test_staging_nginx_supports_scoped_origin_proxy_cidrs_and_private_site_config(self):
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        staging_nginx = (REPO_ROOT / 'deploy/staging/nginx-staging.conf.template').read_text(encoding='utf-8')
+
+        self.assertIn('STAGING_TRUSTED_ORIGIN_PROXY_CIDRS="${STAGING_TRUSTED_ORIGIN_PROXY_CIDRS:-}"', staging_script)
+        self.assertIn('set_real_ip_from {network};', staging_script)
+        self.assertIn('real_ip_header X-Forwarded-For;', staging_script)
+        self.assertIn('-v trusted_origin_proxy_directives="$trusted_origin_proxy_directives"', staging_script)
+        self.assertIn('__TRUSTED_ORIGIN_PROXY_DIRECTIVES__', staging_nginx)
+        self.assertIn('install -o root -g root -m 0600 "$tmp" "$available"', staging_script)
 
     def test_staging_deploy_rejects_shared_production_frontend_dist(self):
         result = run_checked(

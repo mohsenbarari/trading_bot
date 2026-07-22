@@ -218,7 +218,7 @@ def verify_migration_plan(
         inventory,
         approval=inventory_approval,
         signer_policy=signer_policy,
-        host_destructive=True,
+        host_destructive=None,
         now=current,
     )
     if inventory_result["inventory_stage"] != "provisioned":

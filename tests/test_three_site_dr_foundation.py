@@ -616,6 +616,7 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         payload = json.loads(
             Path("deploy/staging/three-site-inventory.example.json").read_text(encoding="utf-8")
         )
+        payload["host_safety_mode"] = "dedicated-host-destructive"
         with self.assertRaises(InventoryError):
             verify_inventory(payload, host_destructive=True)
         payload["campaign_id"] = "11111111-1111-4111-8111-111111111111"
@@ -629,7 +630,7 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         )
         for field in (
             "machine_ids", "docker_daemon_ids", "postgres_system_ids",
-            "volume_ids", "audit_root_ids",
+            "volume_ids", "audit_root_ids", "storage_mount_uuids",
         ):
             payload["production_boundaries"][field] = [f"production-{field}-1"]
         for number, role in enumerate(payload["roles"], 1):
@@ -639,6 +640,7 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
             role["machine_id"] = f"{number:032x}"
             role["docker_daemon_id"] = f"staging-docker-{role['role']}"
             role["postgres_system_id"] = str(9000000000000000000 + number)
+            role["storage_mount_uuid"] = f"00000000-0000-4000-8000-{number:012d}"
             project = f"trading-bot-three-site-staging-{role['role'].replace('_', '-')}"
             logical = {
                 "postgres_volume_id": f"{role['role']}_postgres",

@@ -17,7 +17,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from core.dr_event_protocol import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes
 from core.secure_file_io import (
     read_secure_text,
     sha256_secure_file,
@@ -29,9 +29,14 @@ from core.three_site_sync_timing import (
     sync_timing_policy,
     verify_sync_timing_evidence,
 )
+from core.three_site_execution_safety import (
+    DEDICATED_HOST_DESTRUCTIVE,
+    EXECUTION_CLASSES,
+    SHARED_HOST_SAFE,
+)
 
 
-CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v1"
+CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v2"
 POLICY_SCHEMA = "three-site-staging-full-matrix-approver-policy-v1"
 PHASE_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-phase-v1"
 SCENARIO_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-scenario-v2"
@@ -39,6 +44,7 @@ OPERATION_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-operation-v1"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ARTIFACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,239}$")
+OBJECT_BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 
 CUSTOMER_ACTOR_PAIR_ASSERTION_PREFIX = "customer_actor_pair:"
 CUSTOMER_ACTOR_PAIR_POLICIES: dict[str, str] = {
@@ -286,6 +292,171 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
 }
 
 PHASES = tuple(PHASE_SCENARIOS)
+
+# This map is intentionally exhaustive. Adding a scenario to PHASE_SCENARIOS
+# without assigning its host-safety class makes the module fail closed at
+# import time rather than silently permitting host mutation on production.
+SCENARIO_EXECUTION_CLASS: dict[str, str] = {
+    # migration_topology
+    "fresh_main_queue_dr_histories_equal": SHARED_HOST_SAFE,
+    "legacy_staging_clone_migrated": SHARED_HOST_SAFE,
+    "least_privilege_roles_attested": SHARED_HOST_SAFE,
+    "four_role_identity_isolated": SHARED_HOST_SAFE,
+    "backup_restore_rehearsed": SHARED_HOST_SAFE,
+    "legacy_rollback_rehearsed": SHARED_HOST_SAFE,
+    "integer_id_collision_fixtures": SHARED_HOST_SAFE,
+    "natural_identity_cross_site_collision": SHARED_HOST_SAFE,
+    "unique_ids_real_business_conflict_quarantined": SHARED_HOST_SAFE,
+    "counter_double_increment_fixture": SHARED_HOST_SAFE,
+    "delete_update_resurrection_fixture": SHARED_HOST_SAFE,
+    "backup_counts_pass_semantic_parity_fails": SHARED_HOST_SAFE,
+    # combined_workload
+    "bot_and_webapp_offers_concurrent": SHARED_HOST_SAFE,
+    "requests_trades_partial_settlement": SHARED_HOST_SAFE,
+    "notifications_webpush_messenger_files": SHARED_HOST_SAFE,
+    "queue_publication_edit_callback_private": SHARED_HOST_SAFE,
+    "writer_renewal_and_dr_relay_under_load": SHARED_HOST_SAFE,
+    "relay_preserves_origin_without_echo": SHARED_HOST_SAFE,
+    "dropped_wakeup_still_durably_drains": SHARED_HOST_SAFE,
+    "ambiguous_client_command_retry_is_idempotent": SHARED_HOST_SAFE,
+    "customer_actor_matrix_normal_fi_active": SHARED_HOST_SAFE,
+    "three_site_sync_timing_steady_state": SHARED_HOST_SAFE,
+    # queue_faults
+    "enqueue_commit_crash_boundaries": SHARED_HOST_SAFE,
+    "claim_limiter_provider_crash_boundaries": SHARED_HOST_SAFE,
+    "provider_success_outcome_ambiguity": SHARED_HOST_SAFE,
+    "reconciliation_owner_loss_restart": SHARED_HOST_SAFE,
+    "rate_limit_timeout_malformed_response": SHARED_HOST_SAFE,
+    "duplicate_worker_stale_owner_redis_loss": SHARED_HOST_SAFE,
+    "runtime_cutover_and_forward_rollback": SHARED_HOST_SAFE,
+    # dr_faults
+    "business_event_delivery_commit_boundaries": SHARED_HOST_SAFE,
+    "receive_ack_apply_checkpoint_boundaries": SHARED_HOST_SAFE,
+    "duplicate_gap_out_of_order_replay": SHARED_HOST_SAFE,
+    "same_sequence_hash_conflict_quarantine": SHARED_HOST_SAFE,
+    "transaction_group_partial_and_corrupt": SHARED_HOST_SAFE,
+    "stale_term_terminal_and_destructive_rejected": SHARED_HOST_SAFE,
+    "blob_database_asymmetric_failure_resume": SHARED_HOST_SAFE,
+    "destination_sequence_private_gap_regression": SHARED_HOST_SAFE,
+    "same_event_replay_is_idempotent": SHARED_HOST_SAFE,
+    "table_priority_cannot_overtake_stream_sequence": SHARED_HOST_SAFE,
+    "acknowledged_source_event_absent_target_blocks_promotion": SHARED_HOST_SAFE,
+    "missing_or_corrupt_blob_blocks_readiness": SHARED_HOST_SAFE,
+    # partitions_failover
+    "bot_fi_webapp_fi_partition": SHARED_HOST_SAFE,
+    "webapp_fi_webapp_ir_partition": SHARED_HOST_SAFE,
+    "witness_partition_and_vm_pause": DEDICATED_HOST_DESTRUCTIVE,
+    "asymmetric_ack_both_directions": SHARED_HOST_SAFE,
+    "object_storage_interruption": SHARED_HOST_SAFE,
+    "arvan_control_failure_rate_limit": SHARED_HOST_SAFE,
+    "fi_host_loss_without_national_cutoff": DEDICATED_HOST_DESTRUCTIVE,
+    "iran_international_cutoff_promotes_ir": SHARED_HOST_SAFE,
+    "simultaneous_promotion_attempt_single_epoch": SHARED_HOST_SAFE,
+    "controller_restart_each_failover_cutpoint": SHARED_HOST_SAFE,
+    "queue_work_inflight_during_promotion": SHARED_HOST_SAFE,
+    "customer_actor_matrix_iran_active_outage": SHARED_HOST_SAFE,
+    "arvan_pop_split_origin_is_safe": SHARED_HOST_SAFE,
+    "certificate_expiry_during_national_outage": SHARED_HOST_SAFE,
+    "dns_global_national_asymmetry": SHARED_HOST_SAFE,
+    "deployment_or_migration_during_transition_rejected": SHARED_HOST_SAFE,
+    "permanent_fi_recovery_hub_loss": DEDICATED_HOST_DESTRUCTIVE,
+    "ir_only_active_origin_loss_is_safe_unavailable": DEDICATED_HOST_DESTRUCTIVE,
+    "power_loss_between_fence_and_enable": DEDICATED_HOST_DESTRUCTIVE,
+    "duplicate_operator_commands_race": SHARED_HOST_SAFE,
+    "controller_restart_mid_arvan_mutation": SHARED_HOST_SAFE,
+    # recovery_failback
+    "short_medium_long_outage_rules": SHARED_HOST_SAFE,
+    "bot_remains_active_all_outage_classes": SHARED_HOST_SAFE,
+    "ir_remains_active_during_recovery": SHARED_HOST_SAFE,
+    "customer_actor_matrix_recovery_ir_routed": SHARED_HOST_SAFE,
+    "reconnect_flap_and_bounded_catchup": SHARED_HOST_SAFE,
+    "applied_checkpoint_conflict_effect_gates": SHARED_HOST_SAFE,
+    "database_and_blob_final_parity": SHARED_HOST_SAFE,
+    "final_write_barrier_with_live_arrivals": SHARED_HOST_SAFE,
+    "fi_epoch_reacquire_and_route_switch": SHARED_HOST_SAFE,
+    "old_http_websocket_connections_drained": SHARED_HOST_SAFE,
+    "recovery_and_failback_restart_resume": SHARED_HOST_SAFE,
+    "file_transfer_interruption_resumes_by_hash": SHARED_HOST_SAFE,
+    "database_blob_inverse_completion_reconciles": SHARED_HOST_SAFE,
+    "customer_actor_matrix_post_failback_fi_active": SHARED_HOST_SAFE,
+    # security_isolation
+    "set_role_and_cross_role_access_denied": SHARED_HOST_SAFE,
+    "fake_event_and_raw_sql_bypass_denied": SHARED_HOST_SAFE,
+    "cross_service_secret_boundaries": SHARED_HOST_SAFE,
+    "wrong_pairwise_identity_and_nonce_replay": SHARED_HOST_SAFE,
+    "hostile_artifact_path_and_signature_denied": SHARED_HOST_SAFE,
+    "production_host_domain_bucket_untouched": SHARED_HOST_SAFE,
+    "expired_plan_only_safe_fenced_recovery": SHARED_HOST_SAFE,
+    "protocol_schema_key_rotation_mismatch": SHARED_HOST_SAFE,
+    "restored_old_epoch_effects_remain_fenced": SHARED_HOST_SAFE,
+    "startup_mutation_on_fenced_standby_rejected": SHARED_HOST_SAFE,
+    # capacity_dpi
+    "three_hundred_rps_fifty_fifty": SHARED_HOST_SAFE,
+    "finland_directions_one_fifty_events_each": SHARED_HOST_SAFE,
+    "webapp_dr_three_hundred_events_amplified": SHARED_HOST_SAFE,
+    "batch_flush_inflight_boundaries": SHARED_HOST_SAFE,
+    "database_redis_blob_storage_watermarks": SHARED_HOST_SAFE,
+    "dpi_request_byte_budget_enforced": SHARED_HOST_SAFE,
+    "one_hour_backlog_with_live_traffic": SHARED_HOST_SAFE,
+    "recovery_eta_and_non_starvation": SHARED_HOST_SAFE,
+    "twenty_four_hour_endurance_no_growth": SHARED_HOST_SAFE,
+    "healthy_link_never_accumulates_backlog": SHARED_HOST_SAFE,
+    "wal_event_redis_blob_capacity_exhaustion_safe": DEDICATED_HOST_DESTRUCTIVE,
+    # application_regression
+    "canonical_staging_domain_auth_cors_links": SHARED_HOST_SAFE,
+    "market_trade_account_admin_regression": SHARED_HOST_SAFE,
+    "messenger_upload_download_regression": SHARED_HOST_SAFE,
+    "websocket_reconnect_and_cursor_reconcile": SHARED_HOST_SAFE,
+    "cdn_dynamic_cache_and_stale_health_denied": SHARED_HOST_SAFE,
+    "session_failover_contract": SHARED_HOST_SAFE,
+    "test_ingress_same_release_and_data_plane": SHARED_HOST_SAFE,
+    # cleanup_repeatability
+    "queue_jobs_effects_conflicts_reconciled": SHARED_HOST_SAFE,
+    "writer_epoch_route_and_standby_final_state": SHARED_HOST_SAFE,
+    "temporary_faults_networks_processes_removed": SHARED_HOST_SAFE,
+    "artifact_hash_chain_and_external_anchor": SHARED_HOST_SAFE,
+    "production_boundaries_reverified": SHARED_HOST_SAFE,
+    "second_cycle_same_or_stronger_oracles": SHARED_HOST_SAFE,
+}
+
+_CATALOG_SCENARIOS = {
+    scenario for scenarios in PHASE_SCENARIOS.values() for scenario in scenarios
+}
+if (
+    set(SCENARIO_EXECUTION_CLASS) != _CATALOG_SCENARIOS
+    or not set(SCENARIO_EXECUTION_CLASS.values()).issubset(EXECUTION_CLASSES)
+):
+    raise RuntimeError("Full Matrix scenario host-safety classification is incomplete")
+
+
+def scenarios_for_execution_class(execution_class: str) -> dict[str, tuple[str, ...]]:
+    if execution_class not in EXECUTION_CLASSES:
+        raise FullMatrixCampaignError("Full Matrix execution class is invalid")
+    return {
+        phase: selected
+        for phase, scenarios in PHASE_SCENARIOS.items()
+        if (
+            selected := tuple(
+                scenario
+                for scenario in scenarios
+                if SCENARIO_EXECUTION_CLASS[scenario] == execution_class
+            )
+        )
+    }
+
+
+def scenario_catalog_sha256(execution_class: str) -> str:
+    catalog = scenarios_for_execution_class(execution_class)
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "required_phases": list(catalog),
+                "required_scenarios": {
+                    phase: list(scenarios) for phase, scenarios in catalog.items()
+                },
+            }
+        )
+    ).hexdigest()
 BOUND_ARTIFACTS = frozenset(
     {
         "provisioned_inventory",
@@ -418,7 +589,8 @@ def verify_campaign(
     allow_expired_for_safe_cleanup: bool = False,
 ) -> dict[str, Any]:
     fields = {
-        "schema", "campaign_id", "generated_at", "expires_at", "baseline_sha",
+        "schema", "campaign_id", "gate_group_id", "execution_class",
+        "generated_at", "expires_at", "baseline_sha",
         "activation_sha", "release_sha", "official_staging_url", "failover_test_url",
         "object_storage", "repetitions", "required_phases", "required_scenarios",
         "no_skips", "cleanup_required", "production_forbidden", "bound_artifacts",
@@ -428,8 +600,11 @@ def verify_campaign(
         raise FullMatrixCampaignError("Full Matrix campaign fields/schema are invalid")
     try:
         campaign_id = str(UUID(str(campaign["campaign_id"])))
+        gate_group_id = str(UUID(str(campaign["gate_group_id"])))
     except ValueError as exc:
-        raise FullMatrixCampaignError("Full Matrix campaign_id is invalid") from exc
+        raise FullMatrixCampaignError("Full Matrix campaign/group identity is invalid") from exc
+    execution_class = str(campaign["execution_class"])
+    expected_catalog = scenarios_for_execution_class(execution_class)
     baseline = str(campaign["baseline_sha"])
     activation = str(campaign["activation_sha"])
     release = str(campaign["release_sha"])
@@ -443,9 +618,9 @@ def verify_campaign(
     if (
         campaign["official_staging_url"] != "https://staging.gold-trade.ir"
         or campaign["failover_test_url"] != "https://app.gold-trading.ir"
-        or campaign["required_phases"] != list(PHASES)
+        or campaign["required_phases"] != list(expected_catalog)
         or campaign["required_scenarios"]
-        != {phase: list(scenarios) for phase, scenarios in PHASE_SCENARIOS.items()}
+        != {phase: list(scenarios) for phase, scenarios in expected_catalog.items()}
         or type(campaign["repetitions"]) is not int
         or campaign["repetitions"] != 2
         or campaign["no_skips"] is not True
@@ -458,8 +633,10 @@ def verify_campaign(
         not isinstance(storage, dict)
         or set(storage) != {"region", "bucket", "prefix", "versioned", "private"}
         or storage.get("region") != "ir-thr-at1"
-        or not str(storage.get("bucket") or "").startswith("staging-")
-        or not str(storage.get("prefix") or "").startswith(f"full-matrix/{campaign_id}/")
+        or OBJECT_BUCKET.fullmatch(str(storage.get("bucket") or "")) is None
+        or storage.get("bucket") == "production-sync-coin"
+        or storage.get("prefix")
+        != f"full-matrix/{gate_group_id}/{execution_class}/{campaign_id}/"
         or storage.get("versioned") is not True
         or storage.get("private") is not True
     ):
@@ -516,6 +693,8 @@ def verify_campaign(
     return {
         "status": "approved",
         "campaign_id": campaign_id,
+        "gate_group_id": gate_group_id,
+        "execution_class": execution_class,
         "campaign_hash": campaign_hash,
         "release_sha": release,
         "activation_sha": activation,
@@ -935,7 +1114,7 @@ def verify_phase_evidence(
         or evidence.get("campaign_hash") != campaign_hash
         or evidence.get("release_sha") != campaign["release_sha"]
         or evidence.get("activation_sha") != campaign["activation_sha"]
-        or phase not in PHASE_SCENARIOS
+        or phase not in campaign["required_scenarios"]
         or type(iteration) is not int
         or not 1 <= iteration <= campaign["repetitions"]
         or evidence.get("skip_count") != 0
@@ -949,7 +1128,7 @@ def verify_phase_evidence(
     if not campaign_start <= started <= finished <= campaign_end:
         raise FullMatrixCampaignError("Full Matrix phase time is outside campaign window")
     scenarios = evidence["scenario_results"]
-    expected = PHASE_SCENARIOS[phase]
+    expected = tuple(campaign["required_scenarios"][phase])
     if not isinstance(scenarios, list) or len(scenarios) != len(expected):
         raise FullMatrixCampaignError("Full Matrix phase scenario cardinality is invalid")
     seen: set[str] = set()
@@ -1083,7 +1262,7 @@ def verify_complete_matrix(
     expected_keys = {
         (phase, iteration)
         for iteration in range(1, campaign["repetitions"] + 1)
-        for phase in PHASES
+        for phase in campaign["required_phases"]
     }
     results: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, int]] = set()
@@ -1106,7 +1285,12 @@ def verify_complete_matrix(
         results.append(result)
     if seen_keys != expected_keys:
         raise FullMatrixCampaignError("Full Matrix has missing phase/iteration evidence")
-    ordered = sorted(results, key=lambda item: (item["iteration"], PHASES.index(item["phase"])))
+    ordered = sorted(
+        results,
+        key=lambda item: (
+            item["iteration"], campaign["required_phases"].index(item["phase"])
+        ),
+    )
     journal_binding: dict[str, Any] | None = None
     completed_report_hash: str | None = None
     if execution_journal is not None:
@@ -1126,8 +1310,16 @@ def verify_complete_matrix(
         "bound_artifacts": bindings,
         "phase_results": ordered,
         "phase_evidence_count": len(ordered),
+        "scenario_ids": [
+            scenario
+            for phase in campaign["required_phases"]
+            for scenario in campaign["required_scenarios"][phase]
+        ],
+        "scenario_catalog_sha256": scenario_catalog_sha256(
+            campaign["execution_class"]
+        ),
         "scenario_execution_count": campaign["repetitions"]
-        * sum(len(items) for items in PHASE_SCENARIOS.values()),
+        * sum(len(items) for items in campaign["required_scenarios"].values()),
         "skip_count": 0,
         "cleanup_residue_count": 0,
         "production_touched": False,
@@ -1261,15 +1453,15 @@ def _verify_execution_journal(
                     "failed": None, "attempt": 0,
                 })
                 or (operation_kind == "cleanup" and (
-                    context["phase"] not in PHASE_SCENARIOS
+                    context["phase"] not in campaign["required_scenarios"]
                     or context["scenario_id"] != ""
                     or not 1 <= context["iteration"] <= campaign["repetitions"]
                     or type(context["failed"]) is not bool
                     or context["attempt"] != 0
                 ))
                 or (operation_kind == "recovery" and (
-                    context["phase"] not in PHASE_SCENARIOS
-                    or context["scenario_id"] not in PHASE_SCENARIOS.get(context["phase"], ())
+                    context["phase"] not in campaign["required_scenarios"]
+                    or context["scenario_id"] not in campaign["required_scenarios"].get(context["phase"], ())
                     or not 1 <= context["iteration"] <= campaign["repetitions"]
                     or context["failed"] is not None
                     or context["attempt"] < 1
@@ -1327,7 +1519,7 @@ def _verify_execution_journal(
                 iteration=iteration, failed=False,
             )
             for iteration in range(1, campaign["repetitions"] + 1)
-            for phase in PHASES
+            for phase in campaign["required_phases"]
         },
     }
     if not required_operations.issubset(operation_results):
@@ -1336,13 +1528,13 @@ def _verify_execution_journal(
     expected_scenarios = {
         (iteration, phase, scenario)
         for iteration in range(1, campaign["repetitions"] + 1)
-        for phase in PHASES
-        for scenario in PHASE_SCENARIOS[phase]
+        for phase in campaign["required_phases"]
+        for scenario in campaign["required_scenarios"][phase]
     }
     expected_phases = {
         (iteration, phase)
         for iteration in range(1, campaign["repetitions"] + 1)
-        for phase in PHASES
+        for phase in campaign["required_phases"]
     }
     scenario_hashes: dict[tuple[int, str, str], str] = {}
     scenario_attempts: dict[tuple[int, str, str], int] = {}

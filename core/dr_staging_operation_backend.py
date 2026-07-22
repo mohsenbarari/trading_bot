@@ -133,7 +133,7 @@ def load_staging_backend_config(
         inventory,
         approval=inventory_approval,
         signer_policy=inventory_signer_policy,
-        host_destructive=True,
+        host_destructive=None,
     )
     if (
         verified["inventory_stage"] != "provisioned"

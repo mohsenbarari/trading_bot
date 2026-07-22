@@ -30,6 +30,11 @@ from core.three_site_full_matrix_campaign import (
     verify_campaign,
     verify_complete_matrix,
     verify_scenario_evidence,
+    scenarios_for_execution_class,
+)
+from core.three_site_execution_safety import (
+    DEDICATED_HOST_DESTRUCTIVE,
+    SHARED_HOST_SAFE,
 )
 from core.three_site_sync_timing import (
     SYNC_TIMING_ASSERTION,
@@ -61,9 +66,13 @@ def _signed_campaign(now: datetime):  # noqa: ANN202
     }
     policy_hash = hashlib.sha256(canonical_json_bytes(policy)).hexdigest()
     campaign_id = str(uuid4())
+    gate_group_id = str(uuid4())
+    required_scenarios = scenarios_for_execution_class(SHARED_HOST_SAFE)
     campaign = {
         "schema": CAMPAIGN_SCHEMA,
         "campaign_id": campaign_id,
+        "gate_group_id": gate_group_id,
+        "execution_class": SHARED_HOST_SAFE,
         "generated_at": now.isoformat(),
         "expires_at": (now + timedelta(hours=48)).isoformat(),
         "baseline_sha": "a" * 40,
@@ -74,14 +83,14 @@ def _signed_campaign(now: datetime):  # noqa: ANN202
         "object_storage": {
             "region": "ir-thr-at1",
             "bucket": "staging-three-site-full-matrix",
-            "prefix": f"full-matrix/{campaign_id}/",
+            "prefix": f"full-matrix/{gate_group_id}/{SHARED_HOST_SAFE}/{campaign_id}/",
             "versioned": True,
             "private": True,
         },
         "repetitions": 2,
-        "required_phases": list(PHASES),
+        "required_phases": list(required_scenarios),
         "required_scenarios": {
-            phase: list(scenarios) for phase, scenarios in PHASE_SCENARIOS.items()
+            phase: list(scenarios) for phase, scenarios in required_scenarios.items()
         },
         "no_skips": True,
         "cleanup_required": True,
@@ -122,7 +131,7 @@ def _phase_evidence(
     artifacts = [
         {"path": artifact_name, "sha256": artifact_hash, "size": artifact_size}
     ]
-    for scenario in PHASE_SCENARIOS[phase]:
+    for scenario in campaign["required_scenarios"][phase]:
         operation_id = _matrix_operation_id(
             campaign_hash, "scenario", phase=phase,
             scenario_id=scenario, iteration=iteration, attempt=1,
@@ -293,6 +302,37 @@ def _phase_evidence(
 
 
 class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
+    def test_execution_classes_are_disjoint_and_exhaust_the_110_scenario_catalog(self):
+        shared = {
+            scenario
+            for scenarios in scenarios_for_execution_class(SHARED_HOST_SAFE).values()
+            for scenario in scenarios
+        }
+        destructive = {
+            scenario
+            for scenarios in scenarios_for_execution_class(
+                DEDICATED_HOST_DESTRUCTIVE
+            ).values()
+            for scenario in scenarios
+        }
+        complete = {scenario for scenarios in PHASE_SCENARIOS.values() for scenario in scenarios}
+
+        self.assertFalse(shared & destructive)
+        self.assertEqual(shared | destructive, complete)
+        self.assertEqual(len(shared), 104)
+        self.assertEqual(len(destructive), 6)
+        self.assertEqual(
+            destructive,
+            {
+                "witness_partition_and_vm_pause",
+                "fi_host_loss_without_national_cutoff",
+                "permanent_fi_recovery_hub_loss",
+                "ir_only_active_origin_loss_is_safe_unavailable",
+                "power_loss_between_fence_and_enable",
+                "wal_event_redis_blob_capacity_exhaustion_safe",
+            },
+        )
+
     def test_customer_actor_matrix_is_explicit_in_all_four_lifecycle_states(self):
         placements = {
             "customer_actor_matrix_normal_fi_active": "combined_workload",
@@ -555,7 +595,7 @@ class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
         campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
         evidence = []
         for iteration in range(1, campaign["repetitions"] + 1):
-            for phase in PHASES:
+            for phase in campaign["required_phases"]:
                 artifact_name = f"{iteration}-{phase}.json"
                 payload = f"artifact:{iteration}:{phase}".encode()
                 path = root / artifact_name

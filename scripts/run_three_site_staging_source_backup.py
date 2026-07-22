@@ -702,7 +702,7 @@ def main(argv: list[str] | None = None) -> int:
             load_inventory(args.inventory),
             approval=load_inventory(args.inventory_approval),
             signer_policy=load_inventory(args.signer_policy),
-            host_destructive=True,
+            host_destructive=None,
         )
         if inventory_result["inventory_stage"] != "provisioned":
             raise StagingBackupError("final source backup requires signed provisioned inventory")

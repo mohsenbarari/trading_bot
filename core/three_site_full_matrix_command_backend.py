@@ -18,12 +18,16 @@ from pathlib import Path
 import stat
 from typing import Any
 
-from core.three_site_full_matrix_campaign import PHASES, PHASE_SCENARIOS
+from core.three_site_full_matrix_campaign import scenarios_for_execution_class
+from core.three_site_execution_safety import (
+    EXECUTION_CLASSES,
+    SHARED_HOST_SAFE,
+)
 from core.three_site_full_matrix_runner import CampaignIdentity, FullMatrixRunnerError
 
 
-CONFIG_SCHEMA = "three-site-staging-full-matrix-command-backend-v1"
-RUNTIME_CONFIG_SCHEMA = "three-site-staging-full-matrix-driver-runtime-v1"
+CONFIG_SCHEMA = "three-site-staging-full-matrix-command-backend-v2"
+RUNTIME_CONFIG_SCHEMA = "three-site-staging-full-matrix-driver-runtime-v2"
 PYTHON = "/usr/bin/python3"
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
@@ -53,10 +57,16 @@ class CommandFullMatrixBackend:
         repo_root: Path,
         artifact_root: Path,
         campaign_id: str,
+        gate_group_id: str,
+        execution_class: str,
         release_sha: str,
     ) -> None:
+        if execution_class not in EXECUTION_CLASSES:
+            raise FullMatrixRunnerError("Full Matrix execution class is invalid")
+        catalog = scenarios_for_execution_class(execution_class)
         fields = {
-            "schema", "campaign_id", "release_sha", "production_forbidden",
+            "schema", "campaign_id", "gate_group_id", "execution_class",
+            "release_sha", "production_forbidden",
             "driver", "runtime_config", "supported_scenarios", "timeouts_seconds",
         }
         if (
@@ -64,10 +74,15 @@ class CommandFullMatrixBackend:
             or set(config) != fields
             or config.get("schema") != CONFIG_SCHEMA
             or config.get("campaign_id") != campaign_id
+            or config.get("gate_group_id") != gate_group_id
+            or config.get("execution_class") != execution_class
             or config.get("release_sha") != release_sha
             or config.get("production_forbidden") is not True
             or config.get("supported_scenarios")
-            != {phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES}
+            != {
+                phase: list(scenarios)
+                for phase, scenarios in catalog.items()
+            }
         ):
             raise FullMatrixRunnerError("Full Matrix command backend config is invalid")
         driver = config.get("driver")
@@ -191,14 +206,32 @@ class CommandFullMatrixBackend:
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             os.close(immutable_fd)
             raise FullMatrixRunnerError("Full Matrix driver runtime JSON is invalid") from exc
+        runtime_fields = {
+            "schema", "campaign_id", "gate_group_id", "execution_class",
+            "release_sha", "production_forbidden", "host_mutation_policy",
+            "supported_scenarios", "driver_config",
+        }
+        expected_host_policy = (
+            "forbidden"
+            if execution_class == SHARED_HOST_SAFE
+            else "dedicated-staging-only"
+        )
         if (
             not isinstance(runtime_value, dict)
+            or set(runtime_value) != runtime_fields
             or runtime_value.get("schema") != RUNTIME_CONFIG_SCHEMA
             or runtime_value.get("campaign_id") != campaign_id
+            or runtime_value.get("gate_group_id") != gate_group_id
+            or runtime_value.get("execution_class") != execution_class
             or runtime_value.get("release_sha") != release_sha
             or runtime_value.get("production_forbidden") is not True
+            or runtime_value.get("host_mutation_policy") != expected_host_policy
+            or not isinstance(runtime_value.get("driver_config"), dict)
             or runtime_value.get("supported_scenarios")
-            != {phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES}
+            != {
+                phase: list(scenarios)
+                for phase, scenarios in catalog.items()
+            }
         ):
             os.close(immutable_fd)
             raise FullMatrixRunnerError("Full Matrix driver runtime identity is invalid")
@@ -271,6 +304,8 @@ class CommandFullMatrixBackend:
             "--operation", operation,
             "--operation-id", operation_id,
             "--campaign-id", identity.campaign_id,
+            "--gate-group-id", identity.gate_group_id,
+            "--execution-class", identity.execution_class,
             "--campaign-hash", identity.campaign_hash,
             "--release-sha", identity.release_sha,
             "--activation-sha", identity.activation_sha,
@@ -374,7 +409,8 @@ class CommandFullMatrixBackend:
         attempt: int,
         operation_id: str,
     ) -> dict[str, Any]:
-        if phase not in PHASE_SCENARIOS or scenario_id not in PHASE_SCENARIOS[phase]:
+        catalog = scenarios_for_execution_class(identity.execution_class)
+        if phase not in catalog or scenario_id not in catalog[phase]:
             raise FullMatrixRunnerError("Full Matrix requested an unknown scenario")
         return await self._invoke(
             identity, operation="scenario", operation_id=operation_id, phase=phase,

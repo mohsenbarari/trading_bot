@@ -229,7 +229,7 @@ def verify_role_bundle(
         inventory,
         approval=approval,
         signer_policy=signer_policy,
-        host_destructive=True,
+        host_destructive=None,
     )
     if required_inventory_stage not in {"planned", "provisioned"}:
         raise RoleBundleError("role bundle inventory-stage requirement is invalid")
@@ -272,6 +272,8 @@ def verify_role_bundle(
         or values.get(BIND_ENV[role]) != role_inventory["host_ip"]
     ):
         raise RoleBundleError("role bind address differs from signed host inventory")
+    if values.get("STAGING_DATA_ROOT") != role_inventory["storage_root"]:
+        raise RoleBundleError("staging data root differs from signed host inventory")
     inventory_by_role = {item["role"]: item for item in inventory["roles"]}
     for env_name, peer_role in PEER_IP_ENV[role].items():
         if values.get(env_name) != inventory_by_role[peer_role]["host_ip"]:

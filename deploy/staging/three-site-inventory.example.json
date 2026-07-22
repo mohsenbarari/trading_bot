@@ -1,6 +1,7 @@
 {
-  "schema": "three-site-staging-inventory-v1",
+  "schema": "three-site-staging-inventory-v3",
   "inventory_stage": "planned",
+  "host_safety_mode": "shared-host-safe",
   "campaign_id": "00000000-0000-4000-8000-000000000000",
   "release_sha": "0000000000000000000000000000000000000000",
   "canonical_domain": "staging.gold-trade.ir",
@@ -21,13 +22,14 @@
     "postgres_system_ids": ["replace-production-postgres-system-id"],
     "volume_ids": ["replace-production-volume-id"],
     "audit_root_ids": ["replace-production-audit-root-id"],
+    "storage_mount_uuids": ["replace-production-storage-mount-uuid"],
     "domains": ["gold-trade.ir", "coin.gold-trade.ir"],
     "buckets": ["production-sync-coin"]
   },
   "roles": [
-    {"role":"bot_fi","physical_site":"bot_fi","host_ip":"192.0.2.11","machine_id":"replace-bot-machine","docker_daemon_id":"replace-bot-docker","postgres_system_id":null,"postgres_volume_id":"replace-bot-pg-volume","redis_volume_id":"replace-bot-redis","uploads_volume_id":"replace-bot-uploads","audit_root_id":"replace-bot-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
-    {"role":"webapp_fi","physical_site":"webapp_fi","host_ip":"192.0.2.12","machine_id":"replace-fi-machine","docker_daemon_id":"replace-fi-docker","postgres_system_id":null,"postgres_volume_id":"replace-fi-pg-volume","redis_volume_id":"replace-fi-redis","uploads_volume_id":"replace-fi-uploads","audit_root_id":"replace-fi-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
-    {"role":"webapp_ir","physical_site":"webapp_ir","host_ip":"192.0.2.13","machine_id":"replace-ir-machine","docker_daemon_id":"replace-ir-docker","postgres_system_id":null,"postgres_volume_id":"replace-ir-pg-volume","redis_volume_id":"replace-ir-redis","uploads_volume_id":"replace-ir-uploads","audit_root_id":"replace-ir-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
-    {"role":"witness","physical_site":"witness","host_ip":"192.0.2.14","machine_id":"replace-witness-machine","docker_daemon_id":"replace-witness-docker","postgres_system_id":null,"postgres_volume_id":"replace-witness-pg-volume","redis_volume_id":null,"uploads_volume_id":null,"audit_root_id":"replace-witness-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"}
+    {"role":"bot_fi","physical_site":"bot_fi","host_ip":"192.0.2.11","machine_id":"replace-bot-machine","docker_daemon_id":"replace-bot-docker","postgres_system_id":null,"postgres_volume_id":"replace-bot-pg-volume","redis_volume_id":"replace-bot-redis","uploads_volume_id":"replace-bot-uploads","audit_root_id":"replace-bot-audit","storage_root":"/srv/trading-bot-three-site-staging-data","storage_mount_uuid":"replace-bot-storage-uuid","resource_limits":{"cpu_quota_percent":200,"memory_high_bytes":4294967296,"memory_max_bytes":5368709120,"tasks_max":2048},"release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
+    {"role":"webapp_fi","physical_site":"webapp_fi","host_ip":"192.0.2.12","machine_id":"replace-fi-machine","docker_daemon_id":"replace-fi-docker","postgres_system_id":null,"postgres_volume_id":"replace-fi-pg-volume","redis_volume_id":"replace-fi-redis","uploads_volume_id":"replace-fi-uploads","audit_root_id":"replace-fi-audit","storage_root":"/srv/trading-bot-three-site-staging-data","storage_mount_uuid":"replace-fi-storage-uuid","resource_limits":{"cpu_quota_percent":150,"memory_high_bytes":2147483648,"memory_max_bytes":3221225472,"tasks_max":1536},"release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
+    {"role":"webapp_ir","physical_site":"webapp_ir","host_ip":"192.0.2.13","machine_id":"replace-ir-machine","docker_daemon_id":"replace-ir-docker","postgres_system_id":null,"postgres_volume_id":"replace-ir-pg-volume","redis_volume_id":"replace-ir-redis","uploads_volume_id":"replace-ir-uploads","audit_root_id":"replace-ir-audit","storage_root":"/srv/trading-bot-three-site-staging-data","storage_mount_uuid":"replace-ir-storage-uuid","resource_limits":{"cpu_quota_percent":200,"memory_high_bytes":3221225472,"memory_max_bytes":4294967296,"tasks_max":1536},"release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
+    {"role":"witness","physical_site":"witness","host_ip":"192.0.2.14","machine_id":"replace-witness-machine","docker_daemon_id":"replace-witness-docker","postgres_system_id":null,"postgres_volume_id":"replace-witness-pg-volume","redis_volume_id":null,"uploads_volume_id":null,"audit_root_id":"replace-witness-audit","storage_root":"/srv/trading-bot-three-site-staging-data","storage_mount_uuid":"replace-witness-storage-uuid","resource_limits":{"cpu_quota_percent":100,"memory_high_bytes":1073741824,"memory_max_bytes":2147483648,"tasks_max":768},"release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"}
   ]
 }

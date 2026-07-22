@@ -17,7 +17,7 @@ import time
 from typing import Any, Callable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
-from core.dr_event_protocol import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes
 from core.secure_file_io import (
     append_hash_chained_jsonl,
     sha256_secure_file,
@@ -25,9 +25,7 @@ from core.secure_file_io import (
     write_secure_atomic_bytes,
 )
 from core.three_site_full_matrix_campaign import (
-    PHASES,
     PHASE_EVIDENCE_SCHEMA,
-    PHASE_SCENARIOS,
     FullMatrixCampaignError,
     _relative_artifact,
     _utc,
@@ -38,6 +36,7 @@ from core.three_site_full_matrix_campaign import (
     verify_complete_matrix,
     verify_operation_evidence,
     verify_scenario_evidence,
+    scenarios_for_execution_class,
 )
 
 
@@ -52,10 +51,16 @@ class FullMatrixRunnerError(FullMatrixCampaignError):
 @dataclass(frozen=True)
 class CampaignIdentity:
     campaign_id: str
+    gate_group_id: str
+    execution_class: str
     campaign_hash: str
     release_sha: str
     activation_sha: str
     repetitions: int
+
+
+def _identity_catalog(identity: CampaignIdentity) -> dict[str, tuple[str, ...]]:
+    return scenarios_for_execution_class(identity.execution_class)
 
 
 class FullMatrixExecutionBackend(Protocol):
@@ -529,6 +534,8 @@ def _journal_state(
     journal: Path,
     identity: CampaignIdentity,
 ) -> tuple[list[dict[str, Any]], dict[tuple[int, str, str], dict[str, Any]]]:
+    catalog = _identity_catalog(identity)
+    phases = tuple(catalog)
     if not journal.exists():
         return [], {}
     records = verify_hash_chained_jsonl(journal, label="Full Matrix execution journal")
@@ -579,15 +586,15 @@ def _journal_state(
                     "failed": None, "attempt": 0,
                 })
                 or (operation_kind == "cleanup" and (
-                    context["phase"] not in PHASE_SCENARIOS
+                    context["phase"] not in catalog
                     or context["scenario_id"] != ""
                     or not 1 <= context["iteration"] <= identity.repetitions
                     or type(context["failed"]) is not bool
                     or context["attempt"] != 0
                 ))
                 or (operation_kind == "recovery" and (
-                    context["phase"] not in PHASE_SCENARIOS
-                    or context["scenario_id"] not in PHASE_SCENARIOS.get(
+                    context["phase"] not in catalog
+                    or context["scenario_id"] not in catalog.get(
                         context["phase"], ()
                     )
                     or not 1 <= context["iteration"] <= identity.repetitions
@@ -622,8 +629,8 @@ def _journal_state(
             if (
                 type(key[0]) is not int
                 or not 1 <= key[0] <= identity.repetitions
-                or key[1] not in PHASE_SCENARIOS
-                or key[2] not in PHASE_SCENARIOS[key[1]]
+                or key[1] not in catalog
+                or key[2] not in catalog[key[1]]
             ):
                 raise FullMatrixRunnerError("Full Matrix journal scenario identity is invalid")
             attempt = record.get("attempt")
@@ -670,7 +677,7 @@ def _journal_state(
     if len(finalized_events) > 1:
         raise FullMatrixRunnerError("Full Matrix journal repeats finalization")
     if finalized_events:
-        expected = sum(len(PHASE_SCENARIOS[phase]) for phase in PHASES) * identity.repetitions
+        expected = sum(len(catalog[phase]) for phase in phases) * identity.repetitions
         if len(completed) != expected:
             raise FullMatrixRunnerError("Full Matrix journal finalized before all scenarios")
         allowed_following = {"campaign_completed", "campaign_blocked"}
@@ -681,7 +688,7 @@ def _journal_state(
         ):
             raise FullMatrixRunnerError("Full Matrix journal finalization order is invalid")
     if completed_events:
-        expected = sum(len(PHASE_SCENARIOS[phase]) for phase in PHASES) * identity.repetitions
+        expected = sum(len(catalog[phase]) for phase in phases) * identity.repetitions
         if completed_events != 1 or records[-1].get("event") != "campaign_completed" or len(completed) != expected:
             raise FullMatrixRunnerError("completed Full Matrix journal is incomplete")
     return records, completed
@@ -712,7 +719,10 @@ def _interrupted_key(
 
 def _completed_phase_hashes(
     records: list[dict[str, Any]],
+    identity: CampaignIdentity,
 ) -> dict[tuple[int, str], str]:
+    catalog = _identity_catalog(identity)
+    phases = tuple(catalog)
     completed: dict[tuple[int, str], str] = {}
     passed_scenarios: set[tuple[int, str, str]] = set()
     observed_order: list[tuple[int, str]] = []
@@ -728,11 +738,11 @@ def _completed_phase_hashes(
         evidence_hash = str(record.get("evidence_hash") or "")
         expected_scenarios = {
             (key[0], key[1], scenario_id)
-            for scenario_id in PHASE_SCENARIOS.get(str(key[1]), ())
+            for scenario_id in catalog.get(str(key[1]), ())
         }
         if (
             type(key[0]) is not int
-            or key[1] not in PHASE_SCENARIOS
+            or key[1] not in catalog
             or key in completed
             or SHA256.fullmatch(evidence_hash) is None
             or not expected_scenarios.issubset(passed_scenarios)
@@ -743,7 +753,7 @@ def _completed_phase_hashes(
     expected_order = [
         (iteration, phase)
         for iteration in range(1, max((key[0] for key in completed), default=0) + 1)
-        for phase in PHASES
+        for phase in phases
     ]
     if observed_order != expected_order[: len(observed_order)]:
         raise FullMatrixRunnerError("Full Matrix journal phase order is invalid")
@@ -854,7 +864,7 @@ def _load_all_phase_evidence(
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for iteration in range(1, identity.repetitions + 1):
-        for phase in PHASES:
+        for phase in _identity_catalog(identity):
             name = f"{identity.campaign_id}-i{iteration:02d}-{phase}-evidence.json"
             result.append(
                 secure_json(
@@ -943,13 +953,15 @@ async def run_full_matrix_campaign(
     verify_bound_artifacts(campaign, bound_artifacts)
     identity = CampaignIdentity(
         campaign_id=approved["campaign_id"],
+        gate_group_id=approved["gate_group_id"],
+        execution_class=approved["execution_class"],
         campaign_hash=approved["campaign_hash"],
         release_sha=approved["release_sha"],
         activation_sha=approved["activation_sha"],
         repetitions=approved["repetitions"],
     )
     records, completed = _journal_state(journal, identity)
-    completed_phases = _completed_phase_hashes(records)
+    completed_phases = _completed_phase_hashes(records, identity)
     if any(record.get("event") == "campaign_blocked" for record in records):
         raise FullMatrixRunnerError("blocked Full Matrix campaign requires a new campaign")
     if any(record.get("event") == "campaign_completed" for record in records):
@@ -972,7 +984,7 @@ async def run_full_matrix_campaign(
         ),
     )
     records, completed = _journal_state(journal, identity)
-    completed_phases = _completed_phase_hashes(records)
+    completed_phases = _completed_phase_hashes(records, identity)
 
     interrupted = _interrupted_key(records, completed)
     if interrupted is not None:
@@ -1015,7 +1027,7 @@ async def run_full_matrix_campaign(
         if active is None:
             for record in reversed(records):
                 if (
-                    record.get("phase") in PHASE_SCENARIOS
+                    record.get("phase") in _identity_catalog(identity)
                     and type(record.get("iteration")) is int
                 ):
                     active = (
@@ -1099,10 +1111,11 @@ async def run_full_matrix_campaign(
     phase_evidence: list[dict[str, Any]] = []
     used_scenario_artifacts: set[str] = set()
     try:
+        catalog = _identity_catalog(identity)
         for iteration in range(1, identity.repetitions + 1):
-            for phase in PHASES:
+            for phase in catalog:
                 results: list[dict[str, Any]] = []
-                for scenario_id in PHASE_SCENARIOS[phase]:
+                for scenario_id in catalog[phase]:
                     fresh = verify_campaign(
                         campaign,
                         approver_policy=approver_policy,
@@ -1295,7 +1308,7 @@ async def run_full_matrix_campaign(
         active_phase = phase if "phase" in locals() else "preflight"
         cleanup_error: Exception | None = None
         try:
-            if active_iteration > 0 and active_phase in PHASE_SCENARIOS:
+            if active_iteration > 0 and active_phase in _identity_catalog(identity):
                 cleanup_context = _operation_context(
                     phase=active_phase, iteration=active_iteration, failed=True
                 )

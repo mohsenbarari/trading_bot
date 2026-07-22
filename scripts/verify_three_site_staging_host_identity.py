@@ -4,14 +4,18 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from typing import Any
+from uuid import UUID
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -36,6 +40,9 @@ GIT = "/usr/bin/git"
 DOCKER = "/usr/bin/docker"
 IP = "/usr/sbin/ip"
 TIMEDATECTL = "/usr/bin/timedatectl"
+FINDMNT = "/usr/bin/findmnt"
+SYSTEMCTL = "/usr/bin/systemctl"
+STAGING_SLICE = "trading-bot-three-site-staging.slice"
 SAFE_ENV = {
     "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
     "HOME": "/nonexistent",
@@ -60,6 +67,13 @@ ROLE_VOLUME_FIELDS = {
     role.replace("_", "-"): dict(fields)
     for role, fields in ROLE_VOLUME_LOGICAL_NAMES.items()
 }
+ROLE_MINIMUM_STORAGE_BYTES = {
+    "bot-fi": 40 * 1024**3,
+    "webapp-fi": 40 * 1024**3,
+    "webapp-ir": 30 * 1024**3,
+    "witness": 8 * 1024**3,
+}
+MINIMUM_AVAILABLE_STORAGE_BYTES = 5 * 1024**3
 
 
 class HostIdentityError(RuntimeError):
@@ -114,6 +128,103 @@ def _volume_identity(expected_name: str) -> str | None:
     return value
 
 
+def _storage_identity(role_inventory: dict[str, Any]) -> dict[str, Any]:
+    root = Path(str(role_inventory["storage_root"]))
+    try:
+        metadata = root.lstat()
+    except OSError as exc:
+        raise HostIdentityError("staging storage root is unavailable") from exc
+    if (
+        root != Path("/srv/trading-bot-three-site-staging-data")
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or not os.path.ismount(root)
+    ):
+        raise HostIdentityError("staging storage root is not the exact independent mount")
+    try:
+        mount_payload = json.loads(
+            _run(
+                [
+                    FINDMNT, "--json", "--canonicalize", "--target", str(root),
+                    "--output", "TARGET,SOURCE,FSTYPE,UUID",
+                ]
+            )
+        )
+        filesystems = mount_payload["filesystems"]
+        if not isinstance(filesystems, list) or len(filesystems) != 1:
+            raise ValueError("ambiguous mount")
+        mount = filesystems[0]
+        mount_uuid = str(UUID(str(mount["uuid"]))).lower()
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HostIdentityError("staging storage mount identity is invalid") from exc
+    if (
+        mount.get("target") != str(root)
+        or mount.get("fstype") not in {"ext4", "xfs"}
+        or mount_uuid != str(UUID(str(role_inventory["storage_mount_uuid"]))).lower()
+    ):
+        raise HostIdentityError("staging storage mount differs from signed inventory")
+    filesystem = os.statvfs(root)
+    total_bytes = filesystem.f_blocks * filesystem.f_frsize
+    available_bytes = filesystem.f_bavail * filesystem.f_frsize
+    return {
+        "root": str(root),
+        "source": str(mount["source"]),
+        "filesystem": str(mount["fstype"]),
+        "mount_uuid": mount_uuid,
+        "total_bytes": total_bytes,
+        "available_bytes": available_bytes,
+    }
+
+
+def _resource_boundary() -> dict[str, Any]:
+    raw = _run(
+        [
+            SYSTEMCTL, "show", STAGING_SLICE, "--no-pager",
+            "--property=LoadState,ActiveState,FragmentPath,DropInPaths,CPUAccounting,CPUQuotaPerSecUSec,MemoryAccounting,MemoryHigh,MemoryMax,TasksAccounting,TasksMax",
+        ]
+    )
+    values: dict[str, str] = {}
+    for line in raw.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key in values:
+            raise HostIdentityError("staging resource boundary output is malformed")
+        values[key] = value
+    expected = {
+        "LoadState", "ActiveState", "FragmentPath", "DropInPaths",
+        "CPUAccounting", "CPUQuotaPerSecUSec", "MemoryAccounting",
+        "MemoryHigh", "MemoryMax", "TasksAccounting", "TasksMax",
+    }
+    if (
+        set(values) != expected
+        or values["LoadState"] != "loaded"
+        or values["ActiveState"] != "active"
+        or values["FragmentPath"] != f"/etc/systemd/system/{STAGING_SLICE}"
+        or values["DropInPaths"]
+        or values["CPUAccounting"] != "yes"
+        or values["MemoryAccounting"] != "yes"
+        or values["TasksAccounting"] != "yes"
+    ):
+        raise HostIdentityError("staging aggregate slice is inactive or overridden")
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)s", values["CPUQuotaPerSecUSec"])
+    try:
+        cpu_decimal = Decimal(match.group(1)) * 100 if match else Decimal("NaN")
+        cpu_quota = int(cpu_decimal)
+        memory_high = int(values["MemoryHigh"])
+        memory_max = int(values["MemoryMax"])
+        tasks_max = int(values["TasksMax"])
+    except (InvalidOperation, OverflowError, ValueError) as exc:
+        raise HostIdentityError("staging aggregate slice limits are not finite") from exc
+    if Decimal(cpu_quota) != cpu_decimal:
+        raise HostIdentityError("staging CPU quota is not an integral percentage")
+    return {
+        "slice": STAGING_SLICE,
+        "cpu_quota_percent": cpu_quota,
+        "memory_high_bytes": memory_high,
+        "memory_max_bytes": memory_max,
+        "tasks_max": tasks_max,
+    }
+
+
 def collect_host_snapshot(
     *,
     role: str,
@@ -161,6 +272,8 @@ def collect_host_snapshot(
         field: _volume_identity(str(role_inventory[field]))
         for field in ROLE_VOLUME_FIELDS[role]
     }
+    storage = _storage_identity(role_inventory)
+    resource_boundary = _resource_boundary()
     postgres_system_id: str | None = None
     if stage in {"measure-provisioned", "provisioned"}:
         env = parse_env_values(env_file.read_text(encoding="utf-8"))
@@ -176,7 +289,7 @@ def collect_host_snapshot(
             timeout=30,
         )
     return {
-        "schema": "three-site-staging-host-snapshot-v1",
+        "schema": "three-site-staging-host-snapshot-v2",
         "role": role,
         "stage": stage,
         "release_sha": head_before,
@@ -188,6 +301,8 @@ def collect_host_snapshot(
         "ntp_synchronized": ntp_value == "yes",
         "clock_measurement_tool": clock_tool,
         "volumes": volumes,
+        "storage": storage,
+        "resource_boundary": resource_boundary,
         "postgres_system_id": postgres_system_id,
     }
 
@@ -204,12 +319,12 @@ def verify_host_snapshot(
         "schema", "role", "stage", "release_sha", "worktree_clean",
         "machine_id", "docker_daemon_id", "ipv4_addresses", "timezone",
         "ntp_synchronized", "clock_measurement_tool", "volumes",
-        "postgres_system_id",
+        "storage", "resource_boundary", "postgres_system_id",
     }
     if (
         not isinstance(snapshot, dict)
         or set(snapshot) != expected_fields
-        or snapshot["schema"] != "three-site-staging-host-snapshot-v1"
+        or snapshot["schema"] != "three-site-staging-host-snapshot-v2"
         or snapshot["role"] != role
         or snapshot["stage"] != stage
     ):
@@ -244,6 +359,46 @@ def verify_host_snapshot(
     expected_volume_fields = set(ROLE_VOLUME_FIELDS[role])
     if not isinstance(volumes, dict) or set(volumes) != expected_volume_fields:
         raise HostIdentityError("host volume snapshot is incomplete")
+    storage = snapshot["storage"]
+    storage_fields = {
+        "root", "source", "filesystem", "mount_uuid", "total_bytes",
+        "available_bytes",
+    }
+    try:
+        expected_storage_uuid = str(UUID(str(role_inventory["storage_mount_uuid"]))).lower()
+    except ValueError as exc:
+        raise HostIdentityError("signed staging storage UUID is invalid") from exc
+    if (
+        not isinstance(storage, dict)
+        or set(storage) != storage_fields
+        or storage["root"] != role_inventory["storage_root"]
+        or storage["filesystem"] not in {"ext4", "xfs"}
+        or storage["mount_uuid"] != expected_storage_uuid
+        or not str(storage["source"]).startswith("/dev/")
+        or not isinstance(storage["total_bytes"], int)
+        or not isinstance(storage["available_bytes"], int)
+        or storage["total_bytes"] < ROLE_MINIMUM_STORAGE_BYTES[role]
+        or storage["available_bytes"] < MINIMUM_AVAILABLE_STORAGE_BYTES
+        or storage["available_bytes"] > storage["total_bytes"]
+    ):
+        raise HostIdentityError("staging storage capacity/identity differs from policy")
+    resource_boundary = snapshot["resource_boundary"]
+    if (
+        not isinstance(resource_boundary, dict)
+        or set(resource_boundary) != {
+            "slice", "cpu_quota_percent", "memory_high_bytes",
+            "memory_max_bytes", "tasks_max",
+        }
+        or resource_boundary["slice"] != STAGING_SLICE
+        or {
+            key: resource_boundary[key]
+            for key in (
+                "cpu_quota_percent", "memory_high_bytes", "memory_max_bytes",
+                "tasks_max",
+            )
+        } != role_inventory["resource_limits"]
+    ):
+        raise HostIdentityError("staging aggregate resource boundary differs from signed policy")
     if stage == "fresh-preflight":
         if any(value is not None for value in volumes.values()):
             raise HostIdentityError("fresh staging role already has a declared mutable volume")
@@ -305,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
             inventory,
             approval=approval,
             signer_policy=signer_policy,
-            host_destructive=True,
+            host_destructive=None,
         )
         expected_inventory_stage = (
             "planned"

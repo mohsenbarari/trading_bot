@@ -12,6 +12,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from core.three_site_full_matrix_campaign import BOUND_ARTIFACTS, FullMatrixCampaignError
+from core.three_site_execution_safety import SHARED_HOST_SAFE
 from scripts.build_three_site_staging_full_matrix_campaign import (
     APPROVAL_SCHEMA,
     _queue_transition,
@@ -43,7 +44,7 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             value = {"schema": f"fixture-{name}-v1", "value": name}
             if name == "provisioned_inventory":
                 value = {
-                    "schema": "three-site-staging-inventory-v1",
+                    "schema": "three-site-staging-inventory-v3",
                     "inventory_stage": "provisioned",
                     "campaign_id": campaign_id,
                     "release_sha": activation,
@@ -66,6 +67,8 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             bound_artifact=[f"{name}={path}" for name, path in mappings.items()],
             baseline_sha=baseline,
             activation_sha=activation,
+            gate_group_id=str(uuid4()),
+            execution_class=SHARED_HOST_SAFE,
             approver_policy=policy_path,
             object_bucket="staging-three-site-full-matrix",
             repetitions=2,
@@ -87,7 +90,7 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             )["campaign_id"]
             with patch(
                 "scripts.build_three_site_staging_full_matrix_campaign._verify_prerequisites",
-                return_value=(campaign_id, "f" * 64),
+                return_value=(campaign_id, "f" * 64, args.object_bucket),
             ):
                 prepared = prepare(args)
             self.assertEqual(prepared["status"], "awaiting_two_approvals")
@@ -103,6 +106,8 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
                     {
                         "schema": APPROVAL_SCHEMA,
                         "campaign_id": draft_value["campaign_id"],
+                        "gate_group_id": draft_value["gate_group_id"],
+                        "execution_class": draft_value["execution_class"],
                         "campaign_hash": prepared["campaign_hash"],
                         "operator": f"operator-{number}",
                         "key_id": f"matrix-key-{number}",
@@ -138,6 +143,21 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
                     baseline_sha=args.baseline_sha,
                     activation_sha=args.activation_sha,
                 )
+            self.assertFalse(draft.exists())
+
+    def test_bucket_must_match_the_signed_inventory_exactly(self):
+        values = self._inputs()
+        stack, _root, _baseline, _activation, _policy_path, _policy, _keys, mappings, draft, _request, args = values
+        with stack:
+            campaign_id = json.loads(
+                mappings["provisioned_inventory"].read_text()
+            )["campaign_id"]
+            with patch(
+                "scripts.build_three_site_staging_full_matrix_campaign._verify_prerequisites",
+                return_value=(campaign_id, "f" * 64, "gold-trade-staging-three-site-dr"),
+            ):
+                with self.assertRaisesRegex(FullMatrixCampaignError, "differs"):
+                    prepare(args)
             self.assertFalse(draft.exists())
 
     def test_inventory_must_be_re_attested_at_activation_sha(self):
