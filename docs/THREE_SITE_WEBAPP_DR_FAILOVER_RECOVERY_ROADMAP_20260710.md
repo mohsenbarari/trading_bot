@@ -4589,9 +4589,13 @@ uptime. No staging container was started.
 
 ### 58.3 Still blocked before staging migration
 
-WA-IR still needs a separate filesystem of at least 30 GiB. Witness needs at
-least 8 GiB of separate staging storage, Docker, and a memory increase from 2
-GiB to at least 4 GiB before its role can be deployed. The Arvan compute API
+WA-IR still needs a separate filesystem of at least 30 GiB. Its `chrony`
+measurement tool is installed and NTP convergence has been verified without
+restarting its production database container. Witness now has Docker 29.1.3,
+Docker Compose 2.40.3, cgroup v2/systemd, and converged `chrony`; it has no
+running container. Witness still needs at least 8 GiB of separate staging
+storage and a memory increase from 2 GiB to at least 4 GiB before its role can
+be deployed. The Arvan compute API
 credential must be supplied from a mode-0600 secure environment file; it must
 not be recovered from terminal/session history. Until those two boundaries are
 installed and all four live host snapshots pass against one signed planned
