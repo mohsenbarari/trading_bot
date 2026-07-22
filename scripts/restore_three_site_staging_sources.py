@@ -20,7 +20,7 @@ from scripts.render_three_site_staging_role_compose import _atomic_write
 from scripts.verify_three_site_staging_inventory import (
     _strict_object,
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 from scripts.verify_three_site_staging_role_bundle import _verify_bundle_source
 
@@ -258,17 +258,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-name", default="trading_bot_staging")
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--freeze-evidence", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
     try:
-        inventory_result = verify_signed_inventory(
+        inventory_result = verify_approved_inventory(
             load_inventory(args.inventory),
             approval=load_inventory(args.inventory_approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             host_destructive=None,
         )
         if inventory_result["inventory_stage"] != "provisioned":

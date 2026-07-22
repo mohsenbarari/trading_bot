@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -12,9 +11,9 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from core.three_site_full_matrix_campaign import BOUND_ARTIFACTS, FullMatrixCampaignError
+from core.human_approval_issuer import authenticate_and_issue, totp_code
 from core.three_site_execution_safety import SHARED_HOST_SAFE
 from scripts.build_three_site_staging_full_matrix_campaign import (
-    APPROVAL_SCHEMA,
     _queue_transition,
     finalize,
     prepare,
@@ -34,7 +33,7 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
         root.chmod(0o700)
         baseline = "a" * 40
         activation = "b" * 40
-        _unused, policy, keys = _signed_campaign(datetime.now(timezone.utc))
+        _unused, policy, enrollment = _signed_campaign(datetime.now(timezone.utc))
         policy_path = root / "policy.json"
         _write(policy_path, policy)
         campaign_id = str(uuid4())
@@ -77,13 +76,13 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
             approval_request_output=request,
         )
         return (
-            stack, root, baseline, activation, policy_path, policy, keys,
+            stack, root, baseline, activation, policy_path, policy, enrollment,
             mappings, draft, request, prepare_args,
         )
 
-    def test_prepare_then_two_independent_approvals_finalize(self):
+    def test_prepare_then_password_totp_approval_finalizes(self):
         values = self._inputs()
-        stack, root, _baseline, activation, policy_path, _policy, keys, _mappings, draft, request, args = values
+        stack, root, _baseline, activation, policy_path, _policy, enrollment, _mappings, draft, request, args = values
         with stack:
             campaign_id = json.loads(
                 values[7]["provisioned_inventory"].read_text()
@@ -93,42 +92,40 @@ class BuildThreeSiteStagingFullMatrixCampaignTests(unittest.TestCase):
                 return_value=(campaign_id, "f" * 64, args.object_bucket),
             ):
                 prepared = prepare(args)
-            self.assertEqual(prepared["status"], "awaiting_two_approvals")
+            self.assertEqual(prepared["status"], "awaiting_password_totp_approval")
             draft_value = json.loads(draft.read_text())
             request_value = json.loads(request.read_text())
             self.assertEqual(draft_value["release_sha"], activation)
-            self.assertEqual(request_value["campaign_hash"], prepared["campaign_hash"])
-            approvals = []
-            for number, private in enumerate(keys, 1):
-                path = root / f"approval-{number}.json"
-                _write(
-                    path,
-                    {
-                        "schema": APPROVAL_SCHEMA,
-                        "campaign_id": draft_value["campaign_id"],
-                        "gate_group_id": draft_value["gate_group_id"],
-                        "execution_class": draft_value["execution_class"],
-                        "campaign_hash": prepared["campaign_hash"],
-                        "operator": f"operator-{number}",
-                        "key_id": f"matrix-key-{number}",
-                        "signature": base64.b64encode(
-                            private.sign(prepared["campaign_hash"].encode("ascii"))
-                        ).decode(),
-                    },
-                )
-                approvals.append(path)
+            self.assertEqual(request_value["artifact_sha256"], prepared["campaign_hash"])
+            issued_at = datetime.now(timezone.utc)
+            token, _state, _audit = authenticate_and_issue(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password="test matrix approval passphrase",
+                totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
+                recovery_code=None,
+                action="start_full_matrix",
+                environment="staging",
+                subject=request_value,
+                ttl_seconds=600,
+                now=issued_at,
+            )
+            approval = root / "approval.json"
+            _write(approval, token)
             output = root / "approved.json"
             finalized = finalize(
                 argparse.Namespace(
                     draft=draft,
                     approver_policy=policy_path,
-                    approval=approvals,
+                    approval=approval,
                     output=output,
                 )
             )
             self.assertEqual(finalized["status"], "approved")
             self.assertEqual(finalized["campaign_hash"], prepared["campaign_hash"])
-            self.assertEqual(len(json.loads(output.read_text())["approvals"]), 2)
+            self.assertEqual(len(json.loads(output.read_text())["approvals"]), 1)
 
     def test_transition_lineage_drift_is_rejected_before_draft(self):
         values = self._inputs()

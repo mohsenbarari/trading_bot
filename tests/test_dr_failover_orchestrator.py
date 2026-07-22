@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -12,19 +11,20 @@ import asyncio
 from unittest.mock import patch
 from uuid import uuid4
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from core.dr_command_orchestration_adapter import TYPED_OPERATIONS, load_command_manifest
 from core.dr_event_protocol import canonical_json_bytes
+from core.human_approval import approval_subject
+from core.human_approval_issuer import (
+    authenticate_and_issue,
+    create_enrollment,
+    totp_code,
+)
 from core.dr_failover_orchestrator import (
-    ApprovedSigner,
-    ApproverPolicy,
     DrOrchestrationError,
     parse_plan,
     load_approver_policy,
     run_orchestration,
-    verify_two_person_approvals,
+    verify_human_failover_approval,
 )
 from core.secure_file_io import verify_hash_chained_jsonl
 
@@ -43,24 +43,21 @@ def approved_plan(*, manifest_payload=None, rpo_policy=None):
         manifest_payload = command_manifest(operation_id=operation_id)
     else:
         operation_id = manifest_payload["operation_id"]
-    private_keys = [Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()]
-    policy_hash = "e" * 64
-    signers = {
-        f"operator-{number}": ApprovedSigner(
-            operator=f"person-{number}",
-            key_id=f"operator-{number}",
-            custody_domain=f"independent-device-{number}",
-            public_key=private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw),
-        )
-        for number, private in enumerate(private_keys, 1)
-    }
-    policy = ApproverPolicy(str(uuid4()), "a" * 40, signers, policy_hash)
+    generated = datetime.now(timezone.utc).replace(microsecond=0)
+    enrollment = create_enrollment(
+        operator="person-1",
+        password="test failover approval passphrase",
+        now=generated,
+        scrypt_n=2**14,
+    )
+    policy = enrollment.policy_payload
+    policy_hash = hashlib.sha256(canonical_json_bytes(policy)).hexdigest()
     payload = {
         "schema": "three-site-failover-operation-v1",
         "operation_id": operation_id,
         "operation_nonce": str(uuid4()),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "generated_at": generated.isoformat(),
+        "expires_at": (generated + timedelta(minutes=5)).isoformat(),
         "action": "promote_ir",
         "source_site": "webapp_fi",
         "target_site": "webapp_ir",
@@ -95,14 +92,36 @@ def approved_plan(*, manifest_payload=None, rpo_policy=None):
     plan_hash = hashlib.sha256(
         canonical_json_bytes({key: value for key, value in payload.items() if key != "approvals"})
     ).hexdigest()
-    for number, private in enumerate(private_keys, 1):
-        payload["approvals"].append(
-            {
-                "operator": f"person-{number}",
-                "key_id": f"operator-{number}",
-                "signature": base64.b64encode(private.sign(plan_hash.encode("ascii"))).decode(),
-            }
-        )
+    subject = approval_subject(
+        artifact_type="three-site-failover-operation-v1",
+        artifact_sha256=plan_hash,
+        release_sha=payload["release_sha"],
+        bindings={
+            "operation_id": payload["operation_id"],
+            "operation_nonce": payload["operation_nonce"],
+            "source_site": payload["source_site"],
+            "target_site": payload["target_site"],
+            "expected_epoch": payload["expected_epoch"],
+            "target_epoch": payload["target_epoch"],
+            "readiness_hash": payload["readiness_hash"],
+            "command_manifest_hash": payload["command_manifest_hash"],
+        },
+    )
+    token, _state, _audit = authenticate_and_issue(
+        secrets_payload=enrollment.secrets_payload,
+        state_payload=enrollment.state_payload,
+        policy_payload=policy,
+        private_key_envelope=enrollment.private_key_envelope,
+        password="test failover approval passphrase",
+        totp=totp_code(enrollment.totp_secret, at=generated)[1],
+        recovery_code=None,
+        action="promote_ir",
+        environment="staging",
+        subject=subject,
+        ttl_seconds=300,
+        now=generated,
+    )
+    payload["approvals"] = [token]
     return payload, policy
 
 
@@ -279,31 +298,19 @@ class RollbackFailsOnceAdapter(LostRouteResponseAdapter):
 
 
 class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_failover_policy_cannot_alias_one_key_as_two_people(self):
-        private = Ed25519PrivateKey.generate()
-        public_key = base64.b64encode(
-            private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-        ).decode()
+    async def test_legacy_two_device_failover_policy_is_rejected(self):
         policy = {
             "schema": "three-site-failover-approver-policy-v1",
             "policy_id": str(uuid4()),
             "release_sha": "a" * 40,
             "minimum_approvals": 2,
-            "signers": [
-                {
-                    "operator": f"person-{number}",
-                    "key_id": f"operator-{number}",
-                    "custody_domain": f"device-{number}",
-                    "public_key": public_key,
-                }
-                for number in (1, 2)
-            ],
+            "signers": [],
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "policy.json"
             path.write_text(json.dumps(policy), encoding="utf-8")
             path.chmod(0o600)
-            with self.assertRaisesRegex(DrOrchestrationError, "not independent"):
+            with self.assertRaisesRegex(DrOrchestrationError, "human approval policy"):
                 load_approver_policy(path)
 
     async def test_plan_rejects_coerced_epochs_and_route_scope_drift(self):
@@ -338,7 +345,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_unavailable_tail_is_rejected_by_zero_loss_policy(self):
         raw, policy = approved_plan()
         plan = parse_plan(raw)
-        verify_two_person_approvals(plan, policy)
+        verify_human_failover_approval(plan, policy)
         adapter = SourceUnavailableAdapter(estimated_unreplicated_events=1)
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(DrOrchestrationError, "boundary mode"):
@@ -363,10 +370,10 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(DrOrchestrationError, "RPO policy is invalid"):
             parse_plan(raw)
 
-    async def test_two_person_plan_runs_once_and_resumes_from_hash_chained_journal(self):
+    async def test_human_approved_plan_runs_once_and_resumes_from_hash_chained_journal(self):
         raw, policy = approved_plan()
         plan = parse_plan(raw)
-        verify_two_person_approvals(plan, policy)
+        verify_human_failover_approval(plan, policy)
         ledger = FakeOperationLedger()
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory) / "failover.jsonl"
@@ -426,10 +433,10 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_approval_and_typed_manifest_are_bound_and_fail_closed(self):
         raw, policy = approved_plan()
-        raw["approvals"][1]["operator"] = raw["approvals"][0]["operator"]
+        raw["approvals"][0]["operator"] = "attacker"
         plan = parse_plan(raw)
         with self.assertRaises(DrOrchestrationError):
-            verify_two_person_approvals(plan, policy)
+            verify_human_failover_approval(plan, policy)
 
         operation_id = str(uuid4())
         payload = command_manifest(operation_id=operation_id)
@@ -601,7 +608,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         payload = command_manifest(operation_id=operation_id)
         raw, policy = approved_plan(manifest_payload=payload)
         plan = parse_plan(raw)
-        verify_two_person_approvals(plan, policy)
+        verify_human_failover_approval(plan, policy)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "operations.json"
             path.write_text(json.dumps(payload), encoding="utf-8")

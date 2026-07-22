@@ -1,47 +1,26 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import unittest
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from core.human_approval import approval_subject
+from core.human_approval_issuer import (
+    authenticate_and_issue,
+    create_enrollment,
+    totp_code,
+)
 
 from scripts.verify_three_site_staging_inventory import _canonical_bytes
 from scripts.verify_three_site_staging_image_inventory import _canonical_sha256
 from scripts.verify_three_site_staging_migration_plan import (
     MigrationPlanError,
     ORDERED_PHASES,
-    _verify_signatures,
+    _verify_approval,
     verify_migration_plan,
 )
 from tests.test_three_site_staging_signed_inventory import _inventory
-
-
-def _approvals(document: dict, *, schema: str, hash_field: str, policy: dict, private_keys, now):
-    unsigned = {
-        "schema": schema,
-        hash_field: hashlib.sha256(_canonical_bytes(document)).hexdigest(),
-        "release_sha": document["release_sha"],
-        "policy_hash": hashlib.sha256(_canonical_bytes(policy)).hexdigest(),
-        "signed_at": now.isoformat(),
-        "expires_at": (now + timedelta(hours=1)).isoformat(),
-    }
-    return {
-        **unsigned,
-        "approvals": [
-            {
-                "operator": f"person-{number}",
-                "key_id": f"operator-{number}",
-                "signature": base64.b64encode(
-                    private.sign(_canonical_bytes(unsigned))
-                ).decode(),
-            }
-            for number, private in enumerate(private_keys, 1)
-        ],
-    }
 
 
 def _content(seed: str):
@@ -61,31 +40,38 @@ def _content(seed: str):
 
 class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
     def _documents(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
         inventory = _inventory()
-        private_keys = [Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()]
-        policy = {
-            "schema": "three-site-staging-inventory-signers-v1",
-            "policy_id": "55555555-5555-4555-8555-555555555555",
-            "release_sha": inventory["release_sha"],
-            "signers": [
-                {
-                    "key_id": f"operator-{number}",
-                    "operator": f"person-{number}",
-                    "custody_domain": f"device-{number}",
-                    "public_key": base64.b64encode(
-                        private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-                    ).decode(),
-                }
-                for number, private in enumerate(private_keys, 1)
-            ],
-        }
-        inventory_approval = _approvals(
-            inventory,
-            schema="three-site-staging-inventory-approval-v1",
-            hash_field="inventory_sha256",
-            policy=policy,
-            private_keys=private_keys,
+        enrollment = create_enrollment(
+            operator="person-1",
+            password="test migration approval passphrase",
+            now=now,
+            scrypt_n=2**14,
+        )
+        policy = enrollment.policy_payload
+        inventory_subject = approval_subject(
+            artifact_type="three-site-staging-inventory-v3",
+            artifact_sha256=hashlib.sha256(_canonical_bytes(inventory)).hexdigest(),
+            release_sha=inventory["release_sha"],
+            bindings={
+                "campaign_id": inventory["campaign_id"],
+                "deployment_id": inventory["deployment_id"],
+                "host_safety_mode": inventory["host_safety_mode"],
+                "inventory_stage": inventory["inventory_stage"],
+            },
+        )
+        inventory_approval, issuer_state, _audit = authenticate_and_issue(
+            secrets_payload=enrollment.secrets_payload,
+            state_payload=enrollment.state_payload,
+            policy_payload=policy,
+            private_key_envelope=enrollment.private_key_envelope,
+            password="test migration approval passphrase",
+            totp=totp_code(enrollment.totp_secret, at=now)[1],
+            recovery_code=None,
+            action="approve_inventory",
+            environment="staging",
+            subject=inventory_subject,
+            ttl_seconds=3600,
             now=now,
         )
         backups = {}
@@ -306,15 +292,32 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
                 "cleanup_requires_explicit_finish": True,
             },
         }
-        approval = _approvals(
-            plan,
-            schema="three-site-staging-migration-approval-v1",
-            hash_field="plan_sha256",
-            policy=policy,
-            private_keys=private_keys,
-            now=now,
+        approval_time = now + timedelta(seconds=30)
+        migration_subject = approval_subject(
+            artifact_type="three-site-staging-migration-plan-v1",
+            artifact_sha256=hashlib.sha256(_canonical_bytes(plan)).hexdigest(),
+            release_sha=plan["release_sha"],
+            bindings={
+                "campaign_id": plan["campaign_id"],
+                "deployment_id": plan["deployment_id"],
+                "provisioned_inventory_sha256": plan["provisioned_inventory_sha256"],
+            },
         )
-        return now, inventory, inventory_approval, policy, freezes, backups, seeds, images, plan, approval
+        approval, _state, _audit = authenticate_and_issue(
+            secrets_payload=enrollment.secrets_payload,
+            state_payload=issuer_state,
+            policy_payload=policy,
+            private_key_envelope=enrollment.private_key_envelope,
+            password="test migration approval passphrase",
+            totp=totp_code(enrollment.totp_secret, at=approval_time)[1],
+            recovery_code=None,
+            action="approve_migration",
+            environment="staging",
+            subject=migration_subject,
+            ttl_seconds=3600,
+            now=approval_time,
+        )
+        return approval_time, inventory, inventory_approval, policy, freezes, backups, seeds, images, plan, approval
 
     def _verify(self, documents):
         now, inventory, inventory_approval, policy, freezes, backups, seeds, images, plan, approval = documents
@@ -323,7 +326,7 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
             approval=approval,
             inventory=inventory,
             inventory_approval=inventory_approval,
-            signer_policy=policy,
+            approval_policy=policy,
             freeze_evidence=freezes,
             image_inventories=images,
             backup_manifests=backups,
@@ -336,16 +339,17 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
         self.assertEqual(result["status"], "approved")
         self.assertEqual(result["source_roles"], ["bot_fi", "webapp_fi"])
 
-    def test_migration_policy_cannot_alias_one_key_as_two_people(self):
+    def test_migration_policy_or_token_tampering_is_rejected(self):
         documents = self._documents()
-        documents[3]["signers"][1]["public_key"] = documents[3]["signers"][0]["public_key"]
-        with self.assertRaisesRegex(MigrationPlanError, "not independent"):
-            _verify_signatures(
+        documents[3]["issuer"]["operator"] = "attacker"
+        with self.assertRaisesRegex(MigrationPlanError, "human approval is invalid"):
+            _verify_approval(
                 documents[-2],
                 approval=documents[-1],
-                signer_policy=documents[3],
+                approval_policy=documents[3],
                 release_sha=documents[-2]["release_sha"],
                 now=documents[0],
+                require_fresh=True,
             )
 
     def test_webapp_ir_must_clone_the_webapp_fi_seed(self):

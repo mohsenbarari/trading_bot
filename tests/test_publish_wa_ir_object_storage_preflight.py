@@ -87,7 +87,7 @@ class PublishWaIrObjectStoragePreflightTests(unittest.TestCase):
         for relative, payload, mode in (
             ("planned-inventory.json", "{}\n", 0o600),
             ("planned-inventory-approval.json", "{}\n", 0o600),
-            ("inventory-signers.json", "{}\n", 0o600),
+            ("human-approval-policy.json", "{}\n", 0o600),
             ("roles/webapp-ir.compose.yml", "services: {}\n", 0o640),
             ("roles/webapp-ir.env", "ROLE=webapp_ir\n", 0o600),
             ("secrets/staging-dr-ca.crt", "ca\n", 0o644),
@@ -132,7 +132,7 @@ class PublishWaIrObjectStoragePreflightTests(unittest.TestCase):
                     [
                         "planned-inventory.json",
                         "planned-inventory-approval.json",
-                        "inventory-signers.json",
+                        "human-approval-policy.json",
                         "roles/webapp-ir.compose.yml",
                         "roles/webapp-ir.env",
                         "secrets/staging-dr-ca.crt",

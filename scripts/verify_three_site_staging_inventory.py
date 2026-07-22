@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import binascii
 from datetime import datetime, timedelta, timezone
 import hashlib
 import ipaddress
@@ -20,9 +18,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
+from core.human_approval import (
+    approval_policy_hash,
+    approval_subject,
+    verify_human_approval,
+)
 from core.three_site_execution_safety import (
     DEDICATED_HOST_DESTRUCTIVE,
     EXECUTION_CLASSES as HOST_SAFETY_MODES,
@@ -348,125 +348,50 @@ def _utc(value: Any, *, label: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def verify_signed_inventory(
+def verify_approved_inventory(
     payload: dict[str, Any],
     *,
     approval: dict[str, Any],
-    signer_policy: dict[str, Any],
+    approval_policy: dict[str, Any],
     host_destructive: bool | None = None,
     now: datetime | None = None,
+    require_fresh_approval: bool = True,
 ) -> dict[str, Any]:
-    """Require fresh independent two-person approval of the exact inventory bytes."""
+    """Require password+TOTP approval of the exact inventory bytes."""
 
     structural = verify_inventory(payload, host_destructive=host_destructive)
-    policy_fields = {"schema", "policy_id", "release_sha", "signers"}
-    if (
-        not isinstance(signer_policy, dict)
-        or set(signer_policy) != policy_fields
-        or signer_policy["schema"] != "three-site-staging-inventory-signers-v1"
-    ):
-        raise InventoryError("inventory signer policy fields/schema are invalid")
-    try:
-        UUID(str(signer_policy["policy_id"]))
-    except ValueError as exc:
-        raise InventoryError("inventory signer policy_id must be a UUID") from exc
-    if str(signer_policy["release_sha"]).lower() != structural["release_sha"]:
-        raise InventoryError("inventory signer policy release SHA differs from inventory")
-    raw_signers = signer_policy["signers"]
-    if not isinstance(raw_signers, list) or len(raw_signers) < 2:
-        raise InventoryError("inventory signer policy requires at least two signers")
-    signers: dict[str, tuple[str, str, bytes]] = {}
-    operators: set[str] = set()
-    custody_domains: set[str] = set()
-    public_keys: set[bytes] = set()
-    for item in raw_signers:
-        if not isinstance(item, dict) or set(item) != {
-            "key_id", "operator", "custody_domain", "public_key"
-        }:
-            raise InventoryError("inventory signer entry fields are invalid")
-        key_id = str(item["key_id"]).strip()
-        operator = str(item["operator"]).strip()
-        custody = str(item["custody_domain"]).strip()
-        if (
-            not key_id or not operator or operator in operators or not custody
-            or custody in custody_domains or key_id in signers
-        ):
-            raise InventoryError("inventory signer identities/custody are not independent")
-        try:
-            public_key = base64.b64decode(str(item["public_key"]), validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise InventoryError("inventory signer public key is invalid") from exc
-        if len(public_key) != 32 or public_key in public_keys:
-            raise InventoryError("inventory signer public keys are not independent")
-        signers[key_id] = (operator, custody, public_key)
-        operators.add(operator)
-        custody_domains.add(custody)
-        public_keys.add(public_key)
-
-    approval_fields = {
-        "schema", "inventory_sha256", "release_sha", "policy_hash",
-        "signed_at", "expires_at", "approvals",
-    }
-    if (
-        not isinstance(approval, dict)
-        or set(approval) != approval_fields
-        or approval["schema"] != "three-site-staging-inventory-approval-v1"
-    ):
-        raise InventoryError("signed inventory approval fields/schema are invalid")
     inventory_hash = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
-    policy_hash = hashlib.sha256(_canonical_bytes(signer_policy)).hexdigest()
-    if (
-        approval["inventory_sha256"] != inventory_hash
-        or str(approval["release_sha"]).lower() != structural["release_sha"]
-        or approval["policy_hash"] != policy_hash
-    ):
-        raise InventoryError("signed inventory approval is not bound to inventory/policy/SHA")
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    signed_at = _utc(approval["signed_at"], label="inventory signed_at")
-    expires_at = _utc(approval["expires_at"], label="inventory expires_at")
-    if (
-        signed_at > current + timedelta(minutes=5)
-        or expires_at <= current
-        or expires_at <= signed_at
-        or expires_at - signed_at > timedelta(hours=24)
-    ):
-        raise InventoryError("signed inventory approval is expired or outside its validity window")
-    raw_approvals = approval["approvals"]
-    if not isinstance(raw_approvals, list) or len(raw_approvals) != 2:
-        raise InventoryError("signed inventory requires exactly two approvals")
-    unsigned = {name: approval[name] for name in approval_fields - {"approvals"}}
-    message = _canonical_bytes(unsigned)
-    operators = set()
-    custody_domains = set()
-    key_ids: set[str] = set()
-    for item in raw_approvals:
-        if not isinstance(item, dict) or set(item) != {"operator", "key_id", "signature"}:
-            raise InventoryError("signed inventory approval entry fields are invalid")
-        key_id = str(item["key_id"]).strip()
-        signer = signers.get(key_id)
-        operator = str(item["operator"]).strip()
-        if (
-            signer is None
-            or operator != signer[0]
-            or key_id in key_ids
-            or operator in operators
-            or signer[1] in custody_domains
-        ):
-            raise InventoryError("signed inventory approvals are not independent authorized signers")
-        try:
-            signature = base64.b64decode(str(item["signature"]), validate=True)
-            Ed25519PublicKey.from_public_bytes(signer[2]).verify(signature, message)
-        except (ValueError, binascii.Error, InvalidSignature) as exc:
-            raise InventoryError("signed inventory approval signature is invalid") from exc
-        key_ids.add(key_id)
-        operators.add(operator)
-        custody_domains.add(signer[1])
+    subject = approval_subject(
+        artifact_type="three-site-staging-inventory-v3",
+        artifact_sha256=inventory_hash,
+        release_sha=structural["release_sha"],
+        bindings={
+            "campaign_id": structural["campaign_id"],
+            "deployment_id": structural["deployment_id"],
+            "host_safety_mode": structural["host_safety_mode"],
+            "inventory_stage": structural["inventory_stage"],
+        },
+    )
+    try:
+        verified = verify_human_approval(
+            approval,
+            policy_payload=approval_policy,
+            expected_action="approve_inventory",
+            expected_environment="staging",
+            expected_subject=subject,
+            now=now,
+            require_fresh=require_fresh_approval,
+        )
+    except Exception as exc:
+        raise InventoryError("inventory human approval is invalid") from exc
     return {
         **structural,
         "inventory_sha256": inventory_hash,
-        "signer_policy_sha256": policy_hash,
-        "approved_by": sorted(operators),
-        "approval_expires_at": expires_at.isoformat(),
+        "approval_policy_sha256": approval_policy_hash(approval_policy),
+        "approval_token_sha256": verified.token_hash,
+        "approved_by": [verified.operator],
+        "approval_id": verified.approval_id,
+        "approval_expires_at": verified.expires_at.isoformat(),
     }
 
 
@@ -474,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("inventory", type=Path)
     parser.add_argument("--approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     safety = parser.add_mutually_exclusive_group()
     safety.add_argument("--host-destructive", action="store_true")
     safety.add_argument("--shared-host-safe", action="store_true")
@@ -483,10 +408,10 @@ def main(argv: list[str] | None = None) -> int:
         expected_host_destructive = (
             True if args.host_destructive else False if args.shared_host_safe else None
         )
-        result = verify_signed_inventory(
+        result = verify_approved_inventory(
             load_inventory(args.inventory),
             approval=load_inventory(args.approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             host_destructive=expected_host_destructive,
         )
     except InventoryError as exc:

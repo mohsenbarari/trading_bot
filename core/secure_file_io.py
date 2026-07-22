@@ -22,6 +22,72 @@ class SecureFileError(RuntimeError):
     """Raised when a security-sensitive file cannot be proven safe."""
 
 
+def write_secure_new_bytes(
+    path: Path,
+    payload: bytes,
+    *,
+    label: str = "secure file",
+    mode: int = 0o600,
+    max_size: int = 1024 * 1024,
+) -> None:
+    """Publish a complete owner-only file without replacing any existing path."""
+
+    if not isinstance(payload, bytes) or len(payload) > max_size:
+        raise SecureFileError(f"{label} payload is invalid or oversized")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open(path.parent, directory_flags)
+    temporary_name = f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    temporary_fd = -1
+    published = False
+    try:
+        directory_metadata = os.fstat(directory_fd)
+        if (
+            not stat.S_ISDIR(directory_metadata.st_mode)
+            or directory_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(directory_metadata.st_mode) & 0o022
+        ):
+            raise SecureFileError(f"{label} directory is not owner-controlled")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        temporary_fd = os.open(temporary_name, flags, mode, dir_fd=directory_fd)
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            count = os.write(temporary_fd, view[written:])
+            if count <= 0:
+                raise SecureFileError(f"{label} write made no progress")
+            written += count
+        os.fchmod(temporary_fd, mode)
+        os.fsync(temporary_fd)
+        os.close(temporary_fd)
+        temporary_fd = -1
+        try:
+            os.link(
+                temporary_name,
+                path.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise SecureFileError(f"{label} already exists") from exc
+        published = True
+        os.unlink(temporary_name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    finally:
+        if temporary_fd >= 0:
+            os.close(temporary_fd)
+        try:
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+    if not published:
+        raise SecureFileError(f"{label} was not published")
+
+
 def write_secure_atomic_bytes(
     path: Path,
     payload: bytes,

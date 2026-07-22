@@ -27,7 +27,7 @@ from scripts.render_three_site_staging_role_compose import _atomic_write, parse_
 from scripts.verify_three_site_staging_inventory import (
     ROLE_VOLUME_LOGICAL_NAMES,
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 from scripts.verify_three_site_staging_role_bundle import (
     PHYSICAL_SITE,
@@ -162,7 +162,7 @@ def _storage_identity(role_inventory: dict[str, Any]) -> dict[str, Any]:
         or mount.get("fstype") not in {"ext4", "xfs"}
         or mount_uuid != str(UUID(str(role_inventory["storage_mount_uuid"]))).lower()
     ):
-        raise HostIdentityError("staging storage mount differs from signed inventory")
+        raise HostIdentityError("staging storage mount differs from approved inventory")
     filesystem = os.statvfs(root)
     total_bytes = filesystem.f_blocks * filesystem.f_frsize
     available_bytes = filesystem.f_bavail * filesystem.f_frsize
@@ -356,7 +356,7 @@ def verify_host_snapshot(
         )
         or snapshot["clock_measurement_tool"] not in {None, "chronyc", "ntpq"}
     ):
-        raise HostIdentityError("live host identity differs from signed inventory/SHA/time policy")
+        raise HostIdentityError("live host identity differs from approved inventory/SHA/time policy")
     volumes = snapshot["volumes"]
     expected_volume_fields = set(ROLE_VOLUME_FIELDS[role])
     if not isinstance(volumes, dict) or set(volumes) != expected_volume_fields:
@@ -411,14 +411,14 @@ def verify_host_snapshot(
             volumes[field] != role_inventory[field]
             for field in expected_volume_fields
         ):
-            raise HostIdentityError("provisioned Docker volume differs from signed inventory")
+            raise HostIdentityError("provisioned Docker volume differs from approved inventory")
         postgres_system_id = str(snapshot["postgres_system_id"] or "")
         if not re.fullmatch(r"[0-9]{10,20}", postgres_system_id):
             raise HostIdentityError("measured PostgreSQL system identifier is malformed")
         if stage == "provisioned" and postgres_system_id != str(
             role_inventory["postgres_system_id"]
         ):
-            raise HostIdentityError("PostgreSQL system identifier differs from signed inventory")
+            raise HostIdentityError("PostgreSQL system identifier differs from approved inventory")
     else:
         raise HostIdentityError("unsupported host attestation stage")
     digest = hashlib.sha256(
@@ -447,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument(
         "--snapshot-output",
         type=Path,
@@ -457,11 +457,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         inventory = load_inventory(args.inventory)
         approval = load_inventory(args.approval)
-        signer_policy = load_inventory(args.signer_policy)
-        inventory_result = verify_signed_inventory(
+        approval_policy = load_inventory(args.approval_policy)
+        inventory_result = verify_approved_inventory(
             inventory,
             approval=approval,
-            signer_policy=signer_policy,
+            approval_policy=approval_policy,
             host_destructive=None,
         )
         expected_inventory_stage = (
@@ -489,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
             env_bytes=env_bytes,
             inventory=inventory,
             approval=approval,
-            signer_policy=signer_policy,
+            approval_policy=approval_policy,
             verify_files=True,
             required_inventory_stage=expected_inventory_stage,
         )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an unsigned provisioned inventory from four measured host snapshots."""
+"""Build an unapproved provisioned inventory from four measured host snapshots."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from scripts.verify_three_site_staging_inventory import (
     ROLES,
     load_inventory,
     verify_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 
 
@@ -35,17 +35,17 @@ def finalize_inventory(
     *,
     planned: dict,
     approval: dict,
-    signer_policy: dict,
+    approval_policy: dict,
     snapshots: dict[str, dict],
 ) -> dict:
-    approved = verify_signed_inventory(
+    approved = verify_approved_inventory(
         planned,
         approval=approval,
-        signer_policy=signer_policy,
+        approval_policy=approval_policy,
         host_destructive=None,
     )
     if approved["inventory_stage"] != "planned":
-        raise InventoryFinalizationError("inventory finalization requires a signed planned inventory")
+        raise InventoryFinalizationError("inventory finalization requires an approved planned inventory")
     if set(snapshots) != set(ROLE_CLI):
         raise InventoryFinalizationError("exactly four measured role snapshots are required")
     by_role = {item["role"]: item for item in planned["roles"]}
@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--planned-inventory", type=Path, required=True)
     parser.add_argument("--approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--snapshot", action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         result = finalize_inventory(
             planned=load_inventory(args.planned_inventory),
             approval=load_inventory(args.approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             snapshots={role: _load_snapshot(path) for role, path in parsed},
         )
         encoded = (
@@ -137,12 +137,12 @@ def main(argv: list[str] | None = None) -> int:
     print(
         json.dumps(
             {
-                "status": "provisioned-inventory-created-unsigned",
+                "status": "provisioned-inventory-created-unapproved",
                 "output": str(args.output),
                 "inventory_sha256": hashlib.sha256(
                     json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
                 ).hexdigest(),
-                "next_gate": "obtain two fresh signatures before data restore/migration",
+                "next_gate": "issue one fresh password-plus-TOTP approval bound to this provisioned inventory",
             },
             sort_keys=True,
         )

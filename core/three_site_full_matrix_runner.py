@@ -948,6 +948,7 @@ async def run_full_matrix_campaign(
         approver_policy=approver_policy,
         now=now,
         allow_expired_for_safe_cleanup=journal_exists,
+        require_fresh_approval=not journal_exists,
     )
     _validate_artifact_root(artifact_root)
     verify_bound_artifacts(campaign, bound_artifacts)
@@ -1120,6 +1121,7 @@ async def run_full_matrix_campaign(
                         campaign,
                         approver_policy=approver_policy,
                         now=now,
+                        require_fresh_approval=False,
                     )
                     if fresh["campaign_hash"] != identity.campaign_hash:
                         raise FullMatrixRunnerError(
@@ -1259,7 +1261,12 @@ async def run_full_matrix_campaign(
                     cleanup_evidence_hash=cleanup["evidence_hash"],
                     cleanup_result=cleanup,
                 )
-        fresh = verify_campaign(campaign, approver_policy=approver_policy, now=now)
+        fresh = verify_campaign(
+            campaign,
+            approver_policy=approver_policy,
+            now=now,
+            require_fresh_approval=False,
+        )
         if fresh["campaign_hash"] != identity.campaign_hash:
             raise FullMatrixRunnerError(
                 "Full Matrix campaign identity changed before finalization"

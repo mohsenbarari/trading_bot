@@ -32,7 +32,7 @@ from scripts.arvan_origin_switch import (
     load_token,
 )
 from scripts.update_dr_connectivity_state import load_rounds
-from scripts.verify_three_site_staging_inventory import verify_signed_inventory
+from scripts.verify_three_site_staging_inventory import verify_approved_inventory
 
 
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
@@ -113,7 +113,7 @@ def load_staging_backend_config(
     *,
     inventory: dict[str, Any],
     inventory_approval: dict[str, Any],
-    inventory_signer_policy: dict[str, Any],
+    inventory_approval_policy: dict[str, Any],
 ) -> StagingBackendConfig:
     payload = _secure_json(path)
     fields = {
@@ -129,10 +129,10 @@ def load_staging_backend_config(
         or payload.get("record") != "app"
     ):
         raise StagingOperationBackendError("staging backend scope/schema is invalid")
-    verified = verify_signed_inventory(
+    verified = verify_approved_inventory(
         inventory,
         approval=inventory_approval,
-        signer_policy=inventory_signer_policy,
+        approval_policy=inventory_approval_policy,
         host_destructive=None,
     )
     if (
@@ -140,7 +140,7 @@ def load_staging_backend_config(
         or payload["campaign_id"] != verified["campaign_id"]
         or payload["release_sha"] != verified["release_sha"]
     ):
-        raise StagingOperationBackendError("staging backend differs from signed inventory")
+        raise StagingOperationBackendError("staging backend differs from approved inventory")
     inventory_roles = {row["role"]: row for row in inventory["roles"]}
     raw_hosts = payload["hosts"]
     if not isinstance(raw_hosts, dict) or set(raw_hosts) != set(ROLE_SERVICE):
@@ -660,7 +660,7 @@ class StagingTypedOperationBackend:
         self.validate_plan_scope(plan)
         # Availability is secondary here: both WebApp sites and all public
         # mutators are stopped/fenced, and any live lease is allowed to expire.
-        # A separate signed recovery plan may later acquire a fresh term.
+        # A separately approved recovery plan may later acquire a fresh term.
         safe_results = {}
         for role in (plan.source_site, plan.target_site):
             safe_results[role] = await asyncio.to_thread(

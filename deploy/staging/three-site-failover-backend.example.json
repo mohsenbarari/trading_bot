@@ -22,7 +22,7 @@
       "env_file": "/etc/trading-bot-three-site/webapp-fi.env",
       "plan_path": "/root/secure/failover/active-plan.json",
       "command_manifest_path": "/root/secure/failover/typed-operation-manifest.json",
-      "approver_policy_path": "/etc/trading-bot/security/dr-failover-approvers.json",
+      "approver_policy_path": "/etc/trading-bot/security/human-approval/human-approval-policy.json",
       "evidence_dir": "/root/secure/failover/evidence",
       "recovery_input_path": "/root/secure/failover/failback-recovery-input.json"
     },
@@ -37,7 +37,7 @@
       "env_file": "/etc/trading-bot-three-site/webapp-ir.env",
       "plan_path": "/root/secure/failover/active-plan.json",
       "command_manifest_path": "/root/secure/failover/typed-operation-manifest.json",
-      "approver_policy_path": "/etc/trading-bot/security/dr-failover-approvers.json",
+      "approver_policy_path": "/etc/trading-bot/security/human-approval/human-approval-policy.json",
       "evidence_dir": "/root/secure/failover/evidence",
       "recovery_input_path": "/root/secure/failover/failback-recovery-input.json"
     }

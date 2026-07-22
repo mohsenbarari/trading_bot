@@ -28,7 +28,7 @@ if [[ -z "${WRITER_WITNESS_CONTROLLER_TRANSACTION_UNIT:-}" ]]; then
     forwarded_environment=()
     for name in \
         WRITER_WITNESS_REAL_HOST_MATRIX_CONFIRM \
-        WRITER_WITNESS_REAL_HOST_MATRIX_OBSERVER_CONFIRM \
+        WRITER_WITNESS_REAL_HOST_MATRIX_APPROVAL_REQUEST_CONFIRM \
         WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO
     do
         if [[ -n "${!name:-}" ]]; then

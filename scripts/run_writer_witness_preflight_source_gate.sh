@@ -47,8 +47,12 @@ shell_sources=( \
 )
 
 python_sources=( \
+    core/canonical_json.py \
+    core/human_approval.py \
+    core/human_approval_issuer.py \
     core/secure_file_io.py \
     scripts/hold_writer_witness_package_locks.py \
+    scripts/manage_three_site_human_approval.py \
     scripts/plan_writer_witness_real_host_matrix.py \
     scripts/publish_wa_ir_object_storage_preflight.py \
     scripts/publish_wa_ir_object_storage_transfer.py \
@@ -109,6 +113,8 @@ PY
     --verify deploy/writer-witness/command-surfaces.generated.json >/dev/null
 
 unit_modules=( \
+    tests.test_human_approval \
+    tests.test_manage_three_site_human_approval \
     tests.test_writer_witness \
     tests.test_writer_witness_client \
     tests.test_writer_witness_deployment \

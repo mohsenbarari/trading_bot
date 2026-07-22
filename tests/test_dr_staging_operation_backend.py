@@ -217,7 +217,7 @@ class StagingOperationBackendTests(unittest.TestCase):
                 path,
                 inventory=inventory,
                 inventory_approval=approval,
-                inventory_signer_policy=policy,
+                inventory_approval_policy=policy,
             )
             self.assertEqual(config.hosts["webapp_ir"].host_ip, role_ips["webapp_ir"])
             payload["hosts"]["webapp_ir"]["host_ip"] = "10.30.0.99"
@@ -227,7 +227,7 @@ class StagingOperationBackendTests(unittest.TestCase):
                     path,
                     inventory=inventory,
                     inventory_approval=approval,
-                    inventory_signer_policy=policy,
+                    inventory_approval_policy=policy,
                 )
 
     def test_plan_scope_is_bound_to_signed_role_addresses(self):

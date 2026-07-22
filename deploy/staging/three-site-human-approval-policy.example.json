@@ -1,0 +1,20 @@
+{
+  "schema": "three-site-human-approval-policy-v1",
+  "policy_id": "00000000-0000-4000-8000-000000000000",
+  "issuer": {
+    "issuer_id": "three-site-witness-approval-service",
+    "key_id": "witness-approval-YYYYMMDD",
+    "operator": "replace-with-enrolled-owner",
+    "authenticator_id": "00000000-0000-4000-8000-000000000000",
+    "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  },
+  "actions": [
+    {"action": "approve_inventory", "environments": ["staging"], "max_ttl_seconds": 86400},
+    {"action": "approve_migration", "environments": ["staging"], "max_ttl_seconds": 14400},
+    {"action": "start_full_matrix", "environments": ["staging"], "max_ttl_seconds": 600},
+    {"action": "approve_gate_d", "environments": ["staging"], "max_ttl_seconds": 600},
+    {"action": "run_writer_witness_matrix", "environments": ["staging"], "max_ttl_seconds": 600},
+    {"action": "promote_ir", "environments": ["staging", "production"], "max_ttl_seconds": 600},
+    {"action": "failback_fi", "environments": ["staging", "production"], "max_ttl_seconds": 600}
+  ]
+}

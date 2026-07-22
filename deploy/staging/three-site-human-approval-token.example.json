@@ -1,0 +1,22 @@
+{
+  "schema": "three-site-human-approval-token-v1",
+  "approval_id": "00000000-0000-4000-8000-000000000000",
+  "policy_id": "00000000-0000-4000-8000-000000000000",
+  "policy_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "issuer_id": "three-site-witness-approval-service",
+  "key_id": "witness-approval-YYYYMMDD",
+  "operator": "replace-with-enrolled-owner",
+  "authenticator_id": "00000000-0000-4000-8000-000000000000",
+  "action": "approve_inventory",
+  "environment": "staging",
+  "subject": {
+    "artifact_type": "three-site-staging-inventory-v3",
+    "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "release_sha": "0000000000000000000000000000000000000000",
+    "bindings": {}
+  },
+  "issued_at": "2026-07-22T00:00:00Z",
+  "expires_at": "2026-07-22T00:10:00Z",
+  "authentication": {"methods": ["password", "totp"]},
+  "signature": "replace-with-base64-ed25519-signature"
+}

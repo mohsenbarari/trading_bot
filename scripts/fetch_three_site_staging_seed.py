@@ -218,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-approval", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--freeze-evidence", action="append", type=Path, required=True)
     parser.add_argument("--image-inventory", action="append", required=True)
     parser.add_argument("--backup-manifest", action="append", required=True)
@@ -243,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
             approval=load_inventory(args.plan_approval),
             inventory=inventory,
             inventory_approval=load_inventory(args.inventory_approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             freeze_evidence=[load_inventory(path) for path in args.freeze_evidence],
             image_inventories=_mapping(
                 args.image_inventory,

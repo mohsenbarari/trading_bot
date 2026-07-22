@@ -29,7 +29,7 @@ from core.dr_failover_orchestrator import (
     load_approver_policy,
     parse_plan,
     validate_plan_freshness,
-    verify_two_person_approvals,
+    verify_human_failover_approval,
 )
 from core.secure_file_io import read_secure_text, write_secure_atomic_bytes
 from scripts.render_three_site_staging_role_compose import parse_env_values
@@ -114,7 +114,11 @@ def _psql(args: argparse.Namespace, env: dict[str, str], sql: str) -> str:
 def _common(args: argparse.Namespace):  # noqa: ANN202
     plan = parse_plan(_strict_json(args.plan, label="failover plan"))
     policy = load_approver_policy(args.approver_policy)
-    verify_two_person_approvals(plan, policy)
+    verify_human_failover_approval(
+        plan,
+        policy,
+        require_fresh=args.action != "safe-fence",
+    )
     if args.action != "safe-fence":
         validate_plan_freshness(plan)
     load_typed_operation_manifest(args.command_manifest, plan=plan)

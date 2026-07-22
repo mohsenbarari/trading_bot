@@ -968,7 +968,7 @@ networks:
   witness: {internal: true}
   # These host-level bridge networks are intentionally non-internal. Host
   # firewall rules must restrict their published/egress paths to the exact
-  # signed inventory peers before services are started.
+  # approved inventory peers before services are started.
   bot_fi_dr_egress: {}
   webapp_fi_dr_egress: {}
   webapp_ir_dr_egress: {}

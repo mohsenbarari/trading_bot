@@ -1,9 +1,0 @@
-{
-  "schema": "three-site-staging-gate-d-aggregate-approval-v1",
-  "gate_group_id": "00000000-0000-4000-8000-000000000000",
-  "release_sha": "0000000000000000000000000000000000000000",
-  "aggregate_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-  "operator": "replace-with-authorized-operator",
-  "key_id": "replace-with-authorized-key-id",
-  "signature": "replace-with-base64-ed25519-signature"
-}

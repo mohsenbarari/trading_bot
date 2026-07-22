@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from scripts import run_writer_witness_real_host_matrix as runner
 from scripts import writer_witness_matrix_client as client
 from scripts.plan_writer_witness_real_host_matrix import abort_and_rollback_contract
+from core.human_approval_issuer import create_enrollment
 
 
 HEAD = "a" * 40
@@ -341,21 +342,20 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.MatrixError, "predates"):
             runner.validate_preflight(payload, HEAD)
 
-    def test_observer_approval_is_bound_to_preflight_and_separate_roles(self):
+    def test_human_approval_request_is_bound_to_preflight_and_owner(self):
         now = datetime.now(timezone.utc)
         approval = {
             "schema_version": runner.APPROVAL_SCHEMA,
-            "status": "approved",
+            "status": "awaiting_password_totp_approval",
             "scenario": "RH-001",
             "expected_commit": HEAD,
             "preflight_sha256": "f" * 64,
-            "observer": "abort-observer",
-            "incident_commander": "incident-owner",
+            "operator": "matrix-executor",
             "reason": "approved incident reason",
             "change_id": "CHG-1234",
             "authorization_nonce": "1" * 32,
-            "approved_at": now.isoformat(),
-            "expires_at": (now + timedelta(minutes=30)).isoformat(),
+            "prepared_at": now.isoformat(),
+            "request_expires_at": (now + timedelta(minutes=30)).isoformat(),
             "out_of_band_console_ready": True,
             "alternate_communications_ready": True,
             "maintenance_window_confirmed": True,
@@ -370,7 +370,7 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
             "maintenance_window_end": (now + timedelta(hours=1)).isoformat(),
             "restore_backup_sha256": "d" * 64,
             "restore_authorized_by": "incident-owner",
-            "allowed_signers_sha256": "9" * 64,
+            "human_approval_policy_sha256": "9" * 64,
             "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
         }
         roles = runner.validate_approval(
@@ -382,10 +382,10 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
             reason="approved incident reason",
             change_id="CHG-1234",
             expected_restore_sha256="d" * 64,
-            expected_allowed_signers_sha256="9" * 64,
+            expected_human_approval_policy_sha256="9" * 64,
             expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
         )
-        self.assertEqual(roles, ("abort-observer", "incident-owner"))
+        self.assertEqual(roles, ("matrix-executor", "matrix-executor"))
         approval["preflight_sha256"] = "0" * 64
         with self.assertRaisesRegex(runner.MatrixError, "preflight"):
             runner.validate_approval(
@@ -397,8 +397,16 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
                 reason="approved incident reason",
                 change_id="CHG-1234",
                 expected_restore_sha256="d" * 64,
-                expected_allowed_signers_sha256="9" * 64,
+                expected_human_approval_policy_sha256="9" * 64,
                 expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
+            )
+
+        runner.assert_authenticated_approval_operator(
+            "matrix-executor", "matrix-executor"
+        )
+        with self.assertRaisesRegex(runner.MatrixError, "authenticated approval owner"):
+            runner.assert_authenticated_approval_operator(
+                "different-executor", "matrix-executor"
             )
 
     def test_lock_owner_survives_two_competing_processes(self):
@@ -598,16 +606,23 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
             journal.update(status="completed", dirty=False)
             runner.assert_no_dirty_campaigns(root)
 
-    def test_observer_and_commander_must_have_independent_signer_keys(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "allowed_signers"
-            path.write_text(
-                "observer,commander ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest\n",
-                encoding="utf-8",
-            )
-            path.chmod(0o600)
-            with self.assertRaisesRegex(runner.MatrixError, "independent signing keys"):
-                runner.assert_independent_signer_keys(path.read_bytes(), "observer", "commander")
+    def test_matrix_human_subject_changes_for_any_request_mutation(self):
+        request = {
+            "schema_version": runner.APPROVAL_SCHEMA,
+            "status": "awaiting_password_totp_approval",
+            "expected_commit": HEAD,
+            "scenario": "RH-001",
+            "preflight_sha256": "f" * 64,
+            "change_id": "CHG-1",
+            "authorization_nonce": "1" * 32,
+            "restore_backup_sha256": "d" * 64,
+            "human_approval_policy_sha256": "9" * 64,
+            "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
+        }
+        original = runner.matrix_human_approval_subject(request, expected_head=HEAD)
+        request["change_id"] = "CHG-2"
+        changed = runner.matrix_human_approval_subject(request, expected_head=HEAD)
+        self.assertNotEqual(original["artifact_sha256"], changed["artifact_sha256"])
 
     def test_cleanup_contract_keeps_network_faults_after_requester_and_evidence_steps(self):
         source = (Path(__file__).resolve().parents[1] / "scripts/run_writer_witness_real_host_matrix.py").read_text()
@@ -716,17 +731,16 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
     def _approval(now: datetime, *, expires_at: datetime) -> dict[str, object]:
         return {
             "schema_version": runner.APPROVAL_SCHEMA,
-            "status": "approved",
+            "status": "awaiting_password_totp_approval",
             "scenario": "RH-001",
             "expected_commit": HEAD,
             "preflight_sha256": "f" * 64,
-            "observer": "abort-observer",
-            "incident_commander": "incident-owner",
+            "operator": "matrix-executor",
             "reason": "approved incident reason",
             "change_id": "CHG-1234",
             "authorization_nonce": "1" * 32,
-            "approved_at": now.isoformat(),
-            "expires_at": expires_at.isoformat(),
+            "prepared_at": now.isoformat(),
+            "request_expires_at": expires_at.isoformat(),
             "out_of_band_console_ready": True,
             "alternate_communications_ready": True,
             "maintenance_window_confirmed": True,
@@ -741,7 +755,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             "maintenance_window_end": (now + timedelta(hours=1)).isoformat(),
             "restore_backup_sha256": "d" * 64,
             "restore_authorized_by": "incident-owner",
-            "allowed_signers_sha256": "9" * 64,
+            "human_approval_policy_sha256": "9" * 64,
             "controller_toolchain_inventory_sha256": CONTROLLER_TOOLCHAIN_SHA256,
         }
 
@@ -756,7 +770,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             reason="approved incident reason",
             change_id="CHG-1234",
             expected_restore_sha256="d" * 64,
-            expected_allowed_signers_sha256="9" * 64,
+            expected_human_approval_policy_sha256="9" * 64,
             expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
         )
 
@@ -768,10 +782,10 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
         )
         self.assertEqual(
             self._validate_approval(exact),
-            ("abort-observer", "incident-owner"),
+            ("matrix-executor", "matrix-executor"),
         )
         too_long = dict(exact)
-        too_long["expires_at"] = (
+        too_long["request_expires_at"] = (
             approved_at + timedelta(hours=1, microseconds=1)
         ).isoformat()
         with self.assertRaisesRegex(runner.MatrixError, "expired"):
@@ -1374,13 +1388,18 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             controller_root = root / "controller"
             artifact_root = controller_root / "runs"
             campaign_root = controller_root / "campaigns"
-            trusted_signers = root / "allowed_signers"
-            trusted_signers.write_text(
-                "observer ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestObserver\n"
-                "commander ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestCommander\n",
+            enrollment = create_enrollment(
+                operator="matrix-executor",
+                password="correct horse battery staple",
+                now=now,
+                scrypt_n=2**14,
+            )
+            human_policy = root / "human-approval-policy.json"
+            human_policy.write_text(
+                json.dumps(enrollment.policy_payload, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            trusted_signers.chmod(0o600)
+            human_policy.chmod(0o600)
             preflight = root / "preflight.json"
             preflight.write_text(
                 json.dumps(passing_preflight()) + "\n",
@@ -1388,6 +1407,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             )
             preflight.chmod(0o600)
             output = controller_root / "approvals" / "rh-001.json"
+            subject_output = controller_root / "approvals" / "rh-001-subject.json"
             args = SimpleNamespace(
                 mode="approve",
                 scenario="RH-001",
@@ -1395,8 +1415,11 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
                 campaign_journal=None,
                 preflight=preflight,
-                observer="observer",
-                incident_commander="commander",
+                operator="matrix-executor",
+                approval=None,
+                human_approval=None,
+                human_approval_policy=human_policy,
+                subject_output=subject_output,
                 reason="approved incident reason",
                 change_id="CHG-1234",
                 out_of_band_console="provider-console/session-1234",
@@ -1406,45 +1429,35 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
                 dpi_byte_budget=runner.MIN_DPI_BYTE_BUDGET,
                 restore_authorized_by="incident-owner",
                 output=output,
-                allowed_signers=trusted_signers,
+                artifact_dir=None,
             )
             with (
                 mock.patch.object(runner, "parse_args", return_value=args),
                 mock.patch.object(runner, "DEFAULT_CONTROLLER_ROOT", controller_root),
                 mock.patch.object(runner, "DEFAULT_ARTIFACT_ROOT", artifact_root),
                 mock.patch.object(runner, "DEFAULT_CAMPAIGN_ROOT", campaign_root),
-                mock.patch.object(runner, "TRUSTED_ALLOWED_SIGNERS", trusted_signers),
-                mock.patch.object(
-                    runner,
-                    "TRUSTED_ALLOWED_SIGNERS_SHA256",
-                    hashlib.sha256(trusted_signers.read_bytes()).hexdigest(),
-                ),
+                mock.patch.object(runner, "HUMAN_APPROVAL_POLICY", human_policy),
                 mock.patch.object(runner.controller_runtime, "assert_runtime"),
                 mock.patch.dict(
                     os.environ,
-                    {runner.OBSERVER_CONFIRM_ENV: runner.OBSERVER_CONFIRM_VALUE},
+                    {
+                        runner.APPROVAL_REQUEST_CONFIRM_ENV:
+                        runner.APPROVAL_REQUEST_CONFIRM_VALUE
+                    },
                 ),
             ):
                 self.assertEqual(runner.main(), 0)
             payload = json.loads(output.read_text(encoding="utf-8"))
-            approved = datetime.fromisoformat(payload["approved_at"].replace("Z", "+00:00"))
-            expires = datetime.fromisoformat(payload["expires_at"].replace("Z", "+00:00"))
-            self.assertEqual(expires - approved, timedelta(minutes=45))
-            self.assertLessEqual(expires, approved + timedelta(hours=1))
-
-    def test_signer_policy_is_fail_closed_until_an_external_source_pin_exists(self):
-        with self.assertRaisesRegex(runner.MatrixError, "not yet pinned"):
-            runner.assert_source_pinned_signer_policy(b"two locally selected keys\n")
-        value = b"observer ssh-ed25519 AAAA\ncommander ssh-ed25519 BBBB\n"
-        with mock.patch.object(
-            runner,
-            "TRUSTED_ALLOWED_SIGNERS_SHA256",
-            hashlib.sha256(value).hexdigest(),
-        ):
+            prepared = datetime.fromisoformat(payload["prepared_at"].replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(payload["request_expires_at"].replace("Z", "+00:00"))
+            self.assertEqual(expires - prepared, timedelta(minutes=45))
+            self.assertLessEqual(expires, prepared + timedelta(hours=1))
+            subject = json.loads(subject_output.read_text(encoding="utf-8"))
             self.assertEqual(
-                runner.assert_source_pinned_signer_policy(value),
-                hashlib.sha256(value).hexdigest(),
+                subject["bindings"]["human_approval_policy_sha256"],
+                hashlib.sha256(runner.canonical_json_bytes(enrollment.policy_payload)).hexdigest(),
             )
+            self.assertEqual(subject["bindings"]["scenario"], "RH-001")
 
     def test_approve_mode_rejects_a_caller_selected_trust_store(self):
         now = datetime.now(timezone.utc)
@@ -1455,8 +1468,11 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             expected_controller_toolchain_inventory_sha256=CONTROLLER_TOOLCHAIN_SHA256,
             campaign_journal=None,
             preflight=Path("/not/read/before/trust-check.json"),
-            observer="observer",
-            incident_commander="commander",
+            operator="matrix-executor",
+            approval=None,
+            human_approval=None,
+            human_approval_policy=Path("/tmp/caller-selected-human-policy"),
+            subject_output=Path("/not/used-subject.json"),
             reason="approved incident reason",
             change_id="CHG-1234",
             out_of_band_console="provider-console/session-1234",
@@ -1466,7 +1482,7 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             dpi_byte_budget=runner.MIN_DPI_BYTE_BUDGET,
             restore_authorized_by="incident-owner",
             output=Path("/not/used.json"),
-            allowed_signers=Path("/tmp/caller-selected-allowed-signers"),
+            artifact_dir=None,
         )
         with (
             mock.patch.object(runner, "parse_args", return_value=args),
@@ -1474,35 +1490,14 @@ class WriterWitnessRealHostMatrixAdversarialTests(unittest.TestCase):
             mock.patch.object(runner.controller_runtime, "assert_runtime"),
             mock.patch.dict(
                 os.environ,
-                {runner.OBSERVER_CONFIRM_ENV: runner.OBSERVER_CONFIRM_VALUE},
+                {
+                    runner.APPROVAL_REQUEST_CONFIRM_ENV:
+                    runner.APPROVAL_REQUEST_CONFIRM_VALUE
+                },
             ),
-            self.assertRaisesRegex(runner.MatrixError, "canonical trusted signer"),
+            self.assertRaisesRegex(runner.MatrixError, "canonical human approval policy"),
         ):
             runner.main()
-
-    def test_signature_verification_uses_one_immutable_byte_snapshot(self):
-        approval_raw = b'{"approval":"snapshot-a"}\n'
-        signature_raw = b"snapshot-signature"
-        allowed_raw = b"observer ssh-ed25519 AAAAC3NzaSnapshot\n"
-        observed: dict[str, object] = {}
-
-        def inspect_run(args, *, input, capture_output, pass_fds, env):
-            observed["args"] = args
-            observed["input"] = input
-            observed["fd_bytes"] = tuple(
-                os.pread(descriptor, 1_048_576, 0) for descriptor in pass_fds
-            )
-            return subprocess.CompletedProcess(args, 0, b"", b"")
-
-        with mock.patch.object(runner.subprocess, "run", side_effect=inspect_run):
-            runner.verify_approval_signature(
-                approval_raw,
-                signature_raw,
-                identity="observer",
-                allowed_signers_raw=allowed_raw,
-            )
-        self.assertEqual(observed["input"], approval_raw)
-        self.assertEqual(observed["fd_bytes"], (allowed_raw, signature_raw))
 
     def test_secure_reader_rejects_symlink_and_hardlink_inputs(self):
         with tempfile.TemporaryDirectory(prefix="matrix-secure-read-") as directory:

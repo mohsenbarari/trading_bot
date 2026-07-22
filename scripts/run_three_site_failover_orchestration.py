@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the closed, dual-approved failover saga for the isolated staging domain."""
+"""Run the closed, action-approved failover saga for the isolated staging domain."""
 
 from __future__ import annotations
 
@@ -24,14 +24,14 @@ from core.dr_failover_orchestrator import (
     parse_plan,
     run_orchestration,
     validate_plan_freshness,
-    verify_two_person_approvals,
+    verify_human_failover_approval,
 )
 from core.dr_operation_ledger import WitnessOperationLedger
 from core.dr_staging_operation_backend import (
     StagingTypedOperationBackend,
     load_staging_backend_config,
 )
-from core.secure_file_io import read_secure_text
+from core.secure_file_io import read_secure_text, verify_hash_chained_jsonl
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -60,10 +60,25 @@ def confirmation_phrase(operation_id: str, plan_hash: str) -> str:
     return f"orchestrate-staging-failover:{operation_id}:{plan_hash}"
 
 
+def _journal_proves_operation_started(path: Path, plan: Any) -> bool:
+    """Permit historical approval only after this exact operation was reserved."""
+
+    if not path.exists():
+        return False
+    records = verify_hash_chained_jsonl(path, label="failover journal")
+    return any(
+        record.get("event") == "dr.orchestration.operation_reserved"
+        and record.get("operation_id") == plan.operation_id
+        and record.get("plan_hash") == plan.plan_hash
+        for record in records
+    )
+
+
 def prepare(args: argparse.Namespace):  # noqa: ANN202
     plan = parse_plan(_strict_json(args.plan, "orchestration plan"))
-    policy = load_approver_policy(args.approver_policy)
-    verify_two_person_approvals(plan, policy)
+    policy = load_approver_policy(args.human_approval_policy)
+    operation_started = _journal_proves_operation_started(args.journal, plan)
+    verify_human_failover_approval(plan, policy, require_fresh=not operation_started)
     operations = load_typed_operation_manifest(args.command_manifest, plan=plan)
     config = load_staging_backend_config(
         args.backend_config,
@@ -71,8 +86,8 @@ def prepare(args: argparse.Namespace):  # noqa: ANN202
         inventory_approval=_strict_json(
             args.inventory_approval, "staging inventory approval"
         ),
-        inventory_signer_policy=_strict_json(
-            args.inventory_signer_policy, "staging inventory signer policy"
+        inventory_approval_policy=_strict_json(
+            args.inventory_approval_policy, "staging human approval policy"
         ),
     )
     backend = StagingTypedOperationBackend(config)
@@ -115,11 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", required=True, type=Path)
     parser.add_argument("--command-manifest", required=True, type=Path)
-    parser.add_argument("--approver-policy", required=True, type=Path)
+    parser.add_argument("--human-approval-policy", required=True, type=Path)
     parser.add_argument("--backend-config", required=True, type=Path)
     parser.add_argument("--inventory", required=True, type=Path)
     parser.add_argument("--inventory-approval", required=True, type=Path)
-    parser.add_argument("--inventory-signer-policy", required=True, type=Path)
+    parser.add_argument("--inventory-approval-policy", required=True, type=Path)
     parser.add_argument("--journal", required=True, type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")

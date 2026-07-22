@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -10,22 +9,23 @@ import tempfile
 import unittest
 from uuid import uuid4
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from core.dr_event_protocol import canonical_json_bytes
+from core.human_approval import approval_subject
+from core.human_approval_issuer import (
+    authenticate_and_issue,
+    create_enrollment,
+    totp_code,
+)
 from core.three_site_execution_safety import (
     DEDICATED_HOST_DESTRUCTIVE,
     SHARED_HOST_SAFE,
 )
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
-    POLICY_SCHEMA,
     scenarios_for_execution_class,
     scenario_catalog_sha256,
 )
 from core.three_site_full_matrix_gate import (
-    AGGREGATE_APPROVAL_SCHEMA,
     AGGREGATE_SCHEMA,
     GateDAggregateError,
     verify_component_report,
@@ -102,28 +102,16 @@ def _component(execution_class: str, gate_group_id: str) -> dict:
 
 
 def _policy():  # noqa: ANN202
-    keys = [Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()]
-    policy = {
-        "schema": POLICY_SCHEMA,
-        "policy_id": str(uuid4()),
-        "release_sha": RELEASE,
-        "minimum_approvals": 2,
-        "signers": [
-            {
-                "operator": f"operator-{number}",
-                "key_id": f"key-{number}",
-                "custody_domain": f"device-{number}",
-                "public_key": base64.b64encode(
-                    key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-                ).decode(),
-            }
-            for number, key in enumerate(keys, 1)
-        ],
-    }
-    return policy, keys
+    enrollment = create_enrollment(
+        operator="operator-1",
+        password="test gate approval passphrase",
+        now=datetime.now(timezone.utc),
+        scrypt_n=2**14,
+    )
+    return enrollment.policy_payload, enrollment
 
 
-def _aggregate(shared: dict, destructive: dict, policy: dict, keys) -> dict:  # noqa: ANN001
+def _aggregate(shared: dict, destructive: dict, policy: dict, enrollment) -> dict:  # noqa: ANN001
     summaries = {}
     for report in (shared, destructive):
         verified = verify_component_report(report)
@@ -154,23 +142,42 @@ def _aggregate(shared: dict, destructive: dict, policy: dict, keys) -> dict:  # 
     digest = hashlib.sha256(
         canonical_json_bytes({key: item for key, item in value.items() if key != "approvals"})
     ).hexdigest()
-    value["approvals"] = [
-        {
-            "operator": f"operator-{number}",
-            "key_id": f"key-{number}",
-            "signature": base64.b64encode(key.sign(digest.encode("ascii"))).decode(),
-        }
-        for number, key in enumerate(keys, 1)
-    ]
+    subject = approval_subject(
+        artifact_type=AGGREGATE_SCHEMA,
+        artifact_sha256=digest,
+        release_sha=RELEASE,
+        bindings={
+            "gate_group_id": shared["gate_group_id"],
+            "component_report_hashes": {
+                name: value["component_reports"][name]["report_hash"]
+                for name in sorted(value["component_reports"])
+            },
+        },
+    )
+    token, _state, _audit = authenticate_and_issue(
+        secrets_payload=enrollment.secrets_payload,
+        state_payload=enrollment.state_payload,
+        policy_payload=enrollment.policy_payload,
+        private_key_envelope=enrollment.private_key_envelope,
+        password="test gate approval passphrase",
+        totp=totp_code(enrollment.totp_secret, at=now)[1],
+        recovery_code=None,
+        action="approve_gate_d",
+        environment="staging",
+        subject=subject,
+        ttl_seconds=600,
+        now=now,
+    )
+    value["approvals"] = [token]
     return value
 
 
 class ThreeSiteFullMatrixGateTests(unittest.TestCase):
-    def test_builder_binds_both_reports_and_finalizes_dual_approval(self):
+    def test_builder_binds_both_reports_and_finalizes_human_approval(self):
         group = str(uuid4())
         shared = _component(SHARED_HOST_SAFE, group)
         destructive = _component(DEDICATED_HOST_DESTRUCTIVE, group)
-        policy, keys = _policy()
+        policy, enrollment = _policy()
         with tempfile.TemporaryDirectory() as raw_root:
             root = Path(raw_root)
 
@@ -192,29 +199,28 @@ class ThreeSiteFullMatrixGateTests(unittest.TestCase):
                     approval_request_output=request,
                 )
             )
-            approvals = []
-            for number, key in enumerate(keys, 1):
-                approvals.append(
-                    write(
-                        f"approval-{number}.json",
-                        {
-                            "schema": AGGREGATE_APPROVAL_SCHEMA,
-                            "gate_group_id": group,
-                            "release_sha": RELEASE,
-                            "aggregate_hash": prepared["aggregate_hash"],
-                            "operator": f"operator-{number}",
-                            "key_id": f"key-{number}",
-                            "signature": base64.b64encode(
-                                key.sign(prepared["aggregate_hash"].encode("ascii"))
-                            ).decode(),
-                        },
-                    )
-                )
+            subject = json.loads(request.read_text())
+            issued_at = datetime.now(timezone.utc)
+            token, _state, _audit = authenticate_and_issue(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password="test gate approval passphrase",
+                totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
+                recovery_code=None,
+                action="approve_gate_d",
+                environment="staging",
+                subject=subject,
+                ttl_seconds=600,
+                now=issued_at,
+            )
+            approval = write("approval.json", token)
             result = finalize(
                 argparse.Namespace(
                     draft=draft,
                     approver_policy=root / "policy.json",
-                    approval=approvals,
+                    approval=approval,
                     output=root / "approved.json",
                 )
             )
@@ -225,10 +231,10 @@ class ThreeSiteFullMatrixGateTests(unittest.TestCase):
         group = str(uuid4())
         shared = _component(SHARED_HOST_SAFE, group)
         destructive = _component(DEDICATED_HOST_DESTRUCTIVE, group)
-        policy, keys = _policy()
+        policy, enrollment = _policy()
 
         result = verify_gate_d_aggregate(
-            _aggregate(shared, destructive, policy, keys),
+            _aggregate(shared, destructive, policy, enrollment),
             approver_policy=policy,
         )
 
@@ -246,13 +252,13 @@ class ThreeSiteFullMatrixGateTests(unittest.TestCase):
         group = str(uuid4())
         shared = _component(SHARED_HOST_SAFE, group)
         destructive = _component(DEDICATED_HOST_DESTRUCTIVE, str(uuid4()))
-        policy, keys = _policy()
-        aggregate = _aggregate(shared, destructive, policy, keys)
+        policy, enrollment = _policy()
+        aggregate = _aggregate(shared, destructive, policy, enrollment)
         with self.assertRaisesRegex(GateDAggregateError, "group/lineage"):
             verify_gate_d_aggregate(aggregate, approver_policy=policy)
 
         destructive = _component(DEDICATED_HOST_DESTRUCTIVE, group)
-        aggregate = _aggregate(shared, destructive, policy, keys)
+        aggregate = _aggregate(shared, destructive, policy, enrollment)
         del aggregate["component_reports"][DEDICATED_HOST_DESTRUCTIVE]
         with self.assertRaisesRegex(GateDAggregateError, "both execution classes"):
             verify_gate_d_aggregate(aggregate, approver_policy=policy)

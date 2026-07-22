@@ -49,11 +49,15 @@ ROLLBACK_STATE_MANIFEST_SHA256 = (
 
 SOURCE_GATE = ROOT / "scripts/run_writer_witness_preflight_source_gate.sh"
 PINNED_SOURCE_PATHS = (
+    "core/canonical_json.py",
+    "core/human_approval.py",
+    "core/human_approval_issuer.py",
     "core/secure_file_io.py",
     "scripts/build_writer_witness_release.sh",
     "scripts/build_writer_witness_wheelhouse.sh",
     "scripts/generate_writer_witness_command_surfaces.py",
     "scripts/hold_writer_witness_package_locks.py",
+    "scripts/manage_three_site_human_approval.py",
     "scripts/plan_writer_witness_real_host_matrix.py",
     "scripts/publish_wa_ir_object_storage_preflight.py",
     "scripts/publish_wa_ir_object_storage_transfer.py",

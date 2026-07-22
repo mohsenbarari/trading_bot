@@ -16,7 +16,7 @@ from scripts.publish_three_site_staging_seed import (
     build_plan,
     execute,
 )
-from scripts.verify_three_site_staging_inventory import verify_signed_inventory
+from scripts.verify_three_site_staging_inventory import verify_approved_inventory
 from tests.test_three_site_staging_signed_inventory import _inventory, _signed_documents
 
 
@@ -86,10 +86,10 @@ class PublishThreeSiteStagingSeedTests(unittest.TestCase):
         inventory = _inventory()
         now = datetime.now(timezone.utc)
         policy, approval = _signed_documents(inventory, now)
-        inventory_result = verify_signed_inventory(
+        inventory_result = verify_approved_inventory(
             inventory,
             approval=approval,
-            signer_policy=policy,
+            approval_policy=policy,
             host_destructive=True,
             now=now,
         )

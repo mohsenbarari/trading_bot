@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare/finalize the dual-approved aggregate of both Gate D campaigns."""
+"""Prepare/finalize the action-approved aggregate of both Gate D campaigns."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.canonical_json import canonical_json_bytes
+from core.human_approval import approval_subject
 from core.secure_file_io import write_secure_atomic_bytes
 from core.three_site_execution_safety import (
     DEDICATED_HOST_DESTRUCTIVE,
@@ -23,15 +24,11 @@ from core.three_site_execution_safety import (
 )
 from core.three_site_full_matrix_campaign import _policy, secure_json
 from core.three_site_full_matrix_gate import (
-    AGGREGATE_APPROVAL_SCHEMA,
     AGGREGATE_SCHEMA,
     GateDAggregateError,
     verify_component_report,
     verify_gate_d_aggregate,
 )
-
-
-APPROVAL_REQUEST_SCHEMA = "three-site-staging-gate-d-aggregate-approval-request-v1"
 
 
 def _summary(report: dict[str, Any]) -> dict[str, Any]:
@@ -95,19 +92,18 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     }
     unsigned = {key: value for key, value in aggregate.items() if key != "approvals"}
     aggregate_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    request = {
-        "schema": APPROVAL_REQUEST_SCHEMA,
-        "gate_group_id": aggregate["gate_group_id"],
-        "release_sha": aggregate["release_sha"],
-        "aggregate_hash": aggregate_hash,
-        "component_report_hashes": {
-            name: component["report_hash"]
-            for name, component in aggregate["component_reports"].items()
+    request = approval_subject(
+        artifact_type=AGGREGATE_SCHEMA,
+        artifact_sha256=aggregate_hash,
+        release_sha=aggregate["release_sha"],
+        bindings={
+            "gate_group_id": aggregate["gate_group_id"],
+            "component_report_hashes": {
+                name: aggregate["component_reports"][name]["report_hash"]
+                for name in sorted(aggregate["component_reports"])
+            },
         },
-        "approver_policy_hash": policy_hash,
-        "signature_payload_encoding": "lowercase-hex-ascii",
-        "signature_payload": aggregate_hash,
-    }
+    )
     write_secure_atomic_bytes(
         args.draft_output,
         canonical_json_bytes(aggregate) + b"\n",
@@ -121,7 +117,7 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         mode=0o600,
     )
     return {
-        "status": "awaiting_two_approvals",
+        "status": "awaiting_password_totp_approval",
         "gate_group_id": aggregate["gate_group_id"],
         "release_sha": aggregate["release_sha"],
         "aggregate_hash": aggregate_hash,
@@ -138,33 +134,9 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     aggregate = secure_json(args.draft, label="Gate D draft aggregate")
     if aggregate.get("approvals") != []:
         raise GateDAggregateError("Gate D draft must not already contain approvals")
-    unsigned = {key: value for key, value in aggregate.items() if key != "approvals"}
-    aggregate_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    approvals: list[dict[str, str]] = []
-    for path in args.approval:
-        value = secure_json(path, label="Gate D aggregate approval")
-        if (
-            set(value)
-            != {
-                "schema", "gate_group_id", "release_sha", "aggregate_hash",
-                "operator", "key_id", "signature",
-            }
-            or value.get("schema") != AGGREGATE_APPROVAL_SCHEMA
-            or value.get("gate_group_id") != aggregate.get("gate_group_id")
-            or value.get("release_sha") != aggregate.get("release_sha")
-            or value.get("aggregate_hash") != aggregate_hash
-        ):
-            raise GateDAggregateError("Gate D approval is for another aggregate")
-        approvals.append(
-            {
-                "operator": value["operator"],
-                "key_id": value["key_id"],
-                "signature": value["signature"],
-            }
-        )
-    if len(approvals) != 2:
-        raise GateDAggregateError("exactly two Gate D approval files are required")
-    aggregate["approvals"] = approvals
+    aggregate["approvals"] = [
+        secure_json(args.approval, label="Gate D human approval")
+    ]
     policy = secure_json(args.approver_policy, label="Gate D approver policy")
     verified = verify_gate_d_aggregate(aggregate, approver_policy=policy)
     write_secure_atomic_bytes(
@@ -180,6 +152,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     return verify_gate_d_aggregate(
         secure_json(args.aggregate, label="approved Gate D aggregate"),
         approver_policy=secure_json(args.approver_policy, label="Gate D approver policy"),
+        require_fresh_approval=False,
     )
 
 
@@ -196,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     finalize_parser = subparsers.add_parser("finalize")
     finalize_parser.add_argument("--draft", type=Path, required=True)
     finalize_parser.add_argument("--approver-policy", type=Path, required=True)
-    finalize_parser.add_argument("--approval", type=Path, action="append", default=[])
+    finalize_parser.add_argument("--approval", type=Path, required=True)
     finalize_parser.add_argument("--output", type=Path, required=True)
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("--aggregate", type=Path, required=True)

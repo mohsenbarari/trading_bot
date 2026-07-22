@@ -53,7 +53,7 @@ AGE_RECIPIENT_RE = re.compile(r"^age1[0-9a-z]+$")
 REQUIRED_ROLE_MATERIALS = (
     ("planned-inventory.json", 0o600),
     ("planned-inventory-approval.json", 0o600),
-    ("inventory-signers.json", 0o600),
+    ("human-approval-policy.json", 0o600),
     ("roles/webapp-ir.compose.yml", 0o640),
     ("roles/webapp-ir.env", 0o600),
     ("secrets/staging-dr-ca.crt", 0o644),

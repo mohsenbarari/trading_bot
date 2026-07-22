@@ -117,7 +117,7 @@ Lower them or increase host capacity when production headroom requires it.
 The cgroup boundary does not limit disk growth. Every role therefore also
 requires an independently mounted staging filesystem at
 `/srv/trading-bot-three-site-staging-data`. The exact filesystem UUID is part
-of signed inventory v3 and the live host snapshot verifies the mount target,
+of approved inventory v3 and the live host snapshot verifies the mount target,
 UUID, filesystem type, total capacity, and remaining capacity before Docker is
 allowed to provision the role volumes. All named Compose volumes are local
 bind volumes below that mount. If the disk is absent, the host attestation
@@ -172,22 +172,25 @@ additionally proves that directional DR secrets match only their two endpoints,
 Witness credentials match their WebApp/Witness endpoints, database credentials
 are globally distinct, and intentional WebApp session/readiness secrets match.
 
-Inventory approval is deliberately two-stage:
+Inventory approval is deliberately two-stage. Human authorization uses the
+passphrase-plus-TOTP issuer documented in
+`docs/THREE_SITE_HUMAN_APPROVAL_TOTP_RUNBOOK.md`; legacy two-device signature
+documents are rejected:
 
-1. two operators sign a `planned` inventory in which PostgreSQL system IDs are
+1. the owner approves a `planned` inventory in which PostgreSQL system IDs are
    null and all host/volume names are fixed;
 2. each target role passes `fresh-preflight`, then only its empty, staging-owned
    DB volume is provisioned (the destructive campaign additionally requires a
    fresh dedicated host for every role);
 3. `measure-provisioned` records the real PostgreSQL IDs;
-4. `finalize_three_site_staging_inventory.py` creates a new unsigned
+4. `finalize_three_site_staging_inventory.py` creates a new unapproved
    `provisioned` inventory from all four measurements;
-5. two fresh signatures over that exact inventory are mandatory before restore,
-   migration, service startup, or data movement.
+5. one fresh passphrase-plus-TOTP token over that exact provisioned inventory is
+   mandatory before restore, migration, service startup, or data movement.
 
 The multi-host transport does not pretend Docker internal networks span hosts.
 DR senders use dedicated egress networks; each TLS receiver is published only
-on its signed inventory address (`8443`, Witness `8444`); and fixed host aliases
+on its approved inventory address (`8443`, Witness `8444`); and fixed host aliases
 bind the reviewed TLS names directly to signed peer IPs. Host firewalls must
 still allow these ports only from the exact peer addresses. The role/campaign
 verifiers reject loopback template values, peer-IP drift, missing egress,
@@ -204,11 +207,11 @@ editing its journal is forbidden.
 
 The required order is:
 
-1. render and verify all four exact-SHA role bundles from a two-person-signed
+1. render and verify all four exact-SHA role bundles from an owner-approved
    `planned` inventory;
 2. pass `fresh-preflight` on each dedicated host, provision only the declared
    empty volumes, measure the four PostgreSQL system identifiers, finalize the
-   `provisioned` inventory, and obtain two fresh signatures;
+   `provisioned` inventory, and obtain a fresh exact-subject approval token;
 3. build/distribute one release, capture all four image inventories, and prove
    identical image bytes/digests for every shared image reference;
 4. freeze both legacy staging sources, retaining PostgreSQL and Redis but
@@ -221,8 +224,8 @@ The required order is:
    `VersionId`, decrypt it, and re-prove the original plaintext hash;
 7. create the migration plan binding the provisioned inventory, source-freeze
    evidence, restore-verified backups, encrypted object versions, image
-   inventories, target seed map, and rollback policy; obtain two independent
-   Ed25519 approvals within its maximum four-hour window;
+   inventories, target seed map, and rollback policy; obtain one fresh
+   passphrase-plus-TOTP approval within its maximum four-hour window;
 8. fetch and verify the target seed on each host, then execute the four local
    role journals and the cross-role barriers described below;
 9. keep CDN routing on the legacy origin until all four roles are accepted and
@@ -255,7 +258,7 @@ python3 scripts/freeze_three_site_staging_sources.py \
   --expected-source-release-sha webapp_fi=<current-staging-sha> \
   --inventory /root/secure/provisioned-inventory.json \
   --inventory-approval /root/secure/provisioned-inventory-approval.json \
-  --signer-policy /etc/trading-bot/security/staging-inventory-signers.json \
+  --approval-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --output /root/secure/source-freeze-webapp-fi.json
 ```
 
@@ -275,7 +278,7 @@ python3 scripts/run_three_site_staging_source_backup.py \
   --source-freeze-evidence /root/secure/source-freeze.json \
   --inventory /root/secure/provisioned-inventory.json \
   --inventory-approval /root/secure/provisioned-inventory-approval.json \
-  --signer-policy /etc/trading-bot/security/staging-inventory-signers.json \
+  --approval-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --expected-source-release-sha <current-staging-sha> \
   --target-release-sha <integration-candidate-sha>
 ```
@@ -357,7 +360,7 @@ not an executable configuration. Create the real file outside Git with mode
 Arvan token, connectivity evidence, readiness key, journals, plans, and
 evidence directories owner-only.
 
-The backend is restricted to the signed provisioned inventory, release SHA,
+The backend is restricted to the approved provisioned inventory, release SHA,
 the two exact WebApp host IPs, and `app.gold-trading.ir`. It uses key-only SSH
 with strict known-host checking. SSH is only the low-volume staging management
 plane; it never transports seed or Blob payloads. Source fencing captures the
@@ -367,10 +370,10 @@ has applied that exact boundary, the predecessor Witness lease is drained and
 expired, the target acquires exactly the next epoch, and its private control
 agent proves a fresh post-acquisition renewal.
 
-Every failover package must contain a plan with two independent Ed25519
-approvals, the exact closed typed-operation manifest, the pinned approver
-policy, fresh signed connectivity evidence, and the fresh two-person-signed
-provisioned inventory. Run the command without `--apply`, review the returned
+Every failover package must contain a plan with one fresh action-bound human
+approval token, the exact closed typed-operation manifest, the pinned public
+human-approval policy, fresh machine-signed connectivity evidence, and the
+approved provisioned inventory. Run the command without `--apply`, review the returned
 operation/route/term identity and exact confirmation phrase, then repeat with
 `--apply` only inside the separately authorized Full Matrix window:
 
@@ -378,11 +381,11 @@ operation/route/term identity and exact confirmation phrase, then repeat with
 python3 scripts/run_three_site_failover_orchestration.py \
   --plan /root/secure/failover/active-plan.json \
   --command-manifest /root/secure/failover/typed-operation-manifest.json \
-  --approver-policy /etc/trading-bot/security/dr-failover-approvers.json \
+  --human-approval-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --backend-config /root/secure/failover/staging-backend.json \
   --inventory /root/secure/provisioned-inventory.json \
   --inventory-approval /root/secure/provisioned-inventory-approval.json \
-  --inventory-signer-policy /etc/trading-bot/security/staging-inventory-signers.json \
+  --inventory-approval-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --journal /root/secure/failover/operation.jsonl
 ```
 
@@ -390,7 +393,7 @@ The saga is hash-journaled and restart-aware. An expired or failed operation
 never resumes a forward step. A failure after any mutation fences both WebApp
 sites, proves zero application-role connections on both, waits for any Witness
 lease to expire, and leaves the currently observed test origin unchanged for a
-separate signed recovery decision. It does not silently restore availability
+separately approved recovery decision. It does not silently restore availability
 or change the production domain.
 
 ### Queue activation and remaining gate
@@ -421,7 +424,9 @@ inputs by SHA-256, retains one unique owner-only artifact for every scenario,
 runs zero-residue cleanup after every phase, and uses a hash-chained execution
 journal. A controller crash after `scenario_started` cannot silently continue:
 the deployment backend must first prove zero-residue recovery. A failed
-campaign is terminal and needs a newly approved campaign.
+campaign is terminal and needs a newly approved campaign. Starting a campaign
+requires one fresh `start_full_matrix` token; a proven journal resume verifies
+that same token historically and cannot start a different campaign.
 
 Customer-chain coverage is not allowed to hide behind the broad application
 regression scenario. Four closed lifecycle scenarios run while WebApp-FI is
@@ -439,7 +444,7 @@ The Queue-enabled activation SHA must be one direct commit above the reviewed
 baseline and may change only the code-owned readiness constant. The
 provisioned inventory must then be re-attested at that activation SHA; evidence
 from the baseline deployment and activation release cannot be mixed. Generate
-the transition evidence first, then prepare an unsigned campaign/approval
+the transition evidence first, then prepare an unapproved campaign/approval
 request with the builder:
 
 ```text
@@ -448,10 +453,11 @@ python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
   --activation-sha ACTIVATION_40_HEX \
   --gate-group-id ONE_GATE_D_GROUP_UUID \
   --execution-class shared-host-safe \
-  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --object-bucket EXACT_BUCKET_FROM_SIGNED_INVENTORY \
   --bound-artifact provisioned_inventory=/root/secure/matrix/inventory.json \
   --bound-artifact inventory_approval=/root/secure/matrix/inventory-approval.json \
+  --bound-artifact human_approval_policy=/etc/trading-bot/security/human-approval/human-approval-policy.json \
   --bound-artifact migration_plan=/root/secure/matrix/migration-plan.json \
   --bound-artifact migration_approval=/root/secure/matrix/migration-approval.json \
   --bound-artifact global_commit=/root/secure/matrix/global-commit.json \
@@ -463,25 +469,24 @@ python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
   --approval-request-output /root/secure/matrix/approval-request.json
 ```
 
-Two people on independent custody devices sign the exact lowercase campaign
-hash from the request. Each returns a document shaped like
-`three-site-full-matrix-approval.example.json`. Assemble and cryptographically
-verify the final campaign without manually editing it:
+The prepare step writes the exact approval subject. Transfer it through the
+private versioned Object Storage path and issue one `start_full_matrix` token
+on the Witness with `manage_three_site_human_approval.py`. Assemble and
+cryptographically verify the final campaign without manually editing it:
 
 ```text
 python3 scripts/build_three_site_staging_full_matrix_campaign.py finalize \
   --draft /root/secure/matrix/campaign.draft.json \
-  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
-  --approval /root/secure/matrix/approval-operator-1.json \
-  --approval /root/secure/matrix/approval-operator-2.json \
+  --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
+  --approval /root/secure/matrix/start-full-matrix-token.json \
   --output /root/secure/matrix/campaign.approved.json
 ```
 
-The tracked approver policy and approval files are templates only and are
-deliberately unusable. Real key material and every generated artifact stay
-outside Git with owner-only permissions. Reusing one Ed25519 public key under
-two names/custody labels is rejected across inventory, migration, failover, and
-Full Matrix approval policies.
+The tracked policy, subject, and token examples are deliberately unusable.
+Issuer secrets never leave the Witness; the generated public policy, subjects,
+tokens, and evidence remain outside Git with owner-only permissions. Every
+consumer rejects legacy two-device policies and any action, subject, policy,
+environment, release, or signature drift.
 
 `core/three_site_full_matrix_command_backend.py` and
 `scripts/run_three_site_staging_full_matrix_campaign.py` provide the concrete,
@@ -503,7 +508,7 @@ staging environment, and included in the already-bound backend config. A
 shared-host-safe driver may use an existing physical host but is forbidden from
 host reboot/power/firewall/route/Docker-daemon/storage-pressure mutation and
 from every production domain, bucket, credential, volume, process, and Compose
-project. Destructive driver operations are legal only on the signed disposable
+project. Destructive driver operations are legal only on the approved disposable
 inventory. Execute only in the separately authorized window.
 
 Prepare, approve, execute, and independently verify a second campaign with
@@ -515,26 +520,25 @@ exist, create the only artifact that can pass Gate D:
 python3 scripts/build_three_site_staging_gate_d_aggregate.py prepare \
   --shared-report /root/secure/matrix/shared/report.json \
   --destructive-report /root/secure/matrix/destructive/report.json \
-  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --draft-output /root/secure/matrix/gate-d.draft.json \
   --approval-request-output /root/secure/matrix/gate-d-approval-request.json
 
 python3 scripts/build_three_site_staging_gate_d_aggregate.py finalize \
   --draft /root/secure/matrix/gate-d.draft.json \
-  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
-  --approval /root/secure/matrix/gate-d-operator-1.json \
-  --approval /root/secure/matrix/gate-d-operator-2.json \
+  --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
+  --approval /root/secure/matrix/approve-gate-d-token.json \
   --output /root/secure/matrix/gate-d.approved.json
 
 python3 scripts/build_three_site_staging_gate_d_aggregate.py verify \
   --aggregate /root/secure/matrix/gate-d.approved.json \
-  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json
+  --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json
 ```
 
 The aggregate verifier rejects a missing class, overlapping catalog, different
 release/group, reused campaign, altered report hash, skipped scenario, residue,
-or any production mutation. It requires two fresh independent signatures over
-both component report hashes.
+or any production mutation. It requires one fresh `approve_gate_d` token bound
+to both exact component report hashes.
 
 Synchronization timing is not inferred from scenario wall-clock duration.
 Migration head `b986c7d8e0f1` retains the first delivery attempt, rejects any
@@ -605,7 +609,7 @@ placeholder is forbidden.
 THREE_SITE_STAGING_FULL_MATRIX_CONFIRM=execute-authoritative-three-site-staging-full-matrix \
 python3 scripts/run_three_site_staging_full_matrix_campaign.py execute \
   --campaign /root/secure/matrix/campaign.approved.json \
-  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
   --backend-config /root/secure/matrix/full-matrix-backend.json \
   --artifact-root /root/secure/matrix/evidence \
   --journal /root/secure/matrix/evidence/campaign.jsonl \

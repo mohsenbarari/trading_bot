@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -14,10 +12,13 @@ import stat
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from core.canonical_json import canonical_json_bytes
+from core.human_approval import (
+    HumanApprovalPolicy,
+    approval_subject,
+    load_human_approval_policy,
+    verify_human_approval,
+)
 from core.secure_file_io import (
     read_secure_text,
     sha256_secure_file,
@@ -37,7 +38,6 @@ from core.three_site_execution_safety import (
 
 
 CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v2"
-POLICY_SCHEMA = "three-site-staging-full-matrix-approver-policy-v1"
 PHASE_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-phase-v1"
 SCENARIO_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-scenario-v2"
 OPERATION_EVIDENCE_SCHEMA = "three-site-staging-full-matrix-operation-v1"
@@ -461,7 +461,7 @@ BOUND_ARTIFACTS = frozenset(
     {
         "provisioned_inventory",
         "inventory_approval",
-        "inventory_signer_policy",
+        "human_approval_policy",
         "migration_plan",
         "migration_approval",
         "source_freeze_bot_fi",
@@ -536,49 +536,23 @@ def _matrix_operation_id(
     return str(uuid5(NAMESPACE_URL, material))
 
 
-def _policy(payload: dict[str, Any], *, release_sha: str) -> tuple[dict[str, tuple[str, str, bytes]], str]:
-    fields = {"schema", "policy_id", "release_sha", "minimum_approvals", "signers"}
-    if (
-        set(payload) != fields
-        or payload.get("schema") != POLICY_SCHEMA
-        or payload.get("release_sha") != release_sha
-        or payload.get("minimum_approvals") != 2
-        or not isinstance(payload.get("signers"), list)
-    ):
-        raise FullMatrixCampaignError("Full Matrix approver policy is invalid")
+def _policy(
+    payload: dict[str, Any], *, release_sha: str
+) -> tuple[HumanApprovalPolicy, str]:
+    # ``release_sha`` remains in the call signature so campaign builders must
+    # still supply their exact lineage.  The reusable public policy is not
+    # release-specific; every issued token is bound to the exact release in its
+    # signed subject.
+    if SHA40.fullmatch(str(release_sha)) is None:
+        raise FullMatrixCampaignError("Full Matrix release SHA is invalid")
     try:
-        UUID(str(payload["policy_id"]))
-    except ValueError as exc:
-        raise FullMatrixCampaignError("Full Matrix policy_id is invalid") from exc
-    result: dict[str, tuple[str, str, bytes]] = {}
-    operators: set[str] = set()
-    custody: set[str] = set()
-    public_keys: set[bytes] = set()
-    for item in payload["signers"]:
-        if not isinstance(item, dict) or set(item) != {
-            "operator", "key_id", "custody_domain", "public_key"
-        }:
-            raise FullMatrixCampaignError("Full Matrix signer fields are invalid")
-        operator = str(item["operator"]).strip()
-        key_id = str(item["key_id"]).strip()
-        domain = str(item["custody_domain"]).strip()
-        try:
-            public_key = base64.b64decode(str(item["public_key"]), validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise FullMatrixCampaignError("Full Matrix signer key is invalid") from exc
-        if (
-            not operator or operator in operators or not key_id or key_id in result
-            or not domain or domain in custody or len(public_key) != 32
-            or public_key in public_keys
-        ):
-            raise FullMatrixCampaignError("Full Matrix signers are not independent")
-        result[key_id] = (operator, domain, public_key)
-        operators.add(operator)
-        custody.add(domain)
-        public_keys.add(public_key)
-    if len(result) < 2:
-        raise FullMatrixCampaignError("Full Matrix policy needs two independent signers")
-    return result, hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+        policy = load_human_approval_policy(payload)
+    except Exception as exc:
+        raise FullMatrixCampaignError("Full Matrix human approval policy is invalid") from exc
+    action = policy.actions.get("start_full_matrix")
+    if action is None or "staging" not in action.environments:
+        raise FullMatrixCampaignError("Full Matrix action is absent from human approval policy")
+    return policy, policy.policy_hash
 
 
 def verify_campaign(
@@ -587,6 +561,7 @@ def verify_campaign(
     approver_policy: dict[str, Any],
     now: datetime | None = None,
     allow_expired_for_safe_cleanup: bool = False,
+    require_fresh_approval: bool = True,
 ) -> dict[str, Any]:
     fields = {
         "schema", "campaign_id", "gate_group_id", "execution_class",
@@ -658,38 +633,36 @@ def verify_campaign(
         or expires - generated > timedelta(hours=72)
     ):
         raise FullMatrixCampaignError("Full Matrix campaign is expired or too long")
-    signers, policy_hash = _policy(approver_policy, release_sha=release)
+    _approval_policy, policy_hash = _policy(approver_policy, release_sha=release)
     if campaign["approver_policy_hash"] != policy_hash:
-        raise FullMatrixCampaignError("Full Matrix campaign is not bound to approver policy")
+        raise FullMatrixCampaignError("Full Matrix campaign is not bound to human approval policy")
     approvals = campaign["approvals"]
-    if not isinstance(approvals, list) or len(approvals) != 2:
-        raise FullMatrixCampaignError("Full Matrix campaign needs exactly two approvals")
+    if not isinstance(approvals, list) or len(approvals) != 1:
+        raise FullMatrixCampaignError("Full Matrix campaign needs exactly one human approval")
     unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
     campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    used_operators: set[str] = set()
-    used_domains: set[str] = set()
-    for approval in approvals:
-        if not isinstance(approval, dict) or set(approval) != {
-            "operator", "key_id", "signature"
-        }:
-            raise FullMatrixCampaignError("Full Matrix approval fields are invalid")
-        key_id = str(approval["key_id"])
-        signer = signers.get(key_id)
-        operator = str(approval["operator"])
-        if (
-            signer is None or operator != signer[0] or operator in used_operators
-            or signer[1] in used_domains
-        ):
-            raise FullMatrixCampaignError("Full Matrix approvals are not independent")
-        try:
-            signature = base64.b64decode(str(approval["signature"]), validate=True)
-            Ed25519PublicKey.from_public_bytes(signer[2]).verify(
-                signature, campaign_hash.encode("ascii")
-            )
-        except (ValueError, binascii.Error, InvalidSignature) as exc:
-            raise FullMatrixCampaignError("Full Matrix approval signature is invalid") from exc
-        used_operators.add(operator)
-        used_domains.add(signer[1])
+    subject = approval_subject(
+        artifact_type=CAMPAIGN_SCHEMA,
+        artifact_sha256=campaign_hash,
+        release_sha=release,
+        bindings={
+            "campaign_id": campaign_id,
+            "gate_group_id": gate_group_id,
+            "execution_class": execution_class,
+        },
+    )
+    try:
+        verified_approval = verify_human_approval(
+            approvals[0],
+            policy_payload=approver_policy,
+            expected_action="start_full_matrix",
+            expected_environment="staging",
+            expected_subject=subject,
+            now=now,
+            require_fresh=require_fresh_approval,
+        )
+    except Exception as exc:
+        raise FullMatrixCampaignError("Full Matrix human approval is invalid") from exc
     return {
         "status": "approved",
         "campaign_id": campaign_id,
@@ -700,6 +673,8 @@ def verify_campaign(
         "activation_sha": activation,
         "repetitions": campaign["repetitions"],
         "expires_at": expires.isoformat(),
+        "approval_id": verified_approval.approval_id,
+        "approved_by": verified_approval.operator,
     }
 
 
@@ -1256,6 +1231,7 @@ def verify_complete_matrix(
         approver_policy=approver_policy,
         now=now,
         allow_expired_for_safe_cleanup=True,
+        require_fresh_approval=False,
     )
     _validate_artifact_root(artifact_root)
     bindings = verify_bound_artifacts(campaign, bound_artifacts)

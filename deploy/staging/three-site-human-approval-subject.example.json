@@ -1,0 +1,11 @@
+{
+  "artifact_type": "three-site-staging-inventory-v3",
+  "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "release_sha": "0000000000000000000000000000000000000000",
+  "bindings": {
+    "campaign_id": "00000000-0000-4000-8000-000000000000",
+    "deployment_id": "replace-with-exact-deployment-id",
+    "host_safety_mode": "shared-host-safe",
+    "inventory_stage": "provisioned"
+  }
+}

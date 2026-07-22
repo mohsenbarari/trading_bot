@@ -10,6 +10,7 @@ docs/*
 !docs/messenger-surface-manifest.json
 !docs/messenger-surface-report.md
 !docs/PRODUCTION_DEPLOYMENT_ONLINE.md
+!docs/THREE_SITE_HUMAN_APPROVAL_TOTP_RUNBOOK.md
 .env
 .env.staging
 .env.staging.*

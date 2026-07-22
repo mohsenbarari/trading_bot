@@ -395,7 +395,7 @@ def _service_observation(
         ["/usr/bin/docker", "inspect", "--format", "{{.Image}}", container]
     )
     if image_id != expected_image_id:
-        raise ObservationError(f"required service image differs from signed inventory: {service}")
+        raise ObservationError(f"required service image differs from approved inventory: {service}")
     restart_count = int(
         _run(
             [
@@ -539,7 +539,7 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
         reference = str(service_config.get("image", "")) if isinstance(service_config, dict) else ""
         expected_image_id = image_result["image_ids"].get(reference)
         if not reference or expected_image_id is None:
-            raise ObservationError(f"service image is absent from signed inventory: {service}")
+            raise ObservationError(f"service image is absent from approved inventory: {service}")
         services.append(
             _service_observation(
                 args, service,

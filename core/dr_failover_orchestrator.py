@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -14,10 +12,8 @@ import secrets
 from typing import Any, Protocol
 from uuid import UUID
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from core.dr_event_protocol import canonical_json_bytes
+from core.human_approval import approval_subject, load_human_approval_policy, verify_human_approval
 from core.runtime_sites import SITE_WEBAPP_FI, SITE_WEBAPP_IR
 from core.secure_file_io import append_hash_chained_jsonl, read_secure_text, verify_hash_chained_jsonl
 
@@ -36,8 +32,9 @@ STEPS = (
 SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 MAX_PLAN_LIFETIME = timedelta(minutes=15)
 MAX_PLAN_FUTURE_SKEW = timedelta(seconds=30)
-PINNED_APPROVER_POLICY_PATH = Path("/etc/trading-bot/security/dr-failover-approvers.json")
-APPROVER_POLICY_SCHEMA = "three-site-failover-approver-policy-v1"
+PINNED_APPROVER_POLICY_PATH = Path(
+    "/etc/trading-bot/security/human-approval/human-approval-policy.json"
+)
 
 
 class DrOrchestrationError(RuntimeError):
@@ -65,7 +62,7 @@ class FailoverPlan:
     readiness_hash: str
     command_manifest_hash: str
     approver_policy_hash: str
-    approvals: tuple[dict[str, str], ...]
+    approvals: tuple[dict[str, Any], ...]
     plan_hash: str
 
 
@@ -91,28 +88,12 @@ class OrchestrationAdapter(Protocol):
     ) -> dict[str, Any]: ...
 
 
-@dataclass(frozen=True)
-class ApprovedSigner:
-    operator: str
-    key_id: str
-    custody_domain: str
-    public_key: bytes
-
-
-@dataclass(frozen=True)
-class ApproverPolicy:
-    policy_id: str
-    release_sha: str
-    signers: dict[str, ApprovedSigner]
-    policy_hash: str
-
-
 class OperationLedger(Protocol):
     async def reserve(self, plan: FailoverPlan) -> dict[str, Any]: ...
     async def finalize(self, plan: FailoverPlan, *, outcome: str, evidence_hash: str) -> dict[str, Any]: ...
 
 
-def parse_plan(payload: Any) -> FailoverPlan:
+def parse_plan(payload: Any, *, require_approval: bool = True) -> FailoverPlan:
     expected = {
         "schema", "operation_id", "operation_nonce", "generated_at", "expires_at",
         "action", "source_site", "target_site",
@@ -211,8 +192,11 @@ def parse_plan(payload: Any) -> FailoverPlan:
     if not re.fullmatch(r"[0-9a-f]{64}", approver_policy_hash):
         raise DrOrchestrationError("approver policy hash is malformed")
     approvals = payload["approvals"]
-    if not isinstance(approvals, list) or len(approvals) != 2:
-        raise DrOrchestrationError("exactly two approvals are required")
+    expected_approval_count = 1 if require_approval else 0
+    if not isinstance(approvals, list) or len(approvals) != expected_approval_count:
+        raise DrOrchestrationError(
+            "failover plan has an invalid human approval count"
+        )
     unsigned = {key: value for key, value in payload.items() if key != "approvals"}
     plan_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
     return FailoverPlan(
@@ -260,85 +244,68 @@ def validate_plan_freshness(plan: FailoverPlan, *, now: datetime | None = None) 
         raise DrOrchestrationError("orchestration plan has expired")
 
 
-def load_approver_policy(path: Path = PINNED_APPROVER_POLICY_PATH) -> ApproverPolicy:
+def failover_approval_subject(plan: FailoverPlan) -> dict[str, Any]:
+    return approval_subject(
+        artifact_type=ORCHESTRATION_SCHEMA,
+        artifact_sha256=plan.plan_hash,
+        release_sha=plan.release_sha,
+        bindings={
+            "operation_id": plan.operation_id,
+            "operation_nonce": plan.operation_nonce,
+            "source_site": plan.source_site,
+            "target_site": plan.target_site,
+            "expected_epoch": plan.expected_epoch,
+            "target_epoch": plan.target_epoch,
+            "readiness_hash": plan.readiness_hash,
+            "command_manifest_hash": plan.command_manifest_hash,
+        },
+    )
+
+
+def load_approver_policy(path: Path = PINNED_APPROVER_POLICY_PATH) -> dict[str, Any]:
     try:
         payload = __import__("json").loads(
             read_secure_text(path, label="failover approver policy", max_size=64 * 1024)
         )
     except Exception as exc:
         raise DrOrchestrationError("failover approver policy is invalid") from exc
-    if not isinstance(payload, dict) or set(payload) != {
-        "schema", "policy_id", "release_sha", "minimum_approvals", "signers"
-    } or payload["schema"] != APPROVER_POLICY_SCHEMA or payload["minimum_approvals"] != 2:
-        raise DrOrchestrationError("failover approver policy fields/schema are invalid")
     try:
-        policy_id = str(UUID(str(payload["policy_id"])))
-    except ValueError as exc:
-        raise DrOrchestrationError("failover approver policy id is invalid") from exc
-    release_sha = str(payload["release_sha"]).lower()
-    if not SHA_RE.fullmatch(release_sha) or not isinstance(payload["signers"], list):
-        raise DrOrchestrationError("failover approver policy release/signers are invalid")
-    signers: dict[str, ApprovedSigner] = {}
-    operators: set[str] = set()
-    custody_domains: set[str] = set()
-    public_keys: set[bytes] = set()
-    for raw in payload["signers"]:
-        if not isinstance(raw, dict) or set(raw) != {
-            "operator", "key_id", "custody_domain", "public_key"
-        }:
-            raise DrOrchestrationError("failover signer policy fields are invalid")
-        operator = str(raw["operator"])
-        key_id = str(raw["key_id"])
-        custody = str(raw["custody_domain"])
-        try:
-            public_key = base64.b64decode(str(raw["public_key"]), validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise DrOrchestrationError("failover signer public key is invalid") from exc
-        if (
-            not operator or operator in operators or not key_id or key_id in signers
-            or not custody or custody in custody_domains or len(public_key) != 32
-            or public_key in public_keys
-        ):
-            raise DrOrchestrationError("failover signer identities/custody are not independent")
-        signers[key_id] = ApprovedSigner(operator, key_id, custody, public_key)
-        operators.add(operator)
-        custody_domains.add(custody)
-        public_keys.add(public_key)
-    if len(signers) < 2:
-        raise DrOrchestrationError("failover approver policy needs two independent signers")
-    policy_hash = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
-    return ApproverPolicy(policy_id, release_sha, signers, policy_hash)
+        policy = load_human_approval_policy(payload)
+    except Exception as exc:
+        raise DrOrchestrationError("failover human approval policy is invalid") from exc
+    for action_name in ("promote_ir", "failback_fi"):
+        action = policy.actions.get(action_name)
+        if action is None or "staging" not in action.environments:
+            raise DrOrchestrationError("failover action is absent from human approval policy")
+    return payload
 
 
-def verify_two_person_approvals(plan: FailoverPlan, policy: ApproverPolicy) -> None:
-    if (
-        policy.policy_hash != plan.approver_policy_hash
-        or policy.release_sha != plan.release_sha
-    ):
-        raise DrOrchestrationError("approver policy is not pinned to the approved plan/release")
-    operators: set[str] = set()
-    key_ids: set[str] = set()
-    custody_domains: set[str] = set()
-    message = plan.plan_hash.encode("ascii")
-    for approval in plan.approvals:
-        if set(approval) != {"operator", "key_id", "signature"}:
-            raise DrOrchestrationError("approval fields are invalid")
-        operator = str(approval["operator"]).strip()
-        key_id = str(approval["key_id"]).strip()
-        signer = policy.signers.get(key_id)
-        if (
-            signer is None or operator != signer.operator or operator in operators
-            or key_id in key_ids or signer.custody_domain in custody_domains
-        ):
-            raise DrOrchestrationError("approvals are not from two distinct authorized operators")
-        try:
-            public_key = Ed25519PublicKey.from_public_bytes(signer.public_key)
-            public_key.verify(base64.b64decode(approval["signature"], validate=True), message)
-        except (ValueError, binascii.Error, InvalidSignature) as exc:
-            raise DrOrchestrationError("approval signature is invalid") from exc
-        operators.add(operator)
-        key_ids.add(key_id)
-        custody_domains.add(signer.custody_domain)
+def verify_human_failover_approval(
+    plan: FailoverPlan,
+    policy_payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    require_fresh: bool = True,
+) -> None:
+    try:
+        policy = load_human_approval_policy(policy_payload)
+    except Exception as exc:
+        raise DrOrchestrationError("failover human approval policy is invalid") from exc
+    if policy.policy_hash != plan.approver_policy_hash:
+        raise DrOrchestrationError("human approval policy is not pinned to the failover plan")
+    subject = failover_approval_subject(plan)
+    try:
+        verify_human_approval(
+            plan.approvals[0],
+            policy_payload=policy_payload,
+            expected_action=plan.action,
+            expected_environment="staging",
+            expected_subject=subject,
+            now=now,
+            require_fresh=require_fresh,
+        )
+    except Exception as exc:
+        raise DrOrchestrationError("failover human approval is invalid") from exc
 
 
 def _validate_source_tail_boundary(

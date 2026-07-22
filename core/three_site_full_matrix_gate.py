@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 from datetime import datetime, timedelta, timezone
 import hashlib
 from typing import Any
 from uuid import UUID
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from core.canonical_json import canonical_json_bytes
+from core.human_approval import approval_subject, verify_human_approval
 from core.three_site_execution_safety import (
     DEDICATED_HOST_DESTRUCTIVE,
     EXECUTION_CLASSES,
@@ -30,7 +26,6 @@ from core.three_site_full_matrix_campaign import (
 
 COMPONENT_REPORT_SCHEMA = "three-site-staging-full-matrix-report-v1"
 AGGREGATE_SCHEMA = "three-site-staging-gate-d-aggregate-v1"
-AGGREGATE_APPROVAL_SCHEMA = "three-site-staging-gate-d-aggregate-approval-v1"
 
 
 class GateDAggregateError(RuntimeError):
@@ -194,6 +189,7 @@ def verify_component_report(report: dict[str, Any]) -> dict[str, Any]:
 def verify_gate_d_aggregate(
     aggregate: dict[str, Any], *, approver_policy: dict[str, Any],
     now: datetime | None = None,
+    require_fresh_approval: bool = True,
 ) -> dict[str, Any]:
     fields = {
         "schema", "gate_group_id", "release_sha", "generated_at", "expires_at",
@@ -266,37 +262,39 @@ def verify_gate_d_aggregate(
     ):
         raise GateDAggregateError("Gate D aggregate is expired or future-dated")
     try:
-        signers, policy_hash = _policy(approver_policy, release_sha=release_sha)
+        _approval_policy, policy_hash = _policy(approver_policy, release_sha=release_sha)
     except Exception as exc:
-        raise GateDAggregateError("Gate D approver policy is invalid") from exc
+        raise GateDAggregateError("Gate D human approval policy is invalid") from exc
     if aggregate.get("approver_policy_hash") != policy_hash:
-        raise GateDAggregateError("Gate D aggregate is not bound to approver policy")
+        raise GateDAggregateError("Gate D aggregate is not bound to human approval policy")
     approvals = aggregate.get("approvals")
-    if not isinstance(approvals, list) or len(approvals) != 2:
-        raise GateDAggregateError("Gate D aggregate needs exactly two approvals")
+    if not isinstance(approvals, list) or len(approvals) != 1:
+        raise GateDAggregateError("Gate D aggregate needs exactly one human approval")
     unsigned = {key: value for key, value in aggregate.items() if key != "approvals"}
     aggregate_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    used_operators: set[str] = set()
-    used_domains: set[str] = set()
-    for approval in approvals:
-        if not isinstance(approval, dict) or set(approval) != {"operator", "key_id", "signature"}:
-            raise GateDAggregateError("Gate D approval fields are invalid")
-        signer = signers.get(str(approval["key_id"]))
-        operator = str(approval["operator"])
-        if (
-            signer is None or operator != signer[0] or operator in used_operators
-            or signer[1] in used_domains
-        ):
-            raise GateDAggregateError("Gate D approvals are not independent")
-        try:
-            signature = base64.b64decode(str(approval["signature"]), validate=True)
-            Ed25519PublicKey.from_public_bytes(signer[2]).verify(
-                signature, aggregate_hash.encode("ascii")
-            )
-        except (ValueError, binascii.Error, InvalidSignature) as exc:
-            raise GateDAggregateError("Gate D approval signature is invalid") from exc
-        used_operators.add(operator)
-        used_domains.add(signer[1])
+    subject = approval_subject(
+        artifact_type=AGGREGATE_SCHEMA,
+        artifact_sha256=aggregate_hash,
+        release_sha=release_sha,
+        bindings={
+            "gate_group_id": gate_group_id,
+            "component_report_hashes": {
+                name: components[name]["report_hash"] for name in sorted(components)
+            },
+        },
+    )
+    try:
+        verified_approval = verify_human_approval(
+            approvals[0],
+            policy_payload=approver_policy,
+            expected_action="approve_gate_d",
+            expected_environment="staging",
+            expected_subject=subject,
+            now=now,
+            require_fresh=require_fresh_approval,
+        )
+    except Exception as exc:
+        raise GateDAggregateError("Gate D human approval is invalid") from exc
     return {
         "schema": "three-site-staging-gate-d-result-v1",
         "status": "passed",
@@ -308,5 +306,6 @@ def verify_gate_d_aggregate(
         },
         "combined_scenario_count": len(complete_catalog),
         "combined_scenario_execution_count": execution_count,
-        "approved_by": sorted(used_operators),
+        "approved_by": [verified_approval.operator],
+        "approval_id": verified_approval.approval_id,
     }

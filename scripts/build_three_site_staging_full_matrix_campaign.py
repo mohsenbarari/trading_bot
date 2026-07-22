@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare and finalize a dual-approved immutable staging Full Matrix campaign."""
+"""Prepare and finalize an action-approved immutable staging Full Matrix campaign."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.canonical_json import canonical_json_bytes
+from core.human_approval import approval_subject
 from core.secure_file_io import sha256_secure_file, write_secure_atomic_bytes
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
@@ -39,13 +40,9 @@ from scripts.three_site_staging_migration_journal import (
 )
 from scripts.verify_three_site_queue_activation_transition import verify_transition
 from scripts.verify_three_site_staging_inventory import (
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 from scripts.verify_three_site_staging_migration_plan import verify_migration_plan
-
-
-APPROVAL_REQUEST_SCHEMA = "three-site-staging-full-matrix-approval-request-v2"
-APPROVAL_SCHEMA = "three-site-staging-full-matrix-approval-v2"
 
 
 def _mapping(values: list[str]) -> dict[str, Path]:
@@ -193,17 +190,17 @@ def _verify_prerequisites(
     inventory_approval = secure_json(
         mappings["inventory_approval"], label="inventory approval"
     )
-    inventory_signers = secure_json(
-        mappings["inventory_signer_policy"], label="inventory signer policy"
+    human_approval_policy = secure_json(
+        mappings["human_approval_policy"], label="human approval policy"
     )
-    inventory_result = verify_signed_inventory(
+    inventory_result = verify_approved_inventory(
         inventory,
         approval=inventory_approval,
-        signer_policy=inventory_signers,
+        approval_policy=human_approval_policy,
         host_destructive=execution_class_is_host_destructive(execution_class),
     )
     if inventory_result["inventory_stage"] != "provisioned":
-        raise FullMatrixCampaignError("Full Matrix requires provisioned signed inventory")
+        raise FullMatrixCampaignError("Full Matrix requires an approved provisioned inventory")
     campaign_id = _campaign_id(inventory_result["campaign_id"])
 
     plan = secure_json(mappings["migration_plan"], label="migration plan")
@@ -212,7 +209,7 @@ def _verify_prerequisites(
         approval=secure_json(mappings["migration_approval"], label="migration approval"),
         inventory=inventory,
         inventory_approval=inventory_approval,
-        signer_policy=inventory_signers,
+        approval_policy=human_approval_policy,
         freeze_evidence=[
             secure_json(mappings["source_freeze_bot_fi"], label="Bot-FI source freeze"),
             secure_json(mappings["source_freeze_webapp_fi"], label="WebApp-FI source freeze"),
@@ -229,6 +226,7 @@ def _verify_prerequisites(
             role: secure_json(mappings[f"seed_manifest_{role}"], label=f"{role} seed manifest")
             for role in ("bot_fi", "webapp_fi")
         },
+        require_fresh_approval=False,
     )
     if (
         migration_result.get("campaign_id") != campaign_id
@@ -286,7 +284,7 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     )
     if args.object_bucket != inventory_bucket:
         raise FullMatrixCampaignError(
-            "Full Matrix Object Storage bucket differs from the signed inventory"
+            "Full Matrix Object Storage bucket differs from the approved inventory"
         )
     required_scenarios = scenarios_for_execution_class(args.execution_class)
     policy = secure_json(args.approver_policy, label="Full Matrix approver policy")
@@ -333,17 +331,16 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     }
     unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
     campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    request = {
-        "schema": APPROVAL_REQUEST_SCHEMA,
-        "campaign_id": campaign_id,
-        "gate_group_id": gate_group_id,
-        "execution_class": args.execution_class,
-        "campaign_hash": campaign_hash,
-        "release_sha": args.activation_sha,
-        "approver_policy_hash": policy_hash,
-        "signature_payload_encoding": "lowercase-hex-ascii",
-        "signature_payload": campaign_hash,
-    }
+    request = approval_subject(
+        artifact_type=CAMPAIGN_SCHEMA,
+        artifact_sha256=campaign_hash,
+        release_sha=args.activation_sha,
+        bindings={
+            "campaign_id": campaign_id,
+            "gate_group_id": gate_group_id,
+            "execution_class": args.execution_class,
+        },
+    )
     write_secure_atomic_bytes(
         args.draft_output,
         canonical_json_bytes(campaign) + b"\n",
@@ -357,7 +354,7 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         mode=0o600,
     )
     return {
-        "status": "awaiting_two_approvals",
+        "status": "awaiting_password_totp_approval",
         "campaign_id": campaign_id,
         "gate_group_id": gate_group_id,
         "execution_class": args.execution_class,
@@ -374,31 +371,8 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         raise FullMatrixCampaignError("Full Matrix draft must not contain approvals")
     unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
     campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    approvals: list[dict[str, str]] = []
-    for path in args.approval:
-        value = secure_json(path, label="Full Matrix approval")
-        if (
-            set(value) != {
-                "schema", "campaign_id", "gate_group_id", "execution_class",
-                "campaign_hash", "operator", "key_id", "signature",
-            }
-            or value.get("schema") != APPROVAL_SCHEMA
-            or value.get("campaign_id") != campaign.get("campaign_id")
-            or value.get("gate_group_id") != campaign.get("gate_group_id")
-            or value.get("execution_class") != campaign.get("execution_class")
-            or value.get("campaign_hash") != campaign_hash
-        ):
-            raise FullMatrixCampaignError("Full Matrix approval is for another campaign")
-        approvals.append(
-            {
-                "operator": value["operator"],
-                "key_id": value["key_id"],
-                "signature": value["signature"],
-            }
-        )
-    if len(approvals) != 2:
-        raise FullMatrixCampaignError("exactly two Full Matrix approval files are required")
-    campaign["approvals"] = approvals
+    approval = secure_json(args.approval, label="Full Matrix human approval")
+    campaign["approvals"] = [approval]
     policy = secure_json(args.approver_policy, label="Full Matrix approver policy")
     verified = verify_campaign(campaign, approver_policy=policy)
     write_secure_atomic_bytes(
@@ -430,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     finalize_parser = subparsers.add_parser("finalize")
     finalize_parser.add_argument("--draft", type=Path, required=True)
     finalize_parser.add_argument("--approver-policy", type=Path, required=True)
-    finalize_parser.add_argument("--approval", type=Path, action="append", default=[])
+    finalize_parser.add_argument("--approval", type=Path, required=True)
     finalize_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:

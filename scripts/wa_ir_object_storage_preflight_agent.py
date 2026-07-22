@@ -53,7 +53,7 @@ ROLE_MATERIAL_NAMES = frozenset(
     {
         "planned-inventory.json",
         "planned-inventory-approval.json",
-        "inventory-signers.json",
+        "human-approval-policy.json",
         "roles/webapp-ir.compose.yml",
         "roles/webapp-ir.env",
         "secrets/staging-dr-ca.crt",
@@ -367,7 +367,7 @@ def install_role_materials(archive_path: Path, *, secure_dir: Path) -> None:
     required = [
         secure_dir / "planned-inventory.json",
         secure_dir / "planned-inventory-approval.json",
-        secure_dir / "inventory-signers.json",
+        secure_dir / "human-approval-policy.json",
         secure_dir / "roles" / "webapp-ir.compose.yml",
         secure_dir / "roles" / "webapp-ir.env",
         secure_dir / "secrets" / "staging-dr-ca.crt",
@@ -420,7 +420,7 @@ def run_preflight(*, release_dir: Path, secure_dir: Path, output: Path) -> dict[
         "--env-file", str(secure_dir / "roles" / "webapp-ir.env"),
         "--inventory", str(secure_dir / "planned-inventory.json"),
         "--approval", str(secure_dir / "planned-inventory-approval.json"),
-        "--signer-policy", str(secure_dir / "inventory-signers.json"),
+        "--approval-policy", str(secure_dir / "human-approval-policy.json"),
         "--snapshot-output", str(output),
     ]
     result = subprocess.run(

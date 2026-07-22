@@ -90,7 +90,7 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                     env_bytes=env_bytes,
                     inventory=self.inventory,
                     approval=self.approval,
-                    signer_policy=self.policy,
+                    approval_policy=self.policy,
                     verify_files=False,
                 )
                 self.assertEqual(result["status"], "verified")
@@ -106,7 +106,7 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 env_bytes=env_bytes,
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 
@@ -122,7 +122,7 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 env_bytes=unsafe_env,
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 
@@ -138,7 +138,7 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 env_bytes=unsafe_expected_owner,
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 
@@ -156,7 +156,7 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 env_bytes=wrong_bind,
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 
@@ -169,7 +169,7 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 env_bytes=wrong_peer,
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 

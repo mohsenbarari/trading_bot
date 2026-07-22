@@ -261,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
             env_bytes=env_bytes,
             inventory=inventory,
             approval=load_inventory(args.inventory_approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             verify_files=True,
             required_inventory_stage="provisioned",
         )

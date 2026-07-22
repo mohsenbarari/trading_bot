@@ -3,10 +3,10 @@ from __future__ import annotations
 import base64
 import importlib.util
 import io
+import json
 from pathlib import Path
 import os
 import stat
-import struct
 import sys
 import tempfile
 import unittest
@@ -22,15 +22,25 @@ sys.modules[SPEC.name] = provisioner
 SPEC.loader.exec_module(provisioner)
 
 
-def ssh_string(value: bytes) -> bytes:
-    return struct.pack(">I", len(value)) + value
-
-
-def ed25519_public_key(seed: int, comment: str = "test-key") -> bytes:
-    key_type = b"ssh-ed25519"
-    blob = ssh_string(key_type) + ssh_string(bytes([seed]) * 32)
-    encoded = base64.b64encode(blob)
-    return key_type + b" " + encoded + b" " + comment.encode("ascii") + b"\n"
+def public_policy() -> dict:
+    return {
+        "schema": "three-site-human-approval-policy-v1",
+        "policy_id": "11111111-1111-4111-8111-111111111111",
+        "issuer": {
+            "issuer_id": "three-site-witness-approval-service",
+            "key_id": "witness-approval-20260722",
+            "operator": "mohsen",
+            "authenticator_id": "22222222-2222-4222-8222-222222222222",
+            "public_key": base64.b64encode(b"\x01" * 32).decode(),
+        },
+        "actions": [
+            {
+                "action": "run_writer_witness_matrix",
+                "environments": ["staging"],
+                "max_ttl_seconds": 600,
+            }
+        ],
+    }
 
 
 class ControllerProvisionTests(unittest.TestCase):
@@ -38,24 +48,18 @@ class ControllerProvisionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        self.keys = self.root / "keys"
-        self.keys.mkdir(mode=0o700)
-        self.observer_key = self.keys / "observer.pub"
-        self.commander_key = self.keys / "commander.pub"
-        self.write_key(self.observer_key, ed25519_public_key(1, "observer-private-device"))
-        self.write_key(self.commander_key, ed25519_public_key(2, "commander-private-device"))
+        self.source_root = self.root / "source"
+        self.source_root.mkdir(mode=0o700)
+        self.policy = self.source_root / "human-approval-policy.json"
+        self.write_policy(public_policy())
 
-    @staticmethod
-    def write_key(path: Path, raw: bytes, mode: int = 0o600) -> None:
-        path.write_bytes(raw)
-        path.chmod(mode)
+    def write_policy(self, payload: dict, *, mode: int = 0o600) -> None:
+        self.policy.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        self.policy.chmod(mode)
 
     def config(self, **overrides: object):
         values = {
-            "observer_identity": "abort-observer",
-            "observer_public_key_file": self.observer_key,
-            "incident_commander_identity": "incident-commander",
-            "incident_commander_public_key_file": self.commander_key,
+            "human_approval_policy_file": self.policy,
             "config_root": self.root / "etc-controller",
             "controller_root": self.root / "state-controller",
             "runtime_root": self.root / "run-controller",
@@ -68,23 +72,20 @@ class ControllerProvisionTests(unittest.TestCase):
 
     def assert_owner_path(self, path: Path, mode: int) -> None:
         metadata = path.lstat()
-        self.assertTrue(stat.S_ISDIR(metadata.st_mode) if mode == 0o700 else stat.S_ISREG(metadata.st_mode))
+        expected = stat.S_ISDIR if mode == 0o700 else stat.S_ISREG
+        self.assertTrue(expected(metadata.st_mode))
         self.assertEqual(stat.S_IMODE(metadata.st_mode), mode)
         self.assertEqual(metadata.st_uid, os.geteuid())
         self.assertEqual(metadata.st_gid, os.getegid())
 
-    def test_provisions_distinct_policy_and_all_controller_directories(self) -> None:
+    def test_provisions_only_public_policy_and_controller_directories(self) -> None:
         result = provisioner.provision(self.config())
-
-        policy = self.root / "etc-controller" / "allowed_signers"
-        self.assert_owner_path(policy, 0o600)
-        lines = policy.read_text(encoding="ascii").splitlines()
-        self.assertEqual(len(lines), 2)
-        self.assertEqual(lines[0].split()[0], "abort-observer")
-        self.assertEqual(lines[1].split()[0], "incident-commander")
-        self.assertEqual(len(lines[0].split()), 3)
-        self.assertEqual(len(lines[1].split()), 3)
-        self.assertNotIn("private-device", policy.read_text(encoding="ascii"))
+        installed = self.root / "etc-controller" / "human-approval-policy.json"
+        self.assert_owner_path(installed, 0o600)
+        self.assertEqual(json.loads(installed.read_text()), public_policy())
+        self.assertEqual(result["operator"], "mohsen")
+        self.assertFalse(result["issuer_secrets_copied"])
+        self.assertRegex(result["human_approval_policy_sha256"], r"^[0-9a-f]{64}$")
         for path in (
             self.root / "etc-controller",
             self.root / "state-controller",
@@ -95,117 +96,82 @@ class ControllerProvisionTests(unittest.TestCase):
             self.root / "run-controller",
         ):
             self.assert_owner_path(path, 0o700)
-        self.assertFalse(result["private_keys_copied"])
-        self.assertRegex(result["allowed_signers_sha256"], r"^[0-9a-f]{64}$")
-        self.assertNotEqual(
-            result["observer_key_fingerprint"], result["incident_commander_key_fingerprint"]
-        )
         self.assertEqual(list(self.root.rglob("*.tmp")), [])
 
-    def test_is_idempotent_and_atomically_replaces_a_safe_policy(self) -> None:
+    def test_is_idempotent_and_atomically_replaces_a_safe_public_policy(self) -> None:
         first = provisioner.provision(self.config())
-        self.write_key(self.commander_key, ed25519_public_key(3))
+        changed = public_policy()
+        changed["issuer"]["key_id"] = "witness-approval-20260723"
+        self.write_policy(changed)
         second = provisioner.provision(self.config())
-        self.assertNotEqual(first["allowed_signers_sha256"], second["allowed_signers_sha256"])
-        self.assert_owner_path(self.root / "etc-controller" / "allowed_signers", 0o600)
+        self.assertNotEqual(
+            first["human_approval_policy_sha256"], second["human_approval_policy_sha256"]
+        )
 
-    def test_rejects_duplicate_identity_case_insensitively(self) -> None:
-        with self.assertRaisesRegex(provisioner.ProvisionError, "identities must be distinct"):
-            provisioner.provision(
-                self.config(incident_commander_identity="ABORT-OBSERVER")
-            )
-
-    def test_rejects_unsafe_identity(self) -> None:
-        for identity in ("observer,commander", "../observer", " observer", "observer role", ""):
-            with self.subTest(identity=identity):
-                with self.assertRaisesRegex(provisioner.ProvisionError, "safe OpenSSH"):
-                    provisioner.provision(self.config(observer_identity=identity))
-
-    def test_rejects_duplicate_key_blob_even_when_comments_differ(self) -> None:
-        self.write_key(self.commander_key, ed25519_public_key(1, "different-comment"))
-        with self.assertRaisesRegex(provisioner.ProvisionError, "different public keys"):
+    def test_rejects_legacy_two_signer_or_secret_bearing_policy(self) -> None:
+        legacy = {
+            "schema": "three-site-staging-inventory-signers-v1",
+            "policy_id": "11111111-1111-4111-8111-111111111111",
+            "signers": [],
+        }
+        self.write_policy(legacy)
+        with self.assertRaisesRegex(provisioner.ProvisionError, "policy is invalid"):
+            provisioner.provision(self.config())
+        secret_bearing = public_policy()
+        secret_bearing["totp_secret"] = "MUST-NOT-INSTALL"
+        self.write_policy(secret_bearing)
+        with self.assertRaisesRegex(provisioner.ProvisionError, "policy is invalid"):
             provisioner.provision(self.config())
 
-    def test_rejects_symbolic_link_public_key(self) -> None:
-        alias = self.keys / "observer-link.pub"
-        alias.symlink_to(self.observer_key)
-        with self.assertRaisesRegex(provisioner.ProvisionError, "owner-controlled"):
-            provisioner.provision(self.config(observer_public_key_file=alias))
-
-    def test_rejects_hard_link_public_key(self) -> None:
-        alias = self.keys / "observer-hardlink.pub"
-        os.link(self.observer_key, alias)
+    def test_rejects_symlink_hardlink_fifo_and_bad_mode_source(self) -> None:
+        alias = self.source_root / "policy-link.json"
+        alias.symlink_to(self.policy)
+        with self.assertRaisesRegex(provisioner.ProvisionError, "securely open"):
+            provisioner.provision(self.config(human_approval_policy_file=alias))
+        alias.unlink()
+        os.link(self.policy, alias)
         with self.assertRaisesRegex(provisioner.ProvisionError, "owner-controlled"):
             provisioner.provision(self.config())
-
-    def test_rejects_fifo_without_blocking(self) -> None:
-        fifo = self.keys / "observer.fifo"
-        os.mkfifo(fifo, 0o600)
+        alias.unlink()
+        self.policy.unlink()
+        os.mkfifo(self.policy, 0o600)
         with self.assertRaisesRegex(provisioner.ProvisionError, "owner-controlled"):
-            provisioner.provision(self.config(observer_public_key_file=fifo))
-
-    def test_rejects_public_key_with_bad_mode(self) -> None:
-        self.observer_key.chmod(0o644)
+            provisioner.provision(self.config())
+        self.policy.unlink()
+        self.write_policy(public_policy(), mode=0o644)
         with self.assertRaisesRegex(provisioner.ProvisionError, "mode-0600"):
             provisioner.provision(self.config())
-
-    def test_rejects_malformed_and_mismatched_openssh_keys(self) -> None:
-        cases = (
-            b"not-a-key value\n",
-            b"ssh-ed25519 !!!\n",
-            b"ssh-rsa " + ed25519_public_key(9).split()[1] + b"\n",
-            b"ssh-dss AAAAB3NzaC1kc3MAAACB\n",
-        )
-        for raw in cases:
-            with self.subTest(raw=raw):
-                self.write_key(self.observer_key, raw)
-                with self.assertRaises(provisioner.ProvisionError):
-                    provisioner.provision(self.config())
 
     def test_rejects_existing_policy_symlink_or_hardlink(self) -> None:
         config_root = self.root / "etc-controller"
         config_root.mkdir(mode=0o700)
         unrelated = self.root / "unrelated"
-        unrelated.write_text("do-not-replace\n", encoding="ascii")
+        unrelated.write_text("do-not-replace\n")
         unrelated.chmod(0o600)
-        policy = config_root / "allowed_signers"
-        policy.symlink_to(unrelated)
-        with self.assertRaisesRegex(provisioner.ProvisionError, "existing allowed_signers"):
+        target = config_root / "human-approval-policy.json"
+        target.symlink_to(unrelated)
+        with self.assertRaisesRegex(provisioner.ProvisionError, "existing human approval"):
             provisioner.provision(self.config())
-        self.assertEqual(unrelated.read_text(encoding="ascii"), "do-not-replace\n")
-
-        policy.unlink()
-        os.link(unrelated, policy)
-        with self.assertRaisesRegex(provisioner.ProvisionError, "existing allowed_signers"):
+        self.assertEqual(unrelated.read_text(), "do-not-replace\n")
+        target.unlink()
+        os.link(unrelated, target)
+        with self.assertRaisesRegex(provisioner.ProvisionError, "existing human approval"):
             provisioner.provision(self.config())
-        self.assertEqual(unrelated.read_text(encoding="ascii"), "do-not-replace\n")
 
     def test_replace_failure_never_publishes_an_empty_final_file(self) -> None:
         real_replace = os.replace
 
         def fail_policy_replace(source: object, destination: object) -> None:
-            if Path(destination).name == "allowed_signers":
+            if Path(destination).name == "human-approval-policy.json":
                 raise OSError("simulated power loss before rename")
             real_replace(source, destination)
 
         with mock.patch.object(provisioner.os, "replace", side_effect=fail_policy_replace):
             with self.assertRaisesRegex(OSError, "simulated power loss"):
                 provisioner.provision(self.config())
-        policy = self.root / "etc-controller" / "allowed_signers"
-        self.assertFalse(policy.exists())
-        self.assertEqual(list((self.root / "etc-controller").glob(".allowed_signers.*")), [])
-
-    def test_fsyncs_policy_and_parent_directories(self) -> None:
-        real_fsync = os.fsync
-        descriptors: list[int] = []
-
-        def recording_fsync(descriptor: int) -> None:
-            descriptors.append(descriptor)
-            real_fsync(descriptor)
-
-        with mock.patch.object(provisioner.os, "fsync", side_effect=recording_fsync):
-            provisioner.provision(self.config())
-        self.assertGreaterEqual(len(descriptors), 15)
+        target = self.root / "etc-controller" / "human-approval-policy.json"
+        self.assertFalse(target.exists())
+        self.assertEqual(list(target.parent.glob(".human-approval-policy.json.*")), [])
 
     def test_test_mode_rejects_production_roots_and_root_traversal(self) -> None:
         with self.assertRaisesRegex(provisioner.ProvisionError, "must not target"):
@@ -217,13 +183,10 @@ class ControllerProvisionTests(unittest.TestCase):
                 self.config(config_root=self.root / "state-controller" / ".." / "bad")
             )
 
-    def test_cli_test_mode_uses_override_owner_and_roots(self) -> None:
+    def test_cli_test_mode_uses_public_policy_and_override_roots(self) -> None:
         stdout = io.StringIO()
         arguments = [
-            "--observer-identity", "observer",
-            "--observer-public-key-file", str(self.observer_key),
-            "--incident-commander-identity", "commander",
-            "--incident-commander-public-key-file", str(self.commander_key),
+            "--human-approval-policy-file", str(self.policy),
             "--test-mode",
             "--config-root", str(self.root / "cli-etc"),
             "--controller-root", str(self.root / "cli-state"),
@@ -233,18 +196,13 @@ class ControllerProvisionTests(unittest.TestCase):
         ]
         with mock.patch("sys.stdout", stdout):
             self.assertEqual(provisioner.main(arguments), 0)
-        self.assertIn('"private_keys_copied": false', stdout.getvalue())
+        self.assertIn('"issuer_secrets_copied": false', stdout.getvalue())
 
     def test_non_root_production_execution_is_rejected(self) -> None:
         with mock.patch.object(provisioner.os, "geteuid", return_value=1000):
             with self.assertRaisesRegex(provisioner.ProvisionError, "must run as root"):
                 provisioner._validate_execution_context(
-                    provisioner.ProvisionConfig(
-                        observer_identity="observer",
-                        observer_public_key_file=self.observer_key,
-                        incident_commander_identity="commander",
-                        incident_commander_public_key_file=self.commander_key,
-                    )
+                    provisioner.ProvisionConfig(human_approval_policy_file=self.policy)
                 )
 
 

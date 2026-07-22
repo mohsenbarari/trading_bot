@@ -26,7 +26,7 @@ from scripts.render_three_site_staging_role_compose import (
 )
 from scripts.verify_three_site_staging_inventory import (
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 
 
@@ -221,14 +221,14 @@ def verify_role_bundle(
     env_bytes: bytes,
     inventory: dict[str, Any],
     approval: dict[str, Any],
-    signer_policy: dict[str, Any],
+    approval_policy: dict[str, Any],
     verify_files: bool,
     required_inventory_stage: str = "provisioned",
 ) -> dict[str, Any]:
-    inventory_result = verify_signed_inventory(
+    inventory_result = verify_approved_inventory(
         inventory,
         approval=approval,
-        signer_policy=signer_policy,
+        approval_policy=approval_policy,
         host_destructive=None,
     )
     if required_inventory_stage not in {"planned", "provisioned"}:
@@ -254,7 +254,7 @@ def verify_role_bundle(
     if any(not values.get(name) for name in required):
         raise RoleBundleError("role environment has an empty required value")
     if values["STAGING_RELEASE_SHA"].lower() != inventory_result["release_sha"]:
-        raise RoleBundleError("role environment release SHA differs from signed inventory")
+        raise RoleBundleError("role environment release SHA differs from approved inventory")
     source_root = Path(values.get("STAGING_SOURCE_ROOT", ""))
     if not source_root.is_absolute() or ".." in source_root.parts:
         raise RoleBundleError("staging source root must be an absolute normalized path")
@@ -304,7 +304,7 @@ def verify_role_bundle(
             or not values["DR_BLOB_OBJECT_PREFIX"].startswith(storage["prefix"])
             or values["DR_BLOB_REQUIRE_VERSIONING"] != "true"
         ):
-            raise RoleBundleError("role Object Storage settings differ from signed inventory")
+            raise RoleBundleError("role Object Storage settings differ from approved inventory")
     _verify_transport(values, role=role)
     database_passwords = {
         value
@@ -342,7 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--skip-file-attestation", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -357,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
             env_bytes=_verify_bundle_source(args.env_file, expected_mode=0o600),
             inventory=load_inventory(args.inventory),
             approval=load_inventory(args.approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             verify_files=not args.skip_file_attestation,
         )
     except Exception as exc:

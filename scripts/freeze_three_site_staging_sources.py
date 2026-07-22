@@ -30,7 +30,7 @@ from scripts.run_three_site_staging_source_backup import (
 )
 from scripts.verify_three_site_staging_inventory import (
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 
 
@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-name", default="trading_bot_staging")
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rollback-bundle-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
@@ -330,14 +330,14 @@ def main(argv: list[str] | None = None) -> int:
         if set(args.source_role) != set(args.expected_source_release_sha):
             raise SourceFreezeError("every selected source role requires one expected release")
         inventory = load_inventory(args.inventory)
-        inventory_result = verify_signed_inventory(
+        inventory_result = verify_approved_inventory(
             inventory,
             approval=load_inventory(args.inventory_approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             host_destructive=None,
         )
         if inventory_result["inventory_stage"] != "provisioned":
-            raise SourceFreezeError("source freeze requires signed provisioned inventory")
+            raise SourceFreezeError("source freeze requires approved provisioned inventory")
         _repo, _env, _prefix, services, _user, _database = _validate_static(
             args, inventory_result
         )

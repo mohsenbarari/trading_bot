@@ -1654,7 +1654,7 @@ These are not secondary to the implementation. Several are P0 because software c
 | ID | Priority | Challenge | Risk if unresolved | Required closure evidence |
 |---|---|---|---|---|
 | N-001 | P0 | The owner has approved asynchronous cross-site delivery and rejected cross-site ACK on the user-success path, but exact RPO, RTO, maximum promotion lag, same-region durability, tolerated WebApp write freeze, and maximum failback delay are not approved per data class. The current daily-backup RPO/RTO is not the same as DR service objectives. | Stakeholders may interpret local success as zero-loss durability, while engineering cannot choose replica, storage, promotion, or degraded-mode semantics for the remaining residual-loss window. | Owner-approved objectives for financial rows, users, Messenger text, files, sessions, notifications, and analytics, including accepted residual loss and whether local database/WAL replication is mandatory. |
-| N-002 | P0 | Promotion and failback authority/RACI is undefined. It is unclear who may declare an outage, mint a writer epoch, change Arvan, accept degraded writes, approve conflicts, or abort recovery. | Conflicting operator actions can create the same split brain that technical controls are intended to prevent. | Named primary/backup roles, least-privilege access, command checklist, escalation path, and two-person approval for high-risk financial handoffs. |
+| N-002 | P0 | Promotion and failback authority/RACI is undefined. It is unclear who may declare an outage, mint a writer epoch, change Arvan, accept degraded writes, approve conflicts, or abort recovery. | Conflicting operator actions can create the same split brain that technical controls are intended to prevent. | Named primary/backup roles, least-privilege access, command checklist, escalation path, and one short-lived passphrase-plus-TOTP token bound to the exact high-risk financial handoff. |
 | N-003 | P0 | The boundary between automatic detection, automatic traffic switching, automatic writer promotion, and manual approval is undecided. | Excessive automation can promote on a false positive; excessive manual dependence can miss RTO or be unavailable during a national outage. | A signed state-transition policy stating which transitions are automatic, recommendations, or human-authorized, with timeout and fail-closed behavior. |
 | N-004 | P0 | Product behavior for ambiguous ownership, quota exhaustion, identity conflicts, reauthentication, partial Messenger/file availability, and unresolved recovery conflicts requires explicit business approval. | Engineers may silently select data-loss or user-impact behavior that contradicts commercial rules. | Decision records with owner, approved UX, financial consequence, support script, and testable acceptance criteria for every ambiguity. |
 | N-005 | P1 | Arvan plan features, active-passive semantics, health probes, API availability inside Iran, TTL/cache purge behavior, support SLA, and emergency access are not contractually verified. | The architecture depends on a provider capability that may behave differently during a nationwide event or require unavailable control-plane access. | Written provider confirmation where possible, sandbox test results, support/escalation contacts, account access drill, and a documented manual fallback. |
@@ -2148,7 +2148,8 @@ Arvan setting has been deployed or changed. Keep
 6. finish stale-epoch binding at every command/event/side-effect destination,
    plus sync, parity, file, readiness-evidence, recovery, and Arvan orchestration
    stages;
-7. obtain the operator RACI/two-person approval and measured lease/RTO decision.
+7. obtain the operator RACI, action-bound passphrase-plus-TOTP approval policy,
+   and measured lease/RTO decision.
 
 Therefore the dedicated transport and renewal are source-complete, but T-004
 and Stage 4 remain operationally open. This slice authorizes no production
@@ -2273,7 +2274,8 @@ Before enabling either WebApp witness flag, the project still needs:
    encrypted off-host backup;
 3. real-host concurrent acquire, lost-response, delayed-packet, asymmetric
    FI/IR partition, Witness process/DB/VM pause, disk-full, and clock-jump drills;
-4. a measured lease/RTO decision and two-person production transition policy;
+4. a measured lease/RTO decision and an action-bound passphrase-plus-TOTP
+   production transition policy;
 5. immutable writer epoch/site/transition provenance on every authoritative
    event, command, outbox item, replay, and side-effect destination;
 6. complete sync lag, parity, file, recovery-barrier, and stable-connectivity
@@ -2666,9 +2668,12 @@ rotation/restore state.
 `scripts/run_writer_witness_real_host_matrix.py` replaces the inert catalog as
 the execution boundary. All RH-001 through RH-012 IDs have concrete handlers.
 There is intentionally no all-scenarios mode: one process accepts one exact
-scenario, one fresh passing preflight, distinct named operator, abort observer,
-and incident commander, one reason, an exact commit, a preflight-bound observer
-approval, and matching execution confirmations.
+scenario, one fresh passing preflight, named operator, one reason/change ID, an
+exact commit, an operational request bound to the preflight, one fresh
+`run_writer_witness_matrix` token, and matching execution confirmations. The
+former observer/incident-commander signature ceremony is superseded by section
+59; its operational window, communications, restore, DPI, and cleanup controls
+remain mandatory.
 
 The controller creates a unique `wwm_*` ownership tag, stages pairwise material
 only in controller-private temporary storage and WebApp `/run`, hashes every
@@ -2746,11 +2751,11 @@ WebApp writer:
 - restore journals before candidate creation, covers twelve early/late
   failpoints, rejects liveness-only no-journal recovery, stops the service if
   recovered state validation fails, and fsyncs both archive directories;
-- observer and incident commander approvals require different SSH signing
-  keys, a distinct named operator, exact reason/change ID, one-time nonce,
-  one-time preflight, bounded validity/maintenance window, concrete console,
-  communications, restore identity, request ceiling, and enforced conservative
-  DPI byte budget;
+- at this historical checkpoint, observer and incident commander approvals used
+  different SSH signing keys. Section 59 supersedes only that human ceremony;
+  the exact reason/change ID, one-time nonce/preflight, bounded window, console,
+  communications, restore identity, request ceiling, and conservative DPI byte
+  budget remain enforced;
 - RH-001 establishes both pinned TLS sessions before a common release instant
   and retains readiness/send timing; RH-010 combines authentication-window
   boundaries with an isolated PostgreSQL lease/epoch clock-jump probe.
@@ -2768,15 +2773,13 @@ worktree; it does not assert a commit, push, deployment, live restore drill,
 RH-010 execution, preflight pass, external-review approval, or RH scenario pass.
 
 Controller trust is no longer supplied as a per-command path. A root operator
-must run `scripts/provision_writer_witness_matrix_controller.py` with an
-observer identity/public-key file and a distinct incident-commander
-identity/public-key file. The tool verifies two different public keys and
-atomically installs the root-owned mode-`0600` canonical policy at
-`/etc/trading-bot-witness-matrix/allowed_signers`; controller state/runtime
-directories are root-owned mode `0700`. The two private signing keys remain on
-independent operator devices and must never be copied to the controller,
-repository, approval bundle, or evidence directory. Scenario execution refuses
-an allowed-signers override away from the canonical path.
+must run `scripts/provision_writer_witness_matrix_controller.py` with the
+strict public human-approval policy only. The tool atomically installs the
+root-owned mode-`0600` canonical policy at
+`/etc/trading-bot-witness-matrix/human-approval-policy.json`; controller
+state/runtime directories are root-owned mode `0700`. The TOTP seed, passphrase
+verifier, recovery material, issuer state, and private key remain solely in the
+Witness issuer directory and are rejected from the controller package.
 
 The replacement Witness campaign claim is a complete owner-only `active.json`
 published with no-replace atomicity and directory fsync before side effects. Its
@@ -2972,12 +2975,11 @@ base and is outside what this Python verifier can prove.
    the explicit unit-module list with zero skips, then requires four guarded
    PostgreSQL tests and the four-database failure drill.
 
-14. **Signer trust is source-pinned, not controller-selected.** The canonical
-   root-owned `allowed_signers` bytes must match an exact SHA-256 in the reviewed
-   runner source in addition to containing two different public keys. The pin
-   is intentionally unconfigured until the observer and incident commander
-   supply independently custodied public keys. This blocks RH execution but
-   does not block dark installation or restore prerequisites.
+14. **Historical signer gate (superseded by section 59).** This checkpoint used
+   source-pinned `allowed_signers` bytes and two independently custodied public
+   keys. The current runner instead pins the public human-approval policy and
+   accepts only an exact-subject passphrase-plus-TOTP token; no live consumer
+   accepts the former signer policy.
 
 | Gate | Current status |
 |---|---|
@@ -3053,15 +3055,9 @@ four-database failure drill. A fresh release build and `git diff --check` also
 pass. Those results remain source evidence only; they are not live-host
 attestation or authorization for an RH scenario.
 
-Two gates deliberately remain external or later-phase:
+One later-phase gate remains external:
 
-1. **Independent signer custody (`BEFORE_RH001`).** Two people must provide
-   distinct public keys while retaining the private keys on separate devices.
-   The canonical `allowed_signers` SHA-256 must then replace the current
-   `UNCONFIGURED` source pin in a separately reviewed commit. Until then approve
-   and execute modes fail closed. The agent must not generate or custody both
-   private keys.
-2. **Total controller-host-loss capsule (`BEFORE_REMAINING_MATRIX`).** Current
+1. **Total controller-host-loss capsule (`BEFORE_REMAINING_MATRIX`).** Current
    cleanup is safe with the durable controller journal and target-side
    operation journals, but a complete loss of the controller still lacks an
    independently retained, non-secret capsule that can reconstruct the tooling
@@ -3431,7 +3427,7 @@ feature into `main`, start a WebApp-IR writer, or mutate CDN/DNS.
 
 The historical release/snapshot evidence below belongs to the retired WA-IR
 generation. It proves the provider data-plane technique, but it is not live
-identity or readiness evidence for `95.38.164.29`; the new signed inventory and
+identity or readiness evidence for `95.38.164.29`; the new approved inventory and
 fresh Object-Storage preflight must replace it before staging starts.
 
 ### 48.2 Object Storage and encrypted release evidence
@@ -3512,8 +3508,8 @@ The feature branch now implements these fail-closed contracts:
 4. dark environment rendering uses an explicit secret allowlist and secure
    atomic output, and rejects unsafe ownership, symlinks, hardlinks, and mode;
 5. the Arvan client permits only the exact HTTPS API origin, refuses redirects,
-   uses secure token/audit I/O, and binds both Ed25519 approvals to the canonical
-   hash of the exact command manifest;
+   uses secure token/audit I/O, and the failover package binds its short-lived
+   human approval to the canonical hash of the exact command manifest;
 6. provider effects have immutable event/epoch/destination/idempotency/payload
    intent, a destination execution site, durable result state, and an epoch
    recheck before execution; strict-DR direct Telegram/test-push bypasses fail;
@@ -3681,7 +3677,8 @@ Writer transition, CDN/DNS mutation, Full Matrix, or merge to `main`.
 9. The failover saga accepts only a closed typed operation contract. Arbitrary
    shell, `curl`, `ssh`, Docker, and Python command execution was removed. Plans
    contain a bounded TTL, independent nonce, exact release/route/epoch/current-
-   state bindings and two policy-bound Ed25519 approvals. Witness stores the
+   state bindings and, at this historical checkpoint, two policy-bound Ed25519
+   approvals (the human ceremony is superseded by section 59). Witness stores the
    globally unique reservation/final receipt. Rollback validation uses the
    completed-step set: after target term acquisition, source restoration
    requires the next Witness epoch; otherwise the only safe fallback is fully
@@ -3985,10 +3982,12 @@ does not authorize a `main` merge.
   immutable source-tail/RPO handling, expiry-only rollback, strict credential
   separation, and persistent FI epoch 1 -> IR epoch 2 -> FI epoch 3 lifecycle
   are implemented.
-- Gate D inventory now has two fresh Ed25519 approvals and two explicit stages.
-  A signed `planned` inventory permits only fresh-host/empty-volume setup; live
-  PostgreSQL IDs are measured from all four hosts, converted into an unsigned
-  `provisioned` inventory, and require two new signatures before data movement.
+- Gate D inventory has two explicit stages and an action-bound approval as
+  superseded by section 59. An approved `planned` inventory permits only
+  fresh-host/empty-volume setup; live
+  PostgreSQL IDs are measured from all four hosts, converted into an unapproved
+  `provisioned` inventory, and require a new exact-subject approval token before
+  data movement.
 - The canonical Compose has one exact profile per physical role and can render
   deterministic, secret-minimized role bundles outside the exact-SHA Git tree.
   A campaign verifier proves cross-host key pairing, Witness credential
@@ -4011,7 +4010,7 @@ does not authorize a `main` merge.
 - Exact migration history equivalence is executable for empty, main-parent,
   Queue-parent, and DR-parent paths through head `d542e3f4a6b7`; all four paths
   produced the same effective role/fence/policy digest in scratch PostgreSQL.
-- A two-person-signed migration plan now binds the provisioned inventory, both
+- An action-approved migration plan now binds the provisioned inventory, both
   frozen source identities, two independently restore-verified backups, all
   four exact image inventories, encrypted seed object keys and immutable Arvan
   `VersionId` values, the FI-to-IR clone rule, ordered phases, and a no-Alembic-
@@ -4051,7 +4050,7 @@ does not authorize a `main` merge.
   transport topology, and secret boundaries. Seven focused Writer-client tests
   additionally pass initial lease/import, renewal, drain, target activation,
   and partition paths. The concrete typed staging backend now binds a fresh
-  signed provisioned inventory, closed SSH hosts/known-hosts, connectivity and
+  approved provisioned inventory, closed SSH hosts/known-hosts, connectivity and
   route scope, destination-specific source tail, exact Witness epoch, fresh
   target-control renewal, crash-resumable evidence paths, Arvan readback, and
   two-site safe-fenced rollback. Its backend/runner/site-agent/orchestrator and
@@ -4063,12 +4062,11 @@ controller core are now implemented. The catalog explicitly names migration
 and identity collisions, Queue and DR commit boundaries, partition and
 split-origin cases, failover/failback, certificate/DNS asymmetry, loss of each
 recovery role, Blob/database divergence, application regression, capacity/DPI,
-24-hour endurance, and cleanup/repeatability. Two-person campaign assembly,
+24-hour endurance, and cleanup/repeatability. Exact-subject campaign approval,
 artifact re-hashing, exact scenario order, exactly two repetitions,
 hash-chained restart state, zero-residue interrupted recovery, terminal failure,
-and final no-skips verification have focused source tests. The same-key-under-
-two-identities loophole is also rejected for inventory, migration, failover,
-and Matrix signer policies.
+and final no-skips verification have focused source tests. Legacy signer
+policies and two-device approval documents are rejected by the current gates.
 
 The post-integration source regression pass completed on 2026-07-20 at the
 unchanged integration baseline `a42c7bed`: the complete discovered Python
@@ -4557,9 +4555,9 @@ component report cannot pass Gate D.
 controller-journal-backed reports, recompute their report hashes and exact
 catalog hashes, prove disjoint/exhaustive 110-scenario coverage and 220 total
 executions, and reject different groups/releases, reused campaigns, missing
-classes, residue, or production effects. Two independent operators then sign
-one aggregate hash that binds both component report hashes. Only the verified
-aggregate result has `status=passed` for Gate D.
+classes, residue, or production effects. The enrolled owner then issues one
+fresh `approve_gate_d` token bound to the aggregate and both component report
+hashes. Only the verified aggregate result has `status=passed` for Gate D.
 
 ### 57.4 Remaining operational boundary
 
@@ -4579,7 +4577,7 @@ a separate 30-GiB volume, while the OS/Docker root had only about 9 GiB free at
 the preflight measurement. The shared-host-safe campaign therefore now has a
 second, independent resource boundary.
 
-### 58.1 Signed, fail-closed storage boundary
+### 58.1 Approved, fail-closed storage boundary
 
 Inventory schema v3 adds `storage_root` and `storage_mount_uuid` to every role
 and records production filesystem UUIDs as forbidden boundaries. The only
@@ -4587,9 +4585,9 @@ accepted data root is `/srv/trading-bot-three-site-staging-data`. The v2 host
 snapshot records and verifies the exact mount target, device, filesystem type,
 UUID, total bytes, available bytes, and the effective aggregate slice limits.
 Those live CPU, memory, and task values must equal the role's limits in the
-signed inventory, and an override/drop-in is rejected. It also rejects a plain directory on `/`, a
+approved inventory, and an override/drop-in is rejected. It also rejects a plain directory on `/`, a
 symlink, an undersized filesystem, an unavailable mount, a UUID not present in
-the signed inventory, or a UUID that overlaps production.
+the approved inventory, or a UUID that overlaps production.
 
 All fourteen mutable Compose volumes now use the local bind driver below that
 mount. Docker volume names remain deterministic and staging-only, but their
@@ -4625,5 +4623,37 @@ storage and a memory increase from 2 GiB to at least 4 GiB before its role can
 be deployed. The Arvan compute API
 credential must be supplied from a mode-0600 secure environment file; it must
 not be recovered from terminal/session history. Until those two boundaries are
-installed and all four live host snapshots pass against one signed planned
+installed and all four live host snapshots pass against one approved planned
 inventory, migration and Full Matrix execution remain blocked.
+
+## 59. Human approval supersession: passphrase + TOTP - 2026-07-22
+
+The owner rejected the operational dependency on two laptops and two human
+signature files because loss of access to the second device could block an
+urgent security response for days. That ceremony is superseded by one fixed
+passphrase plus one TOTP possession factor on the isolated Witness/controller.
+This decision does not alter machine signing, mTLS, pairwise HMAC, Witness
+leases/proofs, fencing, Object Storage integrity, or hash-chained journals.
+
+The new public policy is reusable, while every issued token is short-lived and
+cryptographically bound to one exact action, environment, release SHA,
+artifact hash, policy hash, and action-specific bindings. TOTP counters and
+recovery codes are single-use; failures persist and trigger exponential
+lockout. Issuer secrets and the passphrase-encrypted private signing key remain
+only in a root-owned mode-0700 directory on the Witness. Runtime roles receive
+the public policy and token only.
+
+The following human gates now use the common verifier:
+
+- planned and provisioned inventory approval;
+- migration-plan approval;
+- Full Matrix campaign start and journal resume;
+- Gate D aggregate approval;
+- Writer/Witness real-host scenario authorization;
+- WebApp-IR promotion and WebApp-FI failback.
+
+Legacy two-device policy and signature schemas fail closed. Enrollment is not
+automatic and must be completed interactively after this branch is reviewed;
+no secret may be supplied through chat, Git, logs, or Object Storage. The
+activation, recovery, rotation, and custody procedure is authoritative in
+`docs/THREE_SITE_HUMAN_APPROVAL_TOTP_RUNBOOK.md`.

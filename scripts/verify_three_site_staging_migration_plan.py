@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Verify the independently signed, evidence-bound three-site staging cutover plan."""
+"""Verify the human-approved, evidence-bound three-site staging cutover plan."""
 
 from __future__ import annotations
 
 import argparse
-import base64
-import binascii
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -19,14 +17,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
+from core.human_approval import approval_subject, verify_human_approval
 from scripts.run_three_site_staging_source_backup import verify_backup_manifest
 from scripts.verify_three_site_staging_inventory import (
     _canonical_bytes,
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 from scripts.verify_three_site_staging_image_inventory import (
     LOCAL_RELEASE_IMAGE_PREFIXES,
@@ -60,6 +56,12 @@ ORDERED_PHASES = (
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{12}$")
+MIGRATION_PLAN_FIELDS = {
+    "schema", "campaign_id", "release_sha", "deployment_id",
+    "provisioned_inventory_sha256", "created_at", "not_after",
+    "source_freeze", "source_backups", "seed_bundles", "target_seed_map",
+    "image_inventories", "ordered_phases", "rollback_policy",
+}
 SUPPORTED_SOURCE_REVISIONS = frozenset(
     {
         "f1b6e7f8a9dc",  # immutable main parent used by this integration
@@ -78,6 +80,32 @@ class MigrationPlanError(RuntimeError):
     pass
 
 
+def migration_approval_subject(plan: dict[str, Any]) -> dict[str, Any]:
+    if (
+        not isinstance(plan, dict)
+        or set(plan) != MIGRATION_PLAN_FIELDS
+        or plan.get("schema") != "three-site-staging-migration-plan-v1"
+        or SHA_RE.fullmatch(str(plan.get("release_sha") or "")) is None
+        or SHA256_RE.fullmatch(str(plan.get("provisioned_inventory_sha256") or "")) is None
+        or not str(plan.get("deployment_id") or "").strip()
+    ):
+        raise MigrationPlanError("migration plan cannot produce a safe approval subject")
+    try:
+        UUID(str(plan["campaign_id"]))
+    except ValueError as exc:
+        raise MigrationPlanError("migration campaign id is invalid") from exc
+    return approval_subject(
+        artifact_type="three-site-staging-migration-plan-v1",
+        artifact_sha256=hashlib.sha256(_canonical_bytes(plan)).hexdigest(),
+        release_sha=str(plan["release_sha"]),
+        bindings={
+            "campaign_id": plan["campaign_id"],
+            "deployment_id": plan["deployment_id"],
+            "provisioned_inventory_sha256": plan["provisioned_inventory_sha256"],
+        },
+    )
+
+
 def _utc(value: Any, *, label: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -92,115 +120,33 @@ def _strict_load(path: Path) -> dict[str, Any]:
     return load_inventory(path)
 
 
-def _verify_signatures(
+def _verify_approval(
     plan: dict[str, Any],
     *,
     approval: dict[str, Any],
-    signer_policy: dict[str, Any],
+    approval_policy: dict[str, Any],
     release_sha: str,
     now: datetime,
+    require_fresh: bool,
 ) -> dict[str, Any]:
-    policy_fields = {"schema", "policy_id", "release_sha", "signers"}
-    if (
-        not isinstance(signer_policy, dict)
-        or set(signer_policy) != policy_fields
-        or signer_policy.get("schema") != "three-site-staging-inventory-signers-v1"
-        or str(signer_policy.get("release_sha", "")).lower() != release_sha
-    ):
-        raise MigrationPlanError("migration signer policy is invalid or release-mismatched")
+    subject = migration_approval_subject(plan)
     try:
-        UUID(str(signer_policy["policy_id"]))
-    except ValueError as exc:
-        raise MigrationPlanError("migration signer policy_id must be a UUID") from exc
-    signers: dict[str, tuple[str, str, bytes]] = {}
-    operators: set[str] = set()
-    custody_domains: set[str] = set()
-    public_keys: set[bytes] = set()
-    raw_signers = signer_policy["signers"]
-    if not isinstance(raw_signers, list) or len(raw_signers) < 2:
-        raise MigrationPlanError("migration policy requires at least two signers")
-    for item in raw_signers:
-        if not isinstance(item, dict) or set(item) != {
-            "key_id", "operator", "custody_domain", "public_key"
-        }:
-            raise MigrationPlanError("migration signer fields are invalid")
-        key_id = str(item["key_id"]).strip()
-        operator = str(item["operator"]).strip()
-        custody = str(item["custody_domain"]).strip()
-        try:
-            public_key = base64.b64decode(str(item["public_key"]), validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise MigrationPlanError("migration signer public key is invalid") from exc
-        if (
-            not key_id
-            or not operator
-            or not custody
-            or key_id in signers
-            or len(public_key) != 32
-            or operator in operators
-            or custody in custody_domains
-            or public_key in public_keys
-        ):
-            raise MigrationPlanError("migration signer identities/keys are not independent")
-        signers[key_id] = (operator, custody, public_key)
-        operators.add(operator)
-        custody_domains.add(custody)
-        public_keys.add(public_key)
-
-    fields = {
-        "schema", "plan_sha256", "release_sha", "policy_hash",
-        "signed_at", "expires_at", "approvals",
+        verified = verify_human_approval(
+            approval,
+            policy_payload=approval_policy,
+            expected_action="approve_migration",
+            expected_environment="staging",
+            expected_subject=subject,
+            now=now,
+            require_fresh=require_fresh,
+        )
+    except Exception as exc:
+        raise MigrationPlanError("migration human approval is invalid") from exc
+    return {
+        "approved_by": [verified.operator],
+        "approval_id": verified.approval_id,
+        "approval_expires_at": verified.expires_at.isoformat(),
     }
-    if (
-        not isinstance(approval, dict)
-        or set(approval) != fields
-        or approval.get("schema") != "three-site-staging-migration-approval-v1"
-        or approval.get("plan_sha256") != hashlib.sha256(_canonical_bytes(plan)).hexdigest()
-        or str(approval.get("release_sha", "")).lower() != release_sha
-        or approval.get("policy_hash") != hashlib.sha256(
-            _canonical_bytes(signer_policy)
-        ).hexdigest()
-    ):
-        raise MigrationPlanError("migration approval is not bound to plan/policy/release")
-    signed_at = _utc(approval["signed_at"], label="migration signed_at")
-    expires_at = _utc(approval["expires_at"], label="migration expires_at")
-    if (
-        signed_at > now + timedelta(minutes=5)
-        or expires_at <= now
-        or expires_at <= signed_at
-        or expires_at - signed_at > timedelta(hours=4)
-    ):
-        raise MigrationPlanError("migration approval is expired or outside its four-hour window")
-    raw_approvals = approval["approvals"]
-    if not isinstance(raw_approvals, list) or len(raw_approvals) != 2:
-        raise MigrationPlanError("migration plan requires exactly two approvals")
-    message = _canonical_bytes({name: approval[name] for name in fields - {"approvals"}})
-    operators = set()
-    custody_domains = set()
-    key_ids: set[str] = set()
-    for item in raw_approvals:
-        if not isinstance(item, dict) or set(item) != {"operator", "key_id", "signature"}:
-            raise MigrationPlanError("migration approval entry fields are invalid")
-        key_id = str(item["key_id"]).strip()
-        operator = str(item["operator"]).strip()
-        signer = signers.get(key_id)
-        if (
-            signer is None
-            or operator != signer[0]
-            or key_id in key_ids
-            or operator in operators
-            or signer[1] in custody_domains
-        ):
-            raise MigrationPlanError("migration approvals are not independent authorized signers")
-        try:
-            signature = base64.b64decode(str(item["signature"]), validate=True)
-            Ed25519PublicKey.from_public_bytes(signer[2]).verify(signature, message)
-        except (ValueError, binascii.Error, InvalidSignature) as exc:
-            raise MigrationPlanError("migration approval signature is invalid") from exc
-        key_ids.add(key_id)
-        operators.add(operator)
-        custody_domains.add(signer[1])
-    return {"approved_by": sorted(operators), "approval_expires_at": expires_at.isoformat()}
 
 
 def verify_migration_plan(
@@ -209,32 +155,28 @@ def verify_migration_plan(
     approval: dict[str, Any],
     inventory: dict[str, Any],
     inventory_approval: dict[str, Any],
-    signer_policy: dict[str, Any],
+    approval_policy: dict[str, Any],
     freeze_evidence: list[dict[str, Any]],
     image_inventories: dict[str, dict[str, Any]],
     backup_manifests: dict[str, dict[str, Any]],
     seed_manifests: dict[str, dict[str, Any]],
     now: datetime | None = None,
+    require_fresh_approval: bool = True,
 ) -> dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    inventory_result = verify_signed_inventory(
+    inventory_result = verify_approved_inventory(
         inventory,
         approval=inventory_approval,
-        signer_policy=signer_policy,
+        approval_policy=approval_policy,
         host_destructive=None,
         now=current,
+        require_fresh_approval=False,
     )
     if inventory_result["inventory_stage"] != "provisioned":
-        raise MigrationPlanError("migration requires the freshly signed provisioned inventory")
-    fields = {
-        "schema", "campaign_id", "release_sha", "deployment_id",
-        "provisioned_inventory_sha256", "created_at", "not_after",
-        "source_freeze", "source_backups", "seed_bundles", "target_seed_map",
-        "image_inventories", "ordered_phases", "rollback_policy",
-    }
+        raise MigrationPlanError("migration requires the approved provisioned inventory")
     if (
         not isinstance(plan, dict)
-        or set(plan) != fields
+        or set(plan) != MIGRATION_PLAN_FIELDS
         or plan.get("schema") != "three-site-staging-migration-plan-v1"
         or plan.get("campaign_id") != inventory_result["campaign_id"]
         or str(plan.get("release_sha", "")).lower() != inventory_result["release_sha"]
@@ -564,12 +506,13 @@ def verify_migration_plan(
         "cleanup_requires_explicit_finish": True,
     }:
         raise MigrationPlanError("migration rollback policy is unsafe")
-    signed = _verify_signatures(
+    signed = _verify_approval(
         plan,
         approval=approval,
-        signer_policy=signer_policy,
+        approval_policy=approval_policy,
         release_sha=inventory_result["release_sha"],
         now=current,
+        require_fresh=require_fresh_approval,
     )
     return {
         "status": "approved",
@@ -604,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approval", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--freeze-evidence", action="append", type=Path, required=True)
     parser.add_argument("--image-inventory", action="append", required=True)
     parser.add_argument("--backup-manifest", action="append", required=True)
@@ -616,7 +559,7 @@ def main(argv: list[str] | None = None) -> int:
             approval=_strict_load(args.approval),
             inventory=_strict_load(args.inventory),
             inventory_approval=_strict_load(args.inventory_approval),
-            signer_policy=_strict_load(args.signer_policy),
+            approval_policy=_strict_load(args.approval_policy),
             freeze_evidence=[_strict_load(path) for path in args.freeze_evidence],
             image_inventories=_mapping(
                 args.image_inventory,

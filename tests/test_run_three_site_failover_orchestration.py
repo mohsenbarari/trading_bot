@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from core.dr_failover_orchestrator import DrOrchestrationError
-from scripts.run_three_site_failover_orchestration import confirmation_phrase, run
+from core.secure_file_io import append_hash_chained_jsonl
+from scripts.run_three_site_failover_orchestration import (
+    _journal_proves_operation_started,
+    confirmation_phrase,
+    run,
+)
 
 
 def _args(*, apply: bool, confirm: str | None = None):  # noqa: ANN202
@@ -37,6 +43,32 @@ def _prepared():  # noqa: ANN202
 
 
 class ThreeSiteFailoverRunnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_historical_approval_requires_exact_reserved_operation_journal(self):
+        plan, _operations, _backend = _prepared()
+        with tempfile.TemporaryDirectory() as temporary:
+            journal = Path(temporary) / "failover.jsonl"
+            self.assertFalse(_journal_proves_operation_started(journal, plan))
+            append_hash_chained_jsonl(
+                journal,
+                {
+                    "event": "dr.orchestration.operation_reserved",
+                    "operation_id": "22222222-2222-4222-8222-222222222222",
+                    "plan_hash": plan.plan_hash,
+                },
+            )
+            self.assertFalse(_journal_proves_operation_started(journal, plan))
+        with tempfile.TemporaryDirectory() as temporary:
+            journal = Path(temporary) / "failover.jsonl"
+            append_hash_chained_jsonl(
+                journal,
+                {
+                    "event": "dr.orchestration.operation_reserved",
+                    "operation_id": plan.operation_id,
+                    "plan_hash": plan.plan_hash,
+                },
+            )
+            self.assertTrue(_journal_proves_operation_started(journal, plan))
+
     async def test_dry_run_validates_package_without_ledger_or_mutation(self):
         plan, operations, backend = _prepared()
         with (

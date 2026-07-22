@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timedelta, timezone
-import hashlib
 import json
 from pathlib import Path
 import unittest
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from core.human_approval import approval_subject
+from core.human_approval_issuer import (
+    authenticate_and_issue,
+    create_enrollment,
+    totp_code,
+)
 
 from scripts.verify_three_site_staging_inventory import (
     DEDICATED_HOST_DESTRUCTIVE,
     InventoryError,
     ROLE_COMPOSE_PROJECT,
     ROLE_VOLUME_LOGICAL_NAMES,
-    verify_signed_inventory,
+    verify_approved_inventory,
     verify_inventory,
 )
 from core.three_site_execution_safety import SHARED_HOST_SAFE
@@ -61,45 +63,39 @@ def _inventory() -> dict:
     return payload
 
 
-def _signed_documents(payload: dict, now: datetime, *, reuse_public_key: bool = False):
-    private_keys = [Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()]
-    signing_keys = [private_keys[0], private_keys[0] if reuse_public_key else private_keys[1]]
-    policy = {
-        "schema": "three-site-staging-inventory-signers-v1",
-        "policy_id": "22222222-2222-4222-8222-222222222222",
-        "release_sha": payload["release_sha"],
-        "signers": [
-            {
-                "key_id": f"inventory-operator-{number}",
-                "operator": f"person-{number}",
-                "custody_domain": f"device-{number}",
-                "public_key": base64.b64encode(
-                    private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-                ).decode(),
-            }
-            for number, private in enumerate(signing_keys, 1)
-        ],
-    }
-    unsigned = {
-        "schema": "three-site-staging-inventory-approval-v1",
-        "inventory_sha256": hashlib.sha256(_canonical(payload)).hexdigest(),
-        "release_sha": payload["release_sha"],
-        "policy_hash": hashlib.sha256(_canonical(policy)).hexdigest(),
-        "signed_at": now.isoformat(),
-        "expires_at": (now + timedelta(hours=1)).isoformat(),
-    }
-    approval = {
-        **unsigned,
-        "approvals": [
-            {
-                "operator": f"person-{number}",
-                "key_id": f"inventory-operator-{number}",
-                "signature": base64.b64encode(private.sign(_canonical(unsigned))).decode(),
-            }
-            for number, private in enumerate(signing_keys, 1)
-        ],
-    }
-    return policy, approval
+def _signed_documents(payload: dict, now: datetime):
+    enrollment = create_enrollment(
+        operator="person-1",
+        password="test approval passphrase value",
+        now=now,
+        scrypt_n=2**14,
+    )
+    subject = approval_subject(
+        artifact_type="three-site-staging-inventory-v3",
+        artifact_sha256=__import__("hashlib").sha256(_canonical(payload)).hexdigest(),
+        release_sha=payload["release_sha"],
+        bindings={
+            "campaign_id": payload["campaign_id"],
+            "deployment_id": payload["deployment_id"],
+            "host_safety_mode": payload["host_safety_mode"],
+            "inventory_stage": payload["inventory_stage"],
+        },
+    )
+    approval, _state, _audit = authenticate_and_issue(
+        secrets_payload=enrollment.secrets_payload,
+        state_payload=enrollment.state_payload,
+        policy_payload=enrollment.policy_payload,
+        private_key_envelope=enrollment.private_key_envelope,
+        password="test approval passphrase value",
+        totp=totp_code(enrollment.totp_secret, at=now)[1],
+        recovery_code=None,
+        action="approve_inventory",
+        environment="staging",
+        subject=subject,
+        ttl_seconds=3600,
+        now=now,
+    )
+    return enrollment.policy_payload, approval
 
 
 class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
@@ -152,15 +148,29 @@ class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(InventoryError, "fields/schema"):
             verify_inventory(payload)
 
-    def test_signer_policy_cannot_alias_one_key_as_two_people(self):
+    def test_legacy_two_device_policy_and_approval_are_rejected(self):
         now = datetime.now(timezone.utc)
         payload = _inventory()
-        policy, approval = _signed_documents(payload, now, reuse_public_key=True)
-        with self.assertRaisesRegex(InventoryError, "public keys are not independent"):
-            verify_signed_inventory(
+        policy = {
+            "schema": "three-site-staging-inventory-signers-v1",
+            "policy_id": "22222222-2222-4222-8222-222222222222",
+            "release_sha": payload["release_sha"],
+            "signers": [],
+        }
+        approval = {
+            "schema": "three-site-staging-inventory-approval-v1",
+            "inventory_sha256": "0" * 64,
+            "release_sha": payload["release_sha"],
+            "policy_hash": "0" * 64,
+            "signed_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "approvals": [],
+        }
+        with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+            verify_approved_inventory(
                 payload,
                 approval=approval,
-                signer_policy=policy,
+                approval_policy=policy,
                 host_destructive=True,
                 now=now,
             )
@@ -173,31 +183,32 @@ class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
             role["postgres_system_id"] = None
         policy, approval = _signed_documents(payload, now)
 
-        result = verify_signed_inventory(
+        result = verify_approved_inventory(
             payload,
             approval=approval,
-            signer_policy=policy,
+            approval_policy=policy,
             host_destructive=True,
             now=now,
         )
 
         self.assertEqual(result["inventory_stage"], "planned")
 
-    def test_exact_inventory_requires_two_independent_valid_signatures(self):
+    def test_exact_inventory_requires_valid_password_totp_approval(self):
         now = datetime.now(timezone.utc)
         payload = _inventory()
         policy, approval = _signed_documents(payload, now)
 
-        result = verify_signed_inventory(
+        result = verify_approved_inventory(
             payload,
             approval=approval,
-            signer_policy=policy,
+            approval_policy=policy,
             host_destructive=True,
             now=now,
         )
 
         self.assertEqual(result["status"], "approved")
-        self.assertEqual(result["approved_by"], ["person-1", "person-2"])
+        self.assertEqual(result["approved_by"], ["person-1"])
+        self.assertTrue(result["approval_id"])
 
     def test_inventory_mutation_after_approval_is_rejected(self):
         now = datetime.now(timezone.utc)
@@ -205,36 +216,35 @@ class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
         policy, approval = _signed_documents(payload, now)
         payload["roles"][0]["host_ip"] = "10.30.0.99"
 
-        with self.assertRaisesRegex(InventoryError, "not bound"):
-            verify_signed_inventory(
+        with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+            verify_approved_inventory(
                 payload,
                 approval=approval,
-                signer_policy=policy,
+                approval_policy=policy,
                 host_destructive=True,
                 now=now,
             )
 
-    def test_expired_or_same_custody_approval_is_rejected(self):
+    def test_expired_or_policy_tampered_approval_is_rejected(self):
         now = datetime.now(timezone.utc)
         payload = _inventory()
         policy, approval = _signed_documents(payload, now)
-        policy["signers"][1]["custody_domain"] = "device-1"
-        approval["policy_hash"] = hashlib.sha256(_canonical(policy)).hexdigest()
+        policy["issuer"]["operator"] = "other-person"
         with self.assertRaises(InventoryError):
-            verify_signed_inventory(
+            verify_approved_inventory(
                 payload,
                 approval=approval,
-                signer_policy=policy,
+                approval_policy=policy,
                 host_destructive=True,
                 now=now,
             )
 
         policy, approval = _signed_documents(payload, now - timedelta(hours=2))
-        with self.assertRaisesRegex(InventoryError, "expired"):
-            verify_signed_inventory(
+        with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+            verify_approved_inventory(
                 payload,
                 approval=approval,
-                signer_policy=policy,
+                approval_policy=policy,
                 host_destructive=True,
                 now=now,
             )

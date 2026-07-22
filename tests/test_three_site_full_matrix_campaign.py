@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -9,10 +8,13 @@ import tempfile
 import unittest
 from uuid import uuid4
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from core.dr_event_protocol import canonical_json_bytes
+from core.human_approval import POLICY_SCHEMA, approval_subject
+from core.human_approval_issuer import (
+    authenticate_and_issue,
+    create_enrollment,
+    totp_code,
+)
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
     CAMPAIGN_SCHEMA,
@@ -21,7 +23,6 @@ from core.three_site_full_matrix_campaign import (
     PHASES,
     PHASE_EVIDENCE_SCHEMA,
     PHASE_SCENARIOS,
-    POLICY_SCHEMA,
     SCENARIO_EVIDENCE_SCHEMA,
     FullMatrixCampaignError,
     _matrix_operation_id,
@@ -45,25 +46,14 @@ from tests.three_site_sync_timing_fixtures import make_sync_timing_artifact
 
 
 def _signed_campaign(now: datetime):  # noqa: ANN202
-    private_keys = [Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()]
     activation = "b" * 40
-    policy = {
-        "schema": POLICY_SCHEMA,
-        "policy_id": str(uuid4()),
-        "release_sha": activation,
-        "minimum_approvals": 2,
-        "signers": [
-            {
-                "operator": f"operator-{number}",
-                "key_id": f"matrix-key-{number}",
-                "custody_domain": f"device-{number}",
-                "public_key": base64.b64encode(
-                    private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-                ).decode(),
-            }
-            for number, private in enumerate(private_keys, 1)
-        ],
-    }
+    enrollment = create_enrollment(
+        operator="operator-1",
+        password="test matrix approval passphrase",
+        now=now,
+        scrypt_n=2**14,
+    )
+    policy = enrollment.policy_payload
     policy_hash = hashlib.sha256(canonical_json_bytes(policy)).hexdigest()
     campaign_id = str(uuid4())
     gate_group_id = str(uuid4())
@@ -99,20 +89,38 @@ def _signed_campaign(now: datetime):  # noqa: ANN202
         "approver_policy_hash": policy_hash,
         "approvals": [],
     }
-    return campaign, policy, private_keys
+    return campaign, policy, enrollment
 
 
-def _sign(campaign: dict, private_keys: list[Ed25519PrivateKey]) -> None:
+def _sign(campaign: dict, enrollment) -> None:  # noqa: ANN001
     unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
     digest = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
-    campaign["approvals"] = [
-        {
-            "operator": f"operator-{number}",
-            "key_id": f"matrix-key-{number}",
-            "signature": base64.b64encode(private.sign(digest.encode("ascii"))).decode(),
-        }
-        for number, private in enumerate(private_keys, 1)
-    ]
+    issued_at = datetime.fromisoformat(campaign["generated_at"])
+    subject = approval_subject(
+        artifact_type=CAMPAIGN_SCHEMA,
+        artifact_sha256=digest,
+        release_sha=campaign["release_sha"],
+        bindings={
+            "campaign_id": campaign["campaign_id"],
+            "gate_group_id": campaign["gate_group_id"],
+            "execution_class": campaign["execution_class"],
+        },
+    )
+    token, _state, _audit = authenticate_and_issue(
+        secrets_payload=enrollment.secrets_payload,
+        state_payload=enrollment.state_payload,
+        policy_payload=enrollment.policy_payload,
+        private_key_envelope=enrollment.private_key_envelope,
+        password="test matrix approval passphrase",
+        totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
+        recovery_code=None,
+        action="start_full_matrix",
+        environment="staging",
+        subject=subject,
+        ttl_seconds=600,
+        now=issued_at,
+    )
+    campaign["approvals"] = [token]
 
 
 def _phase_evidence(
@@ -564,15 +572,12 @@ class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
         self.assertTrue(required <= actual)
         self.assertEqual(len(actual), sum(len(items) for items in PHASE_SCENARIOS.values()))
 
-    def test_two_signer_policy_cannot_reuse_one_public_key(self):
+    def test_legacy_or_tampered_approval_policy_is_rejected(self):
         now = datetime.now(timezone.utc)
-        campaign, policy, keys = _signed_campaign(now)
-        policy["signers"][1]["public_key"] = policy["signers"][0]["public_key"]
-        campaign["approver_policy_hash"] = hashlib.sha256(
-            canonical_json_bytes(policy)
-        ).hexdigest()
-        _sign(campaign, [keys[0], keys[0]])
-        with self.assertRaisesRegex(FullMatrixCampaignError, "independent"):
+        campaign, policy, enrollment = _signed_campaign(now)
+        _sign(campaign, enrollment)
+        policy["issuer"]["operator"] = "attacker"
+        with self.assertRaisesRegex(FullMatrixCampaignError, "human approval"):
             verify_campaign(campaign, approver_policy=policy, now=now)
 
     def _complete(self):  # noqa: ANN202

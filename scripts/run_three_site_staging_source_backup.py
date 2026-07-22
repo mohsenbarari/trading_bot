@@ -23,7 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.render_three_site_staging_role_compose import _atomic_write, parse_env_values
 from scripts.verify_three_site_staging_inventory import (
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 
 
@@ -687,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--expected-source-release-sha", required=True)
     parser.add_argument("--target-release-sha", required=True)
     parser.add_argument("--apply", action="store_true")
@@ -698,16 +698,16 @@ def main(argv: list[str] | None = None) -> int:
             args.target_release_sha
         ):
             raise StagingBackupError("source and target releases must be exact 40-hex SHAs")
-        inventory_result = verify_signed_inventory(
+        inventory_result = verify_approved_inventory(
             load_inventory(args.inventory),
             approval=load_inventory(args.inventory_approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             host_destructive=None,
         )
         if inventory_result["inventory_stage"] != "provisioned":
-            raise StagingBackupError("final source backup requires signed provisioned inventory")
+            raise StagingBackupError("final source backup requires approved provisioned inventory")
         if inventory_result["release_sha"] != args.target_release_sha:
-            raise StagingBackupError("target SHA differs from signed planned inventory")
+            raise StagingBackupError("target SHA differs from approved planned inventory")
         plan = build_plan(args, inventory_result)
         if not args.apply:
             result = plan

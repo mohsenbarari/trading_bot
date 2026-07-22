@@ -64,7 +64,7 @@ class FinalizeThreeSiteStagingInventoryTests(unittest.TestCase):
         result = finalize_inventory(
             planned=planned,
             approval=approval,
-            signer_policy=policy,
+            approval_policy=policy,
             snapshots=snapshots,
         )
         self.assertEqual(result["inventory_stage"], "provisioned")
@@ -79,7 +79,7 @@ class FinalizeThreeSiteStagingInventoryTests(unittest.TestCase):
             finalize_inventory(
                 planned=planned,
                 approval=approval,
-                signer_policy=policy,
+                approval_policy=policy,
                 snapshots=snapshots,
             )
 
@@ -101,7 +101,7 @@ class FinalizeThreeSiteStagingInventoryTests(unittest.TestCase):
             finalize_inventory(
                 planned=planned,
                 approval=approval,
-                signer_policy=policy,
+                approval_policy=policy,
                 snapshots=snapshots,
             )
 

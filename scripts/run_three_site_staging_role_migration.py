@@ -201,7 +201,7 @@ def verify_inputs(args: argparse.Namespace) -> dict[str, Any]:
         approval=load_inventory(args.plan_approval),
         inventory=inventory,
         inventory_approval=load_inventory(args.inventory_approval),
-        signer_policy=load_inventory(args.signer_policy),
+        approval_policy=load_inventory(args.approval_policy),
         freeze_evidence=[load_inventory(path) for path in args.freeze_evidence],
         image_inventories=images,
         backup_manifests=backups,
@@ -217,7 +217,7 @@ def verify_inputs(args: argparse.Namespace) -> dict[str, Any]:
         env_bytes=env_bytes,
         inventory=inventory,
         approval=load_inventory(args.inventory_approval),
-        signer_policy=load_inventory(args.signer_policy),
+        approval_policy=load_inventory(args.approval_policy),
         verify_files=True,
         required_inventory_stage="provisioned",
     )
@@ -754,7 +754,7 @@ def _require_forward_inputs(args: argparse.Namespace) -> None:
         "target-seed": args.target_seed,
         "inventory": args.inventory,
         "inventory-approval": args.inventory_approval,
-        "signer-policy": args.signer_policy,
+        "approval-policy": args.approval_policy,
         "plan": args.plan,
         "plan-approval": args.plan_approval,
         "freeze-evidence": args.freeze_evidence,
@@ -842,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-seed", type=Path)
     parser.add_argument("--inventory", type=Path)
     parser.add_argument("--inventory-approval", type=Path)
-    parser.add_argument("--signer-policy", type=Path)
+    parser.add_argument("--approval-policy", type=Path)
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--plan-approval", type=Path)
     parser.add_argument("--freeze-evidence", action="append", type=Path, default=[])

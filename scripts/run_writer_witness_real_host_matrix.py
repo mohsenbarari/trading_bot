@@ -34,6 +34,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from scripts import plan_writer_witness_real_host_matrix as preflight_plan
 from scripts import writer_witness_controller_runtime as controller_runtime
+from core.canonical_json import canonical_json_bytes
+from core.human_approval import (
+    approval_subject,
+    load_human_approval_policy,
+    verify_human_approval,
+)
 from scripts.publish_wa_ir_object_storage_transfer import (
     DEFAULT_CONFIG as WA_IR_OBJECT_STORAGE_TRANSFER_CONFIG,
     publish_file as publish_wa_ir_transfer_file,
@@ -43,24 +49,21 @@ from scripts.publish_wa_ir_object_storage_transfer import (
 CLIENT_SCRIPT = ROOT / "scripts/writer_witness_matrix_client.py"
 PREFLIGHT_SCHEMA = "writer_witness_real_host_matrix_preflight_v1"
 RUNNER_SCHEMA = "writer_witness_real_host_matrix_runner_v1"
-APPROVAL_SCHEMA = "writer_witness_real_host_matrix_observer_approval_v1"
+APPROVAL_SCHEMA = "writer_witness_real_host_matrix_human_approval_request_v2"
 EXPECTED_BRANCH = "main"
 CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_CONFIRM"
 CONFIRM_VALUE = "execute-dark-witness-real-host-matrix"
 SCENARIO_CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO"
-OBSERVER_CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_OBSERVER_CONFIRM"
-OBSERVER_CONFIRM_VALUE = "approve-one-dark-witness-scenario"
+APPROVAL_REQUEST_CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_APPROVAL_REQUEST_CONFIRM"
+APPROVAL_REQUEST_CONFIRM_VALUE = "prepare-one-dark-witness-scenario-approval"
 DEFAULT_CONTROLLER_ROOT = Path("/var/lib/trading-bot-witness-matrix")
 DEFAULT_ARTIFACT_ROOT = DEFAULT_CONTROLLER_ROOT / "runs"
 LOCK_PATH = DEFAULT_CONTROLLER_ROOT / "active.lock"
 DEFAULT_CAMPAIGN_ROOT = Path("/var/lib/trading-bot-witness-matrix/campaigns")
 DEFAULT_SECRET_ROOT = Path("/run/writer-witness-matrix-controller")
-TRUSTED_ALLOWED_SIGNERS = Path("/etc/trading-bot-witness-matrix/allowed_signers")
-# Deliberately fail-closed until two independently custodied public keys are
-# selected and their canonical allowed_signers bytes are pinned by a reviewed
-# source commit. Root on the Matrix controller cannot choose this value at run
-# time, so replacing both keys and signatures is no longer self-authorizing.
-TRUSTED_ALLOWED_SIGNERS_SHA256 = "UNCONFIGURED-INDEPENDENT-SIGNER-POLICY"
+HUMAN_APPROVAL_POLICY = Path(
+    "/etc/trading-bot-witness-matrix/human-approval-policy.json"
+)
 REMOTE_CAMPAIGN_ROOT = "/var/lib/trading-bot-witness/matrix-campaign"
 ROLLBACK_STATE_MANIFEST_SHA256 = (
     "0be506962c48d6e19b9f13b8e8f4f5961fade0d4a852de0dcea9d2819a7d61a7"
@@ -678,20 +681,24 @@ def validate_approval(
     reason: str,
     change_id: str,
     expected_restore_sha256: str,
-    expected_allowed_signers_sha256: str,
+    expected_human_approval_policy_sha256: str,
     expected_controller_toolchain_inventory_sha256: str,
 ) -> tuple[str, str]:
-    if payload.get("schema_version") != APPROVAL_SCHEMA or payload.get("status") != "approved":
-        raise MatrixError("independent observer approval is missing or invalid")
+    if (
+        payload.get("schema_version") != APPROVAL_SCHEMA
+        or payload.get("status") != "awaiting_password_totp_approval"
+    ):
+        raise MatrixError("Matrix human approval request is missing or invalid")
     if payload.get("scenario") != scenario or payload.get("expected_commit") != expected_head:
-        raise MatrixError("observer approval is for a different scenario or commit")
+        raise MatrixError("Matrix approval request is for a different scenario or commit")
     if payload.get("preflight_sha256") != preflight_sha256:
-        raise MatrixError("observer approval is not bound to the supplied preflight")
-    observer = str(payload.get("observer") or "").strip()
-    commander = str(payload.get("incident_commander") or "").strip()
-    normalized_roles = {value.casefold() for value in (operator.strip(), observer, commander)}
-    if not operator.strip() or not observer or not commander or len(normalized_roles) != 3:
-        raise MatrixError("operator, observer, and incident commander must be three distinct identities")
+        raise MatrixError("Matrix approval request is not bound to the supplied preflight")
+    request_operator = str(payload.get("operator") or "").strip()
+    if (
+        not operator.strip()
+        or request_operator.casefold() != operator.strip().casefold()
+    ):
+        raise MatrixError("approval operator identity differs from the authenticated owner")
     if not reason.strip() or str(payload.get("reason") or "").strip() != reason.strip():
         raise MatrixError("execution reason must exactly match the approved incident reason")
     if not change_id.strip() or str(payload.get("change_id") or "").strip() != change_id.strip():
@@ -712,24 +719,24 @@ def validate_approval(
             "restore_authorized",
         )
     ):
-        raise MatrixError("observer approval lacks an operational safety assertion")
+        raise MatrixError("Matrix approval request lacks an operational safety assertion")
     try:
-        approved = datetime.fromisoformat(str(payload.get("approved_at")).replace("Z", "+00:00"))
-        expires = datetime.fromisoformat(str(payload.get("expires_at")).replace("Z", "+00:00"))
+        prepared = datetime.fromisoformat(str(payload.get("prepared_at")).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(str(payload.get("request_expires_at")).replace("Z", "+00:00"))
         window_start = datetime.fromisoformat(
             str(payload.get("maintenance_window_start")).replace("Z", "+00:00")
         )
         window_end = datetime.fromisoformat(
             str(payload.get("maintenance_window_end")).replace("Z", "+00:00")
         )
-        for value in (approved, expires, window_start, window_end):
+        for value in (prepared, expires, window_start, window_end):
             if value.tzinfo is None:
                 raise ValueError("timezone is required")
     except (TypeError, ValueError) as exc:
-        raise MatrixError("observer approval expiry is invalid") from exc
+        raise MatrixError("Matrix approval request expiry is invalid") from exc
     now = datetime.now(timezone.utc)
-    if approved > now + timedelta(seconds=30) or expires <= now or expires > approved + timedelta(hours=1):
-        raise MatrixError("observer approval has expired")
+    if prepared > now + timedelta(seconds=30) or expires <= now or expires > prepared + timedelta(hours=1):
+        raise MatrixError("Matrix approval request has expired")
     if window_start > now or window_end <= now or window_end > window_start + timedelta(hours=8):
         raise MatrixError("execution is outside the approved maintenance window")
     for field in (
@@ -750,90 +757,59 @@ def validate_approval(
         raise MatrixError("approval lacks a named restore authorizer")
     if payload.get("restore_backup_sha256") != expected_restore_sha256:
         raise MatrixError("approval is not bound to the pinned restore backup")
-    if payload.get("allowed_signers_sha256") != expected_allowed_signers_sha256:
-        raise MatrixError("approval is not bound to the trusted signer policy")
+    if (
+        payload.get("human_approval_policy_sha256")
+        != expected_human_approval_policy_sha256
+    ):
+        raise MatrixError("approval is not bound to the human approval policy")
     if (
         payload.get("controller_toolchain_inventory_sha256")
         != expected_controller_toolchain_inventory_sha256
     ):
         raise MatrixError("approval is not bound to the Matrix controller toolchain")
-    return observer, commander
+    return request_operator, request_operator
 
 
-def verify_approval_signature(
-    approval_raw: bytes,
-    signature_raw: bytes,
-    *,
-    identity: str,
-    allowed_signers_raw: bytes,
+def matrix_human_approval_subject(
+    payload: dict[str, Any], *, expected_head: str
+) -> dict[str, Any]:
+    if (
+        payload.get("schema_version") != APPROVAL_SCHEMA
+        or payload.get("status") != "awaiting_password_totp_approval"
+        or payload.get("expected_commit") != expected_head
+    ):
+        raise MatrixError("Matrix approval request cannot produce a safe subject")
+    return approval_subject(
+        artifact_type=APPROVAL_SCHEMA,
+        artifact_sha256=hashlib.sha256(canonical_json_bytes(payload)).hexdigest(),
+        release_sha=expected_head,
+        bindings={
+            "scenario": payload.get("scenario"),
+            "preflight_sha256": payload.get("preflight_sha256"),
+            "change_id": payload.get("change_id"),
+            "authorization_nonce": payload.get("authorization_nonce"),
+            "restore_backup_sha256": payload.get("restore_backup_sha256"),
+            "human_approval_policy_sha256": payload.get(
+                "human_approval_policy_sha256"
+            ),
+            "controller_toolchain_inventory_sha256": payload.get(
+                "controller_toolchain_inventory_sha256"
+            ),
+        },
+    )
+
+
+def assert_authenticated_approval_operator(
+    request_operator: str, authenticated_operator: str
 ) -> None:
-    descriptors: list[int] = []
-    try:
-        for name, raw in (("allowed-signers", allowed_signers_raw), ("signature", signature_raw)):
-            if not hasattr(os, "memfd_create"):
-                raise MatrixError("immutable in-memory signature verification requires memfd_create")
-            descriptor = os.memfd_create(f"writer-witness-{name}", flags=0)
-            descriptors.append(descriptor)
-            if os.write(descriptor, raw) != len(raw):
-                raise MatrixError(f"failed to stage immutable {name} bytes")
-            os.lseek(descriptor, 0, os.SEEK_SET)
-        completed = subprocess.run(
-            [
-                controller_runtime.executable("ssh-keygen"),
-                "-Y", "verify", "-f", f"/proc/self/fd/{descriptors[0]}",
-                "-I", identity, "-n", "writer-witness-matrix",
-                "-s", f"/proc/self/fd/{descriptors[1]}",
-            ],
-            input=approval_raw,
-            env=controller_runtime.clean_environment(),
-            capture_output=True,
-            pass_fds=tuple(descriptors),
-        )
-        if completed.returncode != 0:
-            raise MatrixError(f"approval signature verification failed for {identity}")
-    finally:
-        for descriptor in descriptors:
-            os.close(descriptor)
-
-
-def assert_independent_signer_keys(
-    allowed_signers_raw: bytes,
-    observer: str,
-    incident_commander: str,
-) -> None:
-    identities = {observer: set(), incident_commander: set()}
-    try:
-        rendered = allowed_signers_raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise MatrixError("trusted signer policy is not UTF-8") from exc
-    for raw_line in rendered.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        fields = line.split()
-        if len(fields) < 3:
-            raise MatrixError("allowed-signers file contains an invalid entry")
-        principals, key_type, key_data = fields[:3]
-        fingerprint = f"{key_type} {key_data}"
-        for identity in identities:
-            if identity in principals.split(","):
-                identities[identity].add(fingerprint)
-    if not all(identities.values()):
-        raise MatrixError("observer or incident commander lacks an allowed signing key")
-    if identities[observer] & identities[incident_commander]:
-        raise MatrixError("observer and incident commander must use independent signing keys")
-
-
-def assert_source_pinned_signer_policy(allowed_signers_raw: bytes) -> str:
-    expected = TRUSTED_ALLOWED_SIGNERS_SHA256
-    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+    if (
+        not request_operator
+        or not authenticated_operator
+        or request_operator != authenticated_operator
+    ):
         raise MatrixError(
-            "independent signer policy is not yet pinned by the reviewed source"
+            "Matrix request operator differs from the authenticated approval owner"
         )
-    observed = hashlib.sha256(allowed_signers_raw).hexdigest()
-    if observed != expected:
-        raise MatrixError("trusted signer policy differs from the reviewed source pin")
-    return observed
 
 
 def consume_approval(payload: dict[str, Any], root: Path) -> Path:
@@ -3792,8 +3768,8 @@ def build_plan(args: argparse.Namespace, expected_head: str) -> dict[str, Any]:
         "safety": {
             "one_scenario_per_process": True,
             "requires_passing_pinned_preflight": True,
-            "requires_distinct_operator_observer": True,
-            "requires_preflight_bound_observer_approval": True,
+            "requires_password_totp_owner_approval": True,
+            "requires_preflight_bound_action_token": True,
             "requires_out_of_band_console_and_restore_authorization": True,
             "requires_persistent_multiplexed_ssh": True,
             "accounts_http_ssh_scp_and_reconnect_upper_bounds": True,
@@ -3817,12 +3793,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-controller-toolchain-inventory-sha256")
     parser.add_argument("--campaign-journal", type=Path)
     parser.add_argument("--operator")
-    parser.add_argument("--observer")
-    parser.add_argument("--incident-commander")
     parser.add_argument("--approval", type=Path)
-    parser.add_argument("--observer-signature", type=Path)
-    parser.add_argument("--commander-signature", type=Path)
-    parser.add_argument("--allowed-signers", type=Path, default=TRUSTED_ALLOWED_SIGNERS)
+    parser.add_argument("--human-approval", type=Path)
+    parser.add_argument(
+        "--human-approval-policy", type=Path, default=HUMAN_APPROVAL_POLICY
+    )
+    parser.add_argument("--subject-output", type=Path)
     parser.add_argument("--reason")
     parser.add_argument("--change-id")
     parser.add_argument("--out-of-band-console")
@@ -3967,20 +3943,34 @@ def main() -> int:
         return 0
 
     if args.mode == "approve":
-        if os.getenv(OBSERVER_CONFIRM_ENV) != OBSERVER_CONFIRM_VALUE:
-            raise MatrixError("observer approval confirmation is missing")
+        if os.getenv(APPROVAL_REQUEST_CONFIRM_ENV) != APPROVAL_REQUEST_CONFIRM_VALUE:
+            raise MatrixError("Matrix approval-request confirmation is missing")
         required_approval_values = (
-            args.preflight, args.observer, args.incident_commander, args.reason,
+            args.preflight, args.operator, args.reason,
             args.change_id, args.out_of_band_console, args.alternate_communications,
             args.maintenance_window_start, args.maintenance_window_end, args.dpi_byte_budget,
-            args.restore_authorized_by,
+            args.restore_authorized_by, args.subject_output,
         )
         if not all(required_approval_values):
             raise MatrixError("approve mode requires concrete roles, incident, window, communications, and DPI budget")
         if args.dpi_byte_budget < MIN_DPI_BYTE_BUDGET:
             raise MatrixError("approve mode DPI byte budget is below the closed all-transport ceiling")
-        if args.observer.strip().casefold() == args.incident_commander.strip().casefold():
-            raise MatrixError("abort observer and incident commander must be distinct")
+        if args.human_approval_policy != HUMAN_APPROVAL_POLICY:
+            raise MatrixError("approve mode requires the canonical human approval policy")
+        human_policy_raw = read_secure_regular(
+            HUMAN_APPROVAL_POLICY,
+            label="human approval policy",
+        )
+        human_policy = parse_json_bytes(
+            human_policy_raw,
+            label="human approval policy",
+        )
+        # Structural validation happens again with the issued token at execute.
+        parsed_human_policy = load_human_approval_policy(human_policy)
+        assert_authenticated_approval_operator(
+            args.operator.strip(), parsed_human_policy.operator
+        )
+        human_policy_hash = hashlib.sha256(canonical_json_bytes(human_policy)).hexdigest()
         try:
             window_start = datetime.fromisoformat(args.maintenance_window_start.replace("Z", "+00:00"))
             window_end = datetime.fromisoformat(args.maintenance_window_end.replace("Z", "+00:00"))
@@ -3991,13 +3981,6 @@ def main() -> int:
         now = datetime.now(timezone.utc)
         if window_start > now or window_end <= now or window_end > window_start + timedelta(hours=8):
             raise MatrixError("approval must be issued inside a maintenance window of at most eight hours")
-        if args.allowed_signers != TRUSTED_ALLOWED_SIGNERS:
-            raise MatrixError("approve mode requires the canonical trusted signer policy")
-        allowed_signers_raw = read_secure_regular(
-            TRUSTED_ALLOWED_SIGNERS,
-            label="trusted signer policy",
-        )
-        assert_source_pinned_signer_policy(allowed_signers_raw)
         preflight_raw = read_secure_regular(args.preflight, label="preflight artifact")
         preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
         validate_preflight(
@@ -4012,17 +3995,16 @@ def main() -> int:
         secure_directory(output.parent)
         payload = {
             "schema_version": APPROVAL_SCHEMA,
-            "status": "approved",
+            "status": "awaiting_password_totp_approval",
             "scenario": args.scenario,
             "expected_commit": expected_head,
             "preflight_sha256": hashlib.sha256(preflight_raw).hexdigest(),
-            "observer": args.observer.strip(),
-            "incident_commander": args.incident_commander.strip(),
+            "operator": args.operator.strip(),
             "reason": args.reason.strip(),
             "change_id": args.change_id.strip(),
             "authorization_nonce": uuid.uuid4().hex,
-            "approved_at": approval_now.isoformat().replace("+00:00", "Z"),
-            "expires_at": (approval_now + timedelta(minutes=45)).isoformat().replace("+00:00", "Z"),
+            "prepared_at": approval_now.isoformat().replace("+00:00", "Z"),
+            "request_expires_at": (approval_now + timedelta(minutes=45)).isoformat().replace("+00:00", "Z"),
             "out_of_band_console_ready": True,
             "alternate_communications_ready": True,
             "maintenance_window_confirmed": True,
@@ -4037,7 +4019,7 @@ def main() -> int:
             "maintenance_window_end": args.maintenance_window_end.strip(),
             "restore_backup_sha256": preflight["observed_baseline"]["matrix_witness_dark_baseline"]["backup_sha256"],
             "restore_authorized_by": args.restore_authorized_by.strip(),
-            "allowed_signers_sha256": hashlib.sha256(allowed_signers_raw).hexdigest(),
+            "human_approval_policy_sha256": human_policy_hash,
             "controller_toolchain_inventory_sha256": controller_toolchain_digest,
         }
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -4048,51 +4030,73 @@ def main() -> int:
         try:
             raw = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
             if os.write(descriptor, raw) != len(raw):
-                raise MatrixError("failed to persist complete observer approval")
+                raise MatrixError("failed to persist complete Matrix approval request")
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
         fsync_directory(output.parent)
-        print(json.dumps({"status": "approved", "scenario": args.scenario, "output": str(output)}, sort_keys=True))
+        subject = matrix_human_approval_subject(payload, expected_head=expected_head)
+        subject_output = args.subject_output
+        subject_output.parent.mkdir(parents=True, exist_ok=True)
+        subject_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            subject_flags |= os.O_NOFOLLOW
+        subject_descriptor = os.open(subject_output, subject_flags, 0o600)
+        try:
+            subject_raw = (
+                json.dumps(subject, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            ).encode()
+            if os.write(subject_descriptor, subject_raw) != len(subject_raw):
+                raise MatrixError("failed to persist Matrix human approval subject")
+            os.fsync(subject_descriptor)
+        finally:
+            os.close(subject_descriptor)
+        fsync_directory(subject_output.parent)
+        print(
+            json.dumps(
+                {
+                    "status": "awaiting_password_totp_approval",
+                    "scenario": args.scenario,
+                    "output": str(output),
+                    "subject_output": str(subject_output),
+                },
+                sort_keys=True,
+            )
+        )
         return 0
 
     if os.getenv(CONFIRM_ENV) != CONFIRM_VALUE or os.getenv(SCENARIO_CONFIRM_ENV) != args.scenario:
         raise MatrixError("live Matrix execution confirmation is missing or does not match the one scenario")
     if (
         not args.preflight or not args.approval or not args.operator or not args.operator.strip()
-        or not args.reason or not args.reason.strip() or not args.observer_signature
-        or not args.commander_signature
+        or not args.reason or not args.reason.strip() or not args.human_approval
         or not args.change_id or not args.change_id.strip()
     ):
-        raise MatrixError("execute mode requires signed approval, named operator, preflight, and incident reason")
+        raise MatrixError("execute mode requires human approval, named operator, preflight, and incident reason")
     if git_value("branch", "--show-current") != EXPECTED_BRANCH:
         raise MatrixError("Matrix runner is on the wrong branch")
     if git_value("rev-parse", "HEAD") != expected_head or git_value("status", "--porcelain"):
         raise MatrixError("Matrix runner requires the exact clean frozen commit")
-    if args.allowed_signers != TRUSTED_ALLOWED_SIGNERS:
-        raise MatrixError("execute mode requires the canonical trusted signer policy")
+    if args.human_approval_policy != HUMAN_APPROVAL_POLICY:
+        raise MatrixError("execute mode requires the canonical human approval policy")
     preflight_raw = read_secure_regular(args.preflight, label="preflight artifact")
-    approval_raw = read_secure_regular(args.approval, label="observer approval")
-    observer_signature_raw = read_secure_regular(
-        args.observer_signature,
-        label="observer signature",
+    approval_raw = read_secure_regular(args.approval, label="Matrix approval request")
+    human_approval_raw = read_secure_regular(
+        args.human_approval,
+        label="Matrix human approval token",
     )
-    commander_signature_raw = read_secure_regular(
-        args.commander_signature,
-        label="incident commander signature",
+    human_policy_raw = read_secure_regular(
+        HUMAN_APPROVAL_POLICY,
+        label="human approval policy",
     )
-    allowed_signers_raw = read_secure_regular(
-        TRUSTED_ALLOWED_SIGNERS,
-        label="trusted signer policy",
-    )
-    assert_source_pinned_signer_policy(allowed_signers_raw)
+    human_policy = parse_json_bytes(human_policy_raw, label="human approval policy")
     preflight = parse_json_bytes(preflight_raw, label="preflight artifact")
     baseline = validate_preflight(
         preflight,
         expected_head,
         controller_toolchain_digest,
     )
-    approval = parse_json_bytes(approval_raw, label="observer approval")
+    approval = parse_json_bytes(approval_raw, label="Matrix approval request")
     observer, incident_commander = validate_approval(
         approval,
         scenario=args.scenario,
@@ -4102,24 +4106,30 @@ def main() -> int:
         reason=args.reason.strip(),
         change_id=args.change_id.strip(),
         expected_restore_sha256=baseline["matrix_witness_dark_baseline"]["backup_sha256"],
-        expected_allowed_signers_sha256=hashlib.sha256(allowed_signers_raw).hexdigest(),
+        expected_human_approval_policy_sha256=hashlib.sha256(
+            canonical_json_bytes(human_policy)
+        ).hexdigest(),
         expected_controller_toolchain_inventory_sha256=controller_toolchain_digest,
     )
-    assert_independent_signer_keys(allowed_signers_raw, observer, incident_commander)
-    verify_approval_signature(
-        approval_raw,
-        observer_signature_raw,
-        identity=observer,
-        allowed_signers_raw=allowed_signers_raw,
+    human_approval = parse_json_bytes(
+        human_approval_raw,
+        label="Matrix human approval token",
     )
-    verify_approval_signature(
-        approval_raw,
-        commander_signature_raw,
-        identity=incident_commander,
-        allowed_signers_raw=allowed_signers_raw,
+    verified_human_approval = verify_human_approval(
+        human_approval,
+        policy_payload=human_policy,
+        expected_action="run_writer_witness_matrix",
+        expected_environment="staging",
+        expected_subject=matrix_human_approval_subject(
+            approval,
+            expected_head=expected_head,
+        ),
+    )
+    assert_authenticated_approval_operator(
+        observer, verified_human_approval.operator
     )
     approval_expiry = datetime.fromisoformat(
-        str(approval["expires_at"]).replace("Z", "+00:00")
+        str(approval["request_expires_at"]).replace("Z", "+00:00")
     ).astimezone(timezone.utc)
     campaign_not_after = min(
         approval_expiry,
@@ -4160,9 +4170,13 @@ def main() -> int:
         controller.journal.update(
             approval_path=str(args.approval),
             approval_sha256=hashlib.sha256(approval_raw).hexdigest(),
-            observer_signature_sha256=hashlib.sha256(observer_signature_raw).hexdigest(),
-            commander_signature_sha256=hashlib.sha256(commander_signature_raw).hexdigest(),
-            allowed_signers_sha256=hashlib.sha256(allowed_signers_raw).hexdigest(),
+            human_approval_path=str(args.human_approval),
+            human_approval_token_sha256=hashlib.sha256(
+                human_approval_raw
+            ).hexdigest(),
+            human_approval_policy_sha256=hashlib.sha256(
+                canonical_json_bytes(human_policy)
+            ).hexdigest(),
         )
 
         pending_signal: int | None = None

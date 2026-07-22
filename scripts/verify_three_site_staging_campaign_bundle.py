@@ -164,7 +164,7 @@ def verify_campaign_bundle(
     bundles: dict[str, tuple[bytes, bytes]],
     inventory: dict[str, Any],
     approval: dict[str, Any],
-    signer_policy: dict[str, Any],
+    approval_policy: dict[str, Any],
     verify_files: bool,
 ) -> dict[str, Any]:
     if set(bundles) != set(ROLES):
@@ -181,7 +181,7 @@ def verify_campaign_bundle(
                 env_bytes=env_bytes,
                 inventory=inventory,
                 approval=approval,
-                signer_policy=signer_policy,
+                approval_policy=approval_policy,
                 verify_files=verify_files,
             )
             role_values[role] = parse_env_values(env_bytes.decode("utf-8"))
@@ -249,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--canonical-compose", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--bundle", action="append", required=True)
     parser.add_argument("--skip-file-attestation", action="store_true")
     args = parser.parse_args(argv)
@@ -271,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             bundles=bundles,
             inventory=load_inventory(args.inventory),
             approval=load_inventory(args.approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             verify_files=not args.skip_file_attestation,
         )
     except Exception as exc:

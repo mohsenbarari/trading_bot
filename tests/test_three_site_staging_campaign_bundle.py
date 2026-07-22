@@ -153,7 +153,7 @@ class ThreeSiteStagingCampaignBundleTests(unittest.TestCase):
             bundles=self._bundles(),
             inventory=self.inventory,
             approval=self.approval,
-            signer_policy=self.policy,
+            approval_policy=self.policy,
             verify_files=False,
         )
         self.assertEqual(result["status"], "verified")
@@ -184,7 +184,7 @@ class ThreeSiteStagingCampaignBundleTests(unittest.TestCase):
                 bundles=bundles,
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 
@@ -197,7 +197,7 @@ class ThreeSiteStagingCampaignBundleTests(unittest.TestCase):
                 bundles=self._bundles(values),
                 inventory=self.inventory,
                 approval=self.approval,
-                signer_policy=self.policy,
+                approval_policy=self.policy,
                 verify_files=False,
             )
 

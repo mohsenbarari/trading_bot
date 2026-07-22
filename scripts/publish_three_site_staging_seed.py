@@ -28,7 +28,7 @@ from scripts.run_three_site_staging_source_backup import verify_backup_manifest
 from scripts.verify_three_site_staging_inventory import (
     _canonical_bytes,
     load_inventory,
-    verify_signed_inventory,
+    verify_approved_inventory,
 )
 
 
@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--inventory-approval", type=Path, required=True)
-    parser.add_argument("--signer-policy", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--backup-manifest", type=Path, required=True)
     parser.add_argument("--credentials", type=Path, required=True)
     parser.add_argument("--recipient", type=Path, required=True)
@@ -375,10 +375,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         inventory = load_inventory(args.inventory)
-        inventory_result = verify_signed_inventory(
+        inventory_result = verify_approved_inventory(
             inventory,
             approval=load_inventory(args.inventory_approval),
-            signer_policy=load_inventory(args.signer_policy),
+            approval_policy=load_inventory(args.approval_policy),
             host_destructive=None,
         )
         if inventory_result["inventory_stage"] != "provisioned":
