@@ -4018,6 +4018,13 @@ does not authorize a `main` merge.
   downgrade rollback policy. Object publication performs encrypted exact-
   version readback/decrypt/plaintext verification; target fetch repeats all
   provider metadata, ciphertext, plaintext, and tar-safety checks.
+- Image inventory schema v2 no longer treats Docker's host-local `image_id` as
+  a portable content digest. Legacy `overlay2` and containerd image stores
+  expose different IDs for the same imported image bytes. Every image now has
+  a recomputable storage-driver-independent content identity over its canonical
+  config hash and ordered rootfs diff IDs; migration compares that identity
+  across hosts while retaining the local ID for same-host container checks and
+  provider repository digests for third-party images.
 - Four role-local migration journals are owner-only, self-hashed, fsync'd, and
   phase ordered. Beginning a phase durably changes it to rollback-required, so
   an interrupted destructive action cannot resume forward. The role executor

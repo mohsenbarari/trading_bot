@@ -231,6 +231,16 @@ The required order is:
 10. retain frozen legacy volumes and backups until rollback and Full Matrix
     evidence have both been accepted. Cleanup is a separate owner decision.
 
+Image inventory schema v2 deliberately separates the host-local Docker
+`image_id` from the cross-host `content_identity`. Docker's legacy `overlay2`
+image store reports a config digest as `image_id`, while its containerd image
+store reports a manifest digest for the same save/load bytes. The canonical
+content identity instead binds the architecture, OS, creation timestamp,
+canonical runtime-config hash, and ordered rootfs diff IDs. Cross-host equality
+uses this recomputable identity; the local ID is still retained and checked
+against containers on that same host. Third-party images additionally require
+stable provider repository digests.
+
 First freeze the legacy Compose project. The evidence records exactly which
 services were running so rollback cannot accidentally start an unrecorded
 service:

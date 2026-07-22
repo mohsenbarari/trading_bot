@@ -28,7 +28,10 @@ from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_signed_inventory,
 )
-from scripts.verify_three_site_staging_image_inventory import verify_image_document
+from scripts.verify_three_site_staging_image_inventory import (
+    LOCAL_RELEASE_IMAGE_PREFIXES,
+    verify_image_document,
+)
 
 
 SOURCE_ROLES = ("bot_fi", "webapp_fi")
@@ -401,7 +404,7 @@ def verify_migration_plan(
     image_rows = plan["image_inventories"]
     if not isinstance(image_rows, list) or len(image_rows) != len(TARGET_SEED_MAP):
         raise MigrationPlanError("migration requires four image inventories")
-    observed_image_ids: dict[str, str] = {}
+    observed_content_identities: dict[str, str] = {}
     observed_repo_digests: dict[str, tuple[str, ...]] = {}
     image_inventory_hashes: dict[str, str] = {}
     seen_image_roles: set[str] = set()
@@ -431,12 +434,18 @@ def verify_migration_plan(
             role_compose_sha256=str(row["role_compose_sha256"]),
             role_env_sha256=str(row["role_env_sha256"]),
         )
-        for reference, image_id in result["image_ids"].items():
-            previous_id = observed_image_ids.setdefault(reference, image_id)
-            if previous_id != image_id:
-                raise MigrationPlanError("same image reference resolves to different bytes across roles")
+        for reference, content_identity in result["content_identities"].items():
+            previous_identity = observed_content_identities.setdefault(
+                reference, content_identity
+            )
+            if previous_identity != content_identity:
+                raise MigrationPlanError(
+                    "same image reference resolves to different bytes across roles"
+                )
         for item in document["images"]:
             reference = str(item["reference"])
+            if reference.startswith(LOCAL_RELEASE_IMAGE_PREFIXES):
+                continue
             digests = tuple(item["repo_digests"])
             previous = observed_repo_digests.setdefault(reference, digests)
             if previous != digests:

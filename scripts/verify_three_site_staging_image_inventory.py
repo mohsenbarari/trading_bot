@@ -35,10 +35,67 @@ SAFE_ENV = {
     "LC_ALL": "C.UTF-8",
 }
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+LOCAL_RELEASE_IMAGE_PREFIXES = (
+    "trading_bot_three_site_staging:",
+    "trading_bot_postgres_boottime:",
+)
 
 
 class ImageInventoryError(RuntimeError):
     pass
+
+
+def _canonical_sha256(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def image_content_descriptor(raw: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Return a storage-driver-independent identity for one inspected image.
+
+    Docker's ``Id`` is the config digest with the legacy image store but the
+    manifest digest with the containerd image store.  The immutable runtime
+    configuration and ordered rootfs diff IDs remain identical after an exact
+    save/load, so bind the inventory to those canonical values instead.
+    """
+    config = raw.get("Config")
+    rootfs = raw.get("RootFS")
+    if not isinstance(config, dict) or not isinstance(rootfs, dict):
+        raise ImageInventoryError("Docker image lacks canonical config/rootfs metadata")
+    layers = rootfs.get("Layers")
+    descriptor = {
+        "architecture": str(raw.get("Architecture") or ""),
+        "os": str(raw.get("Os") or ""),
+        "created": str(raw.get("Created") or ""),
+        "config_sha256": _canonical_sha256(config),
+        "rootfs_type": str(rootfs.get("Type") or ""),
+        "rootfs_layers": list(layers) if isinstance(layers, list) else layers,
+    }
+    return descriptor, _verify_content_descriptor(descriptor)
+
+
+def _verify_content_descriptor(descriptor: Any) -> str:
+    fields = {
+        "architecture", "os", "created", "config_sha256", "rootfs_type",
+        "rootfs_layers",
+    }
+    if not isinstance(descriptor, dict) or set(descriptor) != fields:
+        raise ImageInventoryError("image content descriptor fields are invalid")
+    layers = descriptor["rootfs_layers"]
+    if (
+        not descriptor["architecture"]
+        or not descriptor["os"]
+        or not descriptor["created"]
+        or not CONTENT_HASH_RE.fullmatch(str(descriptor["config_sha256"]))
+        or descriptor["rootfs_type"] != "layers"
+        or not isinstance(layers, list)
+        or not layers
+        or any(not CONTENT_HASH_RE.fullmatch(str(layer)) for layer in layers)
+    ):
+        raise ImageInventoryError("image content descriptor is malformed")
+    return _canonical_sha256(descriptor)
 
 
 def _run(arguments: list[str], *, timeout: int = 60) -> str:
@@ -75,7 +132,7 @@ def verify_image_document(
     if (
         not isinstance(document, dict)
         or set(document) != fields
-        or document["schema"] != "three-site-staging-image-inventory-v1"
+        or document["schema"] != "three-site-staging-image-inventory-v2"
         or document["campaign_id"] != campaign_id
         or document["release_sha"] != release_sha
         or document["role"] != role
@@ -94,14 +151,21 @@ def verify_image_document(
         raise ImageInventoryError("image inventory is incomplete")
     references: set[str] = set()
     ids: dict[str, str] = {}
+    content_identities: dict[str, str] = {}
     for item in images:
         if not isinstance(item, dict) or set(item) != {
-            "reference", "image_id", "repo_digests", "release_label"
+            "reference", "image_id", "repo_digests", "release_label",
+            "content_descriptor", "content_identity",
         }:
             raise ImageInventoryError("image inventory entry fields are invalid")
         reference = str(item["reference"])
         image_id = str(item["image_id"])
         digests = item["repo_digests"]
+        content_identity = _verify_content_descriptor(item["content_descriptor"])
+        if item["content_identity"] != content_identity:
+            raise ImageInventoryError(
+                "image content_identity differs from its canonical descriptor"
+            )
         if (
             not reference
             or reference in references
@@ -111,13 +175,14 @@ def verify_image_document(
             or len(set(digests)) != len(digests)
         ):
             raise ImageInventoryError("image reference/ID/digest is invalid")
-        if reference.startswith(("trading_bot_three_site_staging:", "trading_bot_postgres_boottime:")):
+        if reference.startswith(LOCAL_RELEASE_IMAGE_PREFIXES):
             if item["release_label"] != release_sha:
                 raise ImageInventoryError("locally built image lacks the exact release label")
         elif not digests:
             raise ImageInventoryError("third-party image lacks a pinned repository digest")
         references.add(reference)
         ids[reference] = image_id
+        content_identities[reference] = content_identity
     required = {
         f"trading_bot_three_site_staging:{release_sha}",
         f"trading_bot_postgres_boottime:15-{release_sha}",
@@ -129,6 +194,7 @@ def verify_image_document(
         "role": role,
         "image_count": len(images),
         "image_ids": ids,
+        "content_identities": content_identities,
         "document_sha256": hashlib.sha256(
             json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
@@ -164,16 +230,19 @@ def collect_image_document(
         raw = inspected[0]
         config = raw.get("Config") if isinstance(raw.get("Config"), dict) else {}
         labels = config.get("Labels") if isinstance(config.get("Labels"), dict) else {}
+        content_descriptor, content_identity = image_content_descriptor(raw)
         images.append(
             {
                 "reference": reference,
                 "image_id": str(raw.get("Id") or ""),
                 "repo_digests": sorted(str(value) for value in (raw.get("RepoDigests") or [])),
                 "release_label": labels.get("org.opencontainers.image.revision"),
+                "content_descriptor": content_descriptor,
+                "content_identity": content_identity,
             }
         )
     return {
-        "schema": "three-site-staging-image-inventory-v1",
+        "schema": "three-site-staging-image-inventory-v2",
         "campaign_id": campaign_id,
         "release_sha": release_sha,
         "role": role,

@@ -14,11 +14,27 @@ from scripts.collect_three_site_staging_migration_observation import (
     ROLE_SERVICES,
     collect_role,
 )
+from scripts.verify_three_site_staging_image_inventory import _canonical_sha256
 
 
 CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111"
 RELEASE_SHA = "a" * 40
 PLAN_SHA = "b" * 64
+
+
+def _content(seed: str):
+    descriptor = {
+        "architecture": "amd64",
+        "os": "linux",
+        "created": "2026-07-22T00:00:00Z",
+        "config_sha256": "sha256:" + seed * 64,
+        "rootfs_type": "layers",
+        "rootfs_layers": ["sha256:" + seed * 64],
+    }
+    return {
+        "content_descriptor": descriptor,
+        "content_identity": _canonical_sha256(descriptor),
+    }
 
 
 class _Response:
@@ -63,7 +79,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
         image_inventory.write_text(
             json.dumps(
                 {
-                    "schema": "three-site-staging-image-inventory-v1",
+                    "schema": "three-site-staging-image-inventory-v2",
                     "campaign_id": CAMPAIGN_ID,
                     "release_sha": RELEASE_SHA,
                     "role": "bot-fi",
@@ -76,18 +92,21 @@ class MigrationObservationCollectorTests(unittest.TestCase):
                             "image_id": "sha256:" + "c" * 64,
                             "repo_digests": [],
                             "release_label": RELEASE_SHA,
+                            **_content("1"),
                         },
                         {
                             "reference": "nginx:1.27-alpine",
                             "image_id": "sha256:" + "c" * 64,
                             "repo_digests": ["nginx@sha256:" + "d" * 64],
                             "release_label": None,
+                            **_content("2"),
                         },
                         {
                             "reference": f"trading_bot_postgres_boottime:15-{RELEASE_SHA}",
                             "image_id": "sha256:" + "c" * 64,
                             "repo_digests": [],
                             "release_label": RELEASE_SHA,
+                            **_content("3"),
                         },
                     ],
                 }

@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from scripts.verify_three_site_staging_inventory import _canonical_bytes
+from scripts.verify_three_site_staging_image_inventory import _canonical_sha256
 from scripts.verify_three_site_staging_migration_plan import (
     MigrationPlanError,
     ORDERED_PHASES,
@@ -40,6 +41,21 @@ def _approvals(document: dict, *, schema: str, hash_field: str, policy: dict, pr
             }
             for number, private in enumerate(private_keys, 1)
         ],
+    }
+
+
+def _content(seed: str):
+    descriptor = {
+        "architecture": "amd64",
+        "os": "linux",
+        "created": "2026-07-22T00:00:00Z",
+        "config_sha256": "sha256:" + seed * 64,
+        "rootfs_type": "layers",
+        "rootfs_layers": ["sha256:" + seed * 64],
+    }
+    return {
+        "content_descriptor": descriptor,
+        "content_identity": _canonical_sha256(descriptor),
     }
 
 
@@ -207,7 +223,7 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
             compose_hash = hashlib.sha256(f"compose-{role}".encode()).hexdigest()
             env_hash = hashlib.sha256(f"env-{role}".encode()).hexdigest()
             document = {
-                "schema": "three-site-staging-image-inventory-v1",
+                "schema": "three-site-staging-image-inventory-v2",
                 "campaign_id": inventory["campaign_id"],
                 "release_sha": inventory["release_sha"],
                 "role": role.replace("_", "-"),
@@ -217,21 +233,24 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
                 "images": [
                     {
                         "reference": f"trading_bot_three_site_staging:{inventory['release_sha']}",
-                        "image_id": "sha256:" + "1" * 64,
+                        "image_id": "sha256:" + format(number, "x") * 64,
                         "repo_digests": [],
                         "release_label": inventory["release_sha"],
+                        **_content("1"),
                     },
                     {
                         "reference": f"trading_bot_postgres_boottime:15-{inventory['release_sha']}",
-                        "image_id": "sha256:" + "2" * 64,
+                        "image_id": "sha256:" + format(number + 4, "x") * 64,
                         "repo_digests": [],
                         "release_label": inventory["release_sha"],
+                        **_content("2"),
                     },
                     {
                         "reference": "redis:7-alpine",
-                        "image_id": "sha256:" + "3" * 64,
+                        "image_id": "sha256:" + format(number + 8, "x") * 64,
                         "repo_digests": ["redis@sha256:" + "4" * 64],
                         "release_label": None,
+                        **_content("3"),
                     },
                 ],
             }
