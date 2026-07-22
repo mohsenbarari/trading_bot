@@ -16,6 +16,12 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertEqual(args.iran_ssh_port, "37067")
         self.assertEqual(args.iran_app_container, "trading_bot_staging_iran-app-1")
 
+    def test_legacy_scp_harness_rejects_replacement_wa_ir(self):
+        with self.assertRaises(SystemExit):
+            runner.parse_args(
+                ["--iran-ssh-host", "ubuntu@95.38.164.29", "--iran-ssh-port", "22"]
+            )
+
     def test_expected_branch_can_be_selected_for_a_candidate_validation(self):
         args = runner.parse_args(["--expected-branch", "candidate/iran-server-replacement-20260710"])
 

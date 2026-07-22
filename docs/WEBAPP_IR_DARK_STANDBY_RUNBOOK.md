@@ -26,8 +26,10 @@ The fixed safety boundary is:
   `sync_worker`, background jobs, or writer promotion.
 - PostgreSQL may run on WA-IR only to receive and validate a restored snapshot.
 - Redis may be retained as backup evidence but is never restored into standby.
-- Bulk release/snapshot bytes use private Arvan Object Storage. SSH is limited
-  to control commands and small administrative files.
+- Release, snapshot, role material, environment, Compose, agent, Matrix
+  credential, CA, and evidence bytes use private Arvan Object Storage. SSH is
+  limited to bounded control commands and status JSON; `scp`, SFTP, rsync, and
+  command-embedded file payloads are forbidden for WA-IR.
 - Every bundle is age-encrypted before leaving Finland. WA-IR receives only a
   short-lived presigned HTTPS URL, never the S3 HMAC credential.
 - Ciphertext SHA-256, object version id, release SHA, source manifest, and
@@ -75,7 +77,7 @@ timezone must never be changed to affect display.
 | --- | --- | --- |
 | Bot-FI | `65.109.216.187` | `UTC` |
 | WebApp-FI | `65.109.220.59` | `UTC` |
-| WA-IR dark standby | `185.206.95.250` | `UTC` |
+| WA-IR dark standby | `95.38.164.29` | `UTC` |
 | Primary Witness | `185.206.95.94` | `UTC` |
 | Transitional Witness | `185.231.182.6` | `UTC` |
 
@@ -100,6 +102,35 @@ tools, Nginx, and basic monitoring directly from the Iran host's configured
 mirrors. Create `/srv/trading-bot/{current,releases,backups,dark-standby}` with
 safe root ownership, force UTC, and retain UFW default-deny ingress. Package
 downloads are not tunneled through SSH; SSH only starts and verifies local work.
+
+Generate the WA-IR age identity on WA-IR itself. Keep the secret identity only
+at `/root/secure-envs/trading-bot/wa-ir-object-storage-age-identity.txt` and
+return only its public recipient to the controller. The controller-side
+transport configuration is the root-only file
+`/root/secure-envs/trading-bot/wa-ir-object-storage-transport.env`.
+
+The delivery implementation is split into four fail-closed tools:
+
+- `scripts/publish_wa_ir_object_storage_preflight.py` packages, encrypts,
+  uploads, reads back, and presigns the exact release, signed role material,
+  role-scoped TLS/CA material, and encrypted Blob credentials/keyring;
+- `scripts/run_wa_ir_object_storage_preflight.py` sends only a bounded SSH
+  command, causing WA-IR to download the agent and manifest from Object
+  Storage;
+- `scripts/wa_ir_object_storage_preflight_agent.py` validates the fixed Arvan
+  endpoint, hashes, sizes, archive members, release SHA, signed inventory, and
+  uploads preflight evidence with a presigned PUT;
+- `scripts/publish_wa_ir_object_storage_transfer.py` carries the short-lived
+  encrypted Matrix credential/CA/client files through the same bucket. The
+  Matrix runner rejects direct WA-IR downloads over SCP.
+
+Durable evidence contains object keys, version IDs, byte counts, and hashes,
+but never presigned URLs. URLs live only in a root-owned `0600` ephemeral
+bootstrap descriptor and expire within 900 seconds.
+
+The SSH target is the provider-created `ubuntu` account. It accepts the
+controller public key and uses passwordless `sudo -n` for the bounded root
+command; direct root SSH is neither required nor enabled.
 
 ### 3. Deliver The Exact Release
 

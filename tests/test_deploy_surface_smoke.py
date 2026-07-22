@@ -524,6 +524,15 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertNotIn('eval "\\$compose_cmd -f docker-compose.iran.yml up -d \\$wait_args"', production_script)
         self.assertNotIn('up -d --wait --wait-timeout 180"', legacy_script)
 
+    def test_replacement_wa_ir_is_blocked_from_legacy_rsync_scp_flow(self):
+        production_script = (
+            REPO_ROOT / 'scripts/production_deploy_online.sh'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('WA_IR_OBJECT_STORAGE_ONLY_HOST="95.38.164.29"', production_script)
+        self.assertIn('Object-Storage-only for every file/data transfer', production_script)
+        self.assertIn('publish_wa_ir_object_storage_preflight.py', production_script)
+
     def test_production_deploys_align_trade_numbers_before_starting_apps(self):
         production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
         legacy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')

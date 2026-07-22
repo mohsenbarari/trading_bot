@@ -219,9 +219,10 @@ controller or in the repository.
 Deployment of this exact reviewed release to the replacement dark Witness,
 read-only live attestation, offsite configuration/proof, all twelve guarded
 restore crash/recovery prerequisites, a fresh exact-SHA preflight, and external
-re-review are still mandatory. No merge with `main`, first lease, WebApp
-mutation, production writer activation, or Arvan/CDN change is authorized by
-the source-level evidence.
+re-review are still mandatory. This historical source-level checkpoint did not
+authorize its then-pending merge with `main`, a first lease, WebApp mutation,
+production writer activation, or an Arvan/CDN change. The integration was
+subsequently completed; the live Matrix remains a separate authorization gate.
 
 The bootstrap trust boundary is explicit. This is host integrity attestation,
 not TPM/remote attestation: the Linux kernel, root account, filesystem and the
@@ -414,7 +415,7 @@ activation:
 - Uvicorn runs as the non-login `writer-witness` user on `127.0.0.1:8011` with
   one worker and systemd hardening;
 - Nginx is the only `443` listener and admits only WebApp-FI
-  (`65.109.220.59`), WebApp-IR (`87.236.212.194`), and local health/smoke
+  (`65.109.220.59`), WebApp-IR (`95.38.164.29`), and local health/smoke
   traffic; UFW denies every other external source on `443`;
 - the private CA has explicit critical CA/key-signing constraints, and the
   leaf has explicit non-CA, server-auth, key-usage, and IP SAN constraints;
@@ -573,7 +574,8 @@ rollback/reference host. WebApp-FI and WebApp-IR are production hosts, so the
 preflight and the later campaign must never stop, restart, reconfigure, or
 inject a broad network fault into their product services.
 
-Build the side-effect-free plan from the dedicated feature branch:
+Build the side-effect-free plan from the exact clean `main` commit selected for
+the Full Matrix:
 
 ```text
 make writer-witness-real-host-matrix-plan
@@ -587,11 +589,10 @@ make writer-witness-real-host-matrix-preflight ARGS='--expected-commit <exact-40
 
 The preflight fails closed unless:
 
-- the checkout is clean, remains on
-  `feature/arvan-controlled-origin-failover`, and exactly matches the explicitly
+- the checkout is clean, remains on `main`, and exactly matches the explicitly
   pinned commit;
 - the focused Writer/Fencing/runtime source regression suite passes with zero
-  skips, including four real-PostgreSQL tests and the four-database drill;
+  skips, including six real-PostgreSQL tests and the four-database drill;
 - WebApp-FI production is healthy and its Witness flags remain disabled;
 - WebApp-IR application and sync-worker writers remain stopped while its
   database is healthy;
@@ -647,11 +648,10 @@ execution freshness window is calculated from `completed_at`, which is written
 only after every preflight check finishes; a slow preflight cannot consume most
 of its work before the authorization clock starts.
 
-This preflight deliberately does not integrate `main` in either direction. A
-pass authorizes only the dark-Witness control-plane fault matrix. It does not
-prove that the feature branch is compatible with the current product release,
-does not authorize a first lease, and does not permit production WebApp or
-Arvan/CDN mutation.
+This preflight never changes Git history. A pass authorizes only the dark-
+Witness control-plane fault matrix for the exact pinned `main` commit. It does
+not authorize a first lease and does not permit production WebApp or Arvan/CDN
+mutation.
 
 ### Mandatory abort and rollback order
 

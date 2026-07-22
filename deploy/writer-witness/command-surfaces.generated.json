@@ -1,20 +1,20 @@
 {
-  "controller_process_call_count": 14,
-  "controller_process_surface_sha256": "936d2726bb1dc8da5e26bedff3c8d049d56d11bb3859ba3527aa8e84a6cad634",
+  "controller_process_call_count": 15,
+  "controller_process_surface_sha256": "1031c83aa8c8dd8c82da7075f6e1d820d9eccd73796ee94f884357623a1fc84b",
   "remote_host_expression_counts": {
     "'control'": 2,
     "'matrix_witness'": 32,
     "'rollback_witness'": 2,
     "'webapp_fi'": 2,
     "'webapp_ir'": 2,
-    "role": 3,
+    "role": 4,
     "site": 6
   },
-  "remote_process_call_count": 49,
-  "remote_process_surface_sha256": "bc99efec3aed79153b9a42ca847ddfe088c165e67025ba90430092e84bf0f82d",
+  "remote_process_call_count": 50,
+  "remote_process_surface_sha256": "2c592ef6085e6bc4fa718c3ff1e590f31eeb27e170c82847c7ff0b1fce8ebc22",
   "schema_version": "writer_witness_command_surfaces_v1",
   "source_sha256": {
-    "scripts/plan_writer_witness_real_host_matrix.py": "80b15905af483d9d54a87070ac5dbfbf92ea96bde2582d34c44f245356270179",
-    "scripts/run_writer_witness_real_host_matrix.py": "6b6bc12997df6a72fc09bf7c783f2ef035c15f0fd325402be43328874e02c908"
+    "scripts/plan_writer_witness_real_host_matrix.py": "68d22e1d45b6092be13c8e28b54741c964e4490d23801c2237719961f335a743",
+    "scripts/run_writer_witness_real_host_matrix.py": "eb9400c7a74fa3cc71760a935394f552f89a7a842459af42bddd571f15406832"
   }
 }

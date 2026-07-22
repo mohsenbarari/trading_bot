@@ -47,13 +47,18 @@ shell_sources=( \
 )
 
 python_sources=( \
+    core/secure_file_io.py \
     scripts/hold_writer_witness_package_locks.py \
     scripts/plan_writer_witness_real_host_matrix.py \
+    scripts/publish_wa_ir_object_storage_preflight.py \
+    scripts/publish_wa_ir_object_storage_transfer.py \
+    scripts/provision_wa_ir_staging_volume.py \
     scripts/provision_writer_witness_matrix_controller.py \
     scripts/render_writer_witness_credentials.py \
     scripts/run_writer_witness_clock_jump_probe.py \
     scripts/run_writer_witness_postgres_gate.py \
     scripts/run_writer_witness_real_host_matrix.py \
+    scripts/run_wa_ir_object_storage_preflight.py \
     scripts/generate_writer_witness_command_surfaces.py \
     scripts/verify_writer_witness_controller_toolchain.py \
     scripts/writer_witness_controller_runtime.py \
@@ -65,6 +70,7 @@ python_sources=( \
     scripts/verify_writer_witness_wheelhouse.py \
     scripts/verify_writer_witness_nftables.py \
     scripts/writer_witness_matrix_client.py \
+    scripts/wa_ir_object_storage_preflight_agent.py \
     scripts/smoke_writer_witness_client.py \
     writer_witness_app.py \
     deploy/writer-witness/models-package-init.py \
@@ -132,6 +138,11 @@ unit_modules=( \
     tests.test_arvan_origin_switch \
     tests.test_writer_witness_real_host_matrix_preflight \
     tests.test_writer_witness_real_host_matrix_runner \
+    tests.test_publish_wa_ir_object_storage_preflight \
+    tests.test_publish_wa_ir_object_storage_transfer \
+    tests.test_provision_wa_ir_staging_volume \
+    tests.test_run_wa_ir_object_storage_preflight \
+    tests.test_wa_ir_object_storage_preflight_agent \
 )
 
 /usr/bin/python3.12 -I -B -X utf8 -X pycache_prefix=/dev/null - "$ROOT_DIR" "${unit_modules[@]}" <<'PY'

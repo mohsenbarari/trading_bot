@@ -31,7 +31,7 @@ from core.three_site_execution_safety import (
 
 
 PRODUCTION_IPS = frozenset(
-    {"65.109.216.187", "65.109.220.59", "185.206.95.250", "185.206.95.94", "185.231.182.6"}
+    {"65.109.216.187", "65.109.220.59", "95.38.164.29", "185.206.95.94", "185.231.182.6"}
 )
 PRODUCTION_DOMAINS = frozenset({"gold-trade.ir", "coin.gold-trade.ir"})
 PRODUCTION_BUCKETS = frozenset({"production-sync-coin"})

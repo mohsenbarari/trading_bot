@@ -51,6 +51,7 @@ EXECUTION_CONFIRM_ENV = "STAGING_TWO_SERVER_FULL_MATRIX_CONFIRM"
 EXECUTION_CONFIRM_VALUE = "execute-staging-two-server-full-matrix"
 DEFAULT_IRAN_SSH_HOST = "root@65.109.220.59"
 DEFAULT_IRAN_SSH_PORT = "37067"
+WA_IR_OBJECT_STORAGE_ONLY_IP = "95.38.164.29"
 DEFAULT_IRAN_APP_CONTAINER = "trading_bot_staging_iran-app-1"
 DEFAULT_FOREIGN_APP_CONTAINER = "trading_bot_staging-foreign_app-1"
 DEFAULT_IRAN_WORKDIR = "/srv/trading-bot/staging-iran"
@@ -2839,6 +2840,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--parity-mode", choices=("quick", "deep"), default=os.getenv("STAGING_FULL_MATRIX_PARITY_MODE", "quick"))
     parser.add_argument("--parity-max-rows-per-table", type=int, default=int(os.getenv("STAGING_FULL_MATRIX_PARITY_MAX_ROWS", "5000") or 5000))
     args = parser.parse_args(argv)
+    if args.iran_ssh_host.rsplit("@", 1)[-1] == WA_IR_OBJECT_STORAGE_ONLY_IP:
+        parser.error(
+            "the replacement WA-IR is Object-Storage-only; the legacy two-server "
+            "SCP harness cannot target it"
+        )
     if args.driver_scenario_limit <= 0:
         args.driver_scenario_limit = len(DRIVER_SCENARIOS)
     if args.artifact_dir is None:

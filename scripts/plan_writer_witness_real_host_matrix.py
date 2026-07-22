@@ -28,10 +28,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from scripts import writer_witness_controller_runtime as controller_runtime
-EXPECTED_BRANCH = "feature/arvan-controlled-origin-failover"
+EXPECTED_BRANCH = "main"
 WEBAPP_FI = "65.109.220.59"
-WEBAPP_IR = "87.236.212.194"
-WEBAPP_IR_SSH_PORT = 37067
+WEBAPP_IR = "95.38.164.29"
+WEBAPP_IR_SSH_PORT = 22
+WEBAPP_IR_SSH_USER = "ubuntu"
+WEBAPP_IR_SSH_IDENTITY = "/root/.ssh/id_ed25519_iran"
 MATRIX_WITNESS = "185.206.95.94"
 ROLLBACK_WITNESS = "185.231.182.6"
 CONTROL_SSH_SOURCE = "65.109.216.187"
@@ -47,11 +49,15 @@ ROLLBACK_STATE_MANIFEST_SHA256 = (
 
 SOURCE_GATE = ROOT / "scripts/run_writer_witness_preflight_source_gate.sh"
 PINNED_SOURCE_PATHS = (
+    "core/secure_file_io.py",
     "scripts/build_writer_witness_release.sh",
     "scripts/build_writer_witness_wheelhouse.sh",
     "scripts/generate_writer_witness_command_surfaces.py",
     "scripts/hold_writer_witness_package_locks.py",
     "scripts/plan_writer_witness_real_host_matrix.py",
+    "scripts/publish_wa_ir_object_storage_preflight.py",
+    "scripts/publish_wa_ir_object_storage_transfer.py",
+    "scripts/provision_wa_ir_staging_volume.py",
     "scripts/provision_writer_witness_host.sh",
     "scripts/provision_writer_witness_matrix_controller.py",
     "scripts/render_writer_witness_credentials.py",
@@ -60,6 +66,7 @@ PINNED_SOURCE_PATHS = (
     "scripts/run_writer_witness_clock_jump_probe.py",
     "scripts/run_writer_witness_postgres_gate.py",
     "scripts/run_writer_witness_real_host_matrix.py",
+    "scripts/run_wa_ir_object_storage_preflight.py",
     "scripts/verify_writer_witness_release.py",
     "scripts/verify_writer_witness_runtime.py",
     "scripts/verify_writer_witness_host_toolchain.py",
@@ -71,6 +78,7 @@ PINNED_SOURCE_PATHS = (
     "scripts/verify_writer_witness_wheelhouse.py",
     "scripts/verify_writer_witness_nftables.py",
     "scripts/writer_witness_matrix_client.py",
+    "scripts/wa_ir_object_storage_preflight_agent.py",
     "writer_witness_app.py",
     "deploy/writer-witness-drill/docker-compose.yml",
     "deploy/writer-witness/writer-witness-live-restore.sh",
@@ -413,7 +421,15 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def ssh_command(host: str, script: str, *, port: int = 22) -> tuple[str, ...]:
+def ssh_command(
+    host: str,
+    script: str,
+    *,
+    port: int = 22,
+    user: str = "root",
+    identity: str | None = None,
+    elevate: bool = False,
+) -> tuple[str, ...]:
     command = [
         controller_runtime.executable("ssh"),
         "-o",
@@ -423,9 +439,14 @@ def ssh_command(host: str, script: str, *, port: int = 22) -> tuple[str, ...]:
         "-o",
         "StrictHostKeyChecking=yes",
     ]
+    if identity is not None:
+        command.extend(("-o", "IdentitiesOnly=yes", "-i", identity))
     if port != 22:
         command.extend(("-p", str(port)))
-    command.extend((f"root@{host}", script))
+    remote_script = (
+        f"sudo -n -- /bin/bash -lc {shlex.quote(script)}" if elevate else script
+    )
+    command.extend((f"{user}@{host}", remote_script))
     return tuple(command)
 
 
@@ -731,6 +752,9 @@ def remote_check_specs(
                 "echo witness_flags_enabled=no; echo witness_tcp_443=reachable; "
                 "echo witness_unsigned_status=401; echo client_credentials_installed=no; echo witness_cert_sha256=$cert",
                 port=WEBAPP_IR_SSH_PORT,
+                user=WEBAPP_IR_SSH_USER,
+                identity=WEBAPP_IR_SSH_IDENTITY,
+                elevate=True,
             ),
             "webapp_ir",
         ),
@@ -1153,8 +1177,8 @@ def git_metadata(expected_commit: str | None = None) -> dict[str, object]:
         "expected_branch": EXPECTED_BRANCH,
         "expected_commit": pinned,
         "exact_commit_matches": head == pinned,
-        "main_merge_authorized": False,
-        "main_integration_claimed": False,
+        "source_control_mutation_authorized": False,
+        "main_integration_state": "already-integrated-pinned-main",
     }
 
 
@@ -1252,12 +1276,20 @@ def build_plan(
             "expected_active_campaign_not_after": expected_active_campaign_not_after,
             "allow_expired_active_campaign": allow_expired_active_campaign,
             "source_gate_requires_zero_skips": True,
-            "source_gate_requires_guarded_postgres_tests": 5,
+            "source_gate_requires_guarded_postgres_tests": 6,
             "source_gate_requires_four_database_drill": True,
         },
         "hosts": {
             "webapp_fi": {"host": WEBAPP_FI, "production_mutation_allowed": False},
-            "webapp_ir": {"host": WEBAPP_IR, "ssh_port": WEBAPP_IR_SSH_PORT, "production_mutation_allowed": False},
+            "webapp_ir": {
+                "host": WEBAPP_IR,
+                "ssh_port": WEBAPP_IR_SSH_PORT,
+                "ssh_user": WEBAPP_IR_SSH_USER,
+                "ssh_identity": WEBAPP_IR_SSH_IDENTITY,
+                "ssh_scope": "bounded-command-and-status-only",
+                "payload_transport": "private-arvan-object-storage",
+                "production_mutation_allowed": False,
+            },
             "matrix_witness": {"host": MATRIX_WITNESS, "must_start": "webapp:0:vacant"},
             "rollback_witness": {"host": ROLLBACK_WITNESS, "must_remain_unchanged": True},
         },
@@ -1269,8 +1301,7 @@ def build_plan(
                 "local Witness backup and isolated restore-smoke",
             ],
             "forbidden_before_matrix": [
-                "merge main into the feature branch",
-                "merge the feature branch into main",
+                "change, merge, rebase, or rewrite the pinned main checkout",
                 "issue a writer lease",
                 "enable Witness flags in a WebApp runtime",
                 "start WebApp-IR application writers",
@@ -1281,8 +1312,8 @@ def build_plan(
             ],
             "claim_boundary": (
                 "Passing this preflight authorizes only the dark-Witness real-host fault matrix. "
-                "It does not prove the feature branch is integrated with current main and does not "
-                "authorize production writer activation."
+                "It proves only the explicitly pinned main source and does not authorize source-control "
+                "mutation or production writer activation."
             ),
         },
         "preflight_checks": [
@@ -1332,10 +1363,16 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
     git_info = plan["git"]
     if not isinstance(git_info, dict):
         raise RuntimeError("invalid git metadata")
+    head = git_info.get("head")
+    expected_commit = git_info.get("expected_commit")
     if (
         git_info.get("branch") != EXPECTED_BRANCH
-        or not git_info.get("clean")
-        or git_info.get("head") != git_info.get("expected_commit")
+        or git_info.get("clean") is not True
+        or not isinstance(head, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", head)
+        or not isinstance(expected_commit, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", expected_commit)
+        or head != expected_commit
     ):
         plan["status"] = "blocked_git_baseline"
         return plan, 2
@@ -1477,7 +1514,7 @@ def execute_preflight(plan: dict[str, object]) -> tuple[dict[str, object], int]:
         or ""
     )
     if (
-        '"guarded_postgres_tests":5' not in source_stdout
+        '"guarded_postgres_tests":6' not in source_stdout
         or '"skipped":0' not in source_stdout
         or '"four_database_drill":true' not in source_stdout
     ):

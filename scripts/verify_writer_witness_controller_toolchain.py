@@ -25,6 +25,7 @@ HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
 # These are controller-local executables.  Remote shell tools belong to the
 # role on which the SSH command runs and are deliberately not claimed here.
 CONTROLLER_TOOL_PATHS = {
+    "age": Path("/usr/bin/age"),
     "awk": Path("/usr/bin/awk"),
     "bash": Path("/bin/bash"),
     "cp": Path("/usr/bin/cp"),

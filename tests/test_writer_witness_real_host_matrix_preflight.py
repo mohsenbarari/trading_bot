@@ -21,14 +21,16 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
             ],
         )
 
-    def test_plan_is_dark_witness_only_and_never_authorizes_main_merge(self):
+    def test_plan_is_dark_witness_only_and_never_authorizes_source_mutation(self):
         with self.git_run:
             plan = preflight.build_plan(include_source_tests=False)
         self.assertEqual(plan["scope"], "dark_writer_witness_control_plane_only")
-        self.assertFalse(plan["git"]["main_merge_authorized"])
+        self.assertFalse(plan["git"]["source_control_mutation_authorized"])
+        self.assertEqual(
+            plan["git"]["main_integration_state"], "already-integrated-pinned-main"
+        )
         forbidden = "\n".join(plan["safety_contract"]["forbidden_before_matrix"])
-        self.assertIn("merge main into", forbidden)
-        self.assertIn("merge the feature branch into main", forbidden)
+        self.assertIn("pinned main checkout", forbidden)
         self.assertIn("change Arvan", forbidden)
 
     def test_preflight_commands_are_read_only(self):
@@ -48,6 +50,16 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
             "WRITER_WITNESS_REQUIRED=true",
         ):
             self.assertNotIn(forbidden, commands)
+        ir = next(
+            spec for spec in preflight.remote_check_specs(
+                include_source_tests=False,
+                expected_release_manifest_sha256="a" * 64,
+            )
+            if spec.host_role == "webapp_ir"
+        )
+        self.assertIn("ubuntu@95.38.164.29", ir.command)
+        self.assertIn("/root/.ssh/id_ed25519_iran", ir.command)
+        self.assertTrue(ir.command[-1].startswith("sudo -n -- /bin/bash -lc "))
         self.assertTrue(
             all(
                 not spec.mutates_state
@@ -227,7 +239,7 @@ class WriterWitnessRealHostMatrixPreflightTests(unittest.TestCase):
         specs_and_stdout = (
             (
                 preflight.CheckSpec("source_regression_gate", ("true",), "control"),
-                '{"guarded_postgres_tests":5,"skipped":0,"four_database_drill":true}\n',
+                '{"guarded_postgres_tests":6,"skipped":0,"four_database_drill":true}\n',
             ),
             (
                 preflight.CheckSpec("webapp_fi_baseline", ("true",), "webapp_fi"),

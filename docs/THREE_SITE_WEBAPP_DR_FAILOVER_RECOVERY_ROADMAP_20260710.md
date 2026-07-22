@@ -1,9 +1,9 @@
 # Three-Site WebApp DR, Failover, And Conflict-Free Recovery Roadmap
 
-Status: Active implementation roadmap; tracked on the dedicated feature branch
+Status: Integrated on `main`; pre-Full-Matrix staging preparation is active
 Prepared on: 2026-07-10
 Original preparation branch: `candidate/webapp-ui-ux-unification`
-Current implementation branch: `feature/arvan-controlled-origin-failover`
+Current implementation branch: `main`
 Publication baseline: `main` at `04fef2a5`; local-fencing foundation at `8ff234de`
 Production gate: no production mutation, deploy, DNS/CDN change, sync change, or data migration is authorized by this document
 
@@ -26,13 +26,15 @@ The target is conflict prevention by authority, identity, ordering, and idempote
 ## 2. Publication And Branch Handling
 
 The owner approved publication on 2026-07-14 after the prerequisite branch
-merges completed. The roadmap is now stored under `docs/` and implemented on
-`feature/arvan-controlled-origin-failover`, which was created directly from the
-then-current `main` baseline.
+merges completed. The implementation and Telegram publication queue were later
+integrated and reviewed together, then merged into `main`. Current Full-Matrix
+evidence must bind the exact clean `main` SHA; historical feature-branch review
+evidence is retained only as provenance.
 
 Publication does not relax the production gate:
 
-- roadmap changes and implementation remain on the dedicated feature branch;
+- every new change must be committed and reviewed on the exact `main` baseline
+  used by the staging campaign;
 - every stage must retain its explicit tests, failure assumptions, and stop
   conditions;
 - no migration, WebApp-IR start, public origin switch, or production deploy is
@@ -63,10 +65,10 @@ If this roadmap conflicts with an existing accepted business rule, implementatio
 |---|---|---:|---|
 | `bot_fi` | Hetzner Finland | `65.109.216.187` | Telegram Bot and foreign authority |
 | `webapp_fi` | Hetzner Finland | `65.109.220.59` | Normal WebApp primary and recovery sync hub |
-| `webapp_ir` | Arvan Tehran, Simin | `185.206.95.250` | Normal standby and national-outage WebApp primary |
+| `webapp_ir` | Arvan Tehran, Simin | `95.38.164.29` | Normal standby and national-outage WebApp primary |
 
 The current Iran address is an observed deployment input, not a permanent
-provider commitment. The replacement has 4 vCPU, 8 GiB RAM, and 75 GB root
+provider commitment. The replacement has 4 vCPU, 12 GiB RAM, and an 85 GB root
 storage. Origin TLS, replacement SLA, and Iran-local redundancy remain
 unresolved deployment decisions.
 
@@ -417,17 +419,19 @@ webapp_dr_policy    = replicate | rebuild | local-only | exclude
 The accepted bulk data plane uses the private, versioned Arvan bucket
 `production-sync-coin` in region `ir-thr-at1`:
 
-- large release, snapshot, file, and later immutable event-batch objects move
-  through Object Storage instead of a persistent Finland-Iran SSH stream;
+- release, snapshot, role/env/Compose, agent, preflight evidence, Matrix
+  credential/CA/client files, and later immutable event-batch objects move
+  through Object Storage instead of a Finland-Iran SSH/SCP data stream;
 - WebApp-IR downloads with short-lived presigned HTTPS URLs and never receives
   the bucket HMAC credential;
 - every payload is encrypted before upload with an independently custodied age
   X25519 key and verified by ciphertext and content manifests;
-- SSH remains a low-volume management/control path, not the bulk data plane;
+- SSH carries only bounded commands and status JSON. Direct WA-IR `scp`, SFTP,
+  rsync, and command-embedded file payloads fail closed;
 - Arvan CDN remains public ingress/control infrastructure and is not a second
   durable queue or backup store;
-- direct sync may remain only as a bounded fallback after measured DPI-safe
-  limits and an explicit activation decision.
+- normal protocol control messages may remain bounded and measured; payload
+  delivery and recovery artifacts have no direct-SSH fallback.
 
 Live compatibility testing found that Arvan accepts Public Access Block and
 default bucket SSE control calls but rejects actual `PutObject` requests while
@@ -1843,7 +1847,7 @@ behavior, and rollback under repeated trials.
 
 ### 36.4 Iran-origin findings and stop decision
 
-WebApp-IR `87.236.212.194` currently returns `502` because Nginx is running but
+WebApp-IR `87.236.212.194` returned `502` during this historical drill because Nginx was running but
 the production application and sync-worker containers received a graceful
 `SIGTERM` on 2026-07-13 and remain stopped. The database and Redis containers
 are still running. The last application evidence also showed old unsent change
@@ -2480,7 +2484,7 @@ the smoke test, and were not persisted in WebApp-FI configuration. WebApp-FI
 production containers remained healthy. The original Witness at
 `185.231.182.6` also remained healthy and unchanged at `webapp:0:vacant`.
 
-WebApp-IR operator SSH is exposed on port `37067`, not the default port `22`.
+WebApp-IR operator SSH was exposed on port `37067`, not the default port `22`.
 After using the correct port, the host reported UTC with synchronized NTP and
 direct TCP `443` to the replacement Witness succeeded. Its authenticated
 private-CA TLS/HMAC status request returned `200` with `webapp:0:vacant`; the
@@ -3406,13 +3410,29 @@ feature into `main`, start a WebApp-IR writer, or mutate CDN/DNS.
 ### 48.1 Current infrastructure
 
 - the two Iran-access-only Bamdad replacements were deleted;
-- current WA-IR is Arvan Simin `185.206.95.250`, Ubuntu 24.04, 4 vCPU,
-  8 GiB RAM, and 75 GB provisioned storage;
+- current WA-IR is Arvan Simin `95.38.164.29`, Ubuntu 24.04, 4 vCPU,
+  12 GiB RAM, and an 85 GB root disk;
+- Arvan server id is `4a377387-c052-4aba-8bda-0c756b9b0cfb`; Linux machine id
+  is `4a377387c0524aba8bda0c756b9b0cfb` and Docker daemon id is
+  `a0bb7c60-f1c8-4067-9c37-b53de96a6369`;
+- disposable Full-Matrix volume `422eb8de-0ecd-456a-8407-119245500d3e`
+  (`three-site-staging-wa-ir-20260722`, 50 GB) is attached and mounted at
+  `/srv/trading-bot-three-site-staging-data` with filesystem UUID
+  `08ae6418-0a2d-4909-81f0-1560c5fc9b35`, `nodev,nosuid,noexec`, and a mandatory
+  delete-after-Full-Matrix lifecycle;
 - primary Witness is `185.206.95.94`; `185.231.182.6` remains transitional;
 - Bot-FI, WebApp-FI, WA-IR, and both Witnesses report `UTC` with synchronized
   NTP; application presentation remains `Asia/Tehran`;
-- UFW on WA-IR permits SSH only from Bot-FI and the two Witness addresses and
-  exposes no 80/443/8000/8100 listener.
+- the replacement host identity, UTC/NTP state, Docker identity and dedicated
+  staging storage have been read back. UFW is enabled with default-deny inbound
+  and only TCP/22 admitted; Nginx is disabled and no public 80/443 listener is
+  active. Every one of these values remains a fresh-preflight gate and must not
+  be inherited from the deleted WA-IR.
+
+The historical release/snapshot evidence below belongs to the retired WA-IR
+generation. It proves the provider data-plane technique, but it is not live
+identity or readiness evidence for `95.38.164.29`; the new signed inventory and
+fresh Object-Storage preflight must replace it before staging starts.
 
 ### 48.2 Object Storage and encrypted release evidence
 

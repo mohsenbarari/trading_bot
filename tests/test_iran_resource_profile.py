@@ -25,7 +25,8 @@ class IranResourceProfileTests(unittest.TestCase):
     def test_standalone_bootstrap_does_not_require_synced_project_payload(self):
         release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
 
-        command = release.split("bootstrap-iran)", 1)[1].split(";;", 1)[0]
+        dispatcher = release.split("main() {", 1)[1]
+        command = dispatcher.split("bootstrap-iran)", 1)[1].split(";;", 1)[0]
         self.assertIn("check_local; bootstrap_iran", command)
         self.assertNotIn("install_sync_sampler_remote", command)
         self.assertNotIn("verify_sync_sampler_remote", command)

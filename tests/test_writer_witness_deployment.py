@@ -2097,7 +2097,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("ufw default deny incoming", provision)
         self.assertIn("65.109.216.187/32", provision)
         self.assertIn("65.109.220.59/32", provision)
-        self.assertIn("87.236.212.194/32", provision)
+        self.assertIn("95.38.164.29/32", provision)
         self.assertIn("validate_init_script(public_key)", provision)
         self.assertIn('"port_to": "443"', provision)
         self.assertIn('"password_printed": False', provision)

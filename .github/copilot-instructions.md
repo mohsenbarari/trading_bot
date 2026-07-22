@@ -13,7 +13,7 @@
 |---|---|---|---|
 | `bot_fi` | Hetzner Finland | Permanent Telegram/foreign authority | `65.109.216.187` |
 | `webapp_fi` | Hetzner Finland | Current WebApp writer and recovery hub | `65.109.220.59` |
-| `webapp_ir` | Iran | Planned standby/outage WebApp writer | `87.236.212.194` |
+| `webapp_ir` | Iran | Planned standby/outage WebApp writer | `95.38.164.29` |
 
 The live application remains on the current Bot-FI/WebApp-FI runtime. WebApp-IR
 must not be started as a writer and Arvan must not be switched on the strength

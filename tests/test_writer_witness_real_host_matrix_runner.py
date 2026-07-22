@@ -126,7 +126,7 @@ def passing_preflight():
             "expected_active_campaign_tag": None,
             "expected_active_campaign_scenario": None,
             "source_gate_requires_zero_skips": True,
-            "source_gate_requires_guarded_postgres_tests": 5,
+            "source_gate_requires_guarded_postgres_tests": 6,
             "source_gate_requires_four_database_drill": True,
         },
         "failed_checks": [],
@@ -148,7 +148,7 @@ def passing_preflight():
                 "status": "passed",
                 "return_code": 0,
                 "stdout": (
-                    '{"guarded_postgres_tests":5,"skipped":0,'
+                    '{"guarded_postgres_tests":6,"skipped":0,'
                     '"four_database_drill":true}'
                     if check_id == "source_regression_gate"
                     else ""
@@ -161,6 +161,84 @@ def passing_preflight():
 
 
 class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
+    def test_wa_ir_ssh_is_ubuntu_key_only_and_sudo_command_only(self):
+        controller = object.__new__(runner.Controller)
+        controller.local_secret_root = Path("/run/writer-witness-matrix/controller")
+        arguments = controller.ssh_args(
+            runner.HOSTS["webapp_ir"], "id -u && echo status"
+        )
+
+        self.assertIn("IdentitiesOnly=yes", arguments)
+        self.assertIn("/root/.ssh/id_ed25519_iran", arguments)
+        self.assertIn("ubuntu@95.38.164.29", arguments)
+        self.assertTrue(arguments[-1].startswith("sudo -n -- /bin/bash -lc "))
+
+    def test_wa_ir_file_transport_is_object_storage_only(self):
+        controller = object.__new__(runner.Controller)
+        controller.tag = "wwm_0123456789ab"
+        controller.event = mock.Mock(return_value=True)
+        evidence = {
+            "destination_name": "client.env",
+            "object_key": "staging/matrix/wwm/client.env/hash.age",
+            "version_id": "version-1",
+            "ciphertext_sha256": "c" * 64,
+            "ciphertext_bytes": 200,
+            "plaintext_sha256": "a" * 64,
+            "plaintext_bytes": 12,
+        }
+        descriptor = {
+            "schema": "three-site-wa-ir-object-storage-file-v1",
+            "artifact": {"url": "https://s3.ir-thr-at1.arvanstorage.ir/private/object"},
+        }
+        controller.remote = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                [],
+                0,
+                json.dumps(
+                    {
+                        "status": "wa-ir-file-installed",
+                        "campaign_tag": controller.tag,
+                        "destination_name": "client.env",
+                        "sha256": evidence["plaintext_sha256"],
+                        "bytes": evidence["plaintext_bytes"],
+                    }
+                ),
+                "",
+            )
+        )
+        controller.command = mock.Mock(side_effect=AssertionError("SCP must not run for WA-IR"))
+        with tempfile.TemporaryDirectory() as raw:
+            source = Path(raw) / "client.env"
+            source.write_bytes(b"x" * evidence["plaintext_bytes"])
+            with mock.patch.object(
+                runner,
+                "publish_wa_ir_transfer_file",
+                return_value=(descriptor, evidence),
+            ) as publish:
+                controller.transfer_to(
+                    "webapp_ir",
+                    source,
+                    "/run/writer-witness-matrix/wwm_0123456789ab/client.env",
+                    "stage_webapp_ir_client",
+                )
+        publish.assert_called_once()
+        controller.remote.assert_called_once()
+        self.assertIn("--receive-file-json-b64", controller.remote.call_args.args[2])
+        self.assertTrue(
+            any(
+                call.args and call.args[0] == "object_storage_transfer.end"
+                for call in controller.event.call_args_list
+            )
+        )
+
+        with self.assertRaisesRegex(runner.MatrixError, "Object Storage"):
+            controller.transfer_from(
+                "webapp_ir",
+                "/run/writer-witness-matrix/wwm_0123456789ab/evidence.json",
+                Path("/tmp/never-created"),
+                "forbidden_wa_ir_scp",
+            )
+
     def test_every_catalog_entry_has_an_executable_handler(self):
         missing = [
             scenario

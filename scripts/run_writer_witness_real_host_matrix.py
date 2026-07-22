@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor
 import ctypes
 from dataclasses import dataclass
@@ -33,13 +34,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from scripts import plan_writer_witness_real_host_matrix as preflight_plan
 from scripts import writer_witness_controller_runtime as controller_runtime
+from scripts.publish_wa_ir_object_storage_transfer import (
+    DEFAULT_CONFIG as WA_IR_OBJECT_STORAGE_TRANSFER_CONFIG,
+    publish_file as publish_wa_ir_transfer_file,
+)
 
 
 CLIENT_SCRIPT = ROOT / "scripts/writer_witness_matrix_client.py"
 PREFLIGHT_SCHEMA = "writer_witness_real_host_matrix_preflight_v1"
 RUNNER_SCHEMA = "writer_witness_real_host_matrix_runner_v1"
 APPROVAL_SCHEMA = "writer_witness_real_host_matrix_observer_approval_v1"
-EXPECTED_BRANCH = "feature/arvan-controlled-origin-failover"
+EXPECTED_BRANCH = "main"
 CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_CONFIRM"
 CONFIRM_VALUE = "execute-dark-witness-real-host-matrix"
 SCENARIO_CONFIRM_ENV = "WRITER_WITNESS_REAL_HOST_MATRIX_SCENARIO"
@@ -70,6 +75,7 @@ SSH_COMMAND_BYTES_UPPER_BOUND = 32_768
 SSH_COMMAND_PAYLOAD_MAX = 65_536
 SCP_SESSION_BYTES_UPPER_BOUND = 65_536
 SCP_FILE_BYTES_MAX = 1_048_576
+OBJECT_STORAGE_ONLY_TRANSFER_ROLES = frozenset({"webapp_ir"})
 MAX_SCENARIO_TRANSPORT_OPERATIONS = 1_024
 CLEANUP_TRANSPORT_BYTES_RESERVE = 16 * 1024 * 1024
 MAX_CLEANUP_TRANSPORT_OPERATIONS = 512
@@ -111,11 +117,18 @@ class Host:
     role: str
     address: str
     port: int = 22
+    user: str = "root"
+    identity: str | None = None
 
 
 HOSTS = {
     "webapp_fi": Host("webapp_fi", "65.109.220.59"),
-    "webapp_ir": Host("webapp_ir", "87.236.212.194", 37067),
+    # Arvan provisions the replacement through the non-root ubuntu account.
+    # Commands are elevated remotely with non-interactive sudo; SSH itself is
+    # still only a bounded control/status plane and never carries file bytes.
+    "webapp_ir": Host(
+        "webapp_ir", "95.38.164.29", 22, "ubuntu", "/root/.ssh/id_ed25519_iran"
+    ),
     "matrix_witness": Host("matrix_witness", "185.206.95.94"),
     "rollback_witness": Host("rollback_witness", "185.231.182.6"),
 }
@@ -558,7 +571,7 @@ def validate_preflight(
             raise MatrixError(f"preflight run bundle {key} drifted")
     if (
         bundle.get("source_gate_requires_zero_skips") is not True
-        or bundle.get("source_gate_requires_guarded_postgres_tests") != 5
+        or bundle.get("source_gate_requires_guarded_postgres_tests") != 6
         or bundle.get("source_gate_requires_four_database_drill") is not True
         or bundle.get("expected_active_campaign_tag") is not None
         or bundle.get("expected_active_campaign_scenario") is not None
@@ -645,7 +658,7 @@ def validate_preflight(
         raise MatrixError("preflight result inventory does not match the closed required checks")
     source = indexed["source_regression_gate"]
     source_output = str((source or {}).get("stdout") or "")
-    for marker in ('"guarded_postgres_tests":5', '"skipped":0', '"four_database_drill":true'):
+    for marker in ('"guarded_postgres_tests":6', '"skipped":0', '"four_database_drill":true'):
         if marker not in source_output:
             raise MatrixError("preflight source gate is not zero-skip and four-database complete")
     return baseline  # type: ignore[return-value]
@@ -1918,7 +1931,9 @@ class Controller:
         )
 
     def _ssh_control_path(self, host: Host) -> Path:
-        identity = hashlib.sha256(f"{host.address}:{host.port}".encode()).hexdigest()[:16]
+        identity = hashlib.sha256(
+            f"{host.user}@{host.address}:{host.port}".encode()
+        ).hexdigest()[:16]
         return self.local_secret_root / f"ssh-{identity}.sock"
 
     def ssh_args(self, host: Host, command: str) -> list[str]:
@@ -1930,9 +1945,14 @@ class Controller:
             "-o", "ControlPersist=30",
             "-o", f"ControlPath={self._ssh_control_path(host)}",
         ]
+        if host.identity is not None:
+            args.extend(("-o", "IdentitiesOnly=yes", "-i", host.identity))
         if host.port != 22:
             args.extend(("-p", str(host.port)))
-        args.extend((f"root@{host.address}", command))
+        remote_command = command
+        if host.user != "root":
+            remote_command = f"sudo -n -- /bin/bash -lc {shlex.quote(command)}"
+        args.extend((f"{host.user}@{host.address}", remote_command))
         return args
 
     def scp_args(self, host: Host, source: str, destination: str, *, from_remote: bool) -> list[str]:
@@ -1942,12 +1962,14 @@ class Controller:
             "-o", "StrictHostKeyChecking=yes", "-o", "ControlMaster=auto",
             "-o", "ControlPersist=30", "-o", f"ControlPath={self._ssh_control_path(host)}",
         ]
+        if host.identity is not None:
+            args.extend(("-o", "IdentitiesOnly=yes", "-i", host.identity))
         if host.port != 22:
             args.extend(("-P", str(host.port)))
         if from_remote:
-            args.extend((f"root@{host.address}:{source}", destination))
+            args.extend((f"{host.user}@{host.address}:{source}", destination))
         else:
-            args.extend((source, f"root@{host.address}:{destination}"))
+            args.extend((source, f"{host.user}@{host.address}:{destination}"))
         return args
 
     def command(
@@ -2115,6 +2137,10 @@ class Controller:
         )
 
     def transfer_from(self, role: str, remote_path: str, local_path: Path, name: str) -> None:
+        if role in OBJECT_STORAGE_ONLY_TRANSFER_ROLES:
+            raise MatrixError(
+                "WA-IR outbound file transfer must use Object Storage; SSH is command-only"
+            )
         if len(remote_path.encode("utf-8")) > SSH_COMMAND_PAYLOAD_MAX:
             raise MatrixError("remote transfer path exceeds its closed bound")
         self.command(
@@ -2135,6 +2161,89 @@ class Controller:
         transfer_bytes = local_path.stat().st_size
         if transfer_bytes > SCP_FILE_BYTES_MAX:
             raise MatrixError("local transfer exceeds its closed file bound")
+        if role in OBJECT_STORAGE_ONLY_TRANSFER_ROLES:
+            if not self.event(
+                "object_storage_transfer.start",
+                role=role,
+                name=name,
+                destination_name=Path(remote_path).name,
+                plaintext_bytes=transfer_bytes,
+            ):
+                raise MatrixError("WA-IR Object Storage transfer intent could not be persisted")
+            try:
+                def encrypt_for_wa_ir(
+                    source: Path, output: Path, recipient: str
+                ) -> tuple[str, int]:
+                    self.command(
+                        f"{name}_age_encrypt",
+                        [
+                            controller_runtime.executable("age"),
+                            "--encrypt",
+                            "--recipient",
+                            recipient,
+                            "--output",
+                            str(output),
+                            str(source),
+                        ],
+                        timeout=30,
+                        record_output=False,
+                    )
+                    os.chmod(output, 0o600)
+                    return file_sha256(output), output.stat().st_size
+
+                descriptor, evidence = publish_wa_ir_transfer_file(
+                    local_path,
+                    campaign_tag=self.tag,
+                    destination=remote_path,
+                    mode=0o700 if Path(remote_path).name == "client.py" else 0o600,
+                    config_path=WA_IR_OBJECT_STORAGE_TRANSFER_CONFIG,
+                    encryptor=encrypt_for_wa_ir,
+                )
+            except Exception:
+                raise MatrixError(
+                    "WA-IR Object Storage transfer publication failed closed"
+                ) from None
+            encoded = base64.b64encode(
+                json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
+            ).decode("ascii")
+            agent = "/srv/trading-bot-three-site/current/scripts/wa_ir_object_storage_preflight_agent.py"
+            command = (
+                f"{REMOTE_ISOLATED_PYTHON} {shlex.quote(agent)} "
+                f"--receive-file-json-b64 {shlex.quote(encoded)}"
+            )
+            completed = self.remote(
+                role,
+                name,
+                command,
+                timeout=360,
+            )
+            try:
+                remote_result = json.loads(completed.stdout)
+            except json.JSONDecodeError as exc:
+                raise MatrixError("WA-IR Object Storage transfer returned non-JSON output") from exc
+            if (
+                remote_result.get("status") != "wa-ir-file-installed"
+                or remote_result.get("campaign_tag") != self.tag
+                or remote_result.get("destination_name") != Path(remote_path).name
+                or remote_result.get("sha256") != evidence["plaintext_sha256"]
+                or remote_result.get("bytes") != evidence["plaintext_bytes"]
+            ):
+                raise MatrixError("WA-IR Object Storage transfer verification failed closed")
+            if not self.event(
+                "object_storage_transfer.end",
+                role=role,
+                name=name,
+                destination_name=evidence["destination_name"],
+                object_key=evidence["object_key"],
+                object_version_id=evidence["version_id"],
+                ciphertext_sha256=evidence["ciphertext_sha256"],
+                ciphertext_bytes=evidence["ciphertext_bytes"],
+                plaintext_sha256=evidence["plaintext_sha256"],
+                plaintext_bytes=evidence["plaintext_bytes"],
+                presigned_url_persisted=False,
+            ):
+                raise MatrixError("WA-IR Object Storage transfer evidence could not be persisted")
+            return
         self.command(
             name,
             self.scp_args(HOSTS[role], str(local_path), remote_path, from_remote=False),

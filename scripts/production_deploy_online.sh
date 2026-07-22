@@ -12,6 +12,7 @@ TRADE_NUMBER_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_trade_number_sequence.
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
+WA_IR_OBJECT_STORAGE_ONLY_HOST="95.38.164.29"
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
 SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_notification_preferences, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts, telegram_notification_outbox"
@@ -528,6 +529,16 @@ load_manifest() {
     PUBLIC_WEBAPP_URL="${PUBLIC_WEBAPP_URL:-$IRAN_FRONTEND_URL}"
     FOREIGN_SERVER_ALIASES="${FOREIGN_SERVER_ALIASES:-$FOREIGN_SERVER_DOMAIN}"
     IRAN_SERVER_ALIASES="${IRAN_SERVER_ALIASES:-$IRAN_SERVER_DOMAIN}"
+
+    if [[ "$IRAN_HOST" == "$WA_IR_OBJECT_STORAGE_ONLY_HOST" ]]; then
+        case "$COMMAND" in
+            check-local|deploy-foreign|build-release|bootstrap-iran)
+                ;;
+            *)
+                die "WA-IR $WA_IR_OBJECT_STORAGE_ONLY_HOST is Object-Storage-only for every file/data transfer. Use publish_wa_ir_object_storage_preflight.py and the three-site agents; this legacy rsync/scp flow is forbidden."
+                ;;
+        esac
+    fi
 
     IRAN_SKIP_CERTBOT="${IRAN_SKIP_CERTBOT:-0}"
     IRAN_SKIP_FRONTEND_BUILD="${IRAN_SKIP_FRONTEND_BUILD:-0}"

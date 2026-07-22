@@ -5,8 +5,8 @@ Date: 2026-07-10
 ## Host Baseline
 
 - CPU: 4 vCPU
-- RAM: 7.8 GiB visible to the operating system
-- Root storage: 75 GB provisioned (about 70 GB usable)
+- Current RAM: about 12 GiB visible to the operating system
+- Current root storage: 85 GB provisioned (about 81 GB usable)
 - Role: Iran WebApp/API, PostgreSQL, Redis, sync worker, and Nginx; no Telegram bot
 
 ## Initial Safe Profile
@@ -31,12 +31,13 @@ open up to another `12`, leaving substantial headroom below PostgreSQL's `150`
 connection limit for migrations, maintenance, and operator access.
 
 `effective_cache_size` is a planner estimate and does not reserve 5 GiB. The
-former `8GB/80GB` PostgreSQL profile belonged to the retired high-memory Iran
-host and must not be reused on this server.
+service limits intentionally retain the conservative 8 GiB-class profile. The
+current 12 GiB allocation is temporary capacity and must not become a runtime
+dependency when WA-IR is downsized after Full Matrix.
 
 ## Rollout Gate
 
-The current replacement host `185.206.95.250` runs Ubuntu 24.04 (`noble`) in
+The current replacement host `95.38.164.29` runs Ubuntu 24.04 (`noble`) in
 Arvan Simin. Its archive provides `docker-compose-v2`; the legacy
 `docker-compose` package is not required. Bootstrap refreshes APT metadata and
 installs Docker, Compose v2, age, curl, CA certificates, and PostgreSQL client
@@ -45,6 +46,13 @@ must not be reused as current-host evidence.
 The standalone `bootstrap-iran` command only installs host prerequisites. Sync
 sampler installation remains after `sync-project` in the full release because a
 fresh host does not yet contain the sampler script.
+
+Full Matrix uses the disposable 50 GB volume
+`422eb8de-0ecd-456a-8407-119245500d3e`, mounted at
+`/srv/trading-bot-three-site-staging-data` by UUID
+`08ae6418-0a2d-4909-81f0-1560c5fc9b35`. It is an isolated staging boundary,
+not permanent WA-IR capacity, and must be detached/deleted after accepted
+Matrix evidence. The 85 GB root disk must not absorb staging volume fallback.
 
 Shared-data recovery is registry-guarded. The reset/backlog list must equal all
 current `SyncPolicy.SYNC` tables, and fresh-host inspection treats every shared

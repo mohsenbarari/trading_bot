@@ -684,7 +684,7 @@
       ],
       "package": "libsqlite3-0:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
-      "sha256": "cfc41395e0887b656b2fd5ce86c0209cb414f2a8ee90bc6258f9ef571ec31025",
+      "sha256": "f2cd05de8b6f71ea9d0495a6f9ff9cae844b15d9c45b7ef49ee0af0f81658cc7",
       "soname": "libsqlite3.so.0"
     },
     {
@@ -922,10 +922,10 @@
       "list_sha256": "283429da68b3ccfd524a5b8709a49eff5ddbcbb683455730d472beea5f8a078b",
       "md5_verified_file_count": 4,
       "md5_verified_paths_sha256": "062ab06f5a0bf4681ac33f888e44dbace971d41201d577bc23345768ec4e5448",
-      "md5sums_sha256": "42a630999f713ced64118ee7ece7f7a36cab9bb4c2db8ac4ea0cb7b12de36417",
+      "md5sums_sha256": "33359a816ba72892215e80eae83daba2f28e51346d67e122e2f8010ac510b258",
       "name": "libsqlite3-0",
       "status": "install ok installed",
-      "version": "3.45.1-1ubuntu2.6"
+      "version": "3.45.1-1ubuntu2.7"
     },
     {
       "architecture": "amd64",
