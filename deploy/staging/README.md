@@ -225,7 +225,7 @@ an exact Object Storage version id is rejected.
 Each host begins with `run_three_site_staging_role_migration.py begin`. Run
 `restore-seed`, `configure-database`, and `start-private` on all four roles in
 their journal order. `configure-database` upgrades every supported predecessor
-to `f764a5b6c8d9`; on WebApp-IR it also converts the restored FI clone into a
+to `a875b6c7d9e0`; on WebApp-IR it also converts the restored FI clone into a
 locally fenced epoch-1 standby.
 
 The compatibility migration leaves WebApp-FI active at epoch 1 but does not
@@ -416,6 +416,49 @@ staging hosts, and included in the already-bound backend config. No driver is
 permitted to use production hosts, domains, buckets, or credentials. Execute
 only in the separately authorized window:
 
+Synchronization timing is not inferred from scenario wall-clock duration.
+Migration head `a875b6c7d9e0` retains the first delivery attempt, and each role
+bundle now contains a dedicated `*_sync_observer` database identity. That
+identity can only read `alembic_version`, `dr_database_runtime`, `dr_events`,
+`dr_event_deliveries`, and `dr_event_receipts`; it has no business, Writer,
+Queue, Telegram, Blob, effect, function, or sequence authority.
+
+Bot-FI, WebApp-FI, and WebApp-IR hosts must have `chronyc` (preferred) or
+`ntpq` installed and synchronized before host attestation. `timedatectl`
+reporting synchronized without an offset-capable client is insufficient and
+now fails preflight rather than failing halfway through timing collection.
+
+The workload doer must create a unique correlation manifest. The independent
+observer then runs `scripts/run_three_site_sync_timing_observer.py` with an
+owner-only config shaped like
+`deploy/staging/three-site-sync-observer.example.json`. The config is bound to
+the exact provisioned staging inventory, three literal host IPs, canonical
+role Compose/env paths, key-only strict-host-key SSH, and one owner-only
+artifact directory. On every observation it:
+
+- derives NTP status and a conservative clock-error bound (including root
+  dispersion and half root delay) from `timedatectl` plus `chronyc` or `ntpq`;
+- launches only the one-shot least-privilege observer service on each role;
+- correlates the same event/envelope through direct and relayed hops;
+- retains event-created, delivery-enqueued, first-attempt, receive, apply, and
+  acknowledgement times, attempt count, hashes, and payload bytes;
+- recomputes route and physical-hop p50/p95/p99/max values from raw samples;
+- measures recovery backlog and live ingress itself until pending work reaches
+  zero, rather than trusting the workload report.
+
+Normal FI-active timing covers Bot-FI -> WebApp-FI, WebApp-FI -> Bot-FI,
+WebApp-FI -> WebApp-IR, and Bot-FI -> WebApp-IR via WebApp-FI. It deliberately
+does not manufacture authoritative WebApp-IR writes while that site is
+standby. IR -> FI and IR -> Bot relay timing is required in the IR-active
+recovery scenarios. The 300-rps profile also retains Bot and WebApp request
+counts and fails if their observed split differs by more than one percentage
+point from 50/50. It enforces the approved FI<->FI p50/p95/p99 upper bounds of
+80/150/300 ms and the healthy FI->IR bounds of 500/750/2000 ms. The 300-rps,
+reconnect/catch-up, and one-hour backlog
+scenarios use the same raw verifier. Missing routes, reused event evidence,
+unsynchronized/stale clocks, forged percentiles, a backlog not observed before
+drain, no live ingress during recovery, or a non-zero final backlog all fail.
+
 Every backend invocation is preceded by a hash-journaled intent carrying a
 deterministic operation ID. Scenario and recovery invocations also receive a
 strictly increasing `--attempt`; a controller crash replays only the same
@@ -427,12 +470,14 @@ assertions, residue count and production boundary before recording success.
 Scenario evidence is likewise rejected when a named assertion says `passed`
 but its observed value differs from the catalog-bound expected value.
 
-There is intentionally no tracked live driver in the repository at this
-source-remediation stage. Consequently the source controller may be reviewed
-and tested, but Gate D cannot be assembled or executed yet. Adding the real
-driver, independent scenario oracles and dedicated staging evidence is an
-explicit later gate, not an implementation detail that can be supplied by an
-operator-local script.
+There is still intentionally no tracked **all-catalog live scenario driver**
+in the repository at this source-remediation stage. The synchronization
+observer above is a real read-only component, but it does not pretend to
+implement migration, provider, failover, Queue, application, and destructive
+fault doers. Consequently Gate D cannot be assembled or executed yet. Adding
+that reviewed all-scenario driver and its independent per-scenario oracles is
+an explicit later gate; an operator-local command runner or self-attesting
+placeholder is forbidden.
 
 ```text
 THREE_SITE_STAGING_FULL_MATRIX_CONFIRM=execute-authoritative-three-site-staging-full-matrix \

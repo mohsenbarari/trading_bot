@@ -39,6 +39,20 @@ class DrDeliveryError(RuntimeError):
     """Raised when peer configuration or acknowledgement is unsafe."""
 
 
+def _mark_delivery_attempt(delivery: Any, *, now: datetime, local_site: str) -> None:
+    """Claim one row without erasing the first delivery timestamp on retries."""
+
+    delivery.status = "inflight"
+    delivery.attempt_count = int(delivery.attempt_count or 0) + 1
+    delivery.first_attempt_at = delivery.first_attempt_at or now
+    delivery.last_attempt_at = now
+    delivery.last_error_code = None
+    delivery.next_attempt_at = now + timedelta(
+        seconds=max(5, int(settings.dr_delivery_claim_seconds))
+    )
+    delivery.relay_site = delivery.relay_site or local_site
+
+
 @dataclass(frozen=True)
 class ClaimedDeliveryBatch:
     claim_id: str
@@ -201,13 +215,8 @@ async def claim_delivery_batch(*, local_site: str) -> ClaimedDeliveryBatch | Non
             event_ids: list[str] = []
             envelopes: list[dict[str, Any]] = []
             for delivery, event_row in rows:
-                delivery.status = "inflight"
-                delivery.attempt_count = int(delivery.attempt_count or 0) + 1
-                delivery.last_attempt_at = now
-                delivery.last_error_code = None
                 # next_attempt_at doubles as a durable claim-expiry boundary.
-                delivery.next_attempt_at = now + timedelta(seconds=max(5, int(settings.dr_delivery_claim_seconds)))
-                delivery.relay_site = delivery.relay_site or local_site
+                _mark_delivery_attempt(delivery, now=now, local_site=local_site)
                 event_ids.append(event_row.event_id)
                 envelopes.append(event_envelope(event_row))
             await session.commit()

@@ -22,6 +22,11 @@ from core.three_site_full_matrix_campaign import (
     verify_complete_matrix,
     verify_scenario_evidence,
 )
+from core.three_site_sync_timing import (
+    SYNC_TIMING_ASSERTION,
+    sync_timing_policy,
+    verify_sync_timing_evidence,
+)
 from core.three_site_full_matrix_runner import (
     CampaignIdentity,
     FullMatrixRunnerError,
@@ -30,6 +35,7 @@ from core.three_site_full_matrix_runner import (
     _validate_preflight,
     run_full_matrix_campaign,
 )
+from tests.three_site_sync_timing_fixtures import make_sync_timing_artifact
 from tests.test_three_site_full_matrix_campaign import _sign, _signed_campaign
 
 
@@ -291,6 +297,37 @@ class FakeBackend:
                     "expected": contract,
                     "observed": contract,
                     "evidence_refs": [pair_raw_name],
+                }
+            )
+        if sync_timing_policy(scenario_id) is not None:
+            timing = make_sync_timing_artifact(
+                scenario_id,
+                captured_at=started_at,
+            )
+            timing_name = (
+                f"raw-sync-timing-{iteration:02d}-{scenario_id}.json"
+            )
+            timing_payload = canonical_json_bytes(timing) + b"\n"
+            timing_path = self.root / timing_name
+            timing_path.write_bytes(timing_payload)
+            timing_path.chmod(0o600)
+            raw_records.append(
+                {
+                    "path": timing_name,
+                    "sha256": hashlib.sha256(timing_payload).hexdigest(),
+                    "size": len(timing_payload),
+                }
+            )
+            assertions.append(
+                {
+                    "name": SYNC_TIMING_ASSERTION,
+                    "status": "passed",
+                    "expected": sync_timing_policy(scenario_id),
+                    "observed": verify_sync_timing_evidence(
+                        timing,
+                        scenario_id=scenario_id,
+                    ),
+                    "evidence_refs": [timing_name],
                 }
             )
         name = f"scenario-{iteration:02d}-{phase}-{scenario_id}.json"

@@ -20,6 +20,7 @@ from core.dr_blob_worker import DrBlobWorkerError, S3Config, _verify_blob_receip
 from core.dr_delivery_worker import (
     ClaimedDeliveryBatch,
     DrDeliveryError,
+    _mark_delivery_attempt,
     _update_delivery_from_result,
     _verify_acknowledgement,
     parse_peer_urls,
@@ -45,6 +46,25 @@ from scripts.verify_three_site_staging_inventory import InventoryError, verify_i
 
 
 class ThreeSiteDrFoundationTests(unittest.TestCase):
+    def test_delivery_retry_retains_first_attempt_timestamp(self):
+        first = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
+        second = first + timedelta(seconds=5)
+        row = SimpleNamespace(
+            status="pending",
+            attempt_count=0,
+            first_attempt_at=None,
+            last_attempt_at=None,
+            last_error_code="old",
+            next_attempt_at=None,
+            relay_site=None,
+        )
+        _mark_delivery_attempt(row, now=first, local_site="webapp_fi")
+        _mark_delivery_attempt(row, now=second, local_site="webapp_fi")
+        self.assertEqual(row.attempt_count, 2)
+        self.assertEqual(row.first_attempt_at, first)
+        self.assertEqual(row.last_attempt_at, second)
+        self.assertEqual(row.relay_site, "webapp_fi")
+
     def _signed_connectivity_evidence(self, *, now: datetime, mode: str):
         controller = Ed25519PrivateKey.generate()
         private_keys = {

@@ -39,6 +39,7 @@ class FinalizeThreeSiteStagingInventoryTests(unittest.TestCase):
                 "ipv4_addresses": [role["host_ip"]],
                 "timezone": "UTC",
                 "ntp_synchronized": True,
+                "clock_measurement_tool": "chronyc",
                 "volumes": {
                     field: role[field] for field in ROLE_VOLUME_FIELDS[cli_role]
                 },

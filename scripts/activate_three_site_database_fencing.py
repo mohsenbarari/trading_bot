@@ -23,6 +23,15 @@ CONTROL_TABLES = (
     "webapp_writer_activation_operations",
     "webapp_writer_transitions",
 )
+SYNC_OBSERVER_TABLES = frozenset(
+    {
+        "alembic_version",
+        "dr_database_runtime",
+        "dr_events",
+        "dr_event_deliveries",
+        "dr_event_receipts",
+    }
+)
 APPLICATION_INTERNAL_GRANTS = {
     "dr_destination_cursors": "SELECT, INSERT, UPDATE",
     "dr_producer_cursors": "SELECT, INSERT, UPDATE",
@@ -236,6 +245,7 @@ def build_statements(
     blob_role: str,
     effect_role: str,
     control_role: str,
+    observer_role: str,
     operator: str,
 ) -> list[str]:
     service_roles = {
@@ -251,6 +261,7 @@ def build_statements(
             (
                 application_role,
                 control_role,
+                observer_role,
                 *service_roles.values(),
             ),
         )
@@ -282,6 +293,9 @@ def build_statements(
         f"GRANT USAGE ON SCHEMA public TO {role_list}",
         f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {application_role}",
         f"GRANT SELECT ON TABLE public.dr_database_runtime, public.dr_durability_state, public.webapp_writer_state, public.webapp_writer_transitions TO {control_role}",
+        "GRANT SELECT ON TABLE "
+        + ", ".join(f"public.{table}" for table in sorted(SYNC_OBSERVER_TABLES))
+        + f" TO {_ident(observer_role)}",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {application_role}, {projection_role}",
     ]
     for role in service_roles.values():
@@ -411,6 +425,7 @@ def main() -> int:
     parser.add_argument("--blob-role", required=True)
     parser.add_argument("--effect-role", required=True)
     parser.add_argument("--control-role", required=True)
+    parser.add_argument("--observer-role", required=True)
     parser.add_argument("--operator", required=True)
     parser.add_argument("--database-url-env", default="SYNC_DATABASE_URL")
     parser.add_argument("--apply", action="store_true")
@@ -434,6 +449,7 @@ def main() -> int:
                 blob_role=args.blob_role,
                 effect_role=args.effect_role,
                 control_role=args.control_role,
+                observer_role=args.observer_role,
                 operator=args.operator,
             )
             if not args.apply:
@@ -449,6 +465,7 @@ def main() -> int:
                         "blob": args.blob_role,
                         "effect": args.effect_role,
                         "control": args.control_role,
+                        "observer": args.observer_role,
                     },
                     "statement_count": len(statements),
                     "required_confirmation": CONFIRMATION,

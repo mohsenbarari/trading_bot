@@ -111,6 +111,11 @@ class DrEventDelivery(Base):
             "status IN ('pending', 'inflight', 'acknowledged', 'blocked_gap', 'quarantined')",
             name="ck_dr_event_deliveries_status",
         ),
+        CheckConstraint(
+            "first_attempt_at IS NULL OR (last_attempt_at IS NOT NULL "
+            "AND first_attempt_at <= last_attempt_at)",
+            name="ck_dr_event_deliveries_first_attempt_order",
+        ),
         Index("ix_dr_event_deliveries_ready", "destination_site", "status", "next_attempt_at"),
     )
 
@@ -119,6 +124,9 @@ class DrEventDelivery(Base):
     status = Column(String(20), nullable=False, default="pending")
     attempt_count = Column(Integer, nullable=False, default=0)
     next_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    # Retained independently from last_attempt_at so retry storms do not erase
+    # the beginning of the end-to-end synchronization measurement.
+    first_attempt_at = Column(DateTime(timezone=True), nullable=True)
     last_attempt_at = Column(DateTime(timezone=True), nullable=True)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
     acknowledgement_hash = Column(String(64), nullable=True)

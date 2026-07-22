@@ -158,7 +158,7 @@ class ThreeSiteStagingCampaignBundleTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "verified")
         self.assertEqual(result["directional_pairwise_key_count"], 4)
-        self.assertEqual(result["database_credential_count"], 24)
+        self.assertEqual(result["database_credential_count"], 27)
         self.assertEqual(len(result["campaign_bundle_sha256"]), 64)
 
     def test_mismatched_endpoint_pairwise_secret_is_rejected(self):

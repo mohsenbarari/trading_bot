@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -142,6 +143,14 @@ def collect_host_snapshot(
     ntp_value = _run(
         [TIMEDATECTL, "show", "-p", "NTPSynchronized", "--value"]
     ).lower()
+    clock_tool = next(
+        (
+            Path(binary).name
+            for name in ("chronyc", "ntpq")
+            if (binary := shutil.which(name, path=SAFE_ENV["PATH"])) is not None
+        ),
+        None,
+    )
     head_before = _git(repo, "rev-parse", "HEAD")
     clean = not bool(_git(repo, "status", "--porcelain=v1", "--untracked-files=all"))
     head_after = _git(repo, "rev-parse", "HEAD")
@@ -177,6 +186,7 @@ def collect_host_snapshot(
         "ipv4_addresses": addresses,
         "timezone": timezone,
         "ntp_synchronized": ntp_value == "yes",
+        "clock_measurement_tool": clock_tool,
         "volumes": volumes,
         "postgres_system_id": postgres_system_id,
     }
@@ -193,7 +203,8 @@ def verify_host_snapshot(
     expected_fields = {
         "schema", "role", "stage", "release_sha", "worktree_clean",
         "machine_id", "docker_daemon_id", "ipv4_addresses", "timezone",
-        "ntp_synchronized", "volumes", "postgres_system_id",
+        "ntp_synchronized", "clock_measurement_tool", "volumes",
+        "postgres_system_id",
     }
     if (
         not isinstance(snapshot, dict)
@@ -222,6 +233,11 @@ def verify_host_snapshot(
         or role_inventory["host_ip"] not in snapshot["ipv4_addresses"]
         or snapshot["timezone"] != "UTC"
         or snapshot["ntp_synchronized"] is not True
+        or (
+            role in {"bot-fi", "webapp-fi", "webapp-ir"}
+            and snapshot["clock_measurement_tool"] not in {"chronyc", "ntpq"}
+        )
+        or snapshot["clock_measurement_tool"] not in {None, "chronyc", "ntpq"}
     ):
         raise HostIdentityError("live host identity differs from signed inventory/SHA/time policy")
     volumes = snapshot["volumes"]

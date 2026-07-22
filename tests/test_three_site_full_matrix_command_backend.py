@@ -13,6 +13,7 @@ from unittest.mock import patch
 from core.three_site_full_matrix_campaign import PHASES, PHASE_SCENARIOS
 from core.three_site_full_matrix_command_backend import (
     CONFIG_SCHEMA,
+    RUNTIME_CONFIG_SCHEMA,
     CommandFullMatrixBackend,
 )
 from core.three_site_full_matrix_runner import CampaignIdentity, FullMatrixRunnerError
@@ -46,14 +47,19 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 parser.add_argument('--release-sha', required=True)
                 parser.add_argument('--activation-sha', required=True)
                 parser.add_argument('--artifact-root', type=Path, required=True)
+                parser.add_argument('--runtime-config', type=Path, required=True)
                 parser.add_argument('--phase')
                 parser.add_argument('--scenario-id')
                 parser.add_argument('--iteration', type=int)
                 parser.add_argument('--attempt', type=int)
                 parser.add_argument('--failed')
                 args = parser.parse_args()
+                runtime = json.loads(args.runtime_config.read_text())
                 path = args.artifact_root / f'{args.operation}.json'
-                body = json.dumps({'operation': args.operation}, sort_keys=True).encode() + b'\\n'
+                body = json.dumps({
+                    'operation': args.operation,
+                    'runtime_marker': runtime['test_marker'],
+                }, sort_keys=True).encode() + b'\\n'
                 path.write_bytes(body)
                 path.chmod(0o600)
                 digest = hashlib.sha256(body).hexdigest()
@@ -71,6 +77,18 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
             + "\n"
         )
         driver.chmod(0o644)
+        runtime = root / "runtime.json"
+        runtime.write_text(json.dumps({
+            "schema": RUNTIME_CONFIG_SCHEMA,
+            "campaign_id": "11111111-1111-4111-8111-111111111111",
+            "release_sha": "a" * 40,
+            "production_forbidden": True,
+            "supported_scenarios": {
+                phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES
+            },
+            "test_marker": "sealed-runtime",
+        }, sort_keys=True) + "\n")
+        runtime.chmod(0o600)
         config = {
             "schema": CONFIG_SCHEMA,
             "campaign_id": "11111111-1111-4111-8111-111111111111",
@@ -79,6 +97,10 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
             "driver": {
                 "path": "scripts/full_matrix_drivers/driver.py",
                 "sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
+            },
+            "runtime_config": {
+                "path": str(runtime.resolve()),
+                "sha256": hashlib.sha256(runtime.read_bytes()).hexdigest(),
             },
             "supported_scenarios": {
                 phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES
@@ -117,6 +139,9 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["status"], "passed")
             self.assertEqual(result["evidence_hash"], result["artifact_sha256"])
             self.assertTrue((artifact_root / result["artifact_path"]).is_file())
+            raw = json.loads((artifact_root / result["artifact_path"]).read_text())
+            self.assertEqual(raw["runtime_marker"], "sealed-runtime")
+            backend.close()
 
     async def test_driver_hash_or_catalog_drift_fails_closed(self):
         stack, repo, artifact_root, config, identity = self._fixture()
@@ -153,6 +178,31 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["driver_attempt"], 2)
             backend.close()
 
+    async def test_runtime_hash_or_unsafe_mode_fails_closed(self):
+        stack, repo, artifact_root, config, identity = self._fixture()
+        with stack:
+            config["runtime_config"]["sha256"] = "0" * 64
+            with self.assertRaisesRegex(FullMatrixRunnerError, "runtime hash"):
+                CommandFullMatrixBackend(
+                    config=config,
+                    repo_root=repo,
+                    artifact_root=artifact_root,
+                    campaign_id=identity.campaign_id,
+                    release_sha=identity.release_sha,
+                )
+
+        stack, repo, artifact_root, config, identity = self._fixture()
+        with stack:
+            Path(config["runtime_config"]["path"]).chmod(0o644)
+            with self.assertRaisesRegex(FullMatrixRunnerError, "runtime file is unsafe"):
+                CommandFullMatrixBackend(
+                    config=config,
+                    repo_root=repo,
+                    artifact_root=artifact_root,
+                    campaign_id=identity.campaign_id,
+                    release_sha=identity.release_sha,
+                )
+
     async def test_invocation_uses_sealed_bytes_after_path_replacement(self):
         stack, repo, artifact_root, config, identity = self._fixture()
         with stack:
@@ -169,6 +219,28 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 identity, operation_id="22222222-2222-4222-8222-222222222222"
             )
             self.assertEqual(result["status"], "passed")
+            backend.close()
+
+    async def test_invocation_uses_sealed_runtime_after_path_replacement(self):
+        stack, repo, artifact_root, config, identity = self._fixture()
+        with stack:
+            backend = CommandFullMatrixBackend(
+                config=config,
+                repo_root=repo,
+                artifact_root=artifact_root,
+                campaign_id=identity.campaign_id,
+                release_sha=identity.release_sha,
+            )
+            runtime = Path(config["runtime_config"]["path"])
+            replacement = runtime.with_suffix(".replacement")
+            replacement.write_text("{}\n")
+            replacement.chmod(0o600)
+            replacement.replace(runtime)
+            result = await backend.preflight(
+                identity, operation_id="22222222-2222-4222-8222-222222222222"
+            )
+            raw = json.loads((artifact_root / result["artifact_path"]).read_text())
+            self.assertEqual(raw["runtime_marker"], "sealed-runtime")
             backend.close()
 
     async def test_execute_rejects_backend_config_not_bound_by_campaign_inputs(self):

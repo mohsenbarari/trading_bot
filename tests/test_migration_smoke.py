@@ -39,7 +39,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['f764a5b6c8d9 (head)'])
+        self.assertEqual(heads, ['a875b6c7d9e0 (head)'])
 
     def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
         versions = REPO_ROOT / 'migrations' / 'versions'
@@ -56,6 +56,13 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('HISTORY_PREFLIGHT_SQL', child_source)
         self.assertIn('trg_dr_event_destination_binding', child_source)
         self.assertIn('op.execute(f"REVOKE ALL ON FUNCTION {function_identity} FROM PUBLIC")', child_source)
+        timing_child = versions / 'a875b6c7d9e0_add_dr_delivery_first_attempt_time.py'
+        timing_source = timing_child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "f764a5b6c8d9"', timing_source)
+        self.assertIn('"first_attempt_at"', timing_source)
+        self.assertIn('SET first_attempt_at=last_attempt_at', timing_source)
+        self.assertIn('ck_dr_event_deliveries_first_attempt_order', timing_source)
+        self.assertIn('forward-only evidence migration', timing_source)
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

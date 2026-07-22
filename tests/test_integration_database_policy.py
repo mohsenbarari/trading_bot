@@ -10,10 +10,12 @@ from core.dr_database_roles import PROJECTION_SERVICE_SCOPES, projection_scope_f
 from scripts.activate_three_site_database_fencing import (
     BOT_LOCAL_EXECUTION_TABLES,
     DR_SERVICE_INTERNAL_GRANTS,
+    SYNC_OBSERVER_TABLES as WEBAPP_SYNC_OBSERVER_TABLES,
 )
 from scripts.provision_bot_database_roles import (
     BOT_DR_SERVICE_GRANTS,
     BOT_LOCAL_QUEUE_APPLICATION_GRANTS,
+    SYNC_OBSERVER_TABLES as BOT_SYNC_OBSERVER_TABLES,
 )
 
 
@@ -56,6 +58,16 @@ class IntegrationDatabasePolicyTests(unittest.TestCase):
                 for permissions in BOT_LOCAL_QUEUE_APPLICATION_GRANTS.values()
             )
         )
+
+    def test_sync_observer_has_one_closed_read_only_table_surface(self):
+        expected = frozenset(
+            {
+                "alembic_version", "dr_database_runtime", "dr_events",
+                "dr_event_deliveries", "dr_event_receipts",
+            }
+        )
+        self.assertEqual(BOT_SYNC_OBSERVER_TABLES, expected)
+        self.assertEqual(WEBAPP_SYNC_OBSERVER_TABLES, expected)
 
     def test_remote_event_insert_omits_source_local_xid(self):
         payload = {

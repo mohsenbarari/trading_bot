@@ -37,6 +37,7 @@ def main() -> int:
         f"{args.role_prefix}_blob": _required("THREE_SITE_BLOB_DB_PASSWORD"),
         f"{args.role_prefix}_effect": _required("THREE_SITE_EFFECT_DB_PASSWORD"),
         f"{args.role_prefix}_control": _required("THREE_SITE_CONTROL_DB_PASSWORD"),
+        f"{args.role_prefix}_observer": _required("THREE_SITE_OBSERVER_DB_PASSWORD"),
     }
     engine = create_engine(database_url)
     try:

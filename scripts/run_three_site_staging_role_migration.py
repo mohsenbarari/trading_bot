@@ -47,7 +47,7 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
 }
-EXPECTED_HEAD = "f764a5b6c8d9"
+EXPECTED_HEAD = "a875b6c7d9e0"
 ROLE_DB = {
     "bot_fi": ("bot_fi_db", "BOT_FI_POSTGRES_USER", "BOT_FI_POSTGRES_DB"),
     "webapp_fi": ("webapp_fi_db", "WEBAPP_FI_POSTGRES_USER", "WEBAPP_FI_POSTGRES_DB"),

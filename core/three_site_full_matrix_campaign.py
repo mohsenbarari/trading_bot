@@ -23,6 +23,12 @@ from core.secure_file_io import (
     sha256_secure_file,
     verify_hash_chained_jsonl,
 )
+from core.three_site_sync_timing import (
+    SYNC_TIMING_ASSERTION,
+    SyncTimingEvidenceError,
+    sync_timing_policy,
+    verify_sync_timing_evidence,
+)
 
 
 CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v1"
@@ -171,6 +177,7 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "dropped_wakeup_still_durably_drains",
         "ambiguous_client_command_retry_is_idempotent",
         "customer_actor_matrix_normal_fi_active",
+        "three_site_sync_timing_steady_state",
     ),
     "queue_faults": (
         "enqueue_commit_crash_boundaries",
@@ -642,6 +649,9 @@ def verify_scenario_evidence(
     }
     customer_contracts = customer_actor_pair_contracts(scenario_id)
     required.update(customer_contracts)
+    timing_policy = sync_timing_policy(scenario_id)
+    if timing_policy is not None:
+        required.add(SYNC_TIMING_ASSERTION)
     if scenario_id == "twenty_four_hour_endurance_no_growth":
         required.add("minimum_duration")
     seen: set[str] = set()
@@ -702,6 +712,30 @@ def verify_scenario_evidence(
                     "Full Matrix customer actor-pair lifecycle proof is invalid"
                 )
             customer_pair_refs.update(normalized)
+        if name == SYNC_TIMING_ASSERTION:
+            if timing_policy is None or assertion["expected"] != timing_policy or len(normalized) != 1:
+                raise FullMatrixCampaignError(
+                    "Full Matrix synchronization timing contract is invalid"
+                )
+            timing_path = next(iter(normalized))
+            try:
+                timing_artifact = secure_json(
+                    artifact_root / timing_path,
+                    label=f"Full Matrix {scenario_id} synchronization timing",
+                    max_size=16 * 1024 * 1024,
+                )
+                timing_observed = verify_sync_timing_evidence(
+                    timing_artifact,
+                    scenario_id=scenario_id,
+                )
+            except (FullMatrixCampaignError, SyncTimingEvidenceError) as exc:
+                raise FullMatrixCampaignError(
+                    "Full Matrix synchronization timing evidence is invalid"
+                ) from exc
+            if assertion["observed"] != timing_observed:
+                raise FullMatrixCampaignError(
+                    "Full Matrix synchronization timing summary is forged"
+                )
         if name == "minimum_duration" and (
             assertion["expected"] != 86400
             or not isinstance(assertion["observed"], (int, float))

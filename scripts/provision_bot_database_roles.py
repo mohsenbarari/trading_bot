@@ -69,6 +69,15 @@ BOT_LOCAL_QUEUE_APPLICATION_GRANTS = {
     "telegram_interaction_anchor_states": "SELECT, INSERT, UPDATE, DELETE",
     "telegram_channel_membership_sagas": "SELECT, INSERT, UPDATE, DELETE",
 }
+SYNC_OBSERVER_TABLES = frozenset(
+    {
+        "alembic_version",
+        "dr_database_runtime",
+        "dr_events",
+        "dr_event_deliveries",
+        "dr_event_receipts",
+    }
+)
 BOT_APPLICATION_INTERNAL_GRANTS = {
     "dr_database_runtime": "SELECT",
     "dr_destination_cursors": "SELECT, INSERT, UPDATE",
@@ -198,6 +207,7 @@ def main() -> int:
         f"{prefix}_receiver": _required("BOT_RECEIVER_DB_PASSWORD"),
         f"{prefix}_delivery": _required("BOT_DELIVERY_DB_PASSWORD"),
         f"{prefix}_projection": _required("BOT_PROJECTION_DB_PASSWORD"),
+        f"{prefix}_observer": _required("BOT_OBSERVER_DB_PASSWORD"),
     }
     app_role = f"{prefix}_app"
     service_roles = {
@@ -206,6 +216,7 @@ def main() -> int:
         "projector": f"{prefix}_projection",
     }
     projection_role = service_roles["projector"]
+    observer_role = f"{prefix}_observer"
     engine = create_engine(_required(args.database_url_env))
     try:
         with engine.begin() as connection:
@@ -240,6 +251,9 @@ def main() -> int:
                 # checker both verify the exact migration head through the
                 # application role.  This exposes metadata only, never DDL.
                 f"GRANT SELECT ON TABLE public.alembic_version TO {app_role}",
+                "GRANT SELECT ON TABLE "
+                + ", ".join(f"public.{table}" for table in sorted(SYNC_OBSERVER_TABLES))
+                + f" TO {observer_role}",
                 f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {app_role}, {projection_role}",
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON TABLES FROM {role_list}",
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {role_list}",

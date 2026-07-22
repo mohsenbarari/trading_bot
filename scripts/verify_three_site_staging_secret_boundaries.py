@@ -53,6 +53,15 @@ SECRET_REFERENCES = {
     "BOT_FI_PROJECTION_DB_PASSWORD": lambda service: service in {
         "bot_fi_db_roles", "bot_fi_dr_projection",
     },
+    "BOT_FI_OBSERVER_DB_PASSWORD": lambda service: service in {
+        "bot_fi_db_roles", "bot_fi_sync_observer",
+    },
+    "WEBAPP_FI_OBSERVER_DB_PASSWORD": lambda service: service in {
+        "webapp_fi_db_roles", "webapp_fi_sync_observer",
+    },
+    "WEBAPP_IR_OBSERVER_DB_PASSWORD": lambda service: service in {
+        "webapp_ir_db_roles", "webapp_ir_sync_observer",
+    },
     "WEBAPP_FI_RECEIVER_DB_PASSWORD": lambda service: service in {
         "webapp_fi_db_roles", "webapp_fi_dr_receiver",
     },

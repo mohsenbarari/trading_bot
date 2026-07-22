@@ -43,6 +43,7 @@ class ThreeSiteStagingHostIdentityTests(unittest.TestCase):
             "ipv4_addresses": ["127.0.0.1", self.role_inventory["host_ip"]],
             "timezone": "UTC",
             "ntp_synchronized": True,
+            "clock_measurement_tool": "chronyc",
             "volumes": volumes,
             "postgres_system_id": (
                 None
@@ -110,6 +111,18 @@ class ThreeSiteStagingHostIdentityTests(unittest.TestCase):
                 role_inventory=self.role_inventory,
                 release_sha=self.inventory["release_sha"],
                 stage="provisioned",
+            )
+
+    def test_sync_role_requires_an_offset_capable_clock_tool(self):
+        snapshot = self._snapshot("fresh-preflight")
+        snapshot["clock_measurement_tool"] = None
+        with self.assertRaisesRegex(HostIdentityError, "time policy"):
+            verify_host_snapshot(
+                snapshot,
+                role=self.role,
+                role_inventory=self._role_inventory("fresh-preflight"),
+                release_sha=self.inventory["release_sha"],
+                stage="fresh-preflight",
             )
 
 

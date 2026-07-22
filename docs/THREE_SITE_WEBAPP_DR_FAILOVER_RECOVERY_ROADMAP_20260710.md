@@ -4366,3 +4366,94 @@ This is source-level enforcement only. It does not claim that the still-missing
 reviewed live driver has executed the customer cases on staging. Gate D remains
 blocked until that driver creates the required real business, notification,
 database and routing evidence on the migrated three-site staging topology.
+
+## 56. Three-site synchronization timing evidence - 2026-07-21
+
+This section closes the source-level timing/oracle gap raised while preparing
+the authoritative Full Matrix. It records no staging or production execution,
+no CDN/DNS/provider mutation, and no permission to merge with `main`.
+
+### 56.1 State-aware route contract
+
+The Full Matrix now has four semantic timing profiles:
+
+1. steady state with FI as Writer;
+2. the 300-request/second, 50/50 Bot/WebApp workload;
+3. reconnect flapping with bounded catch-up while IR remains routed;
+4. one hour of accumulated backlog drained alongside live traffic.
+
+FI-active profiles cover both Finland directions, FI -> IR, and the complete
+Bot -> FI -> IR relay. They do not create an invalid authoritative IR -> FI
+write merely to make a test symmetric while IR is standby. IR -> FI and the
+complete IR -> FI -> Bot relay are measured after an IR-active outage and
+during recovery. Across the two lifecycle states, every real directed physical
+link and both relayed end-to-end routes are measured.
+
+### 56.2 Retained raw timing and percentile report
+
+Each unique correlation retains the immutable event/envelope identity and,
+for every hop, the origin event creation time, destination-delivery enqueue
+time, first attempt, destination receive, destination apply, source
+acknowledgement, attempt count, payload bytes, and receipt hash. Event creation
+is deliberately not mislabeled as PostgreSQL commit time. The independent
+controller duration remains separate and is cross-checked against the host UTC
+timeline within the measured clock tolerance.
+
+The verifier recomputes p50/p95/p99/max for each end-to-end route. It also
+reports the same percentiles for every physical direction, split into enqueue
+wait, transport, projection, acknowledgement, event-created-to-apply, and
+event-created-to-acknowledgement components. Raw correlations cannot be reused
+between samples, and a relay must retain the same event ID and envelope hash.
+
+Forward-only migration `a875b6c7d9e0` adds
+`dr_event_deliveries.first_attempt_at`, backfills existing attempted rows, and
+enforces first-attempt <= last-attempt. Retries update only the last attempt;
+they cannot erase the start of the measurement.
+
+### 56.3 Independent clock, backlog, and database observer
+
+`scripts/measure_three_site_host_clock.py` fails unless the host reports NTP
+synchronization and either `chronyc` or `ntpq` supplies a usable clock-error
+bound. For Chrony and NTP this includes root dispersion and half of root delay,
+not only the displayed offset. The
+raw command output and its SHA-256 remain inside the timing artifact. A maximum
+absolute clock-error bound above one second, stale evidence, a changed raw hash, or an
+unsynchronized host blocks the scenario.
+Host attestation now also blocks Bot-FI/WebApp-FI/WebApp-IR when neither
+`chronyc` nor `ntpq` is installed, so this prerequisite cannot be discovered
+only after the campaign starts.
+
+Each site now has a separate `*_sync_observer` login and one-shot Compose
+service. The login receives SELECT only on the migration version, runtime
+identity, event, delivery, and receipt tables. It receives no DML, role
+membership, sequence, function, business, Queue, Telegram, Writer, Blob, or
+effect permission. `scripts/run_three_site_sync_timing_observer.py` binds its
+SSH targets to the exact provisioned staging inventory, uses strict known-host
+verification, and concurrently queries all three roles through those observer
+containers.
+
+For recovery profiles, the observer samples pending rows and oldest age while
+the backlog drains, calculates ingress/apply rates from successive snapshots,
+requires a positive observed peak, requires new live ingress during the drain,
+and requires a final zero. A doer-provided backlog summary is ignored.
+
+### 56.4 Full Matrix enforcement and remaining Gate-D boundary
+
+The timing assertion is mandatory for the steady-state, 300-rps,
+reconnect/catch-up, and one-hour-backlog scenarios. The campaign verifier
+reopens the raw artifact, recomputes every percentile, and rejects a missing
+route, insufficient cardinality, forged summary, non-applied receipt,
+unacknowledged source delivery, changed relay identity, an approved route
+percentile SLO breach, load below policy, a
+Bot/WebApp request split deviating by more than one percentage point from
+50/50 in the 300-rps profile, or incomplete backlog drain. With two mandatory cycles the catalog now executes
+110 scenarios per cycle and 220 scenario executions in total.
+
+The new timing observer is not represented as the still-missing all-catalog
+live driver. A fake generic command runner would recreate the self-attestation
+gap already rejected by independent review. Gate D therefore remains blocked
+until the real scenario doers and independent oracles for every migration,
+Queue, DR, failover, provider, application, security, capacity, endurance and
+cleanup case are committed, reviewed, hash-bound, and executed on migrated
+staging. This source work only makes the synchronization portion executable
+and auditable.

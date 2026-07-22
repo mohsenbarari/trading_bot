@@ -1,9 +1,10 @@
 """Closed, hash-pinned execution backend for the three-site staging Matrix.
 
 The signed campaign binds the backend configuration.  That configuration in
-turn binds one tracked driver by path and SHA-256 and declares the complete
-catalog.  The backend never invokes a shell and supplies the immutable
-campaign/scenario identity as fixed argv fields.
+turn binds one tracked driver plus one owner-only runtime document by path and
+SHA-256 and declares the complete catalog. Both files are copied into sealed
+memory before preflight. The backend never invokes a shell and supplies the
+immutable campaign/scenario identity as fixed argv fields.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from core.three_site_full_matrix_runner import CampaignIdentity, FullMatrixRunne
 
 
 CONFIG_SCHEMA = "three-site-staging-full-matrix-command-backend-v1"
+RUNTIME_CONFIG_SCHEMA = "three-site-staging-full-matrix-driver-runtime-v1"
 PYTHON = "/usr/bin/python3"
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
@@ -30,6 +32,15 @@ SAFE_ENV = {
     "LC_ALL": "C.UTF-8",
     "PYTHONHASHSEED": "0",
 }
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
 
 
 class CommandFullMatrixBackend:
@@ -46,7 +57,7 @@ class CommandFullMatrixBackend:
     ) -> None:
         fields = {
             "schema", "campaign_id", "release_sha", "production_forbidden",
-            "driver", "supported_scenarios", "timeouts_seconds",
+            "driver", "runtime_config", "supported_scenarios", "timeouts_seconds",
         }
         if (
             not isinstance(config, dict)
@@ -77,6 +88,9 @@ class CommandFullMatrixBackend:
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_uid != os.geteuid()
             or stat.S_IMODE(metadata.st_mode) & 0o022
+            or metadata.st_nlink != 1
+            or metadata.st_size <= 0
+            or metadata.st_size > 4 * 1024 * 1024
         ):
             raise FullMatrixRunnerError("Full Matrix driver ownership/mode is unsafe")
         try:
@@ -125,19 +139,110 @@ class CommandFullMatrixBackend:
             raise FullMatrixRunnerError(
                 "Full Matrix driver could not be pinned into sealed memory"
             ) from exc
+        runtime = config.get("runtime_config")
+        if not isinstance(runtime, dict) or set(runtime) != {"path", "sha256"}:
+            os.close(immutable_fd)
+            raise FullMatrixRunnerError("Full Matrix driver runtime config is invalid")
+        runtime_path = Path(str(runtime["path"]))
+        if not runtime_path.is_absolute() or runtime_path.is_symlink():
+            os.close(immutable_fd)
+            raise FullMatrixRunnerError("Full Matrix driver runtime path is unsafe")
+        runtime_fd = -1
+        try:
+            runtime_metadata = runtime_path.stat()
+            runtime_fd = os.open(
+                runtime_path,
+                os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            )
+            opened_runtime = os.fstat(runtime_fd)
+            if (
+                not stat.S_ISREG(opened_runtime.st_mode)
+                or opened_runtime.st_uid != os.geteuid()
+                or stat.S_IMODE(opened_runtime.st_mode) & 0o077
+                or opened_runtime.st_nlink != 1
+                or opened_runtime.st_dev != runtime_metadata.st_dev
+                or opened_runtime.st_ino != runtime_metadata.st_ino
+                or opened_runtime.st_size != runtime_metadata.st_size
+                or opened_runtime.st_size <= 0
+                or opened_runtime.st_size > 16 * 1024 * 1024
+            ):
+                raise FullMatrixRunnerError("Full Matrix driver runtime file is unsafe")
+            runtime_bytes = os.pread(runtime_fd, opened_runtime.st_size + 1, 0)
+        except OSError as exc:
+            os.close(immutable_fd)
+            raise FullMatrixRunnerError(
+                "Full Matrix driver runtime could not be opened safely"
+            ) from exc
+        except FullMatrixRunnerError:
+            os.close(immutable_fd)
+            raise
+        finally:
+            if runtime_fd >= 0:
+                os.close(runtime_fd)
+        runtime_digest = hashlib.sha256(runtime_bytes).hexdigest()
+        if len(runtime_bytes) != runtime_metadata.st_size or runtime_digest != runtime["sha256"]:
+            os.close(immutable_fd)
+            raise FullMatrixRunnerError("Full Matrix driver runtime hash differs")
+        try:
+            runtime_value = json.loads(
+                runtime_bytes.decode("utf-8"),
+                object_pairs_hook=_strict_json_object,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            os.close(immutable_fd)
+            raise FullMatrixRunnerError("Full Matrix driver runtime JSON is invalid") from exc
+        if (
+            not isinstance(runtime_value, dict)
+            or runtime_value.get("schema") != RUNTIME_CONFIG_SCHEMA
+            or runtime_value.get("campaign_id") != campaign_id
+            or runtime_value.get("release_sha") != release_sha
+            or runtime_value.get("production_forbidden") is not True
+            or runtime_value.get("supported_scenarios")
+            != {phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES}
+        ):
+            os.close(immutable_fd)
+            raise FullMatrixRunnerError("Full Matrix driver runtime identity is invalid")
+        try:
+            immutable_runtime_fd = os.memfd_create(
+                "three-site-full-matrix-runtime",
+                os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING,
+            )
+            if os.write(immutable_runtime_fd, runtime_bytes) != len(runtime_bytes):
+                raise OSError("short write")
+            fcntl.fcntl(
+                immutable_runtime_fd,
+                fcntl.F_ADD_SEALS,
+                fcntl.F_SEAL_SEAL
+                | fcntl.F_SEAL_SHRINK
+                | fcntl.F_SEAL_GROW
+                | fcntl.F_SEAL_WRITE,
+            )
+        except (AttributeError, OSError) as exc:
+            os.close(immutable_fd)
+            if "immutable_runtime_fd" in locals():
+                os.close(immutable_runtime_fd)
+            raise FullMatrixRunnerError(
+                "Full Matrix runtime config could not be pinned into sealed memory"
+            ) from exc
         timeouts = config.get("timeouts_seconds")
         if not isinstance(timeouts, dict) or set(timeouts) != {
             "preflight", "recovery", "scenario", "endurance", "cleanup", "finalize"
         }:
+            os.close(immutable_fd)
+            os.close(immutable_runtime_fd)
             raise FullMatrixRunnerError("Full Matrix command backend timeouts are invalid")
         for name, value in timeouts.items():
             minimum = 86400 if name == "endurance" else 1
             maximum = 90000 if name == "endurance" else 7200
             if type(value) is not int or not minimum <= value <= maximum:
+                os.close(immutable_fd)
+                os.close(immutable_runtime_fd)
                 raise FullMatrixRunnerError("Full Matrix command backend timeout is unsafe")
         self.driver = resolved
         self._driver_fd = immutable_fd
+        self._runtime_fd = immutable_runtime_fd
         self.driver_sha256 = digest
+        self.runtime_sha256 = runtime_digest
         self.repo_root = repo_root.resolve()
         self.artifact_root = artifact_root.resolve()
         self.timeouts = dict(timeouts)
@@ -170,6 +275,7 @@ class CommandFullMatrixBackend:
             "--release-sha", identity.release_sha,
             "--activation-sha", identity.activation_sha,
             "--artifact-root", str(self.artifact_root),
+            "--runtime-config", f"/proc/self/fd/{self._runtime_fd}",
         ]
         if phase is not None:
             command.extend(["--phase", phase])
@@ -187,7 +293,7 @@ class CommandFullMatrixBackend:
                 *command,
                 cwd=self.repo_root,
                 env=SAFE_ENV,
-                pass_fds=(self._driver_fd,),
+                pass_fds=(self._driver_fd, self._runtime_fd),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -209,8 +315,10 @@ class CommandFullMatrixBackend:
                 f"Full Matrix {operation} driver returned a failure"
             )
         try:
-            payload = json.loads(stdout.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            payload = json.loads(
+                stdout.decode("utf-8"), object_pairs_hook=_strict_json_object
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             raise FullMatrixRunnerError(
                 f"Full Matrix {operation} driver output is invalid"
             ) from exc
@@ -223,6 +331,10 @@ class CommandFullMatrixBackend:
         if descriptor >= 0:
             os.close(descriptor)
             self._driver_fd = -1
+        runtime_descriptor = getattr(self, "_runtime_fd", -1)
+        if runtime_descriptor >= 0:
+            os.close(runtime_descriptor)
+            self._runtime_fd = -1
 
     def __del__(self) -> None:
         try:

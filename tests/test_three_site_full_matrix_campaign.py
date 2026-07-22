@@ -31,6 +31,12 @@ from core.three_site_full_matrix_campaign import (
     verify_complete_matrix,
     verify_scenario_evidence,
 )
+from core.three_site_sync_timing import (
+    SYNC_TIMING_ASSERTION,
+    sync_timing_policy,
+    verify_sync_timing_evidence,
+)
+from tests.three_site_sync_timing_fixtures import make_sync_timing_artifact
 
 
 def _signed_campaign(now: datetime):  # noqa: ANN202
@@ -187,6 +193,32 @@ def _phase_evidence(
                     "expected": contract,
                     "observed": contract,
                     "evidence_refs": [pair_raw_name],
+                }
+            )
+        if sync_timing_policy(scenario) is not None:
+            timing = make_sync_timing_artifact(scenario, captured_at=started)
+            timing_name = f"raw-sync-timing-{iteration}-{phase}-{scenario}.json"
+            timing_payload = canonical_json_bytes(timing) + b"\n"
+            timing_path = artifact_root / timing_name
+            timing_path.write_bytes(timing_payload)
+            timing_path.chmod(0o600)
+            raw_records.append(
+                {
+                    "path": timing_name,
+                    "sha256": hashlib.sha256(timing_payload).hexdigest(),
+                    "size": len(timing_payload),
+                }
+            )
+            assertions.append(
+                {
+                    "name": SYNC_TIMING_ASSERTION,
+                    "status": "passed",
+                    "expected": sync_timing_policy(scenario),
+                    "observed": verify_sync_timing_evidence(
+                        timing,
+                        scenario_id=scenario,
+                    ),
+                    "evidence_refs": [timing_name],
                 }
             )
         scenario_name = f"scenario-{iteration}-{phase}-{scenario}.json"
@@ -387,6 +419,73 @@ class ThreeSiteFullMatrixCampaignTests(unittest.TestCase):
             with self.assertRaisesRegex(FullMatrixCampaignError, "lifecycle proof"):
                 verify_scenario_evidence(
                     shared,
+                    campaign=campaign,
+                    campaign_hash=campaign_hash,
+                    phase=phase,
+                    scenario_id=scenario_id,
+                    iteration=1,
+                    attempt=1,
+                    operation_id=result["operation_id"],
+                    artifact_root=root,
+                )
+
+    def test_timing_scenario_requires_raw_semantic_observation(self):
+        now = datetime.now(timezone.utc)
+        campaign, _policy, keys = _signed_campaign(now)
+        _sign(campaign, keys)
+        unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
+        campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            raw = b"phase\n"
+            phase_path = root / "phase.json"
+            phase_path.write_bytes(raw)
+            phase_path.chmod(0o600)
+            phase = "combined_workload"
+            phase_evidence = _phase_evidence(
+                campaign,
+                campaign_hash=campaign_hash,
+                phase=phase,
+                iteration=1,
+                artifact_name=phase_path.name,
+                artifact_hash=hashlib.sha256(raw).hexdigest(),
+                artifact_size=len(raw),
+                artifact_root=root,
+            )
+            scenario_id = "three_site_sync_timing_steady_state"
+            result = next(
+                item for item in phase_evidence["scenario_results"]
+                if item["scenario_id"] == scenario_id
+            )
+            evidence = json.loads((root / result["artifact"]["path"]).read_text())
+            missing = json.loads(json.dumps(evidence))
+            missing["assertions"] = [
+                item for item in missing["assertions"]
+                if item["name"] != SYNC_TIMING_ASSERTION
+            ]
+            with self.assertRaisesRegex(FullMatrixCampaignError, "oracle coverage"):
+                verify_scenario_evidence(
+                    missing,
+                    campaign=campaign,
+                    campaign_hash=campaign_hash,
+                    phase=phase,
+                    scenario_id=scenario_id,
+                    iteration=1,
+                    attempt=1,
+                    operation_id=result["operation_id"],
+                    artifact_root=root,
+                )
+
+            forged = json.loads(json.dumps(evidence))
+            timing_assertion = next(
+                item for item in forged["assertions"]
+                if item["name"] == SYNC_TIMING_ASSERTION
+            )
+            timing_assertion["observed"]["sample_count"] += 1
+            with self.assertRaisesRegex(FullMatrixCampaignError, "summary is forged"):
+                verify_scenario_evidence(
+                    forged,
                     campaign=campaign,
                     campaign_hash=campaign_hash,
                     phase=phase,
