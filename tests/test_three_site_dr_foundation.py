@@ -616,6 +616,7 @@ class ThreeSiteDrFoundationTests(unittest.TestCase):
         payload = json.loads(
             Path("deploy/staging/three-site-inventory.example.json").read_text(encoding="utf-8")
         )
+        payload["host_safety_mode"] = "dedicated-host-destructive"
         with self.assertRaises(InventoryError):
             verify_inventory(payload, host_destructive=True)
         payload["campaign_id"] = "11111111-1111-4111-8111-111111111111"

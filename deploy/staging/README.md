@@ -83,6 +83,37 @@ Bot-FI, WebApp-FI, WebApp-IR, and the independent Writer-Witness. It is not
 started by the legacy `scripts/deploy_staging.sh` flow above and must not be
 pointed at production volumes, tokens, certificates, domains, or databases.
 
+The authoritative Full Matrix is deliberately split by host safety, not by
+feature. A `shared-host-safe` campaign contains 104 container/application
+scenarios and may run beside production on the existing four hosts. It may
+reuse only the physical host, Linux machine identity, and Docker daemon;
+Compose projects, PostgreSQL/Redis/uploads volumes, PostgreSQL system IDs,
+audit roots, credentials, ports, domains, buckets, and evidence roots remain
+staging-only. Every service has explicit CPU/memory/PID ceilings and must be
+placed below the `STAGING_CGROUP_PARENT` aggregate host slice. Production is
+observe-only throughout this campaign.
+
+A separate `dedicated-host-destructive` campaign contains the six operations
+that can affect a whole machine or exhaust its host resources:
+`witness_partition_and_vm_pause`, `fi_host_loss_without_national_cutoff`,
+`permanent_fi_recovery_hub_loss`,
+`ir_only_active_origin_loss_is_safe_unavailable`,
+`power_loss_between_fence_and_enable`, and
+`wal_event_redis_blob_capacity_exhaustion_safe`. It requires four disposable,
+non-production hosts with distinct machine/Docker identities. Both campaigns
+must use the same release SHA and Gate-D group UUID; neither report is
+individually sufficient for Gate D.
+
+Before rendering a shared-host role, review
+`trading-bot-three-site-staging.slice.example` against measured host headroom,
+install the reviewed unit as
+`/etc/systemd/system/trading-bot-three-site-staging.slice`, run
+`systemctl daemon-reload` and `systemctl start
+trading-bot-three-site-staging.slice`, and retain `systemctl show` plus cgroup
+limit evidence. The example's 200% CPU and 50% hard memory ceilings are
+starting bounds, not permission to consume capacity needed by production.
+Lower them or increase host capacity when production headroom requires it.
+
 Its configuration shape is documented in
 `env.three-site.staging.example`. Copy that file to an untracked mode-0600
 location, replace every `CHANGE_ME`, and verify the resulting effective Compose
@@ -121,8 +152,9 @@ Inventory approval is deliberately two-stage:
 
 1. two operators sign a `planned` inventory in which PostgreSQL system IDs are
    null and all host/volume names are fixed;
-2. each fresh host passes `fresh-preflight`, then only its empty DB volume is
-   provisioned;
+2. each target role passes `fresh-preflight`, then only its empty, staging-owned
+   DB volume is provisioned (the destructive campaign additionally requires a
+   fresh dedicated host for every role);
 3. `measure-provisioned` records the real PostgreSQL IDs;
 4. `finalize_three_site_staging_inventory.py` creates a new unsigned
    `provisioned` inventory from all four measurements;
@@ -348,9 +380,11 @@ after the migration evidence is reviewed.
 The source-owned campaign catalog and crash-safe controller now live in
 `core/three_site_full_matrix_campaign.py` and
 `core/three_site_full_matrix_runner.py`. They fix the order and complete
-scenario set, require exactly two complete repetitions, reject skips, bind all
-inputs by SHA-256, retain one unique owner-only artifact for every scenario,
-run zero-residue cleanup after every phase, and use a hash-chained execution
+scenario set. The catalog is exhaustively and disjointly classified as 104
+`shared-host-safe` plus 6 `dedicated-host-destructive` scenarios. Each campaign
+requires exactly two complete repetitions, rejects skips, binds all
+inputs by SHA-256, retains one unique owner-only artifact for every scenario,
+runs zero-residue cleanup after every phase, and uses a hash-chained execution
 journal. A controller crash after `scenario_started` cannot silently continue:
 the deployment backend must first prove zero-residue recovery. A failed
 campaign is terminal and needs a newly approved campaign.
@@ -378,8 +412,10 @@ request with the builder:
 python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
   --baseline-sha BASELINE_40_HEX \
   --activation-sha ACTIVATION_40_HEX \
+  --gate-group-id ONE_GATE_D_GROUP_UUID \
+  --execution-class shared-host-safe \
   --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
-  --object-bucket staging-three-site-full-matrix \
+  --object-bucket EXACT_BUCKET_FROM_SIGNED_INVENTORY \
   --bound-artifact provisioned_inventory=/root/secure/matrix/inventory.json \
   --bound-artifact inventory_approval=/root/secure/matrix/inventory-approval.json \
   --bound-artifact migration_plan=/root/secure/matrix/migration-plan.json \
@@ -429,9 +465,42 @@ The command backend does not make an arbitrary or test-only driver
 authoritative. Before Gate D, the reviewed live driver and its exact hash must
 be committed in the disabled baseline, remain unchanged at the activation SHA,
 be exercised on the migrated dedicated
-staging hosts, and included in the already-bound backend config. No driver is
-permitted to use production hosts, domains, buckets, or credentials. Execute
-only in the separately authorized window:
+staging environment, and included in the already-bound backend config. A
+shared-host-safe driver may use an existing physical host but is forbidden from
+host reboot/power/firewall/route/Docker-daemon/storage-pressure mutation and
+from every production domain, bucket, credential, volume, process, and Compose
+project. Destructive driver operations are legal only on the signed disposable
+inventory. Execute only in the separately authorized window.
+
+Prepare, approve, execute, and independently verify a second campaign with
+`--execution-class dedicated-host-destructive`, the same
+`--gate-group-id`, and the same activation SHA. After both official reports
+exist, create the only artifact that can pass Gate D:
+
+```text
+python3 scripts/build_three_site_staging_gate_d_aggregate.py prepare \
+  --shared-report /root/secure/matrix/shared/report.json \
+  --destructive-report /root/secure/matrix/destructive/report.json \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --draft-output /root/secure/matrix/gate-d.draft.json \
+  --approval-request-output /root/secure/matrix/gate-d-approval-request.json
+
+python3 scripts/build_three_site_staging_gate_d_aggregate.py finalize \
+  --draft /root/secure/matrix/gate-d.draft.json \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --approval /root/secure/matrix/gate-d-operator-1.json \
+  --approval /root/secure/matrix/gate-d-operator-2.json \
+  --output /root/secure/matrix/gate-d.approved.json
+
+python3 scripts/build_three_site_staging_gate_d_aggregate.py verify \
+  --aggregate /root/secure/matrix/gate-d.approved.json \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json
+```
+
+The aggregate verifier rejects a missing class, overlapping catalog, different
+release/group, reused campaign, altered report hash, skipped scenario, residue,
+or any production mutation. It requires two fresh independent signatures over
+both component report hashes.
 
 Synchronization timing is not inferred from scenario wall-clock duration.
 Migration head `b986c7d8e0f1` retains the first delivery attempt, rejects any

@@ -42,7 +42,7 @@ def finalize_inventory(
         planned,
         approval=approval,
         signer_policy=signer_policy,
-        host_destructive=True,
+        host_destructive=None,
     )
     if approved["inventory_stage"] != "planned":
         raise InventoryFinalizationError("inventory finalization requires a signed planned inventory")
@@ -75,7 +75,7 @@ def finalize_inventory(
     result["inventory_stage"] = "provisioned"
     for role in result["roles"]:
         role["postgres_system_id"] = measured_system_ids[role["role"]]
-    verify_inventory(result, host_destructive=True)
+    verify_inventory(result, host_destructive=None)
     return result
 
 

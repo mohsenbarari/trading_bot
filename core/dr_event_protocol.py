@@ -12,6 +12,10 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
+from core.canonical_json import (
+    CanonicalJSONError,
+    canonical_json_bytes as _canonical_json_bytes,
+)
 from core.config import settings
 from core.runtime_identity import resolve_runtime_identity
 from core.runtime_sites import PHYSICAL_SITES, SITE_BOT_FI, SITE_WEBAPP_FI, SITE_WEBAPP_IR
@@ -106,14 +110,8 @@ class ReceiptDecision:
 
 def canonical_json_bytes(payload: Any) -> bytes:
     try:
-        return json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+        return _canonical_json_bytes(payload)
+    except CanonicalJSONError as exc:
         raise DrEventProtocolError("DR payload is not canonical-JSON compatible") from exc
 
 

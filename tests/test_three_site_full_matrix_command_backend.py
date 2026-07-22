@@ -10,7 +10,8 @@ import textwrap
 import unittest
 from unittest.mock import patch
 
-from core.three_site_full_matrix_campaign import PHASES, PHASE_SCENARIOS
+from core.three_site_full_matrix_campaign import scenarios_for_execution_class
+from core.three_site_execution_safety import SHARED_HOST_SAFE
 from core.three_site_full_matrix_command_backend import (
     CONFIG_SCHEMA,
     RUNTIME_CONFIG_SCHEMA,
@@ -43,6 +44,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 parser.add_argument('--operation', required=True)
                 parser.add_argument('--operation-id', required=True)
                 parser.add_argument('--campaign-id', required=True)
+                parser.add_argument('--gate-group-id', required=True)
+                parser.add_argument('--execution-class', required=True)
                 parser.add_argument('--campaign-hash', required=True)
                 parser.add_argument('--release-sha', required=True)
                 parser.add_argument('--activation-sha', required=True)
@@ -58,7 +61,7 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 path = args.artifact_root / f'{args.operation}.json'
                 body = json.dumps({
                     'operation': args.operation,
-                    'runtime_marker': runtime['test_marker'],
+                    'runtime_marker': runtime['driver_config']['test_marker'],
                 }, sort_keys=True).encode() + b'\\n'
                 path.write_bytes(body)
                 path.chmod(0o600)
@@ -78,20 +81,27 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
         )
         driver.chmod(0o644)
         runtime = root / "runtime.json"
+        gate_group_id = "33333333-3333-4333-8333-333333333333"
+        catalog = scenarios_for_execution_class(SHARED_HOST_SAFE)
         runtime.write_text(json.dumps({
             "schema": RUNTIME_CONFIG_SCHEMA,
             "campaign_id": "11111111-1111-4111-8111-111111111111",
+            "gate_group_id": gate_group_id,
+            "execution_class": SHARED_HOST_SAFE,
             "release_sha": "a" * 40,
             "production_forbidden": True,
+            "host_mutation_policy": "forbidden",
             "supported_scenarios": {
-                phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES
+                phase: list(scenarios) for phase, scenarios in catalog.items()
             },
-            "test_marker": "sealed-runtime",
+            "driver_config": {"test_marker": "sealed-runtime"},
         }, sort_keys=True) + "\n")
         runtime.chmod(0o600)
         config = {
             "schema": CONFIG_SCHEMA,
             "campaign_id": "11111111-1111-4111-8111-111111111111",
+            "gate_group_id": gate_group_id,
+            "execution_class": SHARED_HOST_SAFE,
             "release_sha": "a" * 40,
             "production_forbidden": True,
             "driver": {
@@ -103,7 +113,7 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 "sha256": hashlib.sha256(runtime.read_bytes()).hexdigest(),
             },
             "supported_scenarios": {
-                phase: list(PHASE_SCENARIOS[phase]) for phase in PHASES
+                phase: list(scenarios) for phase, scenarios in catalog.items()
             },
             "timeouts_seconds": {
                 "preflight": 30,
@@ -116,6 +126,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
         }
         identity = CampaignIdentity(
             campaign_id=config["campaign_id"],
+            gate_group_id=gate_group_id,
+            execution_class=SHARED_HOST_SAFE,
             campaign_hash="b" * 64,
             release_sha=config["release_sha"],
             activation_sha=config["release_sha"],
@@ -131,6 +143,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 repo_root=repo,
                 artifact_root=artifact_root,
                 campaign_id=identity.campaign_id,
+                gate_group_id=identity.gate_group_id,
+                execution_class=identity.execution_class,
                 release_sha=identity.release_sha,
             )
             result = await backend.preflight(
@@ -153,6 +167,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                     repo_root=repo,
                     artifact_root=artifact_root,
                     campaign_id=identity.campaign_id,
+                    gate_group_id=identity.gate_group_id,
+                    execution_class=identity.execution_class,
                     release_sha=identity.release_sha,
                 )
 
@@ -164,13 +180,16 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 repo_root=repo,
                 artifact_root=artifact_root,
                 campaign_id=identity.campaign_id,
+                gate_group_id=identity.gate_group_id,
+                execution_class=identity.execution_class,
                 release_sha=identity.release_sha,
             )
-            phase = next(iter(PHASES))
+            catalog = scenarios_for_execution_class(identity.execution_class)
+            phase = next(iter(catalog))
             result = await backend.execute_scenario(
                 identity,
                 phase=phase,
-                scenario_id=PHASE_SCENARIOS[phase][0],
+                scenario_id=catalog[phase][0],
                 iteration=1,
                 attempt=2,
                 operation_id="22222222-2222-4222-8222-222222222222",
@@ -188,6 +207,29 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                     repo_root=repo,
                     artifact_root=artifact_root,
                     campaign_id=identity.campaign_id,
+                    gate_group_id=identity.gate_group_id,
+                    execution_class=identity.execution_class,
+                    release_sha=identity.release_sha,
+                )
+
+        stack, repo, artifact_root, config, identity = self._fixture()
+        with stack:
+            runtime_path = Path(config["runtime_config"]["path"])
+            runtime = json.loads(runtime_path.read_text())
+            runtime["host_mutation_policy"] = "dedicated-staging-only"
+            runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n")
+            runtime_path.chmod(0o600)
+            config["runtime_config"]["sha256"] = hashlib.sha256(
+                runtime_path.read_bytes()
+            ).hexdigest()
+            with self.assertRaisesRegex(FullMatrixRunnerError, "runtime identity"):
+                CommandFullMatrixBackend(
+                    config=config,
+                    repo_root=repo,
+                    artifact_root=artifact_root,
+                    campaign_id=identity.campaign_id,
+                    gate_group_id=identity.gate_group_id,
+                    execution_class=identity.execution_class,
                     release_sha=identity.release_sha,
                 )
 
@@ -200,6 +242,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                     repo_root=repo,
                     artifact_root=artifact_root,
                     campaign_id=identity.campaign_id,
+                    gate_group_id=identity.gate_group_id,
+                    execution_class=identity.execution_class,
                     release_sha=identity.release_sha,
                 )
 
@@ -211,6 +255,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 repo_root=repo,
                 artifact_root=artifact_root,
                 campaign_id=identity.campaign_id,
+                gate_group_id=identity.gate_group_id,
+                execution_class=identity.execution_class,
                 release_sha=identity.release_sha,
             )
             driver = repo / config["driver"]["path"]
@@ -229,6 +275,8 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
                 repo_root=repo,
                 artifact_root=artifact_root,
                 campaign_id=identity.campaign_id,
+                gate_group_id=identity.gate_group_id,
+                execution_class=identity.execution_class,
                 release_sha=identity.release_sha,
             )
             runtime = Path(config["runtime_config"]["path"])

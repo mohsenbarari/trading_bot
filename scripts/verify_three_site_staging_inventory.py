@@ -16,8 +16,18 @@ import sys
 from typing import Any
 from uuid import UUID
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from core.three_site_execution_safety import (
+    DEDICATED_HOST_DESTRUCTIVE,
+    EXECUTION_CLASSES as HOST_SAFETY_MODES,
+    SHARED_HOST_SAFE,
+)
 
 
 PRODUCTION_IPS = frozenset(
@@ -90,13 +100,22 @@ def load_inventory(path: Path) -> dict[str, Any]:
     return payload
 
 
-def verify_inventory(payload: dict[str, Any], *, host_destructive: bool) -> dict[str, Any]:
+def inventory_host_destructive(payload: dict[str, Any]) -> bool:
+    mode = payload.get("host_safety_mode")
+    if mode not in HOST_SAFETY_MODES:
+        raise InventoryError("inventory host_safety_mode is invalid")
+    return mode == DEDICATED_HOST_DESTRUCTIVE
+
+
+def verify_inventory(
+    payload: dict[str, Any], *, host_destructive: bool | None = None
+) -> dict[str, Any]:
     required = {
-        "schema", "inventory_stage", "campaign_id", "release_sha", "canonical_domain", "optional_ingress",
+        "schema", "inventory_stage", "host_safety_mode", "campaign_id", "release_sha", "canonical_domain", "optional_ingress",
         "deployment_id", "object_storage", "roles", "credential_scope",
         "production_boundaries",
     }
-    if set(payload) != required or payload["schema"] != "three-site-staging-inventory-v1":
+    if set(payload) != required or payload["schema"] != "three-site-staging-inventory-v2":
         raise InventoryError("inventory fields/schema are invalid")
     def contains_placeholder(value: Any) -> bool:
         if isinstance(value, str):
@@ -114,6 +133,12 @@ def verify_inventory(payload: dict[str, Any], *, host_destructive: bool) -> dict
 
     if contains_placeholder(payload):
         raise InventoryError("inventory still contains template placeholders")
+    effective_host_destructive = inventory_host_destructive(payload)
+    if (
+        host_destructive is not None
+        and host_destructive != effective_host_destructive
+    ):
+        raise InventoryError("inventory host safety mode differs from the required execution class")
     inventory_stage = payload["inventory_stage"]
     if inventory_stage not in {"planned", "provisioned"}:
         raise InventoryError("inventory_stage must be planned or provisioned")
@@ -197,9 +222,9 @@ def verify_inventory(payload: dict[str, Any], *, host_destructive: bool) -> dict
             raise InventoryError(f"invalid host IP for {name}") from exc
         if any(ip_value in network for network in DOCUMENTATION_NETWORKS):
             raise InventoryError(f"documentation-only host IP is forbidden for staging role {name}")
-        if ip in PRODUCTION_IPS:
+        if effective_host_destructive and ip in PRODUCTION_IPS:
             raise InventoryError(f"production host is forbidden for staging role {name}")
-        if ip.lower() in normalized_boundaries["host_ips"]:
+        if effective_host_destructive and ip.lower() in normalized_boundaries["host_ips"]:
             raise InventoryError(f"declared production host is forbidden for staging role {name}")
         if str(role["release_sha"]).lower() != release_sha:
             raise InventoryError("mixed release SHA detected")
@@ -222,12 +247,17 @@ def verify_inventory(payload: dict[str, Any], *, host_destructive: bool) -> dict
                     f"{name} {field} differs from deterministic role Compose volume"
                 )
         boundary_map = {
-            "machine_id": "machine_ids",
-            "docker_daemon_id": "docker_daemon_ids",
             "postgres_system_id": "postgres_system_ids",
             "postgres_volume_id": "volume_ids",
             "audit_root_id": "audit_root_ids",
         }
+        if effective_host_destructive:
+            boundary_map.update(
+                {
+                    "machine_id": "machine_ids",
+                    "docker_daemon_id": "docker_daemon_ids",
+                }
+            )
         for role_field, boundary_field in boundary_map.items():
             if role[role_field] is None:
                 continue
@@ -258,7 +288,7 @@ def verify_inventory(payload: dict[str, Any], *, host_destructive: bool) -> dict
         values = [str(role[field]) for role in roles if role[field] is not None]
         if len(set(values)) != len(values):
             raise InventoryError(f"mutable staging boundary is shared: {field}")
-    if host_destructive:
+    if effective_host_destructive:
         for field in ("host_ip", "machine_id", "docker_daemon_id"):
             values = [str(role[field]) for role in roles]
             if len(set(values)) != len(values):
@@ -269,7 +299,8 @@ def verify_inventory(payload: dict[str, Any], *, host_destructive: bool) -> dict
         "campaign_id": str(payload["campaign_id"]),
         "release_sha": release_sha,
         "deployment_id": payload["deployment_id"],
-        "host_destructive": host_destructive,
+        "host_safety_mode": payload["host_safety_mode"],
+        "host_destructive": effective_host_destructive,
         "role_count": len(roles),
     }
 
@@ -289,7 +320,7 @@ def verify_signed_inventory(
     *,
     approval: dict[str, Any],
     signer_policy: dict[str, Any],
-    host_destructive: bool,
+    host_destructive: bool | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Require fresh independent two-person approval of the exact inventory bytes."""
@@ -411,14 +442,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("inventory", type=Path)
     parser.add_argument("--approval", type=Path, required=True)
     parser.add_argument("--signer-policy", type=Path, required=True)
-    parser.add_argument("--host-destructive", action="store_true")
+    safety = parser.add_mutually_exclusive_group()
+    safety.add_argument("--host-destructive", action="store_true")
+    safety.add_argument("--shared-host-safe", action="store_true")
     args = parser.parse_args(argv)
     try:
+        expected_host_destructive = (
+            True if args.host_destructive else False if args.shared_host_safe else None
+        )
         result = verify_signed_inventory(
             load_inventory(args.inventory),
             approval=load_inventory(args.approval),
             signer_policy=load_inventory(args.signer_policy),
-            host_destructive=args.host_destructive,
+            host_destructive=expected_host_destructive,
         )
     except InventoryError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc)}, sort_keys=True))

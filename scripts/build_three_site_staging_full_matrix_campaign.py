@@ -16,19 +16,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.dr_event_protocol import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes
 from core.secure_file_io import sha256_secure_file, write_secure_atomic_bytes
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
     CAMPAIGN_SCHEMA,
-    PHASES,
-    PHASE_SCENARIOS,
     SHA256,
     SHA40,
     FullMatrixCampaignError,
     _policy,
     secure_json,
     verify_campaign,
+    scenarios_for_execution_class,
+)
+from core.three_site_execution_safety import (
+    EXECUTION_CLASSES,
+    execution_class_is_host_destructive,
 )
 from scripts.three_site_staging_migration_journal import (
     ROLE_PHASES,
@@ -41,8 +44,8 @@ from scripts.verify_three_site_staging_inventory import (
 from scripts.verify_three_site_staging_migration_plan import verify_migration_plan
 
 
-APPROVAL_REQUEST_SCHEMA = "three-site-staging-full-matrix-approval-request-v1"
-APPROVAL_SCHEMA = "three-site-staging-full-matrix-approval-v1"
+APPROVAL_REQUEST_SCHEMA = "three-site-staging-full-matrix-approval-request-v2"
+APPROVAL_SCHEMA = "three-site-staging-full-matrix-approval-v2"
 
 
 def _mapping(values: list[str]) -> dict[str, Path]:
@@ -179,8 +182,9 @@ def _campaign_bundle_summary(
 
 
 def _verify_prerequisites(
-    mappings: dict[str, Path], *, baseline_sha: str, activation_sha: str
-) -> tuple[str, str]:
+    mappings: dict[str, Path], *, baseline_sha: str, activation_sha: str,
+    execution_class: str,
+) -> tuple[str, str, str]:
     inventory = secure_json(mappings["provisioned_inventory"], label="provisioned inventory")
     if inventory.get("release_sha") != activation_sha:
         raise FullMatrixCampaignError(
@@ -196,7 +200,7 @@ def _verify_prerequisites(
         inventory,
         approval=inventory_approval,
         signer_policy=inventory_signers,
-        host_destructive=True,
+        host_destructive=execution_class_is_host_destructive(execution_class),
     )
     if inventory_result["inventory_stage"] != "provisioned":
         raise FullMatrixCampaignError("Full Matrix requires provisioned signed inventory")
@@ -249,25 +253,42 @@ def _verify_prerequisites(
         baseline_sha=baseline_sha,
         activation_sha=activation_sha,
     )
-    return campaign_id, str(inventory_result["inventory_sha256"])
+    object_storage = inventory.get("object_storage")
+    if not isinstance(object_storage, dict) or not isinstance(object_storage.get("bucket"), str):
+        raise FullMatrixCampaignError("provisioned inventory lacks its Object Storage bucket")
+    return (
+        campaign_id,
+        str(inventory_result["inventory_sha256"]),
+        str(object_storage["bucket"]),
+    )
 
 
 def prepare(args: argparse.Namespace) -> dict[str, Any]:
     mappings = _mapping(args.bound_artifact)
+    try:
+        gate_group_id = str(UUID(str(args.gate_group_id)))
+    except ValueError as exc:
+        raise FullMatrixCampaignError("Full Matrix gate_group_id is invalid") from exc
     if (
         SHA40.fullmatch(str(args.baseline_sha)) is None
         or SHA40.fullmatch(str(args.activation_sha)) is None
         or args.baseline_sha == args.activation_sha
-        or not str(args.object_bucket).startswith("staging-")
+        or args.execution_class not in EXECUTION_CLASSES
         or type(args.repetitions) is not int
         or args.repetitions != 2
         or type(args.valid_hours) is not int
         or not 1 <= args.valid_hours <= 72
     ):
         raise FullMatrixCampaignError("Full Matrix preparation scope is invalid")
-    campaign_id, _inventory_hash = _verify_prerequisites(
-        mappings, baseline_sha=args.baseline_sha, activation_sha=args.activation_sha
+    campaign_id, _inventory_hash, inventory_bucket = _verify_prerequisites(
+        mappings, baseline_sha=args.baseline_sha, activation_sha=args.activation_sha,
+        execution_class=args.execution_class,
     )
+    if args.object_bucket != inventory_bucket:
+        raise FullMatrixCampaignError(
+            "Full Matrix Object Storage bucket differs from the signed inventory"
+        )
+    required_scenarios = scenarios_for_execution_class(args.execution_class)
     policy = secure_json(args.approver_policy, label="Full Matrix approver policy")
     _signers, policy_hash = _policy(policy, release_sha=args.activation_sha)
     hashes: dict[str, str] = {}
@@ -280,6 +301,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     campaign = {
         "schema": CAMPAIGN_SCHEMA,
         "campaign_id": campaign_id,
+        "gate_group_id": gate_group_id,
+        "execution_class": args.execution_class,
         "generated_at": generated.isoformat(),
         "expires_at": (generated + timedelta(hours=args.valid_hours)).isoformat(),
         "baseline_sha": args.baseline_sha,
@@ -290,14 +313,16 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         "object_storage": {
             "region": "ir-thr-at1",
             "bucket": args.object_bucket,
-            "prefix": f"full-matrix/{campaign_id}/",
+            "prefix": (
+                f"full-matrix/{gate_group_id}/{args.execution_class}/{campaign_id}/"
+            ),
             "versioned": True,
             "private": True,
         },
         "repetitions": args.repetitions,
-        "required_phases": list(PHASES),
+        "required_phases": list(required_scenarios),
         "required_scenarios": {
-            phase: list(scenarios) for phase, scenarios in PHASE_SCENARIOS.items()
+            phase: list(scenarios) for phase, scenarios in required_scenarios.items()
         },
         "no_skips": True,
         "cleanup_required": True,
@@ -311,6 +336,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     request = {
         "schema": APPROVAL_REQUEST_SCHEMA,
         "campaign_id": campaign_id,
+        "gate_group_id": gate_group_id,
+        "execution_class": args.execution_class,
         "campaign_hash": campaign_hash,
         "release_sha": args.activation_sha,
         "approver_policy_hash": policy_hash,
@@ -332,6 +359,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "status": "awaiting_two_approvals",
         "campaign_id": campaign_id,
+        "gate_group_id": gate_group_id,
+        "execution_class": args.execution_class,
         "campaign_hash": campaign_hash,
         "release_sha": args.activation_sha,
         "draft_output": str(args.draft_output),
@@ -349,9 +378,14 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     for path in args.approval:
         value = secure_json(path, label="Full Matrix approval")
         if (
-            set(value) != {"schema", "campaign_id", "campaign_hash", "operator", "key_id", "signature"}
+            set(value) != {
+                "schema", "campaign_id", "gate_group_id", "execution_class",
+                "campaign_hash", "operator", "key_id", "signature",
+            }
             or value.get("schema") != APPROVAL_SCHEMA
             or value.get("campaign_id") != campaign.get("campaign_id")
+            or value.get("gate_group_id") != campaign.get("gate_group_id")
+            or value.get("execution_class") != campaign.get("execution_class")
             or value.get("campaign_hash") != campaign_hash
         ):
             raise FullMatrixCampaignError("Full Matrix approval is for another campaign")
@@ -382,6 +416,10 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--baseline-sha", required=True)
     prepare_parser.add_argument("--activation-sha", required=True)
+    prepare_parser.add_argument("--gate-group-id", required=True)
+    prepare_parser.add_argument(
+        "--execution-class", required=True, choices=sorted(EXECUTION_CLASSES)
+    )
     prepare_parser.add_argument("--approver-policy", type=Path, required=True)
     prepare_parser.add_argument("--bound-artifact", action="append", default=[])
     prepare_parser.add_argument("--object-bucket", required=True)

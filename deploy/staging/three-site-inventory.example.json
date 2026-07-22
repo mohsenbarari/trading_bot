@@ -1,6 +1,7 @@
 {
-  "schema": "three-site-staging-inventory-v1",
+  "schema": "three-site-staging-inventory-v2",
   "inventory_stage": "planned",
+  "host_safety_mode": "shared-host-safe",
   "campaign_id": "00000000-0000-4000-8000-000000000000",
   "release_sha": "0000000000000000000000000000000000000000",
   "canonical_domain": "staging.gold-trade.ir",

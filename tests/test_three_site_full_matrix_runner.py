@@ -35,6 +35,7 @@ from core.three_site_full_matrix_runner import (
     _validate_preflight,
     run_full_matrix_campaign,
 )
+from core.three_site_execution_safety import SHARED_HOST_SAFE
 from tests.three_site_sync_timing_fixtures import make_sync_timing_artifact
 from tests.test_three_site_full_matrix_campaign import _sign, _signed_campaign
 
@@ -453,12 +454,15 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 now=now + timedelta(minutes=1),
             )
             expected = campaign["repetitions"] * sum(
-                len(PHASE_SCENARIOS[phase]) for phase in PHASES
+                len(scenarios) for scenarios in campaign["required_scenarios"].values()
             )
             self.assertEqual(report["status"], "passed")
             self.assertEqual(report["scenario_execution_count"], expected)
             self.assertEqual(len(backend.executed), expected)
-            self.assertEqual(len(backend.cleanups), campaign["repetitions"] * len(PHASES))
+            self.assertEqual(
+                len(backend.cleanups),
+                campaign["repetitions"] * len(campaign["required_phases"]),
+            )
             records = verify_hash_chained_jsonl(journal)
             self.assertEqual(records[-1]["event"], "campaign_completed")
             retained = [
@@ -469,7 +473,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     ).read_text()
                 )
                 for iteration in range(1, campaign["repetitions"] + 1)
-                for phase in PHASES
+                for phase in campaign["required_phases"]
             ]
             offline = verify_complete_matrix(
                 campaign=campaign,
@@ -530,6 +534,8 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             root.chmod(0o700)
             identity = CampaignIdentity(
                 campaign_id="11111111-1111-4111-8111-111111111111",
+                gate_group_id="22222222-2222-4222-8222-222222222222",
+                execution_class=SHARED_HOST_SAFE,
                 campaign_hash="b" * 64,
                 release_sha="a" * 40,
                 activation_sha="a" * 40,
@@ -620,6 +626,8 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             root.chmod(0o700)
             identity = CampaignIdentity(
                 campaign_id="11111111-1111-4111-8111-111111111111",
+                gate_group_id="22222222-2222-4222-8222-222222222222",
+                execution_class=SHARED_HOST_SAFE,
                 campaign_hash="b" * 64,
                 release_sha="a" * 40,
                 activation_sha="a" * 40,
@@ -721,7 +729,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     ).read_text()
                 )
                 for iteration in range(1, campaign["repetitions"] + 1)
-                for phase in PHASES
+                for phase in campaign["required_phases"]
             ]
             with self.assertRaisesRegex(
                 FullMatrixCampaignError, "reused|identity/status"

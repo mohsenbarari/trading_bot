@@ -17,7 +17,6 @@ if str(REPO_ROOT) not in sys.path:
 from core.secure_file_io import write_secure_atomic_bytes
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
-    PHASES,
     secure_json,
     verify_complete_matrix,
 )
@@ -52,7 +51,7 @@ def _phase_evidence(campaign: dict, artifact_root: Path) -> list[dict]:
             label="Full Matrix phase evidence",
         )
         for iteration in range(1, campaign["repetitions"] + 1)
-        for phase in PHASES
+        for phase in campaign["required_phases"]
     ]
 
 
@@ -74,6 +73,8 @@ async def _execute(args: argparse.Namespace) -> dict:
         repo_root=REPO_ROOT,
         artifact_root=args.artifact_root,
         campaign_id=str(campaign.get("campaign_id")),
+        gate_group_id=str(campaign.get("gate_group_id")),
+        execution_class=str(campaign.get("execution_class")),
         release_sha=str(campaign.get("release_sha")),
     )
     return await run_full_matrix_campaign(

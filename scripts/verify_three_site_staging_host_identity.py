@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             inventory,
             approval=approval,
             signer_policy=signer_policy,
-            host_destructive=True,
+            host_destructive=None,
         )
         expected_inventory_stage = (
             "planned"

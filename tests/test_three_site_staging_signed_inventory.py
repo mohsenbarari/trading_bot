@@ -11,11 +11,14 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from scripts.verify_three_site_staging_inventory import (
+    DEDICATED_HOST_DESTRUCTIVE,
     InventoryError,
     ROLE_COMPOSE_PROJECT,
     ROLE_VOLUME_LOGICAL_NAMES,
     verify_signed_inventory,
+    verify_inventory,
 )
+from core.three_site_execution_safety import SHARED_HOST_SAFE
 
 
 def _canonical(value) -> bytes:  # noqa: ANN001
@@ -30,6 +33,7 @@ def _inventory() -> dict:
     )
     payload.update(
         inventory_stage="provisioned",
+        host_safety_mode=DEDICATED_HOST_DESTRUCTIVE,
         campaign_id="11111111-1111-4111-8111-111111111111",
         release_sha="a" * 40,
         deployment_id="staging-deployment-signed-test",
@@ -98,6 +102,47 @@ def _signed_documents(payload: dict, now: datetime, *, reuse_public_key: bool = 
 
 
 class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
+    def test_shared_host_mode_allows_host_identity_reuse_but_not_mutable_data_reuse(self):
+        payload = _inventory()
+        payload["host_safety_mode"] = SHARED_HOST_SAFE
+        first = payload["roles"][0]
+        first["host_ip"] = "65.109.220.59"
+        first["machine_id"] = "f" * 32
+        first["docker_daemon_id"] = "production-docker-daemon"
+        payload["production_boundaries"]["host_ips"] = [first["host_ip"]]
+        payload["production_boundaries"]["machine_ids"] = [first["machine_id"]]
+        payload["production_boundaries"]["docker_daemon_ids"] = [
+            first["docker_daemon_id"]
+        ]
+
+        approved = verify_inventory(payload, host_destructive=False)
+
+        self.assertEqual(approved["host_safety_mode"], SHARED_HOST_SAFE)
+        self.assertFalse(approved["host_destructive"])
+
+        payload["production_boundaries"]["volume_ids"] = [
+            first["postgres_volume_id"]
+        ]
+        with self.assertRaisesRegex(InventoryError, "production boundary"):
+            verify_inventory(payload, host_destructive=False)
+
+    def test_execution_class_mismatch_and_destructive_production_host_are_rejected(self):
+        payload = _inventory()
+        payload["host_safety_mode"] = SHARED_HOST_SAFE
+        with self.assertRaisesRegex(InventoryError, "differs"):
+            verify_inventory(payload, host_destructive=True)
+
+        payload["host_safety_mode"] = DEDICATED_HOST_DESTRUCTIVE
+        payload["roles"][0]["host_ip"] = "65.109.220.59"
+        with self.assertRaisesRegex(InventoryError, "production host"):
+            verify_inventory(payload, host_destructive=True)
+
+    def test_legacy_inventory_schema_is_rejected(self):
+        payload = _inventory()
+        payload["schema"] = "three-site-staging-inventory-v1"
+        with self.assertRaisesRegex(InventoryError, "fields/schema"):
+            verify_inventory(payload)
+
     def test_signer_policy_cannot_alias_one_key_as_two_people(self):
         now = datetime.now(timezone.utc)
         payload = _inventory()

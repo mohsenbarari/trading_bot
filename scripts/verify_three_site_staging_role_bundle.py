@@ -229,7 +229,7 @@ def verify_role_bundle(
         inventory,
         approval=approval,
         signer_policy=signer_policy,
-        host_destructive=True,
+        host_destructive=None,
     )
     if required_inventory_stage not in {"planned", "provisioned"}:
         raise RoleBundleError("role bundle inventory-stage requirement is invalid")

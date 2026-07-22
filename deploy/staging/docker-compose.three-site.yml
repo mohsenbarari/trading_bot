@@ -1,8 +1,9 @@
 name: trading-bot-three-site-staging
 
 # Functional four-role staging topology. Every mutable store is independent.
-# Host-destructive scenarios additionally require four dedicated hosts and a
-# passing scripts/verify_three_site_staging_inventory.py report.
+# Shared-host-safe campaigns may reuse a production host identity, but every
+# container remains in the staging cgroup and has an explicit resource ceiling.
+# Host-destructive campaigns still require four dedicated temporary hosts.
 
 x-app: &app
   image: trading_bot_three_site_staging:${STAGING_RELEASE_SHA:?exact release SHA required}
@@ -13,6 +14,10 @@ x-app: &app
       FRONTEND_DIST_DIR: ${STAGING_FRONTEND_DOCKER_DIST_DIR:-mini_app_dist_staging}
       RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
   restart: unless-stopped
+  cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+  cpus: ${STAGING_APP_CPU_LIMIT:-1.0}
+  mem_limit: ${STAGING_APP_MEMORY_LIMIT:-768m}
+  pids_limit: ${STAGING_APP_PIDS_LIMIT:-256}
   volumes:
     - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
   logging: &logging
@@ -38,6 +43,10 @@ x-postgres: &postgres
     args:
       RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
   restart: unless-stopped
+  cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+  cpus: ${STAGING_POSTGRES_CPU_LIMIT:-2.0}
+  mem_limit: ${STAGING_POSTGRES_MEMORY_LIMIT:-2g}
+  pids_limit: ${STAGING_POSTGRES_PIDS_LIMIT:-512}
   command: [postgres, -c, timezone=UTC, -c, log_timezone=UTC]
   logging: *logging
   healthcheck:
@@ -49,6 +58,10 @@ x-postgres: &postgres
 x-redis: &redis
   image: redis:7-alpine
   restart: unless-stopped
+  cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+  cpus: ${STAGING_REDIS_CPU_LIMIT:-0.5}
+  mem_limit: ${STAGING_REDIS_MEMORY_LIMIT:-512m}
+  pids_limit: ${STAGING_REDIS_PIDS_LIMIT:-128}
   command: [redis-server, --appendonly, "yes", --appendfsync, everysec, --maxmemory-policy, noeviction]
   logging: *logging
 
@@ -882,6 +895,10 @@ services:
   bot_fi_dr_tls:
     profiles: [bot-fi]
     image: nginx:1.27-alpine
+    cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+    cpus: ${STAGING_NGINX_CPU_LIMIT:-0.25}
+    mem_limit: ${STAGING_NGINX_MEMORY_LIMIT:-128m}
+    pids_limit: ${STAGING_NGINX_PIDS_LIMIT:-64}
     restart: unless-stopped
     volumes:
       - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/bot-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
@@ -895,6 +912,10 @@ services:
   webapp_fi_dr_tls:
     profiles: [webapp-fi]
     image: nginx:1.27-alpine
+    cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+    cpus: ${STAGING_NGINX_CPU_LIMIT:-0.25}
+    mem_limit: ${STAGING_NGINX_MEMORY_LIMIT:-128m}
+    pids_limit: ${STAGING_NGINX_PIDS_LIMIT:-64}
     restart: unless-stopped
     volumes:
       - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/webapp-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
@@ -908,6 +929,10 @@ services:
   webapp_ir_dr_tls:
     profiles: [webapp-ir]
     image: nginx:1.27-alpine
+    cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+    cpus: ${STAGING_NGINX_CPU_LIMIT:-0.25}
+    mem_limit: ${STAGING_NGINX_MEMORY_LIMIT:-128m}
+    pids_limit: ${STAGING_NGINX_PIDS_LIMIT:-64}
     restart: unless-stopped
     volumes:
       - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/webapp-ir-dr.conf:/etc/nginx/conf.d/default.conf:ro
@@ -921,6 +946,10 @@ services:
   witness_dr_tls:
     profiles: [witness]
     image: nginx:1.27-alpine
+    cgroup_parent: ${STAGING_CGROUP_PARENT:?dedicated staging cgroup required}
+    cpus: ${STAGING_NGINX_CPU_LIMIT:-0.25}
+    mem_limit: ${STAGING_NGINX_MEMORY_LIMIT:-128m}
+    pids_limit: ${STAGING_NGINX_PIDS_LIMIT:-64}
     restart: unless-stopped
     volumes:
       - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/witness-dr.conf:/etc/nginx/conf.d/default.conf:ro
