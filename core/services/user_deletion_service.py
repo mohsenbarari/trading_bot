@@ -25,7 +25,11 @@ from core.services.invitation_lifecycle_service import derive_invitation_state, 
 from core.services.invitation_transition_lock_service import lock_invitation_for_transition
 from core.services.offer_expiry_service import OfferExpiryReason, OfferExpirySourceSurface
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
-from core.utils import send_telegram_notification, utc_now_naive
+from core.telegram_delivery_runtime_policy import (  # compatibility import
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
+from core.utils import send_telegram_notification, utc_now_naive  # compatibility import
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.invitation import Invitation
@@ -56,9 +60,14 @@ class _DeletedUserEffect:
     user_id: int
     telegram_id: Optional[int]
     revoked_sessions: list
+    user: User | object | None = None
 
 
-async def remove_user_from_telegram_channel(telegram_id: int) -> None:
+async def remove_user_from_telegram_channel(
+    telegram_id: int,
+    *,
+    require_delivery: bool = False,
+) -> bool:
     """Remove a linked user from the Telegram channel without leaving them banned."""
     if current_server() != SERVER_FOREIGN:
         logger.info(
@@ -68,24 +77,39 @@ async def remove_user_from_telegram_channel(telegram_id: int) -> None:
                 "server_mode": current_server(),
             },
         )
-        return
+        if require_delivery:
+            raise RuntimeError("telegram_channel_removal_requires_foreign_bot")
+        return False
     if not settings.channel_id or not settings.bot_token:
-        return
+        if require_delivery:
+            raise RuntimeError("telegram_channel_removal_credentials_missing")
+        return False
 
-    await telegram_gateway.ban_chat_member(
+    ban_result = await telegram_gateway.ban_chat_member(
         settings.channel_id,
         telegram_id,
         revoke_messages=False,
         bot_token=settings.bot_token,
         idempotency_key=f"user-channel-remove-ban:{telegram_id}",
     )
-    await telegram_gateway.unban_chat_member(
+    if not ban_result.ok:
+        raise RuntimeError(
+            "telegram_channel_removal_ban_failed:"
+            + str(ban_result.error or ban_result.status_code or "unknown")
+        )
+    unban_result = await telegram_gateway.unban_chat_member(
         settings.channel_id,
         telegram_id,
         only_if_banned=True,
         bot_token=settings.bot_token,
         idempotency_key=f"user-channel-remove-unban:{telegram_id}",
     )
+    if not unban_result.ok:
+        raise RuntimeError(
+            "telegram_channel_removal_unban_failed:"
+            + str(unban_result.error or unban_result.status_code or "unknown")
+        )
+    return True
 
 
 def _utcnow_naive():
@@ -461,6 +485,7 @@ async def _delete_user_account_in_transaction(
             user_id=user.id,
             telegram_id=telegram_id,
             revoked_sessions=revoked_sessions,
+            user=user,
         )
     )
 
@@ -471,7 +496,6 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
         raise ValueError("User already deleted")
 
     effects: list[_DeletedUserEffect] = []
-
     try:
         await _delete_user_account_in_transaction(
             db,
@@ -479,6 +503,39 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
             processed_user_ids=set(),
             effects=effects,
         )
+        from core.services.telegram_notification_outbox_service import (
+            TelegramNotificationRecipient,
+            enqueue_account_deletion_telegram_notification_once,
+        )
+
+        linked_effects = [effect for effect in effects if effect.telegram_id]
+        flush = getattr(db, "flush", None)
+        if linked_effects and callable(flush):
+            await flush()
+        for effect in linked_effects:
+            deleted_user = getattr(effect, "user", None)
+            if deleted_user is None:
+                get = getattr(db, "get", None)
+                deleted_user = await get(User, effect.user_id) if callable(get) else None
+            if deleted_user is None:
+                raise RuntimeError("Deleted user effect lost its source user")
+            user_sync_version = max(
+                1,
+                int(getattr(deleted_user, "sync_version", 1) or 1),
+            )
+            await enqueue_account_deletion_telegram_notification_once(
+                db,
+                recipient=TelegramNotificationRecipient(
+                    user_id=int(effect.user_id),
+                    telegram_id=int(effect.telegram_id),
+                ),
+                source_id=(
+                    f"account-deleted:{effect.user_id}:{user_sync_version}"
+                ),
+                text=REMOVAL_TELEGRAM_MESSAGE,
+                user=deleted_user,
+                user_sync_version=user_sync_version,
+            )
         await db.commit()
     except Exception:
         await db.rollback()
@@ -491,19 +548,7 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
             except Exception as exc:
                 logger.warning(f"Failed to mark deleted telegram user {effect.telegram_id}: {exc}")
 
-            if current_server() == SERVER_FOREIGN:
-                try:
-                    await send_telegram_notification(effect.telegram_id, REMOVAL_TELEGRAM_MESSAGE)
-                except Exception as exc:
-                    logger.warning(f"Failed to send deletion notice to telegram user {effect.telegram_id}: {exc}")
-
         await publish_session_revocation(effect.user_id, effect.revoked_sessions)
-
-        if effect.telegram_id and current_server() == SERVER_FOREIGN:
-            try:
-                await remove_user_from_telegram_channel(effect.telegram_id)
-            except Exception as exc:
-                logger.warning(f"Failed to remove telegram user {effect.telegram_id} from channel: {exc}")
 
     primary_effect = next((effect for effect in effects if effect.user_id == user.id), None)
     if primary_effect is None:

@@ -67,6 +67,9 @@ from core.services.trade_webapp_delivery_service import (
     repair_webapp_trade_delivery_for_trade,
 )
 from core.services.trade_telegram_delivery_service import repair_telegram_trade_delivery_for_trade
+from core.services.trade_delivery_receipt_service import (
+    persist_trade_completion_delivery_intents,
+)
 from core.services.offer_expiry_service import OfferExpiryReason
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
@@ -89,6 +92,13 @@ from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, n
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 from core.trading_observability import log_trading_event
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
+    configured_telegram_delivery_runtime,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +120,15 @@ TRADE_TRANSIENT_RETRY_BASE_DELAY_SECONDS = 0.05
 router = APIRouter(
     tags=["Trades"],
 )
+
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_trade_router_direct_sender_is_not_runtime_owner"
+        )
 
 
 def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> None:
@@ -1814,6 +1833,7 @@ def trade_to_response(
 
 async def send_telegram_message(chat_id: int, text: str) -> bool:
     """ارسال پیام به تلگرام"""
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token or not chat_id:
         return False
@@ -1855,6 +1875,12 @@ async def update_channel_buttons(offer: Offer) -> bool:
     """آپدیت دکمه‌های پست کانال"""
     if current_server() != "foreign":
         return False
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    _assert_legacy_direct_delivery_owner()
 
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
@@ -1939,6 +1965,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
 
 def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token or not chat_id:
         return False
@@ -2182,6 +2209,12 @@ def _queue_trade_channel_buttons_update(background_tasks: BackgroundTasks, offer
 
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     import asyncio
     
@@ -2218,6 +2251,12 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
 
 async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, offer_status, lot_sizes) -> bool:
     """Helper async function - باید offer را از دیتابیس بخواند"""
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     
     bot_token = os.getenv("BOT_TOKEN")
@@ -3301,6 +3340,7 @@ async def _execute_trade_authoritatively(
                 result_status=OfferRequestStatus.COMPLETED_TRADE,
                 resulting_trade_id=getattr(existing_trade_obj, "id", None),
             )
+            await persist_trade_completion_delivery_intents(db, existing_trade_obj)
             if callable(getattr(db, "commit", None)):
                 await _commit_trade_execution(db)
             _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
@@ -3392,6 +3432,29 @@ async def _execute_trade_authoritatively(
     )
     _apply_trade_counter_increment(owner_user, trade_quantity)
     mark_trade_phase("flushed_trade_state")
+
+    delivery_trade_contexts: list[tuple[Trade, object, object]]
+    if uses_customer_trade_chain:
+        delivery_trade_contexts = [
+            (
+                trade,
+                trade_execution_nodes[index]["user"],
+                trade_execution_nodes[index + 1]["user"],
+            )
+            for index, trade in enumerate(created_chain_trades)
+        ]
+    else:
+        delivery_trade_contexts = [(response_trade_record, offer.user, owner_user)]
+
+    for delivery_trade, delivery_offer_user, delivery_responder_user in delivery_trade_contexts:
+        # The audience builder is read-only. Bind already-loaded relationships
+        # so it can construct the exact durable payload before the Trade commit.
+        delivery_trade.offer = offer
+        delivery_trade.offer_user = delivery_offer_user
+        delivery_trade.responder_user = delivery_responder_user
+        delivery_trade.commodity = offer.commodity
+        await persist_trade_completion_delivery_intents(db, delivery_trade)
+    mark_trade_phase("persisted_delivery_intents")
     
     # Commit با محافظت Optimistic Locking
     await _commit_trade_execution(db)

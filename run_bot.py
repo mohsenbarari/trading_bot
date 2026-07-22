@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import sys
+import redis.asyncio as redis
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from core.config import settings
+from core.dark_standby import assert_not_dark_standby
 from core.server_routing import SERVER_FOREIGN, normalize_server
 from bot.handlers import (
     start, 
@@ -21,16 +23,35 @@ from bot.handlers import (
     link_account, # 👈 Added
     default
 )
-from core.db import init_db, AsyncSessionLocal
+from core.db import init_db, AsyncSessionLocal, verify_three_site_database_role_bindings
 from core.events import setup_event_listeners
-from bot.middlewares import AuthMiddleware, StaleNavigationHandoffMiddleware, TradeContentionGateMiddleware
+from bot.middlewares import (
+    AuthMiddleware,
+    CallbackReceiptMiddleware,
+    StaleNavigationHandoffMiddleware,
+    TradeContentionGateMiddleware,
+)
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
 from core.offer_publication_worker import offer_telegram_publication_loop
 from core.telegram_admin_broadcast_worker import telegram_admin_broadcast_delivery_loop
 from core.telegram_notification_outbox_worker import telegram_notification_outbox_delivery_loop
+from core.telegram_market_notice_worker import telegram_market_notice_delivery_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop
+from core.telegram_delivery_queue_worker import telegram_delivery_queue_loop
+from core.telegram_delivery_queue_limiter import (
+    configured_redis_telegram_delivery_limiter,
+)
+from core.telegram_delivery_runtime_composition import (
+    build_configured_telegram_delivery_runtime,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    TelegramDeliveryRuntimeDecision,
+    TelegramDeliveryRuntimeMode,
+    configured_telegram_delivery_runtime,
+)
 
 # Configure logging
 configure_logging("bot")
@@ -41,11 +62,111 @@ class BotRuntimeSurfaceError(RuntimeError):
     """Raised when the Telegram bot entrypoint is started on a forbidden surface."""
 
 
+class BotRuntimeTaskError(RuntimeError):
+    """Raised when a required Bot child task exits before polling shuts down."""
+
+
+async def supervise_bot_runtime(
+    *,
+    polling_coro,
+    child_coroutines,
+) -> None:
+    """Fail the process if any required worker stops unexpectedly."""
+
+    polling_task = asyncio.create_task(polling_coro, name="telegram-polling")
+    child_tasks = [
+        asyncio.create_task(coro, name=f"bot-child-{index}")
+        for index, coro in enumerate(child_coroutines, start=1)
+    ]
+    runtime_tasks = [polling_task, *child_tasks]
+    try:
+        done, _ = await asyncio.wait(
+            runtime_tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if polling_task in done:
+            await polling_task
+            return
+        failed_task = next(task for task in child_tasks if task in done)
+        try:
+            await failed_task
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise BotRuntimeTaskError(
+                f"required Bot child task failed: {failed_task.get_name()}"
+            ) from exc
+        raise BotRuntimeTaskError(
+            f"required Bot child task exited unexpectedly: {failed_task.get_name()}"
+        )
+    finally:
+        for task in runtime_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*runtime_tasks, return_exceptions=True)
+
+
+def configured_telegram_delivery_queue_worker_factory(settings_obj):
+    """Return a zero-argument queue runner with all production dependencies bound."""
+
+    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+
+    async def run_configured_telegram_delivery_queue() -> None:
+        redis_client = redis.Redis.from_url(
+            str(getattr(settings_obj, "redis_url", "") or ""),
+            decode_responses=True,
+        )
+        limiter = configured_redis_telegram_delivery_limiter(
+            redis_client,
+            settings=settings_obj,
+        )
+        try:
+            await telegram_delivery_queue_loop(
+                freshness_validators=composition.freshness_validators,
+                lifecycle_feedbacks=composition.lifecycle_feedbacks,
+                credential_registry=composition.credential_registry,
+                dispatch_limiter=limiter,
+                bot_identities=composition.bot_identities,
+            )
+        finally:
+            await redis_client.aclose()
+
+    return run_configured_telegram_delivery_queue
+
+
+def telegram_execution_worker_factories(
+    runtime: TelegramDeliveryRuntimeDecision,
+    *,
+    settings_obj=settings,
+):
+    """Return exactly one ownership set without creating coroutine objects."""
+    if runtime.mode == TelegramDeliveryRuntimeMode.LEGACY:
+        if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+            raise TelegramDeliveryRuntimeConfigurationError(
+                "inconsistent_legacy_runtime_decision"
+            )
+        return (
+            offer_telegram_publication_loop,
+            telegram_trade_delivery_loop,
+            telegram_admin_broadcast_delivery_loop,
+            telegram_notification_outbox_delivery_loop,
+            telegram_market_notice_delivery_loop,
+        )
+    if runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1:
+        if runtime.legacy_workers_enabled or not runtime.queue_worker_enabled:
+            raise TelegramDeliveryRuntimeConfigurationError(
+                "inconsistent_queue_runtime_decision"
+            )
+        return (configured_telegram_delivery_queue_worker_factory(settings_obj),)
+    raise TelegramDeliveryRuntimeConfigurationError("unknown_runtime_decision_mode")
+
+
 def _configured_service_name() -> str:
     return str(getattr(settings, "trading_bot_service", "") or "").strip().lower()
 
 
 def assert_bot_runtime_surface() -> None:
+    assert_not_dark_standby("bot")
     configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
     configured_service = _configured_service_name()
     reasons: list[str] = []
@@ -75,9 +196,11 @@ def assert_bot_runtime_surface() -> None:
 
 async def main():
     assert_bot_runtime_surface()
+    telegram_runtime = configured_telegram_delivery_runtime()
 
     # Initialize Database
     await init_db()
+    await verify_three_site_database_role_bindings()
 
     # Register SQLAlchemy event listeners for sync & realtime events
     setup_event_listeners()
@@ -88,6 +211,9 @@ async def main():
         storage=storage,
         events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
     )
+
+    # Capture the callback deadline origin before Auth or any other DB work.
+    dp.update.outer_middleware(CallbackReceiptMiddleware())
 
     # Hot trade callbacks must fail fast before Auth opens a DB session.
     dp.update.outer_middleware(TradeContentionGateMiddleware())
@@ -117,32 +243,20 @@ async def main():
     dp.include_router(default.router)
 
     logger.info("🤖 Bot started...")
-    suggestion_sync_task = asyncio.create_task(listen_trade_suggestion_events(bot))
-    offer_publication_task = asyncio.create_task(offer_telegram_publication_loop())
-    telegram_delivery_task = asyncio.create_task(telegram_trade_delivery_loop())
-    telegram_admin_broadcast_task = asyncio.create_task(telegram_admin_broadcast_delivery_loop())
-    telegram_notification_outbox_task = asyncio.create_task(telegram_notification_outbox_delivery_loop())
     try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
-    finally:
-        for task in (
-            suggestion_sync_task,
-            offer_publication_task,
-            telegram_delivery_task,
-            telegram_admin_broadcast_task,
-            telegram_notification_outbox_task,
-        ):
-            task.cancel()
-        await asyncio.gather(
-            suggestion_sync_task,
-            offer_publication_task,
-            telegram_delivery_task,
-            telegram_admin_broadcast_task,
-            telegram_notification_outbox_task,
-            return_exceptions=True,
+        await supervise_bot_runtime(
+            polling_coro=dp.start_polling(bot),
+            child_coroutines=[
+                listen_trade_suggestion_events(bot),
+                *(
+                    worker_factory()
+                    for worker_factory in telegram_execution_worker_factories(
+                        telegram_runtime
+                    )
+                ),
+            ],
         )
+    finally:
         await bot.session.close()
 
 if __name__ == "__main__":

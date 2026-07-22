@@ -41,6 +41,14 @@ def is_web_push_dependency_available() -> bool:
 
 
 def is_web_push_execution_allowed() -> bool:
+    if bool(getattr(settings, "three_site_dr_enabled", False)):
+        try:
+            from core.runtime_identity import resolve_runtime_identity
+
+            identity = resolve_runtime_identity(settings)
+            return identity.is_webapp_authority and identity.is_webapp_site
+        except Exception:
+            return False
     return current_server() == WEB_PUSH_EXECUTION_SERVER
 
 
@@ -65,6 +73,21 @@ def is_web_push_configured() -> bool:
     )
 
 
+def is_web_push_client_configured() -> bool:
+    """Return whether an API process can safely advertise subscription support.
+
+    In strict three-site mode the private VAPID key belongs only to the effect
+    worker.  API processes need only the public key and must not infer disabled
+    browser support from the deliberate absence of provider credentials.
+    """
+
+    return bool(
+        is_web_push_execution_allowed()
+        and settings.web_push_enabled
+        and settings.web_push_vapid_public_key
+    )
+
+
 def web_push_config_status() -> dict[str, Any]:
     missing: list[str] = []
     if not is_web_push_execution_allowed():
@@ -73,12 +96,16 @@ def web_push_config_status() -> dict[str, Any]:
         missing.append("WEB_PUSH_ENABLED")
     if not settings.web_push_vapid_public_key:
         missing.append("WEB_PUSH_VAPID_PUBLIC_KEY")
-    if not settings.web_push_vapid_private_key:
-        missing.append("WEB_PUSH_VAPID_PRIVATE_KEY")
-    if not settings.web_push_vapid_subject:
-        missing.append("WEB_PUSH_VAPID_SUBJECT")
-    if not is_web_push_dependency_available():
-        missing.append("pywebpush")
+    strict_three_site = bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    )
+    if not strict_three_site:
+        if not settings.web_push_vapid_private_key:
+            missing.append("WEB_PUSH_VAPID_PRIVATE_KEY")
+        if not settings.web_push_vapid_subject:
+            missing.append("WEB_PUSH_VAPID_SUBJECT")
+        if not is_web_push_dependency_available():
+            missing.append("pywebpush")
 
     return {
         "enabled": len(missing) == 0,
@@ -230,6 +257,13 @@ async def send_web_push_to_user(
 ) -> dict[str, int]:
     if not is_web_push_configured():
         return disabled_web_push_result()
+    from core.dr_effects import (
+        DrEffectError,
+        assert_epoch_bound_effect_execution,
+        current_effect_capability,
+    )
+
+    assert_epoch_bound_effect_execution(provider="webpush", effect_type="webpush_user")
 
     try:
         from core.production_test_isolation import should_suppress_web_push_for_user
@@ -264,6 +298,7 @@ async def send_web_push_to_user(
     sent = 0
     failed = 0
     disabled = 0
+    ambiguous_error: Exception | None = None
     data = json.dumps(payload, ensure_ascii=False)
     vapid_claims = {"sub": settings.web_push_vapid_subject}
 
@@ -287,6 +322,8 @@ async def send_web_push_to_user(
             if status_code in TERMINAL_PUSH_STATUS_CODES:
                 subscription.enabled = False
                 disabled += 1
+            elif current_effect_capability() is not None:
+                ambiguous_error = exc
             logger.warning(
                 "Web Push delivery failed",
                 extra={
@@ -296,6 +333,8 @@ async def send_web_push_to_user(
                     "status_code": status_code,
                 },
             )
+            if ambiguous_error is not None:
+                break
             continue
 
         sent += 1
@@ -303,7 +342,12 @@ async def send_web_push_to_user(
         subscription.failure_count = 0
         subscription.last_error = None
 
-    await db.commit()
+    if current_effect_capability() is not None:
+        await db.flush()
+    else:
+        await db.commit()
+    if ambiguous_error is not None:
+        raise DrEffectError("Web Push provider state is ambiguous") from ambiguous_error
     return {"total": len(subscriptions), "sent": sent, "failed": failed, "disabled": disabled}
 
 
@@ -457,6 +501,12 @@ async def send_market_offer_web_push(offer_id: int) -> None:
 
 
 def schedule_market_offer_web_push(offer_id: int) -> None:
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        # The mapper outbox inserted a dr_effect_fanouts row in the same
+        # transaction as the Offer.  Never create a detached post-commit task.
+        return
     if not is_web_push_configured():
         return
 
@@ -464,7 +514,6 @@ def schedule_market_offer_web_push(offer_id: int) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-
     task = loop.create_task(send_market_offer_web_push(offer_id))
 
     def _log_task_error(done_task: asyncio.Task) -> None:
@@ -503,6 +552,11 @@ def schedule_notification_web_push(
     notification_id: int,
     extra_payload: dict[str, Any] | None = None,
 ) -> None:
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        # The Notification transaction already contains a durable fanout row.
+        return
     if not is_web_push_configured():
         return
 
@@ -510,7 +564,6 @@ def schedule_notification_web_push(
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-
     task = loop.create_task(send_notification_web_push(notification_id, extra_payload))
 
     def _log_task_error(done_task: asyncio.Task) -> None:
@@ -525,3 +578,134 @@ def schedule_notification_web_push(
             )
 
     task.add_done_callback(_log_task_error)
+
+
+async def execute_web_push_effect(db: AsyncSession, payload: dict[str, Any]):
+    """Execute exactly one durable endpoint intent.
+
+    A user may own several browser subscriptions.  Keeping each provider call
+    in a separate effect prevents one successful browser delivery followed by
+    an ambiguous second call from making the whole user fanout unsafe to retry.
+    """
+
+    from core.dr_effects import (
+        ProviderEffectResult,
+        assert_epoch_bound_effect_execution,
+    )
+
+    user_id = payload.get("user_id")
+    subscription_id = payload.get("subscription_id")
+    endpoint_hash = payload.get("endpoint_hash")
+    push_payload = payload.get("push_payload")
+    if (
+        type(user_id) is not int
+        or type(subscription_id) is not int
+        or not isinstance(endpoint_hash, str)
+        or len(endpoint_hash) != 64
+        or not isinstance(push_payload, dict)
+    ):
+        return ProviderEffectResult(outcome="not_sent", error_code="invalid_webpush_payload")
+    if not is_web_push_configured():
+        return ProviderEffectResult(outcome="not_sent", error_code="webpush_not_configured")
+    assert_epoch_bound_effect_execution(
+        provider="webpush", effect_type="webpush_subscription"
+    )
+    subscription = await db.scalar(
+        select(PushSubscription).where(
+            PushSubscription.id == subscription_id,
+            PushSubscription.user_id == user_id,
+            PushSubscription.endpoint_hash == endpoint_hash,
+            PushSubscription.enabled == True,
+        )
+    )
+    if subscription is None:
+        receipt = json.dumps(
+            {
+                "endpoint_hash": endpoint_hash,
+                "status": "subscription_absent_or_disabled",
+                "subscription_id": subscription_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return ProviderEffectResult(outcome="succeeded", receipt=receipt)
+
+    try:
+        from core.production_test_isolation import should_suppress_web_push_for_user
+
+        if await should_suppress_web_push_for_user(db, user_id):
+            return ProviderEffectResult(
+                outcome="succeeded",
+                receipt=json.dumps(
+                    {
+                        "endpoint_hash": endpoint_hash,
+                        "status": "production_test_suppressed",
+                        "subscription_id": subscription_id,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+    except Exception:
+        logger.exception(
+            "Failed to evaluate production test isolation for durable Web Push; continuing",
+            extra={
+                "event": "production_test_isolation.web_push_effect_suppression_failed",
+                "subscription_id": subscription_id,
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    try:
+        await asyncio.to_thread(
+            webpush,
+            subscription_info=_subscription_info(subscription),
+            data=json.dumps(push_payload, ensure_ascii=False),
+            vapid_private_key=settings.web_push_vapid_private_key,
+            vapid_claims={"sub": settings.web_push_vapid_subject},
+            ttl=max(0, int(settings.web_push_ttl_seconds)),
+            timeout=max(1.0, float(settings.web_push_timeout_seconds)),
+        )
+    except Exception as exc:
+        status_code = _response_status_code(exc)
+        subscription.last_failure_at = now
+        subscription.failure_count = int(subscription.failure_count or 0) + 1
+        subscription.last_error = _response_error_text(exc)
+        if status_code in TERMINAL_PUSH_STATUS_CODES:
+            subscription.enabled = False
+            await db.flush()
+            return ProviderEffectResult(
+                outcome="succeeded",
+                receipt=json.dumps(
+                    {
+                        "endpoint_hash": endpoint_hash,
+                        "provider_status": status_code,
+                        "status": "terminal_subscription_disabled",
+                        "subscription_id": subscription_id,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        await db.flush()
+        return ProviderEffectResult(
+            outcome="ambiguous",
+            error_code=f"webpush_provider_{status_code or 'exception'}",
+        )
+
+    subscription.last_success_at = now
+    subscription.failure_count = 0
+    subscription.last_error = None
+    await db.flush()
+    return ProviderEffectResult(
+        outcome="succeeded",
+        receipt=json.dumps(
+            {
+                "endpoint_hash": endpoint_hash,
+                "status": "provider_accepted",
+                "subscription_id": subscription_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )

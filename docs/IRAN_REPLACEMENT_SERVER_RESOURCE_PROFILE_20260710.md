@@ -5,8 +5,8 @@ Date: 2026-07-10
 ## Host Baseline
 
 - CPU: 4 vCPU
-- RAM: 7.6 GiB visible to the operating system
-- Root storage: 150 GB
+- RAM: 7.8 GiB visible to the operating system
+- Root storage: 75 GB provisioned (about 70 GB usable)
 - Role: Iran WebApp/API, PostgreSQL, Redis, sync worker, and Nginx; no Telegram bot
 
 ## Initial Safe Profile
@@ -36,10 +36,12 @@ host and must not be reused on this server.
 
 ## Rollout Gate
 
-The replacement host runs Ubuntu 26.04 (`resolute`). Its archive provides
-`docker-compose-v2` and does not provide the legacy `docker-compose` package.
-The bootstrap must select the available package after refreshing APT metadata;
-it must not hard-code the legacy package name.
+The current replacement host `185.206.95.250` runs Ubuntu 24.04 (`noble`) in
+Arvan Simin. Its archive provides `docker-compose-v2`; the legacy
+`docker-compose` package is not required. Bootstrap refreshes APT metadata and
+installs Docker, Compose v2, age, curl, CA certificates, and PostgreSQL client
+tools directly on the Iran host. The retired Ubuntu 26.04 replacement profile
+must not be reused as current-host evidence.
 The standalone `bootstrap-iran` command only installs host prerequisites. Sync
 sampler installation remains after `sync-project` in the full release because a
 fresh host does not yet contain the sampler script.

@@ -53,6 +53,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling = AsyncMock()
         fake_dp.update.outer_middleware = MagicMock()
         auth_middleware = object()
+        callback_receipt_middleware = object()
         navigation_middleware = object()
         trade_gate_middleware = object()
         storage = MagicMock()
@@ -64,12 +65,16 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
             run_bot.settings, 'redis_url', 'redis://localhost:6379/0'
         ), patch('run_bot.init_db', AsyncMock()) as init_db, patch(
+            'run_bot.verify_three_site_database_role_bindings', AsyncMock()
+        ) as verify_roles, patch(
             'run_bot.setup_event_listeners'
         ) as setup_event_listeners, patch('run_bot.Bot', return_value=fake_bot), patch(
             'run_bot.RedisStorage.from_url', return_value=storage
         ) as storage_from_url, patch('run_bot.Dispatcher', return_value=fake_dp) as dispatcher_ctor, patch(
             'run_bot.AuthMiddleware', return_value=auth_middleware
         ) as auth_ctor, patch(
+            'run_bot.CallbackReceiptMiddleware', return_value=callback_receipt_middleware
+        ) as callback_receipt_ctor, patch(
             'run_bot.TradeContentionGateMiddleware', return_value=trade_gate_middleware
         ) as gate_ctor, patch(
             'run_bot.StaleNavigationHandoffMiddleware', return_value=navigation_middleware
@@ -85,6 +90,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await run_bot.main()
 
         init_db.assert_awaited_once()
+        verify_roles.assert_awaited_once()
         setup_event_listeners.assert_called_once_with()
         storage_from_url.assert_called_once_with('redis://localhost:6379/0')
         storage.create_isolation.assert_called_once_with(lock_kwargs={"timeout": 120})
@@ -92,18 +98,39 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             storage=storage,
             events_isolation=event_isolation,
         )
+        callback_receipt_ctor.assert_called_once_with()
         gate_ctor.assert_called_once_with()
         auth_ctor.assert_called_once_with(run_bot.AsyncSessionLocal)
         navigation_ctor.assert_called_once_with()
-        self.assertEqual(fake_dp.update.outer_middleware.call_count, 4)
-        self.assertIs(fake_dp.update.outer_middleware.call_args_list[0].args[0], trade_gate_middleware)
-        self.assertIs(fake_dp.update.outer_middleware.call_args_list[1].args[0], auth_middleware)
-        self.assertIs(fake_dp.update.outer_middleware.call_args_list[3].args[0], navigation_middleware)
+        self.assertEqual(fake_dp.update.outer_middleware.call_count, 5)
+        self.assertIs(
+            fake_dp.update.outer_middleware.call_args_list[0].args[0],
+            callback_receipt_middleware,
+        )
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[1].args[0], trade_gate_middleware)
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[2].args[0], auth_middleware)
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[4].args[0], navigation_middleware)
         self.assertEqual(fake_dp.include_router.call_count, 14)
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()
 
-    async def test_main_logs_polling_errors_and_still_closes_bot(self):
+    async def test_main_stops_before_provider_start_when_database_role_binding_fails(self):
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch(
+            'run_bot.init_db', AsyncMock()
+        ) as init_db, patch(
+            'run_bot.verify_three_site_database_role_bindings',
+            AsyncMock(side_effect=RuntimeError('wrong database role')),
+        ) as verify_roles, patch('run_bot.Bot') as bot_ctor:
+            with self.assertRaisesRegex(RuntimeError, 'wrong database role'):
+                await run_bot.main()
+
+        init_db.assert_awaited_once()
+        verify_roles.assert_awaited_once()
+        bot_ctor.assert_not_called()
+
+    async def test_main_propagates_polling_errors_and_still_closes_bot(self):
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_dp = MagicMock()
@@ -127,10 +154,10 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.telegram_trade_delivery_loop', _worker_forever
         ), patch('run_bot.telegram_admin_broadcast_delivery_loop', _worker_forever), patch(
             'run_bot.telegram_notification_outbox_delivery_loop', _worker_forever
-        ), patch.object(run_bot, 'logger') as logger:
-            await run_bot.main()
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'boom'):
+                await run_bot.main()
 
-        logger.error.assert_called_once()
         fake_bot.session.close.assert_awaited_once()
 
     async def test_main_module_logs_stop_message_on_keyboard_interrupt(self):

@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -6,6 +7,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 import httpx
 from httpx import ASGITransport
+from starlette.requests import Request
 
 from core.request_context import get_request_context
 from core.request_logging import (
@@ -59,10 +61,18 @@ async def call_app(
 ) -> httpx.Response:
     transport = ASGITransport(app=app, raise_app_exceptions=raise_app_exceptions)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        return await client.request(method, path, headers=headers)
+        response = await client.request(method, path, headers=headers)
+        await response.aclose()
+    return response
 
 
-class RequestLoggingTests(unittest.TestCase):
+class RequestLoggingTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        # Finalize Starlette/AnyIO request streams before this test's event
+        # loop is closed by IsolatedAsyncioTestCase.
+        gc.collect()
+        await asyncio.sleep(0)
+
     def test_make_request_id_uses_incoming_header_with_length_cap(self):
         self.assertEqual(make_request_id(" req-1 "), "req-1")
         generated = make_request_id("x" * 200)
@@ -108,12 +118,12 @@ class RequestLoggingTests(unittest.TestCase):
             "/api/invitations/validate/[REDACTED]",
         )
 
-    def test_middleware_sets_request_id_header_and_sanitized_access_log(self):
+    async def test_middleware_sets_request_id_header_and_sanitized_access_log(self):
         app = make_test_app()
 
         with patch("core.request_logging._logger") as logger:
-            response = asyncio.run(
-                call_app(app, "GET", "/api/config?token=secret", headers={REQUEST_ID_HEADER: "req-123"})
+            response = await call_app(
+                app, "GET", "/api/config?token=secret", headers={REQUEST_ID_HEADER: "req-123"}
             )
 
         self.assertEqual(response.status_code, 200)
@@ -127,12 +137,12 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(extra["status_code"], 200)
         self.assertNotIn("token=secret", repr(extra))
 
-    def test_sensitive_routes_are_flagged_without_logging_payloads(self):
+    async def test_sensitive_routes_are_flagged_without_logging_payloads(self):
         app = make_test_app()
 
         with patch("core.request_logging._logger") as logger:
-            response = asyncio.run(
-                call_app(app, "GET", "/api/auth/token?password=secret", headers={"authorization": "Bearer unsafe"})
+            response = await call_app(
+                app, "GET", "/api/auth/token?password=secret", headers={"authorization": "Bearer unsafe"}
             )
 
         self.assertEqual(response.status_code, 200)
@@ -142,12 +152,12 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertNotIn("password=secret", repr(extra))
         self.assertNotIn("unsafe", repr(extra))
 
-    def test_token_bearing_sensitive_paths_use_route_template(self):
+    async def test_token_bearing_sensitive_paths_use_route_template(self):
         app = make_test_app()
         raw_token = "tok_abcdefghijklmnopqrstuvwxyz123456"
 
         with patch("core.request_logging._logger") as logger:
-            response = asyncio.run(call_app(app, "GET", f"/api/invitations/accept/{raw_token}"))
+            response = await call_app(app, "GET", f"/api/invitations/accept/{raw_token}")
 
         self.assertEqual(response.status_code, 200)
         extra = logger.info.call_args.kwargs["extra"]
@@ -155,12 +165,12 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(extra["path"], "/api/invitations/accept/{token}")
         self.assertNotIn(raw_token, repr(extra))
 
-    def test_unmatched_sensitive_paths_redact_secret_segments(self):
+    async def test_unmatched_sensitive_paths_redact_secret_segments(self):
         app = make_test_app()
         raw_token = "abcdefghijklmnopqrstuvwxyz"
 
         with patch("core.request_logging._logger") as logger:
-            response = asyncio.run(call_app(app, "GET", f"/api/invitations/accept/{raw_token}/missing"))
+            response = await call_app(app, "GET", f"/api/invitations/accept/{raw_token}/missing")
 
         self.assertEqual(response.status_code, 404)
         extra = logger.info.call_args.kwargs["extra"]
@@ -168,12 +178,12 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(extra["path"], "/api/invitations/accept/[REDACTED]/missing")
         self.assertNotIn(raw_token, repr(extra))
 
-    def test_upload_session_paths_use_route_template(self):
+    async def test_upload_session_paths_use_route_template(self):
         app = make_test_app()
         raw_session_id = "upload-session-abcdefghijklmnopqrstuvwxyz123456"
 
         with patch("core.request_logging._logger") as logger:
-            response = asyncio.run(call_app(app, "PATCH", f"/api/chat/upload-sessions/{raw_session_id}/chunk"))
+            response = await call_app(app, "PATCH", f"/api/chat/upload-sessions/{raw_session_id}/chunk")
 
         self.assertEqual(response.status_code, 200)
         extra = logger.info.call_args.kwargs["extra"]
@@ -181,18 +191,39 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(extra["path"], "/api/chat/upload-sessions/{session_id}/chunk")
         self.assertNotIn(raw_session_id, repr(extra))
 
-    def test_exception_logs_use_safe_path(self):
+    async def test_exception_logs_use_safe_path(self):
         app = make_test_app()
         raw_code = "recovery-code-abcdefghijklmnopqrstuvwxyz123456"
+        path = f"/api/recovery/{raw_code}"
+        request = Request(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": path,
+                "raw_path": path.encode("utf-8"),
+                "query_string": b"",
+                "headers": (),
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+                "root_path": "",
+                "route": SimpleNamespace(path="/api/recovery/{code}"),
+            }
+        )
+
+        async def raise_from_application(_request):
+            raise RuntimeError(f"recovery failed for {raw_code}")
+
+        dispatch = app.user_middleware[0].kwargs["dispatch"]
 
         with patch("core.request_logging.capture_exception", return_value="err-1") as capture, patch(
             "core.request_logging._logger"
         ) as logger:
-            response = asyncio.run(
-                call_app(app, "GET", f"/api/recovery/{raw_code}", raise_app_exceptions=False)
-            )
+            with self.assertRaisesRegex(RuntimeError, "recovery failed"):
+                await dispatch(request, raise_from_application)
 
-        self.assertEqual(response.status_code, 500)
         capture_extra = capture.call_args.kwargs["extra"]
         log_extra = logger.exception.call_args.kwargs["extra"]
         self.assertEqual(capture_extra["path"], "/api/recovery/{code}")
@@ -200,50 +231,46 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertNotIn(raw_code, repr(capture_extra))
         self.assertNotIn(raw_code, repr(log_extra))
 
-    def test_static_paths_receive_request_id_but_skip_access_log(self):
+    async def test_static_paths_receive_request_id_but_skip_access_log(self):
         app = make_test_app()
 
         with patch("core.request_logging._logger") as logger:
-            response = asyncio.run(call_app(app, "GET", "/assets/app.js"))
+            response = await call_app(app, "GET", "/assets/app.js")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(REQUEST_ID_HEADER, response.headers)
         logger.info.assert_not_called()
 
-    def test_client_ip_only_trusts_forwarded_headers_from_configured_proxy(self):
+    async def test_client_ip_only_trusts_forwarded_headers_from_configured_proxy(self):
         app = make_test_app()
 
         with patch("core.request_logging._logger") as logger, patch(
             "core.request_logging._trusted_proxy_networks",
             return_value=(),
         ):
-            response = asyncio.run(
-                call_app(
-                    app,
-                    "GET",
-                    "/api/config",
-                    headers={"x-forwarded-for": "203.0.113.9", "x-real-ip": "198.51.100.4"},
-                )
+            response = await call_app(
+                app,
+                "GET",
+                "/api/config",
+                headers={"x-forwarded-for": "203.0.113.9", "x-real-ip": "198.51.100.4"},
             )
 
         self.assertEqual(response.status_code, 200)
         extra = logger.info.call_args.kwargs["extra"]
         self.assertEqual(extra["client_ip"], "127.0.0.1")
 
-    def test_client_ip_uses_forwarded_headers_from_trusted_proxy(self):
+    async def test_client_ip_uses_forwarded_headers_from_trusted_proxy(self):
         app = make_test_app()
 
         with patch("core.request_logging._logger") as logger, patch(
             "core.request_logging._trusted_proxy_networks",
             return_value=(__import__("ipaddress").ip_network("127.0.0.1/32"),),
         ):
-            response = asyncio.run(
-                call_app(
-                    app,
-                    "GET",
-                    "/api/config",
-                    headers={"x-forwarded-for": "203.0.113.9, 10.0.0.2", "x-real-ip": "198.51.100.4"},
-                )
+            response = await call_app(
+                app,
+                "GET",
+                "/api/config",
+                headers={"x-forwarded-for": "203.0.113.9, 10.0.0.2", "x-real-ip": "198.51.100.4"},
             )
 
         self.assertEqual(response.status_code, 200)
@@ -269,12 +296,12 @@ class RequestLoggingTests(unittest.TestCase):
             self.assertEqual(trusted_forwarded_host_from_request(trusted_request), "coin.gold-trade.ir:443")
             self.assertIsNone(trusted_forwarded_host_from_request(untrusted_request))
 
-    def test_metrics_use_sanitized_path_for_unmatched_sensitive_route(self):
+    async def test_metrics_use_sanitized_path_for_unmatched_sensitive_route(self):
         app = make_test_app()
         raw_token = "tok_abcdefghijklmnopqrstuvwxyz123456"
 
         with patch("core.request_logging.record_http_request") as record_http_request:
-            response = asyncio.run(call_app(app, "GET", f"/api/invitations/accept/{raw_token}/missing"))
+            response = await call_app(app, "GET", f"/api/invitations/accept/{raw_token}/missing")
 
         self.assertEqual(response.status_code, 404)
         record_http_request.assert_called_once()
@@ -284,12 +311,12 @@ class RequestLoggingTests(unittest.TestCase):
         )
         self.assertNotIn(raw_token, repr(record_http_request.call_args.kwargs))
 
-    def test_metrics_use_route_template_for_matched_sensitive_route(self):
+    async def test_metrics_use_route_template_for_matched_sensitive_route(self):
         app = make_test_app()
         raw_token = "tok_abcdefghijklmnopqrstuvwxyz123456"
 
         with patch("core.request_logging.record_http_request") as record_http_request:
-            response = asyncio.run(call_app(app, "GET", f"/api/invitations/accept/{raw_token}"))
+            response = await call_app(app, "GET", f"/api/invitations/accept/{raw_token}")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(record_http_request.call_args.kwargs["route"], "/api/invitations/accept/{token}")

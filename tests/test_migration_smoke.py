@@ -1,4 +1,5 @@
 import configparser
+import hashlib
 import subprocess
 import sys
 import unittest
@@ -37,7 +38,127 @@ class MigrationSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
-        self.assertTrue(result.stdout.strip(), msg='Expected at least one Alembic head revision')
+        heads = [line for line in result.stdout.splitlines() if line.strip()]
+        self.assertEqual(heads, ['b986c7d8e0f1 (head)'])
+
+    def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
+        versions = REPO_ROOT / 'migrations' / 'versions'
+        executed = versions / 'e653f4a5b7c8_close_three_site_database_trust_gaps.py'
+        child = versions / 'f764a5b6c8d9_seal_dr_event_stream_contract.py'
+
+        self.assertEqual(
+            hashlib.sha256(executed.read_bytes()).hexdigest(),
+            '4507368ecb8b35034d90e3eed8d99fa20a3c8c0abff27c89cb1799b8f9359eaf',
+        )
+        child_source = child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "e653f4a5b7c8"', child_source)
+        self.assertIn("jsonb_typeof(value) <> 'number'", child_source)
+        self.assertIn('HISTORY_PREFLIGHT_SQL', child_source)
+        self.assertIn('trg_dr_event_destination_binding', child_source)
+        self.assertIn('op.execute(f"REVOKE ALL ON FUNCTION {function_identity} FROM PUBLIC")', child_source)
+        timing_child = versions / 'a875b6c7d9e0_add_dr_delivery_first_attempt_time.py'
+        timing_source = timing_child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "f764a5b6c8d9"', timing_source)
+        self.assertIn('"first_attempt_at"', timing_source)
+        self.assertIn('SET first_attempt_at=last_attempt_at', timing_source)
+        self.assertIn('ck_dr_event_deliveries_first_attempt_order', timing_source)
+        self.assertIn('forward-only evidence migration', timing_source)
+        boundary_child = versions / 'b986c7d8e0f1_harden_dr_stream_upgrade_boundary.py'
+        boundary_source = boundary_child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "a875b6c7d9e0"', boundary_source)
+        self.assertIn('IN SHARE ROW EXCLUSIVE MODE', boundary_source)
+        self.assertIn('cursor.last_sequence>0', boundary_source)
+        self.assertIn('NEW.source_xid IS NOT DISTINCT FROM OLD.source_xid', boundary_source)
+        self.assertIn('forward-only DR safety migration', boundary_source)
+
+    def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
+        migration = (
+            REPO_ROOT
+            / 'migrations/versions/e4f9a0b1c2d3_use_database_boottime_writer_fence.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('CREATE EXTENSION IF NOT EXISTS trading_bot_boottime', migration)
+        self.assertIn('trading_bot_boottime_seconds()', migration)
+        self.assertIn('trading_bot_boot_id()', migration)
+        upgrade_body = migration.split('def upgrade()', 1)[1].split('def downgrade()', 1)[0]
+        self.assertNotIn('clock_timestamp()', upgrade_body)
+
+    def test_three_site_trigger_functions_never_inherit_public_execute(self):
+        expected = {
+            'e4f9a0b1c2d3_use_database_boottime_writer_fence.py': (
+                'trading_bot_enforce_writer_term()',
+            ),
+            'e5a0b1c2d3e4_add_durable_effect_fanouts.py': (
+                'trading_bot_dr_effect_fanout_intent_immutable()',
+            ),
+            'e6b1c2d3e4f5_add_dr_transaction_envelopes.py': (
+                'trading_bot_dr_event_immutable()',
+                'trading_bot_dr_event_finalized()',
+            ),
+            'e8d3e4f5a6b7_enforce_database_event_coverage.py': (
+                'trading_bot_require_same_transaction_dr_event()',
+                'trading_bot_dr_event_immutable()',
+            ),
+            'e9e4f5a6b7c8_enable_bot_database_event_fence.py': (
+                'trading_bot_enforce_writer_term()',
+                'trading_bot_require_same_transaction_dr_event()',
+            ),
+            'c431d2e3f5a6_reconcile_integrated_database_policy.py': (
+                'trading_bot_dr_event_finalized()',
+                'trading_bot_enforce_writer_term()',
+                'trading_bot_require_same_transaction_dr_event()',
+            ),
+            'd542e3f4a6b7_harden_dr_event_integrity_and_role_boundaries.py': (
+                'trading_bot_cleanup_expired_replay_nonces(timestamptz, integer)',
+                'trading_bot_dr_event_integrity_valid(text)',
+                'trading_bot_require_same_transaction_dr_event()',
+                'trading_bot_reject_receiver_source_xid()',
+            ),
+        }
+        for filename, functions in expected.items():
+            source = (REPO_ROOT / 'migrations/versions' / filename).read_text(encoding='utf-8')
+            for function in functions:
+                self.assertIn(
+                    f'REVOKE ALL ON FUNCTION {function} FROM PUBLIC',
+                    source,
+                    msg=f'{filename}:{function}',
+                )
+
+    def test_runtime_role_scripts_revoke_global_function_defaults(self):
+        for filename in (
+            'activate_three_site_database_fencing.py',
+            'provision_bot_database_roles.py',
+        ):
+            source = (REPO_ROOT / 'scripts' / filename).read_text(encoding='utf-8')
+            self.assertIn('REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC', source)
+            self.assertNotIn(
+                'IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC',
+                source,
+            )
+
+    def test_webapp_writer_migration_bootstraps_current_fi_writer(self):
+        migration = (
+            REPO_ROOT
+            / 'migrations/versions/d1c6e7f8a9b0_add_webapp_writer_fencing_foundation.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('webapp_writer_state', migration)
+        self.assertIn('webapp_writer_transitions', migration)
+        self.assertIn("'webapp_fi', 1, 'active'", migration)
+        self.assertIn('ck_webapp_writer_state_active_consistency', migration)
+
+    def test_webapp_writer_witness_migration_is_additive_and_bootstraps_vacant(self):
+        migration = (
+            REPO_ROOT
+            / 'migrations/versions/d2e7f8a9b0c1_add_webapp_writer_witness_lease.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "d1c6e7f8a9b0"', migration)
+        self.assertIn('webapp_writer_witness_state', migration)
+        self.assertIn('webapp_writer_witness_receipts', migration)
+        self.assertIn("'webapp', NULL, 0, NULL, 'vacant'", migration)
+        self.assertIn('lease_refresh', migration)
+        self.assertIn('witness_proof_hash', migration)
 
     def test_offer_request_ledger_enum_migration_is_idempotent(self):
         migration = (REPO_ROOT / 'migrations/versions/c8d9e0f1a2b3_add_offer_request_ledger.py').read_text(

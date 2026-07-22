@@ -109,6 +109,9 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.link_account.get_db", new=db_factory(same_user)), patch(
             "bot.handlers.link_account.is_user_accountant",
             new=AsyncMock(return_value=False),
+        ), patch(
+            "bot.handlers.link_account.build_persistent_navigation_keyboard",
+            new=AsyncMock(return_value="menu"),
         ):
             await handle_contact(message, state)
         self.assertIn("قبلاً متصل شده", message.answer.await_args.args[0])

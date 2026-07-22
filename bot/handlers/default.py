@@ -3,6 +3,7 @@ from aiogram import Router, types
 from typing import Optional
 from models.user import User
 from bot.utils.redis_helpers import is_deleted_telegram_user
+from bot.telegram_pre_auth_interaction import answer_pre_auth_message_via_runtime
 
 router = Router()
 
@@ -14,7 +15,7 @@ async def handle_unauthorized_messages(message: types.Message, user: Optional[Us
     if not user:
         if message.from_user and await is_deleted_telegram_user(message.from_user.id):
             return
-        await message.answer(
+        await answer_pre_auth_message_via_runtime(message,
             "⛔️ بات برای شما هنوز فعال نشده است. "
             "اگر حساب شما قبلاً در وب یا با خط فرمان ساخته شده، دستور /link را بزنید و شماره همان حساب را ارسال کنید. "
             "در غیر این صورت با لینک دعوت معتبر ثبت‌نام کنید."

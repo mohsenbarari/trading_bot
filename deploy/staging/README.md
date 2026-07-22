@@ -75,3 +75,443 @@ STAGING_ENABLE_BOT=1 scripts/deploy_staging.sh deploy
 ```
 
 Do not use the production Telegram bot token in `.env.staging`.
+
+## Three-site integration staging (not yet activated)
+
+`docker-compose.three-site.yml` is the production-like integration topology for
+Bot-FI, WebApp-FI, WebApp-IR, and the independent Writer-Witness. It is not
+started by the legacy `scripts/deploy_staging.sh` flow above and must not be
+pointed at production volumes, tokens, certificates, domains, or databases.
+
+Its configuration shape is documented in
+`env.three-site.staging.example`. Copy that file to an untracked mode-0600
+location, replace every `CHANGE_ME`, and verify the resulting effective Compose
+before any migration. The Witness initializer, migrator, and runtime database
+identities are deliberately distinct; only the initializer may receive
+`WITNESS_POSTGRES_PASSWORD`, and `witness_api` must use the runtime identity.
+
+Telegram Queue-v1 remains an explicit cutover inside this topology. Initial
+migration uses `TELEGRAM_DELIVERY_EXECUTION_OWNER=legacy` with both queue guards
+false. The immutable Full Matrix campaign may switch all three controls only
+after the dedicated staging Bot identities/channel permissions pass live
+preflight; the editor token is present only in `bot_fi_bot`.
+
+The canonical Compose is rendered into four deterministic role bundles. The
+generated Compose may live outside the Git worktree because build contexts and
+Nginx bind sources use the attested absolute `STAGING_SOURCE_ROOT`; this keeps
+the deployed exact-SHA worktree clean. Never distribute the full source env:
+
+```bash
+python3 scripts/render_three_site_staging_role_compose.py \
+  --role bot-fi \
+  --compose deploy/staging/docker-compose.three-site.yml \
+  --output /etc/trading-bot-three-site/bot-fi.compose.yml \
+  --env-source /root/secure/three-site-full.env \
+  --env-output /etc/trading-bot-three-site/bot-fi.env
+```
+
+The role Compose must be mode `0640`; the role env and every host snapshot must
+be mode `0600`. `verify_three_site_staging_role_bundle.py` validates one host.
+`verify_three_site_staging_campaign_bundle.py` validates all four together and
+additionally proves that directional DR secrets match only their two endpoints,
+Witness credentials match their WebApp/Witness endpoints, database credentials
+are globally distinct, and intentional WebApp session/readiness secrets match.
+
+Inventory approval is deliberately two-stage:
+
+1. two operators sign a `planned` inventory in which PostgreSQL system IDs are
+   null and all host/volume names are fixed;
+2. each fresh host passes `fresh-preflight`, then only its empty DB volume is
+   provisioned;
+3. `measure-provisioned` records the real PostgreSQL IDs;
+4. `finalize_three_site_staging_inventory.py` creates a new unsigned
+   `provisioned` inventory from all four measurements;
+5. two fresh signatures over that exact inventory are mandatory before restore,
+   migration, service startup, or data movement.
+
+The multi-host transport does not pretend Docker internal networks span hosts.
+DR senders use dedicated egress networks; each TLS receiver is published only
+on its signed inventory address (`8443`, Witness `8444`); and fixed host aliases
+bind the reviewed TLS names directly to signed peer IPs. Host firewalls must
+still allow these ports only from the exact peer addresses. The role/campaign
+verifiers reject loopback template values, peer-IP drift, missing egress,
+missing host aliases, or an unbound/wildcard TLS port.
+
+### Migration runbook and stop boundary
+
+The migration is a short, explicitly approved maintenance window. Source data
+must not remain writable while backups, encrypted seed objects, and the signed
+migration plan are prepared. Run every mutating command once without `--apply`,
+review the emitted confirmation phrase, then rerun it with `--apply` and the
+exact phrase. A failed or interrupted role phase is rollback-only; deleting or
+editing its journal is forbidden.
+
+The required order is:
+
+1. render and verify all four exact-SHA role bundles from a two-person-signed
+   `planned` inventory;
+2. pass `fresh-preflight` on each dedicated host, provision only the declared
+   empty volumes, measure the four PostgreSQL system identifiers, finalize the
+   `provisioned` inventory, and obtain two fresh signatures;
+3. build/distribute one release, capture all four image inventories, and prove
+   identical image bytes/digests for every shared image reference;
+4. freeze both legacy staging sources, retaining PostgreSQL and Redis but
+   stopping every application process recorded in the freeze evidence;
+5. create PostgreSQL/uploads/audit backups from the frozen sources and pass the
+   independent PostgreSQL-15 restore/fingerprint drill; Redis is observed but
+   is never restored;
+6. encrypt each artifact with the campaign age recipient, publish it to the
+   exact versioned Arvan Object Storage bucket/key, read back that exact
+   `VersionId`, decrypt it, and re-prove the original plaintext hash;
+7. create the migration plan binding the provisioned inventory, source-freeze
+   evidence, restore-verified backups, encrypted object versions, image
+   inventories, target seed map, and rollback policy; obtain two independent
+   Ed25519 approvals within its maximum four-hour window;
+8. fetch and verify the target seed on each host, then execute the four local
+   role journals and the cross-role barriers described below;
+9. keep CDN routing on the legacy origin until all four roles are accepted and
+   the global commit evidence exists. No command in this runbook changes Arvan
+   or the production domain automatically;
+10. retain frozen legacy volumes and backups until rollback and Full Matrix
+    evidence have both been accepted. Cleanup is a separate owner decision.
+
+First freeze the legacy Compose project. The evidence records exactly which
+services were running so rollback cannot accidentally start an unrecorded
+service:
+
+```bash
+python3 scripts/freeze_three_site_staging_sources.py \
+  --repo /srv/trading-bot/current \
+  --compose /srv/trading-bot/current/deploy/staging/docker-compose.staging.yml \
+  --env-file /root/secure/.env.staging \
+  --project-name trading_bot_staging \
+  --source-role webapp_fi \
+  --expected-source-release-sha webapp_fi=<current-staging-sha> \
+  --inventory /root/secure/provisioned-inventory.json \
+  --inventory-approval /root/secure/provisioned-inventory-approval.json \
+  --signer-policy /etc/trading-bot/security/staging-inventory-signers.json \
+  --output /root/secure/source-freeze-webapp-fi.json
+```
+
+Then run the backup tool against that still-frozen source. Applied execution
+creates owner-only PostgreSQL/uploads/audit artifacts outside Git, excludes
+Redis from restore, restores the dump into an isolated PostgreSQL 15 container
+with no published port, and records a full table/sequence fingerprint:
+
+```bash
+python3 scripts/run_three_site_staging_source_backup.py \
+  --source-role webapp_fi \
+  --repo /srv/trading-bot-three-site/current \
+  --compose /srv/trading-bot-three-site/current/deploy/staging/docker-compose.staging.yml \
+  --env-file /root/secure/.env.staging \
+  --output-dir /srv/trading-bot-three-site-backups/<campaign>/webapp_fi \
+  --project-name trading_bot_staging \
+  --source-freeze-evidence /root/secure/source-freeze.json \
+  --inventory /root/secure/provisioned-inventory.json \
+  --inventory-approval /root/secure/provisioned-inventory-approval.json \
+  --signer-policy /etc/trading-bot/security/staging-inventory-signers.json \
+  --expected-source-release-sha <current-staging-sha> \
+  --target-release-sha <integration-candidate-sha>
+```
+
+`publish_three_site_staging_seed.py` and
+`fetch_three_site_staging_seed.py` provide the only approved seed transport.
+Their S3 credential file, age identity/recipient material, fetched artifacts,
+and evidence outputs must be owner-only and outside Git. A moving key without
+an exact Object Storage version id is rejected.
+
+### Four-role execution and barriers
+
+Each host begins with `run_three_site_staging_role_migration.py begin`. Run
+`restore-seed`, `configure-database`, and `start-private` on all four roles in
+their journal order. `configure-database` upgrades every supported predecessor
+to `b986c7d8e0f1`; on WebApp-IR it also converts the restored FI clone into a
+locally fenced epoch-1 standby.
+
+Before Alembic starts, `configure-database` fails closed unless every
+application/migration/worker service is stopped and three consecutive database
+samples show zero other client sessions. This runtime proof complements the
+signed legacy-source freeze evidence. The `b986c7d8e0f1` migration then takes a
+write-excluding lock on all DR event/cursor/binding tables before its final
+cursor-led history preflight; an old-rule transaction must therefore either
+commit before the lock and be included in validation, or wait until the new
+contract is installed.
+
+The supported DR retention model is full-prefix retention: a producer or
+destination cursor may not outlive any member in its `1..last_sequence`
+history. Pruning `dr_events` or their destination sequence evidence while the
+cursor survives is unsupported and intentionally makes migration fail. Legacy
+protocol-v1 members remain valid in the producer prefix; destination allocation
+starts with protocol v2, and pre-`source_xid` v2 envelopes are accepted as
+historical destination evidence.
+
+The compatibility migration leaves WebApp-FI active at epoch 1 but does not
+invent a Witness lease. After the Witness private service is ready, run the
+following first inside the `webapp_fi_writer_control` service without `--apply`,
+then with its exact confirmation. The UUID must be generated and durably
+recorded before the first attempt and reused after any ambiguous response:
+
+```bash
+python3 scripts/bootstrap_three_site_staging_writer_lease.py \
+  --campaign-id <campaign-uuid> \
+  --request-id <persisted-request-uuid> \
+  --expected-release-sha <integration-candidate-sha>
+```
+
+The `attest-writer-state` role phase then requires WebApp-FI to hold and renew a
+live Witness epoch-1 lease, while WebApp-IR must remain locally fenced. It does
+not accept a hand-written Writer-state document.
+
+Collect the four mode-0600 journals on the trusted migration controller and use
+`coordinate_three_site_staging_migration.py` in this order:
+
+1. `private-barrier` after Bot/Witness private readiness and both WebApp Writer
+   attestations; its per-role evidence authorizes only the product workers;
+2. `routing-hold` after worker startup and fresh event-checkpoint, database
+   parity, Blob parity, and unchanged-Arvan observations; its evidence
+   authorizes public services only while the CDN still points at legacy;
+3. `role-acceptance` after fresh direct-origin checks for every role, with
+   Queue ownership still `legacy` and routing still held;
+4. `global-commit` only after all four role journals are committed. A role may
+   enter `finish` only with this exact global document.
+
+Evidence is bound to the current per-role journal state hash. Reusing a barrier
+after any role advances or replacing a role Compose/env bundle is rejected.
+Until the global commit exists, rollback stops the new topology while preserving
+all target bytes, then `restore_three_site_staging_sources.py` restarts only the
+exact legacy services captured by the freeze evidence.
+
+### Typed failover/failback backend
+
+The live staging saga is implemented by
+`run_three_site_failover_orchestration.py` and the closed backend configuration
+shape in `three-site-failover-backend.example.json`. The example is a template,
+not an executable configuration. Create the real file outside Git with mode
+`0600`; keep its SSH keys, pinned known-hosts files, Witness credential/CA,
+Arvan token, connectivity evidence, readiness key, journals, plans, and
+evidence directories owner-only.
+
+The backend is restricted to the signed provisioned inventory, release SHA,
+the two exact WebApp host IPs, and `app.gold-trading.ir`. It uses key-only SSH
+with strict known-host checking. SSH is only the low-volume staging management
+plane; it never transports seed or Blob payloads. Source fencing captures the
+destination-specific FI-to-IR or IR-to-FI stream sequence and transaction hash,
+not the global producer sequence. Promotion cannot continue until the target
+has applied that exact boundary, the predecessor Witness lease is drained and
+expired, the target acquires exactly the next epoch, and its private control
+agent proves a fresh post-acquisition renewal.
+
+Every failover package must contain a plan with two independent Ed25519
+approvals, the exact closed typed-operation manifest, the pinned approver
+policy, fresh signed connectivity evidence, and the fresh two-person-signed
+provisioned inventory. Run the command without `--apply`, review the returned
+operation/route/term identity and exact confirmation phrase, then repeat with
+`--apply` only inside the separately authorized Full Matrix window:
+
+```bash
+python3 scripts/run_three_site_failover_orchestration.py \
+  --plan /root/secure/failover/active-plan.json \
+  --command-manifest /root/secure/failover/typed-operation-manifest.json \
+  --approver-policy /etc/trading-bot/security/dr-failover-approvers.json \
+  --backend-config /root/secure/failover/staging-backend.json \
+  --inventory /root/secure/provisioned-inventory.json \
+  --inventory-approval /root/secure/provisioned-inventory-approval.json \
+  --inventory-signer-policy /etc/trading-bot/security/staging-inventory-signers.json \
+  --journal /root/secure/failover/operation.jsonl
+```
+
+The saga is hash-journaled and restart-aware. An expired or failed operation
+never resumes a forward step. A failure after any mutation fences both WebApp
+sites, proves zero application-role connections on both, waits for any Witness
+lease to expire, and leaves the currently observed test origin unchanged for a
+separate signed recovery decision. It does not silently restore availability
+or change the production domain.
+
+### Queue activation and remaining gate
+
+The migrated topology deliberately starts in legacy Telegram ownership. The
+Queue Full Matrix runs only from a direct one-commit successor whose entire tree
+delta is the single code-owned `False` to `True` readiness gate.
+`verify_three_site_queue_activation_transition.py` mechanically proves the
+parent relation, changed path, exact bytes, clean checkout, and diff hash; any
+second file or line blocks the campaign.
+
+This tooling still authorizes no staging or production mutation. The concrete
+typed staging backend now exists as source and focused tests, but it still
+requires independent review and real-host rollback/fault proof. The single
+immutable-SHA, no-skips combined Full Matrix controller remains mandatory.
+CDN or production-domain changes require their own explicit authorization
+after the migration evidence is reviewed.
+
+### Immutable Full Matrix campaign contract
+
+The source-owned campaign catalog and crash-safe controller now live in
+`core/three_site_full_matrix_campaign.py` and
+`core/three_site_full_matrix_runner.py`. They fix the order and complete
+scenario set, require exactly two complete repetitions, reject skips, bind all
+inputs by SHA-256, retain one unique owner-only artifact for every scenario,
+run zero-residue cleanup after every phase, and use a hash-chained execution
+journal. A controller crash after `scenario_started` cannot silently continue:
+the deployment backend must first prove zero-residue recovery. A failed
+campaign is terminal and needs a newly approved campaign.
+
+Customer-chain coverage is not allowed to hide behind the broad application
+regression scenario. Four closed lifecycle scenarios run while WebApp-FI is
+normally active, while WebApp-IR is outage-active, while recovery remains
+routed to WebApp-IR, and after controlled failback to WebApp-FI. Each lifecycle
+scenario must retain one distinct raw artifact and one exact source-owned
+assertion for every one of the 17 actor-pair families. The controller rejects a
+missing pair, a shared pair artifact, an altered Tier1/Tier2 policy, wrong
+Writer/origin state, missing owner/privacy/notification invariant, or a false
+convergence claim. These four scenarios are repeated with the rest of the
+catalog; a generic `market_trade_account_admin_regression=passed` result cannot
+replace them.
+
+The Queue-enabled activation SHA must be one direct commit above the reviewed
+baseline and may change only the code-owned readiness constant. The
+provisioned inventory must then be re-attested at that activation SHA; evidence
+from the baseline deployment and activation release cannot be mixed. Generate
+the transition evidence first, then prepare an unsigned campaign/approval
+request with the builder:
+
+```text
+python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
+  --baseline-sha BASELINE_40_HEX \
+  --activation-sha ACTIVATION_40_HEX \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --object-bucket staging-three-site-full-matrix \
+  --bound-artifact provisioned_inventory=/root/secure/matrix/inventory.json \
+  --bound-artifact inventory_approval=/root/secure/matrix/inventory-approval.json \
+  --bound-artifact migration_plan=/root/secure/matrix/migration-plan.json \
+  --bound-artifact migration_approval=/root/secure/matrix/migration-approval.json \
+  --bound-artifact global_commit=/root/secure/matrix/global-commit.json \
+  --bound-artifact campaign_bundle=/root/secure/matrix/campaign-bundle.json \
+  --bound-artifact queue_activation_transition=/root/secure/matrix/queue-transition.json \
+  --bound-artifact failover_backend_config=/root/secure/matrix/failover-backend.json \
+  --bound-artifact full_matrix_backend_config=/root/secure/matrix/full-matrix-backend.json \
+  --draft-output /root/secure/matrix/campaign.draft.json \
+  --approval-request-output /root/secure/matrix/approval-request.json
+```
+
+Two people on independent custody devices sign the exact lowercase campaign
+hash from the request. Each returns a document shaped like
+`three-site-full-matrix-approval.example.json`. Assemble and cryptographically
+verify the final campaign without manually editing it:
+
+```text
+python3 scripts/build_three_site_staging_full_matrix_campaign.py finalize \
+  --draft /root/secure/matrix/campaign.draft.json \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --approval /root/secure/matrix/approval-operator-1.json \
+  --approval /root/secure/matrix/approval-operator-2.json \
+  --output /root/secure/matrix/campaign.approved.json
+```
+
+The tracked approver policy and approval files are templates only and are
+deliberately unusable. Real key material and every generated artifact stay
+outside Git with owner-only permissions. Reusing one Ed25519 public key under
+two names/custody labels is rejected across inventory, migration, failover, and
+Full Matrix approval policies.
+
+`core/three_site_full_matrix_command_backend.py` and
+`scripts/run_three_site_staging_full_matrix_campaign.py` provide the concrete,
+shell-free execution boundary and the official execute/verify CLI. The bound
+backend config must name one regular, owner-controlled driver directly under
+`scripts/full_matrix_drivers/`, bind its SHA-256, enumerate the exact closed
+catalog, forbid production, and define bounded operation timeouts (the
+endurance timeout is at least 24 hours). Driver or catalog drift fails before
+preflight. The controller independently reopens typed scenario evidence, every
+raw reference, and preflight/recovery/cleanup/finalization artifacts. It also
+measures endurance with its own monotonic clock; a driver cannot instantly
+self-attest the 24-hour scenario.
+
+The command backend does not make an arbitrary or test-only driver
+authoritative. Before Gate D, the reviewed live driver and its exact hash must
+be committed in the disabled baseline, remain unchanged at the activation SHA,
+be exercised on the migrated dedicated
+staging hosts, and included in the already-bound backend config. No driver is
+permitted to use production hosts, domains, buckets, or credentials. Execute
+only in the separately authorized window:
+
+Synchronization timing is not inferred from scenario wall-clock duration.
+Migration head `b986c7d8e0f1` retains the first delivery attempt, rejects any
+cursor whose retained DR history is not exactly contiguous, and takes a
+write-excluding stream-table lock before its final history validation. Each role
+bundle now contains a dedicated `*_sync_observer` database identity. That
+identity can only read `alembic_version`, `dr_database_runtime`, `dr_events`,
+`dr_event_deliveries`, and `dr_event_receipts`; it has no business, Writer,
+Queue, Telegram, Blob, effect, function, or sequence authority.
+
+Bot-FI, WebApp-FI, and WebApp-IR hosts must have `chronyc` (preferred) or
+`ntpq` installed and synchronized before host attestation. `timedatectl`
+reporting synchronized without an offset-capable client is insufficient and
+now fails preflight rather than failing halfway through timing collection.
+
+The workload doer must create a unique correlation manifest. The independent
+observer then runs `scripts/run_three_site_sync_timing_observer.py` with an
+owner-only config shaped like
+`deploy/staging/three-site-sync-observer.example.json`. The config is bound to
+the exact provisioned staging inventory, three literal host IPs, canonical
+role Compose/env paths, key-only strict-host-key SSH, and one owner-only
+artifact directory. On every observation it:
+
+- derives NTP status and a conservative clock-error bound (including root
+  dispersion and half root delay) from `timedatectl` plus `chronyc` or `ntpq`;
+- launches only the one-shot least-privilege observer service on each role;
+- correlates the same event/envelope through direct and relayed hops;
+- retains event-created, delivery-enqueued, first-attempt, receive, apply, and
+  acknowledgement times, attempt count, hashes, and payload bytes;
+- recomputes route and physical-hop p50/p95/p99/max values from raw samples;
+- measures recovery backlog and live ingress itself until pending work reaches
+  zero, rather than trusting the workload report.
+
+Normal FI-active timing covers Bot-FI -> WebApp-FI, WebApp-FI -> Bot-FI,
+WebApp-FI -> WebApp-IR, and Bot-FI -> WebApp-IR via WebApp-FI. It deliberately
+does not manufacture authoritative WebApp-IR writes while that site is
+standby. IR -> FI and IR -> Bot relay timing is required in the IR-active
+recovery scenarios. The 300-rps profile also retains Bot and WebApp request
+counts and fails if their observed split differs by more than one percentage
+point from 50/50. It enforces the approved FI<->FI p50/p95/p99 upper bounds of
+80/150/300 ms and the healthy FI->IR bounds of 500/750/2000 ms. The 300-rps,
+reconnect/catch-up, and one-hour backlog
+scenarios use the same raw verifier. Missing routes, reused event evidence,
+unsynchronized/stale clocks, forged percentiles, a backlog not observed before
+drain, no live ingress during recovery, or a non-zero final backlog all fail.
+
+Every backend invocation is preceded by a hash-journaled intent carrying a
+deterministic operation ID. Scenario and recovery invocations also receive a
+strictly increasing `--attempt`; a controller crash replays only the same
+intent or creates the next recovery attempt and can never reinterpret stale
+evidence as the current execution. Preflight, recovery, cleanup and finalize
+must each return a typed `three-site-full-matrix-operation-evidence-v1`
+artifact. The controller reopens its raw evidence, exact expected/observed
+assertions, residue count and production boundary before recording success.
+Scenario evidence is likewise rejected when a named assertion says `passed`
+but its observed value differs from the catalog-bound expected value.
+
+There is still intentionally no tracked **all-catalog live scenario driver**
+in the repository at this source-remediation stage. The synchronization
+observer above is a real read-only component, but it does not pretend to
+implement migration, provider, failover, Queue, application, and destructive
+fault doers. Consequently Gate D cannot be assembled or executed yet. Adding
+that reviewed all-scenario driver and its independent per-scenario oracles is
+an explicit later gate; an operator-local command runner or self-attesting
+placeholder is forbidden.
+
+```text
+THREE_SITE_STAGING_FULL_MATRIX_CONFIRM=execute-authoritative-three-site-staging-full-matrix \
+python3 scripts/run_three_site_staging_full_matrix_campaign.py execute \
+  --campaign /root/secure/matrix/campaign.approved.json \
+  --approver-policy /etc/trading-bot/security/full-matrix-approvers.json \
+  --backend-config /root/secure/matrix/full-matrix-backend.json \
+  --artifact-root /root/secure/matrix/evidence \
+  --journal /root/secure/matrix/evidence/campaign.jsonl \
+  --bound-artifact NAME=/absolute/path \
+  --output /root/secure/matrix/final-report.json
+```
+
+Repeat `--bound-artifact` once for every name shown in the preparation command.
+The standalone `verify` action and
+`verify_three_site_staging_full_matrix_campaign.py` only validate the complete
+retained evidence set; neither can manufacture or upgrade a partial campaign
+into a pass.

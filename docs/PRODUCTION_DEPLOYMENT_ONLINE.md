@@ -2,6 +2,12 @@
 
 This document defines the first production release flow driven from the foreign server.
 
+> Domain boundary: `gold-trade.ir` is the production root namespace;
+> `gold-trading.ir` is the isolated Arvan CDN/failover-test namespace. Do not
+> substitute the test domain into a production runtime manifest, and do not
+> treat a successful test-domain switch as approval to enroll or route the
+> production namespace.
+
 ## Scope
 
 This is intentionally the **online-first** version for Iran:
@@ -47,7 +53,9 @@ If the manifest file does not exist, the script will prompt for these values and
 
 The script also updates `/etc/hosts` on both servers so the foreign and Iran domains resolve to the expected internal IPs during sync and runtime traffic. That matters because the sync worker still resolves peer URLs from the configured server domains.
 
-Both servers are forced to `UTC` during the release flow.
+Both servers are forced to `UTC` during the release flow. The Iran standby and
+Writer Witness hosts use the same UTC storage/logging contract. Iran local time
+is rendered explicitly with `Asia/Tehran` in the application/UI layer.
 
 ## Primary command
 
@@ -206,7 +214,12 @@ make production-online-seed-shared MANIFEST=/root/secure-envs/trading-bot/online
 7. For SSH password auth, `sshpass` must be installed on the foreign server.
 8. Iran bootstrap currently assumes the transferred package bundle contains all required `.deb` files for the target distro family.
 9. The foreign host must have root-level access to install missing packages when `docker`, `npm`, or `pip` are absent.
-10. S3 support has been removed from the production deploy flow and from the generated env files.
+10. S3 support remains removed from this legacy two-site online release flow
+    and from its generated runtime env files. The separate three-site,
+    data-only emergency path uses private Object Storage without injecting S3
+    credentials into application runtime envs; see
+    `docs/WEBAPP_IR_DARK_STANDBY_RUNBOOK.md` and
+    `deploy/production/webapp-ir-dark-standby.env.example`.
 11. Existing Iran shared data still requires an operator decision; the script intentionally fails closed instead of guessing whether old data should be preserved or replaced.
 
 ## Next step after this test phase

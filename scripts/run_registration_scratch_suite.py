@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 import subprocess
@@ -24,6 +25,7 @@ RUNTIME_DATABASE_DENYLIST = {
     "trading_bot_staging",
     "trading_bot_production",
 }
+POSTGRES_SYSTEM_IDENTIFIER_PATTERN = re.compile(r"^[1-9][0-9]{15,19}$")
 SUITES = (
     ("stage1_migration", "STAGE1_MIGRATION_TEST_DATABASE_URL", "tests.test_registration_stage1_migration_postgres"),
     ("stage1_counter", "STAGE1_COUNTER_TEST_DATABASE_URL", "tests.test_user_counter_sync_postgres"),
@@ -92,6 +94,28 @@ def _admin_engine(raw_runtime_url: str):
     return create_engine(runtime.set(database="postgres"), isolation_level="AUTOCOMMIT", pool_pre_ping=True)
 
 
+def _verify_scratch_cluster(raw_runtime_url: str, expected_system_id: str) -> None:
+    expected = str(expected_system_id or "").strip()
+    if POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(expected) is None:
+        raise RegistrationScratchSuiteError(
+            "expected scratch-cluster system identifier is required"
+        )
+    engine = _admin_engine(raw_runtime_url)
+    try:
+        with engine.connect() as connection:
+            observed = str(
+                connection.execute(
+                    text("SELECT system_identifier::text FROM pg_control_system()")
+                ).scalar_one()
+            )
+    finally:
+        engine.dispose()
+    if observed != expected:
+        raise RegistrationScratchSuiteError(
+            "runtime database is not on the expected disposable scratch cluster"
+        )
+
+
 def _run(command: list[str], *, env: dict[str, str]) -> None:
     completed = subprocess.run(command, cwd=REPO_ROOT, env=env, check=False)
     if completed.returncode:
@@ -143,6 +167,18 @@ def main() -> int:
         return 2
     if Path(expected_checkout).resolve() != REPO_ROOT:
         print("registration scratch suite refused: checkout mismatch", file=sys.stderr)
+        return 2
+
+    try:
+        _verify_scratch_cluster(
+            runtime_url,
+            os.getenv("TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", ""),
+        )
+    except Exception as exc:
+        print(
+            f"registration scratch suite refused: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
         return 2
 
     before = _database_snapshot(runtime_url)

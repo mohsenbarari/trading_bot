@@ -14,14 +14,17 @@ from sqlalchemy.orm import aliased, selectinload
 from core.config import settings
 from core.services.offer_publication_state_service import (
     ACTIVE_PUBLICATION_STATUSES,
+    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
     TERMINAL_OFFER_STATUSES,
     apply_publication_state_update,
     build_offer_publication_state,
+    ensure_telegram_publication_publisher_identity,
     normalize_publication_status,
 )
 from core.services.telegram_offer_publication_service import (
     apply_existing_telegram_publication_to_offer,
     get_or_create_telegram_publication_state,
+    mark_telegram_publication_success,
     publish_offer_to_telegram_channel_once,
 )
 from core.utils import utc_now, utc_now_naive
@@ -41,6 +44,9 @@ FOREIGN_TELEGRAM_REPAIR_ISSUES = {
     "lagged_telegram_publication",
     "legacy_telegram_message_without_state",
     "offer_missing_legacy_message_id",
+    "telegram_message_identity_mismatch",
+    "telegram_publisher_identity_missing",
+    "telegram_publisher_identity_mismatch",
 }
 IRAN_WEBAPP_REPAIR_ISSUES = {
     "active_offer_without_webapp_state",
@@ -236,8 +242,14 @@ def _foreign_candidate_condition(state: Any):
             state.id.is_(None),
             state.status.in_([OfferPublicationStatus.FAILED, OfferPublicationStatus.LAGGED]),
             state.next_retry_at.isnot(None),
+            state.publisher_bot_identity.is_(None),
             and_(Offer.channel_message_id.isnot(None), state.telegram_message_id.is_(None)),
             and_(Offer.channel_message_id.is_(None), state.telegram_message_id.isnot(None)),
+            and_(
+                Offer.channel_message_id.isnot(None),
+                state.telegram_message_id.isnot(None),
+                Offer.channel_message_id != state.telegram_message_id,
+            ),
         ),
     )
 
@@ -556,9 +568,19 @@ async def load_iran_webapp_reconciliation_candidates(
 
 
 def _foreign_telegram_issue_for(offer: Any, state: Any | None) -> str | None:
+    if state is None:
+        return "active_offer_without_telegram_state"
     offer_message_id = _coerce_int(getattr(offer, "channel_message_id", None))
     state_message_id = _coerce_int(getattr(state, "telegram_message_id", None))
     state_status = _enum_value(getattr(state, "status", None))
+    publisher = str(getattr(state, "publisher_bot_identity", "") or "").strip()
+
+    if not publisher:
+        return "telegram_publisher_identity_missing"
+    if publisher != TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY:
+        return "telegram_publisher_identity_mismatch"
+    if offer_message_id and state_message_id and offer_message_id != state_message_id:
+        return "telegram_message_identity_mismatch"
 
     if state_message_id and not offer_message_id:
         return "offer_missing_legacy_message_id"
@@ -570,8 +592,6 @@ def _foreign_telegram_issue_for(offer: Any, state: Any | None) -> str | None:
         return "lagged_telegram_publication"
     if getattr(state, "next_retry_at", None) is not None:
         return "failed_telegram_publication"
-    if state is None:
-        return "active_offer_without_telegram_state"
     return None
 
 
@@ -788,6 +808,43 @@ async def _repair_foreign_telegram_candidate(
         if message_id:
             return {"result": "repaired", "reason": "legacy_offer_message_id_backfilled", "message_id": message_id}
         return {"result": "failed", "reason": "publication_state_message_id_missing"}
+
+    if candidate.issue == "telegram_publisher_identity_mismatch":
+        return {"result": "failed", "reason": candidate.issue}
+
+    if candidate.issue == "telegram_publisher_identity_missing":
+        ensure_telegram_publication_publisher_identity(candidate.state)
+        state_message_id = _coerce_int(
+            getattr(candidate.state, "telegram_message_id", None)
+        )
+        offer_message_id = _coerce_int(getattr(offer, "channel_message_id", None))
+        if not state_message_id and offer_message_id:
+            mark_telegram_publication_success(
+                candidate.state,
+                offer,
+                message_id=offer_message_id,
+                chat_id=_coerce_int(settings.channel_id),
+            )
+        message_id = apply_existing_telegram_publication_to_offer(
+            offer,
+            candidate.state,
+        )
+        return {
+            "result": "repaired",
+            "reason": candidate.issue,
+            "message_id": message_id,
+        }
+
+    if candidate.issue == "telegram_message_identity_mismatch":
+        message_id = apply_existing_telegram_publication_to_offer(
+            offer,
+            candidate.state,
+        )
+        return {
+            "result": "repaired",
+            "reason": "legacy_offer_message_id_reconciled_from_canonical_state",
+            "message_id": message_id,
+        }
 
     if send_offer_to_channel is None and not _coerce_int(getattr(offer, "channel_message_id", None)):
         return {"result": "failed", "reason": "telegram_send_callback_required"}

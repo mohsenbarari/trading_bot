@@ -35,7 +35,7 @@ class BotBlockManageUnblockUserTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.block_manage.safe_edit_text", new=AsyncMock()
         ) as safe_edit:
             await handle_unblock_user(callback, SimpleNamespace(user_id=7), user=SimpleNamespace(id=5))
-        self.assertIn("کاربران مسدود شده", safe_edit.await_args.args[1])
+        self.assertIn("کاربران مسدود شده", safe_edit.await_args.args[2])
 
         callback = make_callback()
         status = {"max_blocked": 3, "can_block": True, "current_blocked": 0, "remaining": 3}
@@ -45,7 +45,7 @@ class BotBlockManageUnblockUserTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.block_manage.get_block_status", new=AsyncMock(return_value=status)
         ), patch("bot.handlers.block_manage.safe_edit_text", new=AsyncMock()) as safe_edit:
             await handle_unblock_user(callback, SimpleNamespace(user_id=7), user=SimpleNamespace(id=5))
-        self.assertIn("لیست خالی است", safe_edit.await_args.args[1])
+        self.assertIn("لیست خالی است", safe_edit.await_args.args[2])
 
     async def test_handle_unblock_user_rejects_delegated_accounts(self):
         callback = make_callback()

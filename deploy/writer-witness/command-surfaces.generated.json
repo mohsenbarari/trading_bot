@@ -1,0 +1,20 @@
+{
+  "controller_process_call_count": 14,
+  "controller_process_surface_sha256": "936d2726bb1dc8da5e26bedff3c8d049d56d11bb3859ba3527aa8e84a6cad634",
+  "remote_host_expression_counts": {
+    "'control'": 2,
+    "'matrix_witness'": 32,
+    "'rollback_witness'": 2,
+    "'webapp_fi'": 2,
+    "'webapp_ir'": 2,
+    "role": 3,
+    "site": 6
+  },
+  "remote_process_call_count": 49,
+  "remote_process_surface_sha256": "bc99efec3aed79153b9a42ca847ddfe088c165e67025ba90430092e84bf0f82d",
+  "schema_version": "writer_witness_command_surfaces_v1",
+  "source_sha256": {
+    "scripts/plan_writer_witness_real_host_matrix.py": "80b15905af483d9d54a87070ac5dbfbf92ea96bde2582d34c44f245356270179",
+    "scripts/run_writer_witness_real_host_matrix.py": "6b6bc12997df6a72fc09bf7c783f2ef035c15f0fd325402be43328874e02c908"
+  }
+}

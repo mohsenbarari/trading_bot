@@ -1,0 +1,8 @@
+{
+  "schema": "three-site-staging-full-matrix-approval-v1",
+  "campaign_id": "00000000-0000-4000-8000-000000000000",
+  "campaign_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "operator": "CHANGE_ME_operator_one",
+  "key_id": "CHANGE_ME_matrix_key_one",
+  "signature": "CHANGE_ME_base64_ed25519_signature"
+}

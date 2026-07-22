@@ -1,0 +1,46 @@
+{
+  "schema": "three-site-staging-migration-plan-v1",
+  "campaign_id": "replace-with-provisioned-inventory-campaign-uuid",
+  "release_sha": "replace-with-exact-integration-release-sha",
+  "deployment_id": "replace-with-provisioned-inventory-deployment-id",
+  "provisioned_inventory_sha256": "replace-with-canonical-provisioned-inventory-sha256",
+  "created_at": "replace-with-utc-iso-timestamp",
+  "not_after": "replace-with-utc-iso-timestamp-no-more-than-four-hours-later",
+  "source_freeze": {
+    "required": true,
+    "evidence": [],
+    "redis_restore": false
+  },
+  "source_backups": [],
+  "seed_bundles": [],
+  "image_inventories": [],
+  "target_seed_map": [
+    {"target_role": "bot_fi", "source_role": "bot_fi", "mode": "restore"},
+    {"target_role": "webapp_fi", "source_role": "webapp_fi", "mode": "restore"},
+    {"target_role": "webapp_ir", "source_role": "webapp_fi", "mode": "clone"},
+    {"target_role": "witness", "source_role": null, "mode": "empty"}
+  ],
+  "ordered_phases": [
+    "validate_campaign_inputs",
+    "attest_legacy_sources_quiesced",
+    "verify_encrypted_seed_readback",
+    "restore_target_databases",
+    "restore_target_uploads_and_audit",
+    "upgrade_reconciliation_migration",
+    "provision_least_privilege_roles",
+    "activate_database_fencing",
+    "start_private_receivers_and_witness",
+    "start_projection_delivery_blob_and_effect_workers",
+    "prove_initial_convergence",
+    "start_public_apps_with_routing_held",
+    "run_acceptance_smoke",
+    "commit_or_forward_rollback"
+  ],
+  "rollback_policy": {
+    "strategy": "forward-rollback-or-separate-restore",
+    "alembic_downgrade": false,
+    "routing_held_until_commit": true,
+    "legacy_sources_retained": true,
+    "cleanup_requires_explicit_finish": true
+  }
+}

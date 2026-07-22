@@ -94,9 +94,14 @@ class BotTradeExecuteInvalidAmountTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(False, "این لات دیگر موجود نیست.", 4, [2, 3])
         ), patch("bot.handlers.trade_execute.build_lot_unavailable_suggestion_payload", return_value=payload), patch(
             "bot.handlers.trade_execute.send_or_update_trade_suggestion_message", new=AsyncMock()
-        ) as suggestion_mock:
+        ) as suggestion_mock, patch(
+            "bot.handlers.trade_execute._queue_authoritative_channel_offer_refresh",
+            new=AsyncMock(return_value=True),
+        ) as refresh:
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=4), user=user, bot=SimpleNamespace())
         suggestion_mock.assert_awaited_once()
+        refresh.assert_awaited_once()
+        self.assertTrue(refresh.await_args.kwargs["invalid_active_action"])
         callback.answer.assert_awaited_with("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
 
         callback = make_callback()

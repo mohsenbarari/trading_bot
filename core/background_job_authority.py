@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
+from core.runtime_identity import SITE_BOT_FI, SITE_WEBAPP_FI, WEBAPP_SITES
 
 JOB_OFFER_EXPIRY = "offer_expiry"
 JOB_MARKET_SCHEDULE = "market_schedule"
@@ -21,9 +22,12 @@ JOB_TRADE_WEBAPP_DELIVERY = "trade_webapp_delivery"
 JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
 JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY = "telegram_admin_broadcast_delivery"
 JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY = "telegram_notification_outbox_delivery"
+JOB_TELEGRAM_MARKET_NOTICE_DELIVERY = "telegram_market_notice_delivery"
 JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
+JOB_TELEGRAM_DELIVERY_QUEUE = "telegram_delivery_queue"
 JOB_TELEGRAM_REGISTRATION_RECONCILIATION = "telegram_registration_reconciliation"
 JOB_OTP_SMS_FALLBACK = "otp_sms_fallback"
+JOB_WRITER_WITNESS_RENEWAL = "writer_witness_renewal"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -36,9 +40,12 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_TRADE_TELEGRAM_DELIVERY,
         JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
         JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY,
+        JOB_TELEGRAM_MARKET_NOTICE_DELIVERY,
         JOB_OFFER_TELEGRAM_PUBLICATION,
+        JOB_TELEGRAM_DELIVERY_QUEUE,
         JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
         JOB_OTP_SMS_FALLBACK,
+        JOB_WRITER_WITNESS_RENEWAL,
     }
 )
 
@@ -67,6 +74,8 @@ class BackgroundJobAuthorityDecision:
     current_server: str
     allowed_servers: tuple[str, ...]
     reason: str | None = None
+    physical_site: str | None = None
+    runtime_role: str | None = None
 
     def as_log_extra(self) -> dict[str, object]:
         return {
@@ -75,6 +84,8 @@ class BackgroundJobAuthorityDecision:
             "current_server": self.current_server,
             "allowed_servers": list(self.allowed_servers),
             "reason": self.reason,
+            "physical_site": self.physical_site,
+            "runtime_role": self.runtime_role,
         }
 
 
@@ -88,6 +99,24 @@ class BackgroundJobAuthorityError(RuntimeError):
 
 
 BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
+    JOB_WRITER_WITNESS_RENEWAL: BackgroundJobAuthorityEntry(
+        job_name=JOB_WRITER_WITNESS_RENEWAL,
+        mutated_tables=("webapp_writer_state", "webapp_writer_transitions"),
+        allowed_servers=(SERVER_IRAN,),
+        authority_rule=(
+            "active WebApp physical site only; renew the same witness epoch/lease through the "
+            "private authenticated control API and atomically import the signed proof locally"
+        ),
+        outage_behavior=(
+            "retry an ambiguous transport result with the same request id; if renewal cannot be "
+            "proved, local lease fencing stops WebApp-authoritative writes before expiry"
+        ),
+        sync_outbox_behavior=(
+            "writer control state and transition audit are site-local DR bookkeeping and must not "
+            "enter ordinary product sync"
+        ),
+        external_state=("Iran-reachable writer witness API",),
+    ),
     JOB_OFFER_EXPIRY: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_EXPIRY,
         mutated_tables=("offers",),
@@ -107,7 +136,11 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
     ),
     JOB_MARKET_SCHEDULE: BackgroundJobAuthorityEntry(
         job_name=JOB_MARKET_SCHEDULE,
-        mutated_tables=("market_runtime_state", "offers"),
+        mutated_tables=(
+            "market_runtime_state",
+            "offers",
+            "market_channel_notice_receipts",
+        ),
         allowed_servers=(SERVER_FOREIGN, SERVER_IRAN),
         authority_rule=(
             "iran is authoritative for market_runtime_state; foreign must only observe the synced iran runtime state "
@@ -247,6 +280,25 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         external_state=("Telegram Bot API",),
         side_effects=("Telegram private generic notification message",),
     ),
+    JOB_TELEGRAM_MARKET_NOTICE_DELIVERY: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_MARKET_NOTICE_DELIVERY,
+        mutated_tables=("market_channel_notice_receipts",),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign credentialed Bot only; materialize and deliver the notice "
+            "for the latest synced market transition"
+        ),
+        outage_behavior=(
+            "retain failed receipts with bounded retry while Telegram is unavailable; "
+            "tokenless API processes never claim or terminalize them"
+        ),
+        sync_outbox_behavior=(
+            "market state is authoritative product data; delivery receipts are the "
+            "durable Telegram intent/evidence surface"
+        ),
+        external_state=("Telegram Bot API",),
+        side_effects=("Telegram market open/close channel notice",),
+    ),
     JOB_OFFER_TELEGRAM_PUBLICATION: BackgroundJobAuthorityEntry(
         job_name=JOB_OFFER_TELEGRAM_PUBLICATION,
         mutated_tables=("offers", "offer_publication_states"),
@@ -269,6 +321,39 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         offer_impacting=True,
         external_state=("Telegram Bot API",),
         side_effects=("Telegram channel offer post", "Telegram channel offer message text/markup"),
+    ),
+    JOB_TELEGRAM_DELIVERY_QUEUE: BackgroundJobAuthorityEntry(
+        job_name=JOB_TELEGRAM_DELIVERY_QUEUE,
+        mutated_tables=(
+            "telegram_delivery_jobs",
+            "telegram_delivery_provider_outcomes",
+            "telegram_delivery_reconciliation_evidence",
+            "telegram_delivery_runtime_gates",
+            "trade_delivery_receipts",
+            "telegram_admin_broadcasts",
+            "telegram_admin_broadcast_receipts",
+            "telegram_notification_outbox",
+            "telegram_interaction_anchor_states",
+            "market_channel_notice_receipts",
+        ),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only shared Telegram execution owner; it may claim local delivery jobs only after "
+            "the atomic execution-owner cutover guard has disabled every legacy Telegram sender"
+        ),
+        outage_behavior=(
+            "retain durable jobs during DB, Redis, gateway, or Telegram outage; never run on Iran and never "
+            "blindly replay an ambiguous send"
+        ),
+        sync_outbox_behavior=(
+            "telegram_delivery_jobs, provider outcomes, and market-channel receipts are foreign-local "
+            "no-sync execution state; "
+            "trade, admin-broadcast, and notification-outbox receipts remain sync-visible domain audit while "
+            "queue bindings and lease fields are local-only"
+        ),
+        local_runtime=True,
+        external_state=("Telegram Bot API",),
+        side_effects=("all queued Telegram send/edit/callback methods after cutover",),
     ),
     JOB_TELEGRAM_REGISTRATION_RECONCILIATION: BackgroundJobAuthorityEntry(
         job_name=JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
@@ -320,9 +405,13 @@ def check_background_job_authority(
     job_name: str,
     *,
     server_mode: str | None = None,
+    physical_site: str | None = None,
+    runtime_role: str | None = None,
 ) -> BackgroundJobAuthorityDecision:
     normalized_job_name = str(job_name or "").strip()
     server = normalize_server(server_mode, current_server()) if server_mode is not None else current_server()
+    site = str(physical_site or (SITE_BOT_FI if server == SERVER_FOREIGN else SITE_WEBAPP_FI)).strip().lower()
+    role = str(runtime_role or "active").strip().lower()
     entry = BACKGROUND_JOB_AUTHORITY.get(normalized_job_name)
     if entry is None:
         return BackgroundJobAuthorityDecision(
@@ -331,6 +420,8 @@ def check_background_job_authority(
             current_server=server,
             allowed_servers=(),
             reason="unknown_background_job",
+            physical_site=site,
+            runtime_role=role,
         )
     if server not in entry.allowed_servers:
         return BackgroundJobAuthorityDecision(
@@ -339,12 +430,26 @@ def check_background_job_authority(
             current_server=server,
             allowed_servers=entry.allowed_servers,
             reason="background_job_not_allowed_on_server",
+            physical_site=site,
+            runtime_role=role,
+        )
+    if server == SERVER_IRAN and site in WEBAPP_SITES and role != "active" and not entry.local_runtime:
+        return BackgroundJobAuthorityDecision(
+            ok=False,
+            job_name=entry.job_name,
+            current_server=server,
+            allowed_servers=entry.allowed_servers,
+            reason="webapp_writer_not_active",
+            physical_site=site,
+            runtime_role=role,
         )
     return BackgroundJobAuthorityDecision(
         ok=True,
         job_name=entry.job_name,
         current_server=server,
         allowed_servers=entry.allowed_servers,
+        physical_site=site,
+        runtime_role=role,
     )
 
 
@@ -352,8 +457,15 @@ def assert_background_job_authority(
     job_name: str,
     *,
     server_mode: str | None = None,
+    physical_site: str | None = None,
+    runtime_role: str | None = None,
 ) -> BackgroundJobAuthorityDecision:
-    decision = check_background_job_authority(job_name, server_mode=server_mode)
+    decision = check_background_job_authority(
+        job_name,
+        server_mode=server_mode,
+        physical_site=physical_site,
+        runtime_role=runtime_role,
+    )
     if not decision.ok:
         raise BackgroundJobAuthorityError(decision)
     return decision
@@ -363,11 +475,18 @@ def filter_allowed_background_job_factories(
     factories: Iterable[tuple[str, _T]],
     *,
     server_mode: str | None = None,
+    physical_site: str | None = None,
+    runtime_role: str | None = None,
     on_rejected: Callable[[BackgroundJobAuthorityDecision], None] | None = None,
 ) -> list[tuple[str, _T]]:
     allowed: list[tuple[str, _T]] = []
     for job_name, factory in factories:
-        decision = check_background_job_authority(job_name, server_mode=server_mode)
+        decision = check_background_job_authority(
+            job_name,
+            server_mode=server_mode,
+            physical_site=physical_site,
+            runtime_role=runtime_role,
+        )
         if decision.ok:
             allowed.append((job_name, factory))
             continue

@@ -1,0 +1,968 @@
+name: trading-bot-three-site-staging
+
+# Functional four-role staging topology. Every mutable store is independent.
+# Host-destructive scenarios additionally require four dedicated hosts and a
+# passing scripts/verify_three_site_staging_inventory.py report.
+
+x-app: &app
+  image: trading_bot_three_site_staging:${STAGING_RELEASE_SHA:?exact release SHA required}
+  build:
+    context: ${STAGING_SOURCE_ROOT:?exact absolute source root required}
+    dockerfile: Dockerfile
+    args:
+      FRONTEND_DIST_DIR: ${STAGING_FRONTEND_DOCKER_DIST_DIR:-mini_app_dist_staging}
+      RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
+  restart: unless-stopped
+  volumes:
+    - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+  logging: &logging
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+x-three-site: &three_site
+  TZ: UTC
+  ENVIRONMENT: staging
+  TOPOLOGY_SCHEMA_VERSION: three-site-dr-v1
+  THREE_SITE_DR_ENABLED: "true"
+  DR_EVENT_PROTOCOL_ENABLED: "true"
+  DR_EVENT_PROTOCOL_STRICT: "true"
+  DR_SYNC_VERIFY_TLS: "true"
+  DR_SYNC_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+  RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
+
+x-postgres: &postgres
+  image: trading_bot_postgres_boottime:15-${STAGING_RELEASE_SHA:?exact release SHA required}
+  build:
+    context: ${STAGING_SOURCE_ROOT:?exact absolute source root required}
+    dockerfile: deploy/postgres-boottime/Dockerfile
+    args:
+      RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
+  restart: unless-stopped
+  command: [postgres, -c, timezone=UTC, -c, log_timezone=UTC]
+  logging: *logging
+  healthcheck:
+    test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+
+x-redis: &redis
+  image: redis:7-alpine
+  restart: unless-stopped
+  command: [redis-server, --appendonly, "yes", --appendfsync, everysec, --maxmemory-policy, noeviction]
+  logging: *logging
+
+x-webapp-fi-owner-env: &webapp_fi_owner_env
+  <<: *three_site
+  SERVER_MODE: iran
+  LOGICAL_AUTHORITY: webapp
+  PHYSICAL_SITE: webapp_fi
+  DATABASE_URL: postgresql+asyncpg://${WEBAPP_FI_POSTGRES_USER}:${WEBAPP_FI_POSTGRES_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://${WEBAPP_FI_POSTGRES_USER}:${WEBAPP_FI_POSTGRES_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: ${WEBAPP_FI_POSTGRES_USER}
+  POSTGRES_PASSWORD: ${WEBAPP_FI_POSTGRES_PASSWORD}
+  POSTGRES_DB: ${WEBAPP_FI_POSTGRES_DB}
+  FRONTEND_URL: ${FRONTEND_URL:?required}
+  PUBLIC_WEBAPP_URL: ${PUBLIC_WEBAPP_URL:?required}
+  # Required only because the shared Settings model is imported by migration
+  # tools.  This literal is not a credential and cannot validate API tokens.
+  JWT_SECRET_KEY: migration-role-does-not-serve-jwt-webapp-fi
+  REDIS_URL: redis://webapp_fi_redis:6379/0
+  REDIS_HOST: webapp_fi_redis
+
+x-webapp-fi-app-env: &webapp_fi_app_env
+  <<: *webapp_fi_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_fi_app:${WEBAPP_FI_APP_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_fi_app:${WEBAPP_FI_APP_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: webapp_fi_app
+  POSTGRES_PASSWORD: ${WEBAPP_FI_APP_DB_PASSWORD}
+  JWT_SECRET_KEY: runtime-role-does-not-serve-jwt-webapp-fi
+  WRITER_WITNESS_REQUIRED: "true"
+
+x-webapp-fi-env: &webapp_fi_env
+  <<: *webapp_fi_app_env
+  WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
+  WRITER_WITNESS_AUTO_RENEW_ENABLED: "false"
+
+x-webapp-fi-control-env: &webapp_fi_control_env
+  <<: *webapp_fi_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  DR_CONTROL_DATABASE_URL: postgresql+asyncpg://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: webapp_fi_control
+  POSTGRES_PASSWORD: ${WEBAPP_FI_CONTROL_DB_PASSWORD}
+  JWT_SECRET_KEY: control-agent-does-not-serve-jwt-webapp-fi
+  WRITER_WITNESS_REQUIRED: "true"
+  WRITER_WITNESS_INTERNAL_URL: ${STAGING_WITNESS_URL:?required}
+  WRITER_WITNESS_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+  WRITER_WITNESS_CLIENT_KEY_ID: ${WEBAPP_FI_WITNESS_KEY_ID:?required}
+  WRITER_WITNESS_CLIENT_SECRET: ${WEBAPP_FI_WITNESS_SECRET:?required}
+  WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
+  WRITER_WITNESS_AUTO_RENEW_ENABLED: "true"
+
+x-webapp-fi-projection-env: &webapp_fi_projection_env
+  <<: *webapp_fi_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_fi_projection:${WEBAPP_FI_PROJECTION_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_fi_projection:${WEBAPP_FI_PROJECTION_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_fi_projection:${WEBAPP_FI_PROJECTION_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: webapp_fi_projection
+  POSTGRES_PASSWORD: ${WEBAPP_FI_PROJECTION_DB_PASSWORD}
+  JWT_SECRET_KEY: projection-role-does-not-serve-jwt-webapp-fi
+
+x-webapp-fi-observer-env: &webapp_fi_observer_env
+  <<: *webapp_fi_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_fi_observer:${WEBAPP_FI_OBSERVER_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_fi_observer:${WEBAPP_FI_OBSERVER_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: webapp_fi_observer
+  POSTGRES_PASSWORD: ${WEBAPP_FI_OBSERVER_DB_PASSWORD}
+  JWT_SECRET_KEY: sync-observer-does-not-serve-jwt-webapp-fi
+
+x-webapp-ir-owner-env: &webapp_ir_owner_env
+  <<: *three_site
+  SERVER_MODE: iran
+  LOGICAL_AUTHORITY: webapp
+  PHYSICAL_SITE: webapp_ir
+  DATABASE_URL: postgresql+asyncpg://${WEBAPP_IR_POSTGRES_USER}:${WEBAPP_IR_POSTGRES_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://${WEBAPP_IR_POSTGRES_USER}:${WEBAPP_IR_POSTGRES_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: ${WEBAPP_IR_POSTGRES_USER}
+  POSTGRES_PASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD}
+  POSTGRES_DB: ${WEBAPP_IR_POSTGRES_DB}
+  FRONTEND_URL: ${FRONTEND_URL:?required}
+  PUBLIC_WEBAPP_URL: ${PUBLIC_WEBAPP_URL:?required}
+  JWT_SECRET_KEY: migration-role-does-not-serve-jwt-webapp-ir
+  REDIS_URL: redis://webapp_ir_redis:6379/0
+  REDIS_HOST: webapp_ir_redis
+
+x-webapp-ir-app-env: &webapp_ir_app_env
+  <<: *webapp_ir_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_ir_app:${WEBAPP_IR_APP_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_ir_app:${WEBAPP_IR_APP_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: webapp_ir_app
+  POSTGRES_PASSWORD: ${WEBAPP_IR_APP_DB_PASSWORD}
+  JWT_SECRET_KEY: runtime-role-does-not-serve-jwt-webapp-ir
+  WRITER_WITNESS_REQUIRED: "true"
+
+x-webapp-ir-env: &webapp_ir_env
+  <<: *webapp_ir_app_env
+  WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
+  WRITER_WITNESS_AUTO_RENEW_ENABLED: "false"
+
+x-webapp-ir-control-env: &webapp_ir_control_env
+  <<: *webapp_ir_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_ir_control:${WEBAPP_IR_CONTROL_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_ir_control:${WEBAPP_IR_CONTROL_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  DR_CONTROL_DATABASE_URL: postgresql+asyncpg://webapp_ir_control:${WEBAPP_IR_CONTROL_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: webapp_ir_control
+  POSTGRES_PASSWORD: ${WEBAPP_IR_CONTROL_DB_PASSWORD}
+  JWT_SECRET_KEY: control-agent-does-not-serve-jwt-webapp-ir
+  WRITER_WITNESS_REQUIRED: "true"
+  WRITER_WITNESS_INTERNAL_URL: ${STAGING_WITNESS_URL:?required}
+  WRITER_WITNESS_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+  WRITER_WITNESS_CLIENT_KEY_ID: ${WEBAPP_IR_WITNESS_KEY_ID:?required}
+  WRITER_WITNESS_CLIENT_SECRET: ${WEBAPP_IR_WITNESS_SECRET:?required}
+  WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
+  WRITER_WITNESS_AUTO_RENEW_ENABLED: "true"
+
+x-webapp-ir-projection-env: &webapp_ir_projection_env
+  <<: *webapp_ir_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_ir_projection:${WEBAPP_IR_PROJECTION_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_ir_projection:${WEBAPP_IR_PROJECTION_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_ir_projection:${WEBAPP_IR_PROJECTION_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: webapp_ir_projection
+  POSTGRES_PASSWORD: ${WEBAPP_IR_PROJECTION_DB_PASSWORD}
+  JWT_SECRET_KEY: projection-role-does-not-serve-jwt-webapp-ir
+
+x-webapp-ir-observer-env: &webapp_ir_observer_env
+  <<: *webapp_ir_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_ir_observer:${WEBAPP_IR_OBSERVER_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_ir_observer:${WEBAPP_IR_OBSERVER_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+  POSTGRES_USER: webapp_ir_observer
+  POSTGRES_PASSWORD: ${WEBAPP_IR_OBSERVER_DB_PASSWORD}
+  JWT_SECRET_KEY: sync-observer-does-not-serve-jwt-webapp-ir
+
+services:
+  bot_fi_db:
+    profiles: [bot-fi]
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${BOT_FI_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${BOT_FI_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${BOT_FI_POSTGRES_DB:?required}
+    volumes: [bot_fi_postgres:/var/lib/postgresql/data]
+    networks: [bot_fi]
+
+  bot_fi_redis:
+    profiles: [bot-fi]
+    <<: *redis
+    volumes: [bot_fi_redis:/data]
+    networks: [bot_fi]
+
+  bot_fi_migration:
+    profiles: [bot-fi]
+    <<: *app
+    restart: "no"
+    command: [python, manage.py]
+    environment: &bot_env
+      <<: *three_site
+      SERVER_MODE: foreign
+      LOGICAL_AUTHORITY: foreign
+      PHYSICAL_SITE: bot_fi
+      DATABASE_URL: postgresql+asyncpg://${BOT_FI_POSTGRES_USER}:${BOT_FI_POSTGRES_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://${BOT_FI_POSTGRES_USER}:${BOT_FI_POSTGRES_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: ${BOT_FI_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${BOT_FI_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${BOT_FI_POSTGRES_DB}
+      FRONTEND_URL: ${FRONTEND_URL:?required}
+      JWT_SECRET_KEY: migration-role-does-not-serve-jwt-bot-fi
+      REDIS_URL: redis://bot_fi_redis:6379/0
+      REDIS_HOST: bot_fi_redis
+    depends_on: {bot_fi_db: {condition: service_healthy}}
+    networks: [bot_fi]
+
+  bot_fi_api:
+    profiles: [bot-fi]
+    <<: *app
+    command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *bot_env
+      TRADING_BOT_SERVICE: api
+      TELEGRAM_DELIVERY_PRODUCER_MODE: ${TELEGRAM_DELIVERY_PRODUCER_MODE:?required}
+      TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: ${TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER:?required}
+      DATABASE_URL: postgresql+asyncpg://bot_fi_app:${BOT_FI_APP_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_app:${BOT_FI_APP_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: bot_fi_app
+      POSTGRES_PASSWORD: ${BOT_FI_APP_DB_PASSWORD}
+      JWT_SECRET_KEY: ${BOT_FI_JWT_SECRET_KEY:?required}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - bot_fi_uploads:/app/uploads
+      - bot_fi_audit:/app/audit_trail
+    ports: ["127.0.0.1:8211:8000"]
+    depends_on:
+      bot_fi_db_roles: {condition: service_completed_successfully}
+      bot_fi_redis: {condition: service_started}
+    networks: [bot_fi, bot_fi_egress]
+
+  bot_fi_bot:
+    profiles: [bot-fi]
+    <<: *app
+    command: [python, run_bot.py]
+    environment:
+      <<: *bot_env
+      TRADING_BOT_SERVICE: bot
+      BOT_TOKEN: ${BOT_TOKEN:?required}
+      BOT_USERNAME: ${BOT_USERNAME:?required}
+      CHANNEL_ID: ${CHANNEL_ID:?required}
+      CHANNEL_INVITE_LINK: ${CHANNEL_INVITE_LINK:?required}
+      TELEGRAM_DELIVERY_PRODUCER_MODE: ${TELEGRAM_DELIVERY_PRODUCER_MODE:?required}
+      TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: ${TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER:?required}
+      TELEGRAM_DELIVERY_EXECUTION_OWNER: ${TELEGRAM_DELIVERY_EXECUTION_OWNER:?required}
+      TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED: ${TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED:?required}
+      TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY: ${TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY:?required}
+      TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED: ${TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED:?required}
+      TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ${TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN:-}
+      TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID: ${TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID:?required}
+      TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID: ${TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID:-0}
+      TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID: ${TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID:?required}
+      DATABASE_URL: postgresql+asyncpg://bot_fi_app:${BOT_FI_APP_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_app:${BOT_FI_APP_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: bot_fi_app
+      POSTGRES_PASSWORD: ${BOT_FI_APP_DB_PASSWORD}
+      JWT_SECRET_KEY: bot-runtime-does-not-serve-jwt
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - bot_fi_audit:/app/audit_trail
+    depends_on: {bot_fi_api: {condition: service_started}}
+    networks: [bot_fi, bot_fi_egress]
+
+  bot_fi_dr_delivery:
+    profiles: [bot-fi]
+    <<: *app
+    command: [python, -m, core.dr_delivery_worker]
+    environment:
+      <<: *bot_env
+      TRADING_BOT_SERVICE: dr_delivery_worker
+      DR_SYNC_PEER_URLS_JSON: ${BOT_FI_DR_PEERS_JSON:?required}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${BOT_FI_DR_PAIRWISE_KEYS_JSON:?required}
+      DATABASE_URL: postgresql+asyncpg://bot_fi_delivery:${BOT_FI_DELIVERY_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_delivery:${BOT_FI_DELIVERY_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://bot_fi_delivery:${BOT_FI_DELIVERY_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: bot_fi_delivery
+      POSTGRES_PASSWORD: ${BOT_FI_DELIVERY_DB_PASSWORD}
+    depends_on: {bot_fi_dr_receiver: {condition: service_healthy}}
+    extra_hosts:
+      - "webapp-fi-dr.staging.internal:${BOT_FI_PEER_WEBAPP_FI_IP:?required}"
+    # Cross-host transport uses a dedicated, host-firewall-restricted egress
+    # network. Docker "internal" networks do not span physical hosts.
+    networks: [bot_fi, bot_fi_dr_egress]
+
+  bot_fi_dr_receiver:
+    profiles: [bot-fi]
+    <<: *app
+    command: [uvicorn, dr_receiver_app:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *bot_env
+      TRADING_BOT_SERVICE: dr_receiver
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${BOT_FI_DR_PAIRWISE_KEYS_JSON:?required}
+      DATABASE_URL: postgresql+asyncpg://bot_fi_receiver:${BOT_FI_RECEIVER_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_receiver:${BOT_FI_RECEIVER_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://bot_fi_receiver:${BOT_FI_RECEIVER_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      ORIGIN_EXPECTED_MIGRATION_REVISION: ${ORIGIN_EXPECTED_MIGRATION_REVISION:?required}
+      POSTGRES_USER: bot_fi_receiver
+      POSTGRES_PASSWORD: ${BOT_FI_RECEIVER_DB_PASSWORD}
+    depends_on: {bot_fi_db_roles: {condition: service_completed_successfully}}
+    networks: [bot_fi]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+
+  bot_fi_dr_projection:
+    profiles: [bot-fi]
+    <<: *app
+    command: [python, -m, core.dr_projection_worker]
+    environment:
+      <<: *bot_env
+      TRADING_BOT_SERVICE: dr_projection_worker
+      DATABASE_URL: postgresql+asyncpg://bot_fi_projection:${BOT_FI_PROJECTION_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_projection:${BOT_FI_PROJECTION_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://bot_fi_projection:${BOT_FI_PROJECTION_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: bot_fi_projection
+      POSTGRES_PASSWORD: ${BOT_FI_PROJECTION_DB_PASSWORD}
+    depends_on: {bot_fi_dr_receiver: {condition: service_healthy}}
+    networks: [bot_fi]
+
+  bot_fi_db_roles:
+    profiles: [bot-fi]
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_bot_database_roles.py, --role-prefix, bot_fi]
+    environment:
+      <<: *bot_env
+      BOT_APP_DB_PASSWORD: ${BOT_FI_APP_DB_PASSWORD:?required}
+      BOT_RECEIVER_DB_PASSWORD: ${BOT_FI_RECEIVER_DB_PASSWORD:?required}
+      BOT_DELIVERY_DB_PASSWORD: ${BOT_FI_DELIVERY_DB_PASSWORD:?required}
+      BOT_PROJECTION_DB_PASSWORD: ${BOT_FI_PROJECTION_DB_PASSWORD:?required}
+      BOT_OBSERVER_DB_PASSWORD: ${BOT_FI_OBSERVER_DB_PASSWORD:?required}
+    depends_on: {bot_fi_migration: {condition: service_completed_successfully}}
+    networks: [bot_fi]
+
+  bot_fi_sync_observer:
+    profiles: [bot-fi]
+    <<: *app
+    restart: "no"
+    command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
+    environment:
+      <<: *bot_env
+      DATABASE_URL: postgresql+asyncpg://bot_fi_observer:${BOT_FI_OBSERVER_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_observer:${BOT_FI_OBSERVER_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: bot_fi_observer
+      POSTGRES_PASSWORD: ${BOT_FI_OBSERVER_DB_PASSWORD}
+      JWT_SECRET_KEY: sync-observer-does-not-serve-jwt-bot-fi
+    depends_on: {bot_fi_db_roles: {condition: service_completed_successfully}}
+    networks: [bot_fi]
+
+  webapp_fi_db:
+    profiles: [webapp-fi]
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${WEBAPP_FI_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${WEBAPP_FI_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${WEBAPP_FI_POSTGRES_DB:?required}
+    volumes: [webapp_fi_postgres:/var/lib/postgresql/data]
+    networks: [webapp_fi]
+
+  webapp_fi_redis:
+    profiles: [webapp-fi]
+    <<: *redis
+    volumes: [webapp_fi_redis:/data]
+    networks: [webapp_fi]
+
+  webapp_fi_migration:
+    profiles: [webapp-fi]
+    <<: *app
+    restart: "no"
+    command: [python, manage.py]
+    environment: *webapp_fi_owner_env
+    depends_on:
+      webapp_fi_db_roles: {condition: service_completed_successfully}
+    networks: [webapp_fi]
+
+  webapp_fi_db_roles:
+    profiles: [webapp-fi]
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_three_site_database_roles.py, --role-prefix, webapp_fi]
+    environment:
+      <<: *webapp_fi_owner_env
+      THREE_SITE_APP_DB_PASSWORD: ${WEBAPP_FI_APP_DB_PASSWORD:?required}
+      THREE_SITE_RECEIVER_DB_PASSWORD: ${WEBAPP_FI_RECEIVER_DB_PASSWORD:?required}
+      THREE_SITE_DELIVERY_DB_PASSWORD: ${WEBAPP_FI_DELIVERY_DB_PASSWORD:?required}
+      THREE_SITE_PROJECTION_DB_PASSWORD: ${WEBAPP_FI_PROJECTION_DB_PASSWORD:?required}
+      THREE_SITE_BLOB_DB_PASSWORD: ${WEBAPP_FI_BLOB_DB_PASSWORD:?required}
+      THREE_SITE_EFFECT_DB_PASSWORD: ${WEBAPP_FI_EFFECT_DB_PASSWORD:?required}
+      THREE_SITE_CONTROL_DB_PASSWORD: ${WEBAPP_FI_CONTROL_DB_PASSWORD:?required}
+      THREE_SITE_OBSERVER_DB_PASSWORD: ${WEBAPP_FI_OBSERVER_DB_PASSWORD:?required}
+    depends_on: {webapp_fi_db: {condition: service_healthy}}
+    networks: [webapp_fi]
+
+  webapp_fi_db_fencing:
+    profiles: [webapp-fi]
+    <<: *app
+    restart: "no"
+    command:
+      - python
+      - scripts/activate_three_site_database_fencing.py
+      - --site
+      - webapp_fi
+      - --application-role
+      - webapp_fi_app
+      - --projection-role
+      - webapp_fi_projection
+      - --receiver-role
+      - webapp_fi_receiver
+      - --delivery-role
+      - webapp_fi_delivery
+      - --blob-role
+      - webapp_fi_blob
+      - --effect-role
+      - webapp_fi_effect
+      - --control-role
+      - webapp_fi_control
+      - --observer-role
+      - webapp_fi_observer
+      - --operator
+      - staging-compose
+      - --apply
+      - --confirm
+      - ENABLE-THREE-SITE-DATABASE-FENCING
+    environment: *webapp_fi_owner_env
+    depends_on: {webapp_fi_migration: {condition: service_completed_successfully}}
+    networks: [webapp_fi]
+
+  webapp_fi_sync_observer:
+    profiles: [webapp-fi]
+    <<: *app
+    restart: "no"
+    command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
+    environment: *webapp_fi_observer_env
+    depends_on: {webapp_fi_db_fencing: {condition: service_completed_successfully}}
+    networks: [webapp_fi]
+
+  webapp_fi_api:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *webapp_fi_env
+      TRADING_BOT_SERVICE: api
+      TELEGRAM_DELIVERY_PRODUCER_MODE: ${TELEGRAM_DELIVERY_PRODUCER_MODE:?required}
+      TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: ${TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER:?required}
+      ORIGIN_READINESS_API_KEY: ${ORIGIN_READINESS_API_KEY:?required}
+      ORIGIN_EXPECTED_MIGRATION_REVISION: ${ORIGIN_EXPECTED_MIGRATION_REVISION:?required}
+      ORIGIN_READINESS_REQUIRE_RECOVERY_MANIFEST: ${ORIGIN_READINESS_REQUIRE_RECOVERY_MANIFEST:-true}
+      DR_ISOLATED_CRITICAL_WRITE_POLICY: ${DR_ISOLATED_CRITICAL_WRITE_POLICY:-freeze}
+      JWT_SECRET_KEY: ${WEBAPP_JWT_SECRET_KEY:?required}
+      WEB_PUSH_ENABLED: ${WEB_PUSH_ENABLED:-false}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_fi_uploads:/app/uploads
+      - webapp_fi_audit:/app/audit_trail
+    ports: ["127.0.0.1:8212:8000"]
+    depends_on:
+      webapp_fi_db_fencing: {condition: service_completed_successfully}
+      webapp_fi_redis: {condition: service_started}
+    networks: [webapp_fi, webapp_fi_egress]
+
+  webapp_fi_writer_control:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [python, scripts/run_writer_control_agent.py]
+    environment:
+      <<: *webapp_fi_control_env
+      TRADING_BOT_SERVICE: writer_control_agent
+    depends_on:
+      webapp_fi_db_fencing: {condition: service_completed_successfully}
+    extra_hosts:
+      - "witness-dr.staging.internal:${WEBAPP_FI_WITNESS_IP:?required}"
+    networks: [webapp_fi, writer_witness_egress]
+
+  webapp_fi_dr_delivery:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [python, -m, core.dr_delivery_worker]
+    environment:
+      <<: *webapp_fi_projection_env
+      TRADING_BOT_SERVICE: dr_delivery_worker
+      DATABASE_URL: postgresql+asyncpg://webapp_fi_delivery:${WEBAPP_FI_DELIVERY_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://webapp_fi_delivery:${WEBAPP_FI_DELIVERY_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_fi_delivery:${WEBAPP_FI_DELIVERY_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      POSTGRES_USER: webapp_fi_delivery
+      POSTGRES_PASSWORD: ${WEBAPP_FI_DELIVERY_DB_PASSWORD}
+      DR_SYNC_PEER_URLS_JSON: ${WEBAPP_FI_DR_PEERS_JSON:?required}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
+    depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
+    extra_hosts:
+      - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
+      - "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}"
+    networks: [webapp_fi, webapp_fi_dr_egress]
+
+  webapp_fi_dr_projection:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [python, -m, core.dr_projection_worker]
+    environment: {<<: *webapp_fi_projection_env, TRADING_BOT_SERVICE: dr_projection_worker}
+    depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
+    networks: [webapp_fi]
+
+  webapp_fi_effects:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [python, scripts/run_dr_effect_worker.py]
+    environment:
+      <<: *webapp_fi_app_env
+      TRADING_BOT_SERVICE: dr_effect_worker
+      DR_EFFECT_WORKER_ENABLED: "true"
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_fi_effect:${WEBAPP_FI_EFFECT_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      SMSIR_API_KEY: ${SMSIR_API_KEY:-}
+      WEB_PUSH_ENABLED: ${WEB_PUSH_ENABLED:-false}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    networks: [webapp_fi, webapp_fi_egress]
+
+  webapp_fi_blobs:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [python, -m, core.dr_blob_worker]
+    environment:
+      <<: *webapp_fi_projection_env
+      TRADING_BOT_SERVICE: dr_blob_worker
+      DATABASE_URL: postgresql+asyncpg://webapp_fi_blob:${WEBAPP_FI_BLOB_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://webapp_fi_blob:${WEBAPP_FI_BLOB_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_fi_blob:${WEBAPP_FI_BLOB_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      POSTGRES_USER: webapp_fi_blob
+      POSTGRES_PASSWORD: ${WEBAPP_FI_BLOB_DB_PASSWORD}
+      DR_SYNC_PEER_URLS_JSON: ${WEBAPP_FI_DR_PEERS_JSON:?required}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
+      DR_BLOB_OBJECT_ENDPOINT: ${DR_BLOB_OBJECT_ENDPOINT:?required}
+      DR_BLOB_OBJECT_REGION: ${DR_BLOB_OBJECT_REGION:?required}
+      DR_BLOB_OBJECT_BUCKET: ${DR_BLOB_OBJECT_BUCKET:?required}
+      DR_BLOB_OBJECT_PREFIX: ${DR_BLOB_OBJECT_PREFIX:?required}
+      DR_BLOB_REQUIRE_VERSIONING: ${DR_BLOB_REQUIRE_VERSIONING:-true}
+      DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
+      DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_fi_uploads:/app/uploads
+      - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
+      - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
+    depends_on: {webapp_fi_api: {condition: service_started}}
+    extra_hosts:
+      - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
+      - "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}"
+    networks: [webapp_fi, webapp_fi_egress]
+
+  webapp_fi_dr_receiver:
+    profiles: [webapp-fi]
+    <<: *app
+    command: [uvicorn, dr_receiver_app:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *webapp_fi_projection_env
+      TRADING_BOT_SERVICE: dr_receiver
+      DATABASE_URL: postgresql+asyncpg://webapp_fi_receiver:${WEBAPP_FI_RECEIVER_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://webapp_fi_receiver:${WEBAPP_FI_RECEIVER_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_fi_receiver:${WEBAPP_FI_RECEIVER_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+      POSTGRES_USER: webapp_fi_receiver
+      POSTGRES_PASSWORD: ${WEBAPP_FI_RECEIVER_DB_PASSWORD}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
+      ORIGIN_EXPECTED_MIGRATION_REVISION: ${ORIGIN_EXPECTED_MIGRATION_REVISION:?required}
+    depends_on: {webapp_fi_db_fencing: {condition: service_completed_successfully}}
+    networks: [webapp_fi]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+
+  webapp_ir_db:
+    profiles: [webapp-ir]
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${WEBAPP_IR_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${WEBAPP_IR_POSTGRES_DB:?required}
+    volumes: [webapp_ir_postgres:/var/lib/postgresql/data]
+    networks: [webapp_ir]
+
+  webapp_ir_redis:
+    profiles: [webapp-ir]
+    <<: *redis
+    volumes: [webapp_ir_redis:/data]
+    networks: [webapp_ir]
+
+  webapp_ir_migration:
+    profiles: [webapp-ir]
+    <<: *app
+    restart: "no"
+    command: [python, manage.py]
+    environment: *webapp_ir_owner_env
+    depends_on:
+      webapp_ir_db_roles: {condition: service_completed_successfully}
+    networks: [webapp_ir]
+
+  webapp_ir_db_roles:
+    profiles: [webapp-ir]
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_three_site_database_roles.py, --role-prefix, webapp_ir]
+    environment:
+      <<: *webapp_ir_owner_env
+      THREE_SITE_APP_DB_PASSWORD: ${WEBAPP_IR_APP_DB_PASSWORD:?required}
+      THREE_SITE_RECEIVER_DB_PASSWORD: ${WEBAPP_IR_RECEIVER_DB_PASSWORD:?required}
+      THREE_SITE_DELIVERY_DB_PASSWORD: ${WEBAPP_IR_DELIVERY_DB_PASSWORD:?required}
+      THREE_SITE_PROJECTION_DB_PASSWORD: ${WEBAPP_IR_PROJECTION_DB_PASSWORD:?required}
+      THREE_SITE_BLOB_DB_PASSWORD: ${WEBAPP_IR_BLOB_DB_PASSWORD:?required}
+      THREE_SITE_EFFECT_DB_PASSWORD: ${WEBAPP_IR_EFFECT_DB_PASSWORD:?required}
+      THREE_SITE_CONTROL_DB_PASSWORD: ${WEBAPP_IR_CONTROL_DB_PASSWORD:?required}
+      THREE_SITE_OBSERVER_DB_PASSWORD: ${WEBAPP_IR_OBSERVER_DB_PASSWORD:?required}
+    depends_on: {webapp_ir_db: {condition: service_healthy}}
+    networks: [webapp_ir]
+
+  webapp_ir_db_fencing:
+    profiles: [webapp-ir]
+    <<: *app
+    restart: "no"
+    command:
+      - python
+      - scripts/activate_three_site_database_fencing.py
+      - --site
+      - webapp_ir
+      - --application-role
+      - webapp_ir_app
+      - --projection-role
+      - webapp_ir_projection
+      - --receiver-role
+      - webapp_ir_receiver
+      - --delivery-role
+      - webapp_ir_delivery
+      - --blob-role
+      - webapp_ir_blob
+      - --effect-role
+      - webapp_ir_effect
+      - --control-role
+      - webapp_ir_control
+      - --observer-role
+      - webapp_ir_observer
+      - --operator
+      - staging-compose
+      - --apply
+      - --confirm
+      - ENABLE-THREE-SITE-DATABASE-FENCING
+    environment: *webapp_ir_owner_env
+    depends_on: {webapp_ir_migration: {condition: service_completed_successfully}}
+    networks: [webapp_ir]
+
+  webapp_ir_sync_observer:
+    profiles: [webapp-ir]
+    <<: *app
+    restart: "no"
+    command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
+    environment: *webapp_ir_observer_env
+    depends_on: {webapp_ir_db_fencing: {condition: service_completed_successfully}}
+    networks: [webapp_ir]
+
+  webapp_ir_api:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *webapp_ir_env
+      TRADING_BOT_SERVICE: api
+      TELEGRAM_DELIVERY_PRODUCER_MODE: ${TELEGRAM_DELIVERY_PRODUCER_MODE:?required}
+      TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: ${TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER:?required}
+      ORIGIN_READINESS_API_KEY: ${ORIGIN_READINESS_API_KEY:?required}
+      ORIGIN_EXPECTED_MIGRATION_REVISION: ${ORIGIN_EXPECTED_MIGRATION_REVISION:?required}
+      ORIGIN_READINESS_REQUIRE_RECOVERY_MANIFEST: ${ORIGIN_READINESS_REQUIRE_RECOVERY_MANIFEST:-true}
+      DR_ISOLATED_CRITICAL_WRITE_POLICY: ${DR_ISOLATED_CRITICAL_WRITE_POLICY:-freeze}
+      JWT_SECRET_KEY: ${WEBAPP_JWT_SECRET_KEY:?required}
+      WEB_PUSH_ENABLED: ${WEB_PUSH_ENABLED:-false}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads
+      - webapp_ir_audit:/app/audit_trail
+    ports: ["127.0.0.1:8213:8000"]
+    depends_on:
+      webapp_ir_db_fencing: {condition: service_completed_successfully}
+      webapp_ir_redis: {condition: service_started}
+    networks: [webapp_ir, webapp_ir_egress]
+
+  webapp_ir_writer_control:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [python, scripts/run_writer_control_agent.py]
+    environment:
+      <<: *webapp_ir_control_env
+      TRADING_BOT_SERVICE: writer_control_agent
+    depends_on:
+      webapp_ir_db_fencing: {condition: service_completed_successfully}
+    extra_hosts:
+      - "witness-dr.staging.internal:${WEBAPP_IR_WITNESS_IP:?required}"
+    networks: [webapp_ir, writer_witness_egress]
+
+  webapp_ir_dr_delivery:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [python, -m, core.dr_delivery_worker]
+    environment:
+      <<: *webapp_ir_projection_env
+      TRADING_BOT_SERVICE: dr_delivery_worker
+      DATABASE_URL: postgresql+asyncpg://webapp_ir_delivery:${WEBAPP_IR_DELIVERY_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://webapp_ir_delivery:${WEBAPP_IR_DELIVERY_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_ir_delivery:${WEBAPP_IR_DELIVERY_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      POSTGRES_USER: webapp_ir_delivery
+      POSTGRES_PASSWORD: ${WEBAPP_IR_DELIVERY_DB_PASSWORD}
+      DR_SYNC_PEER_URLS_JSON: ${WEBAPP_IR_DR_PEERS_JSON:?required}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_IR_DR_PAIRWISE_KEYS_JSON:?required}
+    depends_on: {webapp_ir_dr_receiver: {condition: service_healthy}}
+    extra_hosts:
+      - "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}"
+    networks: [webapp_ir, webapp_ir_dr_egress]
+
+  webapp_ir_dr_projection:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [python, -m, core.dr_projection_worker]
+    environment: {<<: *webapp_ir_projection_env, TRADING_BOT_SERVICE: dr_projection_worker}
+    depends_on: {webapp_ir_dr_receiver: {condition: service_healthy}}
+    networks: [webapp_ir]
+
+  webapp_ir_effects:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [python, scripts/run_dr_effect_worker.py]
+    environment:
+      <<: *webapp_ir_app_env
+      TRADING_BOT_SERVICE: dr_effect_worker
+      DR_EFFECT_WORKER_ENABLED: "true"
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_ir_effect:${WEBAPP_IR_EFFECT_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      SMSIR_API_KEY: ${SMSIR_API_KEY:-}
+      WEB_PUSH_ENABLED: ${WEB_PUSH_ENABLED:-false}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    networks: [webapp_ir, webapp_ir_egress]
+
+  webapp_ir_blobs:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [python, -m, core.dr_blob_worker]
+    environment:
+      <<: *webapp_ir_projection_env
+      TRADING_BOT_SERVICE: dr_blob_worker
+      DATABASE_URL: postgresql+asyncpg://webapp_ir_blob:${WEBAPP_IR_BLOB_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://webapp_ir_blob:${WEBAPP_IR_BLOB_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_ir_blob:${WEBAPP_IR_BLOB_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      POSTGRES_USER: webapp_ir_blob
+      POSTGRES_PASSWORD: ${WEBAPP_IR_BLOB_DB_PASSWORD}
+      DR_SYNC_PEER_URLS_JSON: ${WEBAPP_IR_DR_PEERS_JSON:?required}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_IR_DR_PAIRWISE_KEYS_JSON:?required}
+      DR_BLOB_OBJECT_ENDPOINT: ${DR_BLOB_OBJECT_ENDPOINT:?required}
+      DR_BLOB_OBJECT_REGION: ${DR_BLOB_OBJECT_REGION:?required}
+      DR_BLOB_OBJECT_BUCKET: ${DR_BLOB_OBJECT_BUCKET:?required}
+      DR_BLOB_OBJECT_PREFIX: ${DR_BLOB_OBJECT_PREFIX:?required}
+      DR_BLOB_REQUIRE_VERSIONING: ${DR_BLOB_REQUIRE_VERSIONING:-true}
+      DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
+      DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads
+      - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
+      - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
+    depends_on: {webapp_ir_api: {condition: service_started}}
+    extra_hosts:
+      - "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}"
+    networks: [webapp_ir, webapp_ir_egress]
+
+  webapp_ir_dr_receiver:
+    profiles: [webapp-ir]
+    <<: *app
+    command: [uvicorn, dr_receiver_app:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *webapp_ir_projection_env
+      TRADING_BOT_SERVICE: dr_receiver
+      DATABASE_URL: postgresql+asyncpg://webapp_ir_receiver:${WEBAPP_IR_RECEIVER_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://webapp_ir_receiver:${WEBAPP_IR_RECEIVER_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      DR_PROJECTION_DATABASE_URL: postgresql+asyncpg://webapp_ir_receiver:${WEBAPP_IR_RECEIVER_DB_PASSWORD}@webapp_ir_db/${WEBAPP_IR_POSTGRES_DB}
+      POSTGRES_USER: webapp_ir_receiver
+      POSTGRES_PASSWORD: ${WEBAPP_IR_RECEIVER_DB_PASSWORD}
+      DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_IR_DR_PAIRWISE_KEYS_JSON:?required}
+      ORIGIN_EXPECTED_MIGRATION_REVISION: ${ORIGIN_EXPECTED_MIGRATION_REVISION:?required}
+    depends_on: {webapp_ir_db_fencing: {condition: service_completed_successfully}}
+    networks: [webapp_ir]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+
+  witness_db:
+    profiles: [witness]
+    <<: *postgres
+    environment:
+      TZ: UTC
+      POSTGRES_USER: ${WITNESS_POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${WITNESS_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${WITNESS_POSTGRES_DB:?required}
+    volumes: [witness_postgres:/var/lib/postgresql/data]
+    networks: [witness]
+
+  witness_api:
+    profiles: [witness]
+    <<: *app
+    command: [uvicorn, writer_witness_app:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      TZ: UTC
+      ENVIRONMENT: staging
+      LOGICAL_AUTHORITY: webapp
+      PHYSICAL_SITE: webapp_ir
+      WRITER_WITNESS_DATABASE_URL: postgresql+asyncpg://${WITNESS_RUNTIME_DB_USER:-writer_witness_runtime}:${WITNESS_RUNTIME_DB_PASSWORD:?required}@witness_db/${WITNESS_POSTGRES_DB}
+      WRITER_WITNESS_PRODUCT_DATABASE_USER: webapp_ir_app
+      WRITER_WITNESS_RELEASE_SHA: ${STAGING_RELEASE_SHA}
+      WRITER_WITNESS_SERVICE_ENABLED: "true"
+      WRITER_WITNESS_PRIVATE_KEY_FILE: /run/witness-signing/private.key
+      WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
+      WRITER_WITNESS_AUTHORITATIVE_SITE: webapp_ir
+      WRITER_WITNESS_SERVICE_WEBAPP_FI_KEY_ID: ${WEBAPP_FI_WITNESS_KEY_ID:?required}
+      WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET: ${WEBAPP_FI_WITNESS_SECRET:?required}
+      WRITER_WITNESS_SERVICE_WEBAPP_IR_KEY_ID: ${WEBAPP_IR_WITNESS_KEY_ID:?required}
+      WRITER_WITNESS_SERVICE_WEBAPP_IR_SECRET: ${WEBAPP_IR_WITNESS_SECRET:?required}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_WITNESS_SIGNING_KEY:?required}:/run/witness-signing/private.key:ro
+      - witness_audit:/app/audit_trail
+    ports: ["127.0.0.1:8214:8000"]
+    depends_on: {witness_migration: {condition: service_completed_successfully}}
+    networks: [witness]
+
+  witness_role_bootstrap:
+    profiles: [witness]
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_staging_witness_database.py, bootstrap]
+    environment:
+      WRITER_WITNESS_BOOTSTRAP_DATABASE_URL: postgresql://${WITNESS_POSTGRES_USER}:${WITNESS_POSTGRES_PASSWORD}@witness_db/${WITNESS_POSTGRES_DB}
+      WRITER_WITNESS_MIGRATOR_DB_USER: ${WITNESS_MIGRATOR_DB_USER:-writer_witness_migrator}
+      WRITER_WITNESS_MIGRATOR_DB_PASSWORD: ${WITNESS_MIGRATOR_DB_PASSWORD:?required}
+      WRITER_WITNESS_RUNTIME_DB_USER: ${WITNESS_RUNTIME_DB_USER:-writer_witness_runtime}
+      WRITER_WITNESS_RUNTIME_DB_PASSWORD: ${WITNESS_RUNTIME_DB_PASSWORD:?required}
+    depends_on: {witness_db: {condition: service_healthy}}
+    networks: [witness]
+
+  witness_migration:
+    profiles: [witness]
+    <<: *app
+    restart: "no"
+    command: [python, scripts/provision_staging_witness_database.py, migrate]
+    environment:
+      WRITER_WITNESS_MIGRATOR_DATABASE_URL: postgresql://${WITNESS_MIGRATOR_DB_USER:-writer_witness_migrator}:${WITNESS_MIGRATOR_DB_PASSWORD:?required}@witness_db/${WITNESS_POSTGRES_DB}
+      WRITER_WITNESS_MIGRATOR_DB_USER: ${WITNESS_MIGRATOR_DB_USER:-writer_witness_migrator}
+      WRITER_WITNESS_RUNTIME_DB_USER: ${WITNESS_RUNTIME_DB_USER:-writer_witness_runtime}
+    depends_on: {witness_role_bootstrap: {condition: service_completed_successfully}}
+    networks: [witness]
+
+  bot_fi_dr_tls:
+    profiles: [bot-fi]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/bot-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_BOT_FI_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_BOT_FI_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {bot_fi_dr_receiver: {condition: service_healthy}}
+    ports: ["${BOT_FI_DR_BIND_ADDRESS:?required}:8443:443"]
+    networks: [bot_fi, bot_fi_ingress]
+    logging: *logging
+
+  webapp_fi_dr_tls:
+    profiles: [webapp-fi]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/webapp-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_WEBAPP_FI_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_WEBAPP_FI_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
+    ports: ["${WEBAPP_FI_DR_BIND_ADDRESS:?required}:8443:443"]
+    networks: [webapp_fi, webapp_fi_ingress]
+    logging: *logging
+
+  webapp_ir_dr_tls:
+    profiles: [webapp-ir]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/webapp-ir-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_WEBAPP_IR_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_WEBAPP_IR_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {webapp_ir_dr_receiver: {condition: service_healthy}}
+    ports: ["${WEBAPP_IR_DR_BIND_ADDRESS:?required}:8443:443"]
+    networks: [webapp_ir, webapp_ir_ingress]
+    logging: *logging
+
+  witness_dr_tls:
+    profiles: [witness]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/witness-dr.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STAGING_WITNESS_TLS_CERT:?required}:/run/tls/server.crt:ro
+      - ${STAGING_WITNESS_TLS_KEY:?required}:/run/tls/server.key:ro
+    depends_on: {witness_api: {condition: service_started}}
+    ports: ["${WITNESS_DR_BIND_ADDRESS:?required}:8444:443"]
+    networks: [witness, witness_ingress]
+    logging: *logging
+
+networks:
+  bot_fi: {internal: true}
+  webapp_fi: {internal: true}
+  webapp_ir: {internal: true}
+  witness: {internal: true}
+  # These host-level bridge networks are intentionally non-internal. Host
+  # firewall rules must restrict their published/egress paths to the exact
+  # signed inventory peers before services are started.
+  bot_fi_dr_egress: {}
+  webapp_fi_dr_egress: {}
+  webapp_ir_dr_egress: {}
+  writer_witness_egress: {}
+  bot_fi_ingress: {}
+  webapp_fi_ingress: {}
+  webapp_ir_ingress: {}
+  witness_ingress: {}
+  bot_fi_egress: {}
+  webapp_fi_egress: {}
+  webapp_ir_egress: {}
+
+volumes:
+  bot_fi_postgres: {}
+  bot_fi_redis: {}
+  bot_fi_uploads: {}
+  bot_fi_audit: {}
+  webapp_fi_postgres: {}
+  webapp_fi_redis: {}
+  webapp_fi_uploads: {}
+  webapp_fi_audit: {}
+  webapp_ir_postgres: {}
+  webapp_ir_redis: {}
+  webapp_ir_uploads: {}
+  webapp_ir_audit: {}
+  witness_postgres: {}
+  witness_audit: {}

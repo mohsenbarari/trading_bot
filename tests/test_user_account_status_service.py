@@ -65,6 +65,18 @@ class UserAccountStatusHelperTests(unittest.TestCase):
 
 
 class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.enqueue_account_notice = AsyncMock()
+        self.enqueue_account_notice_patcher = patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_status_telegram_notification_once",
+            new=self.enqueue_account_notice,
+        )
+        self.enqueue_account_notice_patcher.start()
+
+    async def asyncTearDown(self):
+        self.enqueue_account_notice_patcher.stop()
+
     async def test_build_activation_join_line_closes_bot_and_tolerates_failures(self):
         bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
 
@@ -121,8 +133,9 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_notification.await_args.args[1], 7)
         self.assertEqual(create_notification.await_args.args[3], NotificationLevel.WARNING)
         self.assertEqual(create_notification.await_args.args[4], NotificationCategory.SYSTEM)
-        send_telegram.assert_awaited_once()
-        remove_from_channel.assert_awaited_once_with(71)
+        send_telegram.assert_not_awaited()
+        remove_from_channel.assert_not_awaited()
+        self.enqueue_account_notice.assert_awaited_once()
 
     async def test_transition_user_account_status_logs_channel_removal_failure(self):
         user = SimpleNamespace(
@@ -147,7 +160,57 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
             result = await status_service.transition_user_account_status(SimpleNamespace(), user, UserAccountStatus.INACTIVE)
 
         self.assertTrue(result.changed)
-        log_exception.assert_called_once()
+        log_exception.assert_not_called()
+        self.enqueue_account_notice.assert_awaited_once()
+
+    async def test_queue_owner_persists_account_notice_without_direct_send(self):
+        now = datetime(2026, 5, 18, 12, 0, 0)
+        user = SimpleNamespace(
+            id=27,
+            telegram_id=271,
+            account_status=UserAccountStatus.ACTIVE,
+            deactivated_at=None,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+            sync_version=4,
+        )
+        queue_runtime = SimpleNamespace(
+            mode=status_service.TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+        with patch.object(status_service, "_utcnow_naive", return_value=now), patch.object(
+            status_service,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_account_status_service.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send, patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_status_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue, patch(
+            "core.services.user_account_status_service.remove_user_from_telegram_channel",
+            new=AsyncMock(),
+        ):
+            result = await status_service.transition_user_account_status(
+                SimpleNamespace(),
+                user,
+                UserAccountStatus.INACTIVE,
+            )
+
+        self.assertTrue(result.changed)
+        direct_send.assert_not_awaited()
+        enqueue.assert_awaited_once()
+        self.assertEqual(
+            enqueue.await_args.kwargs["account_status"],
+            UserAccountStatus.INACTIVE,
+        )
+        self.assertFalse(enqueue.await_args.kwargs["messenger_blocked"])
+        self.assertEqual(enqueue.await_args.kwargs["user_sync_version"], 4)
+        self.assertIn("account-inactive:27:", enqueue.await_args.kwargs["source_id"])
 
     async def test_transition_user_account_status_reactivates_and_attaches_join_line(self):
         user = SimpleNamespace(
@@ -179,8 +242,9 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(user.messenger_grace_expires_at)
         self.assertIsNone(user.messenger_blocked_at)
         create_notification.assert_awaited_once()
-        send_telegram.assert_awaited_once()
-        self.assertIn("درخواست عضویت", send_telegram.await_args.args[1])
+        send_telegram.assert_not_awaited()
+        self.enqueue_account_notice.assert_awaited_once()
+        self.assertIn("درخواست عضویت", self.enqueue_account_notice.await_args.kwargs["text"])
 
     async def test_transition_user_account_status_is_idempotent_for_existing_inactive_state(self):
         now = datetime(2026, 5, 18, 12, 0, 0)
@@ -260,8 +324,68 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(blocked_count, 1)
         self.assertEqual(owner.messenger_blocked_at, now)
         self.assertEqual(create_notification.await_count, 2)
-        self.assertEqual(send_telegram.await_count, 2)
+        self.assertEqual(send_telegram.await_count, 0)
+        self.assertEqual(self.enqueue_account_notice.await_count, 2)
         force_clear_sessions.assert_awaited_once_with(db, owner.id)
+
+    async def test_queue_owner_uses_timed_security_for_due_global_lock(self):
+        now = datetime(2026, 5, 18, 12, 0, 0)
+        owner = SimpleNamespace(
+            id=11,
+            telegram_id=111,
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_grace_expires_at=now - timedelta(minutes=5),
+            messenger_blocked_at=None,
+            is_deleted=False,
+            sync_version=8,
+        )
+        accountant_user = SimpleNamespace(
+            id=12,
+            telegram_id=222,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            sync_version=9,
+        )
+        relation = SimpleNamespace(accountant_user=accountant_user)
+        db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult([owner])))
+        queue_runtime = SimpleNamespace(
+            mode=status_service.TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+
+        with patch.object(status_service, "_utcnow_naive", return_value=now), patch.object(
+            status_service,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch.object(
+            status_service,
+            "list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[relation]),
+        ), patch(
+            "core.services.user_account_status_service.force_clear_sessions",
+            new=AsyncMock(return_value=2),
+        ), patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_account_status_service.send_telegram_notification",
+            new=AsyncMock(),
+        ) as direct_send, patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_status_telegram_notification_once",
+            new=AsyncMock(),
+        ) as enqueue:
+            blocked_count = await status_service.mark_due_users_globally_locked(db)
+
+        self.assertEqual(blocked_count, 1)
+        direct_send.assert_not_awaited()
+        self.assertEqual(enqueue.await_count, 2)
+        self.assertTrue(
+            all(
+                call.kwargs["action"]
+                == status_service.TelegramDeliveryAction.TIMED_SECURITY
+                for call in enqueue.await_args_list
+            )
+        )
 
     async def test_mark_due_users_globally_locked_handles_empty_and_failure_branches(self):
         empty_db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult([])))

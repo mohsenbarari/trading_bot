@@ -14,6 +14,11 @@ class ChatFile(Base):
     
     # مسیر فایل در S3
     s3_key = Column(String(512), nullable=False)
+    # New files use immutable content-addressed storage. Nullable during the
+    # controlled legacy-file backfill; promotion readiness rejects missing
+    # hashes.
+    content_hash = Column(String(64), nullable=True, index=True)
+    storage_version = Column(Integer, nullable=False, default=1)
     file_name = Column(String(255), nullable=False)
     mime_type = Column(String(100), nullable=False)
     

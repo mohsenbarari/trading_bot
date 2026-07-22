@@ -1,0 +1,7 @@
+{
+  "chain_count": 69,
+  "policy_sha256": "3bde2cc743fd3b3eaf7bd08503efae92ce26c164789f4d4a6bd98b916d936040",
+  "rule_count": 173,
+  "schema_version": "writer_witness_nftables_policy_v1",
+  "table_count": 2
+}

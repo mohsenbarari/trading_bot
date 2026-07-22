@@ -58,6 +58,13 @@ from core.registration_identity import normalize_account_name, normalize_mobile_
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
+from core.services.telegram_notification_outbox_service import (
+    TelegramNotificationRecipient,
+    enqueue_account_deletion_telegram_notification_once,
+)
+from core.telegram_legacy_otp_relay_contract import (
+    validate_legacy_telegram_otp_relay,
+)
 import hmac
 import hashlib
 import ipaddress
@@ -67,7 +74,14 @@ import logging
 from datetime import date as date_cls, datetime, time as time_cls, timezone
 from dataclasses import dataclass
 
-router = APIRouter()
+def _reject_legacy_sync_when_three_site_strict() -> None:
+    if bool(getattr(settings, "three_site_dr_enabled", False)) and bool(
+        getattr(settings, "dr_event_protocol_strict", False)
+    ):
+        raise HTTPException(status_code=410, detail="Legacy sync is disabled by strict DR protocol")
+
+
+router = APIRouter(dependencies=[Depends(_reject_legacy_sync_when_three_site_strict)])
 logger = logging.getLogger(__name__)
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 PRODUCTION_FULL_MATRIX_SYNC_MARKERS = ("PFM_", "PRODTEST_", "FMX_")
@@ -1409,9 +1423,6 @@ async def _run_synced_deleted_user_telegram_effects(effects: list[tuple[int, int
         return
 
     from bot.utils.redis_helpers import mark_deleted_telegram_user
-    from core.services.user_deletion_service import REMOVAL_TELEGRAM_MESSAGE, remove_user_from_telegram_channel
-    from core.utils import send_telegram_notification
-
     seen_telegram_ids: set[int] = set()
     for user_id, telegram_id in effects:
         if telegram_id in seen_telegram_ids:
@@ -1430,29 +1441,44 @@ async def _run_synced_deleted_user_telegram_effects(effects: list[tuple[int, int
                 },
             )
 
-        try:
-            await send_telegram_notification(telegram_id, REMOVAL_TELEGRAM_MESSAGE)
-        except Exception as exc:
-            logger.warning(
-                "Could not notify synced deleted Telegram user",
-                extra={
-                    "event": "sync.deleted_user_telegram_notify_failed",
-                    "user_id": user_id,
-                    **_summarize_exception(exc),
-                },
-            )
+        # Telegram delivery and membership changes are materialized by the
+        # durable outbox below and executed only by the credentialed Bot.
 
-        try:
-            await remove_user_from_telegram_channel(telegram_id)
-        except Exception as exc:
-            logger.warning(
-                "Could not remove synced deleted Telegram user from channel",
-                extra={
-                    "event": "sync.deleted_user_telegram_channel_remove_failed",
-                    "user_id": user_id,
-                    **_summarize_exception(exc),
-                },
-            )
+
+async def _enqueue_synced_deleted_user_telegram_notices(
+    db: AsyncSession,
+    effects: list[tuple[int, int]],
+) -> None:
+    if (
+        current_server() != SERVER_FOREIGN
+        or not effects
+    ):
+        return
+
+    from core.services.user_deletion_service import REMOVAL_TELEGRAM_MESSAGE
+
+    seen_telegram_ids: set[int] = set()
+    for user_id, telegram_id in effects:
+        if telegram_id in seen_telegram_ids:
+            continue
+        seen_telegram_ids.add(telegram_id)
+        deleted_user = await db.get(User, user_id)
+        if deleted_user is None:
+            raise RuntimeError("synced_deleted_user_notice_source_missing")
+        user_sync_version = int(
+            getattr(deleted_user, "sync_version", 0) or 0
+        )
+        await enqueue_account_deletion_telegram_notification_once(
+            db,
+            recipient=TelegramNotificationRecipient(
+                user_id=int(user_id),
+                telegram_id=int(telegram_id),
+            ),
+            source_id=f"account-deleted:{user_id}:{user_sync_version}",
+            text=REMOVAL_TELEGRAM_MESSAGE,
+            user=deleted_user,
+            user_sync_version=user_sync_version,
+        )
 
 
 def _nonempty_text(value) -> str | None:
@@ -3546,16 +3572,23 @@ async def receive_sync_data(
             if item.get("type") == "notification":
                 try:
                     from core.notifications import send_telegram_message
-                    chat_id = item.get("chat_id")
-                    text = item.get("text")
-                    parse_mode = item.get("parse_mode", "Markdown")
-                    if chat_id and text:
-                        await send_telegram_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
-                        processed_count += 1
-                        logger.info(f"✅ Notification relayed to {chat_id}")
+                    relay = validate_legacy_telegram_otp_relay(
+                        chat_id=item.get("chat_id"),
+                        text=item.get("text"),
+                        parse_mode=item.get("parse_mode", "Markdown"),
+                        purpose=item.get("purpose"),
+                    )
+                    await send_telegram_message(
+                        chat_id=relay.chat_id,
+                        text=relay.text,
+                        parse_mode=relay.parse_mode,
+                        purpose=relay.purpose,
+                    )
+                    processed_count += 1
+                    logger.info("Relayed validated legacy Telegram OTP")
                 except Exception as e:
                     logger.error(
-                        "Failed to relay synced notification",
+                        "Rejected or failed legacy Telegram OTP relay",
                         extra={
                             "event": "sync.notification_relay_failed",
                             **_summarize_exception(e),
@@ -3897,6 +3930,10 @@ async def receive_sync_data(
                     },
                 )
 
+        await _enqueue_synced_deleted_user_telegram_notices(
+            db,
+            synced_deleted_user_telegram_effects,
+        )
         await db.commit()
 
         # --- Fix sequences after sync to avoid ID collision ---

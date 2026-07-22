@@ -190,6 +190,19 @@ Required customer-chain assertions:
 - soft-deleted, revoked, expired, or deleted customer relations are not treated
   as active trading relations.
 
+Three-site successor enforcement:
+
+- the complete 17-family actor-pair catalog runs in normal WebApp-FI-active
+  mode;
+- the same catalog runs after WebApp-IR has acquired the outage Writer epoch;
+- it runs again during catch-up while public traffic and WebApp writes remain
+  pinned to WebApp-IR;
+- it runs after the final barrier, WebApp-IR fence, WebApp-FI epoch acquisition
+  and controlled failback;
+- every family/state cell owns a distinct retained raw artifact and exact
+  Tier1/Tier2 policy assertion; grouped application-regression evidence cannot
+  replace it.
+
 ## User State And Access Guards
 
 The full matrix must include positive and negative cases for:

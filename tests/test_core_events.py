@@ -599,6 +599,30 @@ class CoreEventsTests(unittest.TestCase):
         self.assertNotIn('bcrypt-secret', json.dumps(inserted_change_log_data))
         self.assertNotIn('chat-file-user', json.dumps(inserted_change_log_data))
 
+    def test_strict_three_site_log_change_does_not_create_legacy_backlog(self):
+        connection = _FakeConnection()
+        with patch.object(events.settings, "three_site_dr_enabled", True), patch.object(
+            events.settings, "dr_event_protocol_enabled", True
+        ), patch.object(events.settings, "dr_event_protocol_strict", True), patch(
+            "core.events.mark_sync_outbox_recorded"
+        ) as mark_recorded:
+            events.log_change(
+                connection,
+                "offers",
+                5,
+                "UPDATE",
+                {"id": 5, "status": "active"},
+            )
+
+        connection.execute.assert_not_called()
+        mark_recorded.assert_called_once_with(
+            connection,
+            "offers",
+            "UPDATE",
+            5,
+            {"id": 5, "status": "active"},
+        )
+
     def test_publish_event_sync_success_and_failure(self):
         sync_redis = _FakeSyncRedis()
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch.object(events, 'logger') as logger:
@@ -919,6 +943,7 @@ class CoreEventsTests(unittest.TestCase):
             offer_home_server='foreign',
             surface=SimpleNamespace(value='telegram_channel'),
             publication_owner_server='foreign',
+            publisher_bot_identity='primary',
             status=SimpleNamespace(value='failed'),
             dedupe_key='offer-publication:telegram_channel:ofr_event_1',
             surface_resource_id=None,
@@ -948,6 +973,7 @@ class CoreEventsTests(unittest.TestCase):
         payload = log_change.call_args_list[0].args[4]
         self.assertEqual(payload['surface'], 'telegram_channel')
         self.assertEqual(payload['publication_owner_server'], 'foreign')
+        self.assertEqual(payload['publisher_bot_identity'], 'primary')
         self.assertEqual(payload['status'], 'failed')
         self.assertEqual(payload['dedupe_key'], 'offer-publication:telegram_channel:ofr_event_1')
         self.assertEqual(payload['telegram_message_id'], 700)

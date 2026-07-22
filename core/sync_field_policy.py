@@ -10,6 +10,11 @@ from typing import Any
 
 
 SYNC_FIELD_POLICY_VERSION = 2
+# Canonical transport payloads may contain a small closed set of derived
+# identities that are not physical columns on the source table.
+SYNC_DERIVED_FIELDS = frozenset(
+    {("offer_requests", "customer_relation_invitation_token")}
+)
 
 
 class SyncFieldClassification(str, Enum):
@@ -279,6 +284,28 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         action=SyncFieldAction.DROP,
         reason="local Telegram broadcast delivery lease deadline; opposite server must not use it for execution",
     ),
+    ("telegram_admin_broadcast_receipts", "queue_job_id"): _entry(
+        "telegram_admin_broadcast_receipts",
+        "queue_job_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        references_no_sync_table="telegram_delivery_jobs",
+        reason="foreign-local binding to the no-sync shared Telegram execution queue",
+    ),
+    ("telegram_admin_broadcast_receipts", "queue_handed_off_at"): _entry(
+        "telegram_admin_broadcast_receipts",
+        "queue_handed_off_at",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="foreign-local handoff timestamp for shared Telegram queue ownership",
+    ),
+    ("telegram_admin_broadcasts", "queue_last_handed_off_at"): _entry(
+        "telegram_admin_broadcasts",
+        "queue_last_handed_off_at",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="foreign-local durable round-robin cursor for admin broadcast campaigns",
+    ),
     ("telegram_notification_outbox", "text"): _entry(
         "telegram_notification_outbox",
         "text",
@@ -327,6 +354,21 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.NO_SYNC,
         action=SyncFieldAction.DROP,
         reason="local Telegram notification outbox lease deadline; opposite server must not use it for execution",
+    ),
+    ("telegram_notification_outbox", "queue_job_id"): _entry(
+        "telegram_notification_outbox",
+        "queue_job_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        references_no_sync_table="telegram_delivery_jobs",
+        reason="foreign-local binding to the no-sync shared Telegram execution queue",
+    ),
+    ("telegram_notification_outbox", "queue_handed_off_at"): _entry(
+        "telegram_notification_outbox",
+        "queue_handed_off_at",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="foreign-local handoff timestamp for shared Telegram queue ownership",
     ),
     ("accountant_relations", "mobile_number"): _entry(
         "accountant_relations",
@@ -489,7 +531,7 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         action=SyncFieldAction.HASH,
         sensitive=True,
         output_field="endpoint_hash",
-        reason="browser push endpoints are Iran-local runtime secrets",
+        reason="legacy Bot/WebApp sync exposes only a stable endpoint identity",
     ),
     ("push_subscriptions", "p256dh"): _entry(
         "push_subscriptions",
@@ -497,7 +539,7 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.NO_SYNC,
         action=SyncFieldAction.DROP,
         sensitive=True,
-        reason="browser push key material is Iran-local runtime state",
+        reason="browser push key material never crosses the Bot/WebApp trust boundary",
     ),
     ("push_subscriptions", "auth"): _entry(
         "push_subscriptions",
@@ -505,7 +547,7 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.NO_SYNC,
         action=SyncFieldAction.DROP,
         sensitive=True,
-        reason="browser push auth secret is Iran-local runtime state",
+        reason="browser push auth secret never crosses the Bot/WebApp trust boundary",
     ),
     ("push_subscriptions", "user_agent"): _entry(
         "push_subscriptions",

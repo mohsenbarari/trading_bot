@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.render_runtime_envs import build_runtime_env, collect_runtime_values, main as render_runtime_envs_main
+from scripts.render_runtime_envs import (
+    build_runtime_env,
+    build_service_runtime_env,
+    collect_runtime_values,
+    main as render_runtime_envs_main,
+)
 
 
 class RenderRuntimeEnvsTests(unittest.TestCase):
@@ -24,6 +29,24 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "SYNC_VERIFY_TLS": "true",
             "SYNC_CA_BUNDLE": "",
             "OBSERVABILITY_API_KEY": "obs-key",
+            "RELEASE_SHA": "abc123release",
+            "IRAN_ORIGIN_READINESS_API_KEY": "origin-ready-key",
+            "ORIGIN_EXPECTED_MIGRATION_REVISION": "d2e7f8a9b0c1",
+            "ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS": "900",
+            "WRITER_WITNESS_REQUIRED": "false",
+            "WRITER_WITNESS_PUBLIC_KEY": "witness-public-key",
+            "WRITER_WITNESS_LEASE_DURATION_SECONDS": "180",
+            "WRITER_WITNESS_RENEW_INTERVAL_SECONDS": "30",
+            "WRITER_WITNESS_SAFETY_MARGIN_SECONDS": "15",
+            "WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS": "5",
+            "WRITER_WITNESS_AUTHORITATIVE_SITE": "webapp_ir",
+            "WRITER_WITNESS_HTTP_TIMEOUT_SECONDS": "3.0",
+            "WRITER_WITNESS_AUTH_MAX_AGE_SECONDS": "15",
+            "IRAN_WRITER_WITNESS_INTERNAL_URL": "https://witness.internal",
+            "IRAN_WRITER_WITNESS_CLIENT_KEY_ID": "webapp-fi-v1",
+            "IRAN_WRITER_WITNESS_CLIENT_SECRET": "fi-secret-0123456789abcdef-0123456789abcdef",
+            "IRAN_WRITER_WITNESS_VERIFY_TLS": "true",
+            "IRAN_WRITER_WITNESS_CA_BUNDLE": "/run/secrets/witness-ca.pem",
             "CHANNEL_ID": "-100123",
             "CHANNEL_INVITE_LINK": "https://t.me/example",
             "SMSIR_API_KEY": "sms-key",
@@ -53,7 +76,15 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
             "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
-            "RELEASE_SHA": "abc123release",
+            "TELEGRAM_DELIVERY_PRODUCER_MODE": "queue-v1",
+            "TELEGRAM_DELIVERY_EXECUTION_OWNER": "queue-v1",
+            "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "true",
+            "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "true",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED": "true",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN": "editor-secret",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID": "12345",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID": "67890",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": "-100123",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -95,6 +126,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values = self.sample_values()
         foreign = build_runtime_env(
             role="foreign",
+            physical_site="bot_fi",
             frontend_url="https://coin.362514.ir",
             public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
@@ -108,6 +140,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
         iran = build_runtime_env(
             role="iran",
+            physical_site="webapp_fi",
             frontend_url="https://coin.gold-trade.ir",
             public_webapp_url="https://coin.gold-trade.ir",
             foreign_server_url="https://coin.362514.ir",
@@ -122,10 +155,32 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         self.assertEqual(foreign["SERVER_MODE"], "foreign")
         self.assertEqual(iran["SERVER_MODE"], "iran")
+        self.assertEqual(foreign["LOGICAL_AUTHORITY"], "foreign")
+        self.assertEqual(foreign["PHYSICAL_SITE"], "bot_fi")
+        self.assertEqual(iran["LOGICAL_AUTHORITY"], "webapp")
+        self.assertEqual(iran["PHYSICAL_SITE"], "webapp_fi")
         self.assertEqual(foreign["API_WORKERS"], "2")
         self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
         self.assertEqual(iran["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "true")
+        self.assertEqual(foreign["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "queue-v1")
+        self.assertEqual(foreign["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+        self.assertEqual(
+            foreign["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "queue-v1"
+        )
+        self.assertEqual(
+            foreign["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
+            "editor-secret",
+        )
+        self.assertEqual(iran["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(iran["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+        self.assertEqual(
+            iran["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "queue-v1"
+        )
+        self.assertNotIn("BOT_TOKEN", iran)
+        self.assertEqual(
+            iran["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"], ""
+        )
         self.assertEqual(foreign["RELEASE_SHA"], "abc123release")
         self.assertEqual(iran["RELEASE_SHA"], "abc123release")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
@@ -156,6 +211,20 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
         self.assertEqual(foreign["OTP_DELIVERY_STATE_SECRET"], "")
+        self.assertEqual(foreign["ORIGIN_READINESS_API_KEY"], "")
+        self.assertEqual(iran["ORIGIN_READINESS_API_KEY"], "origin-ready-key")
+        self.assertEqual(iran["ORIGIN_EXPECTED_MIGRATION_REVISION"], "d2e7f8a9b0c1")
+        self.assertEqual(iran["WRITER_WITNESS_REQUIRED"], "false")
+        self.assertEqual(iran["WRITER_WITNESS_PUBLIC_KEY"], "witness-public-key")
+        self.assertEqual(iran["WRITER_WITNESS_INTERNAL_URL"], "https://witness.internal")
+        self.assertEqual(iran["WRITER_WITNESS_CLIENT_KEY_ID"], "webapp-fi-v1")
+        self.assertEqual(
+            iran["WRITER_WITNESS_CLIENT_SECRET"],
+            "fi-secret-0123456789abcdef-0123456789abcdef",
+        )
+        self.assertEqual(foreign["WRITER_WITNESS_CLIENT_SECRET"], "")
+        self.assertNotIn("IRAN_WRITER_WITNESS_CLIENT_SECRET", iran)
+        self.assertEqual(iran["RELEASE_SHA"], "abc123release")
         self.assertEqual(
             iran["OTP_DELIVERY_STATE_SECRET"],
             "iran-only-otp-state-secret-0123456789abcdef",
@@ -163,12 +232,47 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertNotIn("IRAN_OTP_DELIVERY_STATE_SECRET", foreign)
         self.assertNotIn("IRAN_OTP_DELIVERY_STATE_SECRET", iran)
 
+        foreign_api = build_service_runtime_env(
+            foreign, service="api", role="foreign"
+        )
+        foreign_bot = build_service_runtime_env(
+            foreign, service="bot", role="foreign"
+        )
+        self.assertEqual(foreign_api["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+        self.assertNotIn("BOT_TOKEN", foreign_api)
+        self.assertNotIn("TELEGRAM_DELIVERY_EXECUTION_OWNER", foreign_api)
+        self.assertNotIn("TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN", foreign_api)
+        self.assertEqual(foreign_bot["BOT_TOKEN"], "bot-token")
+        self.assertEqual(
+            foreign_bot["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
+            "editor-secret",
+        )
+        legacy_foreign = foreign.copy()
+        legacy_foreign["TELEGRAM_DELIVERY_PRODUCER_MODE"] = "legacy"
+        legacy_foreign["TELEGRAM_DELIVERY_EXECUTION_OWNER"] = "legacy"
+        legacy_api = build_service_runtime_env(
+            legacy_foreign, service="api", role="foreign"
+        )
+        self.assertEqual(legacy_api["BOT_TOKEN"], "bot-token")
+        self.assertNotIn("TELEGRAM_DELIVERY_EXECUTION_OWNER", legacy_api)
+        self.assertNotIn(
+            "BOT_TOKEN",
+            build_service_runtime_env(legacy_foreign, service="sync", role="foreign"),
+        )
+        legacy_iran = iran.copy()
+        legacy_iran["TELEGRAM_DELIVERY_PRODUCER_MODE"] = "legacy"
+        self.assertNotIn(
+            "BOT_TOKEN",
+            build_service_runtime_env(legacy_iran, service="api", role="iran"),
+        )
+
     def test_build_runtime_env_uses_iran_frontend_as_public_webapp_fallback(self):
         values = self.sample_values()
         values["PUBLIC_WEBAPP_URL"] = ""
 
         rendered = build_runtime_env(
             role="foreign",
+            physical_site="bot_fi",
             frontend_url="https://foreign.example.com",
             public_webapp_url="https://webapp.example.ir",
             foreign_server_url="https://sync.example.com",
@@ -210,6 +314,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "2",
                 "--iran-api-workers",
                 "4",
+                "--foreign-physical-site",
+                "bot_fi",
+                "--iran-physical-site",
+                "webapp_fi",
             ]
             with patch.dict(os.environ, values, clear=False):
                 with patch("sys.argv", argv):
@@ -217,9 +325,25 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
             foreign_lines = foreign_path.read_text(encoding="utf-8").splitlines()
             iran_lines = iran_path.read_text(encoding="utf-8").splitlines()
+            foreign_api_lines = Path(f"{foreign_path}.api").read_text(encoding="utf-8").splitlines()
+            foreign_bot_lines = Path(f"{foreign_path}.bot").read_text(encoding="utf-8").splitlines()
+            iran_api_lines = Path(f"{iran_path}.api").read_text(encoding="utf-8").splitlines()
 
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
+            self.assertIn("LOGICAL_AUTHORITY=foreign", foreign_lines)
+            self.assertIn("PHYSICAL_SITE=bot_fi", foreign_lines)
+            self.assertIn("LOGICAL_AUTHORITY=webapp", iran_lines)
+            self.assertIn("PHYSICAL_SITE=webapp_fi", iran_lines)
+            self.assertIn("TELEGRAM_DELIVERY_PRODUCER_MODE=queue-v1", iran_api_lines)
+            self.assertNotIn("BOT_TOKEN=bot-token", iran_lines)
+            self.assertNotIn("BOT_TOKEN=bot-token", iran_api_lines)
+            self.assertNotIn("BOT_TOKEN=bot-token", foreign_api_lines)
+            self.assertNotIn(
+                "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN=editor-secret",
+                foreign_api_lines,
+            )
+            self.assertIn("BOT_TOKEN=bot-token", foreign_bot_lines)
             self.assertIn("API_WORKERS=2", foreign_lines)
             self.assertIn("API_WORKERS=4", iran_lines)
             self.assertIn("DB_POOL_SIZE=8", iran_lines)
@@ -261,6 +385,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("RELEASE_SHA=abc123release", foreign_lines)
             self.assertIn("RELEASE_SHA=abc123release", iran_lines)
             self.assertIn("OTP_DELIVERY_STATE_SECRET=", foreign_lines)
+            self.assertIn("ORIGIN_READINESS_API_KEY=", foreign_lines)
+            self.assertIn("ORIGIN_READINESS_API_KEY=origin-ready-key", iran_lines)
+            self.assertIn(
+                "ORIGIN_EXPECTED_MIGRATION_REVISION=d2e7f8a9b0c1",
+                iran_lines,
+            )
+            self.assertIn("WRITER_WITNESS_REQUIRED=false", iran_lines)
+            self.assertIn("WRITER_WITNESS_PUBLIC_KEY=witness-public-key", iran_lines)
             self.assertIn(
                 "OTP_DELIVERY_STATE_SECRET=iran-only-otp-state-secret-0123456789abcdef",
                 iran_lines,
@@ -287,6 +419,18 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values.pop("WEB_PUSH_TTL_SECONDS")
         values.pop("WEB_PUSH_TIMEOUT_SECONDS")
         values.pop("OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")
+        for key in (
+            "TELEGRAM_DELIVERY_EXECUTION_OWNER",
+            "TELEGRAM_DELIVERY_PRODUCER_MODE",
+            "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
+            "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED",
+            "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID",
+        ):
+            values.pop(key)
         values.pop("RELEASE_SHA")
         values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
@@ -317,10 +461,41 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["WEB_PUSH_TTL_SECONDS"], "3600")
         self.assertEqual(collected["WEB_PUSH_TIMEOUT_SECONDS"], "5.0")
         self.assertEqual(collected["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "false")
+        self.assertEqual(collected["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "legacy")
+        self.assertEqual(
+            collected["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "legacy"
+        )
+        self.assertEqual(
+            collected["TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED"], "false"
+        )
         self.assertEqual(collected["RELEASE_SHA"], "")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
         self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")
+
+    def test_collect_runtime_values_derives_new_producer_key_and_rejects_split_brain(self):
+        values = self.sample_values()
+        values.pop("TELEGRAM_DELIVERY_PRODUCER_MODE")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "runtime.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                collected = collect_runtime_values(str(source_path))
+            self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+            self.assertEqual(
+                collected["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"], "queue-v1"
+            )
+
+            with patch.dict(
+                os.environ,
+                {"TELEGRAM_DELIVERY_PRODUCER_MODE": "legacy"},
+                clear=True,
+            ), self.assertRaisesRegex(SystemExit, "must match"):
+                collect_runtime_values(str(source_path))
 
 
 if __name__ == "__main__":

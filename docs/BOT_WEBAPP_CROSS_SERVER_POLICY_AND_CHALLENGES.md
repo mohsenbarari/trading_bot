@@ -7,6 +7,14 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 
 Last updated: 2026-06-19
 
+Three-site extension: the tracked
+`docs/THREE_SITE_WEBAPP_DR_FAILOVER_RECOVERY_ROADMAP_20260710.md` and
+`docs/ADR_THREE_SITE_WEBAPP_WRITER_WITNESS_LEASE_20260714.md` extend this
+two-authority policy to `bot_fi`, `webapp_fi`, and `webapp_ir`. They do not
+change offer-home or Bot/WebApp business authority rules, and the live runtime
+must still be treated as the current two-site topology until its production
+gates are explicitly closed.
+
 Implementation baseline acceptance: on 2026-06-18, the owner accepted section 16
 (`Second-pass audit findings before implementation`) and section 17
 (`Third-pass external review decisions before implementation`) as part of the implementation

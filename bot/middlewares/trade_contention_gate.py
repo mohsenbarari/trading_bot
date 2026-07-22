@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, TelegramObject, Update
 from redis.asyncio import Redis
 
 from bot.utils.trade_suggestion_messages import PRIVATE_SUGGESTION_CONFIRM_TIMEOUT
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from core.config import settings
 from core.redis import get_redis_client, pool
 from core.services.trade_contention_gate import (
@@ -155,7 +156,11 @@ class TradeContentionGateMiddleware(BaseMiddleware):
 
         confirmed = await claim_telegram_trade_confirmation(telegram_id=telegram_id, parsed=parsed)
         if confirmed is False:
-            await callback.answer(TELEGRAM_TRADE_CONFIRM_MESSAGE, show_alert=False)
+            await answer_callback_query_via_runtime(
+                callback,
+                TELEGRAM_TRADE_CONFIRM_MESSAGE,
+                show_alert=False,
+            )
             return None
         if confirmed is None:
             return await handler(event, data)
@@ -165,7 +170,11 @@ class TradeContentionGateMiddleware(BaseMiddleware):
             offer_id=parsed.offer_id,
         )
         if not lease.acquired:
-            await callback.answer(TELEGRAM_TRADE_BUSY_MESSAGE, show_alert=False)
+            await answer_callback_query_via_runtime(
+                callback,
+                TELEGRAM_TRADE_BUSY_MESSAGE,
+                show_alert=False,
+            )
             return None
 
         data["trade_contention_preconfirmed"] = True

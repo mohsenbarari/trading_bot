@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 from uuid import UUID
@@ -37,8 +38,15 @@ from core.services.telegram_offer_channel_service import (
 )
 from core.services.telegram_offer_publication_service import (
     TelegramOfferSendResult,
+    get_or_create_telegram_publication_state,
     publish_offer_to_telegram_channel_once,
     telegram_offer_send_result_from_gateway,
+)
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
 )
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
@@ -234,7 +242,13 @@ class OfferCreate(BaseModel):
         description="شناسه عمومی لفظ منبع برای تکرار",
     )
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
-    idempotency_key: Optional[str] = Field(default=None, max_length=64, description="شناسه یکتای تلاش ثبت لفظ")
+    idempotency_key: str = Field(
+        ...,
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{7,63}$",
+        description="شناسه یکتای پایدار تلاش ثبت لفظ",
+    )
 
 
 def _build_webapp_offer_creation_command(
@@ -975,6 +989,16 @@ async def send_offer_to_channel_with_result(offer: Offer, user: User) -> Telegra
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
     if current_server() != "foreign":
         return None
+    if (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        raise RuntimeError("direct_offer_channel_send_forbidden_for_queue_owner")
+    assert_telegram_provider_execution_authority()
+    if not (getattr(settings, "bot_token", None) or os.getenv("BOT_TOKEN")):
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_offer_channel_sender_has_no_provider_credentials"
+        )
 
     channel_id = settings.channel_id
     
@@ -1126,7 +1150,7 @@ async def create_offer(
     _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     actor_user = context.actor_user
-    idempotency_key = (offer_data.idempotency_key or "").strip() or None
+    idempotency_key = offer_data.idempotency_key.strip()
     republish_source_public_id = (offer_data.republished_from_public_id or "").strip()
     creation_command = _build_webapp_offer_creation_command(
         offer_data,
@@ -1347,6 +1371,10 @@ async def create_offer(
                 detail="این لفظ دیگر قابل انتشار مجدد نیست. فهرست لفظ‌های اخیر را تازه‌سازی کنید.",
             ) from exc
 
+    queue_owns_telegram_delivery = (
+        configured_telegram_delivery_producer_mode()
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
     try:
         creation_command = _build_webapp_offer_creation_command(
             offer_data,
@@ -1364,8 +1392,17 @@ async def create_offer(
             quota_policy=OfferCreationQuotaPolicy(
                 max_active_offers=ts.max_active_offers,
             ),
+            commit=not queue_owns_telegram_delivery,
+            refresh=not queue_owns_telegram_delivery,
         )
         new_offer = creation_outcome.offer
+        if queue_owns_telegram_delivery:
+            # Persist the authoritative Offer and its publication obligation in
+            # the same transaction on either home server.  The shared state is
+            # then synced; only foreign is allowed to execute Telegram work.
+            await db.flush()
+            await get_or_create_telegram_publication_state(db, new_offer)
+            await db.commit()
     except MarketOfferAdmissionError as exc:
         await _raise_market_offer_admission_rejection(
             db,
@@ -1416,6 +1453,11 @@ async def create_offer(
                 )
             raise
         _ensure_offer_replay_matches_or_conflict(existing_offer, creation_command)
+        if queue_owns_telegram_delivery:
+            # The winner may have committed between this request's insert and
+            # rollback.  Ensure its durable intent exists before replaying the
+            await get_or_create_telegram_publication_state(db, existing_offer)
+            await db.commit()
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
@@ -1478,16 +1520,18 @@ async def create_offer(
     )
     new_offer = result.scalar_one()
     
-    # ارسال idempotent به کانال تلگرام و ثبت نتیجه در publication-state
-    publish_result = await publish_offer_to_telegram_channel_once(
-        db,
-        new_offer,
-        owner_user,
-        send_offer_to_channel=send_offer_to_channel,
-    )
-    if publish_result.message_id:
-        new_offer.channel_message_id = publish_result.message_id
-        await db.commit()
+    # Queue-v1 already persisted the intent atomically above. Legacy retains
+    # the existing synchronous publication behavior until the ownership cutover.
+    if not queue_owns_telegram_delivery:
+        publish_result = await publish_offer_to_telegram_channel_once(
+            db,
+            new_offer,
+            owner_user,
+            send_offer_to_channel=send_offer_to_channel,
+        )
+        if publish_result.message_id:
+            new_offer.channel_message_id = publish_result.message_id
+            await db.commit()
 
     log_trading_event(
         logger,

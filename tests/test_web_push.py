@@ -113,7 +113,76 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preferences.policy, SyncPolicy.SYNC)
         self.assertIn("notification routing policy", preferences.side_effect_classification)
         self.assertEqual(subscriptions.policy, SyncPolicy.NO_SYNC)
-        self.assertIn("iran Web Push runtime only", subscriptions.side_effect_classification)
+        self.assertIn("never project to Bot-FI", subscriptions.side_effect_classification)
+        self.assertIn("WebApp-FI/WebApp-IR", subscriptions.conflict_rule)
+
+    async def test_durable_effect_executes_exactly_one_subscription(self):
+        endpoint_hash = "a" * 64
+        subscription = SimpleNamespace(
+            id=17,
+            user_id=7,
+            endpoint="https://push.example.test/subscription/one",
+            endpoint_hash=endpoint_hash,
+            p256dh="p256dh",
+            auth="auth",
+            enabled=True,
+            failure_count=2,
+            last_success_at=None,
+            last_failure_at=None,
+            last_error="old",
+        )
+        db = SimpleNamespace(
+            scalar=AsyncMock(return_value=subscription),
+            flush=AsyncMock(),
+        )
+        payload = {
+            "user_id": 7,
+            "subscription_id": 17,
+            "endpoint_hash": endpoint_hash,
+            "push_payload": {"title": "one"},
+        }
+        with patch.object(web_push, "is_web_push_configured", return_value=True), patch.object(
+            web_push.asyncio, "to_thread", new=AsyncMock()
+        ) as provider, patch(
+            "core.production_test_isolation.should_suppress_web_push_for_user",
+            new=AsyncMock(return_value=False),
+        ), patch.multiple(
+            web_push.settings,
+            three_site_dr_enabled=False,
+            web_push_vapid_private_key="private",
+            web_push_vapid_subject="mailto:test@example.com",
+        ):
+            result = await web_push.execute_web_push_effect(db, payload)
+
+        self.assertEqual(result.outcome, "succeeded")
+        provider.assert_awaited_once()
+        db.flush.assert_awaited_once()
+        self.assertIn(endpoint_hash, result.receipt)
+        self.assertEqual(subscription.failure_count, 0)
+
+    async def test_durable_effect_does_not_call_provider_for_missing_subscription(self):
+        endpoint_hash = "b" * 64
+        db = SimpleNamespace(
+            scalar=AsyncMock(return_value=None),
+            flush=AsyncMock(),
+        )
+        with patch.object(web_push, "is_web_push_configured", return_value=True), patch.object(
+            web_push.asyncio, "to_thread", new=AsyncMock()
+        ) as provider, patch.multiple(web_push.settings, three_site_dr_enabled=False):
+            result = await web_push.execute_web_push_effect(
+                db,
+                {
+                    "user_id": 7,
+                    "subscription_id": 19,
+                    "endpoint_hash": endpoint_hash,
+                    "push_payload": {"title": "gone"},
+                },
+            )
+
+        self.assertEqual(result.outcome, "succeeded")
+        self.assertIn("subscription_absent_or_disabled", result.receipt)
+        provider.assert_not_awaited()
+        db.flush.assert_not_awaited()
 
     def test_notification_payload_defaults_to_notification_center_route(self):
         notification = type(
@@ -381,6 +450,20 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
             task.callback(FakeDoneTask())
 
         exception_mock.assert_not_called()
+
+    def test_strict_three_site_scheduler_never_creates_detached_task(self):
+        loop = SimpleNamespace(create_task=Mock())
+        with patch.object(web_push, "is_web_push_configured", return_value=True), patch.object(
+            web_push.asyncio, "get_running_loop", return_value=loop
+        ), patch.multiple(
+            web_push.settings,
+            three_site_dr_enabled=True,
+            dr_event_protocol_strict=True,
+        ):
+            web_push.schedule_market_offer_web_push(42)
+            web_push.schedule_notification_web_push(9)
+
+        loop.create_task.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -8,6 +8,30 @@ Status: staging-only implementation and evidence contract. Do not merge,
 release, or run production from this document. This matrix is for the real Iran
 and foreign staging environments and must remain isolated from production.
 
+## Three-Site Successor Boundary — 2026-07-19
+
+This document remains the two-server regression baseline; it is no longer the
+complete final gate for the three-site DR architecture. The authoritative final
+campaign must run on the official project staging deployment at
+`staging.gold-trade.ir` and include Bot-FI, WebApp-FI, WebApp-IR, and Witness as
+defined by Stages 9 and 10 of
+`THREE_SITE_WEBAPP_DR_FAILOVER_RECOVERY_ROADMAP_20260710.md`.
+
+Early Arvan/CDN experiments may use `app.gold-trading.ir`, but only as a second
+ingress to that same official staging release and data plane. Evidence from a
+separate test-domain deployment cannot replace the official staging Full
+Matrix. The two-server cases below remain required regression coverage inside
+the larger three-site campaign.
+
+The successor campaign strengthens controlled outage coverage for customer
+chains. All 17 actor-pair families must produce distinct evidence in four
+materially different lifecycle states: normal WebApp-FI Writer, outage-active
+WebApp-IR Writer, recovery while public traffic remains on WebApp-IR, and the
+post-failback WebApp-FI state. This does not multiply every offer shape and
+contention overlay into every customer cell, but it makes every customer policy
+outcome, owner route, counterparty-privacy rule, notification route and final
+convergence assertion mandatory in every lifecycle state.
+
 ## Goal
 
 Build a complete, controlled full matrix for the Bot/WebApp release gate that

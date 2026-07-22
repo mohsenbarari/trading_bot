@@ -63,6 +63,9 @@ class BotTradeHistoryBackToProfileTests(unittest.IsolatedAsyncioTestCase):
         callback = make_callback()
         user = SimpleNamespace(id=2, account_name="self", full_name="Self User", telegram_id=99, role=SimpleNamespace(value="role"))
         with patch("core.config.settings.bot_username", "botname"), patch(
+            "bot.handlers.trade_history.attach_customer_management_names",
+            new=AsyncMock(),
+        ), patch(
             "bot.keyboards.get_user_panel_keyboard", return_value="KB"
         ):
             await back_to_profile(callback, SimpleNamespace(target_user_id=2), state=SimpleNamespace(), user=user)

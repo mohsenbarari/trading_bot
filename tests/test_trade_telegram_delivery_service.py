@@ -259,6 +259,14 @@ class TradeTelegramClassifierTests(unittest.TestCase):
 
 
 class TradeTelegramDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _queue_runtime():
+        return SimpleNamespace(
+            mode=service.TelegramDeliveryRuntimeMode.QUEUE_V1,
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+
     async def test_iran_cannot_execute_telegram_delivery(self):
         receipt = make_receipt()
         db = FakeDB()
@@ -276,6 +284,68 @@ class TradeTelegramDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.PROCESSING)
         gateway_send.assert_not_awaited()
         self.assertEqual(db.commit_count, 0)
+
+    async def test_queue_owner_rejects_direct_claimed_delivery_before_side_effect(self):
+        receipt = make_receipt()
+        db = FakeDB()
+        gateway_send = AsyncMock()
+
+        with patch(
+            "core.services.trade_telegram_delivery_service."
+            "configured_telegram_delivery_runtime",
+            return_value=self._queue_runtime(),
+        ), self.assertRaisesRegex(
+            service.TelegramDeliveryRuntimeConfigurationError,
+            "direct_sender_is_not_runtime_owner",
+        ):
+            await service.deliver_claimed_telegram_receipt(
+                db,
+                receipt=receipt,
+                current_server="foreign",
+                gateway_send=gateway_send,
+                now=NOW,
+            )
+
+        self.assertEqual(db.execute_calls, [])
+        self.assertEqual(db.commit_count, 0)
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.PROCESSING)
+        gateway_send.assert_not_awaited()
+
+    async def test_queue_owner_upserts_intent_without_claim_or_direct_send(self):
+        db = FakeDB([FakeScalarResult()])
+        gateway_send = AsyncMock()
+
+        with patch(
+            "core.services.trade_telegram_delivery_service."
+            "configured_telegram_delivery_producer_mode",
+            return_value=service.TelegramDeliveryRuntimeMode.QUEUE_V1,
+        ):
+            result = await service.deliver_telegram_trade_notification(
+                db,
+                trade_number=10025,
+                recipient_user_id=20,
+                message="trade message",
+                current_server="foreign",
+                telegram_id=9020,
+                trade_id=501,
+                offer_id=77,
+                recipient_role="responder",
+                event_created_at=NOW,
+                gateway_send=gateway_send,
+                now=NOW,
+            )
+
+        self.assertEqual(
+            result.status,
+            service.TELEGRAM_DELIVERY_STATUS_QUEUED_FOR_MAIN_QUEUE,
+        )
+        self.assertTrue(result.receipt_created)
+        self.assertEqual(result.receipt.status, TradeDeliveryReceiptStatus.PENDING)
+        self.assertIsNone(result.receipt.worker_id)
+        self.assertIsNone(result.receipt.lease_until)
+        self.assertEqual(len(db.execute_calls), 1)
+        self.assertEqual(db.commit_count, 1)
+        gateway_send.assert_not_awaited()
 
     async def test_success_marks_receipt_sent_with_telegram_message_id(self):
         receipt = make_receipt()

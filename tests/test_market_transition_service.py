@@ -7,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from core.services.market_schedule_service import MarketScheduleEvaluation
 from core.services import market_transition_service
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from models.market_runtime_state import MarketRuntimeState
 from models.offer import OfferStatus
 
@@ -46,8 +47,15 @@ class _FakeAsyncClient:
 class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         market_transition_service.invalidate_market_runtime_view_cache()
+        self.bot_credential = patch.object(
+            market_transition_service.settings,
+            "bot_token",
+            "test-bot-token",
+        )
+        self.bot_credential.start()
 
     def tearDown(self):
+        self.bot_credential.stop()
         market_transition_service.invalidate_market_runtime_view_cache()
 
     def test_runtime_helper_functions_cover_default_and_naive_times(self):
@@ -121,6 +129,89 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             json={"chat_id": "@market", "text": "market opened"},
             timeout=10,
         )
+
+    async def test_direct_market_sender_refuses_queue_owner_before_gateway(self):
+        queue_runtime = SimpleNamespace(
+            mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+            queue_worker_enabled=True,
+            legacy_workers_enabled=False,
+        )
+        with patch(
+            "core.services.market_transition_service.configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "@market",
+        ), patch(
+            "core.services.market_transition_service.telegram_gateway.send_message",
+            new=AsyncMock(),
+        ) as gateway:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "legacy_market_notice_sender_is_not_runtime_owner",
+            ):
+                await market_transition_service._send_market_channel_notice("opened")
+        gateway.assert_not_awaited()
+
+    async def test_queue_mode_commits_receipt_without_direct_telegram_call(self):
+        now = datetime(2026, 6, 28, 5, 31, tzinfo=timezone.utc)
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+        receipt = SimpleNamespace(
+            status=market_transition_service.MARKET_NOTICE_STATUS_PENDING,
+            attempt_count=0,
+            last_error_class=None,
+            next_retry_at=None,
+            last_attempt_at=None,
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        queue_runtime = SimpleNamespace(
+            mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+            queue_worker_enabled=True,
+            legacy_workers_enabled=False,
+        )
+
+        with patch(
+            "core.services.market_transition_service.current_server",
+            return_value="foreign",
+        ), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "-1001",
+        ), patch.object(
+            market_transition_service,
+            "utc_now",
+            return_value=now,
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch(
+            "core.services.market_transition_service.configured_telegram_delivery_producer_mode",
+            return_value=queue_runtime.mode,
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(),
+        ) as send_mock:
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "queued")
+        self.assertEqual(receipt.channel_id, "-1001")
+        self.assertEqual(receipt.attempt_count, 0)
+        self.assertIsNone(receipt.last_attempt_at)
+        db.commit.assert_awaited_once()
+        send_mock.assert_not_awaited()
 
     def test_market_channel_notice_dedupe_key_is_stable_and_transition_sensitive(self):
         transition_at = datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc)

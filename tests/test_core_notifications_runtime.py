@@ -4,24 +4,38 @@ from unittest.mock import AsyncMock, patch
 
 from core import notifications
 
+OTP_TEXT = '🔐 کد ورود شما: `12345`\n\nاین کد تا ۲ دقیقه معتبر است.'
+
 
 class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strict_webapp_cannot_emit_unbound_telegram_effect(self):
+        identity = SimpleNamespace(is_webapp_authority=True)
+        with patch.object(notifications.settings, "three_site_dr_enabled", True), patch.object(
+            notifications.settings, "dr_event_protocol_strict", True
+        ), patch("core.notifications.resolve_runtime_identity", return_value=identity), patch.object(
+            notifications.telegram_gateway, "send_message", new=AsyncMock()
+        ) as gateway_send:
+            with self.assertRaises(RuntimeError):
+                await notifications.send_telegram_message(2, "hello")
+        gateway_send.assert_not_awaited()
+
     async def test_send_telegram_message_relays_from_iran(self):
         with patch.object(notifications.settings, 'server_mode', 'iran'), patch(
             'core.notifications.push_sync_direct'
         ) as push_sync_direct:
-            await notifications.send_telegram_message(1, 'hello', parse_mode='HTML')
+            await notifications.send_telegram_message(1, OTP_TEXT)
 
         push_sync_direct.assert_called_once()
         payload = push_sync_direct.call_args.args[0]
         self.assertEqual(payload['chat_id'], 1)
-        self.assertEqual(payload['parse_mode'], 'HTML')
+        self.assertEqual(payload['parse_mode'], 'Markdown')
+        self.assertEqual(payload['purpose'], 'legacy_login_otp')
 
     async def test_send_telegram_message_logs_relay_failures(self):
         with patch.object(notifications.settings, 'server_mode', 'iran'), patch(
             'core.notifications.push_sync_direct', side_effect=RuntimeError('down')
         ), patch.object(notifications, 'logger') as logger:
-            await notifications.send_telegram_message(1, 'hello')
+            await notifications.send_telegram_message(1, OTP_TEXT)
 
         logger.warning.assert_called_once()
 
@@ -30,12 +44,12 @@ class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(notifications.settings, 'server_mode', 'foreign'), patch.object(
             notifications.settings, 'bot_token', 'token'
         ), patch.object(notifications.telegram_gateway, "send_message", gateway_send):
-            await notifications.send_telegram_message(2, 'hello')
+            await notifications.send_telegram_message(2, OTP_TEXT)
         gateway_send.assert_awaited_once_with(
             2,
-            'hello',
+            OTP_TEXT,
             parse_mode='Markdown',
-            idempotency_key='notification:2',
+            idempotency_key='legacy-login-otp:2',
         )
 
         failing_send = AsyncMock(return_value=SimpleNamespace(ok=False, error="boom", status_code=None))
@@ -45,7 +59,7 @@ class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             notifications, 'logger'
         ) as logger:
             with self.assertRaises(RuntimeError):
-                await notifications.send_telegram_message(2, 'hello')
+                await notifications.send_telegram_message(2, OTP_TEXT)
 
         logger.error.assert_called_once()
 

@@ -31,6 +31,11 @@ from core.services.offer_expiry_service import (
     expire_offers_authoritatively,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_runtime,
+)
 from core.utils import utc_now_naive
 from models.offer import Offer, OfferStatus
 
@@ -73,6 +78,12 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
     """Remove inline keyboard from a channel message via Telegram API."""
     if current_server() != "foreign":
         return
+    if (
+        configured_telegram_delivery_runtime().mode
+        == TelegramDeliveryRuntimeMode.QUEUE_V1
+    ):
+        return
+    assert_telegram_provider_execution_authority()
 
     channel_id = settings.channel_id
     

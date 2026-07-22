@@ -1,0 +1,97 @@
+name: writer-witness-drill
+
+x-postgres: &postgres
+  image: postgres:15-alpine
+  restart: "no"
+  command: postgres -c timezone=UTC -c log_timezone=UTC
+  tmpfs:
+    - /var/lib/postgresql/data
+  networks:
+    - drill
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    interval: 1s
+    timeout: 3s
+    retries: 30
+
+services:
+  bot_db:
+    <<: *postgres
+    environment:
+      POSTGRES_USER: drill_bot
+      POSTGRES_PASSWORD: drill-only-bot-password
+      POSTGRES_DB: stage4_writer_witness_drill_bot
+
+  webapp_fi_db:
+    <<: *postgres
+    environment:
+      POSTGRES_USER: drill_webapp_fi
+      POSTGRES_PASSWORD: drill-only-fi-password
+      POSTGRES_DB: stage4_writer_witness_drill_webapp_fi
+
+  webapp_ir_db:
+    <<: *postgres
+    environment:
+      POSTGRES_USER: drill_webapp_ir
+      POSTGRES_PASSWORD: drill-only-ir-password
+      POSTGRES_DB: stage4_writer_witness_drill_webapp_ir
+
+  witness_db:
+    <<: *postgres
+    environment:
+      POSTGRES_USER: drill_witness
+      POSTGRES_PASSWORD: drill-only-witness-password
+      POSTGRES_DB: stage4_writer_witness_drill_witness
+
+  postgres_gate_db:
+    <<: *postgres
+    environment:
+      POSTGRES_USER: drill_gate
+      POSTGRES_PASSWORD: drill-only-gate-password
+      POSTGRES_DB: stage4_registration_writerfence_matrix
+
+  runner:
+    image: ${WRITER_WITNESS_DRILL_RUNNER_IMAGE:-trading_bot_base}
+    restart: "no"
+    working_dir: /app
+    command: ["python", "scripts/run_writer_witness_failure_drill.py", "core"]
+    volumes:
+      - ../../core:/app/core:ro
+      - ../../models:/app/models:ro
+      - ../../scripts:/app/scripts:ro
+      - ../../deploy:/app/deploy:ro
+      - ../../tests:/app/tests:ro
+      - ../../writer_witness_app.py:/app/writer_witness_app.py:ro
+    environment:
+      PYTHONPATH: /app
+      SERVER_MODE: iran
+      DATABASE_URL: postgresql+asyncpg://drill_webapp_fi:drill-only-fi-password@webapp_fi_db/stage4_writer_witness_drill_webapp_fi
+      SYNC_DATABASE_URL: postgresql+asyncpg://drill_webapp_fi:drill-only-fi-password@webapp_fi_db/stage4_writer_witness_drill_webapp_fi
+      POSTGRES_USER: drill_webapp_fi
+      POSTGRES_PASSWORD: drill-only-fi-password
+      POSTGRES_DB: stage4_writer_witness_drill_webapp_fi
+      FRONTEND_URL: http://webapp-fi.drill
+      REDIS_URL: redis://redis-unavailable.drill/0
+      JWT_SECRET_KEY: drill-only-jwt-secret-0123456789abcdef
+      WRITER_WITNESS_DRILL_BOT_DATABASE_URL: postgresql+asyncpg://drill_bot:drill-only-bot-password@bot_db/stage4_writer_witness_drill_bot
+      WRITER_WITNESS_DRILL_FI_DATABASE_URL: postgresql+asyncpg://drill_webapp_fi:drill-only-fi-password@webapp_fi_db/stage4_writer_witness_drill_webapp_fi
+      WRITER_WITNESS_DRILL_IR_DATABASE_URL: postgresql+asyncpg://drill_webapp_ir:drill-only-ir-password@webapp_ir_db/stage4_writer_witness_drill_webapp_ir
+      WRITER_WITNESS_DRILL_DATABASE_URL: postgresql+asyncpg://drill_witness:drill-only-witness-password@witness_db/stage4_writer_witness_drill_witness
+      WRITER_FENCING_TEST_DATABASE_URL: postgresql+asyncpg://drill_gate:drill-only-gate-password@postgres_gate_db/stage4_registration_writerfence_matrix
+    depends_on:
+      bot_db:
+        condition: service_healthy
+      webapp_fi_db:
+        condition: service_healthy
+      webapp_ir_db:
+        condition: service_healthy
+      witness_db:
+        condition: service_healthy
+      postgres_gate_db:
+        condition: service_healthy
+    networks:
+      - drill
+
+networks:
+  drill:
+    internal: true

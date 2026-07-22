@@ -28,6 +28,11 @@ from core import telegram_gateway
 from core.enums import NotificationLevel, NotificationCategory
 from core.registration_identity import normalize_account_name, normalize_persian_numerals
 from core.redis import pool
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_runtime,
+)
 from models.notification import Notification
 
 # Type hints for User model (avoid circular import)
@@ -190,6 +195,16 @@ def unique_user_ids(user_ids: list[object]) -> list[int]:
 
 # ===== TELEGRAM UTILITIES =====
 
+
+def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_core_utils_direct_sender_is_not_runtime_owner"
+        )
+
+
 async def send_deletable_message(
     bot: Bot,
     chat_id: int,
@@ -207,6 +222,8 @@ async def send_deletable_message(
         delay_seconds: تأخیر قبل از حذف (ثانیه)
         **kwargs: آرگومان‌های اضافی برای send_message
     """
+    _assert_legacy_direct_delivery_owner()
+
     async def _delete_task(message: Message, delay: int) -> None:
         await asyncio.sleep(delay)
         try:
@@ -233,6 +250,7 @@ async def send_telegram_notification(telegram_id: int, message: str) -> bool:
     Returns:
         True اگر ارسال موفق بود
     """
+    _assert_legacy_direct_delivery_owner()
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token:
         logger.warning("BOT_TOKEN not found in environment")

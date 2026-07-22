@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from api.routers import trades
 from core.enums import NotificationCategory, NotificationLevel
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.offer import OfferStatus
 
@@ -692,10 +693,36 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(trades._queue_trade_telegram_message(background_tasks, 1, "hello"))
         background_tasks.add_task.assert_called_once_with(trades.send_telegram_message_sync, 1, "hello")
 
+    async def test_queue_owner_rejects_legacy_trade_router_senders(self):
+        queue_runtime = SimpleNamespace(
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        with patch.object(
+            trades,
+            "configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch.object(trades.telegram_gateway, "send_message", new=AsyncMock()) as send:
+            with self.assertRaises(
+                trades.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await trades.send_telegram_message(1, "hello")
+            with self.assertRaises(
+                trades.TelegramDeliveryRuntimeConfigurationError
+            ):
+                trades.send_telegram_message_sync(1, "hello")
+
+        send.assert_not_awaited()
+
     def test_completed_trade_path_uses_receipt_delivery_not_direct_telegram_helpers(self):
         source = inspect.getsource(trades._execute_trade_authoritatively)
 
         self.assertIn("_queue_trade_completion_delivery_repair", source)
+        self.assertIn("persist_trade_completion_delivery_intents", source)
+        self.assertLess(
+            source.index("persist_trade_completion_delivery_intents"),
+            source.index("_commit_trade_execution"),
+        )
         self.assertNotIn("_queue_trade_telegram_message(", source)
         self.assertNotIn("send_telegram_message_sync", source)
         self.assertNotIn("_legacy_create_user_notification", source)
@@ -785,6 +812,38 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         ), patch.object(trades, "logger") as logger:
             self.assertFalse(await trades.update_channel_buttons(active_offer))
         logger.error.assert_called_once()
+
+    async def test_queue_owner_short_circuits_all_legacy_channel_button_helpers(self):
+        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+        offer = SimpleNamespace(channel_message_id=123)
+        with patch(
+            "api.routers.trades.configured_telegram_delivery_runtime",
+            return_value=runtime,
+        ), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+        ) as client_ctor, patch(
+            "asyncio.new_event_loop",
+        ) as loop_ctor:
+            self.assertTrue(await trades.update_channel_buttons(offer))
+            self.assertTrue(
+                trades.update_channel_buttons_sync(
+                    1,
+                    5,
+                    OfferStatus.ACTIVE,
+                    None,
+                )
+            )
+            self.assertTrue(
+                await trades._update_channel_buttons_async(
+                    1,
+                    5,
+                    OfferStatus.ACTIVE,
+                    None,
+                )
+            )
+
+        client_ctor.assert_not_called()
+        loop_ctor.assert_not_called()
 
     async def test_sync_channel_update_and_expiry_helpers(self):
         with patch("api.routers.trades.os.getenv", return_value=None):
@@ -878,18 +937,14 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.COMPLETED, [10, 8]))
-        text_call, markup_call = client_ctor.return_value.post.await_args_list
+        self.assertEqual(client_ctor.return_value.post.await_count, 1)
+        text_call = client_ctor.return_value.post.await_args
         text_payload = text_call.kwargs["json"]
-        markup_payload = markup_call.kwargs["json"]
         self.assertTrue(text_call.args[0].endswith("/editMessageText"))
         self.assertEqual(text_payload["chat_id"], -100)
         self.assertEqual(text_payload["message_id"], 322)
-        self.assertNotIn("reply_markup", text_payload)
+        self.assertEqual(text_payload["reply_markup"], {"inline_keyboard": []})
         self.assertIn("🤝 ✅", text_payload["text"])
-        self.assertTrue(markup_call.args[0].endswith("/editMessageReplyMarkup"))
-        self.assertEqual(markup_payload["chat_id"], -100)
-        self.assertEqual(markup_payload["message_id"], 322)
-        self.assertNotIn("reply_markup", markup_payload)
 
         aware = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
         naive = datetime(2025, 1, 1, 12, 0)

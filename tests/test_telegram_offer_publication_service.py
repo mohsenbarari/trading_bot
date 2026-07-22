@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.exc import IntegrityError
 
 from core.services import telegram_offer_publication_service as publication_service
+from core.services.offer_publication_state_service import (
+    CanonicalPublicationIdentityError,
+)
 from models.offer import OfferStatus
 from models.offer_publication_state import OfferPublicationStatus, OfferPublicationSurface
 
@@ -69,6 +72,37 @@ def make_offer(**overrides):
 
 
 class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_owner_rejects_legacy_direct_publication_before_side_effects(self):
+        offer = make_offer()
+        db = FakeDB()
+        send_mock = AsyncMock(return_value=777)
+
+        with patch.object(
+            publication_service,
+            "configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(
+                legacy_workers_enabled=False,
+                queue_worker_enabled=True,
+            ),
+        ), patch.object(
+            publication_service,
+            "current_server",
+            return_value="foreign",
+        ) as server_mock:
+            with self.assertRaises(
+                publication_service.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await publication_service.publish_offer_to_telegram_channel_once(
+                    db,
+                    offer,
+                    SimpleNamespace(id=1),
+                    send_offer_to_channel=send_mock,
+                )
+
+        server_mock.assert_not_called()
+        send_mock.assert_not_awaited()
+        self.assertEqual(db.execute_calls, [])
+
     async def test_get_or_create_recovers_from_duplicate_insert_race(self):
         offer = make_offer()
         existing = publication_service.build_offer_publication_state(
@@ -77,6 +111,7 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
             status=OfferPublicationStatus.SENT,
         )
         existing.telegram_message_id = 555
+        existing.telegram_chat_id = -100
         db = FakeDB(
             flush_error=IntegrityError("insert", {}, Exception("duplicate key")),
             race_state=existing,
@@ -96,6 +131,7 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
             status=OfferPublicationStatus.SENT,
         )
         state.telegram_message_id = 555
+        state.telegram_chat_id = -100
         state.surface_resource_id = "555"
         db = FakeDB(state=state)
         send_mock = AsyncMock(return_value=999)
@@ -125,6 +161,7 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
             status=OfferPublicationStatus.SENT,
         )
         state.telegram_message_id = 556
+        state.telegram_chat_id = -100
         state.surface_resource_id = "556"
         db = FakeDB(state=state)
 
@@ -148,6 +185,45 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.skipped_reason, "already_published")
         self.assertEqual(offer.version_id, 2)
         send_mock.assert_not_awaited()
+
+    def test_publication_state_message_identity_wins_over_legacy_offer_mirror(self):
+        offer = make_offer(channel_message_id=999)
+        state = publication_service.build_offer_publication_state(
+            offer,
+            OfferPublicationSurface.TELEGRAM_CHANNEL,
+            status=OfferPublicationStatus.SENT,
+        )
+        state.telegram_chat_id = -100
+        state.telegram_message_id = 555
+        state.surface_resource_id = "555"
+
+        message_id = publication_service.apply_existing_telegram_publication_to_offer(
+            offer,
+            state,
+        )
+
+        self.assertEqual(message_id, 555)
+        self.assertEqual(offer.channel_message_id, 555)
+        self.assertEqual(state.telegram_message_id, 555)
+
+    def test_invalid_canonical_state_is_not_copied_to_offer(self):
+        offer = make_offer(channel_message_id=None)
+        state = publication_service.build_offer_publication_state(
+            offer,
+            OfferPublicationSurface.TELEGRAM_CHANNEL,
+            status=OfferPublicationStatus.SENT,
+        )
+        state.publisher_bot_identity = "channel_editor"
+        state.telegram_chat_id = -100
+        state.telegram_message_id = 555
+
+        with self.assertRaises(CanonicalPublicationIdentityError):
+            publication_service.apply_existing_telegram_publication_to_offer(
+                offer,
+                state,
+            )
+
+        self.assertIsNone(offer.channel_message_id)
 
     async def test_stale_retry_preserves_successful_telegram_side_effect_without_resend(self):
         offer = make_offer(version_id=1, channel_message_id=557)

@@ -61,6 +61,17 @@ from .telegram_notification_outbox import (
     TelegramNotificationOutbox,
     TelegramNotificationOutboxStatus,
 )
+from .telegram_delivery_job import TelegramDeliveryJobRecord
+from .telegram_delivery_provider_outcome import TelegramDeliveryProviderOutcomeRecord
+from .telegram_delivery_reconciliation_evidence import (
+    TelegramDeliveryReconciliationEvidence,
+)
+from .telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
+from .telegram_delivery_feeder_state import TelegramDeliveryFeederState
+from .telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
+from .telegram_scheduled_operation import TelegramScheduledOperation
+from .telegram_channel_membership_saga import TelegramChannelMembershipSaga
+from .telegram_interaction_anchor_state import TelegramInteractionAnchorState
 from .chat import Chat
 from .chat_member import ChatMember
 from .message import Message
@@ -80,6 +91,30 @@ from .upload_session import (
 from .change_log import ChangeLog
 from .sync_block import SyncBlock
 from .sync_apply_watermark import SyncApplyWatermark
+from .webapp_writer_state import (
+    WebappWriterActivationOperation,
+    WebappWriterState,
+    WebappWriterTransition,
+    WebappWriterWitnessReceipt,
+    WebappWriterWitnessState,
+)
+from .dr_event import (
+    DrConflictQuarantine,
+    DrEffectOutbox,
+    DrBlobManifest,
+    DrFileIntent,
+    DrBlobDelivery,
+    DrBlobReceipt,
+    DrRecoveryManifest,
+    DrDurabilityState,
+    DrEvent,
+    DrEventDelivery,
+    DrEventReceipt,
+    DrProducerCursor,
+    DrReplayNonce,
+    DrStreamCheckpoint,
+    DrProjectionVersion,
+)
 
 __all__ = [
     # User & Auth
@@ -140,6 +175,14 @@ __all__ = [
     "TERMINAL_TELEGRAM_NOTIFICATION_OUTBOX_STATUSES",
     "TelegramNotificationOutbox",
     "TelegramNotificationOutboxStatus",
+    "TelegramDeliveryJobRecord",
+    "TelegramDeliveryProviderOutcomeRecord",
+    "TelegramDeliveryReconciliationEvidence",
+    "TelegramDeliveryRuntimeGate",
+    "TelegramDeliveryFeederState",
+    "TelegramDeliveryResumeOperation",
+    "TelegramScheduledOperation",
+    "TelegramChannelMembershipSaga",
     # Generic Chat
     "Chat",
     "ChatMember",
@@ -171,4 +214,24 @@ __all__ = [
     "ChangeLog",
     "SyncBlock",
     "SyncApplyWatermark",
+    "WebappWriterState",
+    "WebappWriterActivationOperation",
+    "WebappWriterTransition",
+    "WebappWriterWitnessState",
+    "WebappWriterWitnessReceipt",
+    "DrProducerCursor",
+    "DrEvent",
+    "DrEventDelivery",
+    "DrEventReceipt",
+    "DrStreamCheckpoint",
+    "DrProjectionVersion",
+    "DrConflictQuarantine",
+    "DrReplayNonce",
+    "DrEffectOutbox",
+    "DrBlobManifest",
+    "DrFileIntent",
+    "DrBlobDelivery",
+    "DrBlobReceipt",
+    "DrRecoveryManifest",
+    "DrDurabilityState",
 ]

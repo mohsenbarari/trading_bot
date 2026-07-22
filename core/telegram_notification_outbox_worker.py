@@ -14,6 +14,10 @@ from core.config import settings
 from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeConfigurationError,
+    configured_telegram_delivery_runtime,
+)
 from core.services.telegram_notification_outbox_service import (
     TELEGRAM_NOTIFICATION_DELIVERY_STATUS_NO_ROW,
     claim_and_deliver_next_telegram_notification_outbox,
@@ -23,6 +27,14 @@ from core.services.telegram_notification_outbox_service import (
 
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
+
+
+def _assert_legacy_runtime_owner() -> None:
+    runtime = configured_telegram_delivery_runtime()
+    if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "legacy_notification_outbox_worker_is_not_runtime_owner"
+        )
 
 
 @dataclass(frozen=True)
@@ -78,6 +90,7 @@ async def run_telegram_notification_outbox_delivery_cycle(
     *,
     limit: int | None = None,
 ) -> TelegramNotificationOutboxCycleReport:
+    _assert_legacy_runtime_owner()
     assert_background_job_authority(JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY)
     status_counts: dict[str, int] = {}
     processed_count = 0
@@ -120,6 +133,7 @@ async def run_telegram_notification_outbox_delivery_cycle(
 
 
 async def telegram_notification_outbox_delivery_loop() -> None:
+    _assert_legacy_runtime_owner()
     assert_background_job_authority(JOB_TELEGRAM_NOTIFICATION_OUTBOX_DELIVERY)
     logger.info(
         "Telegram notification outbox worker started",

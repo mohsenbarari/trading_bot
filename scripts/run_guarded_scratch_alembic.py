@@ -18,7 +18,7 @@ from sqlalchemy.engine import URL, make_url
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRATCH_DATABASE_PATTERN = re.compile(
-    r"^(?:stage1_migration|stage1_counter|stage2_registration|stage3_registration|stage4_registration|market_stage7|market_stage8|market_stage9|market_stage10|market_stage11|market_stage12|market_stage13|market_stage15)_[a-z0-9_]+$"
+    r"^(?:stage1_migration|stage1_counter|stage2_registration|stage3_registration|stage4_registration|market_stage7|market_stage8|market_stage9|market_stage10|market_stage11|market_stage12|market_stage13|market_stage15|telegram_queue_stage3)_[a-z0-9_]+$"
 )
 DENIED_DATABASE_NAMES = frozenset(
     {
@@ -32,6 +32,7 @@ DENIED_DATABASE_NAMES = frozenset(
     }
 )
 ALLOWED_COMMANDS = frozenset({"upgrade", "downgrade", "current", "history"})
+POSTGRES_SYSTEM_IDENTIFIER_PATTERN = re.compile(r"^[1-9][0-9]{15,19}$")
 
 
 class ScratchMigrationSafetyError(RuntimeError):
@@ -104,15 +105,31 @@ def validate_alembic_source(*, repo_root: Path = REPO_ROOT) -> str:
 
 
 def verify_connected_database(target: ScratchMigrationTarget) -> None:
+    expected_system_identifier = os.getenv(
+        "TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", ""
+    ).strip()
+    if not POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(expected_system_identifier):
+        raise ScratchMigrationSafetyError(
+            "an explicit scratch-cluster system identifier is required"
+        )
     sync_url = target.sync_url.set(drivername="postgresql+psycopg2")
     engine = create_engine(sync_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
-            connected_database = str(connection.execute(text("SELECT current_database()")).scalar_one())
+            connected_database, connected_system_identifier = connection.execute(
+                text(
+                    "SELECT current_database(), system_identifier::text "
+                    "FROM pg_control_system()"
+                )
+            ).one()
     finally:
         engine.dispose()
-    if connected_database.lower() != target.database_name:
+    if str(connected_database).lower() != target.database_name:
         raise ScratchMigrationSafetyError("connected database does not match guarded target")
+    if str(connected_system_identifier) != expected_system_identifier:
+        raise ScratchMigrationSafetyError(
+            "connected PostgreSQL cluster does not match the expected scratch cluster"
+        )
 
 
 def _validate_command(argv: list[str]) -> None:

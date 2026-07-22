@@ -173,8 +173,9 @@ class BackfillDirectChatsTests(unittest.IsolatedAsyncioTestCase):
             membership_status=ChatMembershipStatus.ACTIVE,
             left_at=left_at_old,
         )
+        messages = [SimpleNamespace(chat_id=None) for _ in range(3)]
         db = SimpleNamespace(
-            execute=AsyncMock(side_effect=[scalars_result([conversation]), scalars_result(users), SimpleNamespace(rowcount=3)]),
+            execute=AsyncMock(side_effect=[scalars_result([conversation]), scalars_result(users), scalars_result(messages)]),
             get=AsyncMock(return_value=chat),
             add=Mock(),
         )
@@ -191,6 +192,7 @@ class BackfillDirectChatsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.last_message_at, conversation.last_message_at)
         self.assertEqual(existing_member.membership_status, ChatMembershipStatus.INACTIVE)
         self.assertEqual(existing_member.left_at, deleted_at_new)
+        self.assertTrue(all(message.chat_id == 88 for message in messages))
         created_member = db.add.call_args.args[0]
         self.assertEqual(created_member.chat_id, 88)
         self.assertEqual(created_member.user_id, 11)
@@ -216,8 +218,9 @@ class BackfillDirectChatsTests(unittest.IsolatedAsyncioTestCase):
         async def flush_chat_id():
             added_objects[0].id = 91
 
+        messages = [SimpleNamespace(chat_id=None) for _ in range(5)]
         db = SimpleNamespace(
-            execute=AsyncMock(side_effect=[scalars_result([conversation]), scalars_result(users), SimpleNamespace(rowcount=5)]),
+            execute=AsyncMock(side_effect=[scalars_result([conversation]), scalars_result(users), scalars_result(messages)]),
             get=AsyncMock(),
             add=Mock(side_effect=add_object),
             flush=AsyncMock(side_effect=flush_chat_id),
@@ -243,6 +246,7 @@ class BackfillDirectChatsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_member.membership_status, ChatMembershipStatus.ACTIVE)
         self.assertEqual(second_member.membership_status, ChatMembershipStatus.INACTIVE)
         self.assertEqual(second_member.left_at, users[1].deleted_at)
+        self.assertTrue(all(message.chat_id == 91 for message in messages))
 
 
 if __name__ == "__main__":

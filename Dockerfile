@@ -1,4 +1,6 @@
 FROM python:3.11-slim-bullseye
+ARG RELEASE_SHA=unbound
+LABEL org.opencontainers.image.revision=${RELEASE_SHA}
 RUN apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends libpq-dev build-essential libmagic1 \
     && rm -rf /var/lib/apt/lists/*

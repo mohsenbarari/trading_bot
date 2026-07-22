@@ -5,6 +5,9 @@
 این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
+import math
+
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -15,6 +18,83 @@ class Settings(BaseSettings):
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
+    # Logical authority remains compatible with server_mode. physical_site is
+    # deployment identity and must not be reused as business/home authority.
+    logical_authority: str | None = None
+    physical_site: str | None = None
+    topology_schema_version: str | None = None
+    three_site_dr_enabled: bool = False
+    dark_standby_mode: bool = False
+    dr_event_protocol_enabled: bool = False
+    dr_event_protocol_strict: bool = False
+    dr_producer_epoch: int = 1
+    dr_sync_pairwise_keys_json: str | None = None
+    dr_sync_peer_urls_json: str | None = None
+    dr_sync_request_max_age_seconds: int = 30
+    dr_replay_nonce_retention_seconds: int = 300
+    dr_sync_http_timeout_seconds: float = 5.0
+    dr_sync_verify_tls: bool = True
+    dr_sync_ca_bundle: str | None = None
+    dr_projection_database_url: str | None = None
+    dr_control_database_url: str | None = None
+    dr_auxiliary_db_pool_size: int = 3
+    dr_auxiliary_db_max_overflow: int = 2
+    dr_delivery_batch_size: int = 100
+    dr_delivery_claim_seconds: int = 30
+    dr_delivery_poll_seconds: float = 0.25
+    dr_blob_root: str = "uploads/blobs"
+    dr_blob_object_prefix: str = "three-site-dr/blobs/sha256"
+    dr_blob_object_endpoint: str | None = None
+    dr_blob_object_region: str | None = None
+    dr_blob_object_bucket: str | None = None
+    dr_blob_s3_credentials_file: str | None = None
+    dr_blob_encryption_keyring_file: str | None = None
+    dr_blob_require_versioning: bool = True
+    dr_blob_gc_retention_days: int = 30
+    dr_blob_orphan_grace_seconds: int = 3600
+    dr_blob_orphan_quarantine_days: int = 30
+    dr_blob_orphan_scan_max_entries: int = 10000
+    dr_blob_local_quota_bytes: int = 20 * 1024 * 1024 * 1024
+    dr_audit_anchor_object_prefix: str = "three-site-dr/audit-anchors"
+    # Safe default until the owner approves RPO and a synchronous same-region
+    # journal has independently passed restoration drills.
+    dr_isolated_critical_write_policy: str = "freeze"
+    dr_effect_worker_enabled: bool = False
+    dr_effect_claim_seconds: int = 30
+    dr_effect_min_lease_remaining_seconds: int = 10
+    dr_effect_poll_seconds: float = 0.25
+    origin_readiness_api_key: str | None = None
+    origin_expected_migration_revision: str | None = None
+    origin_readiness_max_evidence_age_seconds: int = 900
+    origin_readiness_require_recovery_manifest: bool = True
+    # Disabled until the dedicated Iran-reachable witness service and drills exist.
+    writer_witness_required: bool = False
+    writer_witness_public_key: str | None = None
+    writer_witness_private_key_file: str | None = None
+    writer_witness_lease_duration_seconds: int = 180
+    writer_witness_renew_interval_seconds: int = 30
+    writer_witness_safety_margin_seconds: int = 15
+    writer_witness_max_clock_skew_seconds: int = 5
+    writer_witness_boot_id_file: str = "/proc/sys/kernel/random/boot_id"
+    writer_witness_authoritative_site: str = "webapp_ir"
+    # Dedicated witness service and renewal transport. All remain disabled and
+    # unset until the three-site rollout gate is explicitly approved.
+    writer_witness_service_enabled: bool = False
+    writer_witness_database_url: str | None = None
+    writer_witness_product_database_user: str | None = None
+    writer_witness_require_distinct_database_identity: bool = True
+    writer_witness_service_webapp_fi_key_id: str | None = None
+    writer_witness_service_webapp_fi_secret: str | None = None
+    writer_witness_service_webapp_ir_key_id: str | None = None
+    writer_witness_service_webapp_ir_secret: str | None = None
+    writer_witness_internal_url: str | None = None
+    writer_witness_client_key_id: str | None = None
+    writer_witness_client_secret: str | None = None
+    writer_witness_auth_max_age_seconds: int = 15
+    writer_witness_http_timeout_seconds: float = 3.0
+    writer_witness_verify_tls: bool = True
+    writer_witness_ca_bundle: str | None = None
+    writer_witness_auto_renew_enabled: bool = False
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None
@@ -96,6 +176,44 @@ class Settings(BaseSettings):
     telegram_notification_outbox_worker_lease_seconds: int = 30
     telegram_notification_outbox_worker_recover_limit: int = 100
     telegram_notification_outbox_worker_max_sends_per_second: float = 10.0
+    # Shared Telegram queue rollout controls. Defaults preserve legacy ownership.
+    # Producers (API/Bot business paths) only need the non-secret ownership mode.
+    # Executors additionally require the worker/cutover controls and credentials
+    # below.  None preserves the legacy single-runtime compatibility contract by
+    # inheriting telegram_delivery_execution_owner.
+    telegram_delivery_producer_mode: str | None = None
+    # Non-secret cross-service attestation. API/sync processes do not receive
+    # executor controls, but they must still prove that their producer contract
+    # matches the operator-selected global owner.
+    telegram_delivery_expected_execution_owner: str | None = None
+    telegram_delivery_execution_owner: str = "legacy"
+    telegram_delivery_queue_worker_enabled: bool = False
+    telegram_delivery_queue_cutover_ready: bool = False
+    telegram_delivery_queue_channel_editor_enabled: bool = False
+    telegram_delivery_queue_channel_editor_bot_token: SecretStr | None = None
+    telegram_delivery_queue_expected_primary_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
+    telegram_delivery_queue_expected_channel_id: int | None = None
+    telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_interval_seconds: float = 1.0
+    telegram_delivery_queue_worker_batch_limit: int = 25
+    telegram_delivery_queue_primary_concurrency: int = 4
+    telegram_delivery_queue_primary_m0_reserved_concurrency: int = 1
+    telegram_delivery_queue_channel_editor_concurrency: int = 1
+    telegram_delivery_queue_worker_request_timeout_seconds: float = 10.0
+    telegram_delivery_queue_worker_lease_seconds: float = 30.0
+    telegram_delivery_queue_worker_recover_limit: int = 100
+    telegram_offer_queue_feeder_batch_limit: int = 25
+    telegram_offer_queue_feeder_interval_seconds: float = 0.5
+    telegram_delivery_queue_retry_after_safety_seconds: float = 0.1
+    telegram_delivery_queue_retry_base_seconds: float = 1.0
+    telegram_delivery_queue_retry_max_seconds: float = 300.0
+    telegram_delivery_queue_retry_jitter_ratio: float = 0.2
+    telegram_delivery_queue_bot_min_interval_seconds: float = 0.035
+    telegram_delivery_queue_destination_min_interval_seconds: float = 1.05
+    telegram_delivery_queue_rate_limit_probe_delay_seconds: float = 0.1
+    telegram_delivery_queue_global_rate_limit_window_seconds: float = 2.0
+    telegram_delivery_queue_limiter_key_ttl_seconds: int = 86400
     telegram_direct_registration_enabled: bool = False
     telegram_registration_reconciliation_enabled: bool = False
     telegram_login_otp_enabled: bool = False
@@ -160,6 +278,101 @@ class Settings(BaseSettings):
     smsir_customer_invitation_template_id: str | None = "903643"
     invitation_registration_session_ttl_seconds: int = 600
     staging_log_otp_codes: bool = False
+
+    @model_validator(mode="after")
+    def validate_three_site_dr_settings(self):
+        enabled = bool(self.three_site_dr_enabled or self.dr_event_protocol_enabled)
+        if enabled and not (
+            self.three_site_dr_enabled
+            and self.dr_event_protocol_enabled
+            and self.dr_event_protocol_strict
+        ):
+            raise ValueError(
+                "three_site_dr_requires_enabled_strict_event_protocol"
+            )
+        if self.dr_event_protocol_strict and not enabled:
+            raise ValueError("strict_dr_event_protocol_requires_three_site_mode")
+        if int(self.dr_sync_request_max_age_seconds) <= 0:
+            raise ValueError("dr_sync_request_max_age_seconds_must_be_positive")
+        if int(self.dr_replay_nonce_retention_seconds) <= 0:
+            raise ValueError("dr_replay_nonce_retention_seconds_must_be_positive")
+        return self
+
+    @model_validator(mode="after")
+    def validate_telegram_delivery_queue_settings(self):
+        producer = str(
+            self.telegram_delivery_producer_mode
+            or self.telegram_delivery_execution_owner
+            or ""
+        ).strip().lower()
+        expected_owner = str(
+            self.telegram_delivery_expected_execution_owner
+            or self.telegram_delivery_execution_owner
+            or ""
+        ).strip().lower()
+        actual_owner = str(self.telegram_delivery_execution_owner or "").strip().lower()
+        if producer not in {"legacy", "queue-v1"}:
+            raise ValueError("telegram_delivery_producer_mode_invalid")
+        if expected_owner not in {"legacy", "queue-v1"}:
+            raise ValueError("telegram_delivery_expected_execution_owner_invalid")
+        if producer != expected_owner:
+            raise ValueError("telegram_delivery_producer_executor_split_brain")
+        if self.trading_bot_service == "bot" and actual_owner != expected_owner:
+            raise ValueError("telegram_delivery_bot_executor_split_brain")
+        positive_float_fields = (
+            "telegram_delivery_queue_preflight_timeout_seconds",
+            "telegram_delivery_queue_worker_interval_seconds",
+            "telegram_delivery_queue_worker_request_timeout_seconds",
+            "telegram_delivery_queue_worker_lease_seconds",
+            "telegram_offer_queue_feeder_interval_seconds",
+            "telegram_delivery_queue_retry_base_seconds",
+            "telegram_delivery_queue_retry_max_seconds",
+            "telegram_delivery_queue_bot_min_interval_seconds",
+            "telegram_delivery_queue_destination_min_interval_seconds",
+            "telegram_delivery_queue_rate_limit_probe_delay_seconds",
+            "telegram_delivery_queue_global_rate_limit_window_seconds",
+        )
+        for name in positive_float_fields:
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name}_must_be_finite_positive")
+        safety = float(self.telegram_delivery_queue_retry_after_safety_seconds)
+        if not math.isfinite(safety) or safety < 0:
+            raise ValueError(
+                "telegram_delivery_queue_retry_after_safety_seconds_invalid"
+            )
+        jitter = float(self.telegram_delivery_queue_retry_jitter_ratio)
+        if not math.isfinite(jitter) or jitter < 0 or jitter > 1:
+            raise ValueError("telegram_delivery_queue_retry_jitter_ratio_invalid")
+        if (
+            self.telegram_delivery_queue_retry_base_seconds
+            > self.telegram_delivery_queue_retry_max_seconds
+        ):
+            raise ValueError("telegram_delivery_queue_retry_base_exceeds_max")
+        if (
+            self.telegram_delivery_queue_worker_lease_seconds
+            < self.telegram_delivery_queue_worker_request_timeout_seconds + 15.0
+        ):
+            raise ValueError("telegram_delivery_queue_lease_too_short")
+        for name in (
+            "telegram_delivery_queue_worker_batch_limit",
+            "telegram_delivery_queue_worker_recover_limit",
+            "telegram_delivery_queue_primary_concurrency",
+            "telegram_delivery_queue_primary_m0_reserved_concurrency",
+            "telegram_delivery_queue_channel_editor_concurrency",
+            "telegram_offer_queue_feeder_batch_limit",
+            "telegram_delivery_queue_limiter_key_ttl_seconds",
+        ):
+            if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
+                raise ValueError(f"{name}_must_be_positive")
+        if (
+            self.telegram_delivery_queue_primary_m0_reserved_concurrency
+            >= self.telegram_delivery_queue_primary_concurrency
+        ):
+            raise ValueError(
+                "telegram_delivery_queue_primary_m0_reservation_must_leave_general_capacity"
+            )
+        return self
     
     class Config:
         env_file = ".env"

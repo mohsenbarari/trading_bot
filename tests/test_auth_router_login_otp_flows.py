@@ -46,6 +46,7 @@ class FakeRedis:
         self.values = dict(values or {})
         self.ttl_map = dict(ttl_map or {})
         self.setex_calls = []
+        self.set_calls = []
         self.delete_calls = []
         self.expire_calls = []
         self.incr_calls = []
@@ -56,6 +57,15 @@ class FakeRedis:
     async def setex(self, key, ttl, value):
         self.setex_calls.append((key, ttl, value))
         self.values[key] = value
+
+    async def set(self, key, value, *, ex=None, nx=False):
+        self.set_calls.append((key, value, ex, nx))
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        if ex is not None:
+            self.ttl_map[key] = ex
+        return True
 
     async def delete(self, key):
         self.delete_calls.append(key)

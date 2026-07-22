@@ -41,6 +41,26 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
         for database in first.values():
             self.assertRegex(database, r"^market_stage\d+_ci_run_a_test$")
 
+    def test_postgres_cluster_provenance_is_required_and_must_match(self):
+        admin_url = "postgresql://market:secret@127.0.0.1:55432/postgres"
+        with self.assertRaisesRegex(gate.MarketPostgresGateSafetyError, "system identifier"):
+            gate._validate_cluster_provenance(admin_url, "")
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = ("7429384756102938475",)
+        with patch.object(gate, "_connect", return_value=connection):
+            self.assertEqual(
+                gate._validate_cluster_provenance(
+                    admin_url, "7429384756102938475"
+                ),
+                "7429384756102938475",
+            )
+            with self.assertRaisesRegex(gate.MarketPostgresGateSafetyError, "disposable"):
+                gate._validate_cluster_provenance(
+                    admin_url, "6123456789012345678"
+                )
+        self.assertEqual(connection.close.call_count, 2)
+
     def test_checkout_requires_exact_full_head(self):
         completed = [
             SimpleNamespace(stdout=f"{gate.REPO_ROOT}\n"),
@@ -98,6 +118,8 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
             {"MARKET_POSTGRES_GATE_REDIS_URL": "redis://127.0.0.1:6379/14"},
             clear=False,
         ), patch.object(gate, "_validate_admin_url"), patch.object(
+            gate, "_validate_cluster_provenance", return_value="7429384756102938475"
+        ), patch.object(
             gate, "_validate_checkout", return_value="a" * 40
         ), patch.object(gate, "_validate_redis_url"), patch.object(
             gate, "_create_scratch_databases", side_effect=partial_create
@@ -159,6 +181,8 @@ class MarketPostgresGateRunnerTests(unittest.TestCase):
         ), patch.object(gate.signal, "getsignal", return_value=signal.SIG_DFL), patch.object(
             gate.signal, "signal", side_effect=install_handler
         ), patch.object(gate, "_validate_admin_url"), patch.object(
+            gate, "_validate_cluster_provenance", return_value="7429384756102938475"
+        ), patch.object(
             gate, "_validate_checkout", return_value="a" * 40
         ), patch.object(gate, "_validate_redis_url"), patch.object(
             gate, "_create_scratch_databases", side_effect=interrupting_create

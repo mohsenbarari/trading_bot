@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from bot.handlers.trade_create import handle_notes_input, handle_skip_notes
 
@@ -14,20 +14,26 @@ class BotTradeCreateNotesFlowTests(unittest.IsolatedAsyncioTestCase):
             await handle_skip_notes(callback, state, user=SimpleNamespace(id=1))
 
         state.update_data.assert_awaited_once_with(notes=None)
-        preview_mock.assert_awaited_once_with(callback.message, state, edit=True)
+        preview_mock.assert_awaited_once_with(
+            callback.message,
+            state,
+            edit=True,
+            user=ANY,
+        )
         callback.answer.assert_awaited_once_with()
 
     async def test_handle_notes_input_handles_too_long_and_success(self):
         state = SimpleNamespace(update_data=AsyncMock())
+        user = SimpleNamespace(id=1)
         long_message = SimpleNamespace(text="x" * 201, answer=AsyncMock())
-        await handle_notes_input(long_message, state, user=SimpleNamespace(id=1))
+        await handle_notes_input(long_message, state, user=user)
         self.assertIn("بیش از 200 کاراکتر", long_message.answer.await_args.args[0])
 
         message = SimpleNamespace(text="فقط نقدی", answer=AsyncMock())
         with patch("bot.handlers.trade_create._show_wizard_review", new=AsyncMock()) as preview_mock:
-            await handle_notes_input(message, state, user=SimpleNamespace(id=1))
+            await handle_notes_input(message, state, user=user)
         state.update_data.assert_awaited_once_with(notes="فقط نقدی")
-        preview_mock.assert_awaited_once_with(message, state, edit=False)
+        preview_mock.assert_awaited_once_with(message, state, edit=False, user=user)
 
 
 if __name__ == "__main__":

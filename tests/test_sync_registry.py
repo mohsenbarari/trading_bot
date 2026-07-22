@@ -56,6 +56,21 @@ class SyncRegistryTests(unittest.TestCase):
                 self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
                 self.assertIn("local", entry.authority)
 
+    def test_telegram_execution_tables_are_foreign_local_no_sync(self):
+        for table_name in {
+            "telegram_delivery_jobs",
+            "telegram_delivery_provider_outcomes",
+            "telegram_delivery_reconciliation_evidence",
+            "telegram_delivery_runtime_gates",
+            "telegram_delivery_feeder_states",
+            "telegram_delivery_resume_operations",
+            "telegram_interaction_anchor_states",
+        }:
+            with self.subTest(table_name=table_name):
+                entry = get_sync_registry_entry(table_name)
+                self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+                self.assertIn("foreign local", entry.authority)
+
     def test_registration_local_state_tables_are_no_sync(self):
         expected_authority = {
             "invitation_identity_reservations": "iran local",
@@ -80,7 +95,15 @@ class SyncRegistryTests(unittest.TestCase):
         self.assertIn("must not represent current active runtime surface", users.notes)
 
     def test_sync_bookkeeping_tables_are_internal_not_product_sync(self):
-        for table_name in {"change_log", "sync_apply_watermarks", "sync_blocks"}:
+        for table_name in {
+            "change_log",
+            "sync_apply_watermarks",
+            "sync_blocks",
+            "webapp_writer_state",
+            "webapp_writer_transitions",
+            "webapp_writer_witness_state",
+            "webapp_writer_witness_receipts",
+        }:
             with self.subTest(table_name=table_name):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.INTERNAL_BOOKKEEPING)
 

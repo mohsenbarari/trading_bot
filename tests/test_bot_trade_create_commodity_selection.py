@@ -52,6 +52,14 @@ class BotTradeCreateCommoditySelectionTests(unittest.IsolatedAsyncioTestCase):
         commodity = SimpleNamespace(id=7, name="سکه")
         with patch("bot.handlers.trade_create.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(commodity))), patch(
             "bot.handlers.trade_create.get_quantity_keyboard", return_value="QK"
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    offer_min_quantity=1,
+                    offer_max_quantity=100,
+                )
+            ),
         ):
             await handle_commodity_selection(
                 callback,

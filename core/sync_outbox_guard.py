@@ -35,6 +35,17 @@ _RAW_WRITE_RE = re.compile(
     r"(?:\"[^\"]+\"|[A-Za-z_][\w$]*))",
     re.IGNORECASE | re.DOTALL,
 )
+_LEADING_SQL_COMMENTS_RE = re.compile(
+    r"^(?:\s+|--[^\n]*(?:\n|$)|/\*.*?\*/)*",
+    re.DOTALL,
+)
+_RAW_READ_PREFIX_RE = re.compile(r"^(?:select|show|values)\b", re.IGNORECASE)
+_RAW_UNSAFE_TOKEN_RE = re.compile(
+    r"\b(?:insert|update|delete|merge|call|execute|do|copy|create|alter|drop|"
+    r"truncate|grant|revoke|comment|refresh|reindex|vacuum|analyze|cluster|"
+    r"set|reset|listen|notify|unlisten|lock)\b",
+    re.IGNORECASE,
+)
 
 
 class SyncOutboxError(RuntimeError):
@@ -250,7 +261,14 @@ def guard_sync_bulk_or_raw_execute(orm_execute_state: Any) -> None:
     if execution_options.get("is_sync"):
         return
 
-    table_name = statement_write_target_table(getattr(orm_execute_state, "statement", None))
+    statement = getattr(orm_execute_state, "statement", None)
+    table_name = statement_write_target_table(statement)
+    if isinstance(statement, TextClause) and table_name is None:
+        if not raw_sql_is_provably_read_only(str(statement)):
+            raise SyncOutboxBypassError(
+                "Unclassified raw SQL is forbidden because it could bypass the mandatory "
+                "change_log outbox"
+            )
     if not sync_table_requires_outbox(table_name):
         return
 
@@ -266,6 +284,23 @@ def statement_write_target_table(statement: Any) -> str | None:
     if isinstance(statement, TextClause):
         return _raw_sql_write_target(str(statement))
     return None
+
+
+def raw_sql_is_provably_read_only(sql: str) -> bool:
+    """Return true only for a deliberately tiny, side-effect-free SQL subset.
+
+    PostgreSQL permits writes behind ``WITH``, ``SELECT function()``, ``DO`` and
+    multi-statement strings.  A regex cannot prove those forms safe, so strict
+    runtime guards reject them.  Complex reads must use SQLAlchemy's typed
+    ``Select`` API instead of weakening the mutation boundary.
+    """
+
+    normalized = _LEADING_SQL_COMMENTS_RE.sub("", str(sql), count=1).strip()
+    if not normalized or ";" in normalized or "(" in normalized or ")" in normalized:
+        return False
+    if not _RAW_READ_PREFIX_RE.match(normalized):
+        return False
+    return _RAW_UNSAFE_TOKEN_RE.search(normalized) is None
 
 
 def register_sync_outbox_guards() -> None:

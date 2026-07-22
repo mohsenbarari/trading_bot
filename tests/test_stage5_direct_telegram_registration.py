@@ -635,7 +635,11 @@ class Stage5DirectEntryTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=SimpleNamespace(allowed=True, reason=None)),
             ), patch.object(
                 start, "build_linked_account_panel_message", new=AsyncMock(return_value="panel")
-            ), patch.object(start, "get_persistent_menu_keyboard", return_value="menu"), patch.object(
+            ), patch.object(
+                start,
+                "build_persistent_navigation_keyboard",
+                new=AsyncMock(return_value="menu"),
+            ), patch.object(
                 start, "_user_facing_webapp_url", return_value="https://app.example"
             ), patch.object(start, "set_anchor"):
                 if command is None:
@@ -1325,7 +1329,9 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
                 "build_linked_account_panel_message",
                 new=AsyncMock(return_value="existing panel"),
             ) as build_panel, patch.object(
-                start, "get_persistent_menu_keyboard", return_value="existing menu"
+                start,
+                "build_persistent_navigation_keyboard",
+                new=AsyncMock(return_value="existing menu"),
             ), patch.object(
                 start, "public_webapp_url_for_links", return_value="https://app.example"
             ), patch.object(start, "set_anchor") as set_anchor:

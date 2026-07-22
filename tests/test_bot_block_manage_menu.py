@@ -26,7 +26,7 @@ class BotBlockManageMenuTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.block_manage.safe_edit_text", new=AsyncMock()) as safe_edit:
             await show_block_menu(callback, user=SimpleNamespace(id=5))
 
-        self.assertIn("مدیریت کاربران مسدود", safe_edit.await_args.args[1])
+        self.assertIn("مدیریت کاربران مسدود", safe_edit.await_args.args[2])
         callback.answer.assert_awaited_once()
 
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())
@@ -35,7 +35,7 @@ class BotBlockManageMenuTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.block_manage.get_block_status", new=AsyncMock(return_value=disabled_status)
         ), patch("bot.handlers.block_manage.safe_edit_text", new=AsyncMock()) as safe_edit:
             await show_block_menu(callback, user=SimpleNamespace(id=5))
-        self.assertIn("قابلیت مسدود کردن برای شما غیرفعال است", safe_edit.await_args.args[1])
+        self.assertIn("قابلیت مسدود کردن برای شما غیرفعال است", safe_edit.await_args.args[2])
 
 
 if __name__ == "__main__":

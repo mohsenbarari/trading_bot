@@ -3,8 +3,14 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.admin_users import handle_limit_cancel, handle_limit_confirm, process_limit_value
+from bot.handlers.admin_users import (
+    handle_limit_cancel,
+    handle_limit_confirm,
+    process_limit_value,
+    schedule_temporary_message_cleanup,
+)
 from core.enums import NotificationCategory, NotificationLevel, UserRole
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 def consume_task(coro):
@@ -36,6 +42,41 @@ class FakeSession:
 
 
 class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queue_mode_persists_temporary_cleanup_without_legacy_task(self):
+        session = FakeSession(None)
+        queue_runtime = SimpleNamespace(
+            mode=TelegramDeliveryRuntimeMode.QUEUE_V1
+        )
+        with patch(
+            "bot.handlers.admin_users.configured_telegram_delivery_runtime",
+            return_value=queue_runtime,
+        ), patch(
+            "bot.handlers.admin_users.current_server",
+            return_value="foreign",
+        ), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal",
+            return_value=session,
+        ), patch(
+            "core.services.telegram_scheduled_operation_service."
+            "enqueue_temporary_message_cleanup_once",
+            new=AsyncMock(),
+        ) as enqueue, patch(
+            "bot.handlers.admin_users.asyncio.create_task"
+        ) as create_task:
+            await schedule_temporary_message_cleanup(
+                SimpleNamespace(),
+                chat_id=10,
+                message_id=20,
+                delay=3,
+                source_id="admin-user-limit-invalid:10:20",
+            )
+
+        enqueue.assert_awaited_once()
+        self.assertEqual(enqueue.await_args.kwargs["chat_id"], 10)
+        self.assertEqual(enqueue.await_args.kwargs["message_id"], 20)
+        session.commit.assert_awaited_once()
+        create_task.assert_not_called()
+
     async def test_limit_confirm_and_cancel_cover_missing_and_protected_targets(self):
         callback = SimpleNamespace(answer=AsyncMock())
         state = SimpleNamespace(get_data=AsyncMock(return_value={

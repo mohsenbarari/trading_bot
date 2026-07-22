@@ -149,6 +149,29 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch('core.utils.os.getenv', return_value='token'), patch('core.telegram_gateway.httpx.AsyncClient', return_value=err_client):
             self.assertFalse(await utils.send_telegram_notification(9, 'hello'))
 
+    async def test_queue_owner_rejects_legacy_utils_telegram_boundaries(self):
+        queue_runtime = SimpleNamespace(
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        bot = AsyncMock()
+
+        with patch.object(
+            utils,
+            'configured_telegram_delivery_runtime',
+            return_value=queue_runtime,
+        ):
+            with self.assertRaises(
+                utils.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await utils.send_deletable_message(bot, 1, 'hello')
+            with self.assertRaises(
+                utils.TelegramDeliveryRuntimeConfigurationError
+            ):
+                await utils.send_telegram_notification(1, 'hello')
+
+        bot.send_message.assert_not_awaited()
+
     async def test_create_user_notification_and_publish_user_event(self):
         db = MagicMock()
         db.commit = AsyncMock()

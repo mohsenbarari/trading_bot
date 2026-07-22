@@ -14,6 +14,7 @@ from api.routers.sessions import (
     _deliver_identity_submission_messages,
     _deliver_initial_recovery_messages,
     _ensure_recovery_admin_access,
+    _enqueue_recovery_sms,
     _expire_recovery_if_needed,
     _get_recovery_token_cache_key,
     _pop_temporary_refresh_token,
@@ -21,6 +22,7 @@ from api.routers.sessions import (
     _publish_recovery_prompt_updates,
     _publish_recovery_action_message,
     _rollback_if_available,
+    _send_legacy_recovery_sms,
     _store_temporary_refresh_token,
     approve_single_session_recovery,
     cancel_single_session_recovery,
@@ -121,6 +123,79 @@ def make_recovery(**overrides):
 
 
 class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strict_recovery_sms_is_staged_in_the_callers_transaction(self):
+        recovery = make_recovery()
+        event = SimpleNamespace(event_id=str(uuid.uuid4()))
+        db = SimpleNamespace(flush=AsyncMock(), scalar=AsyncMock(return_value=event))
+        fence = SimpleNamespace(physical_site="webapp-fi", writer_epoch=17)
+
+        with patch("api.routers.sessions.settings.three_site_dr_enabled", True), patch(
+            "api.routers.sessions.settings.dr_event_protocol_strict", True
+        ), patch(
+            "api.routers.sessions.current_writer_fence_context", return_value=fence
+        ), patch(
+            "api.routers.sessions.current_dr_transaction_event_ids", return_value=(event.event_id,)
+        ), patch(
+            "api.routers.sessions.enqueue_epoch_bound_effect", new=AsyncMock()
+        ) as enqueue_mock, patch(
+            "api.routers.sessions.send_sms"
+        ) as send_mock:
+            queued = await _enqueue_recovery_sms(
+                db,
+                recovery,
+                mobile="09120000000",
+                message="recovery state changed",
+                action="approved",
+            )
+
+        self.assertTrue(queued)
+        db.flush.assert_awaited_once()
+        db.scalar.assert_awaited_once()
+        enqueue_mock.assert_awaited_once_with(
+            db,
+            event_id=event.event_id,
+            effect_type="recovery_sms",
+            provider="smsir",
+            destination_key="09120000000",
+            idempotency_key=f"recovery-sms:{recovery.id}:approved",
+            payload={"mobile": "09120000000", "message": "recovery state changed"},
+        )
+        send_mock.assert_not_called()
+
+    async def test_strict_recovery_sms_fails_closed_without_causation_event(self):
+        recovery = make_recovery()
+        db = SimpleNamespace(flush=AsyncMock(), scalar=AsyncMock(return_value=None))
+        fence = SimpleNamespace(physical_site="webapp-fi", writer_epoch=17)
+        with patch("api.routers.sessions.settings.three_site_dr_enabled", True), patch(
+            "api.routers.sessions.settings.dr_event_protocol_strict", True
+        ), patch(
+            "api.routers.sessions.current_writer_fence_context", return_value=fence
+        ), patch(
+            "api.routers.sessions.current_dr_transaction_event_ids", return_value=(str(uuid.uuid4()),)
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no immutable causation event"):
+                await _enqueue_recovery_sms(
+                    db,
+                    recovery,
+                    mobile="09120000000",
+                    message="recovery state changed",
+                    action="approved",
+                )
+
+    def test_legacy_recovery_sms_only_sends_when_no_durable_intent_exists(self):
+        with patch("api.routers.sessions.send_sms") as send_mock:
+            _send_legacy_recovery_sms(
+                durably_queued=True,
+                mobile="09120000000",
+                message="queued",
+            )
+            _send_legacy_recovery_sms(
+                durably_queued=False,
+                mobile="09120000000",
+                message="legacy",
+            )
+        send_mock.assert_called_once_with("09120000000", "legacy")
+
     async def test_internal_cache_prompt_and_expiry_helpers_cover_fallback_paths(self):
         login_req = make_login_request(status="pending", created_at=None, expires_at=None)
         self.assertEqual(login_request_to_dict(login_req)["created_at"], None)

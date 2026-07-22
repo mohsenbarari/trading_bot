@@ -757,6 +757,12 @@ validate_web_push_env_file() {
 
 export_runtime_renderer_overrides() {
     local key
+    RELEASE_SHA="$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)"
+    ORIGIN_EXPECTED_MIGRATION_REVISION="$(
+        cd "$LOCAL_PROJECT_DIR"
+        python3 -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; print(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())'
+    )"
+    export RELEASE_SHA ORIGIN_EXPECTED_MIGRATION_REVISION
     local keys=(
         PUBLIC_WEBAPP_URL
         FOREIGN_SERVER_ALIASES
@@ -781,7 +787,26 @@ export_runtime_renderer_overrides() {
         REGISTRATION_SYNC_ACCEPT_UNVERSIONED
         INVITATION_PUBLIC_RATE_LIMIT_PER_MINUTE
         OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED
+        TELEGRAM_DELIVERY_PRODUCER_MODE
+        TELEGRAM_DELIVERY_EXECUTION_OWNER
+        TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED
+        TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY
+        TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED
+        TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN
+        TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID
+        TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID
+        TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID
         RELEASE_SHA
+        IRAN_ORIGIN_READINESS_API_KEY
+        ORIGIN_READINESS_MAX_EVIDENCE_AGE_SECONDS
+        WRITER_WITNESS_REQUIRED
+        WRITER_WITNESS_AUTO_RENEW_ENABLED
+        WRITER_WITNESS_PUBLIC_KEY
+        WRITER_WITNESS_LEASE_DURATION_SECONDS
+        WRITER_WITNESS_RENEW_INTERVAL_SECONDS
+        WRITER_WITNESS_SAFETY_MARGIN_SECONDS
+        WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS
+        WRITER_WITNESS_AUTHORITATIVE_SITE
         DB_POOL_SIZE
         DB_MAX_OVERFLOW
         IRAN_DB_POOL_SIZE
@@ -1643,6 +1668,8 @@ ensure_runtime_env_file() {
             --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
             --iran-server-url "$IRAN_SERVER_URL" \
             --iran-server-domain "$IRAN_SERVER_DOMAIN" \
+            --foreign-physical-site bot_fi \
+            --iran-physical-site webapp_fi \
             --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
             --iran-api-workers "${IRAN_API_WORKERS:-4}"
         chmod 600 "$local_env_path" || true
@@ -1791,6 +1818,8 @@ ensure_runtime_env_file() {
         --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
         --iran-server-url "$IRAN_SERVER_URL" \
         --iran-server-domain "$IRAN_SERVER_DOMAIN" \
+        --foreign-physical-site bot_fi \
+        --iran-physical-site webapp_fi \
         --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
         --iran-api-workers "${IRAN_API_WORKERS:-4}"
 
@@ -1807,7 +1836,12 @@ install_foreign_runtime_env() {
         return 0
     fi
     cp "$LOCAL_ENV_SOURCE_PATH" "$project_env_path"
-    chmod 600 "$project_env_path" || true
+    local service
+    for service in api bot sync migration; do
+        cp "$LOCAL_ENV_SOURCE_PATH.$service" "$project_env_path.$service"
+    done
+    chmod 600 "$project_env_path" "$project_env_path.api" "$project_env_path.bot" \
+        "$project_env_path.sync" "$project_env_path.migration" || true
     log "Installed rendered foreign runtime env at $project_env_path"
 }
 
@@ -1864,6 +1898,10 @@ find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . ||
 grep -h -q 'api/offers/market-history' \"\$assets_dir\"/MarketView-*.js || exit 22" \
         || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only terminal market offers."
     scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
+    local service
+    for service in api sync migration; do
+        scp_iran "$IRAN_ENV_SOURCE_PATH.$service" "$IRAN_SSH_TARGET:$staging_dir/.env.$service"
+    done
     log "Production payload sync complete"
 }
 

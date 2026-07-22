@@ -1,0 +1,33 @@
+{
+  "schema": "three-site-staging-inventory-v1",
+  "inventory_stage": "planned",
+  "campaign_id": "00000000-0000-4000-8000-000000000000",
+  "release_sha": "0000000000000000000000000000000000000000",
+  "canonical_domain": "staging.gold-trade.ir",
+  "optional_ingress": "app.gold-trading.ir",
+  "deployment_id": "replace-with-one-immutable-deployment-id",
+  "object_storage": {
+    "bucket": "replace-with-dedicated-staging-bucket",
+    "prefix": "staging/replace-with-campaign-id/",
+    "credential_id": "replace-with-staging-only-credential-id",
+    "versioning": true,
+    "private": true
+  },
+  "credential_scope": "staging-only",
+  "production_boundaries": {
+    "host_ips": ["65.109.216.187", "65.109.220.59", "185.206.95.250", "185.206.95.94", "185.231.182.6"],
+    "machine_ids": ["replace-production-machine-id"],
+    "docker_daemon_ids": ["replace-production-docker-daemon-id"],
+    "postgres_system_ids": ["replace-production-postgres-system-id"],
+    "volume_ids": ["replace-production-volume-id"],
+    "audit_root_ids": ["replace-production-audit-root-id"],
+    "domains": ["gold-trade.ir", "coin.gold-trade.ir"],
+    "buckets": ["production-sync-coin"]
+  },
+  "roles": [
+    {"role":"bot_fi","physical_site":"bot_fi","host_ip":"192.0.2.11","machine_id":"replace-bot-machine","docker_daemon_id":"replace-bot-docker","postgres_system_id":null,"postgres_volume_id":"replace-bot-pg-volume","redis_volume_id":"replace-bot-redis","uploads_volume_id":"replace-bot-uploads","audit_root_id":"replace-bot-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
+    {"role":"webapp_fi","physical_site":"webapp_fi","host_ip":"192.0.2.12","machine_id":"replace-fi-machine","docker_daemon_id":"replace-fi-docker","postgres_system_id":null,"postgres_volume_id":"replace-fi-pg-volume","redis_volume_id":"replace-fi-redis","uploads_volume_id":"replace-fi-uploads","audit_root_id":"replace-fi-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
+    {"role":"webapp_ir","physical_site":"webapp_ir","host_ip":"192.0.2.13","machine_id":"replace-ir-machine","docker_daemon_id":"replace-ir-docker","postgres_system_id":null,"postgres_volume_id":"replace-ir-pg-volume","redis_volume_id":"replace-ir-redis","uploads_volume_id":"replace-ir-uploads","audit_root_id":"replace-ir-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"},
+    {"role":"witness","physical_site":"witness","host_ip":"192.0.2.14","machine_id":"replace-witness-machine","docker_daemon_id":"replace-witness-docker","postgres_system_id":null,"postgres_volume_id":"replace-witness-pg-volume","redis_volume_id":null,"uploads_volume_id":null,"audit_root_id":"replace-witness-audit","release_sha":"0000000000000000000000000000000000000000","deployment_id":"replace-with-one-immutable-deployment-id"}
+  ]
+}

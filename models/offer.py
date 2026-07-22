@@ -96,6 +96,7 @@ class Offer(Base):
     
     # آیدی لفظ جدید (اگر این لفظ تکرار شده باشد)
     republished_offer_id = Column(Integer, nullable=True)
+    republished_offer_public_id = Column(String(40), nullable=True, index=True)
 
     # Immutable provenance owned by the replacement offer. Unlike the legacy
     # outgoing pointer above, creating a replacement never mutates its source.
