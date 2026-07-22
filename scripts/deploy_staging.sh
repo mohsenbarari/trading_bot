@@ -464,6 +464,7 @@ render_nginx_template() {
         -v redirect_server="$redirect_server" \
         -v listen_directives="$listen_directives" \
         -v ssl_directives="$ssl_directives" \
+        -v trusted_origin_proxy_directives="$trusted_origin_proxy_directives" \
         -v foreign_public_surface_guard="$foreign_public_surface_guard" '
         $0 == "__HTTP_REDIRECT_SERVER__" { print redirect_server; next }
         $0 == "    __LISTEN_DIRECTIVES__" { print listen_directives; next }

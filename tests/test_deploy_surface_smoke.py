@@ -483,6 +483,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('STAGING_TRUSTED_ORIGIN_PROXY_CIDRS="${STAGING_TRUSTED_ORIGIN_PROXY_CIDRS:-}"', staging_script)
         self.assertIn('set_real_ip_from {network};', staging_script)
         self.assertIn('real_ip_header X-Forwarded-For;', staging_script)
+        self.assertIn('-v trusted_origin_proxy_directives="$trusted_origin_proxy_directives"', staging_script)
         self.assertIn('__TRUSTED_ORIGIN_PROXY_DIRECTIVES__', staging_nginx)
         self.assertIn('install -o root -g root -m 0600 "$tmp" "$available"', staging_script)
 
