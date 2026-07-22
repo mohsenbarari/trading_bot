@@ -91,7 +91,11 @@ jobs:
           MARKET_POSTGRES_GATE_REDIS_URL: redis://127.0.0.1:6379/14
           FRONTEND_URL: http://127.0.0.1:4173
           JWT_SECRET_KEY: ci_market_postgres_gate_secret
-        run: python3 scripts/run_market_postgres_gate.py --expected-sha "$(git rev-parse HEAD)"
+        run: |
+          export TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID="$(
+            python3 -c "import psycopg2; connection=psycopg2.connect('postgresql://market_ci:market_ci@127.0.0.1:5432/postgres'); cursor=connection.cursor(); cursor.execute('SELECT system_identifier FROM pg_control_system()'); print(cursor.fetchone()[0]); connection.close()"
+          )"
+          python3 scripts/run_market_postgres_gate.py --expected-sha "$(git rev-parse HEAD)"
 
       - name: Run real multi-worker Redis proof
         shell: bash

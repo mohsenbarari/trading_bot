@@ -17,6 +17,7 @@ from scripts.run_registration_scratch_suite import (
     _run,
     _sync_url,
     _test_command,
+    _verify_scratch_cluster,
 )
 
 
@@ -37,6 +38,8 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
         self.assertIn('"$data_mount_name" == *postgres_data', wrapper)
         self.assertIn("Stage 9 PostgreSQL disposable resource", wrapper)
         self.assertIn('docker rm -fv "$postgres_name"', wrapper)
+        self.assertIn("SELECT system_identifier FROM pg_control_system()", wrapper)
+        self.assertIn("TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", wrapper)
         self.assertIn('-e DATABASE_URL="$runtime_async_url"', wrapper)
         self.assertIn('-e SYNC_DATABASE_URL="$runtime_sync_url"', wrapper)
 
@@ -50,6 +53,27 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
         self.assertIn('{"test", "testing", "ci"}', source)
         self.assertIn("signal.SIGTERM", source)
         self.assertIn("_raise_termination", source)
+        self.assertIn("TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", source)
+
+    def test_scratch_cluster_provenance_is_required_and_must_match(self):
+        with self.assertRaisesRegex(RegistrationScratchSuiteError, "system identifier"):
+            _verify_scratch_cluster(
+                "postgresql://user:pass@db/stage9_runtime", ""
+            )
+        engine = MagicMock()
+        connection = engine.connect.return_value.__enter__.return_value
+        connection.execute.return_value.scalar_one.return_value = "7429384756102938475"
+        with patch.object(scratch_runner, "_admin_engine", return_value=engine):
+            _verify_scratch_cluster(
+                "postgresql://user:pass@db/stage9_runtime",
+                "7429384756102938475",
+            )
+            with self.assertRaisesRegex(RegistrationScratchSuiteError, "disposable"):
+                _verify_scratch_cluster(
+                    "postgresql://user:pass@db/stage9_runtime",
+                    "6123456789012345678",
+                )
+        self.assertEqual(engine.dispose.call_count, 2)
 
     def test_every_suite_uses_an_allowlisted_scratch_prefix(self):
         self.assertEqual(
@@ -188,6 +212,7 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
             "TRADING_BOT_EXPECTED_CHECKOUT": str(scratch_runner.REPO_ROOT),
             "STAGE9_SCRATCH_DATABASES_ALLOWED": "true",
             "ENVIRONMENT": "test",
+            "TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID": "7429384756102938475",
         }
 
     def test_main_environment_guards_fail_before_database_creation(self):
@@ -211,6 +236,15 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
                 },
                 "checkout mismatch",
             ),
+            (
+                {
+                    "DATABASE_URL": "postgresql://db/stage9_runtime",
+                    "STAGE9_SCRATCH_DATABASES_ALLOWED": "true",
+                    "ENVIRONMENT": "test",
+                    "TRADING_BOT_EXPECTED_CHECKOUT": str(scratch_runner.REPO_ROOT),
+                },
+                "cluster provenance",
+            ),
         ]
         for environment, _message in cases:
             with self.subTest(message=_message), patch.dict(os.environ, environment, clear=True), patch.object(
@@ -226,7 +260,8 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
             "_database_snapshot",
             return_value=("postgres", None, 0),
         ), patch.object(scratch_runner, "_admin_engine") as admin:
-            self.assertEqual(scratch_runner.main(), 2)
+            with patch.object(scratch_runner, "_verify_scratch_cluster"):
+                self.assertEqual(scratch_runner.main(), 2)
             admin.assert_not_called()
 
     def _run_main_with_mocks(
@@ -244,6 +279,9 @@ class RegistrationScratchSuiteStaticTests(unittest.TestCase):
         snapshots = [before, before if after is None else after]
         run_side_effect = child_error
         with patch.dict(os.environ, environment, clear=True), patch.object(
+            scratch_runner,
+            "_verify_scratch_cluster",
+        ), patch.object(
             scratch_runner,
             "_database_snapshot",
             side_effect=snapshots,

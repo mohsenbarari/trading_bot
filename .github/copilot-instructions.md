@@ -247,7 +247,8 @@ make status      # Container status
 ### Registration Scratch Migration Safety
 - All registration scratch Alembic commands must run through
   `scripts/run_guarded_scratch_alembic.py` with `TRADING_BOT_MIGRATION_MODE=scratch`, matching
-  `DATABASE_URL`/`SYNC_DATABASE_URL`, the exact expected checkout, and an allowlisted
+  `DATABASE_URL`/`SYNC_DATABASE_URL`, the exact expected checkout, an independently observed
+  `TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID`, and an allowlisted
   `stage1_migration_*`, `stage1_counter_*`, or `stage2_registration_*` database. Never use raw
   Alembic for roadmap scratch evidence.
 - `migrations/env.py` reads `SYNC_DATABASE_URL`, not `DATABASE_URL`. A scratch migration command

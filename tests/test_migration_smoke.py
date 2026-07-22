@@ -39,7 +39,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['a875b6c7d9e0 (head)'])
+        self.assertEqual(heads, ['b986c7d8e0f1 (head)'])
 
     def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
         versions = REPO_ROOT / 'migrations' / 'versions'
@@ -63,6 +63,13 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('SET first_attempt_at=last_attempt_at', timing_source)
         self.assertIn('ck_dr_event_deliveries_first_attempt_order', timing_source)
         self.assertIn('forward-only evidence migration', timing_source)
+        boundary_child = versions / 'b986c7d8e0f1_harden_dr_stream_upgrade_boundary.py'
+        boundary_source = boundary_child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "a875b6c7d9e0"', boundary_source)
+        self.assertIn('IN SHARE ROW EXCLUSIVE MODE', boundary_source)
+        self.assertIn('cursor.last_sequence>0', boundary_source)
+        self.assertIn('NEW.source_xid IS NOT DISTINCT FROM OLD.source_xid', boundary_source)
+        self.assertIn('forward-only DR safety migration', boundary_source)
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

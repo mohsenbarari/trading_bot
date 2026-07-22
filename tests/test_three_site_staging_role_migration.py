@@ -6,8 +6,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
+from scripts import run_three_site_staging_role_migration as role_migration
 from scripts.run_three_site_staging_role_migration import (
+    LocalRoleBackend,
     RoleMigrationError,
     _secure_json,
     apply_action,
@@ -113,6 +116,49 @@ def _write_evidence(
 
 
 class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
+    @staticmethod
+    def _local_backend() -> LocalRoleBackend:
+        backend = object.__new__(LocalRoleBackend)
+        backend.prefix = ["docker", "compose"]
+        backend.db_service = "webapp_fi_db"
+        backend._psql = MagicMock(return_value="0")
+        return backend
+
+    def test_database_migration_quiescence_rejects_running_application_service(self):
+        backend = self._local_backend()
+
+        def fake_run(arguments, **_kwargs):
+            if arguments[-2:] == ["config", "--services"]:
+                return "webapp_fi_db\nwebapp_fi_redis\nwebapp_fi_api\nwebapp_fi_migration"
+            if arguments[-3:] == ["ps", "-q", "webapp_fi_api"]:
+                return "running-container-id"
+            return ""
+
+        with patch.object(role_migration, "_run", side_effect=fake_run):
+            with self.assertRaisesRegex(RoleMigrationError, "service to be stopped"):
+                backend._assert_database_migration_quiescent()
+        backend._psql.assert_not_called()
+
+    def test_database_migration_quiescence_requires_stable_zero_clients(self):
+        backend = self._local_backend()
+
+        def fake_run(arguments, **_kwargs):
+            if arguments[-2:] == ["config", "--services"]:
+                return "webapp_fi_db\nwebapp_fi_redis\nwebapp_fi_api\nwebapp_fi_migration"
+            return ""
+
+        with patch.object(role_migration, "_run", side_effect=fake_run), patch.object(
+            role_migration.time, "sleep"
+        ):
+            backend._assert_database_migration_quiescent()
+        self.assertEqual(backend._psql.call_count, 3)
+
+        backend._psql.reset_mock()
+        backend._psql.return_value = "1"
+        with patch.object(role_migration, "_run", side_effect=fake_run):
+            with self.assertRaisesRegex(RoleMigrationError, "zero other client sessions"):
+                backend._assert_database_migration_quiescent()
+
     def test_webapp_role_requires_ordered_external_barriers_and_commits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

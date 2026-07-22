@@ -66,6 +66,7 @@ SUPPORTED_SOURCE_REVISIONS = frozenset(
         "e653f4a5b7c8",  # hardened integration head (repeat/recovery input)
         "f764a5b6c8d9",  # sealed stream-contract head (repeat/recovery input)
         "a875b6c7d9e0",  # synchronization-timing evidence head
+        "b986c7d8e0f1",  # locked DR history-boundary head
     }
 )
 

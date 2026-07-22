@@ -65,11 +65,22 @@ if [[ "$ready" != true ]]; then
   exit 1
 fi
 
+scratch_cluster_system_id="$(
+  docker exec "$postgres_name" \
+    psql -U "$postgres_user" -d "$postgres_database" -Atqc \
+    'SELECT system_identifier FROM pg_control_system()'
+)"
+if [[ ! "$scratch_cluster_system_id" =~ ^[1-9][0-9]{15,19}$ ]]; then
+  printf 'Stage 9 disposable PostgreSQL system identifier is invalid\n' >&2
+  exit 1
+fi
+
 docker compose run --rm --no-deps \
   "${coverage_args[@]}" \
   -e TRADING_BOT_EXPECTED_CHECKOUT=/app \
   -e STAGE9_SCRATCH_DATABASES_ALLOWED=true \
   -e ENVIRONMENT=test \
+  -e TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID="$scratch_cluster_system_id" \
   -e DATABASE_URL="$runtime_async_url" \
   -e SYNC_DATABASE_URL="$runtime_sync_url" \
   bot "${runner_command[@]}"

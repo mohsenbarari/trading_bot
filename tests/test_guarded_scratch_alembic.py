@@ -187,15 +187,55 @@ class GuardedScratchAlembicTests(unittest.TestCase):
         )
         engine = MagicMock()
         connection = engine.connect.return_value.__enter__.return_value
-        connection.execute.return_value.scalar_one.return_value = "stage2_registration_test"
-        with patch.object(guarded, "create_engine", return_value=engine):
+        connection.execute.return_value.one.return_value = (
+            "stage2_registration_test",
+            "7429384756102938475",
+        )
+        with patch.dict(
+            os.environ,
+            {"TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID": "7429384756102938475"},
+            clear=True,
+        ), patch.object(guarded, "create_engine", return_value=engine):
             verify_connected_database(target)
         engine.dispose.assert_called_once()
 
         engine.reset_mock()
-        connection.execute.return_value.scalar_one.return_value = "other_database"
-        with patch.object(guarded, "create_engine", return_value=engine):
+        connection.execute.return_value.one.return_value = (
+            "other_database",
+            "7429384756102938475",
+        )
+        with patch.dict(
+            os.environ,
+            {"TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID": "7429384756102938475"},
+            clear=True,
+        ), patch.object(guarded, "create_engine", return_value=engine):
             with self.assertRaisesRegex(ScratchMigrationSafetyError, "does not match"):
+                verify_connected_database(target)
+        engine.dispose.assert_called_once()
+
+    def test_connected_database_requires_matching_scratch_cluster_provenance(self):
+        target = ScratchMigrationTarget(
+            database_name="stage4_registration_test",
+            sync_url=make_url(
+                "postgresql+psycopg2://user:pass@db/stage4_registration_test"
+            ),
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ScratchMigrationSafetyError, "system identifier"):
+                verify_connected_database(target)
+
+        engine = MagicMock()
+        connection = engine.connect.return_value.__enter__.return_value
+        connection.execute.return_value.one.return_value = (
+            "stage4_registration_test",
+            "7429384756102938475",
+        )
+        with patch.dict(
+            os.environ,
+            {"TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID": "6123456789012345678"},
+            clear=True,
+        ), patch.object(guarded, "create_engine", return_value=engine):
+            with self.assertRaisesRegex(ScratchMigrationSafetyError, "scratch cluster"):
                 verify_connected_database(target)
         engine.dispose.assert_called_once()
 

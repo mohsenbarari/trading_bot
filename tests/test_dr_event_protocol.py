@@ -4,6 +4,8 @@ import copy
 import unittest
 
 from core.dr_event_protocol import (
+    DR_SEQUENCE_MAX,
+    DR_TRANSACTION_MEMBER_MAX,
     DrEventProtocolError,
     decide_receipt,
     initial_delivery_destinations,
@@ -41,6 +43,29 @@ def envelope(*, sequence: int = 1, event_id: str = "12345678-1234-4234-8234-1234
         "tombstone": False,
         "created_at": "2026-07-19T12:00:00+00:00",
     }
+
+
+def v2_envelope() -> dict:
+    item = envelope()
+    transaction_id = "12345678-1234-4234-8234-123456789abd"
+    item.update(
+        protocol_version=2,
+        transaction_id=transaction_id,
+        transaction_position=1,
+        transaction_size=1,
+        transaction_hash="f" * 64,
+        destination_streams={
+            destination: {
+                "sequence": 1,
+                "transaction_id": transaction_id,
+                "transaction_position": 1,
+                "transaction_size": 1,
+                "transaction_hash": "e" * 64,
+            }
+            for destination in ("webapp_fi", "bot_fi")
+        },
+    )
+    return item
 
 
 class DrEventProtocolTests(unittest.TestCase):
@@ -212,6 +237,58 @@ class DrEventProtocolTests(unittest.TestCase):
         del omitted["destination_streams"]["bot_fi"]
         with self.assertRaisesRegex(DrEventProtocolError, "canonical entitlement"):
             validate_envelope(omitted)
+
+    def test_protocol_numeric_bounds_match_postgresql_storage_types(self):
+        maximum = v2_envelope()
+        maximum["producer_epoch"] = DR_SEQUENCE_MAX
+        maximum["producer_sequence"] = DR_SEQUENCE_MAX
+        maximum["writer_epoch"] = DR_SEQUENCE_MAX
+        maximum["transaction_position"] = DR_TRANSACTION_MEMBER_MAX
+        maximum["transaction_size"] = DR_TRANSACTION_MEMBER_MAX
+        for stream in maximum["destination_streams"].values():
+            stream["sequence"] = DR_SEQUENCE_MAX
+            stream["transaction_position"] = DR_TRANSACTION_MEMBER_MAX
+            stream["transaction_size"] = DR_TRANSACTION_MEMBER_MAX
+        validate_envelope(maximum)
+
+        invalid_cases = (
+            ("producer_sequence", DR_SEQUENCE_MAX + 1),
+            ("producer_epoch", DR_SEQUENCE_MAX + 1),
+            ("transaction_position", DR_TRANSACTION_MEMBER_MAX + 1),
+            ("transaction_size", DR_TRANSACTION_MEMBER_MAX + 1),
+        )
+        for field, value in invalid_cases:
+            with self.subTest(field=field):
+                invalid = v2_envelope()
+                invalid[field] = value
+                if field == "producer_epoch":
+                    invalid["writer_epoch"] = value
+                if field == "transaction_position":
+                    invalid["transaction_size"] = value
+                with self.assertRaises(DrEventProtocolError):
+                    validate_envelope(invalid)
+
+        for field, value in (
+            ("sequence", DR_SEQUENCE_MAX + 1),
+            ("transaction_position", DR_TRANSACTION_MEMBER_MAX + 1),
+            ("transaction_size", DR_TRANSACTION_MEMBER_MAX + 1),
+        ):
+            with self.subTest(destination_field=field):
+                invalid = v2_envelope()
+                stream = invalid["destination_streams"]["webapp_fi"]
+                stream[field] = value
+                if field == "transaction_position":
+                    stream["transaction_size"] = value
+                with self.assertRaises(DrEventProtocolError):
+                    validate_envelope(invalid)
+
+    def test_protocol_numeric_fields_require_exact_positive_integers(self):
+        for value in (0, -1, "1", 1.0, True, None):
+            with self.subTest(value=value):
+                invalid = v2_envelope()
+                invalid["destination_streams"]["webapp_fi"]["sequence"] = value
+                with self.assertRaises(DrEventProtocolError):
+                    validate_envelope(invalid)
 
     def test_destination_streams_remove_private_event_gaps_without_leaking_payload(self):
         product = envelope(sequence=20, event_id="12345678-1234-4234-8234-123456789ab3")

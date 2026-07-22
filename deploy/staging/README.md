@@ -225,8 +225,25 @@ an exact Object Storage version id is rejected.
 Each host begins with `run_three_site_staging_role_migration.py begin`. Run
 `restore-seed`, `configure-database`, and `start-private` on all four roles in
 their journal order. `configure-database` upgrades every supported predecessor
-to `a875b6c7d9e0`; on WebApp-IR it also converts the restored FI clone into a
+to `b986c7d8e0f1`; on WebApp-IR it also converts the restored FI clone into a
 locally fenced epoch-1 standby.
+
+Before Alembic starts, `configure-database` fails closed unless every
+application/migration/worker service is stopped and three consecutive database
+samples show zero other client sessions. This runtime proof complements the
+signed legacy-source freeze evidence. The `b986c7d8e0f1` migration then takes a
+write-excluding lock on all DR event/cursor/binding tables before its final
+cursor-led history preflight; an old-rule transaction must therefore either
+commit before the lock and be included in validation, or wait until the new
+contract is installed.
+
+The supported DR retention model is full-prefix retention: a producer or
+destination cursor may not outlive any member in its `1..last_sequence`
+history. Pruning `dr_events` or their destination sequence evidence while the
+cursor survives is unsupported and intentionally makes migration fail. Legacy
+protocol-v1 members remain valid in the producer prefix; destination allocation
+starts with protocol v2, and pre-`source_xid` v2 envelopes are accepted as
+historical destination evidence.
 
 The compatibility migration leaves WebApp-FI active at epoch 1 but does not
 invent a Witness lease. After the Witness private service is ready, run the
@@ -417,7 +434,9 @@ permitted to use production hosts, domains, buckets, or credentials. Execute
 only in the separately authorized window:
 
 Synchronization timing is not inferred from scenario wall-clock duration.
-Migration head `a875b6c7d9e0` retains the first delivery attempt, and each role
+Migration head `b986c7d8e0f1` retains the first delivery attempt, rejects any
+cursor whose retained DR history is not exactly contiguous, and takes a
+write-excluding stream-table lock before its final history validation. Each role
 bundle now contains a dedicated `*_sync_observer` database identity. That
 identity can only read `alembic_version`, `dr_database_runtime`, `dr_events`,
 `dr_event_deliveries`, and `dr_event_receipts`; it has no business, Writer,

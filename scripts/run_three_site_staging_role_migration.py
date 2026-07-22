@@ -47,7 +47,7 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
 }
-EXPECTED_HEAD = "a875b6c7d9e0"
+EXPECTED_HEAD = "b986c7d8e0f1"
 ROLE_DB = {
     "bot_fi": ("bot_fi_db", "BOT_FI_POSTGRES_USER", "BOT_FI_POSTGRES_DB"),
     "webapp_fi": ("webapp_fi_db", "WEBAPP_FI_POSTGRES_USER", "WEBAPP_FI_POSTGRES_DB"),
@@ -290,6 +290,35 @@ class LocalRoleBackend:
     def _compose_run(self, service: str) -> None:
         _run([*self.prefix, "run", "--rm", "--no-deps", "-T", service], timeout=900)
 
+    def _assert_database_migration_quiescent(self) -> None:
+        """Prove that no old application writer can overlap Alembic preflight."""
+
+        services = tuple(
+            item.strip()
+            for item in _run([*self.prefix, "config", "--services"]).splitlines()
+            if item.strip()
+        )
+        if not services or self.db_service not in services:
+            raise RoleMigrationError("role Compose service inventory is incomplete")
+        for service in services:
+            if service == self.db_service or service.endswith("_redis"):
+                continue
+            if _run([*self.prefix, "ps", "-q", service]):
+                raise RoleMigrationError(
+                    f"database migration requires the application service to be stopped: {service}"
+                )
+        for _sample in range(3):
+            active_clients = self._psql(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname=current_database() AND pid<>pg_backend_pid() "
+                "AND backend_type='client backend'"
+            )
+            if active_clients != "0":
+                raise RoleMigrationError(
+                    "database migration requires zero other client sessions"
+                )
+            time.sleep(0.2)
+
     def _wait_services_ready(
         self,
         services: tuple[str, ...],
@@ -414,6 +443,7 @@ class LocalRoleBackend:
                 raise RoleMigrationError(f"target {kind} seed restore failed")
 
     def configure_database(self) -> None:
+        self._assert_database_migration_quiescent()
         if self.role == "bot_fi":
             self._compose_run("bot_fi_migration")
             self._compose_run("bot_fi_db_roles")

@@ -24,6 +24,7 @@ ADMIN_DATABASE = "postgres"
 SKIPPED_PATTERN = re.compile(r"(?:skipped=|\bskipped\s+)([1-9]\d*)")
 TEST_COUNT_PATTERN = re.compile(r"\bRan\s+(\d+)\s+tests?\b")
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+POSTGRES_SYSTEM_IDENTIFIER_PATTERN = re.compile(r"^[1-9][0-9]{15,19}$")
 
 PROOF_SUITES = (
     ("tests.test_market_offer_admission_postgres", "MARKET_STAGE6_TEST_DATABASE_URL", "market_stage6"),
@@ -121,6 +122,27 @@ def _database_url(admin_url: str, database: str, *, driver: str = "postgresql") 
 def _connect(admin_url: str):
     parsed = _validate_admin_url(admin_url).set(drivername="postgresql")
     return psycopg2.connect(parsed.render_as_string(hide_password=False))
+
+
+def _validate_cluster_provenance(admin_url: str, expected_system_id: str) -> str:
+    expected = str(expected_system_id or "").strip()
+    if POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(expected) is None:
+        raise MarketPostgresGateSafetyError(
+            "expected scratch-cluster system identifier is required"
+        )
+    connection = _connect(admin_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT system_identifier::text FROM pg_control_system()")
+            row = cursor.fetchone()
+    finally:
+        connection.close()
+    observed = str(row[0]) if row else ""
+    if observed != expected:
+        raise MarketPostgresGateSafetyError(
+            "market PostgreSQL endpoint is not the expected disposable cluster"
+        )
+    return observed
 
 
 def _create_scratch_databases(
@@ -333,6 +355,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         _validate_admin_url(admin_url)
+        cluster_system_id = _validate_cluster_provenance(
+            admin_url,
+            os.getenv("TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", ""),
+        )
         head = _validate_checkout(str(args.expected_sha))
         redis_url = os.getenv(
             "MARKET_POSTGRES_GATE_REDIS_URL",
@@ -344,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"gate.head={head}",
                 f"gate.repo={REPO_ROOT}",
                 f"gate.suites={len(PROOF_SUITES)}",
+                f"gate.scratch_cluster_system_id={cluster_system_id}",
             )
         )
         _create_scratch_databases(admin_url, databases, created, evidence)

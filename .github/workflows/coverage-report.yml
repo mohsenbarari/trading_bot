@@ -134,6 +134,9 @@ jobs:
             export DATABASE_URL='postgresql+asyncpg://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
             export SYNC_DATABASE_URL='postgresql+psycopg2://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
             export TRADING_BOT_EXPECTED_CHECKOUT="$PWD"
+            export TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID="$(
+              python3 -c "import psycopg2; connection=psycopg2.connect('postgresql://admin:strongpassword@127.0.0.1:5432/postgres'); cursor=connection.cursor(); cursor.execute('SELECT system_identifier FROM pg_control_system()'); print(cursor.fetchone()[0]); connection.close()"
+            )"
             export STAGE9_COVERAGE_FILE="$PWD/.coverage"
             python3 scripts/run_registration_scratch_suite.py
           ) > tmp/backend-postgres-opt-in.log 2>&1 &

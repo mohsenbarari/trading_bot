@@ -20,6 +20,8 @@ from core.sync_metadata import build_sync_metadata
 
 DR_EVENT_PROTOCOL_VERSION = 2
 DR_EVENT_SCHEMA_VERSION = 1
+DR_SEQUENCE_MAX = 2**63 - 1
+DR_TRANSACTION_MEMBER_MAX = 2**31 - 1
 EVENT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 V1_ENVELOPE_FIELDS = frozenset(
@@ -146,7 +148,11 @@ def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
     if payload.get("origin_authority") != expected_authority:
         raise DrEventProtocolError("DR origin authority does not match its physical producer")
     for key in ("producer_epoch", "producer_sequence"):
-        if type(payload.get(key)) is not int or payload[key] < 1:
+        if (
+            type(payload.get(key)) is not int
+            or payload[key] < 1
+            or payload[key] > DR_SEQUENCE_MAX
+        ):
             raise DrEventProtocolError(f"{key} must be a positive integer")
     if payload.get("operation") not in {"INSERT", "UPDATE", "DELETE"}:
         raise DrEventProtocolError("DR operation is invalid")
@@ -174,7 +180,15 @@ def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
             raise DrEventProtocolError("DR transaction_id is not canonical")
         position = payload.get("transaction_position")
         size = payload.get("transaction_size")
-        if type(position) is not int or type(size) is not int or position < 1 or size < 1 or position > size:
+        if (
+            type(position) is not int
+            or type(size) is not int
+            or position < 1
+            or size < 1
+            or position > DR_TRANSACTION_MEMBER_MAX
+            or size > DR_TRANSACTION_MEMBER_MAX
+            or position > size
+        ):
             raise DrEventProtocolError("DR transaction position/size is invalid")
         if not HASH_RE.fullmatch(str(payload.get("transaction_hash") or "")):
             raise DrEventProtocolError("DR transaction hash is invalid")
@@ -206,11 +220,14 @@ def validate_envelope(payload: Any) -> ValidatedDrEnvelope:
             if (
                 type(stream.get("sequence")) is not int
                 or stream["sequence"] < 1
+                or stream["sequence"] > DR_SEQUENCE_MAX
                 or stream.get("transaction_id") != transaction_id
                 or type(stream.get("transaction_position")) is not int
                 or type(stream.get("transaction_size")) is not int
                 or stream["transaction_position"] < 1
                 or stream["transaction_size"] < 1
+                or stream["transaction_position"] > DR_TRANSACTION_MEMBER_MAX
+                or stream["transaction_size"] > DR_TRANSACTION_MEMBER_MAX
                 or stream["transaction_position"] > stream["transaction_size"]
                 or not HASH_RE.fullmatch(str(stream.get("transaction_hash") or ""))
                 or stream["transaction_hash"] == "0" * 64
