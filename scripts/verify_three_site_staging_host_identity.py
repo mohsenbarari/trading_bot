@@ -180,7 +180,7 @@ def _resource_boundary() -> dict[str, Any]:
     raw = _run(
         [
             SYSTEMCTL, "show", STAGING_SLICE, "--no-pager",
-            "--property=LoadState,ActiveState,FragmentPath,DropInPaths,CPUAccounting,CPUQuotaPerSecUSec,MemoryAccounting,MemoryHigh,MemoryMax,TasksAccounting,TasksMax",
+            "--property=LoadState,ActiveState,FragmentPath,DropInPaths,CPUAccounting,CPUUsageNSec,CPUQuotaPerSecUSec,MemoryAccounting,MemoryHigh,MemoryMax,TasksAccounting,TasksMax",
         ]
     )
     values: dict[str, str] = {}
@@ -189,20 +189,22 @@ def _resource_boundary() -> dict[str, Any]:
         if not separator or key in values:
             raise HostIdentityError("staging resource boundary output is malformed")
         values[key] = value
-    expected = {
+    required = {
         "LoadState", "ActiveState", "FragmentPath", "DropInPaths",
-        "CPUAccounting", "CPUQuotaPerSecUSec", "MemoryAccounting",
-        "MemoryHigh", "MemoryMax", "TasksAccounting", "TasksMax",
+        "CPUUsageNSec", "CPUQuotaPerSecUSec", "MemoryAccounting", "MemoryHigh",
+        "MemoryMax", "TasksAccounting", "TasksMax",
     }
+    actual = frozenset(values)
     if (
-        set(values) != expected
+        actual not in {frozenset(required), frozenset({*required, "CPUAccounting"})}
         or values["LoadState"] != "loaded"
         or values["ActiveState"] != "active"
         or values["FragmentPath"] != f"/etc/systemd/system/{STAGING_SLICE}"
         or values["DropInPaths"]
-        or values["CPUAccounting"] != "yes"
+        or values.get("CPUAccounting", "yes") != "yes"
         or values["MemoryAccounting"] != "yes"
         or values["TasksAccounting"] != "yes"
+        or re.fullmatch(r"[0-9]+", values["CPUUsageNSec"]) is None
     ):
         raise HostIdentityError("staging aggregate slice is inactive or overridden")
     match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)s", values["CPUQuotaPerSecUSec"])

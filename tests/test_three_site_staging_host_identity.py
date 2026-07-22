@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from scripts.verify_three_site_staging_host_identity import (
     HostIdentityError,
     ROLE_VOLUME_FIELDS,
+    _resource_boundary,
     verify_host_snapshot,
 )
 from tests.test_three_site_staging_signed_inventory import _inventory
@@ -171,6 +173,87 @@ class ThreeSiteStagingHostIdentityTests(unittest.TestCase):
                 release_sha=self.inventory["release_sha"],
                 stage="fresh-preflight",
             )
+
+    def test_resource_boundary_accepts_legacy_cpu_accounting_property(self):
+        output = "\n".join(
+            (
+                "LoadState=loaded",
+                "ActiveState=active",
+                "FragmentPath=/etc/systemd/system/trading-bot-three-site-staging.slice",
+                "DropInPaths=",
+                "CPUAccounting=yes",
+                "CPUUsageNSec=0",
+                "CPUQuotaPerSecUSec=1.500000s",
+                "MemoryAccounting=yes",
+                "MemoryHigh=2147483648",
+                "MemoryMax=3221225472",
+                "TasksAccounting=yes",
+                "TasksMax=1536",
+            )
+        )
+        with patch(
+            "scripts.verify_three_site_staging_host_identity._run",
+            return_value=output,
+        ):
+            result = _resource_boundary()
+        self.assertEqual(result["cpu_quota_percent"], 150)
+
+    def test_resource_boundary_accepts_systemd_259_cpu_usage_contract(self):
+        output = "\n".join(
+            (
+                "LoadState=loaded",
+                "ActiveState=active",
+                "FragmentPath=/etc/systemd/system/trading-bot-three-site-staging.slice",
+                "DropInPaths=",
+                "CPUUsageNSec=0",
+                "CPUQuotaPerSecUSec=1.500000s",
+                "MemoryAccounting=yes",
+                "MemoryHigh=2147483648",
+                "MemoryMax=3221225472",
+                "TasksAccounting=yes",
+                "TasksMax=1536",
+            )
+        )
+        with patch(
+            "scripts.verify_three_site_staging_host_identity._run",
+            return_value=output,
+        ):
+            result = _resource_boundary()
+        self.assertEqual(result["cpu_quota_percent"], 150)
+
+    def test_resource_boundary_rejects_missing_or_disabled_cpu_accounting(self):
+        base = {
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "FragmentPath": "/etc/systemd/system/trading-bot-three-site-staging.slice",
+            "DropInPaths": "",
+            "CPUUsageNSec": "0",
+            "CPUQuotaPerSecUSec": "1.500000s",
+            "MemoryAccounting": "yes",
+            "MemoryHigh": "2147483648",
+            "MemoryMax": "3221225472",
+            "TasksAccounting": "yes",
+            "TasksMax": "1536",
+        }
+        invalid = []
+        missing_usage = dict(base)
+        missing_usage.pop("CPUUsageNSec")
+        invalid.append(missing_usage)
+        disabled_legacy = {**base, "CPUAccounting": "no"}
+        invalid.append(disabled_legacy)
+        malformed_usage = {**base, "CPUUsageNSec": "infinity"}
+        invalid.append(malformed_usage)
+        for values in invalid:
+            with self.subTest(values=values):
+                output = "\n".join(f"{key}={value}" for key, value in values.items())
+                with patch(
+                    "scripts.verify_three_site_staging_host_identity._run",
+                    return_value=output,
+                ):
+                    with self.assertRaisesRegex(
+                        HostIdentityError, "aggregate slice"
+                    ):
+                        _resource_boundary()
 
 
 if __name__ == "__main__":
