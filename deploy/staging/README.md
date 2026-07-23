@@ -219,6 +219,10 @@ The required order is:
 5. create PostgreSQL/uploads/audit backups from the frozen sources and pass the
    independent PostgreSQL-15 restore/fingerprint drill; Redis is observed but
    is never restored;
+   the source PostgreSQL identifiers must be present in the signed protected
+   boundary inventory because they are pre-existing, read-only migration
+   inputs, while every newly provisioned target identifier must remain outside
+   that boundary;
 6. encrypt each artifact with the campaign age recipient, publish it to the
    exact versioned Arvan Object Storage bucket/key, read back that exact
    `VersionId`, decrypt it, and re-prove the original plaintext hash;

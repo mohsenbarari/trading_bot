@@ -72,6 +72,7 @@ SUPPORTED_SOURCE_REVISIONS = frozenset(
         "f764a5b6c8d9",  # sealed stream-contract head (repeat/recovery input)
         "a875b6c7d9e0",  # synchronization-timing evidence head
         "b986c7d8e0f1",  # locked DR history-boundary head
+        "f2c7d8e9a0b1",  # deployed repeat-offer staging source before queue merge
     }
 )
 
@@ -207,7 +208,7 @@ def verify_migration_plan(
         raise MigrationPlanError("migration requires exactly two source backups")
     source_by_role: dict[str, dict[str, Any]] = {}
     target_system_ids = {str(role["postgres_system_id"]) for role in inventory["roles"]}
-    production_system_ids = {
+    protected_existing_system_ids = {
         str(value).lower()
         for value in inventory["production_boundaries"]["postgres_system_ids"]
     }
@@ -229,7 +230,12 @@ def verify_migration_plan(
             or str(row["alembic_revision"]) not in SUPPORTED_SOURCE_REVISIONS
             or not SHA256_RE.fullmatch(str(row["database_fingerprint_sha256"]))
             or str(row["postgres_system_id"]) in target_system_ids
-            or str(row["postgres_system_id"]).lower() in production_system_ids
+            # A migration source is an already-existing, frozen resource and
+            # must be declared in the protected boundary inventory. Targets
+            # remain distinct and are still forbidden from that boundary by
+            # the signed-inventory verifier/finalizer.
+            or str(row["postgres_system_id"]).lower()
+            not in protected_existing_system_ids
         ):
             raise MigrationPlanError("source-backup identity/hash is unsafe")
         manifest = backup_manifests.get(role)

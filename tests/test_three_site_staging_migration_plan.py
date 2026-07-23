@@ -42,6 +42,12 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
     def _documents(self):
         now = datetime.now(timezone.utc).replace(microsecond=0)
         inventory = _inventory()
+        inventory["production_boundaries"]["postgres_system_ids"].extend(
+            [
+                str(8000000000000000000 + number)
+                for number in (1, 2)
+            ]
+        )
         enrollment = create_enrollment(
             operator="person-1",
             password="test migration approval passphrase",
@@ -368,6 +374,49 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
         documents = self._documents()
         documents[-4]["webapp_fi"]["objects"][0]["plaintext_sha256"] = "0" * 64
         with self.assertRaises(MigrationPlanError):
+            self._verify(documents)
+
+    def test_source_postgres_must_be_a_declared_protected_input(self):
+        documents = self._documents()
+        documents[-2]["source_backups"][0]["postgres_system_id"] = (
+            "8111111111111111111"
+        )
+        with self.assertRaisesRegex(MigrationPlanError, "source-backup identity"):
+            self._verify(documents)
+
+    def test_deployed_repeat_offer_revision_is_a_supported_source(self):
+        documents = self._documents()
+        freezes = documents[4]
+        backups = documents[5]
+        plan = documents[-2]
+        planned_freeze = {}
+        for freeze in freezes:
+            freeze["postgres"]["alembic_revision"] = "f2c7d8e9a0b1"
+            freeze_hash = hashlib.sha256(_canonical_bytes(freeze)).hexdigest()
+            source_role = freeze["source_roles"][0]["source_role"]
+            planned_freeze[source_role] = freeze_hash
+            backup = backups[source_role]
+            backup["source_alembic_revision"] = "f2c7d8e9a0b1"
+            backup["restore_drill"]["restored_alembic_revision"] = "f2c7d8e9a0b1"
+            backup["source_freeze_evidence_sha256"] = freeze_hash
+        plan["source_freeze"]["evidence"] = [
+            {
+                "evidence_sha256": planned_freeze[
+                    freeze["source_roles"][0]["source_role"]
+                ],
+                "source_roles": [
+                    row["source_role"] for row in freeze["source_roles"]
+                ],
+            }
+            for freeze in freezes
+        ]
+        for row in plan["source_backups"]:
+            backup = backups[row["source_role"]]
+            row["alembic_revision"] = "f2c7d8e9a0b1"
+            row["manifest_sha256"] = hashlib.sha256(
+                _canonical_bytes(backup)
+            ).hexdigest()
+        with self.assertRaisesRegex(MigrationPlanError, "human approval is invalid"):
             self._verify(documents)
 
 
