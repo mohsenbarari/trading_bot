@@ -116,6 +116,7 @@ class CoinIntelligenceShadowService:
             trade_form="PHYSICAL",
             snapshot=snapshot,
             now=now or datetime.now(timezone.utc),
+            allowed_commodities=bundle.canonical_commodity_names,
         )
         inferred = result.inferred_commodity
         return ShadowObservation(

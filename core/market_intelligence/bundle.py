@@ -60,6 +60,13 @@ class LoadedRuntimeBundle:
     def feature_schema_version(self) -> str:
         return str(self.manifest["feature_schema_version"])
 
+    @property
+    def canonical_commodity_names(self) -> tuple[str, ...]:
+        return tuple(
+            str(row["name"])
+            for row in self.commodity_catalog["commodities"]
+        )
+
 
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
@@ -101,6 +108,42 @@ def _validated_member_name(raw_name: object) -> str:
     ):
         raise BundleValidationError("bundle_member_name_invalid")
     return name
+
+
+def _validate_commodity_catalog(payload: Mapping[str, Any]) -> None:
+    if int(payload.get("schema_version") or 0) != 1:
+        raise BundleValidationError(
+            "bundle_commodity_catalog_schema_unsupported"
+        )
+    if not str(payload.get("catalog_version") or "").strip():
+        raise BundleValidationError(
+            "bundle_commodity_catalog_version_missing"
+        )
+    rows = payload.get("commodities")
+    if not isinstance(rows, list) or not rows:
+        raise BundleValidationError(
+            "bundle_commodity_catalog_empty"
+        )
+    names: list[str] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise BundleValidationError(
+                "bundle_commodity_catalog_row_invalid"
+            )
+        name = row.get("name")
+        if not isinstance(name, str) or not name or name != name.strip():
+            raise BundleValidationError(
+                "bundle_commodity_catalog_name_invalid"
+            )
+        if "alias" in row or "aliases" in row:
+            raise BundleValidationError(
+                "bundle_commodity_catalog_alias_forbidden"
+            )
+        names.append(name)
+    if len(names) != len(set(names)):
+        raise BundleValidationError(
+            "bundle_commodity_catalog_name_duplicate"
+        )
 
 
 def load_runtime_bundle(
@@ -212,6 +255,8 @@ def load_runtime_bundle(
         != "SHADOW_NOT_PROMOTED"
     ):
         raise BundleValidationError("bundle_anchor_evidence_not_shadow")
+    commodity_catalog = payloads["commodity_catalog.json"]
+    _validate_commodity_catalog(commodity_catalog)
     try:
         policy = RankerPolicy.from_mapping(ranker_payload)
     except (KeyError, TypeError, ValueError) as exc:
@@ -223,5 +268,5 @@ def load_runtime_bundle(
         manifest=manifest,
         ranker_policy=policy,
         feature_schema=feature_schema,
-        commodity_catalog=payloads["commodity_catalog.json"],
+        commodity_catalog=commodity_catalog,
     )

@@ -129,7 +129,58 @@ class CoinIntelligenceBundleTests(unittest.TestCase):
         self.assertTrue(
             all("name" in row for row in catalog["commodities"])
         )
+        self.assertIn("امام", bundle.canonical_commodity_names)
         self.assertFalse(hasattr(bundle, "commodity_database_id"))
+
+    def test_catalog_alias_metadata_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "bundle"
+            shutil.copytree(DEFAULT_BUNDLE_DIRECTORY, copied)
+            catalog_path = copied / "commodity_catalog.json"
+            catalog = json.loads(
+                catalog_path.read_text(encoding="utf-8")
+            )
+            catalog["commodities"][0]["aliases"] = ["امامی"]
+            catalog_path.write_text(
+                json.dumps(catalog, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self._refresh_member_metadata(
+                copied,
+                "commodity_catalog.json",
+            )
+
+            with self.assertRaisesRegex(
+                BundleValidationError,
+                "bundle_commodity_catalog_alias_forbidden",
+            ):
+                load_runtime_bundle(copied)
+
+    def test_duplicate_canonical_catalog_name_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "bundle"
+            shutil.copytree(DEFAULT_BUNDLE_DIRECTORY, copied)
+            catalog_path = copied / "commodity_catalog.json"
+            catalog = json.loads(
+                catalog_path.read_text(encoding="utf-8")
+            )
+            catalog["commodities"][1]["name"] = (
+                catalog["commodities"][0]["name"]
+            )
+            catalog_path.write_text(
+                json.dumps(catalog, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self._refresh_member_metadata(
+                copied,
+                "commodity_catalog.json",
+            )
+
+            with self.assertRaisesRegex(
+                BundleValidationError,
+                "bundle_commodity_catalog_name_duplicate",
+            ):
+                load_runtime_bundle(copied)
 
 
 if __name__ == "__main__":

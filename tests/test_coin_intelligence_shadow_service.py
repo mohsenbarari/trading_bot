@@ -127,6 +127,26 @@ class CoinIntelligenceShadowServiceTests(unittest.TestCase):
         self.assertIsNone(observation.inferred_commodity)
         self.assertTrue(observation.requires_user_confirmation)
 
+    def test_snapshot_alias_cannot_become_model_output(self) -> None:
+        state = _state()
+        state["settlements"]["CASH"]["rates"] = [
+            _rate("امامی", 54_000, 52_500, 56_000)
+        ]
+        service = CoinIntelligenceShadowService(
+            snapshot_provider=StaticProvider(state)
+        )
+
+        observation = service.observe_implicit_commodity(
+            price=54_200,
+            settlement="cash",
+            current_commodity="امام",
+            now=NOW,
+        )
+
+        self.assertEqual(observation.status, "NO_MARKET_DATA")
+        self.assertIsNone(observation.inferred_commodity)
+        self.assertTrue(observation.requires_user_confirmation)
+
     def test_unknown_settlement_abstains_before_loading_bundle(self) -> None:
         service = CoinIntelligenceShadowService(
             snapshot_provider=UnavailableProvider(),
