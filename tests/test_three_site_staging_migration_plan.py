@@ -107,7 +107,11 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
                 "schema": "three-site-staging-source-freeze-v1",
                 "campaign_id": inventory["campaign_id"],
                 "target_release_sha": inventory["release_sha"],
-                "project_name": "trading_bot_staging",
+                "project_name": (
+                    "trading_bot_staging"
+                    if role == "bot_fi"
+                    else "trading_bot_staging_iran"
+                ),
                 "observed_at": (now - timedelta(minutes=1)).isoformat(),
                 "source_roles": [
                     {

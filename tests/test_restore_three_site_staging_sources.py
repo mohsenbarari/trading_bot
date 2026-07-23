@@ -102,6 +102,26 @@ class RestoreThreeSiteStagingSourcesTests(unittest.TestCase):
         )
         self.assertEqual(result["services_to_start"], ["app", "sync_worker"])
 
+    def test_webapp_freeze_can_restore_only_from_exact_iran_staging_project(self):
+        evidence = _evidence()
+        evidence["project_name"] = "trading_bot_staging_iran"
+        result = verify_restore_input(
+            evidence,
+            campaign_id=evidence["campaign_id"],
+            release_sha=evidence["target_release_sha"],
+            project_name="trading_bot_staging_iran",
+        )
+        self.assertEqual(result["services_to_start"], ["app", "sync_worker"])
+        evidence["source_roles"][0]["source_role"] = "bot_fi"
+        evidence["source_roles"][0]["app_service"] = "foreign_app"
+        with self.assertRaisesRegex(SourceRestoreError, "cannot authorize"):
+            verify_restore_input(
+                evidence,
+                campaign_id=evidence["campaign_id"],
+                release_sha=evidence["target_release_sha"],
+                project_name="trading_bot_staging_iran",
+            )
+
     def test_evidence_cannot_restart_an_unrecorded_service(self):
         evidence = _evidence()
         evidence["stopped_services"].append("bot")

@@ -25,6 +25,10 @@ from scripts.verify_three_site_staging_inventory import (
     verify_approved_inventory,
 )
 from scripts.verify_three_site_staging_image_inventory import verify_image_document
+from core.three_site_staging_source_contract import (
+    LEGACY_STAGING_PROJECTS,
+    legacy_staging_project_allowed,
+)
 
 
 SOURCE_ROLES = ("bot_fi", "webapp_fi")
@@ -287,7 +291,7 @@ def verify_migration_plan(
             or evidence["schema"] != "three-site-staging-source-freeze-v1"
             or evidence["campaign_id"] != inventory_result["campaign_id"]
             or evidence["target_release_sha"] != inventory_result["release_sha"]
-            or evidence["project_name"] != "trading_bot_staging"
+            or evidence["project_name"] not in LEGACY_STAGING_PROJECTS
             or evidence["running_services"] != ["db", "redis"]
             or not isinstance(evidence["stopped_services"], list)
             or "db" in evidence["stopped_services"]
@@ -321,6 +325,9 @@ def verify_migration_plan(
             if (
                 role not in SOURCE_ROLES
                 or role in roles_from_freeze
+                or not legacy_staging_project_allowed(
+                    str(evidence["project_name"]), (role,)
+                )
                 or row["app_service"] != expected_app
                 or row["source_release_sha"] != source_by_role[role]["source_release_sha"]
             ):

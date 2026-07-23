@@ -16,6 +16,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.freeze_three_site_staging_sources import DATA_SERVICES, DOCKER, _run
+from core.three_site_staging_source_contract import (
+    LEGACY_STAGING_PROJECTS,
+    legacy_staging_project_allowed,
+)
 from scripts.render_three_site_staging_role_compose import _atomic_write
 from scripts.verify_three_site_staging_inventory import (
     _strict_object,
@@ -58,6 +62,12 @@ def verify_restore_input(
     }
     previous = evidence.get("previously_running_services") if isinstance(evidence, dict) else None
     stopped = evidence.get("stopped_services") if isinstance(evidence, dict) else None
+    source_rows = evidence.get("source_roles") if isinstance(evidence, dict) else None
+    source_roles = [
+        str(row.get("source_role"))
+        for row in source_rows
+        if isinstance(row, dict)
+    ] if isinstance(source_rows, list) else []
     if (
         not isinstance(evidence, dict)
         or set(evidence) != expected_fields
@@ -65,6 +75,8 @@ def verify_restore_input(
         or evidence.get("campaign_id") != campaign_id
         or evidence.get("target_release_sha") != release_sha
         or evidence.get("project_name") != project_name
+        or len(source_roles) != len(source_rows or [])
+        or not legacy_staging_project_allowed(project_name, source_roles)
         or evidence.get("running_services") != ["db", "redis"]
         or not isinstance(previous, list)
         or len(previous) != len(set(previous))
@@ -154,8 +166,8 @@ def _load_legacy_restore_bundle(
 
 
 def _legacy_prefix(*, project_name: str, compose_path: Path) -> list[str]:
-    if project_name != "trading_bot_staging":
-        raise SourceRestoreError("legacy restore requires the exact staging project")
+    if project_name not in LEGACY_STAGING_PROJECTS:
+        raise SourceRestoreError("legacy restore project is outside the closed allowlist")
     return [DOCKER, "compose", "-p", project_name, "-f", str(compose_path)]
 
 

@@ -21,6 +21,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.render_three_site_staging_role_compose import _atomic_write, parse_env_values
+from core.three_site_staging_source_contract import (
+    legacy_staging_project_allowed,
+)
 from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_approved_inventory,
@@ -75,8 +78,10 @@ def _run(arguments: list[str], *, timeout: int = 30) -> str:
 def _compose_base(
     compose: Path, env_file: Path, source_role: str, project_name: str
 ) -> list[str]:
-    if project_name != "trading_bot_staging":
-        raise StagingBackupError("legacy source backup requires the exact staging Compose project")
+    if not legacy_staging_project_allowed(project_name, (source_role,)):
+        raise StagingBackupError(
+            "legacy source backup project is not approved for the selected source role"
+        )
     result = [
         DOCKER, "compose", "-p", project_name,
         "-f", str(compose), "--env-file", str(env_file),

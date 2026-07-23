@@ -304,14 +304,20 @@ this staging campaign.
 
 First freeze the legacy Compose project. The evidence records exactly which
 services were running so rollback cannot accidentally start an unrecorded
-service:
+service. The source-project allowlist is role-bound: `bot_fi` may use only
+`trading_bot_staging`; `webapp_fi` may use `trading_bot_staging` when it is
+genuinely co-located with the Bot source, or the deployed Finland WebApp
+project `trading_bot_staging_iran`. No production or arbitrary Compose project
+name is accepted. Freeze independently deployed sources in separate local
+runs, and require the runtime `RELEASE_SHA` for each selected application to
+be the exact 40-hex commit; a shortened deployment label is rejected:
 
 ```bash
 python3 scripts/freeze_three_site_staging_sources.py \
   --repo /srv/trading-bot/current \
   --compose /srv/trading-bot/current/deploy/staging/docker-compose.staging.yml \
   --env-file /root/secure/.env.staging \
-  --project-name trading_bot_staging \
+  --project-name trading_bot_staging_iran \
   --source-role webapp_fi \
   --expected-source-release-sha webapp_fi=<current-staging-sha> \
   --inventory /root/secure/provisioned-inventory.json \
@@ -332,7 +338,7 @@ python3 scripts/run_three_site_staging_source_backup.py \
   --compose /srv/trading-bot-three-site/current/deploy/staging/docker-compose.staging.yml \
   --env-file /root/secure/.env.staging \
   --output-dir /srv/trading-bot-three-site-backups/<campaign>/webapp_fi \
-  --project-name trading_bot_staging \
+  --project-name trading_bot_staging_iran \
   --source-freeze-evidence /root/secure/source-freeze.json \
   --inventory /root/secure/provisioned-inventory.json \
   --inventory-approval /root/secure/provisioned-inventory-approval.json \

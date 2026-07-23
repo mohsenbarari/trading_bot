@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from scripts.run_three_site_staging_source_backup import (
     StagingBackupError,
+    _compose_base,
     build_plan,
     confirmation_phrase,
     verify_backup_manifest,
@@ -18,6 +19,22 @@ from scripts.run_three_site_staging_source_backup import (
 
 
 class ThreeSiteStagingSourceBackupTests(unittest.TestCase):
+    def test_webapp_backup_accepts_exact_iran_staging_project_only(self):
+        prefix = _compose_base(
+            Path("/secure/compose.yml"),
+            Path("/secure/staging.env"),
+            "webapp_fi",
+            "trading_bot_staging_iran",
+        )
+        self.assertEqual(prefix[prefix.index("-p") + 1], "trading_bot_staging_iran")
+        with self.assertRaisesRegex(StagingBackupError, "not approved"):
+            _compose_base(
+                Path("/secure/compose.yml"),
+                Path("/secure/staging.env"),
+                "bot_fi",
+                "trading_bot_staging_iran",
+            )
+
     def _manifest(self):
         return {
             "schema": "three-site-staging-source-backup-v2",

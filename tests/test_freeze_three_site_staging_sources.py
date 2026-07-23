@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from scripts.freeze_three_site_staging_sources import (
+    SourceFreezeError,
+    _compose,
     build_plan,
     confirmation_phrase,
     execute,
@@ -15,6 +17,19 @@ from scripts.freeze_three_site_staging_sources import (
 
 
 class FreezeThreeSiteStagingSourcesTests(unittest.TestCase):
+    def test_webapp_source_accepts_only_the_deployed_staging_project_alias(self):
+        args = argparse.Namespace(
+            project_name="trading_bot_staging_iran",
+            source_role=["webapp_fi"],
+            compose=Path("/secure/compose.yml"),
+            env_file=Path("/secure/staging.env"),
+        )
+        prefix = _compose(args)
+        self.assertEqual(prefix[prefix.index("-p") + 1], "trading_bot_staging_iran")
+        args.source_role = ["bot_fi"]
+        with self.assertRaisesRegex(SourceFreezeError, "not approved"):
+            _compose(args)
+
     def test_plan_excludes_database_and_redis_from_stop_set(self):
         plan = build_plan(
             campaign_id="11111111-1111-4111-8111-111111111111",

@@ -4018,6 +4018,12 @@ does not authorize a `main` merge.
   table/sequence fingerprints. A separate rollback tool can restart only the
   previously recorded legacy service set. No official freeze or backup has yet
   been executed by this integration work.
+- The legacy-source project boundary is a role-scoped closed allowlist rather
+  than a single-host assumption: `bot_fi` accepts only
+  `trading_bot_staging`, while `webapp_fi` additionally accepts the deployed
+  Finland staging project `trading_bot_staging_iran`. Freeze, backup, rollback,
+  and migration-plan verification enforce the same mapping; arbitrary or
+  production project names and shortened runtime release SHAs remain rejected.
 - Exact migration history equivalence is executable for empty, main-parent,
   Queue-parent, and DR-parent paths through head `d542e3f4a6b7`; all four paths
   produced the same effective role/fence/policy digest in scratch PostgreSQL.

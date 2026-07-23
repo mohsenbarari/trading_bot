@@ -28,6 +28,9 @@ from scripts.run_three_site_staging_source_backup import (
     _psql,
     _secure_env,
 )
+from core.three_site_staging_source_contract import (
+    legacy_staging_project_allowed,
+)
 from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_approved_inventory,
@@ -64,8 +67,10 @@ def _run(arguments: list[str], *, timeout: int = 30) -> str:
 
 
 def _compose(args: argparse.Namespace) -> list[str]:
-    if args.project_name != "trading_bot_staging":
-        raise SourceFreezeError("source freeze requires the exact legacy staging project")
+    if not legacy_staging_project_allowed(args.project_name, args.source_role):
+        raise SourceFreezeError(
+            "source freeze project is not approved for every selected source role"
+        )
     return [
         DOCKER, "compose", "-p", args.project_name,
         "-f", str(args.compose), "--env-file", str(args.env_file),
