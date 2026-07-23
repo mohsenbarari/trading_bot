@@ -60,7 +60,7 @@ class PublishWaIrObjectStorageTransferTests(unittest.TestCase):
             f"ARVAN_S3_SECRET_KEY={'s' * 40}\n"
             "ARVAN_S3_ENDPOINT=https://s3.ir-thr-at1.arvanstorage.ir\n"
             "ARVAN_S3_REGION=ir-thr-at1\n"
-            "WA_IR_OBJECT_STORAGE_BUCKET=production-sync-coin\n"
+            "WA_IR_OBJECT_STORAGE_BUCKET=gold-trade-staging-three-site-dr\n"
             "WA_IR_OBJECT_STORAGE_PREFIX=staging/matrix-transport\n"
             f"WA_IR_AGE_RECIPIENT_FILE={recipient}\n"
             "WA_IR_REMOTE_AGE_IDENTITY=/root/secure-envs/trading-bot/wa-ir-object-storage-age-identity.txt\n"
@@ -105,6 +105,35 @@ class PublishWaIrObjectStorageTransferTests(unittest.TestCase):
                     destination="/root/.ssh/authorized_keys",
                     mode=0o600,
                     config_path=self._config(root),
+                    client=_FakeS3(),
+                )
+
+    def test_production_bucket_is_rejected_before_s3(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "client.env"
+            source.write_text("SECRET=value\n")
+            source.chmod(0o600)
+            config = self._config(root)
+            config.write_text(
+                config.read_text().replace(
+                    "WA_IR_OBJECT_STORAGE_BUCKET=gold-trade-staging-three-site-dr",
+                    "WA_IR_OBJECT_STORAGE_BUCKET=production-sync-coin",
+                )
+            )
+            config.chmod(0o600)
+            with self.assertRaisesRegex(
+                TransferPublicationError, "production-owned"
+            ):
+                publish_file(
+                    source,
+                    campaign_tag="wwm_0123456789ab",
+                    destination=(
+                        "/run/writer-witness-matrix/"
+                        "wwm_0123456789ab/client.env"
+                    ),
+                    mode=0o600,
+                    config_path=config,
                     client=_FakeS3(),
                 )
 

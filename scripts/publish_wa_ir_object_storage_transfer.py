@@ -26,6 +26,7 @@ from scripts.wa_ir_object_storage_preflight_agent import (
     FILE_TRANSFER_NAMES,
     FILE_TRANSFER_SCHEMA,
 )
+from scripts.verify_three_site_staging_inventory import PRODUCTION_BUCKETS
 
 
 DEFAULT_CONFIG = Path("/root/secure-envs/trading-bot/wa-ir-object-storage-transport.env")
@@ -72,6 +73,15 @@ def _config(path: Path) -> dict[str, str]:
     prefix = values["WA_IR_OBJECT_STORAGE_PREFIX"].strip("/")
     if not re.fullmatch(r"[a-z0-9][a-z0-9./_-]{4,180}", prefix) or ".." in Path(prefix).parts:
         raise TransferPublicationError("WA-IR Object Storage transport prefix is invalid")
+    bucket = values["WA_IR_OBJECT_STORAGE_BUCKET"].strip().lower()
+    if (
+        not re.fullmatch(r"[a-z0-9][a-z0-9.-]{2,62}", bucket)
+        or bucket in PRODUCTION_BUCKETS
+    ):
+        raise TransferPublicationError(
+            "WA-IR staging transport bucket is invalid or production-owned"
+        )
+    values["WA_IR_OBJECT_STORAGE_BUCKET"] = bucket
     values["WA_IR_OBJECT_STORAGE_PREFIX"] = prefix
     return values
 

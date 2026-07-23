@@ -414,20 +414,31 @@ product_sync_policy = sync | no-sync | bookkeeping
 webapp_dr_policy    = replicate | rebuild | local-only | exclude
 ```
 
-### 10.3 DPI-aware bulk transport and Object Storage
+### 10.3 DPI-aware regional data planes and Object Storage
 
-The accepted bulk data plane uses the private, versioned Arvan bucket
-`production-sync-coin` in region `ir-thr-at1`:
+The accepted staging Object Storage data plane uses the private, versioned
+Arvan bucket `gold-trade-staging-three-site-dr` in region `ir-thr-at1`.
+`production-sync-coin` is a protected production boundary and is forbidden for
+staging publication:
 
-- release, snapshot, role/env/Compose, agent, preflight evidence, Matrix
-  credential/CA/client files, and later immutable event-batch objects move
-  through Object Storage instead of a Finland-Iran SSH/SCP data stream;
+- every file/data payload exchanged only by Bot-FI and WebApp-FI travels
+  directly inside Finland over strict, encrypted, resumable SSH/rsync. This
+  includes release, snapshot, role/env/Compose, agent, image, seed/backup,
+  evidence, and immutable event-batch objects; these payloads must not enter or
+  be fetched from Arvan Object Storage;
+- payloads whose destination is WebApp-IR or the Iran-side Witness, plus
+  cross-border recovery/event batches returned from Iran, move through the
+  dedicated staging Object Storage plane instead of a Finland-Iran SSH/SCP data
+  stream;
 - WebApp-IR downloads with short-lived presigned HTTPS URLs and never receives
   the bucket HMAC credential;
 - every payload is encrypted before upload with an independently custodied age
   X25519 key and verified by ciphertext and content manifests;
 - SSH carries only bounded commands and status JSON. Direct WA-IR `scp`, SFTP,
   rsync, and command-embedded file payloads fail closed;
+- Finland direct-transfer evidence records `object_storage_used=false` and
+  `arvan_endpoint_contacted=false`; Iran-side Object Storage evidence records
+  both as true and binds the exact bucket, object key, `VersionId`, and hashes;
 - Arvan CDN remains public ingress/control infrastructure and is not a second
   durable queue or backup store;
 - normal protocol control messages may remain bounded and measured; payload

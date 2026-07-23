@@ -21,6 +21,10 @@ if str(REPO_ROOT) not in sys.path:
 import yaml
 
 from core.secure_file_io import read_secure_bytes, write_secure_new_bytes
+from core.three_site_transport_policy import (
+    ThreeSiteTransportPolicyError,
+    verify_payload_transport,
+)
 from scripts.verify_three_site_staging_image_inventory import (
     verify_image_document,
 )
@@ -149,6 +153,11 @@ def verify_transfer_evidence(
         or bundle.get("remote_retained_until_cleanup") is not True
         or not isinstance(transport, dict)
         or set(transport) != transport_fields
+        or transport.get("encrypted") is not True
+        or transport.get("resumable") is not True
+        or transport.get("strict_host_key_checking") is not True
+        or transport.get("object_storage_used") is not False
+        or transport.get("arvan_endpoint_contacted") is not False
         or transport
         != {
             "kind": "direct-rsync-over-ssh-finland",
@@ -160,6 +169,18 @@ def verify_transfer_evidence(
         }
     ):
         raise FinlandImageTransferError("direct-transfer transport contract is invalid")
+    try:
+        verify_payload_transport(
+            source_role=SOURCE_ROLE,
+            destination_role=DESTINATION_ROLE,
+            transport=str(transport["kind"]),
+            object_storage_used=bool(transport["object_storage_used"]),
+            arvan_endpoint_contacted=bool(transport["arvan_endpoint_contacted"]),
+        )
+    except ThreeSiteTransportPolicyError as exc:
+        raise FinlandImageTransferError(
+            "direct-transfer regional policy verification failed"
+        ) from exc
     try:
         created_at = datetime.fromisoformat(
             str(document["created_at"]).replace("Z", "+00:00")

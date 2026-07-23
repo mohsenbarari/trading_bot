@@ -212,12 +212,16 @@ The required order is:
 2. pass `fresh-preflight` on each dedicated host, provision only the declared
    empty volumes, measure the four PostgreSQL system identifiers, finalize the
    `provisioned` inventory, and obtain a fresh exact-subject approval token;
-3. build one release on Bot-FI, load it locally, transfer the exact image
-   bundle directly from Bot-FI to WebApp-FI with
+3. build one release on Bot-FI. Every file/data payload whose source and
+   destination are both in Finland (release bundle, role/Compose/env material,
+   agents, images, seeds/backups, and returned evidence) must travel directly
+   between Bot-FI and WebApp-FI over strict, encrypted, resumable SSH/rsync;
+   it must never hairpin through Arvan Object Storage. Transfer the exact image
+   bundle with
    `transfer_three_site_staging_image_bundle_fi.py`, and use private/versioned
    Arvan Object Storage only for the Iran-side WebApp-IR/Witness image
-   deliveries. The WebApp-FI direct-transfer evidence must prove resumable
-   SSH encryption, strict host-key checking, and both
+   deliveries. Every Finland direct-transfer evidence document must prove
+   SSH encryption, resumability, strict host-key checking, and both
    `object_storage_used=false` and `arvan_endpoint_contacted=false`. Capture
    all four image inventories and prove identical content identities for every
    shared image reference;
@@ -230,9 +234,12 @@ The required order is:
    boundary inventory because they are pre-existing, read-only migration
    inputs, while every newly provisioned target identifier must remain outside
    that boundary;
-6. encrypt each artifact with the campaign age recipient, publish it to the
-   exact versioned Arvan Object Storage bucket/key, read back that exact
-   `VersionId`, decrypt it, and re-prove the original plaintext hash;
+6. for each payload destined for WebApp-IR or the Iran-side Witness, encrypt it
+   with the role/campaign age recipient, publish it to the dedicated staging
+   bucket/key, read back that exact `VersionId`, decrypt it, and re-prove the
+   original plaintext hash. Payloads exchanged only by Bot-FI and WebApp-FI
+   stay on the direct Finland data plane and carry equivalent end-to-end hash
+   evidence without an Arvan object or `VersionId`;
 7. create the migration plan binding the provisioned inventory, source-freeze
    evidence, restore-verified backups, encrypted object versions, image
    inventories, target seed map, and rollback policy; obtain one fresh
@@ -259,9 +266,14 @@ across legacy and containerd stores because one can retain the registry
 multi-architecture index while the other reports the selected platform
 manifest for the same verified content.
 
-The Finland image hop is intentionally not an Object Storage fallback. Run the
-tracked controller on Bot-FI after the exact release bundle and provisioned
-inventory have been created:
+The Finland data plane is intentionally not an Object Storage fallback. The
+fail-closed policy in `core/three_site_transport_policy.py` applies to releases,
+role material, agents, images, snapshots, seeds/backups, event batches, and
+evidence in both Bot-FI/WebApp-FI directions. A Finland-local payload that
+contacts Arvan is invalid. Cross-border payloads to/from WebApp-IR and payloads
+for the Iran-side Witness use the private, versioned staging Object Storage
+plane. For the image bundle, run the tracked controller on Bot-FI after the
+exact release bundle and provisioned inventory have been created:
 
 ```bash
 python3 scripts/transfer_three_site_staging_image_bundle_fi.py \
@@ -285,7 +297,10 @@ an image-content mismatch, or any evidence that claims Arvan/Object Storage
 was contacted for this hop. First run the command without `--apply`, retain its
 exact confirmation phrase, and then rerun it with `--apply --confirm <phrase>`.
 WA-IR remains Object-Storage-only for file/data transfer so SSH to Iran carries
-commands and redacted status only.
+commands and redacted status only. The configured staging bucket must equal the
+bucket in the signed inventory and must not be any bucket listed in
+`production_boundaries`; `production-sync-coin` is therefore forbidden for
+this staging campaign.
 
 First freeze the legacy Compose project. The evidence records exactly which
 services were running so rollback cannot accidentally start an unrecorded
