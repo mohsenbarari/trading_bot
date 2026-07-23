@@ -176,6 +176,57 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                     role_migration.ROLE_PRIVATE[role][-1:]
                 )
 
+    def test_service_readiness_reads_role_specific_runtime_release_from_container(self):
+        cases = (
+            ("webapp_fi", "webapp_fi_dr_receiver", "RELEASE_SHA"),
+            ("witness", "witness_api", "WRITER_WITNESS_RELEASE_SHA"),
+        )
+        for role, service, release_key in cases:
+            with self.subTest(role=role):
+                backend = object.__new__(LocalRoleBackend)
+                backend.role = role
+                backend.prefix = ["docker", "compose"]
+                backend.context = {"verified_plan": {"release_sha": RELEASE_SHA}}
+                calls: list[list[str]] = []
+
+                def fake_run(arguments, **_kwargs):
+                    calls.append(arguments)
+                    if arguments[-3:] == ["ps", "-q", service]:
+                        return "container-id"
+                    if arguments[-1] == "container-id" and "{{json .State}}" in arguments:
+                        return json.dumps(
+                            {"Running": True, "Health": {"Status": "healthy"}}
+                        )
+                    if arguments[-1] == "container-id" and "{{json .Config.Env}}" in arguments:
+                        return json.dumps([f"{release_key}={RELEASE_SHA}", "TZ=UTC"])
+                    raise AssertionError(arguments)
+
+                with patch.object(role_migration, "_run", side_effect=fake_run):
+                    backend._wait_services_ready((service,), stable_seconds=0)
+                self.assertFalse(
+                    any("exec" in arguments for arguments in calls),
+                    "readiness must not import application settings inside the container",
+                )
+
+    def test_witness_readiness_rejects_missing_witness_release_identity(self):
+        backend = object.__new__(LocalRoleBackend)
+        backend.role = "witness"
+        backend.prefix = ["docker", "compose"]
+        backend.context = {"verified_plan": {"release_sha": RELEASE_SHA}}
+
+        def fake_run(arguments, **_kwargs):
+            if arguments[-3:] == ["ps", "-q", "witness_api"]:
+                return "container-id"
+            if "{{json .State}}" in arguments:
+                return json.dumps({"Running": True, "Health": {"Status": "healthy"}})
+            if "{{json .Config.Env}}" in arguments:
+                return json.dumps([f"RELEASE_SHA={RELEASE_SHA}", "TZ=UTC"])
+            raise AssertionError(arguments)
+
+        with patch.object(role_migration, "_run", side_effect=fake_run):
+            with self.assertRaisesRegex(RoleMigrationError, "release identity mismatch"):
+                backend._wait_services_ready(("witness_api",), stable_seconds=0)
+
     def test_webapp_role_requires_ordered_external_barriers_and_commits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

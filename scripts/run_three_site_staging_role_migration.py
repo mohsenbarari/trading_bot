@@ -356,19 +356,42 @@ class LocalRoleBackend:
                 if health is not None and health != "healthy":
                     all_ready = False
                     break
-                observed_release = _run(
+                environment_raw = _run(
                     [
-                        *self.prefix,
-                        "exec",
-                        "-T",
-                        service,
-                        "python",
-                        "-c",
-                        "from core.config import settings; "
-                        "print(str(settings.release_sha or ''))",
-                    ],
-                    timeout=30,
+                        DOCKER,
+                        "inspect",
+                        "--format",
+                        "{{json .Config.Env}}",
+                        container,
+                    ]
                 )
+                try:
+                    environment_rows = json.loads(environment_raw)
+                except json.JSONDecodeError as exc:
+                    raise RoleMigrationError(
+                        f"service environment is unreadable: {service}"
+                    ) from exc
+                if not isinstance(environment_rows, list) or any(
+                    not isinstance(row, str) or "=" not in row
+                    for row in environment_rows
+                ):
+                    raise RoleMigrationError(
+                        f"service environment is malformed: {service}"
+                    )
+                environment: dict[str, str] = {}
+                for row in environment_rows:
+                    key, _separator, value = row.partition("=")
+                    if not key or key in environment:
+                        raise RoleMigrationError(
+                            f"service environment is ambiguous: {service}"
+                        )
+                    environment[key] = value
+                release_key = (
+                    "WRITER_WITNESS_RELEASE_SHA"
+                    if self.role == "witness" and service == "witness_api"
+                    else "RELEASE_SHA"
+                )
+                observed_release = environment.get(release_key, "")
                 if observed_release != self.context["verified_plan"]["release_sha"]:
                     raise RoleMigrationError(
                         f"service release identity mismatch: {service}"
