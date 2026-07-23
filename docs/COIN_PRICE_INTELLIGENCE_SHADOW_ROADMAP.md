@@ -33,7 +33,43 @@ preview, persisted `commodity_id`, or user-visible flow.
 - `scripts/build_coin_intelligence_snapshot.py` is an offline Shadow entry
   point only. No scheduler, live collector, deployment, or user-facing
   activation is introduced by this slice.
-- Live collectors are not yet migrated.
+- Telegram collection source is present but not enabled. External live
+  collectors, scheduling, and deployment integration are not yet migrated.
+
+## Shadow cycle orchestration
+
+`scripts/run_coin_intelligence_shadow_cycle.py` composes one bounded local
+cycle under a non-blocking filesystem lock:
+
+1. optionally run the explicit Telegram collector;
+2. validate the normalized SQLite schema;
+3. calculate per-source freshness without exposing prices;
+4. build a candidate snapshot at one strict cutoff;
+5. require valid ranges for every canonical commodity and settlement;
+6. compare the candidate with the previous short-horizon snapshot;
+7. atomically publish the candidate and a separate health JSON.
+
+The cycle does not replace the previous snapshot when schema, freshness,
+bundle, model, interval, or anomaly validation fails. Snapshot publication
+itself uses a durable atomic file replacement. It rejects missing or unexpected
+rates, inverted ranges, full interval spans above 25%, and same-bundle center
+changes above 30% inside six hours; changes above 8% are retained as Shadow
+warnings. Re-running the same deterministic cutoff is idempotent, while a
+version collision with different content is rejected.
+
+Input quality is `HEALTHY`, `DEGRADED`, or `INSUFFICIENT`. A current melted,
+dollar, USDT, or generic-coin anchor is required before candidate generation.
+Ounce and closed-market IME observations may remain visible as
+`REFERENCE_ONLY`, but transport time never refreshes their source age. A
+degraded input may attempt a candidate; publication still fails if any of the
+14 required rates is `NO_DATA`.
+
+The health artifact stores only stage states, source ages, counts, relative
+changes, reason codes, and versions. It contains no raw message, absolute
+price, credential, Telegram message ID, or user data. The command requires
+`--acknowledge-shadow-only`, all runtime paths must be outside the repository,
+and Telegram collection cannot be combined with a historical `--as-of`.
+Nothing invokes this command automatically yet.
 
 ## Telegram collector boundary
 
@@ -151,6 +187,8 @@ This market-intelligence plane does not change the fixed business topology:
 - deterministic offline range snapshot producer;
 - low-date physical-melted and strictly-prior coin-anchor runtime overlays;
 - atomic snapshot builder CLI with explicit input and output paths;
+- fail-safe one-cycle Shadow orchestrator, health artifact and concurrency
+  lock;
 - data-minimized Telegram parsers and normalized SQLite writer;
 - explicit, unscheduled Shadow Telegram CLI with optional Telethon dependency;
 - feature flags disabled by default;
