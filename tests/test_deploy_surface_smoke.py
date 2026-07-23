@@ -463,6 +463,20 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/', dockerfile)
         self.assertIn('mini_app_dist_staging/', gitignore)
 
+    def test_application_image_includes_staging_witness_schema_files(self):
+        dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+
+        self.assertIn(
+            'COPY deploy/writer-witness/001_initial.sql '
+            './deploy/writer-witness/001_initial.sql',
+            dockerfile,
+        )
+        self.assertIn(
+            'COPY deploy/writer-witness/002_failover_operation_ledger.sql '
+            './deploy/writer-witness/002_failover_operation_ledger.sql',
+            dockerfile,
+        )
+
     def test_staging_env_sets_trusted_proxy_cidrs_for_nginx_container_hop(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
