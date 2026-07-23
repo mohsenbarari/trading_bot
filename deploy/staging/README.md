@@ -212,8 +212,15 @@ The required order is:
 2. pass `fresh-preflight` on each dedicated host, provision only the declared
    empty volumes, measure the four PostgreSQL system identifiers, finalize the
    `provisioned` inventory, and obtain a fresh exact-subject approval token;
-3. build/distribute one release, capture all four image inventories, and prove
-   identical image bytes/digests for every shared image reference;
+3. build one release on Bot-FI, load it locally, transfer the exact image
+   bundle directly from Bot-FI to WebApp-FI with
+   `transfer_three_site_staging_image_bundle_fi.py`, and use private/versioned
+   Arvan Object Storage only for the Iran-side WebApp-IR/Witness image
+   deliveries. The WebApp-FI direct-transfer evidence must prove resumable
+   SSH encryption, strict host-key checking, and both
+   `object_storage_used=false` and `arvan_endpoint_contacted=false`. Capture
+   all four image inventories and prove identical content identities for every
+   shared image reference;
 4. freeze both legacy staging sources, retaining PostgreSQL and Redis but
    stopping every application process recorded in the freeze evidence;
 5. create PostgreSQL/uploads/audit backups from the frozen sources and pass the
@@ -251,6 +258,34 @@ bound into its inventory document. Those provider digests are not compared
 across legacy and containerd stores because one can retain the registry
 multi-architecture index while the other reports the selected platform
 manifest for the same verified content.
+
+The Finland image hop is intentionally not an Object Storage fallback. Run the
+tracked controller on Bot-FI after the exact release bundle and provisioned
+inventory have been created:
+
+```bash
+python3 scripts/transfer_three_site_staging_image_bundle_fi.py \
+  --bundle /srv/trading-bot-three-site-staging-data/artifacts/<sha8>/three-site-images-<sha8>.tar.zst \
+  --canonical-compose /srv/trading-bot-three-site/current/deploy/staging/docker-compose.three-site.yml \
+  --inventory /root/secure-envs/trading-bot/three-site-staging-<sha8>/provisioned-inventory.json \
+  --inventory-approval /root/secure-envs/trading-bot/three-site-staging-<sha8>/provisioned-inventory-approval.json \
+  --approval-policy /root/secure-envs/trading-bot/three-site-staging-<sha8>/human-approval-policy.json \
+  --bot-image-inventory /root/secure-envs/trading-bot/three-site-staging-<sha8>/image-inventory-bot-fi.json \
+  --roles-dir /root/secure-envs/trading-bot/three-site-staging-<sha8>/roles \
+  --remote-campaign-root /root/secure-envs/trading-bot/three-site-staging-<sha8> \
+  --remote-repo /srv/trading-bot-three-site/current \
+  --ssh-identity /root/.ssh/id_ed25519 \
+  --output-inventory /root/secure-envs/trading-bot/three-site-staging-<sha8>/image-inventory-webapp-fi.json \
+  --output-evidence /root/secure-envs/trading-bot/three-site-staging-<sha8>/webapp-fi-direct-image-transfer.json
+```
+
+The controller is fixed to `bot_fi -> webapp_fi`; it refuses another
+destination, an unapproved campaign root, a dirty/mismatched remote release,
+an image-content mismatch, or any evidence that claims Arvan/Object Storage
+was contacted for this hop. First run the command without `--apply`, retain its
+exact confirmation phrase, and then rerun it with `--apply --confirm <phrase>`.
+WA-IR remains Object-Storage-only for file/data transfer so SSH to Iran carries
+commands and redacted status only.
 
 First freeze the legacy Compose project. The evidence records exactly which
 services were running so rollback cannot accidentally start an unrecorded

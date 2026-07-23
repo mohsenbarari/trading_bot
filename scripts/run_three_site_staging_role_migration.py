@@ -385,6 +385,56 @@ class LocalRoleBackend:
             + ",".join(services)
         )
 
+    def _wait_infrastructure_ready(
+        self,
+        services: tuple[str, ...],
+        *,
+        stable_seconds: int = 5,
+    ) -> None:
+        deadline = time.monotonic() + 90.0
+        stable_since: float | None = None
+        while time.monotonic() < deadline:
+            all_ready = True
+            for service in services:
+                container = _run([*self.prefix, "ps", "-q", service])
+                if not container:
+                    all_ready = False
+                    break
+                state_raw = _run(
+                    [
+                        DOCKER,
+                        "inspect",
+                        "--format",
+                        "{{json .State}}",
+                        container,
+                    ]
+                )
+                try:
+                    state = json.loads(state_raw)
+                except json.JSONDecodeError as exc:
+                    raise RoleMigrationError(
+                        f"infrastructure state is unreadable: {service}"
+                    ) from exc
+                health = (state.get("Health") or {}).get("Status")
+                if (
+                    state.get("Running") is not True
+                    or health == "unhealthy"
+                    or (health is not None and health != "healthy")
+                ):
+                    all_ready = False
+                    break
+            if all_ready:
+                stable_since = stable_since or time.monotonic()
+                if time.monotonic() - stable_since >= stable_seconds:
+                    return
+            else:
+                stable_since = None
+            time.sleep(1)
+        raise RoleMigrationError(
+            "infrastructure services did not retain running/healthy state: "
+            + ",".join(services)
+        )
+
     def restore_seed(self) -> None:
         _run([*self.prefix, "up", "-d", "--no-deps", self.db_service], timeout=180)
         self._wait_db()
@@ -484,20 +534,10 @@ class LocalRoleBackend:
     def start_private(self) -> None:
         for service in ROLE_PRIVATE[self.role]:
             _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
-        receiver = ROLE_PRIVATE[self.role][0]
-        if self.role != "witness":
-            for _attempt in range(30):
-                state = _run(
-                    [
-                        DOCKER, "inspect", "--format",
-                        "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
-                        _run([*self.prefix, "ps", "-q", receiver]),
-                    ]
-                )
-                if state == "healthy":
-                    return
-                time.sleep(1)
-            raise RoleMigrationError("private DR receiver did not become healthy")
+        app_services = ROLE_PRIVATE[self.role][:-1]
+        infrastructure_services = ROLE_PRIVATE[self.role][-1:]
+        self._wait_services_ready(app_services)
+        self._wait_infrastructure_ready(infrastructure_services)
 
     def start_workers(self) -> None:
         if self.role == "witness":

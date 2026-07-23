@@ -467,6 +467,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
 
         self.assertIn('COPY dr_receiver_app.py .', dockerfile)
+        self.assertIn('COPY writer_witness_app.py .', dockerfile)
         self.assertIn(
             'COPY deploy/writer-witness/001_initial.sql '
             './deploy/writer-witness/001_initial.sql',
@@ -477,6 +478,14 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             './deploy/writer-witness/002_failover_operation_ledger.sql',
             dockerfile,
         )
+
+        three_site_compose = (
+            REPO_ROOT / 'deploy/staging/docker-compose.three-site.yml'
+        ).read_text(encoding='utf-8')
+        witness = three_site_compose.split('  witness_api:', 1)[1].split(
+            '  witness_role_bootstrap:', 1
+        )[0]
+        self.assertIn("http://127.0.0.1:8000/health/ready", witness)
 
     def test_staging_env_sets_trusted_proxy_cidrs_for_nginx_container_hop(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')

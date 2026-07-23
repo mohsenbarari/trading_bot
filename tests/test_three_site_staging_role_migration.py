@@ -159,6 +159,23 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(RoleMigrationError, "zero other client sessions"):
                 backend._assert_database_migration_quiescent()
 
+    def test_private_start_waits_for_app_release_and_tls_health_on_every_role(self):
+        for role in ("bot_fi", "webapp_fi", "webapp_ir", "witness"):
+            with self.subTest(role=role):
+                backend = object.__new__(LocalRoleBackend)
+                backend.role = role
+                backend.prefix = ["docker", "compose"]
+                backend._wait_services_ready = MagicMock()
+                backend._wait_infrastructure_ready = MagicMock()
+                with patch.object(role_migration, "_run", return_value=""):
+                    backend.start_private()
+                backend._wait_services_ready.assert_called_once_with(
+                    role_migration.ROLE_PRIVATE[role][:-1]
+                )
+                backend._wait_infrastructure_ready.assert_called_once_with(
+                    role_migration.ROLE_PRIVATE[role][-1:]
+                )
+
     def test_webapp_role_requires_ordered_external_barriers_and_commits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
