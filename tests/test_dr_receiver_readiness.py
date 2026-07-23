@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from core.runtime_identity import RuntimeIdentity
-from dr_receiver_app import ready
+from sqlalchemy.sql import Select
+
+from dr_receiver_app import ready, receiver_readiness_statement
 
 
 class _MappingResult:
@@ -69,6 +71,9 @@ def _ready_row(**overrides):
 
 
 class DrReceiverReadinessTests(unittest.IsolatedAsyncioTestCase):
+    def test_probe_is_a_structured_select_not_raw_sql(self):
+        self.assertIsInstance(receiver_readiness_statement(), Select)
+
     async def _call(self, *, keys, row=None, error=None):
         identity = RuntimeIdentity("webapp", "webapp_fi", "iran", False)
         with patch("dr_receiver_app.settings", _settings(keys)), patch(

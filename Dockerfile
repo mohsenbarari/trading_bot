@@ -26,6 +26,7 @@ COPY templates/ ./templates/
 COPY fonts/ ./fonts/
 COPY alembic.ini .
 COPY main.py .
+COPY dr_receiver_app.py .
 COPY manage.py .
 COPY run_bot.py .
 COPY schemas.py .

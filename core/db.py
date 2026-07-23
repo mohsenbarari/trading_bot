@@ -144,7 +144,10 @@ async def verify_three_site_database_role_bindings() -> None:
     if not (settings.three_site_dr_enabled and settings.dr_event_protocol_strict):
         return
     from core.runtime_identity import resolve_runtime_identity
-    from core.dr_database_roles import projection_scope_for_service
+    from core.dr_database_roles import (
+        projection_database_role_suffix_for_service,
+        projection_scope_for_service,
+    )
 
     identity = resolve_runtime_identity(settings)
     service = str(getattr(settings, "trading_bot_service", "app") or "app")
@@ -176,7 +179,9 @@ async def verify_three_site_database_role_bindings() -> None:
     if identity.is_bot_site:
         for role, database_role in observed.items():
             expected_suffix = (
-                "app" if role == "application" else str(projection_scope)
+                "app"
+                if role == "application"
+                else projection_database_role_suffix_for_service(service)
             )
             if not database_role.endswith(f"_{expected_suffix}"):
                 raise RuntimeError(f"Bot {role} process is not bound to its least-privilege role")

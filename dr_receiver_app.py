@@ -4,7 +4,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import (
+    and_,
+    column,
+    exists,
+    func,
+    literal,
+    literal_column,
+    not_,
+    select,
+    table,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routers import dr_sync
@@ -31,6 +41,113 @@ app = FastAPI(
 
 
 health = APIRouter()
+
+
+def receiver_readiness_statement():
+    """Build the receiver probe as a typed read-only Select.
+
+    Strict DR mode rejects unclassified raw SQL, including health probes.  A
+    SQLAlchemy Select keeps this query visibly read-only to the ORM guards
+    without granting a generic raw-SQL bypass.
+    """
+
+    runtime = table(
+        "dr_database_runtime",
+        column("singleton_id"),
+        column("physical_site"),
+        column("enforcement_enabled"),
+    )
+    service_roles = table(
+        "dr_projection_service_roles",
+        column("physical_site"),
+        column("service_scope"),
+        column("database_role"),
+    )
+    alembic_version = table("alembic_version", column("version_num"))
+    information_schema_columns = table(
+        "columns",
+        column("table_schema"),
+        column("table_name"),
+        column("column_name"),
+        schema="information_schema",
+    )
+    session_user = literal_column("session_user")
+    receiver_role_bound = exists(
+        select(literal(1))
+        .select_from(service_roles)
+        .where(
+            and_(
+                service_roles.c.physical_site == runtime.c.physical_site,
+                service_roles.c.service_scope == "receiver",
+                service_roles.c.database_role == session_user,
+            )
+        )
+    )
+    insertable_event_columns = (
+        select(
+            func.bool_and(
+                func.has_column_privilege(
+                    session_user,
+                    "public.dr_events",
+                    information_schema_columns.c.column_name,
+                    "INSERT",
+                )
+            )
+        )
+        .select_from(information_schema_columns)
+        .where(
+            and_(
+                information_schema_columns.c.table_schema == "public",
+                information_schema_columns.c.table_name == "dr_events",
+                information_schema_columns.c.column_name != "source_xid",
+            )
+        )
+        .scalar_subquery()
+    )
+    return (
+        select(
+            session_user.label("database_user"),
+            runtime.c.physical_site,
+            runtime.c.enforcement_enabled,
+            receiver_role_bound.label("receiver_role_bound"),
+            select(alembic_version.c.version_num)
+            .scalar_subquery()
+            .label("migration_revision"),
+            and_(
+                func.has_table_privilege(
+                    session_user, "dr_replay_nonces", "SELECT"
+                ),
+                func.has_table_privilege(
+                    session_user, "dr_replay_nonces", "INSERT"
+                ),
+            ).label("nonce_privilege"),
+            and_(
+                func.has_table_privilege(session_user, "dr_events", "SELECT"),
+                func.coalesce(insertable_event_columns, False),
+                not_(
+                    func.has_column_privilege(
+                        session_user,
+                        "public.dr_events",
+                        "source_xid",
+                        "INSERT",
+                    )
+                ),
+            ).label("event_privilege"),
+            and_(
+                func.has_table_privilege(
+                    session_user, "dr_event_receipts", "SELECT"
+                ),
+                func.has_table_privilege(
+                    session_user, "dr_event_receipts", "INSERT"
+                ),
+                func.has_table_privilege(
+                    session_user, "dr_event_receipts", "UPDATE"
+                ),
+            ).label("receipt_privilege"),
+        )
+        .select_from(runtime)
+        .where(runtime.c.singleton_id == 1)
+    )
 
 
 @health.get("/live")
@@ -69,33 +186,7 @@ async def ready(db: AsyncSession = Depends(get_dr_projection_db)):
         reasons.append("expected_migration_revision_missing")
     try:
         row = (
-            await db.execute(
-                text(
-                    "SELECT session_user AS database_user, runtime.physical_site, "
-                    "runtime.enforcement_enabled, "
-                    "EXISTS (SELECT 1 FROM dr_projection_service_roles service_role "
-                    "WHERE service_role.physical_site=runtime.physical_site "
-                    "AND service_role.service_scope='receiver' "
-                    "AND service_role.database_role=session_user) AS receiver_role_bound, "
-                    "(SELECT version_num FROM alembic_version) AS migration_revision, "
-                    "(has_table_privilege(session_user, 'dr_replay_nonces', 'SELECT') "
-                    " AND has_table_privilege(session_user, 'dr_replay_nonces', 'INSERT')) "
-                    "AS nonce_privilege, "
-                    "(has_table_privilege(session_user, 'dr_events', 'SELECT') "
-                    " AND COALESCE((SELECT bool_and(has_column_privilege("
-                    "     session_user, 'public.dr_events', column_name, 'INSERT')) "
-                    "   FROM information_schema.columns "
-                    "  WHERE table_schema='public' AND table_name='dr_events' "
-                    "    AND column_name<>'source_xid'), false) "
-                    " AND NOT has_column_privilege(session_user, 'public.dr_events', "
-                    "     'source_xid', 'INSERT')) AS event_privilege, "
-                    "(has_table_privilege(session_user, 'dr_event_receipts', 'SELECT') "
-                    " AND has_table_privilege(session_user, 'dr_event_receipts', 'INSERT') "
-                    " AND has_table_privilege(session_user, 'dr_event_receipts', 'UPDATE')) "
-                    "AS receipt_privilege "
-                    "FROM dr_database_runtime runtime WHERE runtime.singleton_id = 1"
-                )
-            )
+            await db.execute(receiver_readiness_statement())
         ).mappings().one_or_none()
         if row is None or row["enforcement_enabled"] is not True:
             reasons.append("dr_database_fencing_unavailable")

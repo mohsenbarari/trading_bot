@@ -20,3 +20,10 @@ def projection_scope_for_service(service: str | None) -> str:
         raise RuntimeError(
             f"service {normalized or '<missing>'} has no private DR database scope"
         ) from exc
+
+
+def projection_database_role_suffix_for_service(service: str | None) -> str:
+    """Return the provisioned PostgreSQL role suffix for a DR service."""
+
+    scope = projection_scope_for_service(service)
+    return "projection" if scope == "projector" else scope

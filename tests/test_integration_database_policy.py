@@ -6,7 +6,11 @@ import unittest
 
 from core.dr_event_receiver import _event_values
 from core.dr_event_protocol import sha256_json, validate_envelope
-from core.dr_database_roles import PROJECTION_SERVICE_SCOPES, projection_scope_for_service
+from core.dr_database_roles import (
+    PROJECTION_SERVICE_SCOPES,
+    projection_database_role_suffix_for_service,
+    projection_scope_for_service,
+)
 from scripts.activate_three_site_database_fencing import (
     BOT_LOCAL_EXECUTION_TABLES,
     DR_SERVICE_INTERNAL_GRANTS,
@@ -43,6 +47,14 @@ class IntegrationDatabasePolicyTests(unittest.TestCase):
         self.assertEqual(set(DR_SERVICE_INTERNAL_GRANTS), set(PROJECTION_SERVICE_SCOPES.values()))
         self.assertEqual(set(BOT_DR_SERVICE_GRANTS), {"receiver", "delivery", "projector"})
         self.assertEqual(projection_scope_for_service("dr_receiver"), "receiver")
+        self.assertEqual(
+            projection_database_role_suffix_for_service("dr_projection_worker"),
+            "projection",
+        )
+        self.assertEqual(
+            projection_database_role_suffix_for_service("dr_receiver"),
+            "receiver",
+        )
         with self.assertRaises(RuntimeError):
             projection_scope_for_service("api")
 
